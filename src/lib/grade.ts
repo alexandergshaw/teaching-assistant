@@ -353,8 +353,9 @@ Rules:
 - Cite only the assignment filename portion (from format studentname_date_time_filename), excluding studentname/date/time prefix.
 - Cite file-specific evidence for both positive and negative feedback.
 - Maintain at least a 2:1 positive-to-negative ratio: for every negative feedback point, include at least two distinct positive feedback points.
-- Write each rubricResults comment in a professional, warm, and slightly casual tone.
+- Write each rubricResults comment in a professional, warm, and slightly casual tone. 
 - Write overallComment in a professional, warm, and slightly casual tone.
+- Mimic how a personable professor would write feedback.
 - Don't use long dashes (—) or short dashes (–) in feedback, as they can cause formatting issues in some LMS platforms. Use colons, parentheses, or commas instead.
 - Write feedback in a direct, student-facing coaching style with short concrete phrases like "Nice job with the formatting" and "Be sure to proofread for spelling mistakes," and second-person words like "you", "your", "yours", and "you're" are allowed. Using the student's name is strictly prohibited.
 - Do not include markdown fences or any text outside the JSON object.`;

@@ -677,6 +677,7 @@ export async function synthesizeFullCreditChecklist(
 
     if (!response.ok) {
       const errorBody = await response.text();
+      console.error(`[Gemini synthesizeFullCreditChecklist] HTTP ${response.status}:`, errorBody);
       throw new Error(normalizeGeminiError(response.status, errorBody));
     }
 
@@ -886,6 +887,20 @@ function formatFeedback(
 }
 
 function normalizeGeminiError(status: number, errorBody: string): string {
+  if (status === 400) {
+    let detail = "";
+
+    try {
+      const parsed = JSON.parse(errorBody) as { error?: { message?: string } };
+      detail = parsed.error?.message?.trim() ?? "";
+    } catch {
+      detail = errorBody.slice(0, 300).trim();
+    }
+
+    const suffix = detail ? ` Gemini said: "${detail}"` : "";
+    return `Gemini rejected the request (400). This usually means instructions, rubric, or submission text are too long or contain unsupported content.${suffix}`;
+  }
+
   if (status === 429) {
     return "Gemini quota exceeded for this project. Reduce run size, wait for quota reset, enable billing, or switch providers (for example Groq).";
   }
@@ -1123,6 +1138,7 @@ async function gradeSubmission(
 
   if (!response.ok) {
     const errorBody = await response.text();
+    console.error(`[Gemini gradeSubmission] HTTP ${response.status}:`, errorBody);
     throw new Error(normalizeGeminiError(response.status, errorBody));
   }
 
@@ -1203,8 +1219,31 @@ export async function gradeSubmissions(
     const { student, content, mergedFileCount, submittedFiles } = limitedEntries[i];
     const truncated = truncateSubmission(content, maxCharsPerSubmission);
 
-    const result = await gradeSubmission(systemPrompt, student, truncated);
-    results.push({ ...result, mergedFileCount, submittedFiles });
+    try {
+      const result = await gradeSubmission(systemPrompt, student, truncated);
+      results.push({ ...result, mergedFileCount, submittedFiles });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "An unexpected grading error occurred.";
+      const overallComment = `Could not automatically grade this submission: ${message}`;
+      const fallbackRubricAreas: RubricAreaResult[] = [
+        {
+          area: "Overall",
+          score: "",
+          comment: overallComment,
+        },
+      ];
+
+      results.push({
+        student,
+        overallComment,
+        rubricAreas: fallbackRubricAreas,
+        totalScore: "",
+        mergedFileCount,
+        submittedFiles,
+        feedback: formatFeedback(overallComment, fallbackRubricAreas, ""),
+      });
+    }
 
     if (interRequestDelayMs > 0 && i < limitedEntries.length - 1) {
       await sleep(interRequestDelayMs);

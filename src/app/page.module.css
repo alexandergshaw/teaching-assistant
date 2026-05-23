@@ -434,22 +434,19 @@
 }
 
 .matrixCellDetail {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding-top: 2px;
+  padding-right: 30px;
   min-width: 0;
-}
-
-.copyGroup {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
 }
 
 .matrixFileList {
   margin: 0;
   padding-left: 18px;
+  list-style-position: outside;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -457,9 +454,11 @@
 
 .matrixFileItem {
   margin: 0;
+  line-height: 1.35;
 }
 
 .matrixFileButton {
+  display: inline;
   border: 0;
   background: transparent;
   padding: 0;
@@ -467,7 +466,8 @@
   color: var(--text-primary);
   font: inherit;
   font-size: 0.84rem;
-  line-height: 1.35;
+  line-height: inherit;
+  vertical-align: baseline;
   text-align: left;
   cursor: pointer;
 }
@@ -541,26 +541,37 @@
   color: var(--text-secondary);
 }
 
-.copyButton {
-  padding: 4px 9px;
-  border-radius: 999px;
+.copyIconButton {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 6px;
   border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-primary);
-  font-size: 0.76rem;
-  font-weight: 650;
-  letter-spacing: 0.01em;
   cursor: pointer;
 }
 
+.copyIconButton svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
 @media (hover: hover) and (pointer: fine) {
-  .copyButton:hover {
+  .copyIconButton:hover {
     border-color: var(--accent);
     background: color-mix(in srgb, var(--field-background) 88%, var(--accent) 12%);
   }
 }
 
-.copyButton:focus-visible {
+.copyIconButton:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -583,6 +594,12 @@
   line-height: 1.5;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+.overallFeedbackWrap {
+  position: relative;
+  padding-top: 2px;
+  padding-right: 30px;
 }
 
 .previewBackdrop {

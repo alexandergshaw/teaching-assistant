@@ -137,6 +137,15 @@ function buildCsvContent(state: GradeActionState): string {
   return rows.join("\n");
 }
 
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M7 3.5A2.5 2.5 0 0 1 9.5 1h6A2.5 2.5 0 0 1 18 3.5v8A2.5 2.5 0 0 1 15.5 14h-6A2.5 2.5 0 0 1 7 11.5v-8Zm2.5-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-6Z" />
+      <path d="M2 7.5A2.5 2.5 0 0 1 4.5 5h.75a.75.75 0 0 1 0 1.5H4.5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-.75a.75.75 0 0 1 1.5 0v.75A2.5 2.5 0 0 1 10.5 18h-6A2.5 2.5 0 0 1 2 15.5v-8Z" />
+    </svg>
+  );
+}
+
 export default function Home() {
   const [state, formAction, pending] = useActionState(gradeAction, initialState);
   const [assignmentInstructions, setAssignmentInstructions] = useState(() =>
@@ -638,42 +647,32 @@ export default function Home() {
                             <td key={`${result.student}-${areaName}`}>
                               {area ? (
                                 <div className={styles.matrixCellDetail}>
-                                  <div className={styles.copyGroup}>
-                                    <span className={styles.scoreBadge}>
-                                      Score: {area.score || "-"}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      className={styles.copyButton}
-                                      onClick={() =>
-                                        handleCopy(
-                                          `${result.student}-${areaName}-score`,
-                                          area.score || "-"
-                                        )
-                                      }
-                                    >
-                                      {copiedKey === `${result.student}-${areaName}-score`
+                                  <button
+                                    type="button"
+                                    className={styles.copyIconButton}
+                                    title={
+                                      copiedKey === `${result.student}-${areaName}-comment`
                                         ? "Copied"
-                                        : "Copy Score"}
-                                    </button>
-                                  </div>
-                                  <div className={styles.copyGroup}>
-                                    <p>{area.comment || "No feedback provided."}</p>
-                                    <button
-                                      type="button"
-                                      className={styles.copyButton}
-                                      onClick={() =>
-                                        handleCopy(
-                                          `${result.student}-${areaName}-comment`,
-                                          area.comment || "No feedback provided."
-                                        )
-                                      }
-                                    >
-                                      {copiedKey === `${result.student}-${areaName}-comment`
+                                        : "Copy Feedback"
+                                    }
+                                    aria-label={
+                                      copiedKey === `${result.student}-${areaName}-comment`
                                         ? "Copied"
-                                        : "Copy Feedback"}
-                                    </button>
-                                  </div>
+                                        : `Copy feedback for ${result.student} - ${areaName}`
+                                    }
+                                    onClick={() =>
+                                      handleCopy(
+                                        `${result.student}-${areaName}-comment`,
+                                        area.comment || "No feedback provided."
+                                      )
+                                    }
+                                  >
+                                    <CopyIcon />
+                                  </button>
+                                  <span className={styles.scoreBadge}>
+                                    Score: {area.score || "-"}
+                                  </span>
+                                  <p>{area.comment || "No feedback provided."}</p>
                                 </div>
                               ) : (
                                 "-"
@@ -683,13 +682,20 @@ export default function Home() {
                         })}
                         <td>{result.totalScore || "-"}</td>
                         <td>
-                          <div className={styles.copyGroup}>
-                            <p className={styles.overallFeedbackCell}>
-                              {result.overallComment || "No overall feedback provided."}
-                            </p>
+                          <div className={styles.overallFeedbackWrap}>
                             <button
                               type="button"
-                              className={styles.copyButton}
+                              className={styles.copyIconButton}
+                              title={
+                                copiedKey === `${result.student}-overall-comment`
+                                  ? "Copied"
+                                  : "Copy Overall Feedback"
+                              }
+                              aria-label={
+                                copiedKey === `${result.student}-overall-comment`
+                                  ? "Copied"
+                                  : `Copy overall feedback for ${result.student}`
+                              }
                               onClick={() =>
                                 handleCopy(
                                   `${result.student}-overall-comment`,
@@ -697,10 +703,11 @@ export default function Home() {
                                 )
                               }
                             >
-                              {copiedKey === `${result.student}-overall-comment`
-                                ? "Copied"
-                                : "Copy Overall"}
+                              <CopyIcon />
                             </button>
+                            <p className={styles.overallFeedbackCell}>
+                              {result.overallComment || "No overall feedback provided."}
+                            </p>
                           </div>
                         </td>
                       </tr>

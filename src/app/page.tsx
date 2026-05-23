@@ -750,6 +750,26 @@ export default function Home() {
               <h1>Lesson Planning</h1>
               <p>Plan and generate lesson content with AI assistance.</p>
             </div>
+            <div className={styles.field}>
+              <label htmlFor="moduleObjectives">Module Objectives</label>
+              <textarea
+                id="moduleObjectives"
+                placeholder="Describe the learning objectives for this module…"
+                style={{ minHeight: "260px" }}
+              />
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="lessonContext">Context</label>
+              <textarea
+                id="lessonContext"
+                placeholder="Add any background context, notes, or relevant information…"
+                style={{ minHeight: "180px" }}
+              />
+              <div className={styles.fileField}>
+                <input id="lessonContextFile" type="file" />
+                <p>Optionally attach a file for additional context.</p>
+              </div>
+            </div>
           </section>
         )}
       </div>

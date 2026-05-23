@@ -199,6 +199,34 @@
   font-size: 0.95rem;
 }
 
+.checklistCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+  border: 1px solid var(--field-border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--field-background) 92%, var(--accent) 8%);
+}
+
+.checklistCard h2 {
+  font-size: 1.05rem;
+  color: var(--text-primary);
+}
+
+.checklistCard ul {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checklistCard li {
+  line-height: 1.45;
+}
+
 .results {
   display: flex;
   flex-direction: column;

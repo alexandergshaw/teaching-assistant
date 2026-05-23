@@ -243,6 +243,7 @@ export interface GradeResult {
 export interface GradingRun {
   results: GradeResult[];
   rubricAreaNames: string[];
+  fullCreditChecklist: string[];
 }
 
 /** Extract text-based files from a zip archive. */
@@ -358,6 +359,35 @@ Rules:
 - Do not include markdown fences or any text outside the JSON object.`;
 }
 
+function buildChecklistPrompt(
+  assignmentInstructions: string,
+  rubric: string
+): string {
+  return `You are helping instructors summarize grading expectations.
+
+ASSIGNMENT INSTRUCTIONS:
+${assignmentInstructions}
+
+RUBRIC:
+${rubric}
+
+Return ONLY valid JSON in this exact format:
+{
+  "fullCreditChecklist": [
+    "bullet 1",
+    "bullet 2",
+    "bullet 3"
+  ]
+}
+
+Rules:
+- Include exactly 3 concise bullets.
+- Each bullet must describe a concrete action students can take to earn full credit.
+- Combine assignment and rubric expectations.
+- Keep each bullet practical and specific.
+- Do not include markdown or text outside the JSON object.`;
+}
+
 function extractJsonObject(raw: string): string | null {
   const trimmed = raw.trim();
   const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -370,6 +400,127 @@ function extractJsonObject(raw: string): string | null {
   }
 
   return candidate.slice(start, end + 1);
+}
+
+function defaultFullCreditChecklist(): string[] {
+  return [
+    "Complete every required deliverable from the assignment instructions.",
+    "Meet each rubric criterion at the highest performance level with clear evidence.",
+    "Submit organized, correct work that follows the required format and submission rules.",
+  ];
+}
+
+function normalizeChecklistItem(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.replace(/^[\s\-•*\d.)]+/, "").trim();
+}
+
+function parseChecklistResponse(raw: string): string[] {
+  const jsonText = extractJsonObject(raw);
+
+  if (jsonText) {
+    try {
+      const parsed = JSON.parse(jsonText) as {
+        fullCreditChecklist?: unknown;
+        checklist?: unknown;
+        bullets?: unknown;
+      };
+
+      const candidate =
+        parsed.fullCreditChecklist ?? parsed.checklist ?? parsed.bullets;
+
+      if (Array.isArray(candidate)) {
+        const items = candidate
+          .map((item) => normalizeChecklistItem(item))
+          .filter(Boolean);
+
+        if (items.length > 0) {
+          return items;
+        }
+      }
+    } catch {
+      // Fall through to line-based parsing.
+    }
+  }
+
+  const lineItems = raw
+    .split(/\r?\n/)
+    .map((line) => normalizeChecklistItem(line))
+    .filter(Boolean);
+
+  return lineItems;
+}
+
+export async function synthesizeFullCreditChecklist(
+  assignmentInstructions: string,
+  rubric: string
+): Promise<string[]> {
+  const apiKey = getGeminiApiKey();
+  const model = getGeminiModel();
+  const fallback = defaultFullCreditChecklist();
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: buildChecklistPrompt(assignmentInstructions, rubric),
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 300,
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(normalizeGeminiError(response.status, errorBody));
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{
+            text?: string;
+          }>;
+        };
+      }>;
+    };
+
+    const rawChecklist =
+      data.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text ?? "")
+        .join("")
+        .trim() ?? "";
+
+    const parsed = parseChecklistResponse(rawChecklist);
+    const normalized = parsed.slice(0, 3);
+
+    for (let i = normalized.length; i < 3; i += 1) {
+      normalized.push(fallback[i]);
+    }
+
+    return normalized;
+  } catch {
+    return fallback;
+  }
 }
 
 function normalizeText(value: unknown): string {
@@ -825,6 +976,7 @@ export async function gradeSubmissions(
     return {
       results: [],
       rubricAreaNames: [],
+      fullCreditChecklist: [],
     };
   }
 
@@ -863,5 +1015,6 @@ export async function gradeSubmissions(
   return {
     results,
     rubricAreaNames,
+    fullCreditChecklist: [],
   };
 }

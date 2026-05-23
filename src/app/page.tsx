@@ -436,6 +436,17 @@ export default function Home() {
           </p>
         )}
 
+        {run && run.fullCreditChecklist.length > 0 && (
+          <section className={styles.checklistCard}>
+            <h2>Full-credit checklist</h2>
+            <ul>
+              {run.fullCreditChecklist.map((item, index) => (
+                <li key={`full-credit-${index + 1}`}>{item}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         {run && run.results.length > 0 && (
           <section className={styles.results}>
             <div className={styles.resultsHeader}>
@@ -597,28 +608,6 @@ export default function Home() {
                 </tbody>
               </table>
             </div>
-
-            {sortedResults.map((result) => (
-              <div key={`${result.student}-files`} className={styles.resultFiles}>
-                <h3>{result.student}</h3>
-                <p className={styles.mergeInfo}>
-                  Includes {result.mergedFileCount} file
-                  {result.mergedFileCount === 1 ? "" : "s"} in this student submission.
-                </p>
-                <p className={styles.fileMetaLabel}>Submitted files</p>
-                <ul className={styles.fileList}>
-                  {result.submittedFiles.map((file) => (
-                    <li
-                      key={`${result.student}-${file.name}-${file.extension}`}
-                      className={styles.fileItem}
-                    >
-                      <span>{file.name}</span>
-                      <span className={styles.fileExtension}>{file.extension}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
           </section>
         )}
       </section>

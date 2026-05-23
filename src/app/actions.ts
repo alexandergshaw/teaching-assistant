@@ -1,6 +1,10 @@
 "use server";
 
-import { gradeSubmissions, type GradingRun } from "@/lib/grade";
+import {
+  gradeSubmissions,
+  synthesizeFullCreditChecklist,
+  type GradingRun,
+} from "@/lib/grade";
 
 export interface GradeActionState {
   run: GradingRun | null;
@@ -30,8 +34,18 @@ export async function gradeAction(
 
   try {
     const zipBuffer = await file.arrayBuffer();
-    const run = await gradeSubmissions(zipBuffer, assignmentInstructions, rubric);
-    return { run, error: null };
+    const [run, fullCreditChecklist] = await Promise.all([
+      gradeSubmissions(zipBuffer, assignmentInstructions, rubric),
+      synthesizeFullCreditChecklist(assignmentInstructions, rubric),
+    ]);
+
+    return {
+      run: {
+        ...run,
+        fullCreditChecklist,
+      },
+      error: null,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : "An unexpected error occurred.";
     return { run: null, error: message };

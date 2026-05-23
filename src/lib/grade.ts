@@ -1,5 +1,12 @@
 import JSZip from "jszip";
-import { getGeminiApiKey, getGeminiModel } from "./gemini";
+import {
+  getGeminiApiKey,
+  getGeminiInterRequestDelayMs,
+  getGeminiMaxCharsPerSubmission,
+  getGeminiMaxOutputTokens,
+  getGeminiMaxSubmissions,
+  getGeminiModel,
+} from "./gemini";
 
 export interface GradeResult {
   student: string;
@@ -67,6 +74,42 @@ Grade each student submission against the rubric. Be constructive and specific.
 Return your feedback as plain text.`;
 }
 
+function normalizeGeminiError(status: number, errorBody: string): string {
+  if (status === 429) {
+    return "Gemini quota exceeded for this project. Reduce run size, wait for quota reset, enable billing, or switch providers (for example Groq).";
+  }
+
+  try {
+    const parsed = JSON.parse(errorBody) as {
+      error?: {
+        message?: string;
+      };
+    };
+
+    const message = parsed.error?.message?.trim();
+    if (message) {
+      return `Gemini request failed (${status}): ${message}`;
+    }
+  } catch {
+    // Keep the fallback below when the provider response is not valid JSON.
+  }
+
+  return `Gemini request failed (${status}): ${errorBody}`;
+}
+
+function truncateSubmission(content: string, maxChars: number): string {
+  if (content.length <= maxChars) {
+    return content;
+  }
+
+  const omitted = content.length - maxChars;
+  return `${content.slice(0, maxChars)}\n\n[Truncated ${omitted} characters to stay within configured grading limits.]`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Grade a single student submission. */
 async function gradeSubmission(
   systemPrompt: string,
@@ -75,6 +118,7 @@ async function gradeSubmission(
 ): Promise<GradeResult> {
   const apiKey = getGeminiApiKey();
   const model = getGeminiModel();
+  const maxOutputTokens = getGeminiMaxOutputTokens();
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -97,13 +141,17 @@ async function gradeSubmission(
             ],
           },
         ],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens,
+        },
       }),
     }
   );
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new Error(`Gemini request failed (${response.status}): ${errorBody}`);
+    throw new Error(normalizeGeminiError(response.status, errorBody));
   }
 
   const data = (await response.json()) as {
@@ -133,17 +181,30 @@ export async function gradeSubmissions(
 ): Promise<GradingRun> {
   const submissions = await extractSubmissions(zipBuffer);
 
-  if (Object.keys(submissions).length === 0) {
+  const submissionEntries = Object.entries(submissions);
+  if (submissionEntries.length === 0) {
     return { results: [] };
   }
 
-  const systemPrompt = buildSystemPrompt(assignmentInstructions, rubric);
+  const maxSubmissions = getGeminiMaxSubmissions();
+  const maxCharsPerSubmission = getGeminiMaxCharsPerSubmission();
+  const interRequestDelayMs = getGeminiInterRequestDelayMs();
 
-  const results = await Promise.all(
-    Object.entries(submissions).map(([name, content]) =>
-      gradeSubmission(systemPrompt, name, content)
-    )
-  );
+  const limitedEntries = submissionEntries.slice(0, maxSubmissions);
+  const systemPrompt = buildSystemPrompt(assignmentInstructions, rubric);
+  const results: GradeResult[] = [];
+
+  for (let i = 0; i < limitedEntries.length; i += 1) {
+    const [name, content] = limitedEntries[i];
+    const truncated = truncateSubmission(content, maxCharsPerSubmission);
+
+    const result = await gradeSubmission(systemPrompt, name, truncated);
+    results.push(result);
+
+    if (interRequestDelayMs > 0 && i < limitedEntries.length - 1) {
+      await sleep(interRequestDelayMs);
+    }
+  }
 
   return { results };
 }

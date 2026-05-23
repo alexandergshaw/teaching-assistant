@@ -246,6 +246,16 @@ export interface GradingRun {
   fullCreditChecklist: string[];
 }
 
+interface InferredFileNameParts {
+  studentDisplay: string;
+  citationFileName: string;
+}
+
+interface InferredFileNameLookup {
+  byRaw: Map<string, InferredFileNameParts>;
+  byBase: Map<string, InferredFileNameParts>;
+}
+
 /** Extract text-based files from a zip archive. */
 async function extractSubmissions(
   zipBuffer: ArrayBuffer
@@ -350,7 +360,7 @@ Rules:
 - Every score must include what it is out of, in the format earned/possible (for example 7/10).
 - Every comment must cite specific evidence with exact file names from the submission.
 - Do not prefix citations with "Evidence:".
-- Cite only the assignment filename portion (from format studentname_date_time_filename), excluding studentname/date/time prefix.
+- Cite only the assignment filename portion inferred from submitted raw filenames (exclude student-identifying prefixes and timestamp metadata when present).
 - Cite file-specific evidence for both positive and negative feedback.
 - Maintain at least a 2:1 positive-to-negative ratio: for every negative feedback point, include at least two distinct positive feedback points.
 - Write each rubricResults comment in a professional, warm, and slightly casual tone. 
@@ -388,6 +398,32 @@ Rules:
 - Combine assignment and rubric expectations.
 - Keep each bullet practical and specific.
 - Do not include markdown or text outside the JSON object.`;
+}
+
+function buildFileNameConventionPrompt(rawFileNames: string[]): string {
+  return `You are identifying filename naming conventions for student submissions.
+
+Given this exact list of raw submitted filenames:
+${rawFileNames.map((name) => `- ${name}`).join("\n")}
+
+Return ONLY valid JSON in this exact shape:
+{
+  "items": [
+    {
+      "rawFileName": "exact raw file name from input",
+      "studentName": "student-identifying segment",
+      "assignmentFileName": "actual assignment file name segment"
+    }
+  ]
+}
+
+Rules:
+- Include one item for every input filename.
+- Preserve each rawFileName exactly as provided.
+- studentName should contain only the student-identifying portion.
+- assignmentFileName should contain only the assignment file-name portion.
+- If unsure, make the best consistent guess based on the whole list.
+- Do not include markdown or text outside JSON.`;
 }
 
 function extractJsonObject(raw: string): string | null {
@@ -454,6 +490,154 @@ function parseChecklistResponse(raw: string): string[] {
     .filter(Boolean);
 
   return lineItems;
+}
+
+function normalizeStudentDisplay(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeCitationFileName(value: string): string {
+  return value.trim();
+}
+
+function parseInferredFileNameLookup(
+  raw: string,
+  requestedRawFileNames: string[]
+): InferredFileNameLookup {
+  const empty: InferredFileNameLookup = {
+    byRaw: new Map<string, InferredFileNameParts>(),
+    byBase: new Map<string, InferredFileNameParts>(),
+  };
+
+  const jsonText = extractJsonObject(raw);
+  if (!jsonText) {
+    return empty;
+  }
+
+  try {
+    const parsed = JSON.parse(jsonText) as {
+      items?: Array<{
+        rawFileName?: unknown;
+        studentName?: unknown;
+        assignmentFileName?: unknown;
+      }>;
+    };
+
+    if (!Array.isArray(parsed.items)) {
+      return empty;
+    }
+
+    const requestedSet = new Set(requestedRawFileNames);
+    const byRaw = new Map<string, InferredFileNameParts>();
+    const byBaseCandidates = new Map<string, InferredFileNameParts[]>();
+
+    for (const item of parsed.items) {
+      const rawFileName = typeof item.rawFileName === "string" ? item.rawFileName : "";
+      const studentDisplay = normalizeStudentDisplay(
+        typeof item.studentName === "string" ? item.studentName : ""
+      );
+      const citationFileName = normalizeCitationFileName(
+        typeof item.assignmentFileName === "string" ? item.assignmentFileName : ""
+      );
+
+      if (!rawFileName || !requestedSet.has(rawFileName)) {
+        continue;
+      }
+
+      if (!studentDisplay || !citationFileName) {
+        continue;
+      }
+
+      const inferred = { studentDisplay, citationFileName };
+      byRaw.set(rawFileName, inferred);
+
+      const baseName = getBaseFileName(rawFileName);
+      const candidates = byBaseCandidates.get(baseName) ?? [];
+      candidates.push(inferred);
+      byBaseCandidates.set(baseName, candidates);
+    }
+
+    const byBase = new Map<string, InferredFileNameParts>();
+    for (const [baseName, candidates] of byBaseCandidates.entries()) {
+      if (candidates.length !== 1) {
+        continue;
+      }
+
+      byBase.set(baseName, candidates[0]);
+    }
+
+    return { byRaw, byBase };
+  } catch {
+    return empty;
+  }
+}
+
+async function inferFileNameConvention(
+  rawFileNames: string[]
+): Promise<InferredFileNameLookup> {
+  const fallback: InferredFileNameLookup = {
+    byRaw: new Map<string, InferredFileNameParts>(),
+    byBase: new Map<string, InferredFileNameParts>(),
+  };
+
+  if (rawFileNames.length === 0) {
+    return fallback;
+  }
+
+  const apiKey = getGeminiApiKey();
+  const model = getGeminiModel();
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: buildFileNameConventionPrompt(rawFileNames),
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 1200,
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      return fallback;
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{
+            text?: string;
+          }>;
+        };
+      }>;
+    };
+
+    const raw =
+      data.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text ?? "")
+        .join("")
+        .trim() ?? "";
+
+    return parseInferredFileNameLookup(raw, rawFileNames);
+  } catch {
+    return fallback;
+  }
 }
 
 export async function synthesizeFullCreditChecklist(
@@ -782,8 +966,30 @@ function parseSubmissionFileName(filePath: string): {
   studentDisplay: string;
   citationFileName: string;
   extension: string;
+}
+function parseSubmissionFileName(
+  filePath: string,
+  inferredLookup?: InferredFileNameLookup
+): {
+  studentKey: string;
+  studentDisplay: string;
+  citationFileName: string;
+  extension: string;
 } {
   const baseName = getBaseFileName(filePath);
+
+  const inferred =
+    inferredLookup?.byRaw.get(filePath) ?? inferredLookup?.byBase.get(baseName);
+
+  if (inferred) {
+    return {
+      studentKey: inferred.studentDisplay.toLowerCase(),
+      studentDisplay: inferred.studentDisplay,
+      citationFileName: inferred.citationFileName,
+      extension: getFileExtension(inferred.citationFileName) || "(none)",
+    };
+  }
+
   const parts = baseName.split("_");
 
   // Expected format: studentname_date_time_filename
@@ -813,8 +1019,11 @@ function parseSubmissionFileName(filePath: string): {
   };
 }
 
-function inferStudentPrefix(filePath: string): { key: string; display: string } {
-  const parsed = parseSubmissionFileName(filePath);
+function inferStudentPrefix(
+  filePath: string,
+  inferredLookup?: InferredFileNameLookup
+): { key: string; display: string } {
+  const parsed = parseSubmissionFileName(filePath, inferredLookup);
   return {
     key: parsed.studentKey,
     display: parsed.studentDisplay,
@@ -822,7 +1031,8 @@ function inferStudentPrefix(filePath: string): { key: string; display: string } 
 }
 
 function groupSubmissionsByStudent(
-  submissions: Record<string, string>
+  submissions: Record<string, string>,
+  inferredLookup?: InferredFileNameLookup
 ): Array<{
   student: string;
   content: string;
@@ -832,7 +1042,7 @@ function groupSubmissionsByStudent(
   const grouped = new Map<string, { student: string; files: Array<[string, string]> }>();
 
   for (const [filePath, content] of Object.entries(submissions)) {
-    const inferred = inferStudentPrefix(filePath);
+    const inferred = inferStudentPrefix(filePath, inferredLookup);
     const existing = grouped.get(inferred.key);
 
     if (!existing) {
@@ -852,13 +1062,13 @@ function groupSubmissionsByStudent(
   return entries.map((entry) => {
     const mergedContent = entry.files
       .map(([filePath, content]) => {
-        const parsed = parseSubmissionFileName(filePath);
+        const parsed = parseSubmissionFileName(filePath, inferredLookup);
         return `File: ${parsed.citationFileName}\n\n${content}`;
       })
       .join("\n\n---\n\n");
 
     const submittedFiles = entry.files.map(([filePath, content]) => {
-      const parsed = parseSubmissionFileName(filePath);
+      const parsed = parseSubmissionFileName(filePath, inferredLookup);
       const preview = toPreviewContent(content);
 
       return {
@@ -964,7 +1174,12 @@ export async function gradeSubmissions(
   const { submissions, attemptedSupportedFiles, failedSupportedFiles } =
     await extractSubmissions(zipBuffer);
 
-  const studentSubmissions = groupSubmissionsByStudent(submissions);
+  const rawFileNames = Object.keys(submissions);
+  const inferredFileNameLookup = await inferFileNameConvention(rawFileNames);
+  const studentSubmissions = groupSubmissionsByStudent(
+    submissions,
+    inferredFileNameLookup
+  );
   if (studentSubmissions.length === 0) {
     if (attemptedSupportedFiles > 0) {
       const failedPreview = failedSupportedFiles.slice(0, 3).join(", ");

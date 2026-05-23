@@ -961,12 +961,6 @@ function toPreviewContent(content: string): {
   };
 }
 
-function parseSubmissionFileName(filePath: string): {
-  studentKey: string;
-  studentDisplay: string;
-  citationFileName: string;
-  extension: string;
-}
 function parseSubmissionFileName(
   filePath: string,
   inferredLookup?: InferredFileNameLookup

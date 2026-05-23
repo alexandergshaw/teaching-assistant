@@ -5,6 +5,52 @@ import {
   synthesizeFullCreditChecklist,
   type GradingRun,
 } from "@/lib/grade";
+import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
+
+export interface TestGeminiState {
+  result: string | null;
+  error: string | null;
+}
+
+export async function testGeminiAction(
+  _prev: TestGeminiState
+): Promise<TestGeminiState> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: "Say hello." }] }],
+        }),
+      }
+    );
+
+    const body = await response.text();
+
+    if (!response.ok) {
+      return { result: null, error: `HTTP ${response.status}: ${body}` };
+    }
+
+    const data = JSON.parse(body) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    const text =
+      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ??
+      "(no response text)";
+
+    return { result: text, error: null };
+  } catch (err) {
+    return {
+      result: null,
+      error: err instanceof Error ? err.message : "Unknown error",
+    };
+  }
+}
 
 export interface GradeActionState {
   run: GradingRun | null;

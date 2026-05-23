@@ -2,7 +2,7 @@
 
 import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
-import { gradeAction, type GradeActionState } from "./actions";
+import { gradeAction, testGeminiAction, type GradeActionState, type TestGeminiState } from "./actions";
 import styles from "./page.module.css";
 
 type PreviewFile = {
@@ -14,6 +14,7 @@ type PreviewFile = {
 };
 
 const initialState: GradeActionState = { run: null, error: null };
+const initialTestState: TestGeminiState = { result: null, error: null };
 
 type SortDirection = "asc" | "desc";
 
@@ -111,6 +112,7 @@ function CopyIcon() {
 
 export default function Home() {
   const [state, formAction, pending] = useActionState(gradeAction, initialState);
+  const [testState, testAction, testPending] = useActionState(testGeminiAction, initialTestState);
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
@@ -379,6 +381,18 @@ export default function Home() {
             {pending ? "Grading..." : "Start Review"}
           </button>
         </form>
+
+        <form action={testAction}>
+          <button className={styles.submitButton} type="submit" disabled={testPending}>
+            {testPending ? "Testing..." : "Test Gemini Connection"}
+          </button>
+        </form>
+        {testState.result && (
+          <p style={{ marginTop: "0.5rem", color: "green" }}>Gemini responded: {testState.result}</p>
+        )}
+        {testState.error && (
+          <p style={{ marginTop: "0.5rem", color: "red" }}>Gemini error: {testState.error}</p>
+        )}
 
         {run && run.results.length === 0 && (
           <p className={styles.emptyState}>

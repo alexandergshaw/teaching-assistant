@@ -660,6 +660,39 @@ export default function Home() {
     }
   };
 
+  const handleGenerateRemaining = async () => {
+    setCoursePlanningError(null);
+    setIsGeneratingSection(true);
+    const updated = [...sectionContents];
+    // Save whatever the user typed in the current field first
+    if (currentSectionInput.trim()) {
+      updated[currentSectionIndex] = currentSectionInput.trim();
+    }
+    try {
+      for (let i = currentSectionIndex + (currentSectionInput.trim() ? 1 : 0); i < parsedSections.length; i++) {
+        const completedSections = parsedSections
+          .slice(0, i)
+          .map((s, j) => ({ heading: s.heading, content: updated[j] }))
+          .filter((s) => s.content);
+        const result = await generateSyllabusSectionAction(
+          courseTitle,
+          parsedSections[i],
+          completedSections
+        );
+        if (typeof result !== "string") {
+          setCoursePlanningError(result.error);
+          setSectionContents(updated);
+          return;
+        }
+        updated[i] = result;
+      }
+      setSectionContents(updated);
+      setCoursePlanningStep("preview");
+    } finally {
+      setIsGeneratingSection(false);
+    }
+  };
+
   const handleDownloadSyllabus = () => {
     const lines: string[] = [];
     for (let i = 0; i < parsedSections.length; i++) {
@@ -1162,6 +1195,16 @@ export default function Home() {
                   >
                     Skip
                   </button>
+                  {currentSectionIndex + 1 < parsedSections.length && (
+                    <button
+                      type="button"
+                      className={styles.downloadButton}
+                      onClick={handleGenerateRemaining}
+                      disabled={isGeneratingSection}
+                    >
+                      {isGeneratingSection ? "Generating…" : "Generate All"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={styles.submitButton}

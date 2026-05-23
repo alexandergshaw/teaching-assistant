@@ -335,6 +335,135 @@ export async function generateAssignmentRubricAction(
   }
 }
 
+export interface SyllabusSection {
+  heading: string;
+  hint: string;
+}
+
+export async function parseSyllabusAction(
+  courseTitle: string,
+  file: { name: string; base64: string; mimeType: string }
+): Promise<SyllabusSection[] | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const prompt = `You are parsing a syllabus template for a course called "${courseTitle}".
+
+Extract each distinct section from this document. Return ONLY valid JSON:
+{
+  "sections": [
+    { "heading": "Section Name", "hint": "What should go in this section based on the template's placeholder text, structure, or context" }
+  ]
+}
+
+Requirements:
+- Identify every major section or heading in the document.
+- The "hint" should describe what content belongs in this section — use placeholder text, examples, or structural cues from the template.
+- Keep headings short and clear, exactly as they appear in the template.
+- Do not include any text outside the JSON object.`;
+
+    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+      { text: prompt },
+      { inlineData: { mimeType: file.mimeType, data: file.base64 } },
+    ];
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Syllabus parsing failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const trimmed = raw.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1) return { error: "Could not parse sections from the syllabus template." };
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      sections?: Array<{ heading?: string; hint?: string }>;
+    };
+
+    const sections: SyllabusSection[] = (parsed.sections ?? [])
+      .filter((s) => typeof s.heading === "string" && s.heading.trim())
+      .map((s) => ({ heading: s.heading!.trim(), hint: s.hint?.trim() ?? "" }));
+
+    if (sections.length === 0) return { error: "No sections found in the syllabus template." };
+    return sections;
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+export async function generateSyllabusSectionAction(
+  courseTitle: string,
+  section: SyllabusSection,
+  completedSections: Array<{ heading: string; content: string }>
+): Promise<string | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const contextBlock =
+      completedSections.length > 0
+        ? `\n\nPREVIOUSLY COMPLETED SECTIONS:\n${completedSections
+            .map((s) => `${s.heading}:\n${s.content}`)
+            .join("\n\n")}`
+        : "";
+
+    const prompt = `You are writing content for a university course syllabus.
+
+COURSE TITLE: ${courseTitle}
+SECTION: ${section.heading}
+GUIDANCE: ${section.hint || "Write appropriate content for this syllabus section."}${contextBlock}
+
+Write the content for the "${section.heading}" section of this syllabus. Be specific, professional, and practical. Use the guidance and any previously completed sections for context and consistency. Write only the section content — do not include the heading itself, markdown formatting, or any preamble.`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.5, maxOutputTokens: 1024 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Section generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    return raw.trim() || "Could not generate content for this section.";
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
 export interface TestGeminiState {
   result: string | null;
   error: string | null;

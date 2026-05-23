@@ -177,6 +177,56 @@
   color: #94a3b8;
 }
 
+.textInput {
+  width: 100%;
+  padding: 14px 18px;
+  border: 1px solid var(--field-border);
+  border-radius: 18px;
+  background: var(--field-background);
+  font: inherit;
+  font-size: 1rem;
+  color: var(--text-primary);
+  line-height: 1.55;
+}
+
+.textInput::placeholder {
+  color: #94a3b8;
+}
+
+.textInput:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+.syllabusSectionCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px 24px;
+  border: 1px solid var(--field-border);
+  border-radius: 18px;
+  background: var(--field-background);
+}
+
+.syllabusSectionHeading {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.syllabusSectionContent {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
+
 .field textarea:focus,
 .fileField:focus-within {
   outline: 2px solid rgba(37, 99, 235, 0.2);

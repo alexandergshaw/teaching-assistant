@@ -3,7 +3,7 @@
 import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
-import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData } from "./actions";
+import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, parseSyllabusAction, generateSyllabusSectionAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type SyllabusSection } from "./actions";
 import styles from "./page.module.css";
 
 type PreviewFile = {
@@ -200,6 +200,15 @@ export default function Home() {
   const lessonContextFileRef = useRef<HTMLInputElement>(null);
   const syllabusFileRef = useRef<HTMLInputElement>(null);
   const [courseTitle, setCourseTitle] = useState("");
+  type CoursePlanningStep = "form" | "wizard" | "preview";
+  const [coursePlanningStep, setCoursePlanningStep] = useState<CoursePlanningStep>("form");
+  const [parsedSections, setParsedSections] = useState<SyllabusSection[]>([]);
+  const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
+  const [sectionContents, setSectionContents] = useState<string[]>([]);
+  const [currentSectionInput, setCurrentSectionInput] = useState("");
+  const [isParsingTemplate, setIsParsingTemplate] = useState(false);
+  const [isGeneratingSection, setIsGeneratingSection] = useState(false);
+  const [coursePlanningError, setCoursePlanningError] = useState<string | null>(null);
   const run = state.run;
 
   const sortedResults = useMemo(() => {
@@ -567,6 +576,93 @@ export default function Home() {
     } catch (err) {
       setLessonError(err instanceof Error ? err.message : "Download failed.");
     }
+  };
+
+  const handleStartCoursePlanning = async () => {
+    if (!syllabusFileRef.current?.files?.length) {
+      setCoursePlanningError("Please upload a syllabus template to continue.");
+      return;
+    }
+    if (!courseTitle.trim()) {
+      setCoursePlanningError("Please enter a course title.");
+      return;
+    }
+    const file = syllabusFileRef.current.files[0];
+    setIsParsingTemplate(true);
+    setCoursePlanningError(null);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const result = await parseSyllabusAction(courseTitle, {
+        name: file.name,
+        base64,
+        mimeType: file.type || "application/octet-stream",
+      });
+      if ("error" in result) { setCoursePlanningError(result.error); return; }
+      setParsedSections(result);
+      setSectionContents(new Array(result.length).fill(""));
+      setCurrentSectionIndex(0);
+      setCurrentSectionInput("");
+      setCoursePlanningStep("wizard");
+    } catch (err) {
+      setCoursePlanningError(err instanceof Error ? err.message : "Failed to parse template.");
+    } finally {
+      setIsParsingTemplate(false);
+    }
+  };
+
+  const handleSectionNext = async () => {
+    setCoursePlanningError(null);
+    const typed = currentSectionInput.trim();
+    let content = typed;
+    if (!typed) {
+      setIsGeneratingSection(true);
+      try {
+        const completedSections = parsedSections
+          .slice(0, currentSectionIndex)
+          .map((s, i) => ({ heading: s.heading, content: sectionContents[i] }))
+          .filter((s) => s.content);
+        const result = await generateSyllabusSectionAction(
+          courseTitle,
+          parsedSections[currentSectionIndex],
+          completedSections
+        );
+        if (typeof result !== "string") { setCoursePlanningError(result.error); return; }
+        content = result;
+      } finally {
+        setIsGeneratingSection(false);
+      }
+    }
+    const updated = [...sectionContents];
+    updated[currentSectionIndex] = content;
+    setSectionContents(updated);
+    if (currentSectionIndex + 1 < parsedSections.length) {
+      setCurrentSectionIndex(currentSectionIndex + 1);
+      setCurrentSectionInput("");
+    } else {
+      setCoursePlanningStep("preview");
+    }
+  };
+
+  const handleDownloadSyllabus = () => {
+    const lines: string[] = [];
+    for (let i = 0; i < parsedSections.length; i++) {
+      const h = parsedSections[i].heading;
+      lines.push(h, "=".repeat(h.length), "", sectionContents[i], "", "");
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${courseTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_")}_syllabus.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const handleCopy = async (copyKey: string, value: string) => {
@@ -986,29 +1082,114 @@ export default function Home() {
         )}
 
         {activeTab === "course-planning" && (
-          <section className={styles.card}>
-            <div className={styles.header}>
-              <h1>Course Planning</h1>
-              <p>Build and organise course-level materials.</p>
-            </div>
-            <div className={styles.field}>
-              <label htmlFor="courseTitle">Course Title</label>
-              <input
-                id="courseTitle"
-                type="text"
-                placeholder="e.g. Introduction to Data Science"
-                value={courseTitle}
-                onChange={(e) => setCourseTitle(e.target.value)}
-              />
-            </div>
-            <div className={styles.field}>
-              <label htmlFor="syllabusFile">Syllabus Template</label>
-              <div className={styles.fileField}>
-                <input id="syllabusFile" type="file" ref={syllabusFileRef} />
-                <p>Upload a syllabus template to use as a starting point.</p>
-              </div>
-            </div>
-          </section>
+          <>
+            {coursePlanningStep === "form" && (
+              <section className={styles.card}>
+                <div className={styles.header}>
+                  <h1>Course Planning</h1>
+                  <p>Upload a syllabus template and we will walk through each section together, letting you write or generate content for each one.</p>
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor="courseTitle">Course Title</label>
+                  <input
+                    id="courseTitle"
+                    type="text"
+                    className={styles.textInput}
+                    placeholder="e.g. Introduction to Data Science"
+                    value={courseTitle}
+                    onChange={(e) => setCourseTitle(e.target.value)}
+                  />
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor="syllabusFile">Syllabus Template</label>
+                  <div className={styles.fileField}>
+                    <input id="syllabusFile" type="file" ref={syllabusFileRef} />
+                    <p>Upload a syllabus template (.txt, .pdf, .docx, etc.) to use as a starting point.</p>
+                  </div>
+                </div>
+                {coursePlanningError && <p className={styles.error}>{coursePlanningError}</p>}
+                <button
+                  type="button"
+                  className={styles.submitButton}
+                  onClick={handleStartCoursePlanning}
+                  disabled={isParsingTemplate || !courseTitle.trim()}
+                >
+                  {isParsingTemplate ? "Parsing template…" : "Begin"}
+                </button>
+              </section>
+            )}
+
+            {coursePlanningStep === "wizard" && parsedSections[currentSectionIndex] && (
+              <section className={styles.card}>
+                <div className={styles.header}>
+                  <p className={styles.eyebrow}>Section {currentSectionIndex + 1} of {parsedSections.length}</p>
+                  <h1>{parsedSections[currentSectionIndex].heading}</h1>
+                  {parsedSections[currentSectionIndex].hint && (
+                    <p>{parsedSections[currentSectionIndex].hint}</p>
+                  )}
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor="sectionInput">Your Content</label>
+                  <textarea
+                    id="sectionInput"
+                    placeholder="Paste your content here, or leave blank to generate with AI…"
+                    value={currentSectionInput}
+                    onChange={(e) => setCurrentSectionInput(e.target.value)}
+                    disabled={isGeneratingSection}
+                  />
+                </div>
+                {coursePlanningError && <p className={styles.error}>{coursePlanningError}</p>}
+                <div className={styles.lessonPreviewFooter}>
+                  <button
+                    type="button"
+                    className={styles.submitButton}
+                    onClick={handleSectionNext}
+                    disabled={isGeneratingSection}
+                  >
+                    {isGeneratingSection
+                      ? "Generating…"
+                      : currentSectionIndex + 1 < parsedSections.length
+                        ? "Next"
+                        : "Finish"}
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {coursePlanningStep === "preview" && (
+              <section className={styles.card}>
+                <div className={styles.header}>
+                  <h1>{courseTitle}</h1>
+                  <p>{parsedSections.length} sections compiled</p>
+                </div>
+                {parsedSections.map((section, i) => (
+                  <div key={i} className={styles.syllabusSectionCard}>
+                    <p className={styles.syllabusSectionHeading}>{section.heading}</p>
+                    <p className={styles.syllabusSectionContent}>{sectionContents[i]}</p>
+                  </div>
+                ))}
+                <div className={styles.lessonPreviewFooter}>
+                  <button type="button" className={styles.submitButton} onClick={handleDownloadSyllabus}>
+                    Download Syllabus
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.downloadButton}
+                    onClick={() => {
+                      setCoursePlanningStep("form");
+                      setParsedSections([]);
+                      setSectionContents([]);
+                      setCurrentSectionIndex(0);
+                      setCurrentSectionInput("");
+                      setCoursePlanningError(null);
+                    }}
+                  >
+                    Start Over
+                  </button>
+                </div>
+              </section>
+            )}
+          </>
         )}
 
         {activeTab === "lesson-planning" && (

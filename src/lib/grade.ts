@@ -79,6 +79,10 @@ function normalizeGeminiError(status: number, errorBody: string): string {
     return "Gemini quota exceeded for this project. Reduce run size, wait for quota reset, enable billing, or switch providers (for example Groq).";
   }
 
+  if (status === 404 && errorBody.includes("no longer available")) {
+    return "The configured Gemini model is not available for this account. Set GEMINI_MODEL to a current model such as gemini-2.5-flash and try again.";
+  }
+
   try {
     const parsed = JSON.parse(errorBody) as {
       error?: {

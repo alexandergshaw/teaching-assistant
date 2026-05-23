@@ -23,7 +23,7 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 Set these values in your local `.env.local` and in your deployment provider:
 
 - `GEMINI_API_KEY` (required)
-- `GEMINI_MODEL` (optional, default: `gemini-2.0-flash`)
+- `GEMINI_MODEL` (optional, default: `gemini-3.1-flash-lite`)
 - `GEMINI_MAX_OUTPUT_TOKENS` (optional, default: `700`)
 - `GRADE_MAX_SUBMISSIONS` (optional, default: `5`)
 - `GRADE_MAX_CHARS_PER_SUBMISSION` (optional, default: `12000`)

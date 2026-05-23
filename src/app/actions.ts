@@ -781,7 +781,8 @@ export async function reviseSyllabusAction(
   revisionPrompt: string,
   files: Array<{ name: string; base64: string; mimeType: string }> = [],
   additionalContext?: string,
-  contextFiles: SyllabusContextFile[] = []
+  contextFiles: SyllabusContextFile[] = [],
+  lockedSections: boolean[] = []
 ): Promise<{ contents: string[] } | { error: string }> {
   try {
     const apiKey = getGeminiApiKey();
@@ -801,8 +802,16 @@ export async function reviseSyllabusAction(
       contextFiles.length > 0
         ? `\n\nADDITIONAL CONTEXT FILES:\n${contextFiles.map((f) => `- ${f.name}`).join("\n")}`
         : "";
+    const lockedHeadings = sections
+      .map((section, i) => ({ heading: section.heading, locked: !!lockedSections[i] }))
+      .filter((s) => s.locked)
+      .map((s) => s.heading);
+    const lockedSectionsBlock =
+      lockedHeadings.length > 0
+        ? `\n\nLOCKED SECTIONS (DO NOT CHANGE THESE):\n${lockedHeadings.map((h) => `- ${h}`).join("\n")}`
+        : "";
 
-    const prompt = `You are revising a university course syllabus for "${courseTitle}".${templateBlock}${additionalContextBlock}${contextFilesSummary}
+    const prompt = `You are revising a university course syllabus for "${courseTitle}".${templateBlock}${additionalContextBlock}${contextFilesSummary}${lockedSectionsBlock}
 
 CURRENT SYLLABUS:
 ${syllabusText}
@@ -819,6 +828,7 @@ Return ONLY valid JSON with updated content for all ${sections.length} sections 
 
 Requirements:
 - Preserve all section headings exactly as shown.
+- Do not modify any section listed under LOCKED SECTIONS.
 - Apply the revision instructions intelligently; leave unaffected sections unchanged.
 - Do not include any text outside the JSON object.`;
 
@@ -892,6 +902,8 @@ Requirements:
     };
 
     const updatedContents = sections.map((section, i) => {
+      if (lockedSections[i]) return contents[i] ?? "";
+
       // Prefer index-based match, fall back to heading match.
       const byIndex = parsed.sections?.[i];
       if (byIndex?.content?.trim()) return byIndex.content.trim();

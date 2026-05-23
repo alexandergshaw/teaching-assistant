@@ -152,6 +152,22 @@ function CopyIcon() {
   );
 }
 
+function LockClosedIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path fillRule="evenodd" d="M5.75 8V6a4.25 4.25 0 1 1 8.5 0v2h.25A2.75 2.75 0 0 1 17.25 10.75v5.5A2.75 2.75 0 0 1 14.5 19h-9A2.75 2.75 0 0 1 2.75 16.25v-5.5A2.75 2.75 0 0 1 5.5 8h.25Zm7 0V6a2.75 2.75 0 1 0-5.5 0v2h5.5Zm-4.25 3a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-.75 1.298v1.452a.75.75 0 0 1-1.5 0v-1.452A1.5 1.5 0 0 1 8.5 11Z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+function LockOpenIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path fillRule="evenodd" d="M7.25 8V6a2.75 2.75 0 0 1 5.164-1.31.75.75 0 0 0 1.323-.706A4.25 4.25 0 0 0 5.75 6v2H5.5a2.75 2.75 0 0 0-2.75 2.75v5.5A2.75 2.75 0 0 0 5.5 19h9a2.75 2.75 0 0 0 2.75-2.75v-5.5A2.75 2.75 0 0 0 14.5 8h-7.25Zm2.75 3a1.5 1.5 0 0 0-.75 2.798v1.452a.75.75 0 0 0 1.5 0v-1.452A1.5 1.5 0 0 0 10 11Z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
 function DownloadIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
@@ -214,6 +230,7 @@ export default function Home() {
   const [coursePlanningError, setCoursePlanningError] = useState<string | null>(null);
   const [syllabusRevisionPrompt, setSyllabusRevisionPrompt] = useState("");
   const [syllabusRevisionFiles, setSyllabusRevisionFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
+  const [lockedSyllabusSections, setLockedSyllabusSections] = useState<boolean[]>([]);
   const [isRevisingSyllabus, setIsRevisingSyllabus] = useState(false);
   const syllabusRevisionFileRef = useRef<HTMLInputElement>(null);
   const run = state.run;
@@ -613,6 +630,7 @@ export default function Home() {
       setParsedSections(result.sections);
       setSyllabusTemplateText(result.templateText);
       setSectionContents(new Array(result.sections.length).fill(""));
+      setLockedSyllabusSections(new Array(result.sections.length).fill(false));
       setCurrentSectionIndex(0);
       setCurrentSectionInput("");
       setCoursePlanningStep("wizard");
@@ -741,7 +759,8 @@ export default function Home() {
         syllabusRevisionPrompt.trim(),
         syllabusRevisionFiles,
         coursePlanningContext.trim() || undefined,
-        coursePlanningContextFiles
+        coursePlanningContextFiles,
+        lockedSyllabusSections
       );
       if ("error" in result) { setCoursePlanningError(result.error); return; }
       setSectionContents(result.contents);
@@ -761,6 +780,7 @@ export default function Home() {
     setCoursePlanningError(null);
     setSyllabusRevisionPrompt("");
     setSyllabusRevisionFiles([]);
+    setLockedSyllabusSections([]);
   };
 
   const handleCoursePlanningContextFiles = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -1419,7 +1439,43 @@ export default function Home() {
               {parsedSections.map((section, i) =>
                 sectionContents[i] ? (
                   <div key={i} className={styles.syllabusSectionCard}>
-                    <p className={styles.syllabusSectionHeading}>{section.heading}</p>
+                    <div className={styles.syllabusSectionTopRow}>
+                      <p className={styles.syllabusSectionHeading}>{section.heading}</p>
+                      <div className={styles.syllabusSectionActions}>
+                        <button
+                          type="button"
+                          className={styles.syllabusSectionActionButton}
+                          title={
+                            copiedKey === `syllabus-section-${i}`
+                              ? "Copied"
+                              : "Copy section content"
+                          }
+                          aria-label={
+                            copiedKey === `syllabus-section-${i}`
+                              ? "Copied"
+                              : `Copy ${section.heading} section`
+                          }
+                          onClick={() => handleCopy(`syllabus-section-${i}`, sectionContents[i])}
+                        >
+                          <CopyIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className={`${styles.syllabusSectionActionButton}${lockedSyllabusSections[i] ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
+                          title={lockedSyllabusSections[i] ? "Locked for revisions" : "Unlocked for revisions"}
+                          aria-label={lockedSyllabusSections[i] ? `Unlock ${section.heading}` : `Lock ${section.heading}`}
+                          onClick={() => {
+                            setLockedSyllabusSections((prev) => {
+                              const next = [...prev];
+                              next[i] = !next[i];
+                              return next;
+                            });
+                          }}
+                        >
+                          {lockedSyllabusSections[i] ? <LockClosedIcon /> : <LockOpenIcon />}
+                        </button>
+                      </div>
+                    </div>
                     <p className={styles.syllabusSectionContent}>{sectionContents[i]}</p>
                   </div>
                 ) : null

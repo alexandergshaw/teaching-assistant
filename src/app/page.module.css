@@ -218,6 +218,50 @@
   color: var(--accent);
 }
 
+.syllabusSectionTopRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.syllabusSectionActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.syllabusSectionActionButton {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.syllabusSectionActionButton svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+.syllabusSectionActionButtonActive {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--field-background) 88%, var(--accent) 12%);
+}
+
+.syllabusSectionActionButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .syllabusSectionContent {
   margin: 0;
   font-size: 0.95rem;

@@ -161,7 +161,9 @@ export default function Home() {
       }
 
       if (column.kind === "files") {
-        comparison = a.mergedFileCount - b.mergedFileCount;
+        const aFiles = a.submittedFiles.map((file) => file.name).join(", ");
+        const bFiles = b.submittedFiles.map((file) => file.name).join(", ");
+        comparison = compareText(aFiles, bFiles);
       }
 
       if (column.kind === "fileTypes") {
@@ -504,7 +506,7 @@ export default function Home() {
                     return (
                       <tr key={`${result.student}-matrix`}>
                         <td>{result.student}</td>
-                        <td>{result.mergedFileCount}</td>
+                        <td>{result.submittedFiles.map((file) => file.name).join(", ") || "-"}</td>
                         <td>{uniqueExtensions.join(", ") || "-"}</td>
                         {run.rubricAreaNames.map((areaName) => {
                           const area = areaMap.get(areaName);

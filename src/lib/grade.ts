@@ -341,7 +341,9 @@ Rules:
 - For every deduction, explicitly cite the affected rubric area and the exact reason from the submission.
 - In overallComment, reference rubric areas by name when summarizing strengths and weaknesses.
 - Every score must include what it is out of, in the format earned/possible (for example 7/10).
-- Every comment must cite specific evidence with exact file names from the submission (for example Evidence: wendelcynthia_project.docx ...).
+- Every comment must cite specific evidence with exact file names from the submission.
+- Do not prefix citations with "Evidence:".
+- Cite only the assignment filename portion (from format studentname_date_time_filename), excluding studentname/date/time prefix.
 - Cite file-specific evidence for both positive and negative feedback.
 - Maintain at least a 2:1 positive-to-negative ratio: for every negative feedback point, include at least two distinct positive feedback points.
 - Do not include markdown fences or any text outside the JSON object.`;
@@ -540,20 +542,47 @@ function removeLastExtension(fileName: string): string {
   return fileName.slice(0, lastDot);
 }
 
-function inferStudentPrefix(filePath: string): { key: string; display: string } {
+function parseSubmissionFileName(filePath: string): {
+  studentKey: string;
+  studentDisplay: string;
+  citationFileName: string;
+  extension: string;
+} {
   const baseName = getBaseFileName(filePath);
-  const stem = removeLastExtension(baseName);
-  const match = stem.match(/^([A-Za-z0-9]+)/);
-  const prefix = match?.[1] ?? stem;
-  const trimmed = prefix.trim();
+  const parts = baseName.split("_");
 
-  if (!trimmed) {
-    return { key: "unknown", display: "unknown" };
+  // Expected format: studentname_date_time_filename
+  if (parts.length >= 4) {
+    const studentPart = parts[0].trim();
+    const filePart = parts.slice(3).join("_").trim();
+
+    if (studentPart && filePart) {
+      return {
+        studentKey: studentPart.toLowerCase(),
+        studentDisplay: studentPart,
+        citationFileName: filePart,
+        extension: getFileExtension(filePart) || "(none)",
+      };
+    }
   }
 
+  const stem = removeLastExtension(baseName);
+  const match = stem.match(/^([A-Za-z0-9]+)/);
+  const fallbackStudent = (match?.[1] ?? stem).trim() || "unknown";
+
   return {
-    key: trimmed.toLowerCase(),
-    display: trimmed,
+    studentKey: fallbackStudent.toLowerCase(),
+    studentDisplay: fallbackStudent,
+    citationFileName: baseName,
+    extension: getFileExtension(baseName) || "(none)",
+  };
+}
+
+function inferStudentPrefix(filePath: string): { key: string; display: string } {
+  const parsed = parseSubmissionFileName(filePath);
+  return {
+    key: parsed.studentKey,
+    display: parsed.studentDisplay,
   };
 }
 
@@ -587,16 +616,18 @@ function groupSubmissionsByStudent(
 
   return entries.map((entry) => {
     const mergedContent = entry.files
-      .map(([filePath, content]) => `File: ${filePath}\n\n${content}`)
+      .map(([filePath, content]) => {
+        const parsed = parseSubmissionFileName(filePath);
+        return `File: ${parsed.citationFileName}\n\n${content}`;
+      })
       .join("\n\n---\n\n");
 
     const submittedFiles = entry.files.map(([filePath]) => {
-      const fileName = getBaseFileName(filePath);
-      const extension = getFileExtension(fileName);
+      const parsed = parseSubmissionFileName(filePath);
 
       return {
-        name: fileName,
-        extension: extension || "(none)",
+        name: parsed.citationFileName,
+        extension: parsed.extension,
       };
     });
 

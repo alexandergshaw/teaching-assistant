@@ -62,6 +62,10 @@ function hasDeduction(score: string): boolean {
   return Number.isFinite(earned) && Number.isFinite(possible) && possible > 0 && earned < possible;
 }
 
+function formatFeedback(text: string): string {
+  return text.replace(/\s*[\u2013\u2014]\s*/g, ", ");
+}
+
 function escapeCsvCell(value: string): string {
   const sanitized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   return `"${sanitized.replace(/"/g, '""')}"`;
@@ -426,9 +430,6 @@ export default function Home() {
           <button className={styles.submitButton} type="submit" disabled={pending}>
             {pending ? "Grading..." : "Start Review"}
           </button>
-          <button className={styles.submitButton} type="submit" formAction={testAction} disabled={testPending}>
-            {testPending ? "Testing..." : "Test Gemini with Zip"}
-          </button>
         </form>
         {testState.result && (
           <p style={{ marginTop: "0.5rem", color: "green" }}>Gemini responded: {testState.result}</p>
@@ -608,7 +609,7 @@ export default function Home() {
                                     onClick={() =>
                                       handleCopy(
                                         `${result.student}-${areaName}-comment`,
-                                        area.comment || "No feedback provided."
+                                        formatFeedback(area.comment || "No feedback provided.")
                                       )
                                     }
                                   >
@@ -617,7 +618,7 @@ export default function Home() {
                                   <span className={`${styles.scoreBadge}${area && hasDeduction(area.score) ? ` ${styles.scoreBadgeDeducted}` : ''}`}>
                                     Score: {area.score || "-"}
                                   </span>
-                                  <p>{area.comment || "No feedback provided."}</p>
+                                  <p>{formatFeedback(area.comment || "No feedback provided.")}</p>
                                 </div>
                               ) : (
                                 "-"
@@ -644,14 +645,14 @@ export default function Home() {
                               onClick={() =>
                                 handleCopy(
                                   `${result.student}-overall-comment`,
-                                  result.overallComment || "No overall feedback provided."
+                                  formatFeedback(result.overallComment || "No overall feedback provided.")
                                 )
                               }
                             >
                               <CopyIcon />
                             </button>
                             <p className={styles.overallFeedbackCell}>
-                              {result.overallComment || "No overall feedback provided."}
+                              {formatFeedback(result.overallComment || "No overall feedback provided.")}
                             </p>
                           </div>
                         </td>

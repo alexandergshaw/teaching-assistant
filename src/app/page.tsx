@@ -1,20 +1,421 @@
 "use client";
 
-import { useActionState } from "react";
+import type { ChangeEvent } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { gradeAction, type GradeActionState } from "./actions";
 import styles from "./page.module.css";
 
+type PreviewFile = {
+  student: string;
+  name: string;
+  extension: string;
+  content: string;
+  truncated: boolean;
+};
+
 const initialState: GradeActionState = { run: null, error: null };
+const STORAGE_KEYS = {
+  assignmentInstructions: "ta.assignmentInstructions",
+  rubric: "ta.rubric",
+  fileName: "ta.studentSubmissions.fileName",
+  fileType: "ta.studentSubmissions.fileType",
+  fileData: "ta.studentSubmissions.fileData",
+};
+
+type SortDirection = "asc" | "desc";
+
+type SortColumn =
+  | { kind: "student" }
+  | { kind: "files" }
+  | { kind: "fileTypes" }
+  | { kind: "rubric"; area: string }
+  | { kind: "total" }
+  | { kind: "overall" };
+
+const DEFAULT_SORT: { column: SortColumn; direction: SortDirection } = {
+  column: { kind: "student" },
+  direction: "asc",
+};
+
+function sortColumnKey(column: SortColumn): string {
+  if (column.kind === "rubric") {
+    return `rubric:${column.area}`;
+  }
+
+  return column.kind;
+}
+
+function compareText(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+}
+
+function parseScoreValue(value: string): number | null {
+  const match = value.match(/-?\d+(?:\.\d+)?/);
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(match[0]);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function readSessionItem(key: string): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return sessionStorage.getItem(key) ?? "";
+}
+
+function toBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+
+  return btoa(binary);
+}
+
+function fromBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return bytes;
+}
+
+function escapeCsvCell(value: string): string {
+  const sanitized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  return `"${sanitized.replace(/"/g, '""')}"`;
+}
+
+function buildCsvContent(state: GradeActionState): string {
+  if (!state.run) {
+    return "";
+  }
+
+  const header = ["Student"];
+
+  for (const area of state.run.rubricAreaNames) {
+    header.push(`${area} Score`);
+    header.push(`${area} Comment`);
+  }
+
+  header.push("Total Score");
+  header.push("Overall Comment");
+  header.push("Submitted Files");
+  header.push("Submitted Extensions");
+
+  const rows = [header.map((cell) => escapeCsvCell(cell)).join(",")];
+
+  for (const result of state.run.results) {
+    const row: string[] = [result.student];
+    const areaMap = new Map(result.rubricAreas.map((area) => [area.area, area]));
+
+    for (const areaName of state.run.rubricAreaNames) {
+      const area = areaMap.get(areaName);
+      row.push(area?.score ?? "");
+      row.push(area?.comment ?? "");
+    }
+
+    row.push(result.totalScore);
+    row.push(result.overallComment);
+    row.push(result.submittedFiles.map((file) => file.name).join("; "));
+    row.push(
+      Array.from(new Set(result.submittedFiles.map((file) => file.extension))).join(
+        "; "
+      )
+    );
+    rows.push(row.map((cell) => escapeCsvCell(cell)).join(","));
+  }
+
+  return rows.join("\n");
+}
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M7 3.5A2.5 2.5 0 0 1 9.5 1h6A2.5 2.5 0 0 1 18 3.5v8A2.5 2.5 0 0 1 15.5 14h-6A2.5 2.5 0 0 1 7 11.5v-8Zm2.5-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-6Z" />
+      <path d="M2 7.5A2.5 2.5 0 0 1 4.5 5h.75a.75.75 0 0 1 0 1.5H4.5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-.75a.75.75 0 0 1 1.5 0v.75A2.5 2.5 0 0 1 10.5 18h-6A2.5 2.5 0 0 1 2 15.5v-8Z" />
+    </svg>
+  );
+}
 
 export default function Home() {
   const [state, formAction, pending] = useActionState(gradeAction, initialState);
+  const [assignmentInstructions, setAssignmentInstructions] = useState(() =>
+    readSessionItem(STORAGE_KEYS.assignmentInstructions)
+  );
+  const [rubric, setRubric] = useState(() => readSessionItem(STORAGE_KEYS.rubric));
+  const [storedFileName, setStoredFileName] = useState<string | null>(() => {
+    const saved = readSessionItem(STORAGE_KEYS.fileName);
+    return saved || null;
+  });
+  const [fileStorageError, setFileStorageError] = useState<string | null>(null);
+  const [sortState, setSortState] = useState(DEFAULT_SORT);
+  const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const copyResetTimerRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const run = state.run;
+
+  const sortedResults = useMemo(() => {
+    if (!run) {
+      return [];
+    }
+
+    const directionMultiplier = sortState.direction === "asc" ? 1 : -1;
+    const results = [...run.results];
+
+    results.sort((a, b) => {
+      const column = sortState.column;
+      let comparison = 0;
+
+      if (column.kind === "student") {
+        comparison = compareText(a.student, b.student);
+      }
+
+      if (column.kind === "files") {
+        const aFiles = a.submittedFiles.map((file) => file.name).join(", ");
+        const bFiles = b.submittedFiles.map((file) => file.name).join(", ");
+        comparison = compareText(aFiles, bFiles);
+      }
+
+      if (column.kind === "fileTypes") {
+        const aTypes = Array.from(new Set(a.submittedFiles.map((file) => file.extension))).join(
+          ", "
+        );
+        const bTypes = Array.from(new Set(b.submittedFiles.map((file) => file.extension))).join(
+          ", "
+        );
+        comparison = compareText(aTypes, bTypes);
+      }
+
+      if (column.kind === "rubric") {
+        const aArea = a.rubricAreas.find((area) => area.area === column.area);
+        const bArea = b.rubricAreas.find((area) => area.area === column.area);
+        const aNumeric = parseScoreValue(aArea?.score ?? "");
+        const bNumeric = parseScoreValue(bArea?.score ?? "");
+
+        if (aNumeric !== null && bNumeric !== null) {
+          comparison = aNumeric - bNumeric;
+        } else {
+          comparison = compareText(aArea?.score ?? "", bArea?.score ?? "");
+        }
+
+        if (comparison === 0) {
+          comparison = compareText(aArea?.comment ?? "", bArea?.comment ?? "");
+        }
+      }
+
+      if (column.kind === "total") {
+        const aNumeric = parseScoreValue(a.totalScore);
+        const bNumeric = parseScoreValue(b.totalScore);
+
+        if (aNumeric !== null && bNumeric !== null) {
+          comparison = aNumeric - bNumeric;
+        } else {
+          comparison = compareText(a.totalScore, b.totalScore);
+        }
+      }
+
+      if (column.kind === "overall") {
+        comparison = compareText(a.overallComment, b.overallComment);
+      }
+
+      if (comparison === 0) {
+        comparison = compareText(a.student, b.student);
+      }
+
+      return comparison * directionMultiplier;
+    });
+
+    return results;
+  }, [run, sortState]);
+
+  const handleSort = (column: SortColumn) => {
+    const nextKey = sortColumnKey(column);
+    const currentKey = sortColumnKey(sortState.column);
+
+    if (nextKey === currentKey) {
+      setSortState((current) => ({
+        ...current,
+        direction: current.direction === "asc" ? "desc" : "asc",
+      }));
+      return;
+    }
+
+    setSortState({ column, direction: "asc" });
+  };
+
+  const sortLabel = (column: SortColumn) => {
+    const nextKey = sortColumnKey(column);
+    const currentKey = sortColumnKey(sortState.column);
+
+    if (nextKey !== currentKey) {
+      return "↕";
+    }
+
+    return sortState.direction === "asc" ? "↑" : "↓";
+  };
+
+  useEffect(() => {
+    const savedFileName = sessionStorage.getItem(STORAGE_KEYS.fileName);
+    const savedFileType = sessionStorage.getItem(STORAGE_KEYS.fileType) ?? "application/zip";
+    const savedFileData = sessionStorage.getItem(STORAGE_KEYS.fileData);
+
+    if (!savedFileName || !savedFileData || !fileInputRef.current) {
+      return;
+    }
+
+    try {
+      const restoredBytes = fromBase64(savedFileData);
+      const restoredBuffer = new ArrayBuffer(restoredBytes.byteLength);
+      new Uint8Array(restoredBuffer).set(restoredBytes);
+
+      const restoredFile = new File([restoredBuffer], savedFileName, {
+        type: savedFileType,
+      });
+      const transfer = new DataTransfer();
+      transfer.items.add(restoredFile);
+      fileInputRef.current.files = transfer.files;
+    } catch {
+      sessionStorage.removeItem(STORAGE_KEYS.fileName);
+      sessionStorage.removeItem(STORAGE_KEYS.fileType);
+      sessionStorage.removeItem(STORAGE_KEYS.fileData);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current !== null) {
+        window.clearTimeout(copyResetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleAssignmentInstructionsChange = (
+    event: ChangeEvent<HTMLTextAreaElement>
+  ) => {
+    const next = event.target.value;
+    setAssignmentInstructions(next);
+    sessionStorage.setItem(STORAGE_KEYS.assignmentInstructions, next);
+  };
+
+  const handleRubricChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    const next = event.target.value;
+    setRubric(next);
+    sessionStorage.setItem(STORAGE_KEYS.rubric, next);
+  };
+
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      setStoredFileName(null);
+      setFileStorageError(null);
+      sessionStorage.removeItem(STORAGE_KEYS.fileName);
+      sessionStorage.removeItem(STORAGE_KEYS.fileType);
+      sessionStorage.removeItem(STORAGE_KEYS.fileData);
+      return;
+    }
+
+    try {
+      const fileBuffer = await file.arrayBuffer();
+      const encoded = toBase64(fileBuffer);
+      sessionStorage.setItem(STORAGE_KEYS.fileName, file.name);
+      sessionStorage.setItem(STORAGE_KEYS.fileType, file.type || "application/zip");
+      sessionStorage.setItem(STORAGE_KEYS.fileData, encoded);
+      setStoredFileName(file.name);
+      setFileStorageError(null);
+    } catch {
+      setFileStorageError(
+        "Could not keep this upload in session storage. You can still submit now, but refresh may require re-uploading the zip."
+      );
+    }
+  };
+
+  const handleExportCsv = () => {
+    if (!state.run) {
+      return;
+    }
+
+    const csvContent = buildCsvContent(state);
+    if (!csvContent) {
+      return;
+    }
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "grading-results.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleOpenPreview = (student: string, file: PreviewFile) => {
+    setSelectedPreview({ ...file, student });
+  };
+
+  const handleClosePreview = () => {
+    setSelectedPreview(null);
+  };
+
+  const handleCopy = async (copyKey: string, value: string) => {
+    const text = value.trim();
+    if (!text) {
+      return;
+    }
+
+    const copyViaFallback = () => {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "absolute";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    };
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        copyViaFallback();
+      }
+    } catch {
+      copyViaFallback();
+    }
+
+    setCopiedKey(copyKey);
+
+    if (copyResetTimerRef.current !== null) {
+      window.clearTimeout(copyResetTimerRef.current);
+    }
+
+    copyResetTimerRef.current = window.setTimeout(() => {
+      setCopiedKey(null);
+      copyResetTimerRef.current = null;
+    }, 1600);
+  };
 
   return (
     <main className={styles.page}>
       <section className={styles.card}>
         <div className={styles.header}>
           <p className={styles.eyebrow}>Teaching Assistant</p>
-          <h1>Prepare a grading run</h1>
+          <h1>Prepare a Grading Run</h1>
           <p>
             Add the student submissions and the grading context needed to review
             an assignment.
@@ -22,37 +423,55 @@ export default function Home() {
         </div>
 
         <form className={styles.form} action={formAction}>
+          {pending && (
+            <div className={styles.loadingState} role="status" aria-live="polite">
+              <span className={styles.spinner} aria-hidden="true" />
+              <div>
+                <p className={styles.loadingTitle}>Grading In Progress</p>
+                <p className={styles.loadingText}>
+                  Reviewing submissions now. This can take a moment for larger archives.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className={styles.field}>
-            <label htmlFor="student-submissions">student submissions</label>
+            <label htmlFor="student-submissions">Student Submissions</label>
             <div className={styles.fileField}>
               <input
+                ref={fileInputRef}
                 id="student-submissions"
                 name="studentSubmissions"
                 type="file"
                 accept=".zip,application/zip"
+                onChange={handleFileChange}
               />
               <p>Upload a zip archive that contains the student submissions.</p>
+              {storedFileName && <p>Restored upload: {storedFileName}</p>}
+              {fileStorageError && <p role="alert">{fileStorageError}</p>}
             </div>
           </div>
 
           <div className={styles.field}>
-            <label htmlFor="assignment-instructions">
-              assignment instructions
-            </label>
+            <label htmlFor="assignment-instructions">Assignment Instructions</label>
             <textarea
               id="assignment-instructions"
               name="assignmentInstructions"
               rows={10}
+              value={assignmentInstructions}
+              onChange={handleAssignmentInstructionsChange}
               placeholder="Paste the assignment brief, requirements, and any special directions."
             />
           </div>
 
           <div className={styles.field}>
-            <label htmlFor="rubric">rubric</label>
+            <label htmlFor="rubric">Rubric</label>
             <textarea
               id="rubric"
               name="rubric"
               rows={10}
+              value={rubric}
+              onChange={handleRubricChange}
               placeholder="Paste the grading rubric, expectations, and scoring guidance."
             />
           </div>
@@ -64,28 +483,275 @@ export default function Home() {
           )}
 
           <button className={styles.submitButton} type="submit" disabled={pending}>
-            {pending ? "Grading…" : "Start review"}
+            {pending ? "Grading..." : "Start Review"}
           </button>
         </form>
 
-        {state.run && state.run.results.length === 0 && (
+        {run && run.results.length === 0 && (
           <p className={styles.emptyState}>
-            No text-based submissions found in the zip archive.
+            No supported submission files were found in the zip archive.
           </p>
         )}
 
-        {state.run && state.run.results.length > 0 && (
+        {run && run.fullCreditChecklist.length > 0 && (
+          <section className={styles.checklistCard}>
+            <h2>Full Credit Checklist</h2>
+            <ul>
+              {run.fullCreditChecklist.map((item, index) => (
+                <li key={`full-credit-${index + 1}`}>{item}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {run && run.results.length > 0 && (
           <section className={styles.results}>
-            <h2>Grading results</h2>
-            {state.run.results.map((result) => (
-              <div key={result.student} className={styles.result}>
-                <h3>{result.student}</h3>
-                <pre className={styles.feedback}>{result.feedback}</pre>
-              </div>
-            ))}
+            <div className={styles.resultsHeader}>
+              <h2>Grading Results</h2>
+              <button
+                className={styles.downloadButton}
+                type="button"
+                onClick={handleExportCsv}
+              >
+                Export CSV
+              </button>
+            </div>
+
+            <div className={styles.matrixWrap}>
+              <table className={styles.matrix}>
+                <thead>
+                  <tr>
+                    <th>
+                      <button
+                        type="button"
+                        className={styles.sortButton}
+                        onClick={() => handleSort({ kind: "student" })}
+                      >
+                        Student <span>{sortLabel({ kind: "student" })}</span>
+                      </button>
+                    </th>
+                    <th>
+                      <button
+                        type="button"
+                        className={styles.sortButton}
+                        onClick={() => handleSort({ kind: "files" })}
+                      >
+                        Files <span>{sortLabel({ kind: "files" })}</span>
+                      </button>
+                    </th>
+                    <th>
+                      <button
+                        type="button"
+                        className={styles.sortButton}
+                        onClick={() => handleSort({ kind: "fileTypes" })}
+                      >
+                        File Types <span>{sortLabel({ kind: "fileTypes" })}</span>
+                      </button>
+                    </th>
+                    {run.rubricAreaNames.map((area) => (
+                      <th key={area}>
+                        <button
+                          type="button"
+                          className={styles.sortButton}
+                          onClick={() => handleSort({ kind: "rubric", area })}
+                        >
+                          {area} <span>{sortLabel({ kind: "rubric", area })}</span>
+                        </button>
+                      </th>
+                    ))}
+                    <th>
+                      <button
+                        type="button"
+                        className={styles.sortButton}
+                        onClick={() => handleSort({ kind: "total" })}
+                      >
+                        Total <span>{sortLabel({ kind: "total" })}</span>
+                      </button>
+                    </th>
+                    <th>
+                      <button
+                        type="button"
+                        className={styles.sortButton}
+                        onClick={() => handleSort({ kind: "overall" })}
+                      >
+                        Overall Feedback <span>{sortLabel({ kind: "overall" })}</span>
+                      </button>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedResults.map((result) => {
+                    const areaMap = new Map(
+                      result.rubricAreas.map((area) => [area.area, area])
+                    );
+                    const uniqueExtensions = Array.from(
+                      new Set(result.submittedFiles.map((file) => file.extension))
+                    );
+
+                    return (
+                      <tr key={`${result.student}-matrix`}>
+                        <td>{result.student}</td>
+                        <td>
+                          {result.submittedFiles.length > 0 ? (
+                            <ul className={styles.matrixFileList}>
+                              {result.submittedFiles.map((file) => (
+                                <li
+                                  key={`${result.student}-file-name-${file.name}`}
+                                  className={styles.matrixFileItem}
+                                >
+                                  <button
+                                    type="button"
+                                    className={styles.matrixFileButton}
+                                    onClick={() =>
+                                      handleOpenPreview(result.student, {
+                                        student: result.student,
+                                        name: file.name,
+                                        extension: file.extension,
+                                        content:
+                                          file.previewContent ||
+                                          "No extracted text available for this file.",
+                                        truncated: file.previewTruncated,
+                                      })
+                                    }
+                                    title={`Preview ${file.name}`}
+                                  >
+                                    {file.name}
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                        <td>
+                          {uniqueExtensions.length > 0 ? (
+                            <div className={styles.chipRow}>
+                              {uniqueExtensions.map((extension) => (
+                                <span
+                                  key={`${result.student}-file-type-${extension}`}
+                                  className={styles.typeChip}
+                                >
+                                  {extension}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                        {run.rubricAreaNames.map((areaName) => {
+                          const area = areaMap.get(areaName);
+
+                          return (
+                            <td key={`${result.student}-${areaName}`}>
+                              {area ? (
+                                <div className={styles.matrixCellDetail}>
+                                  <button
+                                    type="button"
+                                    className={styles.copyIconButton}
+                                    title={
+                                      copiedKey === `${result.student}-${areaName}-comment`
+                                        ? "Copied"
+                                        : "Copy Feedback"
+                                    }
+                                    aria-label={
+                                      copiedKey === `${result.student}-${areaName}-comment`
+                                        ? "Copied"
+                                        : `Copy feedback for ${result.student} - ${areaName}`
+                                    }
+                                    onClick={() =>
+                                      handleCopy(
+                                        `${result.student}-${areaName}-comment`,
+                                        area.comment || "No feedback provided."
+                                      )
+                                    }
+                                  >
+                                    <CopyIcon />
+                                  </button>
+                                  <span className={styles.scoreBadge}>
+                                    Score: {area.score || "-"}
+                                  </span>
+                                  <p>{area.comment || "No feedback provided."}</p>
+                                </div>
+                              ) : (
+                                "-"
+                              )}
+                            </td>
+                          );
+                        })}
+                        <td>{result.totalScore || "-"}</td>
+                        <td>
+                          <div className={styles.overallFeedbackWrap}>
+                            <button
+                              type="button"
+                              className={styles.copyIconButton}
+                              title={
+                                copiedKey === `${result.student}-overall-comment`
+                                  ? "Copied"
+                                  : "Copy Overall Feedback"
+                              }
+                              aria-label={
+                                copiedKey === `${result.student}-overall-comment`
+                                  ? "Copied"
+                                  : `Copy overall feedback for ${result.student}`
+                              }
+                              onClick={() =>
+                                handleCopy(
+                                  `${result.student}-overall-comment`,
+                                  result.overallComment || "No overall feedback provided."
+                                )
+                              }
+                            >
+                              <CopyIcon />
+                            </button>
+                            <p className={styles.overallFeedbackCell}>
+                              {result.overallComment || "No overall feedback provided."}
+                            </p>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </section>
         )}
       </section>
+
+      {selectedPreview && (
+        <div className={styles.previewBackdrop} onClick={handleClosePreview}>
+          <section
+            className={styles.previewModal}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Preview for ${selectedPreview.name}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.previewHeader}>
+              <div>
+                <p className={styles.previewMeta}>Student: {selectedPreview.student}</p>
+                <h3>{selectedPreview.name}</h3>
+                <p className={styles.previewMeta}>Type: {selectedPreview.extension}</p>
+              </div>
+              <button
+                type="button"
+                className={styles.previewCloseButton}
+                onClick={handleClosePreview}
+              >
+                Close
+              </button>
+            </div>
+            {selectedPreview.truncated && (
+              <p className={styles.previewNotice}>
+                Showing a partial preview because the extracted file content is large.
+              </p>
+            )}
+            <pre className={styles.previewContent}>{selectedPreview.content}</pre>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

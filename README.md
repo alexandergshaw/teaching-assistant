@@ -31,6 +31,25 @@ Set these values in your local `.env.local` and in your deployment provider:
 
 The grading pipeline uses these limits to reduce free-tier quota spikes by capping per-run workload and pacing requests.
 
+## Supported Submission File Types
+
+The grader can now extract text from common source and document formats inside the uploaded zip archive, including:
+
+- Plain text and code files: `txt`, `md`, `py`, `js`, `ts`, `tsx`, `jsx`, `java`, `c`, `cpp`, `cs`, `go`, `rs`, `json`, `xml`, `yaml`, `sql`, and more
+- Microsoft Office files: `docx`, `pptx`, `xlsx` (plus best-effort parsing for `doc`, `ppt`, `xls`)
+- Other common document formats: `pdf`, `rtf`, `odt`, `odp`, `ods`, `html`, `csv`, `ipynb`
+
+If a file cannot be parsed, it is skipped and the rest of the submissions continue processing.
+
+## Grading Output
+
+Each grading run returns:
+
+- Per-student rubric-area scores and comments
+- An overall comment and optional total score
+- An on-page rubric score matrix preview for quick scanning
+- A CSV export generated only when the Export CSV button is clicked
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More

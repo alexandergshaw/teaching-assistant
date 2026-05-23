@@ -2,7 +2,6 @@
 
 import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Tab, Tabs } from "@mui/material";
 import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData } from "./actions";
 import styles from "./page.module.css";
@@ -177,11 +176,10 @@ export default function Home() {
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
-  const router = useRouter();
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "lesson-planning";
     const saved = localStorage.getItem("ta-active-tab");
-    return saved === "grading" || saved === "lesson-planning" ? saved : "lesson-planning";
+    return saved === "grading" || saved === "lesson-planning" || saved === "course-planning" ? saved : "lesson-planning";
   });
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
@@ -200,6 +198,8 @@ export default function Home() {
   const [revisionPrompt, setRevisionPrompt] = useState("");
   const [isRegenerating, setIsRegenerating] = useState(false);
   const lessonContextFileRef = useRef<HTMLInputElement>(null);
+  const syllabusFileRef = useRef<HTMLInputElement>(null);
+  const [courseTitle, setCourseTitle] = useState("");
   const run = state.run;
 
   const sortedResults = useMemo(() => {
@@ -614,13 +614,7 @@ export default function Home() {
       <div className={styles.tabContainer}>
         <Tabs
           value={activeTab}
-          onChange={(_, v: ActiveTab) => {
-            if (v === "course-planning") {
-              router.push("/course-planning");
-              return;
-            }
-            setActiveTab(v);
-          }}
+          onChange={(_, v: ActiveTab) => setActiveTab(v)}
           sx={{
             borderBottom: "1px solid var(--field-border)",
             marginBottom: "0",
@@ -988,6 +982,32 @@ export default function Home() {
             </div>
           </section>
         )}
+          </section>
+        )}
+
+        {activeTab === "course-planning" && (
+          <section className={styles.card}>
+            <div className={styles.header}>
+              <h1>Course Planning</h1>
+              <p>Build and organise course-level materials.</p>
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="courseTitle">Course Title</label>
+              <input
+                id="courseTitle"
+                type="text"
+                placeholder="e.g. Introduction to Data Science"
+                value={courseTitle}
+                onChange={(e) => setCourseTitle(e.target.value)}
+              />
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="syllabusFile">Syllabus Template</label>
+              <div className={styles.fileField}>
+                <input id="syllabusFile" type="file" ref={syllabusFileRef} />
+                <p>Upload a syllabus template to use as a starting point.</p>
+              </div>
+            </div>
           </section>
         )}
 

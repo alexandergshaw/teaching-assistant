@@ -7,7 +7,7 @@ import {
   generateRubric,
   type GradingRun,
 } from "@/lib/grade";
-import { OfficeParser } from "officeparser";
+import { OfficeParser, type SupportedFileType } from "officeparser";
 import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
 
 export interface SlideData {
@@ -378,16 +378,56 @@ Requirements:
         { inlineData: { mimeType: file.mimeType, data: file.base64 } },
       ];
     } else {
-      // Extract plain text from DOCX / PPTX / XLSX / etc. using officeparser.
+      // Extract plain text from DOCX / PPTX / XLSX / etc.
       const buffer = Buffer.from(file.base64, "base64");
+      const ext = file.name.includes(".")
+        ? file.name.split(".").pop()!.toLowerCase()
+        : "";
       let extractedText = "";
+
       try {
-        const ast = await OfficeParser.parseOffice(buffer);
-        const conversion = await ast.to("text");
-        extractedText = typeof conversion.value === "string" ? conversion.value.trim() : "";
+        // For DOCX, direct XML extraction is most reliable (matches grade.ts approach).
+        if (ext === "docx") {
+          const JSZip = (await import("jszip")).default;
+          const zip = await JSZip.loadAsync(buffer);
+          const documentXml = zip.file("word/document.xml");
+          if (documentXml) {
+            let xml = await documentXml.async("string");
+            xml = xml
+              .replace(/<w:tab\s*\/?>/g, "\t")
+              .replace(/<w:br\s*\/?>/g, "\n")
+              .replace(/<w:p[^>]*>/g, "\n")
+              .replace(/<[^>]+>/g, "");
+            extractedText = xml
+              .replace(/\r\n/g, "\n")
+              .replace(/\r/g, "\n")
+              .replace(/\n{3,}/g, "\n\n")
+              .trim();
+          }
+        }
+
+        // Fall back to OfficeParser with explicit fileType for other formats (or if XML extraction yielded nothing).
+        if (!extractedText) {
+          const officeFileTypes: Record<string, SupportedFileType> = {
+            docx: "docx",
+            pptx: "pptx",
+            xlsx: "xlsx",
+            odt: "odt",
+            odp: "odp",
+            ods: "ods",
+            rtf: "rtf",
+          };
+          const fileType = officeFileTypes[ext];
+          const ast = fileType
+            ? await OfficeParser.parseOffice(buffer, { fileType })
+            : await OfficeParser.parseOffice(buffer);
+          const conversion = await ast.to("text");
+          extractedText = typeof conversion.value === "string" ? conversion.value.trim() : "";
+        }
       } catch {
         return { error: "Could not read the uploaded file. Please try a .txt, .pdf, or .docx file." };
       }
+
       if (!extractedText) {
         return { error: "The uploaded file appears to be empty or could not be read." };
       }

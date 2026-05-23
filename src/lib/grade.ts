@@ -341,6 +341,10 @@ Rules:
 - Include one rubricResults item for each rubric area.
 - Keep comments concise and actionable.
 - For every deduction, explicitly cite the affected rubric area and the exact reason from the submission.
+- Grade generously by default, but do not automatically award full points when an explicit rubric violation is present.
+- Only deduct points when there is clear, explicit evidence of a rubric violation in the submission.
+- If nothing in the submission explicitly violates a rubric area, award full points for that area.
+- Do not deduct points for ambiguity, missing assumptions, or speculative issues that are not explicit rubric violations.
 - In overallComment, reference rubric areas by name when summarizing strengths and weaknesses.
 - Every score must include what it is out of, in the format earned/possible (for example 7/10).
 - Every comment must cite specific evidence with exact file names from the submission.

@@ -3,7 +3,7 @@
 import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
-import { gradeAction, testGeminiAction, type GradeActionState, type TestGeminiState } from "./actions";
+import { gradeAction, testGeminiAction, generateLessonPlanAction, type GradeActionState, type TestGeminiState } from "./actions";
 import styles from "./page.module.css";
 
 type PreviewFile = {

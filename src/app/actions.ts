@@ -9,6 +9,117 @@ import {
 } from "@/lib/grade";
 import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
 
+export interface SlideData {
+  title: string;
+  bullets: string[];
+}
+
+export interface GenerateLessonPlanResult {
+  presentationTitle: string;
+  slides: SlideData[];
+}
+
+export async function generateLessonPlanAction(
+  moduleObjectives: string,
+  contextText: string,
+  files: Array<{ name: string; base64: string; mimeType: string }>
+): Promise<GenerateLessonPlanResult | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const filesSummary =
+      files.length > 0
+        ? `\n\nATTACHED FILES (${files.length}):\n${files.map((f) => `- ${f.name}`).join("\n")}`
+        : "";
+
+    const prompt = `You are an expert educator creating a lecture slide deck.
+
+MODULE OBJECTIVES:
+${moduleObjectives}
+
+CONTEXT:
+${contextText || "(none provided)"}${filesSummary}
+
+Create a complete set of lecture slides that fully address the module objectives. Return ONLY valid JSON:
+{
+  "presentationTitle": "...",
+  "slides": [
+    { "title": "...", "bullets": ["...", "...", "..."] }
+  ]
+}
+
+Requirements:
+- Each slide must have a "title" and a "bullets" array.
+- Maximum 3 bullets per slide.
+- Each bullet must be a single, concise idea — no sub-points.
+- Use plenty of real-world analogies and concrete examples that students will immediately recognise (everyday technology, social media, sports, food, pop culture, etc.).
+- The first slide should be a title/overview slide listing the key topics.
+- Include enough slides to thoroughly cover every objective.
+- Do not include any text outside the JSON object.`;
+
+    const parts: Array<
+      { text: string } | { inlineData: { mimeType: string; data: string } }
+    > = [
+      { text: prompt },
+      ...files.map((f) => ({ inlineData: { mimeType: f.mimeType, data: f.base64 } })),
+    ];
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: { temperature: 0.6, maxOutputTokens: 4096 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Gemini API error: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw =
+      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+    const trimmed = raw.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return { error: "Could not parse slide data from the model response." };
+    }
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      presentationTitle?: string;
+      slides?: Array<{ title?: string; bullets?: string[] }>;
+    };
+
+    if (!parsed.slides || !Array.isArray(parsed.slides)) {
+      return { error: "Model did not return a valid slides array." };
+    }
+
+    const slides: SlideData[] = parsed.slides
+      .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
+      .map((s) => ({ title: s.title!, bullets: (s.bullets ?? []).slice(0, 3) }));
+
+    return {
+      presentationTitle: parsed.presentationTitle ?? "Lesson Plan",
+      slides,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
 export interface TestGeminiState {
   result: string | null;
   error: string | null;

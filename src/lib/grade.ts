@@ -226,6 +226,8 @@ export interface RubricAreaResult {
 export interface SubmittedFileInfo {
   name: string;
   extension: string;
+  previewContent: string;
+  previewTruncated: boolean;
 }
 
 export interface GradeResult {
@@ -597,6 +599,27 @@ function removeLastExtension(fileName: string): string {
   return fileName.slice(0, lastDot);
 }
 
+const MAX_PREVIEW_CHARS = 16000;
+
+function toPreviewContent(content: string): {
+  text: string;
+  truncated: boolean;
+} {
+  if (content.length <= MAX_PREVIEW_CHARS) {
+    return {
+      text: content,
+      truncated: false,
+    };
+  }
+
+  const omitted = content.length - MAX_PREVIEW_CHARS;
+
+  return {
+    text: `${content.slice(0, MAX_PREVIEW_CHARS)}\n\n[Preview truncated: ${omitted} additional characters are not shown.]`,
+    truncated: true,
+  };
+}
+
 function parseSubmissionFileName(filePath: string): {
   studentKey: string;
   studentDisplay: string;
@@ -677,12 +700,15 @@ function groupSubmissionsByStudent(
       })
       .join("\n\n---\n\n");
 
-    const submittedFiles = entry.files.map(([filePath]) => {
+    const submittedFiles = entry.files.map(([filePath, content]) => {
       const parsed = parseSubmissionFileName(filePath);
+      const preview = toPreviewContent(content);
 
       return {
         name: parsed.citationFileName,
         extension: parsed.extension,
+        previewContent: preview.text,
+        previewTruncated: preview.truncated,
       };
     });
 

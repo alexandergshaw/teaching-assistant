@@ -388,6 +388,22 @@
   word-break: break-word;
 }
 
+.previewChipButton {
+  cursor: pointer;
+  font: inherit;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .previewChipButton:hover {
+    background: color-mix(in srgb, var(--field-background) 80%, var(--accent) 20%);
+  }
+}
+
+.previewChipButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .typeChip {
   background: var(--field-background);
   color: var(--text-secondary);
@@ -419,6 +435,80 @@
   font-size: 0.84rem;
   line-height: 1.5;
   color: var(--text-secondary);
+}
+
+.previewBackdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.55);
+  z-index: 30;
+}
+
+.previewModal {
+  width: min(100%, 980px);
+  max-height: min(90vh, 860px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border-radius: 18px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  box-shadow: 0 20px 56px rgba(15, 23, 42, 0.25);
+}
+
+.previewHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.previewHeader h3 {
+  font-size: 1.05rem;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.previewMeta {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.previewCloseButton {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.previewNotice {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+}
+
+.previewContent {
+  margin: 0;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--field-border);
+  background: color-mix(in srgb, var(--field-background) 94%, var(--accent) 6%);
+  color: var(--text-primary);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow: auto;
 }
 
 @keyframes spin {

@@ -5,6 +5,14 @@ import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { gradeAction, type GradeActionState } from "./actions";
 import styles from "./page.module.css";
 
+type PreviewFile = {
+  student: string;
+  name: string;
+  extension: string;
+  content: string;
+  truncated: boolean;
+};
+
 const initialState: GradeActionState = { run: null, error: null };
 const STORAGE_KEYS = {
   assignmentInstructions: "ta.assignmentInstructions",
@@ -141,6 +149,7 @@ export default function Home() {
   });
   const [fileStorageError, setFileStorageError] = useState<string | null>(null);
   const [sortState, setSortState] = useState(DEFAULT_SORT);
+  const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const run = state.run;
 
@@ -334,6 +343,14 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
+  const handleOpenPreview = (student: string, file: PreviewFile) => {
+    setSelectedPreview({ ...file, student });
+  };
+
+  const handleClosePreview = () => {
+    setSelectedPreview(null);
+  };
+
   return (
     <main className={styles.page}>
       <section className={styles.card}>
@@ -510,12 +527,24 @@ export default function Home() {
                           {result.submittedFiles.length > 0 ? (
                             <div className={styles.chipRow}>
                               {result.submittedFiles.map((file) => (
-                                <span
+                                <button
                                   key={`${result.student}-file-name-${file.name}`}
-                                  className={styles.fileChip}
+                                  type="button"
+                                  className={`${styles.fileChip} ${styles.previewChipButton}`}
+                                  onClick={() =>
+                                    handleOpenPreview(result.student, {
+                                      student: result.student,
+                                      name: file.name,
+                                      extension: file.extension,
+                                      content:
+                                        file.previewContent || "No extracted text available for this file.",
+                                      truncated: file.previewTruncated,
+                                    })
+                                  }
+                                  title={`Preview ${file.name}`}
                                 >
                                   {file.name}
-                                </span>
+                                </button>
                               ))}
                             </div>
                           ) : (
@@ -593,6 +622,39 @@ export default function Home() {
           </section>
         )}
       </section>
+
+      {selectedPreview && (
+        <div className={styles.previewBackdrop} onClick={handleClosePreview}>
+          <section
+            className={styles.previewModal}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Preview for ${selectedPreview.name}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.previewHeader}>
+              <div>
+                <p className={styles.previewMeta}>Student: {selectedPreview.student}</p>
+                <h3>{selectedPreview.name}</h3>
+                <p className={styles.previewMeta}>Type: {selectedPreview.extension}</p>
+              </div>
+              <button
+                type="button"
+                className={styles.previewCloseButton}
+                onClick={handleClosePreview}
+              >
+                Close
+              </button>
+            </div>
+            {selectedPreview.truncated && (
+              <p className={styles.previewNotice}>
+                Showing a partial preview because the extracted file content is large.
+              </p>
+            )}
+            <pre className={styles.previewContent}>{selectedPreview.content}</pre>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

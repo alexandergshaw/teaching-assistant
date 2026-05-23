@@ -1115,15 +1115,12 @@ async function gradeSubmission(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: systemPrompt }],
-        },
         contents: [
           {
             role: "user",
             parts: [
               {
-                text: `Student: ${studentName}\n\nSubmission:\n${content}`,
+                text: `${systemPrompt}\n\nStudent: ${studentName}\n\nSubmission:\n${content}`,
               },
             ],
           },

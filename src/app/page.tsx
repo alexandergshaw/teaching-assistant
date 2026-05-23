@@ -2,6 +2,7 @@
 
 import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { Tab, Tabs } from "@mui/material";
 import { gradeAction, testGeminiAction, type GradeActionState, type TestGeminiState } from "./actions";
 import styles from "./page.module.css";
 
@@ -377,24 +378,32 @@ export default function Home() {
   return (
     <main className={styles.page}>
       <div className={styles.tabContainer}>
-        <nav className={styles.tabBar} aria-label="App sections">
-          <button
-            role="tab"
-            aria-selected={activeTab === "grading"}
-            className={`${styles.tab}${activeTab === "grading" ? ` ${styles.tabActive}` : ""}`}
-            onClick={() => setActiveTab("grading")}
-          >
-            Grading
-          </button>
-          <button
-            role="tab"
-            aria-selected={activeTab === "lesson-planning"}
-            className={`${styles.tab}${activeTab === "lesson-planning" ? ` ${styles.tabActive}` : ""}`}
-            onClick={() => setActiveTab("lesson-planning")}
-          >
-            Lesson Planning
-          </button>
-        </nav>
+        <Tabs
+          value={activeTab}
+          onChange={(_, v: ActiveTab) => setActiveTab(v)}
+          sx={{
+            borderBottom: "1px solid var(--field-border)",
+            marginBottom: "0",
+            "& .MuiTabs-indicator": { backgroundColor: "var(--accent)" },
+            "& .MuiTab-root": {
+              fontFamily: "inherit",
+              fontSize: "0.9rem",
+              fontWeight: 500,
+              textTransform: "none",
+              color: "var(--text-secondary)",
+              minHeight: 44,
+              padding: "10px 20px",
+            },
+            "& .Mui-selected": {
+              color: "var(--accent) !important",
+              fontWeight: 600,
+            },
+            minHeight: 44,
+          }}
+        >
+          <Tab label="Grading" value="grading" disableRipple />
+          <Tab label="Lesson Planning" value="lesson-planning" disableRipple />
+        </Tabs>
 
         {activeTab === "grading" && (
           <section className={styles.card}>

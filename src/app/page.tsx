@@ -11,6 +11,8 @@ type PreviewFile = {
   extension: string;
   content: string;
   truncated: boolean;
+  rawBase64?: string;
+  mimeType?: string;
 };
 
 const initialState: GradeActionState = { run: null, error: null };
@@ -133,6 +135,7 @@ export default function Home() {
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyResetTimerRef = useRef<number | null>(null);
   const run = state.run;
@@ -284,10 +287,23 @@ export default function Home() {
 
   const handleOpenPreview = (student: string, file: PreviewFile) => {
     setSelectedPreview({ ...file, student });
+    if (file.rawBase64 && file.mimeType) {
+      const byteChars = atob(file.rawBase64);
+      const byteArray = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([byteArray], { type: file.mimeType });
+      setPreviewBlobUrl(URL.createObjectURL(blob));
+    } else {
+      setPreviewBlobUrl(null);
+    }
   };
 
   const handleClosePreview = () => {
     setSelectedPreview(null);
+    if (previewBlobUrl) {
+      URL.revokeObjectURL(previewBlobUrl);
+      setPreviewBlobUrl(null);
+    }
   };
 
   const handleCopy = async (copyKey: string, value: string) => {
@@ -524,6 +540,8 @@ export default function Home() {
                                           file.previewContent ||
                                           "No extracted text available for this file.",
                                         truncated: file.previewTruncated,
+                                        rawBase64: file.rawBase64,
+                                        mimeType: file.mimeType,
                                       })
                                     }
                                     title={`Preview ${file.name}`}
@@ -655,12 +673,30 @@ export default function Home() {
                 Close
               </button>
             </div>
-            {selectedPreview.truncated && (
-              <p className={styles.previewNotice}>
-                Showing a partial preview because the extracted file content is large.
-              </p>
+            {previewBlobUrl && selectedPreview.mimeType === "application/pdf" ? (
+              <iframe
+                src={previewBlobUrl}
+                className={styles.previewIframe}
+                title={`Preview of ${selectedPreview.name}`}
+              />
+            ) : previewBlobUrl && selectedPreview.mimeType?.startsWith("image/") ? (
+              <div className={styles.previewImageWrap}>
+                <img
+                  src={previewBlobUrl}
+                  alt={`Preview of ${selectedPreview.name}`}
+                  className={styles.previewImage}
+                />
+              </div>
+            ) : (
+              <>
+                {selectedPreview.truncated && (
+                  <p className={styles.previewNotice}>
+                    Showing a partial preview because the extracted file content is large.
+                  </p>
+                )}
+                <pre className={styles.previewContent}>{selectedPreview.content}</pre>
+              </>
             )}
-            <pre className={styles.previewContent}>{selectedPreview.content}</pre>
           </section>
         </div>
       )}

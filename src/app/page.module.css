@@ -972,6 +972,13 @@
   color: var(--accent);
 }
 
+.introText {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
 .assignmentStepList {
   display: flex;
   flex-direction: column;

@@ -32,6 +32,86 @@ export interface AssignmentData {
   deliverables: string[];
 }
 
+export interface ModuleIntroData {
+  overview: string;
+  keyTerms: string;
+}
+
+export async function generateModuleIntroAction(
+  moduleObjectives: string,
+  contextText: string
+): Promise<ModuleIntroData | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const prompt = `You are an expert educator writing a module introduction for students.
+
+MODULE OBJECTIVES:
+${moduleObjectives}
+
+CONTEXT:
+${contextText || "(none provided)"}
+
+Write a brief module introduction that students read before engaging with any content. Return ONLY valid JSON:
+{
+  "overview": "...",
+  "keyTerms": "..."
+}
+
+Requirements:
+- "overview": Exactly 2-3 sentences. Explain where these module concepts fit in the broader field or discipline — the big picture, why it matters, and how it connects to what students may already know or have learned previously. Write directly to the student.
+- "keyTerms": Exactly 2-3 sentences that introduce the most important terms or concepts students will encounter in this module, defining each briefly in plain language. Write directly to the student.
+- Use clear, engaging language. Avoid jargon unless you define it immediately.
+- Do not include any text outside the JSON object.`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.5, maxOutputTokens: 512 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Module intro generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw =
+      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+    const trimmed = raw.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return { error: "Could not parse module intro from the model response." };
+    }
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      overview?: string;
+      keyTerms?: string;
+    };
+
+    return {
+      overview: parsed.overview ?? "",
+      keyTerms: parsed.keyTerms ?? "",
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
 export async function generateLessonPlanAction(
   moduleObjectives: string,
   contextText: string,

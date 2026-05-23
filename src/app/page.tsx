@@ -3,7 +3,7 @@
 import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
-import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData } from "./actions";
+import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData } from "./actions";
 import styles from "./page.module.css";
 
 type PreviewFile = {
@@ -187,8 +187,9 @@ export default function Home() {
   const [lessonError, setLessonError] = useState<string | null>(null);
   const [lessonPlanPreview, setLessonPlanPreview] = useState<GenerateLessonPlanResult | null>(null);
   const [assignmentPreview, setAssignmentPreview] = useState<AssignmentData | null>(null);
-  const [previewTab, setPreviewTab] = useState<"slides" | "assignment" | "rubric">("slides");
+  const [previewTab, setPreviewTab] = useState<"intro" | "slides" | "assignment" | "rubric">("intro");
   const [rubricPreview, setRubricPreview] = useState<string | null>(null);
+  const [introPreview, setIntroPreview] = useState<ModuleIntroData | null>(null);
   const [savedLessonFiles, setSavedLessonFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
   const [revisionPrompt, setRevisionPrompt] = useState("");
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -388,10 +389,11 @@ export default function Home() {
 
       setSavedLessonFiles(files);
 
-      const [slideResult, assignmentResult, rubricResult] = await Promise.all([
+      const [slideResult, assignmentResult, rubricResult, introResult] = await Promise.all([
         generateLessonPlanAction(moduleObjectives, lessonContext, files),
         generateAssignmentAction(moduleObjectives, lessonContext, files),
         generateAssignmentRubricAction(moduleObjectives, lessonContext),
+        generateModuleIntroAction(moduleObjectives, lessonContext),
       ]);
 
       if ("error" in slideResult) {
@@ -402,7 +404,8 @@ export default function Home() {
       setLessonPlanPreview(slideResult);
       setAssignmentPreview("error" in assignmentResult ? null : assignmentResult);
       setRubricPreview(typeof rubricResult === "string" ? rubricResult : null);
-      setPreviewTab("slides");
+      setIntroPreview("error" in introResult ? null : introResult);
+      setPreviewTab("intro");
       setRevisionPrompt("");
     } catch (err) {
       setLessonError(err instanceof Error ? err.message : "Generation failed.");
@@ -942,11 +945,13 @@ export default function Home() {
               <div>
                 <h3>{lessonPlanPreview.presentationTitle}</h3>
                 <p className={styles.previewMeta}>
-                  {previewTab === "slides"
-                    ? `${lessonPlanPreview.slides.length} slides`
-                    : previewTab === "assignment"
-                      ? (assignmentPreview?.title ?? "Assignment")
-                      : "Grading Rubric"}
+                  {previewTab === "intro"
+                    ? "Module Introduction"
+                    : previewTab === "slides"
+                      ? `${lessonPlanPreview.slides.length} slides`
+                      : previewTab === "assignment"
+                        ? (assignmentPreview?.title ?? "Assignment")
+                        : "Grading Rubric"}
                 </p>
               </div>
               <button
@@ -959,6 +964,13 @@ export default function Home() {
             </div>
 
             <div className={styles.lessonInnerTabs}>
+              <button
+                type="button"
+                className={`${styles.lessonInnerTab}${previewTab === "intro" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                onClick={() => setPreviewTab("intro")}
+              >
+                Introduction
+              </button>
               <button
                 type="button"
                 className={`${styles.lessonInnerTab}${previewTab === "slides" ? ` ${styles.lessonInnerTabActive}` : ""}`}
@@ -981,6 +993,25 @@ export default function Home() {
                 Rubric
               </button>
             </div>
+
+            {previewTab === "intro" && (
+              <div className={styles.assignmentContent}>
+                {introPreview ? (
+                  <>
+                    <div className={styles.assignmentSection}>
+                      <p className={styles.assignmentSectionLabel}>Where This Fits</p>
+                      <p className={styles.introText}>{introPreview.overview}</p>
+                    </div>
+                    <div className={styles.assignmentSection}>
+                      <p className={styles.assignmentSectionLabel}>Key Terms</p>
+                      <p className={styles.introText}>{introPreview.keyTerms}</p>
+                    </div>
+                  </>
+                ) : (
+                  <p className={styles.emptyState}>Introduction generation failed — try regenerating.</p>
+                )}
+              </div>
+            )}
 
             {previewTab === "slides" && (
               <ol className={styles.lessonSlideList}>

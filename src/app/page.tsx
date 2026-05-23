@@ -17,9 +17,6 @@ const initialState: GradeActionState = { run: null, error: null };
 const STORAGE_KEYS = {
   assignmentInstructions: "ta.assignmentInstructions",
   rubric: "ta.rubric",
-  fileName: "ta.studentSubmissions.fileName",
-  fileType: "ta.studentSubmissions.fileType",
-  fileData: "ta.studentSubmissions.fileData",
 };
 
 type SortDirection = "asc" | "desc";
@@ -65,28 +62,6 @@ function readSessionItem(key: string): string {
   }
 
   return sessionStorage.getItem(key) ?? "";
-}
-
-function toBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-
-  for (let i = 0; i < bytes.length; i += 1) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-
-  return btoa(binary);
-}
-
-function fromBase64(value: string): Uint8Array {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-
-  return bytes;
 }
 
 function escapeCsvCell(value: string): string {
@@ -152,16 +127,10 @@ export default function Home() {
     readSessionItem(STORAGE_KEYS.assignmentInstructions)
   );
   const [rubric, setRubric] = useState(() => readSessionItem(STORAGE_KEYS.rubric));
-  const [storedFileName, setStoredFileName] = useState<string | null>(() => {
-    const saved = readSessionItem(STORAGE_KEYS.fileName);
-    return saved || null;
-  });
-  const [fileStorageError, setFileStorageError] = useState<string | null>(null);
   const [sortState, setSortState] = useState(DEFAULT_SORT);
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyResetTimerRef = useRef<number | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const run = state.run;
 
   const sortedResults = useMemo(() => {
@@ -265,33 +234,6 @@ export default function Home() {
   };
 
   useEffect(() => {
-    const savedFileName = sessionStorage.getItem(STORAGE_KEYS.fileName);
-    const savedFileType = sessionStorage.getItem(STORAGE_KEYS.fileType) ?? "application/zip";
-    const savedFileData = sessionStorage.getItem(STORAGE_KEYS.fileData);
-
-    if (!savedFileName || !savedFileData || !fileInputRef.current) {
-      return;
-    }
-
-    try {
-      const restoredBytes = fromBase64(savedFileData);
-      const restoredBuffer = new ArrayBuffer(restoredBytes.byteLength);
-      new Uint8Array(restoredBuffer).set(restoredBytes);
-
-      const restoredFile = new File([restoredBuffer], savedFileName, {
-        type: savedFileType,
-      });
-      const transfer = new DataTransfer();
-      transfer.items.add(restoredFile);
-      fileInputRef.current.files = transfer.files;
-    } catch {
-      sessionStorage.removeItem(STORAGE_KEYS.fileName);
-      sessionStorage.removeItem(STORAGE_KEYS.fileType);
-      sessionStorage.removeItem(STORAGE_KEYS.fileData);
-    }
-  }, []);
-
-  useEffect(() => {
     return () => {
       if (copyResetTimerRef.current !== null) {
         window.clearTimeout(copyResetTimerRef.current);
@@ -311,33 +253,6 @@ export default function Home() {
     const next = event.target.value;
     setRubric(next);
     sessionStorage.setItem(STORAGE_KEYS.rubric, next);
-  };
-
-  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-
-    if (!file) {
-      setStoredFileName(null);
-      setFileStorageError(null);
-      sessionStorage.removeItem(STORAGE_KEYS.fileName);
-      sessionStorage.removeItem(STORAGE_KEYS.fileType);
-      sessionStorage.removeItem(STORAGE_KEYS.fileData);
-      return;
-    }
-
-    try {
-      const fileBuffer = await file.arrayBuffer();
-      const encoded = toBase64(fileBuffer);
-      sessionStorage.setItem(STORAGE_KEYS.fileName, file.name);
-      sessionStorage.setItem(STORAGE_KEYS.fileType, file.type || "application/zip");
-      sessionStorage.setItem(STORAGE_KEYS.fileData, encoded);
-      setStoredFileName(file.name);
-      setFileStorageError(null);
-    } catch {
-      setFileStorageError(
-        "Could not keep this upload in session storage. You can still submit now, but refresh may require re-uploading the zip."
-      );
-    }
   };
 
   const handleExportCsv = () => {
@@ -439,16 +354,12 @@ export default function Home() {
             <label htmlFor="student-submissions">Student Submissions</label>
             <div className={styles.fileField}>
               <input
-                ref={fileInputRef}
                 id="student-submissions"
                 name="studentSubmissions"
                 type="file"
                 accept=".zip,application/zip"
-                onChange={handleFileChange}
               />
               <p>Upload a zip archive that contains the student submissions.</p>
-              {storedFileName && <p>Restored upload: {storedFileName}</p>}
-              {fileStorageError && <p role="alert">{fileStorageError}</p>}
             </div>
           </div>
 

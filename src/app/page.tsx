@@ -3,7 +3,7 @@
 import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
-import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, parseSyllabusAction, generateSyllabusSectionAction, reviseSyllabusAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type SyllabusSection } from "./actions";
+import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, parseSyllabusAction, generateSyllabusSectionAction, generateSyllabusRemainingSectionsAction, reviseSyllabusAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type SyllabusSection } from "./actions";
 import styles from "./page.module.css";
 
 type PreviewFile = {
@@ -672,29 +672,33 @@ export default function Home() {
     setIsGeneratingSection(true);
     const updated = [...sectionContents];
     // Save whatever the user typed in the current field first
-    if (currentSectionInput.trim()) {
-      updated[currentSectionIndex] = currentSectionInput.trim();
+    const typedCurrent = currentSectionInput.trim();
+    if (typedCurrent) {
+      updated[currentSectionIndex] = typedCurrent;
     }
     try {
-      for (let i = currentSectionIndex + (currentSectionInput.trim() ? 1 : 0); i < parsedSections.length; i++) {
-        const completedSections = parsedSections
-          .slice(0, i)
-          .map((s, j) => ({ heading: s.heading, content: updated[j] }))
-          .filter((s) => s.content);
-        const result = await generateSyllabusSectionAction(
-          courseTitle,
-          parsedSections[i],
-          completedSections,
-          syllabusTemplateText || undefined
-        );
-        if (typeof result !== "string") {
-          setCoursePlanningError(result.error);
-          setSectionContents(updated);
-          return;
-        }
-        updated[i] = result;
+      const startIndex = currentSectionIndex + (typedCurrent ? 1 : 0);
+      if (startIndex >= parsedSections.length) {
+        setSectionContents(updated);
+        setCoursePlanningStep("preview");
+        return;
       }
-      setSectionContents(updated);
+
+      const result = await generateSyllabusRemainingSectionsAction(
+        courseTitle,
+        parsedSections,
+        updated,
+        startIndex,
+        syllabusTemplateText || undefined
+      );
+
+      if ("error" in result) {
+        setCoursePlanningError(result.error);
+        setSectionContents(updated);
+        return;
+      }
+
+      setSectionContents(result.contents);
       setCoursePlanningStep("preview");
     } finally {
       setIsGeneratingSection(false);

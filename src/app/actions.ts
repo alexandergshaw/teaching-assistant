@@ -578,6 +578,111 @@ Write the content for the "${section.heading}" section of this syllabus. Be spec
   }
 }
 
+export async function generateSyllabusRemainingSectionsAction(
+  courseTitle: string,
+  sections: SyllabusSection[],
+  currentContents: string[],
+  startIndex: number,
+  templateText?: string
+): Promise<{ contents: string[] } | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const existingBlock = sections
+      .map((s, i) => `${s.heading}:\n${currentContents[i] || "(empty)"}`)
+      .join("\n\n");
+
+    const remainingBlock = sections
+      .slice(startIndex)
+      .map((s, idx) => `${startIndex + idx + 1}. ${s.heading}${s.hint ? ` (${s.hint})` : ""}`)
+      .join("\n");
+
+    const templateBlock = templateText
+      ? `\n\nORIGINAL SYLLABUS TEMPLATE:\n${templateText}`
+      : "";
+
+    const prompt = `You are writing the remaining content for a university course syllabus.
+
+COURSE TITLE: ${courseTitle}${templateBlock}
+
+CURRENT SYLLABUS STATE:
+${existingBlock}
+
+FILL THESE REMAINING SECTIONS (in order):
+${remainingBlock}
+
+Return ONLY valid JSON:
+{
+  "sections": [
+    { "heading": "Section Name", "content": "Generated content..." }
+  ]
+}
+
+Requirements:
+- Return only the sections listed in "FILL THESE REMAINING SECTIONS".
+- Preserve each heading exactly.
+- Use existing filled sections for consistency.
+- Do not include any text outside the JSON object.`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.5, maxOutputTokens: 4096 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Section generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const trimmed = raw.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return { error: "Could not parse section data from the model response." };
+    }
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      sections?: Array<{ heading?: string; content?: string }>;
+    };
+
+    const updated = [...currentContents];
+    const remaining = sections.slice(startIndex);
+    for (let i = 0; i < remaining.length; i++) {
+      const target = remaining[i];
+      const byIndex = parsed.sections?.[i];
+      let content = byIndex?.content?.trim() ?? "";
+      if (!content) {
+        const byHeading = parsed.sections?.find(
+          (s) => s.heading?.trim().toLowerCase() === target.heading.toLowerCase()
+        );
+        content = byHeading?.content?.trim() ?? "";
+      }
+      if (content) {
+        updated[startIndex + i] = content;
+      }
+    }
+
+    return { contents: updated };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
 export async function reviseSyllabusAction(
   courseTitle: string,
   sections: SyllabusSection[],

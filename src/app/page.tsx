@@ -815,7 +815,6 @@ export default function Home() {
         {activeTab === "lesson-planning" && (
           <section className={styles.card}>
             <div className={styles.header}>
-              <p className={styles.eyebrow}>Teaching Assistant</p>
               <h1>Lesson Planning</h1>
               <p>Plan and generate lesson content with AI assistance.</p>
             </div>

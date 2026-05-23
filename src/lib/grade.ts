@@ -340,6 +340,10 @@ Rules:
 - Keep comments concise and actionable.
 - For every deduction, explicitly cite the affected rubric area and the exact reason from the submission.
 - In overallComment, reference rubric areas by name when summarizing strengths and weaknesses.
+- Every score must include what it is out of, in the format earned/possible (for example 7/10).
+- Every comment must cite specific evidence with exact file names from the submission (for example Evidence: wendelcynthia_project.docx ...).
+- Cite file-specific evidence for both positive and negative feedback.
+- Maintain at least a 2:1 positive-to-negative ratio: for every negative feedback point, include at least two distinct positive feedback points.
 - Do not include markdown fences or any text outside the JSON object.`;
 }
 

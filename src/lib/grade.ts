@@ -84,6 +84,90 @@ function getFileExtension(name: string): string {
   return name.slice(lastDot + 1).toLowerCase();
 }
 
+function decodeXmlEntities(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
+function normalizeWhitespace(value: string): string {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+async function extractDocxText(buffer: Buffer): Promise<string | null> {
+  const zip = await JSZip.loadAsync(buffer);
+  const documentXml = zip.file("word/document.xml");
+
+  if (!documentXml) {
+    return null;
+  }
+
+  let xml = await documentXml.async("string");
+  xml = xml
+    .replace(/<w:tab\s*\/?>/g, "\t")
+    .replace(/<w:br\s*\/?>/g, "\n")
+    .replace(/<w:p[^>]*>/g, "\n")
+    .replace(/<[^>]+>/g, "");
+
+  return normalizeWhitespace(decodeXmlEntities(xml));
+}
+
+async function extractPptxText(buffer: Buffer): Promise<string | null> {
+  const zip = await JSZip.loadAsync(buffer);
+  const slideFiles = Object.values(zip.files)
+    .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/i.test(entry.name))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+  if (slideFiles.length === 0) {
+    return null;
+  }
+
+  const slides: string[] = [];
+
+  for (const slide of slideFiles) {
+    const xml = await slide.async("string");
+    const textMatches = Array.from(xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g));
+    const text = textMatches
+      .map((match) => decodeXmlEntities(match[1] ?? "").trim())
+      .filter(Boolean)
+      .join("\n");
+
+    if (text) {
+      slides.push(text);
+    }
+  }
+
+  return normalizeWhitespace(slides.join("\n\n"));
+}
+
+async function extractXlsxText(buffer: Buffer): Promise<string | null> {
+  const zip = await JSZip.loadAsync(buffer);
+  const sharedStringsFile = zip.file("xl/sharedStrings.xml");
+
+  if (!sharedStringsFile) {
+    return null;
+  }
+
+  const xml = await sharedStringsFile.async("string");
+  const matches = Array.from(xml.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g));
+  const values = matches
+    .map((match) => decodeXmlEntities(match[1] ?? "").trim())
+    .filter(Boolean);
+
+  if (values.length === 0) {
+    return null;
+  }
+
+  return normalizeWhitespace(values.join("\n"));
+}
+
 async function extractTextFromFile(
   name: string,
   file: JSZip.JSZipObject
@@ -96,13 +180,38 @@ async function extractTextFromFile(
 
   if (DOCUMENT_EXTENSIONS.has(extension)) {
     const buffer = await file.async("nodebuffer");
+
+    // OOXML fallbacks are resilient for common LMS submissions.
+    if (extension === "docx") {
+      const docxText = await extractDocxText(buffer);
+      if (docxText) {
+        return docxText;
+      }
+    }
+
+    if (extension === "pptx") {
+      const pptxText = await extractPptxText(buffer);
+      if (pptxText) {
+        return pptxText;
+      }
+    }
+
+    if (extension === "xlsx") {
+      const xlsxText = await extractXlsxText(buffer);
+      if (xlsxText) {
+        return xlsxText;
+      }
+    }
+
     const fileType = OFFICE_FILE_TYPE_HINTS[extension];
     const ast = fileType
       ? await OfficeParser.parseOffice(buffer, { fileType })
       : await OfficeParser.parseOffice(buffer);
 
     const conversion = await ast.to("text");
-    return typeof conversion.value === "string" ? conversion.value : null;
+    return typeof conversion.value === "string"
+      ? normalizeWhitespace(conversion.value)
+      : null;
   }
 
   return null;
@@ -130,8 +239,14 @@ export interface GradingRun {
 /** Extract text-based files from a zip archive. */
 async function extractSubmissions(
   zipBuffer: ArrayBuffer
-): Promise<Record<string, string>> {
+): Promise<{
+  submissions: Record<string, string>;
+  attemptedSupportedFiles: number;
+  failedSupportedFiles: string[];
+}> {
   const submissions: Record<string, string> = {};
+  let attemptedSupportedFiles = 0;
+  const failedSupportedFiles: string[] = [];
 
   async function collectFromZip(
     zip: JSZip,
@@ -144,6 +259,8 @@ async function extractSubmissions(
 
         const fullName = parentPath ? `${parentPath}/${name}` : name;
         const extension = getFileExtension(name);
+        const isSupportedFile =
+          TEXT_EXTENSIONS.has(extension) || DOCUMENT_EXTENSIONS.has(extension);
 
         if (extension === "zip" && depth < MAX_NESTED_ZIP_DEPTH) {
           try {
@@ -156,13 +273,21 @@ async function extractSubmissions(
           return;
         }
 
+        if (!isSupportedFile) {
+          return;
+        }
+
+        attemptedSupportedFiles += 1;
+
         try {
           const extractedText = await extractTextFromFile(name, file);
           if (extractedText && extractedText.trim()) {
             submissions[fullName] = extractedText;
+          } else {
+            failedSupportedFiles.push(fullName);
           }
         } catch {
-          // Skip files that cannot be parsed; continue grading other submissions.
+          failedSupportedFiles.push(fullName);
         }
       })
     );
@@ -171,7 +296,11 @@ async function extractSubmissions(
   const zip = await JSZip.loadAsync(zipBuffer);
   await collectFromZip(zip, 0, "");
 
-  return submissions;
+  return {
+    submissions,
+    attemptedSupportedFiles,
+    failedSupportedFiles,
+  };
 }
 
 /** Build a system prompt for the grader. */
@@ -463,10 +592,20 @@ export async function gradeSubmissions(
   assignmentInstructions: string,
   rubric: string
 ): Promise<GradingRun> {
-  const submissions = await extractSubmissions(zipBuffer);
+  const { submissions, attemptedSupportedFiles, failedSupportedFiles } =
+    await extractSubmissions(zipBuffer);
 
   const submissionEntries = Object.entries(submissions);
   if (submissionEntries.length === 0) {
+    if (attemptedSupportedFiles > 0) {
+      const failedPreview = failedSupportedFiles.slice(0, 3).join(", ");
+      const failedSuffix = failedPreview ? ` Example files: ${failedPreview}.` : "";
+
+      throw new Error(
+        `Found supported files, but could not extract text from them.${failedSuffix} If possible, use .docx/.pptx/.xlsx files with selectable text (not scanned images).`
+      );
+    }
+
     return {
       results: [],
       rubricAreaNames: [],

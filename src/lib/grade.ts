@@ -346,6 +346,8 @@ Rules:
 - Cite only the assignment filename portion (from format studentname_date_time_filename), excluding studentname/date/time prefix.
 - Cite file-specific evidence for both positive and negative feedback.
 - Maintain at least a 2:1 positive-to-negative ratio: for every negative feedback point, include at least two distinct positive feedback points.
+- Write each rubricResults comment in a professional, warm, and slightly casual tone.
+- Write overallComment in a professional, warm, and slightly casual tone.
 - Do not include markdown fences or any text outside the JSON object.`;
 }
 

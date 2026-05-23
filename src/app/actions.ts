@@ -4,6 +4,7 @@ import {
   gradeSubmissions,
   synthesizeFullCreditChecklist,
   extractSubmissions,
+  generateRubric,
   type GradingRun,
 } from "@/lib/grade";
 import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
@@ -79,6 +80,7 @@ export async function testGeminiAction(
 export interface GradeActionState {
   run: GradingRun | null;
   error: string | null;
+  generatedRubric?: string;
 }
 
 export async function gradeAction(
@@ -98,15 +100,16 @@ export async function gradeAction(
     return { run: null, error: "Please provide assignment instructions." };
   }
 
-  if (!rubric.trim()) {
-    return { run: null, error: "Please provide a rubric." };
-  }
-
   try {
+    const effectiveRubric = rubric.trim()
+      ? rubric
+      : await generateRubric(assignmentInstructions);
+    const generatedRubric = rubric.trim() ? undefined : effectiveRubric;
+
     const zipBuffer = await file.arrayBuffer();
     const [run, fullCreditChecklist] = await Promise.all([
-      gradeSubmissions(zipBuffer, assignmentInstructions, rubric),
-      synthesizeFullCreditChecklist(assignmentInstructions, rubric),
+      gradeSubmissions(zipBuffer, assignmentInstructions, effectiveRubric),
+      synthesizeFullCreditChecklist(assignmentInstructions, effectiveRubric),
     ]);
 
     return {
@@ -115,6 +118,7 @@ export async function gradeAction(
         fullCreditChecklist,
       },
       error: null,
+      generatedRubric,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "An unexpected error occurred.";

@@ -681,6 +681,71 @@ async function inferFileNameConvention(
   }
 }
 
+export async function generateRubric(assignmentInstructions: string): Promise<string> {
+  const apiKey = getGeminiApiKey();
+  const model = getGeminiModel();
+
+  const prompt = `You are a teaching assistant creating a grading rubric.
+
+ASSIGNMENT INSTRUCTIONS:
+${assignmentInstructions}
+
+Create a grading rubric suited to these instructions. Return ONLY valid JSON:
+{
+  "rubric": "..."
+}
+
+The rubric text must:
+- Contain 3 to 6 grading areas tied directly to the assignment requirements.
+- Format each area on its own line: "[Area Name] ([Points] points): [What earns full credit and how points may be deducted]"
+- Total points must sum to 100.
+- Be specific and actionable based on the assignment, not generic.
+- Use plain prose only, no markdown.
+- Do not include text outside the JSON object.`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 512 },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Rubric generation failed: HTTP ${response.status} ${body}`);
+  }
+
+  const data = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+
+  const raw =
+    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+  const jsonText = extractJsonObject(raw);
+  if (jsonText) {
+    try {
+      const parsed = JSON.parse(jsonText) as { rubric?: unknown };
+      if (typeof parsed.rubric === "string" && parsed.rubric.trim()) {
+        return parsed.rubric.trim();
+      }
+    } catch {
+      // fall through to raw text
+    }
+  }
+
+  if (raw.trim()) {
+    return raw.trim();
+  }
+
+  throw new Error("Gemini returned an empty rubric.");
+}
+
 export async function synthesizeFullCreditChecklist(
   assignmentInstructions: string,
   rubric: string

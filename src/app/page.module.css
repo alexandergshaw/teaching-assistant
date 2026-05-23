@@ -222,6 +222,48 @@
   background: color-mix(in srgb, var(--field-background) 92%, var(--accent) 8%);
 }
 
+.generatedRubricCard {
+  padding: 14px 18px;
+  border: 1px solid var(--field-border);
+  border-radius: 14px;
+  background: var(--field-background);
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+}
+
+.generatedRubricCard summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-primary);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+
+.generatedRubricCard summary::before {
+  content: "▶";
+  font-size: 0.7em;
+  transition: transform 0.15s ease;
+}
+
+.generatedRubricCard[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.generatedRubricBody {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--field-border);
+  background: color-mix(in srgb, var(--field-background) 94%, var(--accent) 6%);
+  font-size: 0.84rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  color: var(--text-primary);
+}
+
 .checklistCard h2 {
   font-size: 1.18rem;
   font-weight: 700;

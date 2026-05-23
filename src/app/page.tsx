@@ -444,6 +444,13 @@ export default function Home() {
           </p>
         )}
 
+        {state.generatedRubric && (
+          <details className={styles.generatedRubricCard}>
+            <summary>Rubric was auto-generated from assignment instructions</summary>
+            <pre className={styles.generatedRubricBody}>{state.generatedRubric}</pre>
+          </details>
+        )}
+
         {run && run.fullCreditChecklist.length > 0 && (
           <section className={styles.checklistCard}>
             <h2>Full Credit Checklist</h2>

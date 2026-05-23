@@ -766,7 +766,7 @@ export default function Home() {
                 style={{ minHeight: "180px" }}
               />
               <div className={styles.fileField}>
-                <input id="lessonContextFile" type="file" />
+                <input id="lessonContextFile" type="file" multiple />
                 <p>Optionally attach a file for additional context.</p>
               </div>
             </div>

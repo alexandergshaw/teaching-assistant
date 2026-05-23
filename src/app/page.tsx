@@ -128,6 +128,15 @@ function DownloadIcon() {
   );
 }
 
+function EyeIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+      <path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 0 1 0-1.186A10.004 10.004 0 0 1 10 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0 1 10 17c-4.257 0-7.893-2.66-9.336-6.41ZM14 10a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
 export default function Home() {
   const [state, formAction, pending] = useActionState(gradeAction, initialState);
   const [testState, testAction, testPending] = useActionState(testGeminiAction, initialTestState);
@@ -528,39 +537,45 @@ export default function Home() {
                                   key={`${result.student}-file-name-${file.name}`}
                                   className={styles.matrixFileItem}
                                 >
-                                  <button
-                                    type="button"
-                                    className={styles.matrixFileButton}
-                                    onClick={() =>
-                                      handleOpenPreview(result.student, {
-                                        student: result.student,
-                                        name: file.name,
-                                        extension: file.extension,
-                                        content:
-                                          file.previewContent ||
-                                          "No extracted text available for this file.",
-                                        truncated: file.previewTruncated,
-                                        rawBase64: file.rawBase64,
-                                        mimeType: file.mimeType,
-                                      })
-                                    }
-                                    title={`Preview ${file.name}`}
-                                  >
+                                  <span className={styles.matrixFileName}>
                                     {file.extension && file.extension !== "(none)" && !file.name.toLowerCase().endsWith(`.${file.extension.toLowerCase()}`)
                                       ? `${file.name}.${file.extension}`
                                       : file.name}
-                                  </button>
-                                  {file.rawBase64 && (
+                                  </span>
+                                  <div className={styles.fileIconGroup}>
                                     <button
                                       type="button"
-                                      className={styles.fileDownloadButton}
-                                      title={`Download ${file.name}`}
-                                      aria-label={`Download ${file.name}`}
-                                      onClick={() => handleDownloadFile(file.name, file.extension, file.rawBase64!, file.mimeType ?? "application/octet-stream")}
+                                      className={styles.fileIconButton}
+                                      title={`Preview ${file.name}`}
+                                      aria-label={`Preview ${file.name}`}
+                                      onClick={() =>
+                                        handleOpenPreview(result.student, {
+                                          student: result.student,
+                                          name: file.name,
+                                          extension: file.extension,
+                                          content:
+                                            file.previewContent ||
+                                            "No extracted text available for this file.",
+                                          truncated: file.previewTruncated,
+                                          rawBase64: file.rawBase64,
+                                          mimeType: file.mimeType,
+                                        })
+                                      }
                                     >
-                                      <DownloadIcon />
+                                      <EyeIcon />
                                     </button>
-                                  )}
+                                    {file.rawBase64 && (
+                                      <button
+                                        type="button"
+                                        className={styles.fileIconButton}
+                                        title={`Download ${file.name}`}
+                                        aria-label={`Download ${file.name}`}
+                                        onClick={() => handleDownloadFile(file.name, file.extension, file.rawBase64!, file.mimeType ?? "application/octet-stream")}
+                                      >
+                                        <DownloadIcon />
+                                      </button>
+                                    )}
+                                  </div>
                                 </li>
                               ))}
                             </ul>

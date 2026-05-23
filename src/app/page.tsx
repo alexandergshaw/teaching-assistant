@@ -150,6 +150,8 @@ export default function Home() {
   const [fileStorageError, setFileStorageError] = useState<string | null>(null);
   const [sortState, setSortState] = useState(DEFAULT_SORT);
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const copyResetTimerRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const run = state.run;
 
@@ -280,6 +282,14 @@ export default function Home() {
     }
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current !== null) {
+        window.clearTimeout(copyResetTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleAssignmentInstructionsChange = (
     event: ChangeEvent<HTMLTextAreaElement>
   ) => {
@@ -349,6 +359,46 @@ export default function Home() {
 
   const handleClosePreview = () => {
     setSelectedPreview(null);
+  };
+
+  const handleCopy = async (copyKey: string, value: string) => {
+    const text = value.trim();
+    if (!text) {
+      return;
+    }
+
+    const copyViaFallback = () => {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "absolute";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    };
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        copyViaFallback();
+      }
+    } catch {
+      copyViaFallback();
+    }
+
+    setCopiedKey(copyKey);
+
+    if (copyResetTimerRef.current !== null) {
+      window.clearTimeout(copyResetTimerRef.current);
+    }
+
+    copyResetTimerRef.current = window.setTimeout(() => {
+      setCopiedKey(null);
+      copyResetTimerRef.current = null;
+    }, 1600);
   };
 
   return (
@@ -542,7 +592,7 @@ export default function Home() {
                                 >
                                   <button
                                     type="button"
-                                    className={`${styles.fileChip} ${styles.previewChipButton}`}
+                                    className={styles.matrixFileButton}
                                     onClick={() =>
                                       handleOpenPreview(result.student, {
                                         student: result.student,
@@ -588,10 +638,42 @@ export default function Home() {
                             <td key={`${result.student}-${areaName}`}>
                               {area ? (
                                 <div className={styles.matrixCellDetail}>
-                                  <span className={styles.scoreBadge}>
-                                    Score: {area.score || "-"}
-                                  </span>
-                                  <p>{area.comment || "No feedback provided."}</p>
+                                  <div className={styles.copyGroup}>
+                                    <span className={styles.scoreBadge}>
+                                      Score: {area.score || "-"}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className={styles.copyButton}
+                                      onClick={() =>
+                                        handleCopy(
+                                          `${result.student}-${areaName}-score`,
+                                          area.score || "-"
+                                        )
+                                      }
+                                    >
+                                      {copiedKey === `${result.student}-${areaName}-score`
+                                        ? "Copied"
+                                        : "Copy Score"}
+                                    </button>
+                                  </div>
+                                  <div className={styles.copyGroup}>
+                                    <p>{area.comment || "No feedback provided."}</p>
+                                    <button
+                                      type="button"
+                                      className={styles.copyButton}
+                                      onClick={() =>
+                                        handleCopy(
+                                          `${result.student}-${areaName}-comment`,
+                                          area.comment || "No feedback provided."
+                                        )
+                                      }
+                                    >
+                                      {copiedKey === `${result.student}-${areaName}-comment`
+                                        ? "Copied"
+                                        : "Copy Feedback"}
+                                    </button>
+                                  </div>
                                 </div>
                               ) : (
                                 "-"
@@ -601,9 +683,25 @@ export default function Home() {
                         })}
                         <td>{result.totalScore || "-"}</td>
                         <td>
-                          <p className={styles.overallFeedbackCell}>
-                            {result.overallComment || "No overall feedback provided."}
-                          </p>
+                          <div className={styles.copyGroup}>
+                            <p className={styles.overallFeedbackCell}>
+                              {result.overallComment || "No overall feedback provided."}
+                            </p>
+                            <button
+                              type="button"
+                              className={styles.copyButton}
+                              onClick={() =>
+                                handleCopy(
+                                  `${result.student}-overall-comment`,
+                                  result.overallComment || "No overall feedback provided."
+                                )
+                              }
+                            >
+                              {copiedKey === `${result.student}-overall-comment`
+                                ? "Copied"
+                                : "Copy Overall"}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

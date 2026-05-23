@@ -19,6 +19,19 @@ export interface GenerateLessonPlanResult {
   slides: SlideData[];
 }
 
+export interface AssignmentStep {
+  stepTitle: string;
+  description: string;
+}
+
+export interface AssignmentData {
+  title: string;
+  overview: string;
+  steps: AssignmentStep[];
+  tools: string[];
+  deliverables: string[];
+}
+
 export async function generateLessonPlanAction(
   moduleObjectives: string,
   contextText: string,
@@ -121,6 +134,109 @@ Requirements:
     return {
       presentationTitle: parsed.presentationTitle ?? "Lesson Plan",
       slides,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+export async function generateAssignmentAction(
+  moduleObjectives: string,
+  contextText: string,
+  files: Array<{ name: string; base64: string; mimeType: string }>
+): Promise<AssignmentData | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const filesSummary =
+      files.length > 0
+        ? `\n\nATTACHED FILES (${files.length}):\n${files.map((f) => `- ${f.name}`).join("\n")}`
+        : "";
+
+    const prompt = `You are an expert educator designing a hands-on, industry-simulating assignment.
+
+MODULE OBJECTIVES:
+${moduleObjectives}
+
+CONTEXT:
+${contextText || "(none provided)"}${filesSummary}
+
+Design a practical assignment that simulates real industry workflows and that students can complete entirely for free. Return ONLY valid JSON:
+{
+  "title": "...",
+  "overview": "...",
+  "steps": [
+    { "stepTitle": "...", "description": "..." }
+  ],
+  "tools": ["..."],
+  "deliverables": ["..."]
+}
+
+Requirements:
+- Simulate authentic challenges students will face on the job.
+- Every tool listed must be free and accessible (e.g. Python, VS Code, Google Colab, GitHub, Figma free tier, Canva, Google Sheets, Replit, etc.).
+- 4–8 concrete, sequential steps that a student can complete working alone.
+- Tie every step clearly to the module objectives.
+- Deliverables should be specific and assessable.
+- Do not include any text outside the JSON object.`;
+
+    const parts: Array<
+      { text: string } | { inlineData: { mimeType: string; data: string } }
+    > = [
+      { text: prompt },
+      ...files.map((f) => ({ inlineData: { mimeType: f.mimeType, data: f.base64 } })),
+    ];
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: { temperature: 0.5, maxOutputTokens: 2048 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Assignment generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw =
+      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+    const trimmed = raw.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return { error: "Could not parse assignment data from the model response." };
+    }
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      title?: string;
+      overview?: string;
+      steps?: Array<{ stepTitle?: string; description?: string }>;
+      tools?: string[];
+      deliverables?: string[];
+    };
+
+    return {
+      title: parsed.title ?? "Assignment",
+      overview: parsed.overview ?? "",
+      steps: (parsed.steps ?? [])
+        .filter((s) => s.stepTitle && s.description)
+        .map((s) => ({ stepTitle: s.stepTitle!, description: s.description! })),
+      tools: parsed.tools ?? [],
+      deliverables: parsed.deliverables ?? [],
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };

@@ -3,7 +3,7 @@
 import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
-import { gradeAction, testGeminiAction, generateLessonPlanAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult } from "./actions";
+import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData } from "./actions";
 import styles from "./page.module.css";
 
 type PreviewFile = {
@@ -172,6 +172,8 @@ export default function Home() {
   const [isGeneratingLesson, setIsGeneratingLesson] = useState(false);
   const [lessonError, setLessonError] = useState<string | null>(null);
   const [lessonPlanPreview, setLessonPlanPreview] = useState<GenerateLessonPlanResult | null>(null);
+  const [assignmentPreview, setAssignmentPreview] = useState<AssignmentData | null>(null);
+  const [previewTab, setPreviewTab] = useState<"slides" | "assignment">("slides");
   const [savedLessonFiles, setSavedLessonFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
   const [revisionPrompt, setRevisionPrompt] = useState("");
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -371,13 +373,19 @@ export default function Home() {
 
       setSavedLessonFiles(files);
 
-      const result = await generateLessonPlanAction(moduleObjectives, lessonContext, files);
-      if ("error" in result) {
-        setLessonError(result.error);
+      const [slideResult, assignmentResult] = await Promise.all([
+        generateLessonPlanAction(moduleObjectives, lessonContext, files),
+        generateAssignmentAction(moduleObjectives, lessonContext, files),
+      ]);
+
+      if ("error" in slideResult) {
+        setLessonError(slideResult.error);
         return;
       }
 
-      setLessonPlanPreview(result);
+      setLessonPlanPreview(slideResult);
+      setAssignmentPreview("error" in assignmentResult ? null : assignmentResult);
+      setPreviewTab("slides");
       setRevisionPrompt("");
     } catch (err) {
       setLessonError(err instanceof Error ? err.message : "Generation failed.");
@@ -403,6 +411,7 @@ export default function Home() {
         return;
       }
       setLessonPlanPreview(result);
+      // assignment is not regenerated on revision — keep existing
       setRevisionPrompt("");
     } catch (err) {
       setLessonError(err instanceof Error ? err.message : "Regeneration failed.");
@@ -908,7 +917,11 @@ export default function Home() {
             <div className={styles.previewHeader}>
               <div>
                 <h3>{lessonPlanPreview.presentationTitle}</h3>
-                <p className={styles.previewMeta}>{lessonPlanPreview.slides.length} slides</p>
+                <p className={styles.previewMeta}>
+                  {previewTab === "slides"
+                    ? `${lessonPlanPreview.slides.length} slides`
+                    : assignmentPreview?.title ?? "Assignment"}
+                </p>
               </div>
               <button
                 type="button"
@@ -918,36 +931,94 @@ export default function Home() {
                 Close
               </button>
             </div>
-            <ol className={styles.lessonSlideList}>
-              {lessonPlanPreview.slides.map((slide, i) => (
-                <li key={i} className={styles.lessonSlideCard}>
-                  <span className={styles.lessonSlideNum}>Slide {i + 1}</span>
-                  <p className={styles.lessonSlideTitle}>{slide.title}</p>
-                  {slide.bullets.length > 0 && (
-                    <ul className={styles.lessonSlideBullets}>
-                      {slide.bullets.map((b, j) => <li key={j}>{b}</li>)}
-                    </ul>
-                  )}
-                </li>
-              ))}
-            </ol>
-            <div className={styles.lessonRevisionRow}>
-              <textarea
-                className={styles.lessonRevisionArea}
-                placeholder="Revision instructions — e.g. add a slide on X, make analogies more sports-focused, shorten slide 3…"
-                value={revisionPrompt}
-                onChange={(e) => setRevisionPrompt(e.target.value)}
-                rows={2}
-              />
+
+            <div className={styles.lessonInnerTabs}>
               <button
                 type="button"
-                className={styles.submitButton}
-                onClick={handleRegenerateLesson}
-                disabled={isRegenerating}
+                className={`${styles.lessonInnerTab}${previewTab === "slides" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                onClick={() => setPreviewTab("slides")}
               >
-                {isRegenerating ? "Regenerating…" : "Regenerate"}
+                Slides
+              </button>
+              <button
+                type="button"
+                className={`${styles.lessonInnerTab}${previewTab === "assignment" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                onClick={() => setPreviewTab("assignment")}
+              >
+                Assignment
               </button>
             </div>
+
+            {previewTab === "slides" && (
+              <>
+                <ol className={styles.lessonSlideList}>
+                  {lessonPlanPreview.slides.map((slide, i) => (
+                    <li key={i} className={styles.lessonSlideCard}>
+                      <span className={styles.lessonSlideNum}>Slide {i + 1}</span>
+                      <p className={styles.lessonSlideTitle}>{slide.title}</p>
+                      {slide.bullets.length > 0 && (
+                        <ul className={styles.lessonSlideBullets}>
+                          {slide.bullets.map((b, j) => <li key={j}>{b}</li>)}
+                        </ul>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+                <div className={styles.lessonRevisionRow}>
+                  <textarea
+                    className={styles.lessonRevisionArea}
+                    placeholder="Revision instructions — e.g. add a slide on X, make analogies more sports-focused, shorten slide 3…"
+                    value={revisionPrompt}
+                    onChange={(e) => setRevisionPrompt(e.target.value)}
+                    rows={2}
+                  />
+                  <button
+                    type="button"
+                    className={styles.submitButton}
+                    onClick={handleRegenerateLesson}
+                    disabled={isRegenerating}
+                  >
+                    {isRegenerating ? "Regenerating…" : "Regenerate"}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {previewTab === "assignment" && (
+              <div className={styles.assignmentContent}>
+                {assignmentPreview ? (
+                  <>
+                    <p className={styles.assignmentOverview}>{assignmentPreview.overview}</p>
+                    <div className={styles.assignmentSection}>
+                      <p className={styles.assignmentSectionLabel}>Steps</p>
+                      <ol className={styles.assignmentStepList}>
+                        {assignmentPreview.steps.map((step, i) => (
+                          <li key={i} className={styles.assignmentStepCard}>
+                            <p className={styles.assignmentStepTitle}>{step.stepTitle}</p>
+                            <p className={styles.assignmentStepDesc}>{step.description}</p>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                    <div className={styles.assignmentSection}>
+                      <p className={styles.assignmentSectionLabel}>Free Tools</p>
+                      <ul className={styles.assignmentList}>
+                        {assignmentPreview.tools.map((t, i) => <li key={i}>{t}</li>)}
+                      </ul>
+                    </div>
+                    <div className={styles.assignmentSection}>
+                      <p className={styles.assignmentSectionLabel}>Deliverables</p>
+                      <ul className={styles.assignmentList}>
+                        {assignmentPreview.deliverables.map((d, i) => <li key={i}>{d}</li>)}
+                      </ul>
+                    </div>
+                  </>
+                ) : (
+                  <p className={styles.emptyState}>Assignment generation failed — try regenerating.</p>
+                )}
+              </div>
+            )}
+
             <div className={styles.lessonPreviewFooter}>
               <button
                 type="button"

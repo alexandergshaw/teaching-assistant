@@ -176,7 +176,11 @@ export default function Home() {
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
-  const [activeTab, setActiveTab] = useState<ActiveTab>("grading");
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+    if (typeof window === "undefined") return "lesson-planning";
+    const saved = localStorage.getItem("ta-active-tab");
+    return saved === "grading" || saved === "lesson-planning" ? saved : "lesson-planning";
+  });
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -300,6 +304,10 @@ export default function Home() {
 
     return sortState.direction === "asc" ? "↑" : "↓";
   };
+
+  useEffect(() => {
+    localStorage.setItem("ta-active-tab", activeTab);
+  }, [activeTab]);
 
   useEffect(() => {
     return () => {
@@ -625,8 +633,8 @@ export default function Home() {
             minHeight: 44,
           }}
         >
-          <Tab label="Grading" value="grading" disableRipple />
           <Tab label="Lesson Planning" value="lesson-planning" disableRipple />
+          <Tab label="Grading" value="grading" disableRipple />
         </Tabs>
 
         {activeTab === "grading" && (

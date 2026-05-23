@@ -19,6 +19,7 @@ const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
 type SortDirection = "asc" | "desc";
+type ActiveTab = "grading" | "lesson-planning";
 
 type SortColumn =
   | { kind: "student" }
@@ -160,6 +161,7 @@ export default function Home() {
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
+  const [activeTab, setActiveTab] = useState<ActiveTab>("grading");
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -374,7 +376,28 @@ export default function Home() {
 
   return (
     <main className={styles.page}>
-      <section className={styles.card}>
+      <div className={styles.tabContainer}>
+        <nav className={styles.tabBar} aria-label="App sections">
+          <button
+            role="tab"
+            aria-selected={activeTab === "grading"}
+            className={`${styles.tab}${activeTab === "grading" ? ` ${styles.tabActive}` : ""}`}
+            onClick={() => setActiveTab("grading")}
+          >
+            Grading
+          </button>
+          <button
+            role="tab"
+            aria-selected={activeTab === "lesson-planning"}
+            className={`${styles.tab}${activeTab === "lesson-planning" ? ` ${styles.tabActive}` : ""}`}
+            onClick={() => setActiveTab("lesson-planning")}
+          >
+            Lesson Planning
+          </button>
+        </nav>
+
+        {activeTab === "grading" && (
+          <section className={styles.card}>
         <div className={styles.header}>
           <p className={styles.eyebrow}>Teaching Assistant</p>
           <h1>Prepare a Grading Run</h1>
@@ -708,7 +731,19 @@ export default function Home() {
             </div>
           </section>
         )}
-      </section>
+          </section>
+        )}
+
+        {activeTab === "lesson-planning" && (
+          <section className={styles.card}>
+            <div className={styles.header}>
+              <p className={styles.eyebrow}>Teaching Assistant</p>
+              <h1>Lesson Planning</h1>
+              <p>Plan and generate lesson content with AI assistance.</p>
+            </div>
+          </section>
+        )}
+      </div>
 
       {selectedPreview && (
         <div className={styles.previewBackdrop} onClick={handleClosePreview}>

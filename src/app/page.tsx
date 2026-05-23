@@ -176,7 +176,7 @@ export default function Home() {
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
-  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "lesson-planning";
     const saved = localStorage.getItem("ta-active-tab");
     return saved === "grading" || saved === "lesson-planning" ? saved : "lesson-planning";

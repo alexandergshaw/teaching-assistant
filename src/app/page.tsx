@@ -167,6 +167,11 @@ export default function Home() {
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyResetTimerRef = useRef<number | null>(null);
+  const [moduleObjectives, setModuleObjectives] = useState("");
+  const [lessonContext, setLessonContext] = useState("");
+  const [isGeneratingLesson, setIsGeneratingLesson] = useState(false);
+  const [lessonError, setLessonError] = useState<string | null>(null);
+  const lessonContextFileRef = useRef<HTMLInputElement>(null);
   const run = state.run;
 
   const sortedResults = useMemo(() => {
@@ -332,6 +337,70 @@ export default function Home() {
     if (previewBlobUrl) {
       URL.revokeObjectURL(previewBlobUrl);
       setPreviewBlobUrl(null);
+    }
+  };
+
+  const handleGenerateLesson = async () => {
+    if (!moduleObjectives.trim()) {
+      setLessonError("Please enter module objectives before generating.");
+      return;
+    }
+    setIsGeneratingLesson(true);
+    setLessonError(null);
+    try {
+      const fileList = lessonContextFileRef.current?.files;
+      const files: Array<{ name: string; base64: string; mimeType: string }> = [];
+      if (fileList) {
+        for (const file of Array.from(fileList)) {
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = reader.result as string;
+              resolve(result.split(",")[1] ?? "");
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+          files.push({ name: file.name, base64, mimeType: file.type || "application/octet-stream" });
+        }
+      }
+
+      const result = await generateLessonPlanAction(moduleObjectives, lessonContext, files);
+      if ("error" in result) {
+        setLessonError(result.error);
+        return;
+      }
+
+      const { default: PptxGenJS } = await import("pptxgenjs");
+      const prs = new PptxGenJS();
+      prs.layout = "LAYOUT_WIDE";
+
+      const titleSlide = prs.addSlide();
+      titleSlide.addText(result.presentationTitle, {
+        x: 0.5, y: 2.2, w: "90%", h: 1.8,
+        fontSize: 40, bold: true, align: "center", color: "1a1a2e",
+      });
+
+      for (const slide of result.slides) {
+        const s = prs.addSlide();
+        s.addText(slide.title, {
+          x: 0.5, y: 0.3, w: "90%", h: 1,
+          fontSize: 28, bold: true, color: "1a1a2e",
+        });
+        if (slide.bullets.length > 0) {
+          s.addText(
+            slide.bullets.map((b) => ({ text: b, options: { bullet: true, paraSpaceBefore: 8 } })),
+            { x: 0.5, y: 1.55, w: "90%", h: 4, fontSize: 18, color: "2d2d2d", valign: "top" }
+          );
+        }
+      }
+
+      const safeName = result.presentationTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+      await prs.writeFile({ fileName: `${safeName}.pptx` });
+    } catch (err) {
+      setLessonError(err instanceof Error ? err.message : "Generation failed.");
+    } finally {
+      setIsGeneratingLesson(false);
     }
   };
 
@@ -756,6 +825,8 @@ export default function Home() {
                 id="moduleObjectives"
                 placeholder="Describe the learning objectives for this module…"
                 style={{ minHeight: "260px" }}
+                value={moduleObjectives}
+                onChange={(e) => setModuleObjectives(e.target.value)}
               />
             </div>
             <div className={styles.field}>
@@ -764,12 +835,23 @@ export default function Home() {
                 id="lessonContext"
                 placeholder="Add any background context, notes, or relevant information…"
                 style={{ minHeight: "180px" }}
+                value={lessonContext}
+                onChange={(e) => setLessonContext(e.target.value)}
               />
               <div className={styles.fileField}>
-                <input id="lessonContextFile" type="file" multiple />
-                <p>Optionally attach a file for additional context.</p>
+                <input id="lessonContextFile" type="file" multiple ref={lessonContextFileRef} />
+                <p>Optionally attach any files for additional context.</p>
               </div>
             </div>
+            {lessonError && <p className={styles.error}>{lessonError}</p>}
+            <button
+              type="button"
+              className={styles.submitButton}
+              onClick={handleGenerateLesson}
+              disabled={isGeneratingLesson}
+            >
+              {isGeneratingLesson ? "Generating…" : "Generate"}
+            </button>
           </section>
         )}
       </div>

@@ -355,7 +355,7 @@ Rules:
 - Maintain at least a 2:1 positive-to-negative ratio: for every negative feedback point, include at least two distinct positive feedback points.
 - Write each rubricResults comment in a professional, warm, and slightly casual tone.
 - Write overallComment in a professional, warm, and slightly casual tone.
-- Write feedback in a direct, student-facing coaching style with short concrete phrases like "Nice job with the formatting" and "Be sure to proofread for spelling mistakes," and second-person words like "you", "your", "yours", and "you're" are allowed.
+- Write feedback in a direct, student-facing coaching style with short concrete phrases like "Nice job with the formatting" and "Be sure to proofread for spelling mistakes," and second-person words like "you", "your", "yours", and "you're" are allowed. Using the student's name is strictly prohibited.
 - Do not include markdown fences or any text outside the JSON object.`;
 }
 

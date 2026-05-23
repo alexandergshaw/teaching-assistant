@@ -521,7 +521,6 @@ export default function Home() {
                           return (
                             <td
                               key={`${result.student}-${areaName}`}
-                              className={area && hasDeduction(area.score) ? styles.cellDeducted : undefined}
                             >
                               {area ? (
                                 <div className={styles.matrixCellDetail}>
@@ -547,7 +546,7 @@ export default function Home() {
                                   >
                                     <CopyIcon />
                                   </button>
-                                  <span className={styles.scoreBadge}>
+                                  <span className={`${styles.scoreBadge}${area && hasDeduction(area.score) ? ` ${styles.scoreBadgeDeducted}` : ''}`}>
                                     Score: {area.score || "-"}
                                   </span>
                                   <p>{area.comment || "No feedback provided."}</p>

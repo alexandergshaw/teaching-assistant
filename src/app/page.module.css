@@ -436,11 +436,6 @@
   background: color-mix(in srgb, var(--field-background) 95%, var(--accent) 5%);
 }
 
-.matrix tbody td.cellDeducted,
-.matrix tbody tr:nth-child(even) td.cellDeducted {
-  background: #fef2f2;
-}
-
 .matrixCellDetail {
   position: relative;
   display: flex;
@@ -593,6 +588,12 @@
   font-size: 0.78rem;
   font-weight: 700;
   color: var(--text-primary);
+}
+
+.scoreBadgeDeducted {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
 .overallFeedbackCell {

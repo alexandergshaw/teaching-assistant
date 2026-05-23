@@ -3,6 +3,7 @@
 import {
   gradeSubmissions,
   synthesizeFullCreditChecklist,
+  extractSubmissions,
   type GradingRun,
 } from "@/lib/grade";
 import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
@@ -13,11 +14,29 @@ export interface TestGeminiState {
 }
 
 export async function testGeminiAction(
-  _prev: TestGeminiState
+  _prev: TestGeminiState,
+  formData: FormData
 ): Promise<TestGeminiState> {
   try {
     const apiKey = getGeminiApiKey();
     const model = getGeminiModel();
+
+    const file = formData.get("testZip") as File | null;
+    if (!file || file.size === 0) {
+      return { result: null, error: "Please select a zip file to test with." };
+    }
+
+    const zipBuffer = await file.arrayBuffer();
+    const { submissions } = await extractSubmissions(zipBuffer);
+
+    const entries = Object.entries(submissions);
+    if (entries.length === 0) {
+      return { result: null, error: "No readable text files found in the zip." };
+    }
+
+    // Take the first submission, truncated to 2000 chars to keep the request small
+    const [fileName, content] = entries[0];
+    const truncated = content.length > 2000 ? content.slice(0, 2000) + "\n\n[truncated]" : content;
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -25,7 +44,12 @@ export async function testGeminiAction(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: "Say hello." }] }],
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: `Summarize this student file in one sentence.\n\nFile: ${fileName}\n\n${truncated}` }],
+            },
+          ],
         }),
       }
     );
@@ -43,7 +67,7 @@ export async function testGeminiAction(
       data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ??
       "(no response text)";
 
-    return { result: text, error: null };
+    return { result: `[${fileName}] ${text}`, error: null };
   } catch (err) {
     return {
       result: null,

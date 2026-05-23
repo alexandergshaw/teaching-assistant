@@ -257,7 +257,7 @@ interface InferredFileNameLookup {
 }
 
 /** Extract text-based files from a zip archive. */
-async function extractSubmissions(
+export async function extractSubmissions(
   zipBuffer: ArrayBuffer
 ): Promise<{
   submissions: Record<string, string>;

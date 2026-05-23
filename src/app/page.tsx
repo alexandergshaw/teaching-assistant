@@ -383,8 +383,9 @@ export default function Home() {
         </form>
 
         <form action={testAction}>
+          <input type="file" name="testZip" accept=".zip" required disabled={testPending} />
           <button className={styles.submitButton} type="submit" disabled={testPending}>
-            {testPending ? "Testing..." : "Test Gemini Connection"}
+            {testPending ? "Testing..." : "Test Gemini with Zip"}
           </button>
         </form>
         {testState.result && (

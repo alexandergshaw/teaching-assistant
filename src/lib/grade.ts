@@ -8,13 +8,23 @@ import {
   getGeminiModel,
 } from "./gemini";
 
+export interface RubricAreaResult {
+  area: string;
+  score: string;
+  comment: string;
+}
+
 export interface GradeResult {
   student: string;
+  overallComment: string;
+  rubricAreas: RubricAreaResult[];
+  totalScore: string;
   feedback: string;
 }
 
 export interface GradingRun {
   results: GradeResult[];
+  rubricAreaNames: string[];
 }
 
 /** Extract text-based files from a zip archive. */
@@ -70,8 +80,160 @@ ${assignmentInstructions}
 RUBRIC:
 ${rubric}
 
-Grade each student submission against the rubric. Be constructive and specific. 
-Return your feedback as plain text.`;
+Grade each student submission against the rubric and respond ONLY in JSON using this shape:
+{
+  "overallComment": "short overall feedback",
+  "rubricResults": [
+    {
+      "area": "criterion name",
+      "score": "numeric or text score",
+      "comment": "criterion-specific comment"
+    }
+  ]
+}
+
+Rules:
+- Include one rubricResults item for each rubric area.
+- Keep comments concise and actionable.
+- Do not include markdown fences or any text outside the JSON object.`;
+}
+
+function extractJsonObject(raw: string): string | null {
+  const trimmed = raw.trim();
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+
+  if (start === -1 || end === -1 || end <= start) {
+    return null;
+  }
+
+  return candidate.slice(start, end + 1);
+}
+
+function normalizeText(value: unknown): string {
+  if (typeof value !== "string") {
+    if (typeof value === "number") {
+      return String(value);
+    }
+
+    return "";
+  }
+
+  return value.trim();
+}
+
+function toRubricAreaResult(value: unknown): RubricAreaResult | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const item = value as { area?: unknown; score?: unknown; comment?: unknown };
+  const area = normalizeText(item.area);
+
+  if (!area) {
+    return null;
+  }
+
+  return {
+    area,
+    score: normalizeText(item.score),
+    comment: normalizeText(item.comment),
+  };
+}
+
+function parseRubricResponse(raw: string): {
+  overallComment: string;
+  rubricAreas: RubricAreaResult[];
+  totalScore: string;
+} {
+  const jsonText = extractJsonObject(raw);
+
+  if (!jsonText) {
+    return {
+      overallComment: raw.trim() || "No feedback generated.",
+      rubricAreas: [
+        {
+          area: "Overall",
+          score: "",
+          comment: raw.trim() || "No feedback generated.",
+        },
+      ],
+      totalScore: "",
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(jsonText) as {
+      overallComment?: unknown;
+      rubricResults?: unknown;
+      totalScore?: unknown;
+    };
+
+    const rubricAreas = Array.isArray(parsed.rubricResults)
+      ? parsed.rubricResults
+          .map((item) => toRubricAreaResult(item))
+          .filter((item): item is RubricAreaResult => item !== null)
+      : [];
+
+    const overallComment =
+      normalizeText(parsed.overallComment) || "No overall comment provided.";
+
+    if (rubricAreas.length === 0) {
+      return {
+        overallComment,
+        rubricAreas: [
+          {
+            area: "Overall",
+            score: "",
+            comment: overallComment,
+          },
+        ],
+        totalScore: normalizeText(parsed.totalScore),
+      };
+    }
+
+    return {
+      overallComment,
+      rubricAreas,
+      totalScore: normalizeText(parsed.totalScore),
+    };
+  } catch {
+    return {
+      overallComment: raw.trim() || "No feedback generated.",
+      rubricAreas: [
+        {
+          area: "Overall",
+          score: "",
+          comment: raw.trim() || "No feedback generated.",
+        },
+      ],
+      totalScore: "",
+    };
+  }
+}
+
+function formatFeedback(
+  overallComment: string,
+  rubricAreas: RubricAreaResult[],
+  totalScore: string
+): string {
+  const lines: string[] = [];
+
+  if (totalScore) {
+    lines.push(`Total Score: ${totalScore}`);
+  }
+
+  for (const area of rubricAreas) {
+    const label = area.score
+      ? `${area.area} (Score: ${area.score})`
+      : area.area;
+    lines.push(`${label}: ${area.comment || "No comment provided."}`);
+  }
+
+  lines.push(`Overall: ${overallComment}`);
+  return lines.join("\n");
 }
 
 function normalizeGeminiError(status: number, errorBody: string): string {
@@ -80,7 +242,7 @@ function normalizeGeminiError(status: number, errorBody: string): string {
   }
 
   if (status === 404 && errorBody.includes("no longer available")) {
-    return "The configured Gemini model is not available for this account. Set GEMINI_MODEL to a current model such as gemini-2.5-flash and try again.";
+    return "The configured Gemini model is not available for this account. Set GEMINI_MODEL to a current model such as gemini-3.1-flash-lite and try again.";
   }
 
   try {
@@ -173,8 +335,19 @@ async function gradeSubmission(
       ?.map((part) => part.text ?? "")
       .join("")
       .trim() || "No feedback generated.";
+  const parsed = parseRubricResponse(feedback);
 
-  return { student: studentName, feedback };
+  return {
+    student: studentName,
+    overallComment: parsed.overallComment,
+    rubricAreas: parsed.rubricAreas,
+    totalScore: parsed.totalScore,
+    feedback: formatFeedback(
+      parsed.overallComment,
+      parsed.rubricAreas,
+      parsed.totalScore
+    ),
+  };
 }
 
 /** Grade all submissions in the provided zip archive. */
@@ -187,7 +360,10 @@ export async function gradeSubmissions(
 
   const submissionEntries = Object.entries(submissions);
   if (submissionEntries.length === 0) {
-    return { results: [] };
+    return {
+      results: [],
+      rubricAreaNames: [],
+    };
   }
 
   const maxSubmissions = getGeminiMaxSubmissions();
@@ -210,5 +386,20 @@ export async function gradeSubmissions(
     }
   }
 
-  return { results };
+  const rubricAreaNames: string[] = [];
+  const seenAreas = new Set<string>();
+
+  for (const result of results) {
+    for (const area of result.rubricAreas) {
+      if (!seenAreas.has(area.area)) {
+        seenAreas.add(area.area);
+        rubricAreaNames.push(area.area);
+      }
+    }
+  }
+
+  return {
+    results,
+    rubricAreaNames,
+  };
 }

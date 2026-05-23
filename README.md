@@ -31,6 +31,15 @@ Set these values in your local `.env.local` and in your deployment provider:
 
 The grading pipeline uses these limits to reduce free-tier quota spikes by capping per-run workload and pacing requests.
 
+## Grading Output
+
+Each grading run returns:
+
+- Per-student rubric-area scores and comments
+- An overall comment and optional total score
+- An on-page rubric score matrix preview for quick scanning
+- A CSV export generated only when the Export CSV button is clicked
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More

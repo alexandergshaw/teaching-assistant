@@ -171,9 +171,38 @@
   gap: 24px;
 }
 
+.resultsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .results h2 {
   font-size: 1.4rem;
   color: var(--text-primary);
+}
+
+.downloadButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .downloadButton:hover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--field-background) 88%, var(--accent) 12%);
+  }
 }
 
 .result {
@@ -201,6 +230,38 @@
   color: var(--text-secondary);
 }
 
+.matrixWrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--field-border);
+  border-radius: 14px;
+  background: var(--field-background);
+}
+
+.matrix {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 560px;
+}
+
+.matrix th,
+.matrix td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--field-border);
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.matrix th {
+  font-weight: 700;
+  background: color-mix(in srgb, var(--field-background) 84%, var(--accent) 16%);
+}
+
+.matrix tbody tr:last-child td {
+  border-bottom: none;
+}
+
 @media (max-width: 600px) {
   .page {
     padding: 24px 16px;
@@ -218,6 +279,11 @@
   .submitButton {
     width: 100%;
     justify-content: center;
+  }
+
+  .resultsHeader {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

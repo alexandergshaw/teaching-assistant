@@ -1,6 +1,14 @@
+"use client";
+
+import { useActionState } from "react";
+import { gradeAction, type GradeActionState } from "./actions";
 import styles from "./page.module.css";
 
+const initialState: GradeActionState = { run: null, error: null };
+
 export default function Home() {
+  const [state, formAction, pending] = useActionState(gradeAction, initialState);
+
   return (
     <main className={styles.page}>
       <section className={styles.card}>
@@ -13,7 +21,7 @@ export default function Home() {
           </p>
         </div>
 
-        <form className={styles.form}>
+        <form className={styles.form} action={formAction}>
           <div className={styles.field}>
             <label htmlFor="student-submissions">student submissions</label>
             <div className={styles.fileField}>
@@ -49,10 +57,34 @@ export default function Home() {
             />
           </div>
 
-          <button className={styles.submitButton} type="submit">
-            Start review
+          {state.error && (
+            <p role="alert" className={styles.error}>
+              {state.error}
+            </p>
+          )}
+
+          <button className={styles.submitButton} type="submit" disabled={pending}>
+            {pending ? "Grading…" : "Start review"}
           </button>
         </form>
+
+        {state.run && state.run.results.length === 0 && (
+          <p className={styles.emptyState}>
+            No text-based submissions found in the zip archive.
+          </p>
+        )}
+
+        {state.run && state.run.results.length > 0 && (
+          <section className={styles.results}>
+            <h2>Grading results</h2>
+            {state.run.results.map((result) => (
+              <div key={result.student} className={styles.result}>
+                <h3>{result.student}</h3>
+                <pre className={styles.feedback}>{result.feedback}</pre>
+              </div>
+            ))}
+          </section>
+        )}
       </section>
     </main>
   );

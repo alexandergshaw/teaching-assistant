@@ -1190,6 +1190,21 @@ export default function Home() {
                   <button
                     type="button"
                     className={styles.downloadButton}
+                    onClick={() => {
+                      setCoursePlanningStep("form");
+                      setParsedSections([]);
+                      setSectionContents([]);
+                      setCurrentSectionIndex(0);
+                      setCurrentSectionInput("");
+                      setCoursePlanningError(null);
+                    }}
+                    disabled={isGeneratingSection}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.downloadButton}
                     onClick={handleSectionSkip}
                     disabled={isGeneratingSection}
                   >

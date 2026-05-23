@@ -66,6 +66,19 @@ function formatFeedback(text: string): string {
   return text.replace(/\s*[\u2013\u2014]\s*/g, ", ");
 }
 
+type RubricRow = { area: string; weight: string; description: string };
+
+function parseGeneratedRubric(text: string): RubricRow[] | null {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const rows: RubricRow[] = [];
+  for (const line of lines) {
+    const match = line.match(/^(.+?)\s*\((\d+(?:\.\d+)?\s*%?)\)\s*:\s*(.+)$/);
+    if (!match) return null;
+    rows.push({ area: match[1].trim(), weight: match[2].trim(), description: match[3].trim() });
+  }
+  return rows.length > 0 ? rows : null;
+}
+
 function escapeCsvCell(value: string): string {
   const sanitized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   return `"${sanitized.replace(/"/g, '""')}"`;
@@ -444,12 +457,36 @@ export default function Home() {
           </p>
         )}
 
-        {state.generatedRubric && (
-          <details className={styles.generatedRubricCard}>
-            <summary>Rubric was auto-generated from assignment instructions</summary>
-            <pre className={styles.generatedRubricBody}>{state.generatedRubric}</pre>
-          </details>
-        )}
+        {state.generatedRubric && (() => {
+          const rows = parseGeneratedRubric(state.generatedRubric);
+          return (
+            <details className={styles.generatedRubricCard}>
+              <summary>Rubric was auto-generated from assignment instructions</summary>
+              {rows ? (
+                <table className={styles.generatedRubricTable}>
+                  <thead>
+                    <tr>
+                      <th>Criterion</th>
+                      <th>Weight</th>
+                      <th>Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => (
+                      <tr key={row.area}>
+                        <td>{row.area}</td>
+                        <td>{row.weight.endsWith("%") ? row.weight : `${row.weight}%`}</td>
+                        <td>{row.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <pre className={styles.generatedRubricBody}>{state.generatedRubric}</pre>
+              )}
+            </details>
+          );
+        })()}
 
         {run && run.fullCreditChecklist.length > 0 && (
           <section className={styles.checklistCard}>

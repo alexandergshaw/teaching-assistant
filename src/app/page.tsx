@@ -200,6 +200,8 @@ export default function Home() {
   const lessonContextFileRef = useRef<HTMLInputElement>(null);
   const syllabusFileRef = useRef<HTMLInputElement>(null);
   const [courseTitle, setCourseTitle] = useState("");
+  const [coursePlanningContext, setCoursePlanningContext] = useState("");
+  const [coursePlanningContextFiles, setCoursePlanningContextFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
   type CoursePlanningStep = "form" | "wizard" | "preview";
   const [coursePlanningStep, setCoursePlanningStep] = useState<CoursePlanningStep>("form");
   const [parsedSections, setParsedSections] = useState<SyllabusSection[]>([]);
@@ -606,7 +608,7 @@ export default function Home() {
         name: file.name,
         base64,
         mimeType: file.type || "application/octet-stream",
-      });
+      }, coursePlanningContext.trim() || undefined, coursePlanningContextFiles);
       if ("error" in result) { setCoursePlanningError(result.error); return; }
       setParsedSections(result.sections);
       setSyllabusTemplateText(result.templateText);
@@ -636,7 +638,9 @@ export default function Home() {
           courseTitle,
           parsedSections[currentSectionIndex],
           completedSections,
-          syllabusTemplateText || undefined
+          syllabusTemplateText || undefined,
+          coursePlanningContext.trim() || undefined,
+          coursePlanningContextFiles
         );
         if (typeof result !== "string") { setCoursePlanningError(result.error); return; }
         content = result;
@@ -689,7 +693,9 @@ export default function Home() {
         parsedSections,
         updated,
         startIndex,
-        syllabusTemplateText || undefined
+        syllabusTemplateText || undefined,
+        coursePlanningContext.trim() || undefined,
+        coursePlanningContextFiles
       );
 
       if ("error" in result) {
@@ -733,7 +739,9 @@ export default function Home() {
         sectionContents,
         syllabusTemplateText,
         syllabusRevisionPrompt.trim(),
-        syllabusRevisionFiles
+        syllabusRevisionFiles,
+        coursePlanningContext.trim() || undefined,
+        coursePlanningContextFiles
       );
       if ("error" in result) { setCoursePlanningError(result.error); return; }
       setSectionContents(result.contents);
@@ -753,6 +761,26 @@ export default function Home() {
     setCoursePlanningError(null);
     setSyllabusRevisionPrompt("");
     setSyllabusRevisionFiles([]);
+  };
+
+  const handleCoursePlanningContextFiles = async (e: ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files ?? []);
+    if (selected.length === 0) return;
+
+    const files = await Promise.all(
+      selected.map(async (file) => {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        return { name: file.name, base64, mimeType: file.type || "application/octet-stream" };
+      })
+    );
+
+    setCoursePlanningContextFiles((prev) => [...prev, ...files]);
+    e.target.value = "";
   };
 
   const handleDownloadSyllabus = () => {
@@ -1208,6 +1236,30 @@ export default function Home() {
                     value={courseTitle}
                     onChange={(e) => setCourseTitle(e.target.value)}
                   />
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor="coursePlanningContext">Additional Context</label>
+                  <textarea
+                    id="coursePlanningContext"
+                    placeholder="Optional context to guide syllabus generation (program goals, institution policies, audience details, tone, etc.)"
+                    value={coursePlanningContext}
+                    onChange={(e) => setCoursePlanningContext(e.target.value)}
+                  />
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor="coursePlanningContextFiles">Additional Context Files</label>
+                  <div className={styles.fileField}>
+                    <input
+                      id="coursePlanningContextFiles"
+                      type="file"
+                      multiple
+                      onChange={handleCoursePlanningContextFiles}
+                    />
+                    <p>Attach multiple supporting files (optional). Text, PDF, image, and DOCX files are used as extra context.</p>
+                    {coursePlanningContextFiles.length > 0 && (
+                      <p>{coursePlanningContextFiles.length} context file(s) selected.</p>
+                    )}
+                  </div>
                 </div>
                 <div className={styles.field}>
                   <label htmlFor="syllabusFile">Syllabus Template</label>

@@ -341,15 +341,75 @@ export interface SyllabusSection {
   hint: string;
 }
 
+type SyllabusContextFile = { name: string; base64: string; mimeType: string };
+
+async function appendSyllabusContextParts(
+  parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>,
+  files: SyllabusContextFile[]
+) {
+  for (const file of files) {
+    if (file.mimeType === "application/pdf" || file.mimeType.startsWith("image/")) {
+      parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
+      continue;
+    }
+
+    if (file.mimeType.startsWith("text/")) {
+      const text = Buffer.from(file.base64, "base64").toString("utf-8").trim();
+      if (text) {
+        parts.push({ text: `\n\nADDITIONAL CONTEXT FILE (${file.name}):\n${text}` });
+      }
+      continue;
+    }
+
+    const ext = file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "";
+    if (ext === "docx") {
+      try {
+        const JSZip = (await import("jszip")).default;
+        const buffer = Buffer.from(file.base64, "base64");
+        const zip = await JSZip.loadAsync(buffer);
+        const documentXml = zip.file("word/document.xml");
+        if (documentXml) {
+          let xml = await documentXml.async("string");
+          xml = xml
+            .replace(/<w:tab\s*\/?>/g, "\t")
+            .replace(/<w:br\s*\/?>/g, "\n")
+            .replace(/<w:p[^>]*>/g, "\n")
+            .replace(/<[^>]+>/g, "");
+          const text = xml
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+          if (text) {
+            parts.push({ text: `\n\nADDITIONAL CONTEXT FILE (${file.name}):\n${text}` });
+          }
+        }
+      } catch {
+        // Ignore unreadable context files instead of failing the full request.
+      }
+    }
+  }
+}
+
 export async function parseSyllabusAction(
   courseTitle: string,
-  file: { name: string; base64: string; mimeType: string }
+  file: { name: string; base64: string; mimeType: string },
+  additionalContext?: string,
+  contextFiles: SyllabusContextFile[] = []
 ): Promise<{ sections: SyllabusSection[]; templateText: string } | { error: string }> {
   try {
     const apiKey = getGeminiApiKey();
     const model = getGeminiModel();
 
-    const prompt = `You are parsing a syllabus template for a course called "${courseTitle}".
+    const additionalContextBlock = additionalContext?.trim()
+      ? `\n\nADDITIONAL COURSE CONTEXT:\n${additionalContext.trim()}`
+      : "";
+    const contextFilesSummary =
+      contextFiles.length > 0
+        ? `\n\nADDITIONAL CONTEXT FILES:\n${contextFiles.map((f) => `- ${f.name}`).join("\n")}`
+        : "";
+
+    const prompt = `You are parsing a syllabus template for a course called "${courseTitle}".${additionalContextBlock}${contextFilesSummary}
 
 Extract each distinct section from this document. Return ONLY valid JSON:
 {
@@ -381,6 +441,7 @@ Requirements:
         { text: prompt },
         { inlineData: { mimeType: file.mimeType, data: file.base64 } },
       ];
+      await appendSyllabusContextParts(parts, contextFiles);
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -475,6 +536,7 @@ Requirements:
         return { error: "The uploaded file appears to be empty or could not be read." };
       }
       parts = [{ text: `${prompt}\n\nSYLLABUS TEMPLATE TEXT:\n${extractedText}` }];
+      await appendSyllabusContextParts(parts, contextFiles);
     }
 
     const response = await fetch(
@@ -525,7 +587,9 @@ export async function generateSyllabusSectionAction(
   courseTitle: string,
   section: SyllabusSection,
   completedSections: Array<{ heading: string; content: string }>,
-  templateText?: string
+  templateText?: string,
+  additionalContext?: string,
+  contextFiles: SyllabusContextFile[] = []
 ): Promise<string | { error: string }> {
   try {
     const apiKey = getGeminiApiKey();
@@ -541,14 +605,26 @@ export async function generateSyllabusSectionAction(
             .map((s) => `${s.heading}:\n${s.content}`)
             .join("\n\n")}`
         : "";
+    const additionalContextBlock = additionalContext?.trim()
+      ? `\n\nADDITIONAL COURSE CONTEXT:\n${additionalContext.trim()}`
+      : "";
+    const contextFilesSummary =
+      contextFiles.length > 0
+        ? `\n\nADDITIONAL CONTEXT FILES:\n${contextFiles.map((f) => `- ${f.name}`).join("\n")}`
+        : "";
 
     const prompt = `You are writing content for a university course syllabus.
 
 COURSE TITLE: ${courseTitle}
 SECTION: ${section.heading}
-GUIDANCE: ${section.hint || "Write appropriate content for this syllabus section."}${templateBlock}${contextBlock}
+GUIDANCE: ${section.hint || "Write appropriate content for this syllabus section."}${templateBlock}${additionalContextBlock}${contextFilesSummary}${contextBlock}
 
 Write the content for the "${section.heading}" section of this syllabus. Be specific, professional, and practical. Use the guidance, the original template, and any previously completed sections for context and consistency. Write only the section content — do not include the heading itself, markdown formatting, or any preamble.`;
+
+    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+      { text: prompt },
+    ];
+    await appendSyllabusContextParts(parts, contextFiles);
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -556,7 +632,7 @@ Write the content for the "${section.heading}" section of this syllabus. Be spec
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          contents: [{ role: "user", parts }],
           generationConfig: { temperature: 0.5, maxOutputTokens: 1024 },
         }),
       }
@@ -583,7 +659,9 @@ export async function generateSyllabusRemainingSectionsAction(
   sections: SyllabusSection[],
   currentContents: string[],
   startIndex: number,
-  templateText?: string
+  templateText?: string,
+  additionalContext?: string,
+  contextFiles: SyllabusContextFile[] = []
 ): Promise<{ contents: string[] } | { error: string }> {
   try {
     const apiKey = getGeminiApiKey();
@@ -601,10 +679,17 @@ export async function generateSyllabusRemainingSectionsAction(
     const templateBlock = templateText
       ? `\n\nORIGINAL SYLLABUS TEMPLATE:\n${templateText}`
       : "";
+    const additionalContextBlock = additionalContext?.trim()
+      ? `\n\nADDITIONAL COURSE CONTEXT:\n${additionalContext.trim()}`
+      : "";
+    const contextFilesSummary =
+      contextFiles.length > 0
+        ? `\n\nADDITIONAL CONTEXT FILES:\n${contextFiles.map((f) => `- ${f.name}`).join("\n")}`
+        : "";
 
     const prompt = `You are writing the remaining content for a university course syllabus.
 
-COURSE TITLE: ${courseTitle}${templateBlock}
+COURSE TITLE: ${courseTitle}${templateBlock}${additionalContextBlock}${contextFilesSummary}
 
 CURRENT SYLLABUS STATE:
 ${existingBlock}
@@ -625,13 +710,18 @@ Requirements:
 - Use existing filled sections for consistency.
 - Do not include any text outside the JSON object.`;
 
+    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+      { text: prompt },
+    ];
+    await appendSyllabusContextParts(parts, contextFiles);
+
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          contents: [{ role: "user", parts }],
           generationConfig: { temperature: 0.5, maxOutputTokens: 4096 },
         }),
       }
@@ -689,7 +779,9 @@ export async function reviseSyllabusAction(
   contents: string[],
   templateText: string,
   revisionPrompt: string,
-  files: Array<{ name: string; base64: string; mimeType: string }> = []
+  files: Array<{ name: string; base64: string; mimeType: string }> = [],
+  additionalContext?: string,
+  contextFiles: SyllabusContextFile[] = []
 ): Promise<{ contents: string[] } | { error: string }> {
   try {
     const apiKey = getGeminiApiKey();
@@ -702,8 +794,15 @@ export async function reviseSyllabusAction(
     const templateBlock = templateText
       ? `\n\nORIGINAL SYLLABUS TEMPLATE:\n${templateText}`
       : "";
+    const additionalContextBlock = additionalContext?.trim()
+      ? `\n\nADDITIONAL COURSE CONTEXT:\n${additionalContext.trim()}`
+      : "";
+    const contextFilesSummary =
+      contextFiles.length > 0
+        ? `\n\nADDITIONAL CONTEXT FILES:\n${contextFiles.map((f) => `- ${f.name}`).join("\n")}`
+        : "";
 
-    const prompt = `You are revising a university course syllabus for "${courseTitle}".${templateBlock}
+    const prompt = `You are revising a university course syllabus for "${courseTitle}".${templateBlock}${additionalContextBlock}${contextFilesSummary}
 
 CURRENT SYLLABUS:
 ${syllabusText}
@@ -726,6 +825,7 @@ Requirements:
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
       { text: prompt },
     ];
+    await appendSyllabusContextParts(parts, contextFiles);
 
     for (const file of files) {
       if (file.mimeType === "application/pdf" || file.mimeType.startsWith("image/")) {

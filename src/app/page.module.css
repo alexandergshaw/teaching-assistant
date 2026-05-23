@@ -369,7 +369,20 @@
   background: color-mix(in srgb, var(--field-background) 84%, var(--accent) 16%);
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 3;
+}
+
+.matrix th:first-child {
+  left: 0;
+  z-index: 4;
+}
+
+.matrix td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--field-background);
+  box-shadow: 1px 0 0 var(--field-border);
 }
 
 .sortButton {
@@ -399,6 +412,10 @@
 }
 
 .matrix tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--field-background) 95%, var(--accent) 5%);
+}
+
+.matrix tbody tr:nth-child(even) td:first-child {
   background: color-mix(in srgb, var(--field-background) 95%, var(--accent) 5%);
 }
 

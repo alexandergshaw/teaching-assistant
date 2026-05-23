@@ -506,8 +506,38 @@ export default function Home() {
                     return (
                       <tr key={`${result.student}-matrix`}>
                         <td>{result.student}</td>
-                        <td>{result.submittedFiles.map((file) => file.name).join(", ") || "-"}</td>
-                        <td>{uniqueExtensions.join(", ") || "-"}</td>
+                        <td>
+                          {result.submittedFiles.length > 0 ? (
+                            <div className={styles.chipRow}>
+                              {result.submittedFiles.map((file) => (
+                                <span
+                                  key={`${result.student}-file-name-${file.name}`}
+                                  className={styles.fileChip}
+                                >
+                                  {file.name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                        <td>
+                          {uniqueExtensions.length > 0 ? (
+                            <div className={styles.chipRow}>
+                              {uniqueExtensions.map((extension) => (
+                                <span
+                                  key={`${result.student}-file-type-${extension}`}
+                                  className={styles.typeChip}
+                                >
+                                  {extension}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
                         {run.rubricAreaNames.map((areaName) => {
                           const area = areaMap.get(areaName);
 

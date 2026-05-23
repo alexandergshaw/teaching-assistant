@@ -18,7 +18,8 @@
 }
 
 .card {
-  width: min(100%, 840px);
+  width: min(100%, 96vw);
+  max-width: 1640px;
   display: flex;
   flex-direction: column;
   gap: 32px;
@@ -312,7 +313,7 @@
 .matrix {
   width: 100%;
   border-collapse: collapse;
-  min-width: 560px;
+  min-width: 1200px;
 }
 
 .matrix th,
@@ -360,6 +361,38 @@
   flex-direction: column;
   gap: 8px;
   min-width: 210px;
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.fileChip,
+.typeChip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--field-border);
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.fileChip {
+  background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.typeChip {
+  background: var(--field-background);
+  color: var(--text-secondary);
+  text-transform: lowercase;
+  font-weight: 700;
 }
 
 .matrixCellDetail p {

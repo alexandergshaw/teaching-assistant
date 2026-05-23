@@ -348,6 +348,7 @@ Rules:
 - Maintain at least a 2:1 positive-to-negative ratio: for every negative feedback point, include at least two distinct positive feedback points.
 - Write each rubricResults comment in a professional, warm, and slightly casual tone.
 - Write overallComment in a professional, warm, and slightly casual tone.
+- Do not address the student directly; never use the student's name or second-person words like "you" or "your".
 - Do not include markdown fences or any text outside the JSON object.`;
 }
 
@@ -465,6 +466,58 @@ function parseRubricResponse(raw: string): {
       totalScore: "",
     };
   }
+}
+
+function parseEarnedPossibleScore(
+  score: string
+): { earned: number; possible: number } | null {
+  const match = score.match(/(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)/);
+  if (!match) {
+    return null;
+  }
+
+  const earned = Number.parseFloat(match[1]);
+  const possible = Number.parseFloat(match[2]);
+
+  if (!Number.isFinite(earned) || !Number.isFinite(possible) || possible <= 0) {
+    return null;
+  }
+
+  return { earned, possible };
+}
+
+function formatScoreNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function deriveTotalScore(
+  explicitTotalScore: string,
+  rubricAreas: RubricAreaResult[]
+): string {
+  if (explicitTotalScore.trim()) {
+    return explicitTotalScore;
+  }
+
+  let earnedTotal = 0;
+  let possibleTotal = 0;
+  let parsedCount = 0;
+
+  for (const area of rubricAreas) {
+    const parsed = parseEarnedPossibleScore(area.score);
+    if (!parsed) {
+      continue;
+    }
+
+    earnedTotal += parsed.earned;
+    possibleTotal += parsed.possible;
+    parsedCount += 1;
+  }
+
+  if (parsedCount === 0 || possibleTotal <= 0) {
+    return "";
+  }
+
+  return `${formatScoreNumber(earnedTotal)}/${formatScoreNumber(possibleTotal)}`;
 }
 
 function formatFeedback(
@@ -702,18 +755,19 @@ async function gradeSubmission(
       .join("")
       .trim() || "No feedback generated.";
   const parsed = parseRubricResponse(feedback);
+  const totalScore = deriveTotalScore(parsed.totalScore, parsed.rubricAreas);
 
   return {
     student: studentName,
     overallComment: parsed.overallComment,
     rubricAreas: parsed.rubricAreas,
-    totalScore: parsed.totalScore,
+    totalScore,
     mergedFileCount: 1,
     submittedFiles: [],
     feedback: formatFeedback(
       parsed.overallComment,
       parsed.rubricAreas,
-      parsed.totalScore
+      totalScore
     ),
   };
 }

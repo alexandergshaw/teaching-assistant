@@ -52,6 +52,14 @@ function parseScoreValue(value: string): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+function hasDeduction(score: string): boolean {
+  const match = score.match(/(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)/)
+  if (!match) return false;
+  const earned = Number.parseFloat(match[1]);
+  const possible = Number.parseFloat(match[2]);
+  return Number.isFinite(earned) && Number.isFinite(possible) && possible > 0 && earned < possible;
+}
+
 function escapeCsvCell(value: string): string {
   const sanitized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   return `"${sanitized.replace(/"/g, '""')}"`;
@@ -511,7 +519,10 @@ export default function Home() {
                           const area = areaMap.get(areaName);
 
                           return (
-                            <td key={`${result.student}-${areaName}`}>
+                            <td
+                              key={`${result.student}-${areaName}`}
+                              style={area && hasDeduction(area.score) ? { background: '#fef2f2' } : undefined}
+                            >
                               {area ? (
                                 <div className={styles.matrixCellDetail}>
                                   <button

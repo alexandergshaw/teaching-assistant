@@ -352,6 +352,8 @@
 .matrixWrap {
   width: 100%;
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 65vh;
   border: 1px solid var(--field-border);
   border-radius: 14px;
   background: var(--field-background);

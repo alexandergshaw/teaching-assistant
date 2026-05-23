@@ -338,6 +338,8 @@ Grade each student submission against the rubric and respond ONLY in JSON using 
 Rules:
 - Include one rubricResults item for each rubric area.
 - Keep comments concise and actionable.
+- For every deduction, explicitly cite the affected rubric area and the exact reason from the submission.
+- In overallComment, reference rubric areas by name when summarizing strengths and weaknesses.
 - Do not include markdown fences or any text outside the JSON object.`;
 }
 

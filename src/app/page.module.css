@@ -238,7 +238,7 @@
   }
 }
 
-.result {
+.resultFiles {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -248,7 +248,7 @@
   background: var(--field-background);
 }
 
-.result h3 {
+.resultFiles h3 {
   font-size: 1rem;
   font-weight: 600;
   color: var(--text-primary);
@@ -301,14 +301,6 @@
   text-transform: lowercase;
 }
 
-.feedback {
-  white-space: pre-wrap;
-  font: inherit;
-  font-size: 0.95rem;
-  line-height: 1.7;
-  color: var(--text-secondary);
-}
-
 .matrixWrap {
   width: 100%;
   overflow-x: auto;
@@ -325,11 +317,12 @@
 
 .matrix th,
 .matrix td {
-  padding: 10px 12px;
+  padding: 12px;
   text-align: left;
   border-bottom: 1px solid var(--field-border);
   font-size: 0.9rem;
   color: var(--text-primary);
+  vertical-align: top;
 }
 
 .matrix th {
@@ -337,8 +330,62 @@
   background: color-mix(in srgb, var(--field-background) 84%, var(--accent) 16%);
 }
 
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sortButton:hover {
+    text-decoration: underline;
+  }
+}
+
 .matrix tbody tr:last-child td {
   border-bottom: none;
+}
+
+.matrixCellDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 210px;
+}
+
+.matrixCellDetail p {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.scoreBadge {
+  align-self: flex-start;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.overallFeedbackCell {
+  margin: 0;
+  min-width: 240px;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
 }
 
 @keyframes spin {

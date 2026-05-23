@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChangeEvent } from "react";
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { gradeAction, type GradeActionState } from "./actions";
 import styles from "./page.module.css";
 
@@ -13,6 +13,43 @@ const STORAGE_KEYS = {
   fileType: "ta.studentSubmissions.fileType",
   fileData: "ta.studentSubmissions.fileData",
 };
+
+type SortDirection = "asc" | "desc";
+
+type SortColumn =
+  | { kind: "student" }
+  | { kind: "files" }
+  | { kind: "fileTypes" }
+  | { kind: "rubric"; area: string }
+  | { kind: "total" }
+  | { kind: "overall" };
+
+const DEFAULT_SORT: { column: SortColumn; direction: SortDirection } = {
+  column: { kind: "student" },
+  direction: "asc",
+};
+
+function sortColumnKey(column: SortColumn): string {
+  if (column.kind === "rubric") {
+    return `rubric:${column.area}`;
+  }
+
+  return column.kind;
+}
+
+function compareText(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+}
+
+function parseScoreValue(value: string): number | null {
+  const match = value.match(/-?\d+(?:\.\d+)?/);
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(match[0]);
+  return Number.isNaN(parsed) ? null : parsed;
+}
 
 function readSessionItem(key: string): string {
   if (typeof window === "undefined") {
@@ -103,8 +140,107 @@ export default function Home() {
     return saved || null;
   });
   const [fileStorageError, setFileStorageError] = useState<string | null>(null);
+  const [sortState, setSortState] = useState(DEFAULT_SORT);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const run = state.run;
+
+  const sortedResults = useMemo(() => {
+    if (!run) {
+      return [];
+    }
+
+    const directionMultiplier = sortState.direction === "asc" ? 1 : -1;
+    const results = [...run.results];
+
+    results.sort((a, b) => {
+      const column = sortState.column;
+      let comparison = 0;
+
+      if (column.kind === "student") {
+        comparison = compareText(a.student, b.student);
+      }
+
+      if (column.kind === "files") {
+        comparison = a.mergedFileCount - b.mergedFileCount;
+      }
+
+      if (column.kind === "fileTypes") {
+        const aTypes = Array.from(new Set(a.submittedFiles.map((file) => file.extension))).join(
+          ", "
+        );
+        const bTypes = Array.from(new Set(b.submittedFiles.map((file) => file.extension))).join(
+          ", "
+        );
+        comparison = compareText(aTypes, bTypes);
+      }
+
+      if (column.kind === "rubric") {
+        const aArea = a.rubricAreas.find((area) => area.area === column.area);
+        const bArea = b.rubricAreas.find((area) => area.area === column.area);
+        const aNumeric = parseScoreValue(aArea?.score ?? "");
+        const bNumeric = parseScoreValue(bArea?.score ?? "");
+
+        if (aNumeric !== null && bNumeric !== null) {
+          comparison = aNumeric - bNumeric;
+        } else {
+          comparison = compareText(aArea?.score ?? "", bArea?.score ?? "");
+        }
+
+        if (comparison === 0) {
+          comparison = compareText(aArea?.comment ?? "", bArea?.comment ?? "");
+        }
+      }
+
+      if (column.kind === "total") {
+        const aNumeric = parseScoreValue(a.totalScore);
+        const bNumeric = parseScoreValue(b.totalScore);
+
+        if (aNumeric !== null && bNumeric !== null) {
+          comparison = aNumeric - bNumeric;
+        } else {
+          comparison = compareText(a.totalScore, b.totalScore);
+        }
+      }
+
+      if (column.kind === "overall") {
+        comparison = compareText(a.overallComment, b.overallComment);
+      }
+
+      if (comparison === 0) {
+        comparison = compareText(a.student, b.student);
+      }
+
+      return comparison * directionMultiplier;
+    });
+
+    return results;
+  }, [run, sortState]);
+
+  const handleSort = (column: SortColumn) => {
+    const nextKey = sortColumnKey(column);
+    const currentKey = sortColumnKey(sortState.column);
+
+    if (nextKey === currentKey) {
+      setSortState((current) => ({
+        ...current,
+        direction: current.direction === "asc" ? "desc" : "asc",
+      }));
+      return;
+    }
+
+    setSortState({ column, direction: "asc" });
+  };
+
+  const sortLabel = (column: SortColumn) => {
+    const nextKey = sortColumnKey(column);
+    const currentKey = sortColumnKey(sortState.column);
+
+    if (nextKey !== currentKey) {
+      return "↕";
+    }
+
+    return sortState.direction === "asc" ? "↑" : "↓";
+  };
 
   useEffect(() => {
     const savedFileName = sessionStorage.getItem(STORAGE_KEYS.fileName);
@@ -298,28 +434,102 @@ export default function Home() {
               <table className={styles.matrix}>
                 <thead>
                   <tr>
-                    <th>Student</th>
+                    <th>
+                      <button
+                        type="button"
+                        className={styles.sortButton}
+                        onClick={() => handleSort({ kind: "student" })}
+                      >
+                        Student <span>{sortLabel({ kind: "student" })}</span>
+                      </button>
+                    </th>
+                    <th>
+                      <button
+                        type="button"
+                        className={styles.sortButton}
+                        onClick={() => handleSort({ kind: "files" })}
+                      >
+                        Files <span>{sortLabel({ kind: "files" })}</span>
+                      </button>
+                    </th>
+                    <th>
+                      <button
+                        type="button"
+                        className={styles.sortButton}
+                        onClick={() => handleSort({ kind: "fileTypes" })}
+                      >
+                        File Types <span>{sortLabel({ kind: "fileTypes" })}</span>
+                      </button>
+                    </th>
                     {run.rubricAreaNames.map((area) => (
-                      <th key={area}>{area}</th>
+                      <th key={area}>
+                        <button
+                          type="button"
+                          className={styles.sortButton}
+                          onClick={() => handleSort({ kind: "rubric", area })}
+                        >
+                          {area} <span>{sortLabel({ kind: "rubric", area })}</span>
+                        </button>
+                      </th>
                     ))}
-                    <th>Total</th>
+                    <th>
+                      <button
+                        type="button"
+                        className={styles.sortButton}
+                        onClick={() => handleSort({ kind: "total" })}
+                      >
+                        Total <span>{sortLabel({ kind: "total" })}</span>
+                      </button>
+                    </th>
+                    <th>
+                      <button
+                        type="button"
+                        className={styles.sortButton}
+                        onClick={() => handleSort({ kind: "overall" })}
+                      >
+                        Overall Feedback <span>{sortLabel({ kind: "overall" })}</span>
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {run.results.map((result) => {
+                  {sortedResults.map((result) => {
                     const areaMap = new Map(
                       result.rubricAreas.map((area) => [area.area, area])
+                    );
+                    const uniqueExtensions = Array.from(
+                      new Set(result.submittedFiles.map((file) => file.extension))
                     );
 
                     return (
                       <tr key={`${result.student}-matrix`}>
                         <td>{result.student}</td>
-                        {run.rubricAreaNames.map((areaName) => (
-                          <td key={`${result.student}-${areaName}`}>
-                            {areaMap.get(areaName)?.score || "-"}
-                          </td>
-                        ))}
+                        <td>{result.mergedFileCount}</td>
+                        <td>{uniqueExtensions.join(", ") || "-"}</td>
+                        {run.rubricAreaNames.map((areaName) => {
+                          const area = areaMap.get(areaName);
+
+                          return (
+                            <td key={`${result.student}-${areaName}`}>
+                              {area ? (
+                                <div className={styles.matrixCellDetail}>
+                                  <span className={styles.scoreBadge}>
+                                    Score: {area.score || "-"}
+                                  </span>
+                                  <p>{area.comment || "No feedback provided."}</p>
+                                </div>
+                              ) : (
+                                "-"
+                              )}
+                            </td>
+                          );
+                        })}
                         <td>{result.totalScore || "-"}</td>
+                        <td>
+                          <p className={styles.overallFeedbackCell}>
+                            {result.overallComment || "No overall feedback provided."}
+                          </p>
+                        </td>
                       </tr>
                     );
                   })}
@@ -327,8 +537,8 @@ export default function Home() {
               </table>
             </div>
 
-            {run.results.map((result) => (
-              <div key={result.student} className={styles.result}>
+            {sortedResults.map((result) => (
+              <div key={`${result.student}-files`} className={styles.resultFiles}>
                 <h3>{result.student}</h3>
                 <p className={styles.mergeInfo}>
                   Includes {result.mergedFileCount} file
@@ -346,7 +556,6 @@ export default function Home() {
                     </li>
                   ))}
                 </ul>
-                <pre className={styles.feedback}>{result.feedback}</pre>
               </div>
             ))}
           </section>

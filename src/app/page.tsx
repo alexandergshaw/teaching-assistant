@@ -2,7 +2,8 @@
 
 import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
-import { gradeAction, testGeminiAction, type GradeActionState, type TestGeminiState } from "./actions";
+import { Tab, Tabs } from "@mui/material";
+import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData } from "./actions";
 import styles from "./page.module.css";
 
 type PreviewFile = {
@@ -19,6 +20,7 @@ const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
 type SortDirection = "asc" | "desc";
+type ActiveTab = "grading" | "lesson-planning";
 
 type SortColumn =
   | { kind: "student" }
@@ -66,16 +68,30 @@ function formatFeedback(text: string): string {
   return text.replace(/\s*[\u2013\u2014]\s*/g, ", ");
 }
 
-type RubricRow = { area: string; weight: string; description: string };
+type RubricSubcategory = { label: string; description: string };
+type RubricRow = { area: string; weight: string; description: string; subcategories: RubricSubcategory[] };
 
 function parseGeneratedRubric(text: string): RubricRow[] | null {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const lines = text.split("\n");
   const rows: RubricRow[] = [];
+  let current: RubricRow | null = null;
   for (const line of lines) {
-    const match = line.match(/^(.+?)\s*\((\d+(?:\.\d+)?\s*%?)\)\s*:\s*(.+)$/);
-    if (!match) return null;
-    rows.push({ area: match[1].trim(), weight: match[2].trim(), description: match[3].trim() });
+    if (!line.trim()) continue;
+    if (/^\s/.test(line)) {
+      if (!current) continue;
+      const subLine = line.trim().replace(/^[-•]\s*/, "");
+      const subMatch = subLine.match(/^(.+?)\s*:\s*(.+)$/);
+      if (subMatch) {
+        current.subcategories.push({ label: subMatch[1].trim(), description: subMatch[2].trim() });
+      }
+    } else {
+      const match = line.trim().match(/^(.+?)\s*\((\d+(?:\.\d+)?\s*%?)\)\s*:\s*(.*)$/);
+      if (!match) continue;
+      if (current) rows.push(current);
+      current = { area: match[1].trim(), weight: match[2].trim(), description: match[3].trim(), subcategories: [] };
+    }
   }
+  if (current) rows.push(current);
   return rows.length > 0 ? rows : null;
 }
 
@@ -160,10 +176,24 @@ export default function Home() {
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
+  const [activeTab, setActiveTab] = useState<ActiveTab>("grading");
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyResetTimerRef = useRef<number | null>(null);
+  const [moduleObjectives, setModuleObjectives] = useState("");
+  const [lessonContext, setLessonContext] = useState("");
+  const [isGeneratingLesson, setIsGeneratingLesson] = useState(false);
+  const [lessonError, setLessonError] = useState<string | null>(null);
+  const [lessonPlanPreview, setLessonPlanPreview] = useState<GenerateLessonPlanResult | null>(null);
+  const [assignmentPreview, setAssignmentPreview] = useState<AssignmentData | null>(null);
+  const [previewTab, setPreviewTab] = useState<"intro" | "slides" | "assignment" | "rubric">("intro");
+  const [rubricPreview, setRubricPreview] = useState<string | null>(null);
+  const [introPreview, setIntroPreview] = useState<ModuleIntroData | null>(null);
+  const [savedLessonFiles, setSavedLessonFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
+  const [revisionPrompt, setRevisionPrompt] = useState("");
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const lessonContextFileRef = useRef<HTMLInputElement>(null);
   const run = state.run;
 
   const sortedResults = useMemo(() => {
@@ -332,6 +362,203 @@ export default function Home() {
     }
   };
 
+  const handleGenerateLesson = async () => {
+    if (!moduleObjectives.trim()) {
+      setLessonError("Please enter module objectives before generating.");
+      return;
+    }
+    setIsGeneratingLesson(true);
+    setLessonError(null);
+    try {
+      const fileList = lessonContextFileRef.current?.files;
+      const files: Array<{ name: string; base64: string; mimeType: string }> = [];
+      if (fileList) {
+        for (const file of Array.from(fileList)) {
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = reader.result as string;
+              resolve(result.split(",")[1] ?? "");
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+          files.push({ name: file.name, base64, mimeType: file.type || "application/octet-stream" });
+        }
+      }
+
+      setSavedLessonFiles(files);
+
+      const [slideResult, assignmentResult, rubricResult, introResult] = await Promise.all([
+        generateLessonPlanAction(moduleObjectives, lessonContext, files),
+        generateAssignmentAction(moduleObjectives, lessonContext, files),
+        generateAssignmentRubricAction(moduleObjectives, lessonContext),
+        generateModuleIntroAction(moduleObjectives, lessonContext),
+      ]);
+
+      if ("error" in slideResult) {
+        setLessonError(slideResult.error);
+        return;
+      }
+
+      setLessonPlanPreview(slideResult);
+      setAssignmentPreview("error" in assignmentResult ? null : assignmentResult);
+      setRubricPreview(typeof rubricResult === "string" ? rubricResult : null);
+      setIntroPreview("error" in introResult ? null : introResult);
+      setPreviewTab("intro");
+      setRevisionPrompt("");
+    } catch (err) {
+      setLessonError(err instanceof Error ? err.message : "Generation failed.");
+    } finally {
+      setIsGeneratingLesson(false);
+    }
+  };
+
+  const handleRegenerateLesson = async () => {
+    if (!lessonPlanPreview) return;
+    setIsRegenerating(true);
+    setLessonError(null);
+    try {
+      const result = await generateLessonPlanAction(
+        moduleObjectives,
+        lessonContext,
+        savedLessonFiles,
+        revisionPrompt.trim() || undefined,
+        lessonPlanPreview.slides
+      );
+      if ("error" in result) {
+        setLessonError(result.error);
+        return;
+      }
+      setLessonPlanPreview(result);
+      // assignment is not regenerated on revision — keep existing
+      setRevisionPrompt("");
+    } catch (err) {
+      setLessonError(err instanceof Error ? err.message : "Regeneration failed.");
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
+  const handleDownloadLessonPlan = async () => {
+    if (!lessonPlanPreview) return;
+    try {
+      const [{ default: PptxGenJS }, { default: JSZip }] = await Promise.all([
+        import("pptxgenjs"),
+        import("jszip"),
+      ]);
+
+      // ── Build PPTX ──────────────────────────────────────────────────
+      const prs = new PptxGenJS();
+      prs.layout = "LAYOUT_WIDE";
+
+      const titleSlide = prs.addSlide();
+      titleSlide.addText(lessonPlanPreview.presentationTitle, {
+        x: 0.5, y: 2.2, w: "90%", h: 1.8,
+        fontSize: 40, bold: true, align: "center", color: "1a1a2e",
+      });
+
+      for (const slide of lessonPlanPreview.slides) {
+        const s = prs.addSlide();
+        s.addText(slide.title, {
+          x: 0.5, y: 0.3, w: "90%", h: 1,
+          fontSize: 28, bold: true, color: "1a1a2e",
+        });
+        if (slide.bullets.length > 0) {
+          s.addText(
+            slide.bullets.map((b) => ({ text: b, options: { bullet: true, paraSpaceBefore: 8 } })),
+            { x: 0.5, y: 1.55, w: "90%", h: 4, fontSize: 18, color: "2d2d2d", valign: "top" }
+          );
+        }
+      }
+
+      const pptxData = await prs.write({ outputType: "arraybuffer" }) as ArrayBuffer;
+
+      // ── Build introduction.txt ───────────────────────────────────────
+      let introText = "";
+      if (introPreview) {
+        introText = [
+          "MODULE INTRODUCTION",
+          "===================",
+          "",
+          "WHERE THIS FITS",
+          "---------------",
+          introPreview.overview,
+          "",
+          "KEY TERMS",
+          "---------",
+          introPreview.keyTerms,
+        ].join("\n");
+      }
+
+      // ── Build assignment.txt ─────────────────────────────────────────
+      let assignmentText = "";
+      if (assignmentPreview) {
+        const header = `ASSIGNMENT: ${assignmentPreview.title}`;
+        assignmentText = [
+          header,
+          "=".repeat(header.length),
+          "",
+          "OVERVIEW",
+          "--------",
+          assignmentPreview.overview,
+          "",
+          "STEPS",
+          "-----",
+          ...assignmentPreview.steps.map((s, i) => `${i + 1}. ${s.stepTitle}\n   ${s.description}`),
+          "",
+          "FREE TOOLS",
+          "----------",
+          ...assignmentPreview.tools.map((t) => `- ${t}`),
+          "",
+          "DELIVERABLES",
+          "------------",
+          ...assignmentPreview.deliverables.map((d) => `- ${d}`),
+        ].join("\n");
+      }
+
+      // ── Build rubric.txt ─────────────────────────────────────────────
+      let rubricText = "";
+      if (rubricPreview) {
+        const rows = parseGeneratedRubric(rubricPreview);
+        if (rows) {
+          const lines: string[] = ["GRADING RUBRIC", "==============", ""];
+          for (const row of rows) {
+            const w = row.weight.endsWith("%") ? row.weight : `${row.weight}%`;
+            lines.push(`${row.area} (${w}): ${row.description}`);
+            for (const sub of row.subcategories) {
+              lines.push(`  ${sub.label}: ${sub.description}`);
+            }
+            lines.push("");
+          }
+          rubricText = lines.join("\n");
+        } else {
+          rubricText = `GRADING RUBRIC\n==============\n\n${rubricPreview}`;
+        }
+      }
+
+      // ── Assemble ZIP ─────────────────────────────────────────────────
+      const zip = new JSZip();
+      if (introText) zip.file("introduction.txt", introText);
+      zip.file("slides.pptx", pptxData);
+      if (assignmentText) zip.file("assignment.txt", assignmentText);
+      if (rubricText) zip.file("rubric.txt", rubricText);
+
+      const safeName = lessonPlanPreview.presentationTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safeName}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setLessonError(err instanceof Error ? err.message : "Download failed.");
+    }
+  };
+
   const handleCopy = async (copyKey: string, value: string) => {
     const text = value.trim();
     if (!text) {
@@ -374,10 +601,38 @@ export default function Home() {
 
   return (
     <main className={styles.page}>
-      <section className={styles.card}>
+      <div className={styles.tabContainer}>
+        <Tabs
+          value={activeTab}
+          onChange={(_, v: ActiveTab) => setActiveTab(v)}
+          sx={{
+            borderBottom: "1px solid var(--field-border)",
+            marginBottom: "0",
+            "& .MuiTabs-indicator": { backgroundColor: "var(--accent)" },
+            "& .MuiTab-root": {
+              fontFamily: "inherit",
+              fontSize: "0.9rem",
+              fontWeight: 500,
+              textTransform: "none",
+              color: "var(--text-secondary)",
+              minHeight: 44,
+              padding: "10px 20px",
+            },
+            "& .Mui-selected": {
+              color: "var(--accent) !important",
+              fontWeight: 600,
+            },
+            minHeight: 44,
+          }}
+        >
+          <Tab label="Grading" value="grading" disableRipple />
+          <Tab label="Lesson Planning" value="lesson-planning" disableRipple />
+        </Tabs>
+
+        {activeTab === "grading" && (
+          <section className={styles.card}>
         <div className={styles.header}>
-          <p className={styles.eyebrow}>Teaching Assistant</p>
-          <h1>Prepare a Grading Run</h1>
+          <h1>Grading</h1>
           <p>
             Add the student submissions and the grading context needed to review
             an assignment.
@@ -468,7 +723,7 @@ export default function Home() {
                     <tr>
                       <th>Criterion</th>
                       <th>Weight</th>
-                      <th>Description</th>
+                      <th>Performance Levels</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -476,7 +731,15 @@ export default function Home() {
                       <tr key={row.area}>
                         <td>{row.area}</td>
                         <td>{row.weight.endsWith("%") ? row.weight : `${row.weight}%`}</td>
-                        <td>{row.description}</td>
+                        <td>
+                          {row.subcategories.length > 0 ? (
+                            <ul className={styles.rubricSubcategoryList}>
+                              {row.subcategories.map((sub) => (
+                                <li key={sub.label}><strong>{sub.label}:</strong> {sub.description}</li>
+                              ))}
+                            </ul>
+                          ) : row.description}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -708,7 +971,261 @@ export default function Home() {
             </div>
           </section>
         )}
-      </section>
+          </section>
+        )}
+
+        {activeTab === "lesson-planning" && (
+          <section className={styles.card}>
+            <div className={styles.header}>
+              <h1>Lesson Planning</h1>
+              <p>Plan and generate lesson content with AI assistance.</p>
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="moduleObjectives">Module Objectives</label>
+              <textarea
+                id="moduleObjectives"
+                placeholder="Describe the learning objectives for this module…"
+                style={{ minHeight: "260px" }}
+                value={moduleObjectives}
+                onChange={(e) => setModuleObjectives(e.target.value)}
+              />
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="lessonContext">Context</label>
+              <textarea
+                id="lessonContext"
+                placeholder="Add any background context, notes, or relevant information…"
+                style={{ minHeight: "180px" }}
+                value={lessonContext}
+                onChange={(e) => setLessonContext(e.target.value)}
+              />
+              <div className={styles.fileField}>
+                <input id="lessonContextFile" type="file" multiple ref={lessonContextFileRef} />
+                <p>Optionally attach any files for additional context.</p>
+              </div>
+            </div>
+            {lessonError && <p className={styles.error}>{lessonError}</p>}
+            <button
+              type="button"
+              className={styles.submitButton}
+              onClick={handleGenerateLesson}
+              disabled={isGeneratingLesson}
+            >
+              {isGeneratingLesson ? "Generating…" : "Generate"}
+            </button>
+          </section>
+        )}
+      </div>
+
+      {lessonPlanPreview && (
+        <div className={styles.previewBackdrop} onClick={() => setLessonPlanPreview(null)}>
+          <section
+            className={styles.lessonPreviewModal}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Lesson plan preview"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.previewHeader}>
+              <div>
+                <h3>{lessonPlanPreview.presentationTitle}</h3>
+                <p className={styles.previewMeta}>
+                  {previewTab === "intro"
+                    ? "Module Introduction"
+                    : previewTab === "slides"
+                      ? `${lessonPlanPreview.slides.length} slides`
+                      : previewTab === "assignment"
+                        ? (assignmentPreview?.title ?? "Assignment")
+                        : "Grading Rubric"}
+                </p>
+              </div>
+              <button
+                type="button"
+                className={styles.previewCloseButton}
+                onClick={() => setLessonPlanPreview(null)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className={styles.lessonInnerTabs}>
+              <button
+                type="button"
+                className={`${styles.lessonInnerTab}${previewTab === "intro" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                onClick={() => setPreviewTab("intro")}
+              >
+                Introduction
+              </button>
+              <button
+                type="button"
+                className={`${styles.lessonInnerTab}${previewTab === "slides" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                onClick={() => setPreviewTab("slides")}
+              >
+                Slides
+              </button>
+              <button
+                type="button"
+                className={`${styles.lessonInnerTab}${previewTab === "assignment" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                onClick={() => setPreviewTab("assignment")}
+              >
+                Assignment
+              </button>
+              <button
+                type="button"
+                className={`${styles.lessonInnerTab}${previewTab === "rubric" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                onClick={() => setPreviewTab("rubric")}
+              >
+                Rubric
+              </button>
+            </div>
+
+            {previewTab === "intro" && (
+              <div className={styles.assignmentContent}>
+                {introPreview ? (
+                  <>
+                    <div className={styles.assignmentSection}>
+                      <p className={styles.assignmentSectionLabel}>Where This Fits</p>
+                      <p className={styles.introText}>{introPreview.overview}</p>
+                    </div>
+                    <div className={styles.assignmentSection}>
+                      <p className={styles.assignmentSectionLabel}>Key Terms</p>
+                      <p className={styles.introText}>{introPreview.keyTerms}</p>
+                    </div>
+                  </>
+                ) : (
+                  <p className={styles.emptyState}>Introduction generation failed — try regenerating.</p>
+                )}
+              </div>
+            )}
+
+            {previewTab === "slides" && (
+              <ol className={styles.lessonSlideList}>
+                {lessonPlanPreview.slides.map((slide, i) => (
+                  <li key={i} className={styles.lessonSlideCard}>
+                    <span className={styles.lessonSlideNum}>Slide {i + 1}</span>
+                    <p className={styles.lessonSlideTitle}>{slide.title}</p>
+                    {slide.bullets.length > 0 && (
+                      <ul className={styles.lessonSlideBullets}>
+                        {slide.bullets.map((b, j) => <li key={j}>{b}</li>)}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            )}
+
+            {previewTab === "assignment" && (
+              <div className={styles.assignmentContent}>
+                {assignmentPreview ? (
+                  <>
+                    <p className={styles.assignmentOverview}>{assignmentPreview.overview}</p>
+                    <div className={styles.assignmentSection}>
+                      <p className={styles.assignmentSectionLabel}>Steps</p>
+                      <ol className={styles.assignmentStepList}>
+                        {assignmentPreview.steps.map((step, i) => (
+                          <li key={i} className={styles.assignmentStepCard}>
+                            <p className={styles.assignmentStepTitle}>{step.stepTitle}</p>
+                            <p className={styles.assignmentStepDesc}>{step.description}</p>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                    <div className={styles.assignmentSection}>
+                      <p className={styles.assignmentSectionLabel}>Free Tools</p>
+                      <ul className={styles.assignmentList}>
+                        {assignmentPreview.tools.map((t, i) => <li key={i}>{t}</li>)}
+                      </ul>
+                    </div>
+                    <div className={styles.assignmentSection}>
+                      <p className={styles.assignmentSectionLabel}>Deliverables</p>
+                      <ul className={styles.assignmentList}>
+                        {assignmentPreview.deliverables.map((d, i) => <li key={i}>{d}</li>)}
+                      </ul>
+                    </div>
+                  </>
+                ) : (
+                  <p className={styles.emptyState}>Assignment generation failed — try regenerating.</p>
+                )}
+              </div>
+            )}
+
+            {previewTab === "rubric" && (
+              <div className={styles.assignmentContent}>
+                {rubricPreview ? (() => {
+                  const rows = parseGeneratedRubric(rubricPreview);
+                  return rows ? (
+                    <table className={styles.generatedRubricTable}>
+                      <thead>
+                        <tr>
+                          <th>Area</th>
+                          <th>Weight</th>
+                          <th>Performance Levels</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((row, i) => (
+                          <tr key={i}>
+                            <td>{row.area}</td>
+                            <td>{row.weight.endsWith("%") ? row.weight : `${row.weight}%`}</td>
+                            <td>
+                              {row.subcategories.length > 0 ? (
+                                <ul className={styles.rubricSubcategoryList}>
+                                  {row.subcategories.map((sub) => (
+                                    <li key={sub.label}><strong>{sub.label}:</strong> {sub.description}</li>
+                                  ))}
+                                </ul>
+                              ) : row.description}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <pre className={styles.generatedRubricBody}>{rubricPreview}</pre>
+                  );
+                })() : (
+                  <p className={styles.emptyState}>Rubric generation failed — try regenerating.</p>
+                )}
+              </div>
+            )}
+
+            <div className={styles.lessonRevisionRow}>
+              <textarea
+                className={styles.lessonRevisionArea}
+                placeholder="Revision instructions — e.g. add a slide on X, make analogies more sports-focused, shorten slide 3…"
+                value={revisionPrompt}
+                onChange={(e) => setRevisionPrompt(e.target.value)}
+                rows={2}
+              />
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleRegenerateLesson}
+                disabled={isRegenerating}
+              >
+                {isRegenerating ? "Regenerating…" : "Regenerate"}
+              </button>
+            </div>
+
+            <div className={styles.lessonPreviewFooter}>
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleDownloadLessonPlan}
+              >
+                Download ZIP
+              </button>
+              <button
+                type="button"
+                className={styles.downloadButton}
+                onClick={() => setLessonPlanPreview(null)}
+              >
+                Close
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {selectedPreview && (
         <div className={styles.previewBackdrop} onClick={handleClosePreview}>

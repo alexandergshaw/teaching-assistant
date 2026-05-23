@@ -696,10 +696,14 @@ Create a grading rubric suited to these instructions. Return ONLY valid JSON:
 }
 
 The rubric text must:
-- Contain 3 to 6 grading areas tied directly to the assignment requirements.
-- Format each area on its own line: "[Area Name] ([Percentage]%): [What earns full credit and how points may be deducted]"
-- Percentages must sum to 100.
-- Be specific and actionable based on the assignment, not generic.
+- Contain between 3 and 5 grading areas tied directly to the assignment requirements.
+- Weight ALL areas equally: divide 100% evenly across the number of areas you choose (e.g. 4 areas = 25% each). Every area must have the same percentage as every other.
+- Start each area on its own line: "[Area Name] ([Percentage]%): [Brief description of what this area covers]"
+- Immediately under each area, include exactly three subcategory lines, each indented with two spaces, using these fixed deduction tiers:
+  "  Excellent (100% — no deductions): [Specific criteria for full credit]"
+  "  Meets Expectations (75% — 25% deducted): [What is missing or partially done that causes the deduction]"
+  "  Needs Improvement (50% — 50% deducted): [Significant deficiencies that reduce the score by half]"
+- Be specific and actionable, not generic.
 - Use plain prose only, no markdown.
 - Do not include text outside the JSON object.`;
 
@@ -710,7 +714,7 @@ The rubric text must:
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 512 },
+        generationConfig: { temperature: 0.3, maxOutputTokens: 1500 },
       }),
     }
   );

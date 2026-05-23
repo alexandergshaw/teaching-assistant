@@ -443,7 +443,12 @@ export default function Home() {
   const handleDownloadLessonPlan = async () => {
     if (!lessonPlanPreview) return;
     try {
-      const { default: PptxGenJS } = await import("pptxgenjs");
+      const [{ default: PptxGenJS }, { default: JSZip }] = await Promise.all([
+        import("pptxgenjs"),
+        import("jszip"),
+      ]);
+
+      // ── Build PPTX ──────────────────────────────────────────────────
       const prs = new PptxGenJS();
       prs.layout = "LAYOUT_WIDE";
 
@@ -467,8 +472,88 @@ export default function Home() {
         }
       }
 
+      const pptxData = await prs.write({ outputType: "arraybuffer" }) as ArrayBuffer;
+
+      // ── Build introduction.txt ───────────────────────────────────────
+      let introText = "";
+      if (introPreview) {
+        introText = [
+          "MODULE INTRODUCTION",
+          "===================",
+          "",
+          "WHERE THIS FITS",
+          "---------------",
+          introPreview.overview,
+          "",
+          "KEY TERMS",
+          "---------",
+          introPreview.keyTerms,
+        ].join("\n");
+      }
+
+      // ── Build assignment.txt ─────────────────────────────────────────
+      let assignmentText = "";
+      if (assignmentPreview) {
+        const header = `ASSIGNMENT: ${assignmentPreview.title}`;
+        assignmentText = [
+          header,
+          "=".repeat(header.length),
+          "",
+          "OVERVIEW",
+          "--------",
+          assignmentPreview.overview,
+          "",
+          "STEPS",
+          "-----",
+          ...assignmentPreview.steps.map((s, i) => `${i + 1}. ${s.stepTitle}\n   ${s.description}`),
+          "",
+          "FREE TOOLS",
+          "----------",
+          ...assignmentPreview.tools.map((t) => `- ${t}`),
+          "",
+          "DELIVERABLES",
+          "------------",
+          ...assignmentPreview.deliverables.map((d) => `- ${d}`),
+        ].join("\n");
+      }
+
+      // ── Build rubric.txt ─────────────────────────────────────────────
+      let rubricText = "";
+      if (rubricPreview) {
+        const rows = parseGeneratedRubric(rubricPreview);
+        if (rows) {
+          const lines: string[] = ["GRADING RUBRIC", "==============", ""];
+          for (const row of rows) {
+            const w = row.weight.endsWith("%") ? row.weight : `${row.weight}%`;
+            lines.push(`${row.area} (${w}): ${row.description}`);
+            for (const sub of row.subcategories) {
+              lines.push(`  ${sub.label}: ${sub.description}`);
+            }
+            lines.push("");
+          }
+          rubricText = lines.join("\n");
+        } else {
+          rubricText = `GRADING RUBRIC\n==============\n\n${rubricPreview}`;
+        }
+      }
+
+      // ── Assemble ZIP ─────────────────────────────────────────────────
+      const zip = new JSZip();
+      if (introText) zip.file("introduction.txt", introText);
+      zip.file("slides.pptx", pptxData);
+      if (assignmentText) zip.file("assignment.txt", assignmentText);
+      if (rubricText) zip.file("rubric.txt", rubricText);
+
       const safeName = lessonPlanPreview.presentationTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
-      await prs.writeFile({ fileName: `${safeName}.pptx` });
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safeName}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch (err) {
       setLessonError(err instanceof Error ? err.message : "Download failed.");
     }
@@ -1128,7 +1213,7 @@ export default function Home() {
                 className={styles.submitButton}
                 onClick={handleDownloadLessonPlan}
               >
-                Download PPTX
+                Download ZIP
               </button>
               <button
                 type="button"

@@ -1,5 +1,5 @@
 import JSZip from "jszip";
-import { getOpenAIClient } from "./openai";
+import { getGeminiApiKey, getGeminiModel } from "./gemini";
 
 export interface GradeResult {
   student: string;
@@ -73,20 +73,55 @@ async function gradeSubmission(
   studentName: string,
   content: string
 ): Promise<GradeResult> {
-  const openai = getOpenAIClient();
+  const apiKey = getGeminiApiKey();
+  const model = getGeminiModel();
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    messages: [
-      { role: "system", content: systemPrompt },
-      {
-        role: "user",
-        content: `Student: ${studentName}\n\nSubmission:\n${content}`,
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
-    ],
-  });
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: systemPrompt }],
+        },
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: `Student: ${studentName}\n\nSubmission:\n${content}`,
+              },
+            ],
+          },
+        ],
+      }),
+    }
+  );
 
-  const feedback = response.choices[0]?.message?.content ?? "No feedback generated.";
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Gemini request failed (${response.status}): ${errorBody}`);
+  }
+
+  const data = (await response.json()) as {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{
+          text?: string;
+        }>;
+      };
+    }>;
+  };
+
+  const feedback =
+    data.candidates?.[0]?.content?.parts
+      ?.map((part) => part.text ?? "")
+      .join("")
+      .trim() || "No feedback generated.";
+
   return { student: studentName, feedback };
 }
 

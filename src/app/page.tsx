@@ -496,7 +496,9 @@ export default function Home() {
                                     }
                                     title={`Preview ${file.name}`}
                                   >
-                                    {file.name}{file.extension && file.extension !== "(none)" ? `.${file.extension}` : ""}
+                                    {file.extension && file.extension !== "(none)" && !file.name.toLowerCase().endsWith(`.${file.extension.toLowerCase()}`)
+                                      ? `${file.name}.${file.extension}`
+                                      : file.name}
                                   </button>
                                 </li>
                               ))}

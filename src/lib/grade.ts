@@ -368,6 +368,7 @@ Rules:
 - Mimic how a personable professor would write feedback.
 - Don't use long dashes (—) or short dashes (–) in feedback, as they can cause formatting issues in some LMS platforms. Use colons, parentheses, or commas instead.
 - Write feedback in a direct, student-facing coaching style with short concrete phrases like "Nice job with the formatting" and "Be sure to proofread for spelling mistakes," and second-person words like "you", "your", "yours", and "you're" are allowed. Using the student's name is strictly prohibited.
+- Beyond rubric scoring, act as a subject matter expert on the topic being graded. In at least the overallComment (and any rubricResults possible), include at least one piece of genuine industry-level insight, a best practice, or a forward-looking tip that goes beyond the rubric criteria, helping the student understand real-world relevance or how to push their work to a professional standard.
 - Do not include markdown fences or any text outside the JSON object.`;
 }
 
@@ -995,7 +996,7 @@ function parseSubmissionFileName(
       studentKey: inferred.studentDisplay.toLowerCase(),
       studentDisplay: inferred.studentDisplay,
       citationFileName: inferred.citationFileName,
-      extension: getFileExtension(inferred.citationFileName) || "(none)",
+      extension: getFileExtension(baseName) || getFileExtension(inferred.citationFileName) || "(none)",
     };
   }
 

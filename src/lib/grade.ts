@@ -223,12 +223,19 @@ export interface RubricAreaResult {
   comment: string;
 }
 
+export interface SubmittedFileInfo {
+  name: string;
+  extension: string;
+}
+
 export interface GradeResult {
   student: string;
   overallComment: string;
   rubricAreas: RubricAreaResult[];
   totalScore: string;
   feedback: string;
+  mergedFileCount: number;
+  submittedFiles: SubmittedFileInfo[];
 }
 
 export interface GradingRun {
@@ -512,6 +519,90 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getBaseFileName(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const segments = normalized.split("/");
+  return segments[segments.length - 1] ?? path;
+}
+
+function removeLastExtension(fileName: string): string {
+  const lastDot = fileName.lastIndexOf(".");
+  if (lastDot <= 0) {
+    return fileName;
+  }
+
+  return fileName.slice(0, lastDot);
+}
+
+function inferStudentPrefix(filePath: string): { key: string; display: string } {
+  const baseName = getBaseFileName(filePath);
+  const stem = removeLastExtension(baseName);
+  const match = stem.match(/^([A-Za-z0-9]+)/);
+  const prefix = match?.[1] ?? stem;
+  const trimmed = prefix.trim();
+
+  if (!trimmed) {
+    return { key: "unknown", display: "unknown" };
+  }
+
+  return {
+    key: trimmed.toLowerCase(),
+    display: trimmed,
+  };
+}
+
+function groupSubmissionsByStudent(
+  submissions: Record<string, string>
+): Array<{
+  student: string;
+  content: string;
+  mergedFileCount: number;
+  submittedFiles: SubmittedFileInfo[];
+}> {
+  const grouped = new Map<string, { student: string; files: Array<[string, string]> }>();
+
+  for (const [filePath, content] of Object.entries(submissions)) {
+    const inferred = inferStudentPrefix(filePath);
+    const existing = grouped.get(inferred.key);
+
+    if (!existing) {
+      grouped.set(inferred.key, {
+        student: inferred.display,
+        files: [[filePath, content]],
+      });
+      continue;
+    }
+
+    existing.files.push([filePath, content]);
+  }
+
+  const entries = Array.from(grouped.values());
+  entries.sort((a, b) => a.student.localeCompare(b.student));
+
+  return entries.map((entry) => {
+    const mergedContent = entry.files
+      .map(([filePath, content]) => `File: ${filePath}\n\n${content}`)
+      .join("\n\n---\n\n");
+
+    const submittedFiles = entry.files.map(([filePath]) => {
+      const fileName = getBaseFileName(filePath);
+      const extension = getFileExtension(fileName);
+
+      return {
+        name: fileName,
+        extension: extension || "(none)",
+      };
+    });
+
+    return {
+      student: entry.student,
+      content: mergedContent,
+      mergedFileCount: entry.files.length,
+      submittedFiles,
+    };
+  });
+}
+
 /** Grade a single student submission. */
 async function gradeSubmission(
   systemPrompt: string,
@@ -578,6 +669,8 @@ async function gradeSubmission(
     overallComment: parsed.overallComment,
     rubricAreas: parsed.rubricAreas,
     totalScore: parsed.totalScore,
+    mergedFileCount: 1,
+    submittedFiles: [],
     feedback: formatFeedback(
       parsed.overallComment,
       parsed.rubricAreas,
@@ -595,8 +688,8 @@ export async function gradeSubmissions(
   const { submissions, attemptedSupportedFiles, failedSupportedFiles } =
     await extractSubmissions(zipBuffer);
 
-  const submissionEntries = Object.entries(submissions);
-  if (submissionEntries.length === 0) {
+  const studentSubmissions = groupSubmissionsByStudent(submissions);
+  if (studentSubmissions.length === 0) {
     if (attemptedSupportedFiles > 0) {
       const failedPreview = failedSupportedFiles.slice(0, 3).join(", ");
       const failedSuffix = failedPreview ? ` Example files: ${failedPreview}.` : "";
@@ -616,16 +709,16 @@ export async function gradeSubmissions(
   const maxCharsPerSubmission = getGeminiMaxCharsPerSubmission();
   const interRequestDelayMs = getGeminiInterRequestDelayMs();
 
-  const limitedEntries = submissionEntries.slice(0, maxSubmissions);
+  const limitedEntries = studentSubmissions.slice(0, maxSubmissions);
   const systemPrompt = buildSystemPrompt(assignmentInstructions, rubric);
   const results: GradeResult[] = [];
 
   for (let i = 0; i < limitedEntries.length; i += 1) {
-    const [name, content] = limitedEntries[i];
+    const { student, content, mergedFileCount, submittedFiles } = limitedEntries[i];
     const truncated = truncateSubmission(content, maxCharsPerSubmission);
 
-    const result = await gradeSubmission(systemPrompt, name, truncated);
-    results.push(result);
+    const result = await gradeSubmission(systemPrompt, student, truncated);
+    results.push({ ...result, mergedFileCount, submittedFiles });
 
     if (interRequestDelayMs > 0 && i < limitedEntries.length - 1) {
       await sleep(interRequestDelayMs);

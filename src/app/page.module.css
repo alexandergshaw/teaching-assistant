@@ -255,6 +255,52 @@
   word-break: break-all;
 }
 
+.mergeInfo {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.fileMetaLabel {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.fileList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fileItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--field-border);
+  background: color-mix(in srgb, var(--field-background) 92%, var(--accent) 8%);
+  font-size: 0.86rem;
+  color: var(--text-primary);
+}
+
+.fileExtension {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: lowercase;
+}
+
 .feedback {
   white-space: pre-wrap;
   font: inherit;

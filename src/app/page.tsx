@@ -63,6 +63,8 @@ function buildCsvContent(state: GradeActionState): string {
 
   header.push("Total Score");
   header.push("Overall Comment");
+  header.push("Submitted Files");
+  header.push("Submitted Extensions");
 
   const rows = [header.map((cell) => escapeCsvCell(cell)).join(",")];
 
@@ -78,6 +80,12 @@ function buildCsvContent(state: GradeActionState): string {
 
     row.push(result.totalScore);
     row.push(result.overallComment);
+    row.push(result.submittedFiles.map((file) => file.name).join("; "));
+    row.push(
+      Array.from(new Set(result.submittedFiles.map((file) => file.extension))).join(
+        "; "
+      )
+    );
     rows.push(row.map((cell) => escapeCsvCell(cell)).join(","));
   }
 
@@ -322,6 +330,22 @@ export default function Home() {
             {run.results.map((result) => (
               <div key={result.student} className={styles.result}>
                 <h3>{result.student}</h3>
+                <p className={styles.mergeInfo}>
+                  Includes {result.mergedFileCount} file
+                  {result.mergedFileCount === 1 ? "" : "s"} in this student submission.
+                </p>
+                <p className={styles.fileMetaLabel}>Submitted files</p>
+                <ul className={styles.fileList}>
+                  {result.submittedFiles.map((file) => (
+                    <li
+                      key={`${result.student}-${file.name}-${file.extension}`}
+                      className={styles.fileItem}
+                    >
+                      <span>{file.name}</span>
+                      <span className={styles.fileExtension}>{file.extension}</span>
+                    </li>
+                  ))}
+                </ul>
                 <pre className={styles.feedback}>{result.feedback}</pre>
               </div>
             ))}

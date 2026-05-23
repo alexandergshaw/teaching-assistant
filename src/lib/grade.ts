@@ -350,10 +350,11 @@ Grade each student submission against the rubric and respond ONLY in JSON using 
 
 Rules:
 - Include one rubricResults item for each rubric area.
+- In your tone and verbage, flow well, be brief, be human-like.
 - Keep comments concise and actionable.
+- Always find at least one deduction for a submission, but be generous/lenient in your evaluation.
 - For every deduction, explicitly cite the affected rubric area and the exact reason from the submission.
 - Grade generously by default, but do not automatically award full points when an explicit rubric violation is present.
-- Only deduct points when there is clear, explicit evidence of a rubric violation in the submission.
 - If nothing in the submission explicitly violates a rubric area, award full points for that area.
 - Do not deduct points for ambiguity, missing assumptions, or speculative issues that are not explicit rubric violations.
 - In overallComment, reference rubric areas by name when summarizing strengths and weaknesses.
@@ -368,6 +369,7 @@ Rules:
 - Mimic how a personable professor would write feedback.
 - Don't use long dashes (—) or short dashes (–) in feedback, as they can cause formatting issues in some LMS platforms. Use colons, parentheses, or commas instead.
 - Write feedback in a direct, student-facing coaching style with short concrete phrases like "Nice job with the formatting" and "Be sure to proofread for spelling mistakes," and second-person words like "you", "your", "yours", and "you're" are allowed. Using the student's name is strictly prohibited.
+- Beyond rubric scoring, act as a subject matter expert on the topic being graded. In at least the overallComment (and any rubricResults possible), include at least one piece of genuine industry-level insight, a best practice, or a forward-looking tip that goes beyond the rubric criteria, helping the student understand real-world relevance or how to push their work to a professional standard.
 - Do not include markdown fences or any text outside the JSON object.`;
 }
 
@@ -995,7 +997,7 @@ function parseSubmissionFileName(
       studentKey: inferred.studentDisplay.toLowerCase(),
       studentDisplay: inferred.studentDisplay,
       citationFileName: inferred.citationFileName,
-      extension: getFileExtension(inferred.citationFileName) || "(none)",
+      extension: getFileExtension(baseName) || getFileExtension(inferred.citationFileName) || "(none)",
     };
   }
 

@@ -21,7 +21,6 @@ type SortDirection = "asc" | "desc";
 type SortColumn =
   | { kind: "student" }
   | { kind: "files" }
-  | { kind: "fileTypes" }
   | { kind: "rubric"; area: string }
   | { kind: "total" }
   | { kind: "overall" };
@@ -51,6 +50,14 @@ function parseScoreValue(value: string): number | null {
 
   const parsed = Number.parseFloat(match[0]);
   return Number.isNaN(parsed) ? null : parsed;
+}
+
+function hasDeduction(score: string): boolean {
+  const match = score.match(/(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)/)
+  if (!match) return false;
+  const earned = Number.parseFloat(match[1]);
+  const possible = Number.parseFloat(match[2]);
+  return Number.isFinite(earned) && Number.isFinite(possible) && possible > 0 && earned < possible;
 }
 
 function escapeCsvCell(value: string): string {
@@ -141,16 +148,6 @@ export default function Home() {
         const aFiles = a.submittedFiles.map((file) => file.name).join(", ");
         const bFiles = b.submittedFiles.map((file) => file.name).join(", ");
         comparison = compareText(aFiles, bFiles);
-      }
-
-      if (column.kind === "fileTypes") {
-        const aTypes = Array.from(new Set(a.submittedFiles.map((file) => file.extension))).join(
-          ", "
-        );
-        const bTypes = Array.from(new Set(b.submittedFiles.map((file) => file.extension))).join(
-          ", "
-        );
-        comparison = compareText(aTypes, bTypes);
       }
 
       if (column.kind === "rubric") {
@@ -443,15 +440,6 @@ export default function Home() {
                         Files <span>{sortLabel({ kind: "files" })}</span>
                       </button>
                     </th>
-                    <th>
-                      <button
-                        type="button"
-                        className={styles.sortButton}
-                        onClick={() => handleSort({ kind: "fileTypes" })}
-                      >
-                        File Types <span>{sortLabel({ kind: "fileTypes" })}</span>
-                      </button>
-                    </th>
                     {run.rubricAreaNames.map((area) => (
                       <th key={area}>
                         <button
@@ -488,9 +476,6 @@ export default function Home() {
                     const areaMap = new Map(
                       result.rubricAreas.map((area) => [area.area, area])
                     );
-                    const uniqueExtensions = Array.from(
-                      new Set(result.submittedFiles.map((file) => file.extension))
-                    );
 
                     return (
                       <tr key={`${result.student}-matrix`}>
@@ -519,7 +504,9 @@ export default function Home() {
                                     }
                                     title={`Preview ${file.name}`}
                                   >
-                                    {file.name}
+                                    {file.extension && file.extension !== "(none)" && !file.name.toLowerCase().endsWith(`.${file.extension.toLowerCase()}`)
+                                      ? `${file.name}.${file.extension}`
+                                      : file.name}
                                   </button>
                                 </li>
                               ))}
@@ -528,27 +515,13 @@ export default function Home() {
                             "-"
                           )}
                         </td>
-                        <td>
-                          {uniqueExtensions.length > 0 ? (
-                            <div className={styles.chipRow}>
-                              {uniqueExtensions.map((extension) => (
-                                <span
-                                  key={`${result.student}-file-type-${extension}`}
-                                  className={styles.typeChip}
-                                >
-                                  {extension}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            "-"
-                          )}
-                        </td>
                         {run.rubricAreaNames.map((areaName) => {
                           const area = areaMap.get(areaName);
 
                           return (
-                            <td key={`${result.student}-${areaName}`}>
+                            <td
+                              key={`${result.student}-${areaName}`}
+                            >
                               {area ? (
                                 <div className={styles.matrixCellDetail}>
                                   <button
@@ -573,7 +546,7 @@ export default function Home() {
                                   >
                                     <CopyIcon />
                                   </button>
-                                  <span className={styles.scoreBadge}>
+                                  <span className={`${styles.scoreBadge}${area && hasDeduction(area.score) ? ` ${styles.scoreBadgeDeducted}` : ''}`}>
                                     Score: {area.score || "-"}
                                   </span>
                                   <p>{area.comment || "No feedback provided."}</p>

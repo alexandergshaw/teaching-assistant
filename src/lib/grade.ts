@@ -1,5 +1,5 @@
 import JSZip from "jszip";
-import openai from "./openai";
+import { getOpenAIClient } from "./openai";
 
 export interface GradeResult {
   student: string;
@@ -73,6 +73,8 @@ async function gradeSubmission(
   studentName: string,
   content: string
 ): Promise<GradeResult> {
+  const openai = getOpenAIClient();
+
   const response = await openai.chat.completions.create({
     model: "gpt-4o",
     messages: [

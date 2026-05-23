@@ -350,7 +350,9 @@ Grade each student submission against the rubric and respond ONLY in JSON using 
 
 Rules:
 - Include one rubricResults item for each rubric area.
+- In your tone and verbage, flow well, be brief, be human-like.
 - Keep comments concise and actionable.
+- Always find at least one deduction for a submission, but be generous/lenient in your evaluation.
 - For every deduction, explicitly cite the affected rubric area and the exact reason from the submission.
 - Grade generously by default, but do not automatically award full points when an explicit rubric violation is present.
 - Only deduct points when there is clear, explicit evidence of a rubric violation in the submission.

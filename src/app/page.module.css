@@ -1,142 +1,185 @@
 .page {
-  --background: #fafafa;
-  --foreground: #fff;
-
-  --text-primary: #000;
-  --text-secondary: #666;
-
-  --button-primary-hover: #383838;
-  --button-secondary-hover: #f2f2f2;
-  --button-secondary-border: #ebebeb;
+  --page-background: linear-gradient(180deg, #f4f7fb 0%, #e8eef7 100%);
+  --card-background: rgba(255, 255, 255, 0.92);
+  --card-border: rgba(15, 23, 42, 0.08);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --field-border: #cbd5e1;
+  --field-background: #ffffff;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
 
   display: flex;
   flex: 1;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-geist-sans);
-  background-color: var(--background);
+  padding: 48px 24px;
+  background: var(--page-background);
 }
 
-.main {
-  display: flex;
-  flex: 1;
-  width: 100%;
-  max-width: 800px;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: space-between;
-  background-color: var(--foreground);
-  padding: 120px 60px;
-}
-
-.intro {
+.card {
+  width: min(100%, 840px);
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  gap: 24px;
+  gap: 32px;
+  padding: 40px;
+  border: 1px solid var(--card-border);
+  border-radius: 24px;
+  background: var(--card-background);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
 }
 
-.intro h1 {
-  max-width: 320px;
-  font-size: 40px;
-  font-weight: 600;
-  line-height: 48px;
-  letter-spacing: -2.4px;
-  text-wrap: balance;
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.eyebrow {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.header h1 {
+  font-size: clamp(2rem, 5vw, 3rem);
+  line-height: 1.1;
   color: var(--text-primary);
 }
 
-.intro p {
-  max-width: 440px;
-  font-size: 18px;
-  line-height: 32px;
-  text-wrap: balance;
+.header p {
+  max-width: 52rem;
+  font-size: 1rem;
+  line-height: 1.7;
   color: var(--text-secondary);
 }
 
-.intro a {
-  font-weight: 500;
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.field label {
+  font-size: 0.95rem;
+  font-weight: 600;
   color: var(--text-primary);
 }
 
-.ctas {
-  display: flex;
-  flex-direction: row;
+.fileField,
+.field textarea {
   width: 100%;
-  max-width: 440px;
-  gap: 16px;
-  font-size: 14px;
+  border: 1px solid var(--field-border);
+  border-radius: 18px;
+  background: var(--field-background);
 }
 
-.ctas a {
+.fileField {
   display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 40px;
-  padding: 0 16px;
-  border-radius: 128px;
-  border: 1px solid transparent;
-  transition: 0.2s;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border-style: dashed;
+}
+
+.fileField input {
+  width: 100%;
+  color: var(--text-primary);
+}
+
+.fileField input::file-selector-button {
+  margin-right: 16px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
   cursor: pointer;
-  width: fit-content;
-  font-weight: 500;
 }
 
-a.primary {
-  background: var(--text-primary);
-  color: var(--background);
-  gap: 8px;
+.fileField p {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
 }
 
-a.secondary {
-  border-color: var(--button-secondary-border);
+.field textarea {
+  min-height: 220px;
+  padding: 18px 20px;
+  resize: vertical;
+  font: inherit;
+  color: var(--text-primary);
 }
 
-/* Enable hover only on non-touch devices */
+.field textarea::placeholder {
+  color: #94a3b8;
+}
+
+.field textarea:focus,
+.fileField:focus-within {
+  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+.submitButton {
+  align-self: flex-start;
+  padding: 14px 22px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
 @media (hover: hover) and (pointer: fine) {
-  a.primary:hover {
-    background: var(--button-primary-hover);
-    border-color: transparent;
-  }
-
-  a.secondary:hover {
-    background: var(--button-secondary-hover);
-    border-color: transparent;
+  .submitButton:hover,
+  .fileField input::file-selector-button:hover {
+    background: var(--accent-hover);
   }
 }
 
 @media (max-width: 600px) {
-  .main {
-    padding: 48px 24px;
+  .page {
+    padding: 24px 16px;
   }
 
-  .intro {
-    gap: 16px;
+  .card {
+    padding: 24px;
+    border-radius: 20px;
   }
 
-  .intro h1 {
-    font-size: 32px;
-    line-height: 40px;
-    letter-spacing: -1.92px;
+  .field textarea {
+    min-height: 180px;
+  }
+
+  .submitButton {
+    width: 100%;
+    justify-content: center;
   }
 }
 
 @media (prefers-color-scheme: dark) {
-  .logo {
-    filter: invert();
-  }
-
   .page {
-    --background: #000;
-    --foreground: #000;
-
-    --text-primary: #ededed;
-    --text-secondary: #999;
-
-    --button-primary-hover: #ccc;
-    --button-secondary-hover: #1a1a1a;
-    --button-secondary-border: #1a1a1a;
+    --page-background: linear-gradient(180deg, #020617 0%, #0f172a 100%);
+    --card-background: rgba(15, 23, 42, 0.92);
+    --card-border: rgba(148, 163, 184, 0.2);
+    --text-primary: #e2e8f0;
+    --text-secondary: #cbd5e1;
+    --field-border: rgba(148, 163, 184, 0.3);
+    --field-background: rgba(15, 23, 42, 0.75);
+    --accent: #60a5fa;
+    --accent-hover: #3b82f6;
   }
 }

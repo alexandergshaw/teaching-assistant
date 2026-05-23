@@ -355,7 +355,6 @@ Rules:
 - Always find at least one deduction for a submission, but be generous/lenient in your evaluation.
 - For every deduction, explicitly cite the affected rubric area and the exact reason from the submission.
 - Grade generously by default, but do not automatically award full points when an explicit rubric violation is present.
-- Only deduct points when there is clear, explicit evidence of a rubric violation in the submission.
 - If nothing in the submission explicitly violates a rubric area, award full points for that area.
 - Do not deduct points for ambiguity, missing assumptions, or speculative issues that are not explicit rubric violations.
 - In overallComment, reference rubric areas by name when summarizing strengths and weaknesses.

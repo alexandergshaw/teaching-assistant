@@ -18,6 +18,19 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Environment Variables
+
+Set these values in your local `.env.local` and in your deployment provider:
+
+- `GEMINI_API_KEY` (required)
+- `GEMINI_MODEL` (optional, default: `gemini-2.0-flash`)
+- `GEMINI_MAX_OUTPUT_TOKENS` (optional, default: `700`)
+- `GRADE_MAX_SUBMISSIONS` (optional, default: `5`)
+- `GRADE_MAX_CHARS_PER_SUBMISSION` (optional, default: `12000`)
+- `GRADE_INTER_REQUEST_DELAY_MS` (optional, default: `1200`)
+
+The grading pipeline uses these limits to reduce free-tier quota spikes by capping per-run workload and pacing requests.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More

@@ -578,6 +578,130 @@ Write the content for the "${section.heading}" section of this syllabus. Be spec
   }
 }
 
+export async function reviseSyllabusAction(
+  courseTitle: string,
+  sections: SyllabusSection[],
+  contents: string[],
+  templateText: string,
+  revisionPrompt: string,
+  files: Array<{ name: string; base64: string; mimeType: string }> = []
+): Promise<{ contents: string[] } | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const syllabusText = sections
+      .map((s, i) => `${s.heading}:\n${contents[i] || "(empty)"}`)
+      .join("\n\n");
+
+    const templateBlock = templateText
+      ? `\n\nORIGINAL SYLLABUS TEMPLATE:\n${templateText}`
+      : "";
+
+    const prompt = `You are revising a university course syllabus for "${courseTitle}".${templateBlock}
+
+CURRENT SYLLABUS:
+${syllabusText}
+
+REVISION INSTRUCTIONS:
+${revisionPrompt}
+
+Return ONLY valid JSON with updated content for all ${sections.length} sections in the same order:
+{
+  "sections": [
+    { "heading": "Section Name", "content": "Updated content..." }
+  ]
+}
+
+Requirements:
+- Preserve all section headings exactly as shown.
+- Apply the revision instructions intelligently; leave unaffected sections unchanged.
+- Do not include any text outside the JSON object.`;
+
+    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+      { text: prompt },
+    ];
+
+    for (const file of files) {
+      if (file.mimeType === "application/pdf" || file.mimeType.startsWith("image/")) {
+        parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
+      } else if (file.mimeType.startsWith("text/")) {
+        const text = Buffer.from(file.base64, "base64").toString("utf-8").trim();
+        if (text) parts.push({ text: `\n\nATTACHED FILE (${file.name}):\n${text}` });
+      } else {
+        const ext = file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "";
+        if (ext === "docx") {
+          try {
+            const JSZip = (await import("jszip")).default;
+            const buffer = Buffer.from(file.base64, "base64");
+            const zip = await JSZip.loadAsync(buffer);
+            const documentXml = zip.file("word/document.xml");
+            if (documentXml) {
+              let xml = await documentXml.async("string");
+              xml = xml
+                .replace(/<w:tab\s*\/?>/g, "\t")
+                .replace(/<w:br\s*\/?>/g, "\n")
+                .replace(/<w:p[^>]*>/g, "\n")
+                .replace(/<[^>]+>/g, "");
+              const text = xml.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+              if (text) parts.push({ text: `\n\nATTACHED FILE (${file.name}):\n${text}` });
+            }
+          } catch { /* skip unreadable file */ }
+        }
+      }
+    }
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Syllabus revision failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const trimmed = raw.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1) {
+      return { error: "Could not parse revised syllabus from the model response." };
+    }
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      sections?: Array<{ heading?: string; content?: string }>;
+    };
+
+    const updatedContents = sections.map((section, i) => {
+      // Prefer index-based match, fall back to heading match.
+      const byIndex = parsed.sections?.[i];
+      if (byIndex?.content?.trim()) return byIndex.content.trim();
+      const byHeading = parsed.sections?.find(
+        (s) => s.heading?.trim().toLowerCase() === section.heading.toLowerCase()
+      );
+      return byHeading?.content?.trim() ?? contents[i] ?? "";
+    });
+
+    return { contents: updatedContents };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
 export interface TestGeminiState {
   result: string | null;
   error: string | null;

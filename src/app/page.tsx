@@ -133,7 +133,7 @@ export default function Home() {
 
         {run && run.results.length === 0 && (
           <p className={styles.emptyState}>
-            No text-based submissions found in the zip archive.
+            No supported submission files were found in the zip archive.
           </p>
         )}
 

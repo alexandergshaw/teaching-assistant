@@ -73,6 +73,8 @@ const OFFICE_FILE_TYPE_HINTS: Record<string, SupportedFileType> = {
   rtf: "rtf",
 };
 
+const MAX_NESTED_ZIP_DEPTH = 3;
+
 function getFileExtension(name: string): string {
   const lastDot = name.lastIndexOf(".");
   if (lastDot === -1 || lastDot === name.length - 1) {
@@ -129,23 +131,45 @@ export interface GradingRun {
 async function extractSubmissions(
   zipBuffer: ArrayBuffer
 ): Promise<Record<string, string>> {
-  const zip = await JSZip.loadAsync(zipBuffer);
   const submissions: Record<string, string> = {};
 
-  await Promise.all(
-    Object.entries(zip.files).map(async ([name, file]) => {
-      if (file.dir) return;
+  async function collectFromZip(
+    zip: JSZip,
+    depth: number,
+    parentPath: string
+  ): Promise<void> {
+    await Promise.all(
+      Object.entries(zip.files).map(async ([name, file]) => {
+        if (file.dir) return;
 
-      try {
-        const extractedText = await extractTextFromFile(name, file);
-        if (extractedText && extractedText.trim()) {
-          submissions[name] = extractedText;
+        const fullName = parentPath ? `${parentPath}/${name}` : name;
+        const extension = getFileExtension(name);
+
+        if (extension === "zip" && depth < MAX_NESTED_ZIP_DEPTH) {
+          try {
+            const nestedBuffer = await file.async("arraybuffer");
+            const nestedZip = await JSZip.loadAsync(nestedBuffer);
+            await collectFromZip(nestedZip, depth + 1, fullName);
+          } catch {
+            // Continue when a nested archive cannot be opened.
+          }
+          return;
         }
-      } catch {
-        // Skip files that cannot be parsed; continue grading other submissions.
-      }
-    })
-  );
+
+        try {
+          const extractedText = await extractTextFromFile(name, file);
+          if (extractedText && extractedText.trim()) {
+            submissions[fullName] = extractedText;
+          }
+        } catch {
+          // Skip files that cannot be parsed; continue grading other submissions.
+        }
+      })
+    );
+  }
+
+  const zip = await JSZip.loadAsync(zipBuffer);
+  await collectFromZip(zip, 0, "");
 
   return submissions;
 }

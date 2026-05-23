@@ -3,7 +3,7 @@
 import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
-import { gradeAction, testGeminiAction, generateLessonPlanAction, type GradeActionState, type TestGeminiState } from "./actions";
+import { gradeAction, testGeminiAction, generateLessonPlanAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult } from "./actions";
 import styles from "./page.module.css";
 
 type PreviewFile = {
@@ -171,6 +171,7 @@ export default function Home() {
   const [lessonContext, setLessonContext] = useState("");
   const [isGeneratingLesson, setIsGeneratingLesson] = useState(false);
   const [lessonError, setLessonError] = useState<string | null>(null);
+  const [lessonPlanPreview, setLessonPlanPreview] = useState<GenerateLessonPlanResult | null>(null);
   const lessonContextFileRef = useRef<HTMLInputElement>(null);
   const run = state.run;
 
@@ -371,17 +372,28 @@ export default function Home() {
         return;
       }
 
+      setLessonPlanPreview(result);
+    } catch (err) {
+      setLessonError(err instanceof Error ? err.message : "Generation failed.");
+    } finally {
+      setIsGeneratingLesson(false);
+    }
+  };
+
+  const handleDownloadLessonPlan = async () => {
+    if (!lessonPlanPreview) return;
+    try {
       const { default: PptxGenJS } = await import("pptxgenjs");
       const prs = new PptxGenJS();
       prs.layout = "LAYOUT_WIDE";
 
       const titleSlide = prs.addSlide();
-      titleSlide.addText(result.presentationTitle, {
+      titleSlide.addText(lessonPlanPreview.presentationTitle, {
         x: 0.5, y: 2.2, w: "90%", h: 1.8,
         fontSize: 40, bold: true, align: "center", color: "1a1a2e",
       });
 
-      for (const slide of result.slides) {
+      for (const slide of lessonPlanPreview.slides) {
         const s = prs.addSlide();
         s.addText(slide.title, {
           x: 0.5, y: 0.3, w: "90%", h: 1,
@@ -395,12 +407,10 @@ export default function Home() {
         }
       }
 
-      const safeName = result.presentationTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+      const safeName = lessonPlanPreview.presentationTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
       await prs.writeFile({ fileName: `${safeName}.pptx` });
     } catch (err) {
-      setLessonError(err instanceof Error ? err.message : "Generation failed.");
-    } finally {
-      setIsGeneratingLesson(false);
+      setLessonError(err instanceof Error ? err.message : "Download failed.");
     }
   };
 
@@ -854,6 +864,61 @@ export default function Home() {
           </section>
         )}
       </div>
+
+      {lessonPlanPreview && (
+        <div className={styles.previewBackdrop} onClick={() => setLessonPlanPreview(null)}>
+          <section
+            className={styles.lessonPreviewModal}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Lesson plan preview"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.previewHeader}>
+              <div>
+                <h3>{lessonPlanPreview.presentationTitle}</h3>
+                <p className={styles.previewMeta}>{lessonPlanPreview.slides.length} slides</p>
+              </div>
+              <button
+                type="button"
+                className={styles.previewCloseButton}
+                onClick={() => setLessonPlanPreview(null)}
+              >
+                Close
+              </button>
+            </div>
+            <ol className={styles.lessonSlideList}>
+              {lessonPlanPreview.slides.map((slide, i) => (
+                <li key={i} className={styles.lessonSlideCard}>
+                  <span className={styles.lessonSlideNum}>Slide {i + 1}</span>
+                  <p className={styles.lessonSlideTitle}>{slide.title}</p>
+                  {slide.bullets.length > 0 && (
+                    <ul className={styles.lessonSlideBullets}>
+                      {slide.bullets.map((b, j) => <li key={j}>{b}</li>)}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ol>
+            <div className={styles.lessonPreviewFooter}>
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleDownloadLessonPlan}
+              >
+                Download PPTX
+              </button>
+              <button
+                type="button"
+                className={styles.downloadButton}
+                onClick={() => setLessonPlanPreview(null)}
+              >
+                Close
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {selectedPreview && (
         <div className={styles.previewBackdrop} onClick={handleClosePreview}>

@@ -1,0 +1,39 @@
+"use server";
+
+import { gradeSubmissions, type GradingRun } from "@/lib/grade";
+
+export interface GradeActionState {
+  run: GradingRun | null;
+  error: string | null;
+}
+
+export async function gradeAction(
+  _prev: GradeActionState,
+  formData: FormData
+): Promise<GradeActionState> {
+  const file = formData.get("studentSubmissions") as File | null;
+  const assignmentInstructions =
+    (formData.get("assignmentInstructions") as string | null) ?? "";
+  const rubric = (formData.get("rubric") as string | null) ?? "";
+
+  if (!file || file.size === 0) {
+    return { run: null, error: "Please upload a student submissions zip file." };
+  }
+
+  if (!assignmentInstructions.trim()) {
+    return { run: null, error: "Please provide assignment instructions." };
+  }
+
+  if (!rubric.trim()) {
+    return { run: null, error: "Please provide a rubric." };
+  }
+
+  try {
+    const zipBuffer = await file.arrayBuffer();
+    const run = await gradeSubmissions(zipBuffer, assignmentInstructions, rubric);
+    return { run, error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "An unexpected error occurred.";
+    return { run: null, error: message };
+  }
+}

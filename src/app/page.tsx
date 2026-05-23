@@ -68,16 +68,30 @@ function formatFeedback(text: string): string {
   return text.replace(/\s*[\u2013\u2014]\s*/g, ", ");
 }
 
-type RubricRow = { area: string; weight: string; description: string };
+type RubricSubcategory = { label: string; description: string };
+type RubricRow = { area: string; weight: string; description: string; subcategories: RubricSubcategory[] };
 
 function parseGeneratedRubric(text: string): RubricRow[] | null {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const lines = text.split("\n");
   const rows: RubricRow[] = [];
+  let current: RubricRow | null = null;
   for (const line of lines) {
-    const match = line.match(/^(.+?)\s*\((\d+(?:\.\d+)?\s*%?)\)\s*:\s*(.+)$/);
-    if (!match) return null;
-    rows.push({ area: match[1].trim(), weight: match[2].trim(), description: match[3].trim() });
+    if (!line.trim()) continue;
+    if (/^\s/.test(line)) {
+      if (!current) continue;
+      const subLine = line.trim().replace(/^[-•]\s*/, "");
+      const subMatch = subLine.match(/^(.+?)\s*:\s*(.+)$/);
+      if (subMatch) {
+        current.subcategories.push({ label: subMatch[1].trim(), description: subMatch[2].trim() });
+      }
+    } else {
+      const match = line.trim().match(/^(.+?)\s*\((\d+(?:\.\d+)?\s*%?)\)\s*:\s*(.*)$/);
+      if (!match) continue;
+      if (current) rows.push(current);
+      current = { area: match[1].trim(), weight: match[2].trim(), description: match[3].trim(), subcategories: [] };
+    }
   }
+  if (current) rows.push(current);
   return rows.length > 0 ? rows : null;
 }
 
@@ -621,7 +635,7 @@ export default function Home() {
                     <tr>
                       <th>Criterion</th>
                       <th>Weight</th>
-                      <th>Description</th>
+                      <th>Performance Levels</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -629,7 +643,15 @@ export default function Home() {
                       <tr key={row.area}>
                         <td>{row.area}</td>
                         <td>{row.weight.endsWith("%") ? row.weight : `${row.weight}%`}</td>
-                        <td>{row.description}</td>
+                        <td>
+                          {row.subcategories.length > 0 ? (
+                            <ul className={styles.rubricSubcategoryList}>
+                              {row.subcategories.map((sub) => (
+                                <li key={sub.label}><strong>{sub.label}:</strong> {sub.description}</li>
+                              ))}
+                            </ul>
+                          ) : row.description}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1021,15 +1043,23 @@ export default function Home() {
                         <tr>
                           <th>Area</th>
                           <th>Weight</th>
-                          <th>Description</th>
+                          <th>Performance Levels</th>
                         </tr>
                       </thead>
                       <tbody>
                         {rows.map((row, i) => (
                           <tr key={i}>
                             <td>{row.area}</td>
-                            <td>{row.weight}</td>
-                            <td>{row.description}</td>
+                            <td>{row.weight.endsWith("%") ? row.weight : `${row.weight}%`}</td>
+                            <td>
+                              {row.subcategories.length > 0 ? (
+                                <ul className={styles.rubricSubcategoryList}>
+                                  {row.subcategories.map((sub) => (
+                                    <li key={sub.label}><strong>{sub.label}:</strong> {sub.description}</li>
+                                  ))}
+                                </ul>
+                              ) : row.description}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

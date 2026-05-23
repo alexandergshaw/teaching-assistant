@@ -62,6 +62,39 @@
   gap: 24px;
 }
 
+.loadingState {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--field-border) 65%);
+  background: color-mix(in srgb, var(--field-background) 84%, var(--accent) 16%);
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  margin-top: 4px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 20%, transparent 80%);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+.loadingTitle {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.loadingText {
+  margin-top: 4px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -260,6 +293,16 @@
 
 .matrix tbody tr:last-child td {
   border-bottom: none;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 600px) {

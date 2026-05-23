@@ -201,6 +201,18 @@ export default function Home() {
         </div>
 
         <form className={styles.form} action={formAction}>
+          {pending && (
+            <div className={styles.loadingState} role="status" aria-live="polite">
+              <span className={styles.spinner} aria-hidden="true" />
+              <div>
+                <p className={styles.loadingTitle}>Grading in progress</p>
+                <p className={styles.loadingText}>
+                  Reviewing submissions now. This can take a moment for larger archives.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className={styles.field}>
             <label htmlFor="student-submissions">student submissions</label>
             <div className={styles.fileField}>

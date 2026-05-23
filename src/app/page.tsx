@@ -14,10 +14,6 @@ type PreviewFile = {
 };
 
 const initialState: GradeActionState = { run: null, error: null };
-const STORAGE_KEYS = {
-  assignmentInstructions: "ta.assignmentInstructions",
-  rubric: "ta.rubric",
-};
 
 type SortDirection = "asc" | "desc";
 
@@ -54,14 +50,6 @@ function parseScoreValue(value: string): number | null {
 
   const parsed = Number.parseFloat(match[0]);
   return Number.isNaN(parsed) ? null : parsed;
-}
-
-function readSessionItem(key: string): string {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return sessionStorage.getItem(key) ?? "";
 }
 
 function escapeCsvCell(value: string): string {
@@ -123,10 +111,8 @@ function CopyIcon() {
 
 export default function Home() {
   const [state, formAction, pending] = useActionState(gradeAction, initialState);
-  const [assignmentInstructions, setAssignmentInstructions] = useState(() =>
-    readSessionItem(STORAGE_KEYS.assignmentInstructions)
-  );
-  const [rubric, setRubric] = useState(() => readSessionItem(STORAGE_KEYS.rubric));
+  const [assignmentInstructions, setAssignmentInstructions] = useState("");
+  const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -244,15 +230,11 @@ export default function Home() {
   const handleAssignmentInstructionsChange = (
     event: ChangeEvent<HTMLTextAreaElement>
   ) => {
-    const next = event.target.value;
-    setAssignmentInstructions(next);
-    sessionStorage.setItem(STORAGE_KEYS.assignmentInstructions, next);
+    setAssignmentInstructions(event.target.value);
   };
 
   const handleRubricChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    const next = event.target.value;
-    setRubric(next);
-    sessionStorage.setItem(STORAGE_KEYS.rubric, next);
+    setRubric(event.target.value);
   };
 
   const handleExportCsv = () => {

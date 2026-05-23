@@ -7,6 +7,7 @@ import {
   generateRubric,
   type GradingRun,
 } from "@/lib/grade";
+import { OfficeParser } from "officeparser";
 import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
 
 export interface SlideData {
@@ -363,10 +364,35 @@ Requirements:
 - Keep headings short and clear, exactly as they appear in the template.
 - Do not include any text outside the JSON object.`;
 
-    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
-      { text: prompt },
-      { inlineData: { mimeType: file.mimeType, data: file.base64 } },
-    ];
+    // Gemini natively supports PDF and text/*; extract text from office formats first.
+    const isNativelySupported =
+      file.mimeType === "application/pdf" ||
+      file.mimeType.startsWith("text/") ||
+      file.mimeType.startsWith("image/");
+
+    let parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>;
+
+    if (isNativelySupported) {
+      parts = [
+        { text: prompt },
+        { inlineData: { mimeType: file.mimeType, data: file.base64 } },
+      ];
+    } else {
+      // Extract plain text from DOCX / PPTX / XLSX / etc. using officeparser.
+      const buffer = Buffer.from(file.base64, "base64");
+      let extractedText = "";
+      try {
+        const ast = await OfficeParser.parseOffice(buffer);
+        const conversion = await ast.to("text");
+        extractedText = typeof conversion.value === "string" ? conversion.value.trim() : "";
+      } catch {
+        return { error: "Could not read the uploaded file. Please try a .txt, .pdf, or .docx file." };
+      }
+      if (!extractedText) {
+        return { error: "The uploaded file appears to be empty or could not be read." };
+      }
+      parts = [{ text: `${prompt}\n\nSYLLABUS TEMPLATE TEXT:\n${extractedText}` }];
+    }
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,

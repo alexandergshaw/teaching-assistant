@@ -458,6 +458,9 @@
 .matrixFileItem {
   margin: 0;
   line-height: 1.35;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .matrixFileButton {
@@ -485,6 +488,39 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+.fileDownloadButton {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 5px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.fileDownloadButton svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .fileDownloadButton:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+}
+
+.fileDownloadButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .chipRow {

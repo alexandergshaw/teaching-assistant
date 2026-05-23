@@ -228,6 +228,8 @@ export interface SubmittedFileInfo {
   extension: string;
   previewContent: string;
   previewTruncated: boolean;
+  rawBase64?: string;
+  mimeType?: string;
 }
 
 export interface GradeResult {
@@ -256,15 +258,50 @@ interface InferredFileNameLookup {
   byBase: Map<string, InferredFileNameParts>;
 }
 
+const MIME_TYPES: Record<string, string> = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  doc: "application/msword",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ppt: "application/vnd.ms-powerpoint",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xls: "application/vnd.ms-excel",
+  odt: "application/vnd.oasis.opendocument.text",
+  odp: "application/vnd.oasis.opendocument.presentation",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  rtf: "application/rtf",
+  txt: "text/plain",
+  md: "text/markdown",
+  py: "text/x-python",
+  js: "text/javascript",
+  ts: "text/typescript",
+  tsx: "text/typescript",
+  jsx: "text/javascript",
+  html: "text/html",
+  css: "text/css",
+  json: "application/json",
+  xml: "application/xml",
+  csv: "text/csv",
+  java: "text/x-java-source",
+  ipynb: "application/json",
+  zip: "application/zip",
+};
+
+function getMimeType(extension: string): string {
+  return MIME_TYPES[extension.toLowerCase()] ?? "application/octet-stream";
+}
+
 /** Extract text-based files from a zip archive. */
 export async function extractSubmissions(
   zipBuffer: ArrayBuffer
 ): Promise<{
   submissions: Record<string, string>;
+  rawData: Record<string, string>;
   attemptedSupportedFiles: number;
   failedSupportedFiles: string[];
 }> {
   const submissions: Record<string, string> = {};
+  const rawData: Record<string, string> = {};
   let attemptedSupportedFiles = 0;
   const failedSupportedFiles: string[] = [];
 
@@ -303,6 +340,7 @@ export async function extractSubmissions(
           const extractedText = await extractTextFromFile(name, file);
           if (extractedText && extractedText.trim()) {
             submissions[fullName] = extractedText;
+            rawData[fullName] = await file.async("base64");
           } else {
             failedSupportedFiles.push(fullName);
           }
@@ -318,6 +356,7 @@ export async function extractSubmissions(
 
   return {
     submissions,
+    rawData,
     attemptedSupportedFiles,
     failedSupportedFiles,
   };
@@ -1043,7 +1082,8 @@ function inferStudentPrefix(
 
 function groupSubmissionsByStudent(
   submissions: Record<string, string>,
-  inferredLookup?: InferredFileNameLookup
+  inferredLookup?: InferredFileNameLookup,
+  rawData?: Record<string, string>
 ): Array<{
   student: string;
   content: string;
@@ -1087,6 +1127,8 @@ function groupSubmissionsByStudent(
         extension: parsed.extension,
         previewContent: preview.text,
         previewTruncated: preview.truncated,
+        rawBase64: rawData?.[filePath],
+        mimeType: getMimeType(parsed.extension),
       };
     });
 
@@ -1180,14 +1222,15 @@ export async function gradeSubmissions(
   assignmentInstructions: string,
   rubric: string
 ): Promise<GradingRun> {
-  const { submissions, attemptedSupportedFiles, failedSupportedFiles } =
+  const { submissions, rawData, attemptedSupportedFiles, failedSupportedFiles } =
     await extractSubmissions(zipBuffer);
 
   const rawFileNames = Object.keys(submissions);
   const inferredFileNameLookup = await inferFileNameConvention(rawFileNames);
   const studentSubmissions = groupSubmissionsByStudent(
     submissions,
-    inferredFileNameLookup
+    inferredFileNameLookup,
+    rawData
   );
   if (studentSubmissions.length === 0) {
     if (attemptedSupportedFiles > 0) {

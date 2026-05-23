@@ -117,6 +117,15 @@ function CopyIcon() {
   );
 }
 
+function DownloadIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+      <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+    </svg>
+  );
+}
+
 export default function Home() {
   const [state, formAction, pending] = useActionState(gradeAction, initialState);
   const [testState, testAction, testPending] = useActionState(testGeminiAction, initialTestState);
@@ -191,6 +200,21 @@ export default function Home() {
 
     return results;
   }, [run, sortState]);
+
+  const handleDownloadFile = (name: string, extension: string, rawBase64: string, mimeType: string) => {
+    const byteChars = atob(rawBase64);
+    const byteArray = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) {
+      byteArray[i] = byteChars.charCodeAt(i);
+    }
+    const blob = new Blob([byteArray], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name.toLowerCase().endsWith(`.${extension.toLowerCase()}`) ? name : `${name}.${extension}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleSort = (column: SortColumn) => {
     const nextKey = sortColumnKey(column);
@@ -508,6 +532,17 @@ export default function Home() {
                                       ? `${file.name}.${file.extension}`
                                       : file.name}
                                   </button>
+                                  {file.rawBase64 && (
+                                    <button
+                                      type="button"
+                                      className={styles.fileDownloadButton}
+                                      title={`Download ${file.name}`}
+                                      aria-label={`Download ${file.name}`}
+                                      onClick={() => handleDownloadFile(file.name, file.extension, file.rawBase64!, file.mimeType ?? "application/octet-stream")}
+                                    >
+                                      <DownloadIcon />
+                                    </button>
+                                  )}
                                 </li>
                               ))}
                             </ul>

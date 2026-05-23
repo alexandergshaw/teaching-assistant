@@ -359,6 +359,9 @@
   font-size: 0.9rem;
   color: var(--text-primary);
   vertical-align: top;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .matrix th {
@@ -382,6 +385,7 @@
   font-weight: inherit;
   cursor: pointer;
   text-align: left;
+  white-space: normal;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -402,14 +406,14 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 210px;
+  min-width: 0;
 }
 
 .chipRow {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  min-width: 160px;
+  min-width: 0;
 }
 
 .fileChip,
@@ -422,6 +426,8 @@
   border: 1px solid var(--field-border);
   font-size: 0.78rem;
   line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .fileChip {
@@ -473,10 +479,11 @@
 
 .overallFeedbackCell {
   margin: 0;
-  min-width: 240px;
+  min-width: 0;
   font-size: 0.84rem;
   line-height: 1.5;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .previewBackdrop {

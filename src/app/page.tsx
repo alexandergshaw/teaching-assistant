@@ -534,28 +534,33 @@ export default function Home() {
                         <td>{result.student}</td>
                         <td>
                           {result.submittedFiles.length > 0 ? (
-                            <div className={styles.chipRow}>
+                            <ul className={styles.matrixFileList}>
                               {result.submittedFiles.map((file) => (
-                                <button
+                                <li
                                   key={`${result.student}-file-name-${file.name}`}
-                                  type="button"
-                                  className={`${styles.fileChip} ${styles.previewChipButton}`}
-                                  onClick={() =>
-                                    handleOpenPreview(result.student, {
-                                      student: result.student,
-                                      name: file.name,
-                                      extension: file.extension,
-                                      content:
-                                        file.previewContent || "No extracted text available for this file.",
-                                      truncated: file.previewTruncated,
-                                    })
-                                  }
-                                  title={`Preview ${file.name}`}
+                                  className={styles.matrixFileItem}
                                 >
-                                  {file.name}
-                                </button>
+                                  <button
+                                    type="button"
+                                    className={`${styles.fileChip} ${styles.previewChipButton}`}
+                                    onClick={() =>
+                                      handleOpenPreview(result.student, {
+                                        student: result.student,
+                                        name: file.name,
+                                        extension: file.extension,
+                                        content:
+                                          file.previewContent ||
+                                          "No extracted text available for this file.",
+                                        truncated: file.previewTruncated,
+                                      })
+                                    }
+                                    title={`Preview ${file.name}`}
+                                  >
+                                    {file.name}
+                                  </button>
+                                </li>
                               ))}
-                            </div>
+                            </ul>
                           ) : (
                             "-"
                           )}

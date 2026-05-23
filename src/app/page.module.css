@@ -440,6 +440,18 @@
   min-width: 0;
 }
 
+.matrixFileList {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.matrixFileItem {
+  margin: 0;
+}
+
 .chipRow {
   display: flex;
   flex-wrap: wrap;

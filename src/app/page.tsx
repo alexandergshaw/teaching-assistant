@@ -2,6 +2,7 @@
 
 import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Tab, Tabs } from "@mui/material";
 import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData } from "./actions";
 import styles from "./page.module.css";
@@ -20,7 +21,7 @@ const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
 type SortDirection = "asc" | "desc";
-type ActiveTab = "grading" | "lesson-planning";
+type ActiveTab = "grading" | "lesson-planning" | "course-planning";
 
 type SortColumn =
   | { kind: "student" }
@@ -176,7 +177,8 @@ export default function Home() {
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
-   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "lesson-planning";
     const saved = localStorage.getItem("ta-active-tab");
     return saved === "grading" || saved === "lesson-planning" ? saved : "lesson-planning";
@@ -612,7 +614,13 @@ export default function Home() {
       <div className={styles.tabContainer}>
         <Tabs
           value={activeTab}
-          onChange={(_, v: ActiveTab) => setActiveTab(v)}
+          onChange={(_, v: ActiveTab) => {
+            if (v === "course-planning") {
+              router.push("/course-planning");
+              return;
+            }
+            setActiveTab(v);
+          }}
           sx={{
             borderBottom: "1px solid var(--field-border)",
             marginBottom: "0",
@@ -633,6 +641,7 @@ export default function Home() {
             minHeight: 44,
           }}
         >
+          <Tab label="Course Planning" value="course-planning" disableRipple />
           <Tab label="Lesson Planning" value="lesson-planning" disableRipple />
           <Tab label="Grading" value="grading" disableRipple />
         </Tabs>

@@ -362,7 +362,8 @@
 
 .matrix {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   min-width: 1200px;
   table-layout: fixed;
 }
@@ -433,6 +434,11 @@
 
 .matrix tbody tr:nth-child(even) td:first-child {
   background: color-mix(in srgb, var(--field-background) 95%, var(--accent) 5%);
+}
+
+.matrix tbody td.cellDeducted,
+.matrix tbody tr:nth-child(even) td.cellDeducted {
+  background: #fef2f2;
 }
 
 .matrixCellDetail {

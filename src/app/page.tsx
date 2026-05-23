@@ -521,7 +521,7 @@ export default function Home() {
                           return (
                             <td
                               key={`${result.student}-${areaName}`}
-                              style={area && hasDeduction(area.score) ? { background: '#fef2f2' } : undefined}
+                              className={area && hasDeduction(area.score) ? styles.cellDeducted : undefined}
                             >
                               {area ? (
                                 <div className={styles.matrixCellDetail}>

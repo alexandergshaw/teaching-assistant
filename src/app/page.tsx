@@ -3,7 +3,7 @@
 import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
-import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData } from "./actions";
+import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData } from "./actions";
 import styles from "./page.module.css";
 
 type PreviewFile = {
@@ -173,7 +173,8 @@ export default function Home() {
   const [lessonError, setLessonError] = useState<string | null>(null);
   const [lessonPlanPreview, setLessonPlanPreview] = useState<GenerateLessonPlanResult | null>(null);
   const [assignmentPreview, setAssignmentPreview] = useState<AssignmentData | null>(null);
-  const [previewTab, setPreviewTab] = useState<"slides" | "assignment">("slides");
+  const [previewTab, setPreviewTab] = useState<"slides" | "assignment" | "rubric">("slides");
+  const [rubricPreview, setRubricPreview] = useState<string | null>(null);
   const [savedLessonFiles, setSavedLessonFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
   const [revisionPrompt, setRevisionPrompt] = useState("");
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -373,9 +374,10 @@ export default function Home() {
 
       setSavedLessonFiles(files);
 
-      const [slideResult, assignmentResult] = await Promise.all([
+      const [slideResult, assignmentResult, rubricResult] = await Promise.all([
         generateLessonPlanAction(moduleObjectives, lessonContext, files),
         generateAssignmentAction(moduleObjectives, lessonContext, files),
+        generateAssignmentRubricAction(moduleObjectives, lessonContext),
       ]);
 
       if ("error" in slideResult) {
@@ -385,6 +387,7 @@ export default function Home() {
 
       setLessonPlanPreview(slideResult);
       setAssignmentPreview("error" in assignmentResult ? null : assignmentResult);
+      setRubricPreview(typeof rubricResult === "string" ? rubricResult : null);
       setPreviewTab("slides");
       setRevisionPrompt("");
     } catch (err) {
@@ -527,8 +530,7 @@ export default function Home() {
         {activeTab === "grading" && (
           <section className={styles.card}>
         <div className={styles.header}>
-          <p className={styles.eyebrow}>Teaching Assistant</p>
-          <h1>Prepare a Grading Run</h1>
+          <h1>Grading</h1>
           <p>
             Add the student submissions and the grading context needed to review
             an assignment.
@@ -920,7 +922,9 @@ export default function Home() {
                 <p className={styles.previewMeta}>
                   {previewTab === "slides"
                     ? `${lessonPlanPreview.slides.length} slides`
-                    : assignmentPreview?.title ?? "Assignment"}
+                    : previewTab === "assignment"
+                      ? (assignmentPreview?.title ?? "Assignment")
+                      : "Grading Rubric"}
                 </p>
               </div>
               <button
@@ -947,41 +951,29 @@ export default function Home() {
               >
                 Assignment
               </button>
+              <button
+                type="button"
+                className={`${styles.lessonInnerTab}${previewTab === "rubric" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                onClick={() => setPreviewTab("rubric")}
+              >
+                Rubric
+              </button>
             </div>
 
             {previewTab === "slides" && (
-              <>
-                <ol className={styles.lessonSlideList}>
-                  {lessonPlanPreview.slides.map((slide, i) => (
-                    <li key={i} className={styles.lessonSlideCard}>
-                      <span className={styles.lessonSlideNum}>Slide {i + 1}</span>
-                      <p className={styles.lessonSlideTitle}>{slide.title}</p>
-                      {slide.bullets.length > 0 && (
-                        <ul className={styles.lessonSlideBullets}>
-                          {slide.bullets.map((b, j) => <li key={j}>{b}</li>)}
-                        </ul>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-                <div className={styles.lessonRevisionRow}>
-                  <textarea
-                    className={styles.lessonRevisionArea}
-                    placeholder="Revision instructions — e.g. add a slide on X, make analogies more sports-focused, shorten slide 3…"
-                    value={revisionPrompt}
-                    onChange={(e) => setRevisionPrompt(e.target.value)}
-                    rows={2}
-                  />
-                  <button
-                    type="button"
-                    className={styles.submitButton}
-                    onClick={handleRegenerateLesson}
-                    disabled={isRegenerating}
-                  >
-                    {isRegenerating ? "Regenerating…" : "Regenerate"}
-                  </button>
-                </div>
-              </>
+              <ol className={styles.lessonSlideList}>
+                {lessonPlanPreview.slides.map((slide, i) => (
+                  <li key={i} className={styles.lessonSlideCard}>
+                    <span className={styles.lessonSlideNum}>Slide {i + 1}</span>
+                    <p className={styles.lessonSlideTitle}>{slide.title}</p>
+                    {slide.bullets.length > 0 && (
+                      <ul className={styles.lessonSlideBullets}>
+                        {slide.bullets.map((b, j) => <li key={j}>{b}</li>)}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ol>
             )}
 
             {previewTab === "assignment" && (
@@ -1018,6 +1010,56 @@ export default function Home() {
                 )}
               </div>
             )}
+
+            {previewTab === "rubric" && (
+              <div className={styles.assignmentContent}>
+                {rubricPreview ? (() => {
+                  const rows = parseGeneratedRubric(rubricPreview);
+                  return rows ? (
+                    <table className={styles.generatedRubricTable}>
+                      <thead>
+                        <tr>
+                          <th>Area</th>
+                          <th>Weight</th>
+                          <th>Description</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((row, i) => (
+                          <tr key={i}>
+                            <td>{row.area}</td>
+                            <td>{row.weight}</td>
+                            <td>{row.description}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <pre className={styles.generatedRubricBody}>{rubricPreview}</pre>
+                  );
+                })() : (
+                  <p className={styles.emptyState}>Rubric generation failed — try regenerating.</p>
+                )}
+              </div>
+            )}
+
+            <div className={styles.lessonRevisionRow}>
+              <textarea
+                className={styles.lessonRevisionArea}
+                placeholder="Revision instructions — e.g. add a slide on X, make analogies more sports-focused, shorten slide 3…"
+                value={revisionPrompt}
+                onChange={(e) => setRevisionPrompt(e.target.value)}
+                rows={2}
+              />
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleRegenerateLesson}
+                disabled={isRegenerating}
+              >
+                {isRegenerating ? "Regenerating…" : "Regenerate"}
+              </button>
+            </div>
 
             <div className={styles.lessonPreviewFooter}>
               <button

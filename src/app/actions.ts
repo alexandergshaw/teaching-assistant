@@ -243,6 +243,18 @@ Requirements:
   }
 }
 
+export async function generateAssignmentRubricAction(
+  moduleObjectives: string,
+  contextText: string
+): Promise<string | { error: string }> {
+  try {
+    const instructions = `MODULE OBJECTIVES:\n${moduleObjectives}${contextText ? `\n\nCONTEXT:\n${contextText}` : ""}`;
+    return await generateRubric(instructions);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Rubric generation failed." };
+  }
+}
+
 export interface TestGeminiState {
   result: string | null;
   error: string | null;

@@ -228,6 +228,8 @@ export interface SubmittedFileInfo {
   extension: string;
   previewContent: string;
   previewTruncated: boolean;
+  rawBase64?: string;
+  mimeType?: string;
 }
 
 export interface GradeResult {
@@ -256,15 +258,50 @@ interface InferredFileNameLookup {
   byBase: Map<string, InferredFileNameParts>;
 }
 
+const MIME_TYPES: Record<string, string> = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  doc: "application/msword",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ppt: "application/vnd.ms-powerpoint",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xls: "application/vnd.ms-excel",
+  odt: "application/vnd.oasis.opendocument.text",
+  odp: "application/vnd.oasis.opendocument.presentation",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  rtf: "application/rtf",
+  txt: "text/plain",
+  md: "text/markdown",
+  py: "text/x-python",
+  js: "text/javascript",
+  ts: "text/typescript",
+  tsx: "text/typescript",
+  jsx: "text/javascript",
+  html: "text/html",
+  css: "text/css",
+  json: "application/json",
+  xml: "application/xml",
+  csv: "text/csv",
+  java: "text/x-java-source",
+  ipynb: "application/json",
+  zip: "application/zip",
+};
+
+function getMimeType(extension: string): string {
+  return MIME_TYPES[extension.toLowerCase()] ?? "application/octet-stream";
+}
+
 /** Extract text-based files from a zip archive. */
 export async function extractSubmissions(
   zipBuffer: ArrayBuffer
 ): Promise<{
   submissions: Record<string, string>;
+  rawData: Record<string, string>;
   attemptedSupportedFiles: number;
   failedSupportedFiles: string[];
 }> {
   const submissions: Record<string, string> = {};
+  const rawData: Record<string, string> = {};
   let attemptedSupportedFiles = 0;
   const failedSupportedFiles: string[] = [];
 
@@ -303,6 +340,7 @@ export async function extractSubmissions(
           const extractedText = await extractTextFromFile(name, file);
           if (extractedText && extractedText.trim()) {
             submissions[fullName] = extractedText;
+            rawData[fullName] = await file.async("base64");
           } else {
             failedSupportedFiles.push(fullName);
           }
@@ -318,6 +356,7 @@ export async function extractSubmissions(
 
   return {
     submissions,
+    rawData,
     attemptedSupportedFiles,
     failedSupportedFiles,
   };
@@ -369,7 +408,7 @@ Rules:
 - Mimic how a personable professor would write feedback.
 - Don't use long dashes (—) or short dashes (–) in feedback, as they can cause formatting issues in some LMS platforms. Use colons, parentheses, or commas instead.
 - Write feedback in a direct, student-facing coaching style with short concrete phrases like "Nice job with the formatting" and "Be sure to proofread for spelling mistakes," and second-person words like "you", "your", "yours", and "you're" are allowed. Using the student's name is strictly prohibited.
-- Beyond rubric scoring, act as a subject matter expert on the topic being graded. In at least the overallComment (and any rubricResults possible), include at least one piece of genuine industry-level insight, a best practice, or a forward-looking tip that goes beyond the rubric criteria, helping the student understand real-world relevance or how to push their work to a professional standard.
+- Beyond rubric scoring, act as a subject matter expert on the topic being graded. In at least the overallComment (and any rubricResults possible), include at least one piece of genuine industry-level insight, a best practice, or a forward-looking tip that goes beyond the rubric criteria, helping the student understand real-world relevance or how to push their work to a professional standard, and is extremelyrelevant to the content of their submission.
 - Do not include markdown fences or any text outside the JSON object.`;
 }
 
@@ -1043,7 +1082,8 @@ function inferStudentPrefix(
 
 function groupSubmissionsByStudent(
   submissions: Record<string, string>,
-  inferredLookup?: InferredFileNameLookup
+  inferredLookup?: InferredFileNameLookup,
+  rawData?: Record<string, string>
 ): Array<{
   student: string;
   content: string;
@@ -1087,6 +1127,8 @@ function groupSubmissionsByStudent(
         extension: parsed.extension,
         previewContent: preview.text,
         previewTruncated: preview.truncated,
+        rawBase64: rawData?.[filePath],
+        mimeType: getMimeType(parsed.extension),
       };
     });
 
@@ -1180,14 +1222,15 @@ export async function gradeSubmissions(
   assignmentInstructions: string,
   rubric: string
 ): Promise<GradingRun> {
-  const { submissions, attemptedSupportedFiles, failedSupportedFiles } =
+  const { submissions, rawData, attemptedSupportedFiles, failedSupportedFiles } =
     await extractSubmissions(zipBuffer);
 
   const rawFileNames = Object.keys(submissions);
   const inferredFileNameLookup = await inferFileNameConvention(rawFileNames);
   const studentSubmissions = groupSubmissionsByStudent(
     submissions,
-    inferredFileNameLookup
+    inferredFileNameLookup,
+    rawData
   );
   if (studentSubmissions.length === 0) {
     if (attemptedSupportedFiles > 0) {

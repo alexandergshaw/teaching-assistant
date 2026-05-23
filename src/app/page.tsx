@@ -172,6 +172,9 @@ export default function Home() {
   const [isGeneratingLesson, setIsGeneratingLesson] = useState(false);
   const [lessonError, setLessonError] = useState<string | null>(null);
   const [lessonPlanPreview, setLessonPlanPreview] = useState<GenerateLessonPlanResult | null>(null);
+  const [savedLessonFiles, setSavedLessonFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
+  const [revisionPrompt, setRevisionPrompt] = useState("");
+  const [isRegenerating, setIsRegenerating] = useState(false);
   const lessonContextFileRef = useRef<HTMLInputElement>(null);
   const run = state.run;
 
@@ -366,6 +369,8 @@ export default function Home() {
         }
       }
 
+      setSavedLessonFiles(files);
+
       const result = await generateLessonPlanAction(moduleObjectives, lessonContext, files);
       if ("error" in result) {
         setLessonError(result.error);
@@ -373,10 +378,36 @@ export default function Home() {
       }
 
       setLessonPlanPreview(result);
+      setRevisionPrompt("");
     } catch (err) {
       setLessonError(err instanceof Error ? err.message : "Generation failed.");
     } finally {
       setIsGeneratingLesson(false);
+    }
+  };
+
+  const handleRegenerateLesson = async () => {
+    if (!lessonPlanPreview) return;
+    setIsRegenerating(true);
+    setLessonError(null);
+    try {
+      const result = await generateLessonPlanAction(
+        moduleObjectives,
+        lessonContext,
+        savedLessonFiles,
+        revisionPrompt.trim() || undefined,
+        lessonPlanPreview.slides
+      );
+      if ("error" in result) {
+        setLessonError(result.error);
+        return;
+      }
+      setLessonPlanPreview(result);
+      setRevisionPrompt("");
+    } catch (err) {
+      setLessonError(err instanceof Error ? err.message : "Regeneration failed.");
+    } finally {
+      setIsRegenerating(false);
     }
   };
 
@@ -900,6 +931,23 @@ export default function Home() {
                 </li>
               ))}
             </ol>
+            <div className={styles.lessonRevisionRow}>
+              <textarea
+                className={styles.lessonRevisionArea}
+                placeholder="Revision instructions — e.g. add a slide on X, make analogies more sports-focused, shorten slide 3…"
+                value={revisionPrompt}
+                onChange={(e) => setRevisionPrompt(e.target.value)}
+                rows={2}
+              />
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleRegenerateLesson}
+                disabled={isRegenerating}
+              >
+                {isRegenerating ? "Regenerating…" : "Regenerate"}
+              </button>
+            </div>
             <div className={styles.lessonPreviewFooter}>
               <button
                 type="button"

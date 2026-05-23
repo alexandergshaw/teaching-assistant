@@ -22,7 +22,9 @@ export interface GenerateLessonPlanResult {
 export async function generateLessonPlanAction(
   moduleObjectives: string,
   contextText: string,
-  files: Array<{ name: string; base64: string; mimeType: string }>
+  files: Array<{ name: string; base64: string; mimeType: string }>,
+  revisionPrompt?: string,
+  currentSlides?: SlideData[]
 ): Promise<GenerateLessonPlanResult | { error: string }> {
   try {
     const apiKey = getGeminiApiKey();
@@ -33,13 +35,18 @@ export async function generateLessonPlanAction(
         ? `\n\nATTACHED FILES (${files.length}):\n${files.map((f) => `- ${f.name}`).join("\n")}`
         : "";
 
+    const revisionSection =
+      revisionPrompt && currentSlides
+        ? `\n\nCURRENT SLIDE DECK (JSON):\n${JSON.stringify(currentSlides, null, 2)}\n\nREVISION INSTRUCTIONS:\n${revisionPrompt}\n\nUpdate the slide deck based on the revision instructions. Preserve slides that don't need to change; modify, add, or remove slides as needed.`
+        : "";
+
     const prompt = `You are an expert educator creating a lecture slide deck.
 
 MODULE OBJECTIVES:
 ${moduleObjectives}
 
 CONTEXT:
-${contextText || "(none provided)"}${filesSummary}
+${contextText || "(none provided)"}${filesSummary}${revisionSection}
 
 Create a complete set of lecture slides that fully address the module objectives. Return ONLY valid JSON:
 {

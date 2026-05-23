@@ -906,6 +906,37 @@
   border-top: 1px solid color-mix(in srgb, var(--field-border) 80%, transparent 20%);
 }
 
+.lessonRevisionRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--field-border) 80%, transparent 20%);
+}
+
+.lessonRevisionArea {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--field-border);
+  border-radius: 12px;
+  background: var(--field-background);
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  line-height: 1.5;
+  resize: none;
+}
+
+.lessonRevisionArea::placeholder {
+  color: #94a3b8;
+}
+
+.lessonRevisionArea:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
 @keyframes spin {
   from {
     transform: rotate(0deg);

@@ -203,6 +203,7 @@ export default function Home() {
   type CoursePlanningStep = "form" | "wizard" | "preview";
   const [coursePlanningStep, setCoursePlanningStep] = useState<CoursePlanningStep>("form");
   const [parsedSections, setParsedSections] = useState<SyllabusSection[]>([]);
+  const [syllabusTemplateText, setSyllabusTemplateText] = useState("");
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
   const [sectionContents, setSectionContents] = useState<string[]>([]);
   const [currentSectionInput, setCurrentSectionInput] = useState("");
@@ -603,8 +604,9 @@ export default function Home() {
         mimeType: file.type || "application/octet-stream",
       });
       if ("error" in result) { setCoursePlanningError(result.error); return; }
-      setParsedSections(result);
-      setSectionContents(new Array(result.length).fill(""));
+      setParsedSections(result.sections);
+      setSyllabusTemplateText(result.templateText);
+      setSectionContents(new Array(result.sections.length).fill(""));
       setCurrentSectionIndex(0);
       setCurrentSectionInput("");
       setCoursePlanningStep("wizard");
@@ -629,7 +631,8 @@ export default function Home() {
         const result = await generateSyllabusSectionAction(
           courseTitle,
           parsedSections[currentSectionIndex],
-          completedSections
+          completedSections,
+          syllabusTemplateText || undefined
         );
         if (typeof result !== "string") { setCoursePlanningError(result.error); return; }
         content = result;
@@ -677,7 +680,8 @@ export default function Home() {
         const result = await generateSyllabusSectionAction(
           courseTitle,
           parsedSections[i],
-          completedSections
+          completedSections,
+          syllabusTemplateText || undefined
         );
         if (typeof result !== "string") {
           setCoursePlanningError(result.error);

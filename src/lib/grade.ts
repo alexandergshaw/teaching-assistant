@@ -697,8 +697,8 @@ Create a grading rubric suited to these instructions. Return ONLY valid JSON:
 
 The rubric text must:
 - Contain 3 to 6 grading areas tied directly to the assignment requirements.
-- Format each area on its own line: "[Area Name] ([Points] points): [What earns full credit and how points may be deducted]"
-- Total points must sum to 100.
+- Format each area on its own line: "[Area Name] ([Percentage]%): [What earns full credit and how points may be deducted]"
+- Percentages must sum to 100.
 - Be specific and actionable based on the assignment, not generic.
 - Use plain prose only, no markdown.
 - Do not include text outside the JSON object.`;

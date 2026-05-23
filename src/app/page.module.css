@@ -264,6 +264,51 @@
   color: var(--text-primary);
 }
 
+.generatedRubricTable {
+  margin-top: 12px;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.generatedRubricTable th,
+.generatedRubricTable td {
+  padding: 8px 12px;
+  text-align: left;
+  border: 1px solid var(--field-border);
+  vertical-align: top;
+}
+
+.generatedRubricTable th {
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
+  color: var(--text-secondary);
+}
+
+.generatedRubricTable td:first-child {
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.generatedRubricTable td:nth-child(2) {
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.generatedRubricTable td:last-child {
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.generatedRubricTable tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--field-background) 97%, var(--accent) 3%);
+}
+
 .checklistCard h2 {
   font-size: 1.18rem;
   font-weight: 700;

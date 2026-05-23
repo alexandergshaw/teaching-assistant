@@ -380,11 +380,7 @@ export default function Home() {
           <button className={styles.submitButton} type="submit" disabled={pending}>
             {pending ? "Grading..." : "Start Review"}
           </button>
-        </form>
-
-        <form action={testAction}>
-          <input type="file" name="testZip" accept=".zip" required disabled={testPending} />
-          <button className={styles.submitButton} type="submit" disabled={testPending}>
+          <button className={styles.submitButton} type="submit" formAction={testAction} disabled={testPending}>
             {testPending ? "Testing..." : "Test Gemini with Zip"}
           </button>
         </form>

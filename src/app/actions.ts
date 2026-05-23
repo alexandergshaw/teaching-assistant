@@ -21,7 +21,7 @@ export async function testGeminiAction(
     const apiKey = getGeminiApiKey();
     const model = getGeminiModel();
 
-    const file = formData.get("testZip") as File | null;
+    const file = formData.get("studentSubmissions") as File | null;
     if (!file || file.size === 0) {
       return { result: null, error: "Please select a zip file to test with." };
     }

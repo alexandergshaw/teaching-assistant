@@ -356,7 +356,7 @@ export default function Home() {
       <section className={styles.card}>
         <div className={styles.header}>
           <p className={styles.eyebrow}>Teaching Assistant</p>
-          <h1>Prepare a grading run</h1>
+          <h1>Prepare a Grading Run</h1>
           <p>
             Add the student submissions and the grading context needed to review
             an assignment.
@@ -368,7 +368,7 @@ export default function Home() {
             <div className={styles.loadingState} role="status" aria-live="polite">
               <span className={styles.spinner} aria-hidden="true" />
               <div>
-                <p className={styles.loadingTitle}>Grading in progress</p>
+                <p className={styles.loadingTitle}>Grading In Progress</p>
                 <p className={styles.loadingText}>
                   Reviewing submissions now. This can take a moment for larger archives.
                 </p>
@@ -377,7 +377,7 @@ export default function Home() {
           )}
 
           <div className={styles.field}>
-            <label htmlFor="student-submissions">student submissions</label>
+            <label htmlFor="student-submissions">Student Submissions</label>
             <div className={styles.fileField}>
               <input
                 ref={fileInputRef}
@@ -394,9 +394,7 @@ export default function Home() {
           </div>
 
           <div className={styles.field}>
-            <label htmlFor="assignment-instructions">
-              assignment instructions
-            </label>
+            <label htmlFor="assignment-instructions">Assignment Instructions</label>
             <textarea
               id="assignment-instructions"
               name="assignmentInstructions"
@@ -408,7 +406,7 @@ export default function Home() {
           </div>
 
           <div className={styles.field}>
-            <label htmlFor="rubric">rubric</label>
+            <label htmlFor="rubric">Rubric</label>
             <textarea
               id="rubric"
               name="rubric"
@@ -426,7 +424,7 @@ export default function Home() {
           )}
 
           <button className={styles.submitButton} type="submit" disabled={pending}>
-            {pending ? "Grading…" : "Start review"}
+            {pending ? "Grading..." : "Start Review"}
           </button>
         </form>
 
@@ -438,7 +436,7 @@ export default function Home() {
 
         {run && run.fullCreditChecklist.length > 0 && (
           <section className={styles.checklistCard}>
-            <h2>Full-credit checklist</h2>
+            <h2>Full Credit Checklist</h2>
             <ul>
               {run.fullCreditChecklist.map((item, index) => (
                 <li key={`full-credit-${index + 1}`}>{item}</li>
@@ -450,7 +448,7 @@ export default function Home() {
         {run && run.results.length > 0 && (
           <section className={styles.results}>
             <div className={styles.resultsHeader}>
-              <h2>Grading results</h2>
+              <h2>Grading Results</h2>
               <button
                 className={styles.downloadButton}
                 type="button"

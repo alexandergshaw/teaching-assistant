@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { OfficeParser, type SupportedFileType } from "officeparser";
 import {
   getGeminiApiKey,
   getGeminiInterRequestDelayMs,
@@ -7,6 +8,103 @@ import {
   getGeminiMaxSubmissions,
   getGeminiModel,
 } from "./gemini";
+
+const TEXT_EXTENSIONS = new Set([
+  "txt",
+  "md",
+  "markdown",
+  "py",
+  "js",
+  "ts",
+  "tsx",
+  "jsx",
+  "java",
+  "c",
+  "cpp",
+  "cs",
+  "html",
+  "htm",
+  "css",
+  "json",
+  "xml",
+  "rb",
+  "go",
+  "rs",
+  "csv",
+  "ipynb",
+  "yml",
+  "yaml",
+  "sql",
+  "sh",
+  "bash",
+  "zsh",
+  "php",
+  "swift",
+  "kt",
+  "kts",
+  "scala",
+  "r",
+  "m",
+  "tex",
+]);
+
+const DOCUMENT_EXTENSIONS = new Set([
+  "docx",
+  "doc",
+  "pptx",
+  "ppt",
+  "xlsx",
+  "xls",
+  "odt",
+  "odp",
+  "ods",
+  "pdf",
+  "rtf",
+]);
+
+const OFFICE_FILE_TYPE_HINTS: Record<string, SupportedFileType> = {
+  docx: "docx",
+  pptx: "pptx",
+  xlsx: "xlsx",
+  odt: "odt",
+  odp: "odp",
+  ods: "ods",
+  pdf: "pdf",
+  rtf: "rtf",
+};
+
+function getFileExtension(name: string): string {
+  const lastDot = name.lastIndexOf(".");
+  if (lastDot === -1 || lastDot === name.length - 1) {
+    return "";
+  }
+
+  return name.slice(lastDot + 1).toLowerCase();
+}
+
+async function extractTextFromFile(
+  name: string,
+  file: JSZip.JSZipObject
+): Promise<string | null> {
+  const extension = getFileExtension(name);
+
+  if (TEXT_EXTENSIONS.has(extension)) {
+    return file.async("string");
+  }
+
+  if (DOCUMENT_EXTENSIONS.has(extension)) {
+    const buffer = await file.async("nodebuffer");
+    const fileType = OFFICE_FILE_TYPE_HINTS[extension];
+    const ast = fileType
+      ? await OfficeParser.parseOffice(buffer, { fileType })
+      : await OfficeParser.parseOffice(buffer);
+
+    const conversion = await ast.to("text");
+    return typeof conversion.value === "string" ? conversion.value : null;
+  }
+
+  return null;
+}
 
 export interface RubricAreaResult {
   area: string;
@@ -38,28 +136,13 @@ async function extractSubmissions(
     Object.entries(zip.files).map(async ([name, file]) => {
       if (file.dir) return;
 
-      // Only attempt to read text-like files
-      const lower = name.toLowerCase();
-      const isText =
-        lower.endsWith(".txt") ||
-        lower.endsWith(".md") ||
-        lower.endsWith(".py") ||
-        lower.endsWith(".js") ||
-        lower.endsWith(".ts") ||
-        lower.endsWith(".java") ||
-        lower.endsWith(".c") ||
-        lower.endsWith(".cpp") ||
-        lower.endsWith(".cs") ||
-        lower.endsWith(".html") ||
-        lower.endsWith(".css") ||
-        lower.endsWith(".json") ||
-        lower.endsWith(".xml") ||
-        lower.endsWith(".rb") ||
-        lower.endsWith(".go") ||
-        lower.endsWith(".rs");
-
-      if (isText) {
-        submissions[name] = await file.async("string");
+      try {
+        const extractedText = await extractTextFromFile(name, file);
+        if (extractedText && extractedText.trim()) {
+          submissions[name] = extractedText;
+        }
+      } catch {
+        // Skip files that cannot be parsed; continue grading other submissions.
       }
     })
   );

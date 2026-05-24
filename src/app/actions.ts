@@ -7,6 +7,7 @@ import {
   generateRubric,
   type GradingRun,
 } from "@/lib/grade";
+import { OfficeParser, type SupportedFileType } from "officeparser";
 import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
 
 export interface SlideData {
@@ -332,6 +333,589 @@ export async function generateAssignmentRubricAction(
     return await generateRubric(instructions);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Rubric generation failed." };
+  }
+}
+
+export interface SyllabusSection {
+  heading: string;
+  hint: string;
+}
+
+type SyllabusContextFile = { name: string; base64: string; mimeType: string };
+
+async function appendSyllabusContextParts(
+  parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>,
+  files: SyllabusContextFile[]
+) {
+  for (const file of files) {
+    if (file.mimeType === "application/pdf" || file.mimeType.startsWith("image/")) {
+      parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
+      continue;
+    }
+
+    if (file.mimeType.startsWith("text/")) {
+      const text = Buffer.from(file.base64, "base64").toString("utf-8").trim();
+      if (text) {
+        parts.push({ text: `\n\nADDITIONAL CONTEXT FILE (${file.name}):\n${text}` });
+      }
+      continue;
+    }
+
+    const ext = file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "";
+    if (ext === "docx") {
+      try {
+        const JSZip = (await import("jszip")).default;
+        const buffer = Buffer.from(file.base64, "base64");
+        const zip = await JSZip.loadAsync(buffer);
+        const documentXml = zip.file("word/document.xml");
+        if (documentXml) {
+          let xml = await documentXml.async("string");
+          xml = xml
+            .replace(/<w:tab\s*\/?>/g, "\t")
+            .replace(/<w:br\s*\/?>/g, "\n")
+            .replace(/<w:p[^>]*>/g, "\n")
+            .replace(/<[^>]+>/g, "");
+          const text = xml
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+          if (text) {
+            parts.push({ text: `\n\nADDITIONAL CONTEXT FILE (${file.name}):\n${text}` });
+          }
+        }
+      } catch {
+        // Ignore unreadable context files instead of failing the full request.
+      }
+    }
+  }
+}
+
+export async function parseSyllabusAction(
+  courseTitle: string,
+  file: { name: string; base64: string; mimeType: string },
+  additionalContext?: string,
+  contextFiles: SyllabusContextFile[] = []
+): Promise<{ sections: SyllabusSection[]; templateText: string } | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const additionalContextBlock = additionalContext?.trim()
+      ? `\n\nADDITIONAL COURSE CONTEXT:\n${additionalContext.trim()}`
+      : "";
+    const contextFilesSummary =
+      contextFiles.length > 0
+        ? `\n\nADDITIONAL CONTEXT FILES:\n${contextFiles.map((f) => `- ${f.name}`).join("\n")}`
+        : "";
+
+    const prompt = `You are parsing a syllabus template for a course called "${courseTitle}".${additionalContextBlock}${contextFilesSummary}
+
+Extract each distinct section from this document. Return ONLY valid JSON:
+{
+  "sections": [
+    { "heading": "Section Name", "hint": "What should go in this section based on the template's placeholder text, structure, or context" }
+  ]
+}
+
+Requirements:
+- Identify every major section or heading in the document.
+- The "hint" should describe what content belongs in this section — use placeholder text, examples, or structural cues from the template.
+- Keep headings short and clear, exactly as they appear in the template.
+- Do not include any text outside the JSON object.`;
+
+    // Gemini natively supports PDF and text/*; extract text from office formats first.
+    const isNativelySupported =
+      file.mimeType === "application/pdf" ||
+      file.mimeType.startsWith("text/") ||
+      file.mimeType.startsWith("image/");
+
+    let parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>;
+    let extractedText = "";
+
+    if (isNativelySupported) {
+      const templateText = file.mimeType.startsWith("text/")
+        ? Buffer.from(file.base64, "base64").toString("utf-8")
+        : ""; // PDF/image: text not extractable without extra dependencies
+      parts = [
+        { text: prompt },
+        { inlineData: { mimeType: file.mimeType, data: file.base64 } },
+      ];
+      await appendSyllabusContextParts(parts, contextFiles);
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts }],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const body = await response.text();
+        return { error: `Syllabus parsing failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+      }
+
+      const data = (await response.json()) as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      };
+
+      const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+      const trimmed = raw.trim();
+      const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+      const start = candidate.indexOf("{");
+      const end = candidate.lastIndexOf("}");
+      if (start === -1 || end === -1) return { error: "Could not parse sections from the syllabus template." };
+
+      const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+        sections?: Array<{ heading?: string; hint?: string }>;
+      };
+
+      const sections: SyllabusSection[] = (parsed.sections ?? [])
+        .filter((s) => typeof s.heading === "string" && s.heading.trim())
+        .map((s) => ({ heading: s.heading!.trim(), hint: s.hint?.trim() ?? "" }));
+
+      if (sections.length === 0) return { error: "No sections found in the syllabus template." };
+      return { sections, templateText };
+    } else {
+      // Extract plain text from DOCX / PPTX / XLSX / etc.
+      const buffer = Buffer.from(file.base64, "base64");
+      const ext = file.name.includes(".")
+        ? file.name.split(".").pop()!.toLowerCase()
+        : "";
+
+      try {
+        // For DOCX, direct XML extraction is most reliable (matches grade.ts approach).
+        if (ext === "docx") {
+          const JSZip = (await import("jszip")).default;
+          const zip = await JSZip.loadAsync(buffer);
+          const documentXml = zip.file("word/document.xml");
+          if (documentXml) {
+            let xml = await documentXml.async("string");
+            xml = xml
+              .replace(/<w:tab\s*\/?>/g, "\t")
+              .replace(/<w:br\s*\/?>/g, "\n")
+              .replace(/<w:p[^>]*>/g, "\n")
+              .replace(/<[^>]+>/g, "");
+            extractedText = xml
+              .replace(/\r\n/g, "\n")
+              .replace(/\r/g, "\n")
+              .replace(/\n{3,}/g, "\n\n")
+              .trim();
+          }
+        }
+
+        // Fall back to OfficeParser with explicit fileType for other formats (or if XML extraction yielded nothing).
+        if (!extractedText) {
+          const officeFileTypes: Record<string, SupportedFileType> = {
+            docx: "docx",
+            pptx: "pptx",
+            xlsx: "xlsx",
+            odt: "odt",
+            odp: "odp",
+            ods: "ods",
+            rtf: "rtf",
+          };
+          const fileType = officeFileTypes[ext];
+          const ast = fileType
+            ? await OfficeParser.parseOffice(buffer, { fileType })
+            : await OfficeParser.parseOffice(buffer);
+          const conversion = await ast.to("text");
+          extractedText = typeof conversion.value === "string" ? conversion.value.trim() : "";
+        }
+      } catch {
+        return { error: "Could not read the uploaded file. Please try a .txt, .pdf, or .docx file." };
+      }
+
+      if (!extractedText) {
+        return { error: "The uploaded file appears to be empty or could not be read." };
+      }
+      parts = [{ text: `${prompt}\n\nSYLLABUS TEMPLATE TEXT:\n${extractedText}` }];
+      await appendSyllabusContextParts(parts, contextFiles);
+    }
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Syllabus parsing failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const trimmed = raw.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1) return { error: "Could not parse sections from the syllabus template." };
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      sections?: Array<{ heading?: string; hint?: string }>;
+    };
+
+    const sections: SyllabusSection[] = (parsed.sections ?? [])
+      .filter((s) => typeof s.heading === "string" && s.heading.trim())
+      .map((s) => ({ heading: s.heading!.trim(), hint: s.hint?.trim() ?? "" }));
+
+    if (sections.length === 0) return { error: "No sections found in the syllabus template." };
+    return { sections, templateText: extractedText };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+export async function generateSyllabusSectionAction(
+  courseTitle: string,
+  section: SyllabusSection,
+  completedSections: Array<{ heading: string; content: string }>,
+  templateText?: string,
+  additionalContext?: string,
+  contextFiles: SyllabusContextFile[] = []
+): Promise<string | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const templateBlock = templateText
+      ? `\n\nORIGINAL SYLLABUS TEMPLATE:\n${templateText}`
+      : "";
+
+    const contextBlock =
+      completedSections.length > 0
+        ? `\n\nPREVIOUSLY COMPLETED SECTIONS:\n${completedSections
+            .map((s) => `${s.heading}:\n${s.content}`)
+            .join("\n\n")}`
+        : "";
+    const additionalContextBlock = additionalContext?.trim()
+      ? `\n\nADDITIONAL COURSE CONTEXT:\n${additionalContext.trim()}`
+      : "";
+    const contextFilesSummary =
+      contextFiles.length > 0
+        ? `\n\nADDITIONAL CONTEXT FILES:\n${contextFiles.map((f) => `- ${f.name}`).join("\n")}`
+        : "";
+
+    const prompt = `You are writing content for a university course syllabus.
+
+COURSE TITLE: ${courseTitle}
+SECTION: ${section.heading}
+GUIDANCE: ${section.hint || "Write appropriate content for this syllabus section."}${templateBlock}${additionalContextBlock}${contextFilesSummary}${contextBlock}
+
+Write the content for the "${section.heading}" section of this syllabus. Be specific, professional, and practical. Use the guidance, the original template, and any previously completed sections for context and consistency. Write only the section content — do not include the heading itself, markdown formatting, or any preamble.`;
+
+    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+      { text: prompt },
+    ];
+    await appendSyllabusContextParts(parts, contextFiles);
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: { temperature: 0.5, maxOutputTokens: 1024 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Section generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    return raw.trim() || "Could not generate content for this section.";
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+export async function generateSyllabusRemainingSectionsAction(
+  courseTitle: string,
+  sections: SyllabusSection[],
+  currentContents: string[],
+  startIndex: number,
+  templateText?: string,
+  additionalContext?: string,
+  contextFiles: SyllabusContextFile[] = []
+): Promise<{ contents: string[] } | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const existingBlock = sections
+      .map((s, i) => `${s.heading}:\n${currentContents[i] || "(empty)"}`)
+      .join("\n\n");
+
+    const remainingBlock = sections
+      .slice(startIndex)
+      .map((s, idx) => `${startIndex + idx + 1}. ${s.heading}${s.hint ? ` (${s.hint})` : ""}`)
+      .join("\n");
+
+    const templateBlock = templateText
+      ? `\n\nORIGINAL SYLLABUS TEMPLATE:\n${templateText}`
+      : "";
+    const additionalContextBlock = additionalContext?.trim()
+      ? `\n\nADDITIONAL COURSE CONTEXT:\n${additionalContext.trim()}`
+      : "";
+    const contextFilesSummary =
+      contextFiles.length > 0
+        ? `\n\nADDITIONAL CONTEXT FILES:\n${contextFiles.map((f) => `- ${f.name}`).join("\n")}`
+        : "";
+
+    const prompt = `You are writing the remaining content for a university course syllabus.
+
+COURSE TITLE: ${courseTitle}${templateBlock}${additionalContextBlock}${contextFilesSummary}
+
+CURRENT SYLLABUS STATE:
+${existingBlock}
+
+FILL THESE REMAINING SECTIONS (in order):
+${remainingBlock}
+
+Return ONLY valid JSON:
+{
+  "sections": [
+    { "heading": "Section Name", "content": "Generated content..." }
+  ]
+}
+
+Requirements:
+- Return only the sections listed in "FILL THESE REMAINING SECTIONS".
+- Preserve each heading exactly.
+- Use existing filled sections for consistency.
+- Do not include any text outside the JSON object.`;
+
+    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+      { text: prompt },
+    ];
+    await appendSyllabusContextParts(parts, contextFiles);
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: { temperature: 0.5, maxOutputTokens: 4096 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Section generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const trimmed = raw.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return { error: "Could not parse section data from the model response." };
+    }
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      sections?: Array<{ heading?: string; content?: string }>;
+    };
+
+    const updated = [...currentContents];
+    const remaining = sections.slice(startIndex);
+    for (let i = 0; i < remaining.length; i++) {
+      const target = remaining[i];
+      const byIndex = parsed.sections?.[i];
+      let content = byIndex?.content?.trim() ?? "";
+      if (!content) {
+        const byHeading = parsed.sections?.find(
+          (s) => s.heading?.trim().toLowerCase() === target.heading.toLowerCase()
+        );
+        content = byHeading?.content?.trim() ?? "";
+      }
+      if (content) {
+        updated[startIndex + i] = content;
+      }
+    }
+
+    return { contents: updated };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+export async function reviseSyllabusAction(
+  courseTitle: string,
+  sections: SyllabusSection[],
+  contents: string[],
+  templateText: string,
+  revisionPrompt: string,
+  files: Array<{ name: string; base64: string; mimeType: string }> = [],
+  additionalContext?: string,
+  contextFiles: SyllabusContextFile[] = [],
+  lockedSections: boolean[] = []
+): Promise<{ contents: string[] } | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const syllabusText = sections
+      .map((s, i) => `${s.heading}:\n${contents[i] || "(empty)"}`)
+      .join("\n\n");
+
+    const templateBlock = templateText
+      ? `\n\nORIGINAL SYLLABUS TEMPLATE:\n${templateText}`
+      : "";
+    const additionalContextBlock = additionalContext?.trim()
+      ? `\n\nADDITIONAL COURSE CONTEXT:\n${additionalContext.trim()}`
+      : "";
+    const contextFilesSummary =
+      contextFiles.length > 0
+        ? `\n\nADDITIONAL CONTEXT FILES:\n${contextFiles.map((f) => `- ${f.name}`).join("\n")}`
+        : "";
+    const lockedHeadings = sections
+      .map((section, i) => ({ heading: section.heading, locked: !!lockedSections[i] }))
+      .filter((s) => s.locked)
+      .map((s) => s.heading);
+    const lockedSectionsBlock =
+      lockedHeadings.length > 0
+        ? `\n\nLOCKED SECTIONS (DO NOT CHANGE THESE):\n${lockedHeadings.map((h) => `- ${h}`).join("\n")}`
+        : "";
+
+    const prompt = `You are revising a university course syllabus for "${courseTitle}".${templateBlock}${additionalContextBlock}${contextFilesSummary}${lockedSectionsBlock}
+
+CURRENT SYLLABUS:
+${syllabusText}
+
+REVISION INSTRUCTIONS:
+${revisionPrompt}
+
+Return ONLY valid JSON with updated content for all ${sections.length} sections in the same order:
+{
+  "sections": [
+    { "heading": "Section Name", "content": "Updated content..." }
+  ]
+}
+
+Requirements:
+- Preserve all section headings exactly as shown.
+- Do not modify any section listed under LOCKED SECTIONS.
+- Apply the revision instructions intelligently; leave unaffected sections unchanged.
+- Do not include any text outside the JSON object.`;
+
+    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+      { text: prompt },
+    ];
+    await appendSyllabusContextParts(parts, contextFiles);
+
+    for (const file of files) {
+      if (file.mimeType === "application/pdf" || file.mimeType.startsWith("image/")) {
+        parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
+      } else if (file.mimeType.startsWith("text/")) {
+        const text = Buffer.from(file.base64, "base64").toString("utf-8").trim();
+        if (text) parts.push({ text: `\n\nATTACHED FILE (${file.name}):\n${text}` });
+      } else {
+        const ext = file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "";
+        if (ext === "docx") {
+          try {
+            const JSZip = (await import("jszip")).default;
+            const buffer = Buffer.from(file.base64, "base64");
+            const zip = await JSZip.loadAsync(buffer);
+            const documentXml = zip.file("word/document.xml");
+            if (documentXml) {
+              let xml = await documentXml.async("string");
+              xml = xml
+                .replace(/<w:tab\s*\/?>/g, "\t")
+                .replace(/<w:br\s*\/?>/g, "\n")
+                .replace(/<w:p[^>]*>/g, "\n")
+                .replace(/<[^>]+>/g, "");
+              const text = xml.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+              if (text) parts.push({ text: `\n\nATTACHED FILE (${file.name}):\n${text}` });
+            }
+          } catch { /* skip unreadable file */ }
+        }
+      }
+    }
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Syllabus revision failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const trimmed = raw.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1) {
+      return { error: "Could not parse revised syllabus from the model response." };
+    }
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      sections?: Array<{ heading?: string; content?: string }>;
+    };
+
+    const updatedContents = sections.map((section, i) => {
+      if (lockedSections[i]) return contents[i] ?? "";
+
+      // Prefer index-based match, fall back to heading match.
+      const byIndex = parsed.sections?.[i];
+      if (byIndex?.content?.trim()) return byIndex.content.trim();
+      const byHeading = parsed.sections?.find(
+        (s) => s.heading?.trim().toLowerCase() === section.heading.toLowerCase()
+      );
+      return byHeading?.content?.trim() ?? contents[i] ?? "";
+    });
+
+    return { contents: updatedContents };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
 }
 

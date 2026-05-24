@@ -3,7 +3,7 @@
 import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
-import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData } from "./actions";
+import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, parseSyllabusAction, generateSyllabusSectionAction, generateSyllabusRemainingSectionsAction, reviseSyllabusAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type SyllabusSection } from "./actions";
 import styles from "./page.module.css";
 
 type PreviewFile = {
@@ -20,7 +20,7 @@ const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
 type SortDirection = "asc" | "desc";
-type ActiveTab = "grading" | "lesson-planning";
+type ActiveTab = "grading" | "lesson-planning" | "course-planning";
 
 type SortColumn =
   | { kind: "student" }
@@ -152,6 +152,22 @@ function CopyIcon() {
   );
 }
 
+function LockClosedIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path fillRule="evenodd" d="M5.75 8V6a4.25 4.25 0 1 1 8.5 0v2h.25A2.75 2.75 0 0 1 17.25 10.75v5.5A2.75 2.75 0 0 1 14.5 19h-9A2.75 2.75 0 0 1 2.75 16.25v-5.5A2.75 2.75 0 0 1 5.5 8h.25Zm7 0V6a2.75 2.75 0 1 0-5.5 0v2h5.5Zm-4.25 3a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-.75 1.298v1.452a.75.75 0 0 1-1.5 0v-1.452A1.5 1.5 0 0 1 8.5 11Z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+function LockOpenIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path fillRule="evenodd" d="M7.25 8V6a2.75 2.75 0 0 1 5.164-1.31.75.75 0 0 0 1.323-.706A4.25 4.25 0 0 0 5.75 6v2H5.5a2.75 2.75 0 0 0-2.75 2.75v5.5A2.75 2.75 0 0 0 5.5 19h9a2.75 2.75 0 0 0 2.75-2.75v-5.5A2.75 2.75 0 0 0 14.5 8h-7.25Zm2.75 3a1.5 1.5 0 0 0-.75 2.798v1.452a.75.75 0 0 0 1.5 0v-1.452A1.5 1.5 0 0 0 10 11Z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
 function DownloadIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
@@ -176,7 +192,11 @@ export default function Home() {
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
-  const [activeTab, setActiveTab] = useState<ActiveTab>("grading");
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+    if (typeof window === "undefined") return "lesson-planning";
+    const saved = localStorage.getItem("ta-active-tab");
+    return saved === "grading" || saved === "lesson-planning" || saved === "course-planning" ? saved : "lesson-planning";
+  });
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -194,6 +214,25 @@ export default function Home() {
   const [revisionPrompt, setRevisionPrompt] = useState("");
   const [isRegenerating, setIsRegenerating] = useState(false);
   const lessonContextFileRef = useRef<HTMLInputElement>(null);
+  const syllabusFileRef = useRef<HTMLInputElement>(null);
+  const [courseTitle, setCourseTitle] = useState("");
+  const [coursePlanningContext, setCoursePlanningContext] = useState("");
+  const [coursePlanningContextFiles, setCoursePlanningContextFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
+  type CoursePlanningStep = "form" | "wizard" | "preview";
+  const [coursePlanningStep, setCoursePlanningStep] = useState<CoursePlanningStep>("form");
+  const [parsedSections, setParsedSections] = useState<SyllabusSection[]>([]);
+  const [syllabusTemplateText, setSyllabusTemplateText] = useState("");
+  const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
+  const [sectionContents, setSectionContents] = useState<string[]>([]);
+  const [currentSectionInput, setCurrentSectionInput] = useState("");
+  const [isParsingTemplate, setIsParsingTemplate] = useState(false);
+  const [isGeneratingSection, setIsGeneratingSection] = useState(false);
+  const [coursePlanningError, setCoursePlanningError] = useState<string | null>(null);
+  const [syllabusRevisionPrompt, setSyllabusRevisionPrompt] = useState("");
+  const [syllabusRevisionFiles, setSyllabusRevisionFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
+  const [lockedSyllabusSections, setLockedSyllabusSections] = useState<boolean[]>([]);
+  const [isRevisingSyllabus, setIsRevisingSyllabus] = useState(false);
+  const syllabusRevisionFileRef = useRef<HTMLInputElement>(null);
   const run = state.run;
 
   const sortedResults = useMemo(() => {
@@ -300,6 +339,10 @@ export default function Home() {
 
     return sortState.direction === "asc" ? "↑" : "↓";
   };
+
+  useEffect(() => {
+    localStorage.setItem("ta-active-tab", activeTab);
+  }, [activeTab]);
 
   useEffect(() => {
     return () => {
@@ -559,6 +602,226 @@ export default function Home() {
     }
   };
 
+  const handleStartCoursePlanning = async () => {
+    if (!syllabusFileRef.current?.files?.length) {
+      setCoursePlanningError("Please upload a syllabus template to continue.");
+      return;
+    }
+    if (!courseTitle.trim()) {
+      setCoursePlanningError("Please enter a course title.");
+      return;
+    }
+    const file = syllabusFileRef.current.files[0];
+    setIsParsingTemplate(true);
+    setCoursePlanningError(null);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const result = await parseSyllabusAction(courseTitle, {
+        name: file.name,
+        base64,
+        mimeType: file.type || "application/octet-stream",
+      }, coursePlanningContext.trim() || undefined, coursePlanningContextFiles);
+      if ("error" in result) { setCoursePlanningError(result.error); return; }
+      setParsedSections(result.sections);
+      setSyllabusTemplateText(result.templateText);
+      setSectionContents(new Array(result.sections.length).fill(""));
+      setLockedSyllabusSections(new Array(result.sections.length).fill(false));
+      setCurrentSectionIndex(0);
+      setCurrentSectionInput("");
+      setCoursePlanningStep("wizard");
+    } catch (err) {
+      setCoursePlanningError(err instanceof Error ? err.message : "Failed to parse template.");
+    } finally {
+      setIsParsingTemplate(false);
+    }
+  };
+
+  const handleSectionNext = async () => {
+    setCoursePlanningError(null);
+    const typed = currentSectionInput.trim();
+    let content = typed;
+    if (!typed) {
+      setIsGeneratingSection(true);
+      try {
+        const completedSections = parsedSections
+          .slice(0, currentSectionIndex)
+          .map((s, i) => ({ heading: s.heading, content: sectionContents[i] }))
+          .filter((s) => s.content);
+        const result = await generateSyllabusSectionAction(
+          courseTitle,
+          parsedSections[currentSectionIndex],
+          completedSections,
+          syllabusTemplateText || undefined,
+          coursePlanningContext.trim() || undefined,
+          coursePlanningContextFiles
+        );
+        if (typeof result !== "string") { setCoursePlanningError(result.error); return; }
+        content = result;
+      } finally {
+        setIsGeneratingSection(false);
+      }
+    }
+    const updated = [...sectionContents];
+    updated[currentSectionIndex] = content;
+    setSectionContents(updated);
+    if (currentSectionIndex + 1 < parsedSections.length) {
+      setCurrentSectionIndex(currentSectionIndex + 1);
+      setCurrentSectionInput("");
+    } else {
+      setCoursePlanningStep("preview");
+    }
+  };
+
+  const handleSectionSkip = () => {
+    const updated = [...sectionContents];
+    updated[currentSectionIndex] = "";
+    setSectionContents(updated);
+    if (currentSectionIndex + 1 < parsedSections.length) {
+      setCurrentSectionIndex(currentSectionIndex + 1);
+      setCurrentSectionInput("");
+    } else {
+      setCoursePlanningStep("preview");
+    }
+  };
+
+  const handleGenerateRemaining = async () => {
+    setCoursePlanningError(null);
+    setIsGeneratingSection(true);
+    const updated = [...sectionContents];
+    // Save whatever the user typed in the current field first
+    const typedCurrent = currentSectionInput.trim();
+    if (typedCurrent) {
+      updated[currentSectionIndex] = typedCurrent;
+    }
+    try {
+      const startIndex = currentSectionIndex + (typedCurrent ? 1 : 0);
+      if (startIndex >= parsedSections.length) {
+        setSectionContents(updated);
+        setCoursePlanningStep("preview");
+        return;
+      }
+
+      const result = await generateSyllabusRemainingSectionsAction(
+        courseTitle,
+        parsedSections,
+        updated,
+        startIndex,
+        syllabusTemplateText || undefined,
+        coursePlanningContext.trim() || undefined,
+        coursePlanningContextFiles
+      );
+
+      if ("error" in result) {
+        setCoursePlanningError(result.error);
+        setSectionContents(updated);
+        return;
+      }
+
+      setSectionContents(result.contents);
+      setCoursePlanningStep("preview");
+    } finally {
+      setIsGeneratingSection(false);
+    }
+  };
+
+  const handleSyllabusRevisionFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = Array.from(e.target.files ?? []);
+    const encoded = await Promise.all(
+      fileList.map(async (file) => {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        return { name: file.name, base64, mimeType: file.type || "application/octet-stream" };
+      })
+    );
+    setSyllabusRevisionFiles((prev) => [...prev, ...encoded]);
+    e.target.value = "";
+  };
+
+  const handleReviseSyllabus = async () => {
+    if (!syllabusRevisionPrompt.trim() && syllabusRevisionFiles.length === 0) return;
+    setIsRevisingSyllabus(true);
+    setCoursePlanningError(null);
+    try {
+      const result = await reviseSyllabusAction(
+        courseTitle,
+        parsedSections,
+        sectionContents,
+        syllabusTemplateText,
+        syllabusRevisionPrompt.trim(),
+        syllabusRevisionFiles,
+        coursePlanningContext.trim() || undefined,
+        coursePlanningContextFiles,
+        lockedSyllabusSections
+      );
+      if ("error" in result) { setCoursePlanningError(result.error); return; }
+      setSectionContents(result.contents);
+      setSyllabusRevisionPrompt("");
+      setSyllabusRevisionFiles([]);
+    } finally {
+      setIsRevisingSyllabus(false);
+    }
+  };
+
+  const resetCoursePlanning = () => {
+    setCoursePlanningStep("form");
+    setParsedSections([]);
+    setSectionContents([]);
+    setCurrentSectionIndex(0);
+    setCurrentSectionInput("");
+    setCoursePlanningError(null);
+    setSyllabusRevisionPrompt("");
+    setSyllabusRevisionFiles([]);
+    setLockedSyllabusSections([]);
+  };
+
+  const handleCoursePlanningContextFiles = async (e: ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files ?? []);
+    if (selected.length === 0) return;
+
+    const files = await Promise.all(
+      selected.map(async (file) => {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        return { name: file.name, base64, mimeType: file.type || "application/octet-stream" };
+      })
+    );
+
+    setCoursePlanningContextFiles((prev) => [...prev, ...files]);
+    e.target.value = "";
+  };
+
+  const handleDownloadSyllabus = () => {
+    const lines: string[] = [];
+    for (let i = 0; i < parsedSections.length; i++) {
+      const content = sectionContents[i];
+      if (!content) continue;
+      const h = parsedSections[i].heading;
+      lines.push(h, "=".repeat(h.length), "", content, "", "");
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${courseTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_")}_syllabus.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const handleCopy = async (copyKey: string, value: string) => {
     const text = value.trim();
     if (!text) {
@@ -625,8 +888,9 @@ export default function Home() {
             minHeight: 44,
           }}
         >
-          <Tab label="Grading" value="grading" disableRipple />
+          <Tab label="Course Planning" value="course-planning" disableRipple />
           <Tab label="Lesson Planning" value="lesson-planning" disableRipple />
+          <Tab label="Grading" value="grading" disableRipple />
         </Tabs>
 
         {activeTab === "grading" && (
@@ -974,6 +1238,135 @@ export default function Home() {
           </section>
         )}
 
+        {activeTab === "course-planning" && (
+          <>
+            {coursePlanningStep === "form" && (
+              <section className={styles.card}>
+                <div className={styles.header}>
+                  <h1>Course Planning</h1>
+                  <p>Upload a syllabus template and we will walk through each section together, letting you write or generate content for each one.</p>
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor="courseTitle">Course Title</label>
+                  <input
+                    id="courseTitle"
+                    type="text"
+                    className={styles.textInput}
+                    placeholder="e.g. Introduction to Data Science"
+                    value={courseTitle}
+                    onChange={(e) => setCourseTitle(e.target.value)}
+                  />
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor="coursePlanningContext">Additional Context</label>
+                  <textarea
+                    id="coursePlanningContext"
+                    placeholder="Optional context to guide syllabus generation (program goals, institution policies, audience details, tone, etc.)"
+                    value={coursePlanningContext}
+                    onChange={(e) => setCoursePlanningContext(e.target.value)}
+                  />
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor="coursePlanningContextFiles">Additional Context Files</label>
+                  <div className={styles.fileField}>
+                    <input
+                      id="coursePlanningContextFiles"
+                      type="file"
+                      multiple
+                      onChange={handleCoursePlanningContextFiles}
+                    />
+                    <p>Attach multiple supporting files (optional). Text, PDF, image, and DOCX files are used as extra context.</p>
+                    {coursePlanningContextFiles.length > 0 && (
+                      <p>{coursePlanningContextFiles.length} context file(s) selected.</p>
+                    )}
+                  </div>
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor="syllabusFile">Syllabus Template</label>
+                  <div className={styles.fileField}>
+                    <input id="syllabusFile" type="file" ref={syllabusFileRef} />
+                    <p>Upload a syllabus template (.txt, .pdf, .docx, etc.) to use as a starting point.</p>
+                  </div>
+                </div>
+                {coursePlanningError && <p className={styles.error}>{coursePlanningError}</p>}
+                <button
+                  type="button"
+                  className={styles.submitButton}
+                  onClick={handleStartCoursePlanning}
+                  disabled={isParsingTemplate || !courseTitle.trim()}
+                >
+                  {isParsingTemplate ? "Parsing template…" : "Begin"}
+                </button>
+              </section>
+            )}
+
+            {coursePlanningStep === "wizard" && parsedSections[currentSectionIndex] && (
+              <section className={styles.card}>
+                <div className={styles.header}>
+                  <p className={styles.eyebrow}>Section {currentSectionIndex + 1} of {parsedSections.length}</p>
+                  <h1>{parsedSections[currentSectionIndex].heading}</h1>
+                  {parsedSections[currentSectionIndex].hint && (
+                    <p>{parsedSections[currentSectionIndex].hint}</p>
+                  )}
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor="sectionInput">Your Content</label>
+                  <textarea
+                    id="sectionInput"
+                    placeholder="Paste your content here, or leave blank to generate with AI…"
+                    value={currentSectionInput}
+                    onChange={(e) => setCurrentSectionInput(e.target.value)}
+                    disabled={isGeneratingSection}
+                  />
+                </div>
+                {coursePlanningError && <p className={styles.error}>{coursePlanningError}</p>}
+                <div className={styles.lessonPreviewFooter}>
+                  <button
+                    type="button"
+                    className={styles.downloadButton}
+                    onClick={resetCoursePlanning}
+                    disabled={isGeneratingSection}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.downloadButton}
+                    onClick={handleSectionSkip}
+                    disabled={isGeneratingSection}
+                  >
+                    Skip
+                  </button>
+                  {currentSectionIndex + 1 < parsedSections.length && (
+                    <button
+                      type="button"
+                      className={styles.downloadButton}
+                      onClick={handleGenerateRemaining}
+                      disabled={isGeneratingSection}
+                    >
+                      {isGeneratingSection ? "Generating…" : "Generate All"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={styles.submitButton}
+                    onClick={handleSectionNext}
+                    disabled={isGeneratingSection}
+                  >
+                    {isGeneratingSection
+                      ? "Generating…"
+                      : currentSectionIndex + 1 < parsedSections.length
+                        ? "Next"
+                        : "Finish"}
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {coursePlanningStep === "preview" && null}
+          </>
+        )}
+
         {activeTab === "lesson-planning" && (
           <section className={styles.card}>
             <div className={styles.header}>
@@ -1016,6 +1409,127 @@ export default function Home() {
           </section>
         )}
       </div>
+
+      {coursePlanningStep === "preview" && (
+        <div className={styles.previewBackdrop} onClick={resetCoursePlanning}>
+          <section
+            className={styles.lessonPreviewModal}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Syllabus preview"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.previewHeader}>
+              <div>
+                <h3>{courseTitle}</h3>
+                <p className={styles.previewMeta}>
+                  {sectionContents.filter(Boolean).length} of {parsedSections.length} sections compiled
+                </p>
+              </div>
+              <button
+                type="button"
+                className={styles.previewCloseButton}
+                onClick={resetCoursePlanning}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className={styles.assignmentContent}>
+              {parsedSections.map((section, i) =>
+                sectionContents[i] ? (
+                  <div key={i} className={styles.syllabusSectionCard}>
+                    <div className={styles.syllabusSectionTopRow}>
+                      <p className={styles.syllabusSectionHeading}>{section.heading}</p>
+                      <div className={styles.syllabusSectionActions}>
+                        <button
+                          type="button"
+                          className={styles.syllabusSectionActionButton}
+                          title={
+                            copiedKey === `syllabus-section-${i}`
+                              ? "Copied"
+                              : "Copy section content"
+                          }
+                          aria-label={
+                            copiedKey === `syllabus-section-${i}`
+                              ? "Copied"
+                              : `Copy ${section.heading} section`
+                          }
+                          onClick={() => handleCopy(`syllabus-section-${i}`, sectionContents[i])}
+                        >
+                          <CopyIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className={`${styles.syllabusSectionActionButton}${lockedSyllabusSections[i] ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
+                          title={lockedSyllabusSections[i] ? "Locked for revisions" : "Unlocked for revisions"}
+                          aria-label={lockedSyllabusSections[i] ? `Unlock ${section.heading}` : `Lock ${section.heading}`}
+                          onClick={() => {
+                            setLockedSyllabusSections((prev) => {
+                              const next = [...prev];
+                              next[i] = !next[i];
+                              return next;
+                            });
+                          }}
+                        >
+                          {lockedSyllabusSections[i] ? <LockClosedIcon /> : <LockOpenIcon />}
+                        </button>
+                      </div>
+                    </div>
+                    <p className={styles.syllabusSectionContent}>{sectionContents[i]}</p>
+                  </div>
+                ) : null
+              )}
+            </div>
+
+            {coursePlanningError && <p className={styles.error}>{coursePlanningError}</p>}
+
+            <div className={styles.lessonRevisionRow}>
+              <input
+                ref={syllabusRevisionFileRef}
+                type="file"
+                multiple
+                style={{ display: "none" }}
+                onChange={handleSyllabusRevisionFileChange}
+              />
+              <textarea
+                className={styles.lessonRevisionArea}
+                placeholder="Revision instructions — e.g. make the grading policy stricter, add a late work policy, shorten the course description…"
+                value={syllabusRevisionPrompt}
+                onChange={(e) => setSyllabusRevisionPrompt(e.target.value)}
+                rows={2}
+                disabled={isRevisingSyllabus}
+              />
+              <button
+                type="button"
+                className={styles.downloadButton}
+                onClick={() => syllabusRevisionFileRef.current?.click()}
+                disabled={isRevisingSyllabus}
+                title="Attach additional context files"
+              >
+                {syllabusRevisionFiles.length > 0 ? `Files (${syllabusRevisionFiles.length})` : "Attach"}
+              </button>
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleReviseSyllabus}
+                disabled={isRevisingSyllabus || (!syllabusRevisionPrompt.trim() && syllabusRevisionFiles.length === 0)}
+              >
+                {isRevisingSyllabus ? "Revising…" : "Revise"}
+              </button>
+            </div>
+
+            <div className={styles.lessonPreviewFooter}>
+              <button type="button" className={styles.submitButton} onClick={handleDownloadSyllabus}>
+                Download Syllabus
+              </button>
+              <button type="button" className={styles.downloadButton} onClick={resetCoursePlanning}>
+                Start Over
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {lessonPlanPreview && (
         <div className={styles.previewBackdrop} onClick={() => setLessonPlanPreview(null)}>

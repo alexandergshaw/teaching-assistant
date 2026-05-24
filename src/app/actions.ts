@@ -342,6 +342,8 @@ export interface SyllabusSection {
 }
 
 type SyllabusContextFile = { name: string; base64: string; mimeType: string };
+const SYLLABUS_VERTICAL_LIST_REQUIREMENT =
+  "Format every list vertically with one item per line.";
 
 async function appendSyllabusContextParts(
   parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>,
@@ -619,7 +621,7 @@ COURSE TITLE: ${courseTitle}
 SECTION: ${section.heading}
 GUIDANCE: ${section.hint || "Write appropriate content for this syllabus section."}${templateBlock}${additionalContextBlock}${contextFilesSummary}${contextBlock}
 
-Write the content for the "${section.heading}" section of this syllabus. Be specific, professional, and practical. Use the guidance, the original template, and any previously completed sections for context and consistency. Write only the section content — do not include the heading itself, markdown formatting, or any preamble. If you need to make a list, do so vertically. If you need to make a late policy, be sure that assignments submitted after the deadline can only earn a maximum of 90%. Resubmissions are allowed only for assignments that earned at least a 70% on the initial submission. Be sure the policy prevents AI abuse in a way that is not time demanding for the instructor.`;
+Write the content for the "${section.heading}" section of this syllabus. Be specific, professional, and practical. Use the guidance, the original template, and any previously completed sections for context and consistency. Write only the section content — do not include the heading itself, markdown formatting, or any preamble. ${SYLLABUS_VERTICAL_LIST_REQUIREMENT} If you need to make a late policy, be sure that assignments submitted after the deadline can only earn a maximum of 90%. Resubmissions are allowed only for assignments that earned at least a 70% on the initial submission. Be sure the policy prevents AI abuse in a way that is not time demanding for the instructor.`;
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
       { text: prompt },
@@ -708,6 +710,7 @@ Requirements:
 - Return only the sections listed in "FILL THESE REMAINING SECTIONS".
 - Preserve each heading exactly.
 - Use existing filled sections for consistency.
+- ${SYLLABUS_VERTICAL_LIST_REQUIREMENT}
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
@@ -830,6 +833,7 @@ Requirements:
 - Preserve all section headings exactly as shown.
 - Do not modify any section listed under LOCKED SECTIONS.
 - Apply the revision instructions intelligently; leave unaffected sections unchanged.
+- ${SYLLABUS_VERTICAL_LIST_REQUIREMENT}
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [

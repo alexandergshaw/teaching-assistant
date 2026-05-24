@@ -270,6 +270,77 @@
   white-space: pre-wrap;
 }
 
+.fieldLabelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fieldEditWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fieldEditArea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--field-border);
+  border-radius: 10px;
+  background: var(--field-background);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.93rem;
+  line-height: 1.6;
+  resize: vertical;
+  min-height: 60px;
+  box-sizing: border-box;
+}
+
+.fieldEditArea:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+.fieldEditActions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.fieldEditSaveBtn {
+  padding: 5px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fieldEditSaveBtn:hover {
+  opacity: 0.9;
+}
+
+.fieldEditCancelBtn {
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.fieldEditCancelBtn:hover {
+  border-color: var(--text-secondary);
+}
+
 
 .field textarea:focus,
 .fileField:focus-within {

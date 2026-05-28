@@ -50,6 +50,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   >([]);
   const [lockedSyllabusSections, setLockedSyllabusSections] = useState<boolean[]>([]);
   const [isRevisingSyllabus, setIsRevisingSyllabus] = useState(false);
+  const academicCalendarRef = useRef<HTMLInputElement>(null);
+  const [academicCalendarFile, setAcademicCalendarFile] = useState<{ name: string; base64: string; mimeType: string } | null>(null);
 
   const getFullContext = () => {
     const parts = [
@@ -59,6 +61,24 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       coursePlanningContext.trim(),
     ].filter(Boolean) as string[];
     return parts.length > 0 ? parts.join("\n") : undefined;
+  };
+
+  const getContextFiles = () => [
+    ...(academicCalendarFile ? [academicCalendarFile] : []),
+    ...coursePlanningContextFiles,
+  ];
+
+  const handleAcademicCalendarChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    setAcademicCalendarFile({ name: file.name, base64, mimeType: file.type || "application/octet-stream" });
+    e.target.value = "";
   };
 
   const handleCoursePlanningContextFiles = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -104,7 +124,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         courseTitle,
         { name: file.name, base64, mimeType: file.type || "application/octet-stream" },
         getFullContext(),
-        coursePlanningContextFiles
+        getContextFiles()
       );
       if ("error" in result) { setCoursePlanningError(result.error); return; }
       setParsedSections(result.sections);
@@ -138,7 +158,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
           completedSections,
           syllabusTemplateText || undefined,
           getFullContext(),
-          coursePlanningContextFiles
+          getContextFiles()
         );
         if (typeof result !== "string") { setCoursePlanningError(result.error); return; }
         content = result;
@@ -192,7 +212,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         startIndex,
         syllabusTemplateText || undefined,
         getFullContext(),
-        coursePlanningContextFiles
+        getContextFiles()
       );
 
       if ("error" in result) {
@@ -238,7 +258,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         syllabusRevisionPrompt.trim(),
         syllabusRevisionFiles,
         getFullContext(),
-        coursePlanningContextFiles,
+        getContextFiles(),
         lockedSyllabusSections
       );
       if ("error" in result) { setCoursePlanningError(result.error); return; }
@@ -267,7 +287,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       completedSections.filter((s) => s.heading !== parsedSections[i].heading),
       syllabusTemplateText || undefined,
       getFullContext(),
-      coursePlanningContextFiles
+      getContextFiles()
     );
     if (typeof result === "string") {
       setSectionContents((prev) => {
@@ -370,6 +390,20 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               value={officeHours}
               onChange={(e) => setOfficeHours(e.target.value)}
             />
+          </div>
+          <div className={styles.field}>
+            <label htmlFor="academicCalendar">Academic Calendar</label>
+            <div className={styles.fileField}>
+              <input
+                id="academicCalendar"
+                type="file"
+                accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                ref={academicCalendarRef}
+                onChange={handleAcademicCalendarChange}
+              />
+              <p>Upload your institution&apos;s academic calendar (PDF or DOCX) to inform key dates and deadlines.</p>
+              {academicCalendarFile && <p>{academicCalendarFile.name}</p>}
+            </div>
           </div>
           <div className={styles.field}>
             <label htmlFor="coursePlanningContext">Additional Context</label>

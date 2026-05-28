@@ -123,13 +123,11 @@ function replaceSectionsInDocx(
           out.push(makePara(plainPPr, plainRPr, ""));
           continue;
         }
+        // Strip any stray list markers the model may have emitted despite instructions,
+        // and always render as a plain paragraph using the template's body style.
         const markerMatch = rawLine.match(LIST_MARKER_RE);
-        if (markerMatch && listPPr) {
-          // Strip the markdown marker and use the template's DOCX list paragraph style
-          out.push(makePara(listPPr, listRPr, rawLine.slice(markerMatch[0].length)));
-        } else {
-          out.push(makePara(plainPPr, plainRPr, rawLine));
-        }
+        const lineText = markerMatch ? rawLine.slice(markerMatch[0].length) : rawLine;
+        out.push(makePara(plainPPr, plainRPr, lineText));
       }
     } else {
       // No generated content — keep the original template body for this section

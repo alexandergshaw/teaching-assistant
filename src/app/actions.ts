@@ -343,7 +343,7 @@ export interface SyllabusSection {
 
 type SyllabusContextFile = { name: string; base64: string; mimeType: string };
 const SYLLABUS_VERTICAL_LIST_REQUIREMENT =
-  "Format every list vertically with one item per line.";
+  "Write all content as cleanly separated paragraphs. Do not use bullet points, numbered lists, dashes, asterisks, or any other list or markdown formatting. Each distinct point or idea should be its own standalone paragraph separated by a blank line. Never start a line with a dash, bullet, number, or letter followed by a period or parenthesis."
 
 const SYLLABUS_SCHEDULE_REQUIREMENT =
   "For any course schedule or weekly plan section, include a Week number (e.g. Week 1, Week 2, …) AND the specific date(s) for that week — derive the dates from the academic calendar provided in context. List one week per line. Be sure to include all breaks (e.g. holiday breaks, spring break, fall break, etc.) from the academic calendar as their own entries in the schedule.";

@@ -345,6 +345,9 @@ type SyllabusContextFile = { name: string; base64: string; mimeType: string };
 const SYLLABUS_VERTICAL_LIST_REQUIREMENT =
   "Format every list vertically with one item per line.";
 
+const SYLLABUS_SCHEDULE_REQUIREMENT =
+  "For any course schedule or weekly plan section, include a Week number (e.g. Week 1, Week 2, …) AND the specific date(s) for that week — derive the dates from the academic calendar provided in context. List one week per line.";
+
 async function appendSyllabusContextParts(
   parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>,
   files: SyllabusContextFile[]
@@ -621,7 +624,7 @@ COURSE TITLE: ${courseTitle}
 SECTION: ${section.heading}
 GUIDANCE: ${section.hint || "Write appropriate content for this syllabus section."}${templateBlock}${additionalContextBlock}${contextFilesSummary}${contextBlock}
 
-Write the content for the "${section.heading}" section of this syllabus. Be specific, professional, and practical. Use the guidance, the original template, and any previously completed sections for context and consistency. Write only the section content — do not include the heading itself, markdown formatting, or any preamble. ${SYLLABUS_VERTICAL_LIST_REQUIREMENT} If you need to make a late policy, be sure that assignments submitted after the deadline can only earn a maxiumum of 85%, be sure it encourages resubmissions and prevents AI abuse in a way that is not time demanding for the instructor.`;
+Write the content for the "${section.heading}" section of this syllabus. Be specific, professional, and practical. Use the guidance, the original template, and any previously completed sections for context and consistency. Write only the section content — do not include the heading itself, markdown formatting, or any preamble. ${SYLLABUS_VERTICAL_LIST_REQUIREMENT} ${SYLLABUS_SCHEDULE_REQUIREMENT} If you need to make a late policy, be sure that assignments submitted after the deadline can only earn a maxiumum of 85%, be sure it encourages resubmissions and prevents AI abuse in a way that is not time demanding for the instructor.`;
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
       { text: prompt },
@@ -711,6 +714,7 @@ Requirements:
 - Preserve each heading exactly.
 - Use existing filled sections for consistency.
 - ${SYLLABUS_VERTICAL_LIST_REQUIREMENT}
+- ${SYLLABUS_SCHEDULE_REQUIREMENT}
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
@@ -834,6 +838,7 @@ Requirements:
 - Do not modify any section listed under LOCKED SECTIONS.
 - Apply the revision instructions intelligently; leave unaffected sections unchanged.
 - ${SYLLABUS_VERTICAL_LIST_REQUIREMENT}
+- ${SYLLABUS_SCHEDULE_REQUIREMENT}
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [

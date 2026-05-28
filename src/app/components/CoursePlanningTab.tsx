@@ -51,9 +51,19 @@ function replaceSectionsInDocx(
     paragraphs.push(m[0]);
     lastIndex = m.index + m[0].length;
   }
-  gaps.push(xml.slice(lastIndex)); // closing XML after last paragraph
+  gaps.push(xml.slice(lastIndex));
 
   const getText = (p: string) => p.replace(/<[^>]+>/g, "").trim();
+  const getPPr = (p: string): string => {
+    const r = p.match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
+    return r ? r[0] : "";
+  };
+  const hasNumPr = (p: string) => /<w:numPr>/.test(p);
+  // Matches common AI-generated list markers: -, *, •, 1., a., etc.
+  const LIST_MARKER_RE = /^(\s*[-•*]\s+|\s*\d+[.)]\s+|\s*[a-zA-Z][.)]\s+)/;
+
+  const makePara = (pPr: string, text: string): string =>
+    `<w:p>${pPr}<w:r><w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
 
   // Map each section heading to the paragraph index that contains it
   const headingIndices = sections.map((s) => {
@@ -81,10 +91,25 @@ function replaceSectionsInDocx(
 
     const content = contents[i];
     if (content) {
-      for (const line of content.split("\n")) {
-        out.push(
-          `<w:p><w:r><w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r></w:p>`
-        );
+      // Pull paragraph style templates from the section's original body paragraphs
+      const bodyParas = paragraphs.slice(hIdx + 1, nextHIdx);
+      const listPara = bodyParas.find(hasNumPr);
+      const plainPara = bodyParas.find((p) => !hasNumPr(p) && getText(p).length > 0);
+      const listPPr = listPara ? getPPr(listPara) : "";
+      const plainPPr = plainPara ? getPPr(plainPara) : "";
+
+      for (const rawLine of content.split("\n")) {
+        if (rawLine.trim() === "") {
+          out.push(makePara(plainPPr, ""));
+          continue;
+        }
+        const markerMatch = rawLine.match(LIST_MARKER_RE);
+        if (markerMatch && listPPr) {
+          // Strip the markdown marker and use the template's DOCX list paragraph style
+          out.push(makePara(listPPr, rawLine.slice(markerMatch[0].length)));
+        } else {
+          out.push(makePara(plainPPr, rawLine));
+        }
       }
     } else {
       // No generated content — keep the original template body for this section

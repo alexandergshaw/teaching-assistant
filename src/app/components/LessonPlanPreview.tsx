@@ -6,7 +6,7 @@ import type {
   AssignmentData,
   GenerateLessonPlanResult,
   ModuleIntroData,
-} from "./actions";
+} from "../actions";
 import styles from "../page.module.css";
 import { parseGeneratedRubric } from "../utils/rubric";
 

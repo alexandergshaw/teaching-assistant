@@ -1105,3 +1105,61 @@ export async function gradeAction(
     return { run: null, error: message };
   }
 }
+
+export interface SelectionChatMessage {
+  role: "user" | "model";
+  text: string;
+}
+
+export async function selectionChatAction(
+  selectedText: string,
+  question: string,
+  history: SelectionChatMessage[]
+): Promise<string | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const systemPrompt = `You are a helpful teaching assistant. The user has highlighted the following text and has a question about it. Answer concisely and helpfully.
+
+HIGHLIGHTED TEXT:
+"""
+${selectedText}
+"""`;
+
+    const contents = [
+      { role: "user" as const, parts: [{ text: systemPrompt }] },
+      { role: "model" as const, parts: [{ text: "Understood. I'll answer questions about the highlighted text." }] },
+      ...history.map((m) => ({ role: m.role as "user" | "model", parts: [{ text: m.text }] })),
+      { role: "user" as const, parts: [{ text: question }] },
+    ];
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents,
+          generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Chat failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const text =
+      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+    return text || "No response from the model.";
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}

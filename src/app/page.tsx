@@ -4,7 +4,9 @@ import type { ChangeEvent } from "react";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
 import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, parseSyllabusAction, generateSyllabusSectionAction, generateSyllabusRemainingSectionsAction, reviseSyllabusAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type SyllabusSection } from "./actions";
+import LessonPlanPreview from "./components/LessonPlanPreview";
 import styles from "./page.module.css";
+import { parseGeneratedRubric } from "./utils/rubric";
 
 type PreviewFile = {
   student: string;
@@ -66,33 +68,6 @@ function hasDeduction(score: string): boolean {
 
 function formatFeedback(text: string): string {
   return text.replace(/\s*[\u2013\u2014]\s*/g, ", ");
-}
-
-type RubricSubcategory = { label: string; description: string };
-type RubricRow = { area: string; weight: string; description: string; subcategories: RubricSubcategory[] };
-
-function parseGeneratedRubric(text: string): RubricRow[] | null {
-  const lines = text.split("\n");
-  const rows: RubricRow[] = [];
-  let current: RubricRow | null = null;
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    if (/^\s/.test(line)) {
-      if (!current) continue;
-      const subLine = line.trim().replace(/^[-•]\s*/, "");
-      const subMatch = subLine.match(/^(.+?)\s*:\s*(.+)$/);
-      if (subMatch) {
-        current.subcategories.push({ label: subMatch[1].trim(), description: subMatch[2].trim() });
-      }
-    } else {
-      const match = line.trim().match(/^(.+?)\s*\((\d+(?:\.\d+)?\s*%?)\)\s*:\s*(.*)$/);
-      if (!match) continue;
-      if (current) rows.push(current);
-      current = { area: match[1].trim(), weight: match[2].trim(), description: match[3].trim(), subcategories: [] };
-    }
-  }
-  if (current) rows.push(current);
-  return rows.length > 0 ? rows : null;
 }
 
 function escapeCsvCell(value: string): string {
@@ -216,12 +191,9 @@ export default function Home() {
   const [lessonError, setLessonError] = useState<string | null>(null);
   const [lessonPlanPreview, setLessonPlanPreview] = useState<GenerateLessonPlanResult | null>(null);
   const [assignmentPreview, setAssignmentPreview] = useState<AssignmentData | null>(null);
-  const [previewTab, setPreviewTab] = useState<"intro" | "slides" | "assignment" | "rubric">("intro");
   const [rubricPreview, setRubricPreview] = useState<string | null>(null);
   const [introPreview, setIntroPreview] = useState<ModuleIntroData | null>(null);
   const [savedLessonFiles, setSavedLessonFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
-  const [revisionPrompt, setRevisionPrompt] = useState("");
-  const [isRegenerating, setIsRegenerating] = useState(false);
   const lessonContextFileRef = useRef<HTMLInputElement>(null);
   const syllabusFileRef = useRef<HTMLInputElement>(null);
   const [courseTitle, setCourseTitle] = useState("");
@@ -242,9 +214,6 @@ export default function Home() {
   const [lockedSyllabusSections, setLockedSyllabusSections] = useState<boolean[]>([]);
   const [isRevisingSyllabus, setIsRevisingSyllabus] = useState(false);
   const syllabusRevisionFileRef = useRef<HTMLInputElement>(null);
-  const [editingLessonField, setEditingLessonField] = useState<string | null>(null);
-  const [lessonFieldDraft, setLessonFieldDraft] = useState<string>("");
-  const [lockedLessonFields, setLockedLessonFields] = useState<Set<string>>(new Set());
   const [editingSyllabusSection, setEditingSyllabusSection] = useState<number | null>(null);
   const [syllabusSectionDraft, setSyllabusSectionDraft] = useState<string>("");
   const run = state.run;
@@ -462,8 +431,6 @@ export default function Home() {
       setAssignmentPreview("error" in assignmentResult ? null : assignmentResult);
       setRubricPreview(typeof rubricResult === "string" ? rubricResult : null);
       setIntroPreview("error" in introResult ? null : introResult);
-      setPreviewTab("intro");
-      setRevisionPrompt("");
     } catch (err) {
       setLessonError(err instanceof Error ? err.message : "Generation failed.");
     } finally {
@@ -471,9 +438,8 @@ export default function Home() {
     }
   };
 
-  const handleRegenerateLesson = async () => {
-    if (!lessonPlanPreview) return;
-    setIsRegenerating(true);
+  const handleRegenerateLesson = async (revisionPrompt: string): Promise<boolean> => {
+    if (!lessonPlanPreview) return false;
     setLessonError(null);
     try {
       const result = await generateLessonPlanAction(
@@ -485,15 +451,13 @@ export default function Home() {
       );
       if ("error" in result) {
         setLessonError(result.error);
-        return;
+        return false;
       }
       setLessonPlanPreview(result);
-      // assignment is not regenerated on revision — keep existing
-      setRevisionPrompt("");
+      return true;
     } catch (err) {
       setLessonError(err instanceof Error ? err.message : "Regeneration failed.");
-    } finally {
-      setIsRegenerating(false);
+      return false;
     }
   };
 
@@ -836,15 +800,7 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
-  const startEditLessonField = (key: string, value: string) => {
-    setEditingLessonField(key);
-    setLessonFieldDraft(value);
-  };
-
-  const cancelEditLessonField = () => setEditingLessonField(null);
-
-  const saveLessonFieldEdit = (key: string) => {
-    const draft = lessonFieldDraft;
+  const saveLessonFieldEdit = (key: string, draft: string) => {
     if (key === "lesson-title") {
       setLessonPlanPreview((prev) => prev ? { ...prev, presentationTitle: draft } : prev);
     } else if (key === "intro-overview") {
@@ -884,15 +840,6 @@ export default function Home() {
     } else if (key === "rubric") {
       setRubricPreview(draft);
     }
-    setEditingLessonField(null);
-  };
-
-  const toggleLessonFieldLock = (key: string) => {
-    setLockedLessonFields((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
   };
 
   const startEditSyllabusSection = (i: number) => {
@@ -1646,629 +1593,19 @@ export default function Home() {
       )}
 
       {lessonPlanPreview && (
-        <div className={styles.previewBackdrop} onClick={() => setLessonPlanPreview(null)}>
-          <section
-            className={styles.lessonPreviewModal}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Lesson plan preview"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className={styles.previewHeader}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                {editingLessonField === "lesson-title" ? (
-                  <div className={styles.fieldEditWrap}>
-                    <input
-                      type="text"
-                      className={styles.fieldEditArea}
-                      style={{ minHeight: "auto", padding: "6px 10px", fontSize: "1.05rem", fontWeight: 700 }}
-                      value={lessonFieldDraft}
-                      onChange={(e) => setLessonFieldDraft(e.target.value)}
-                      autoFocus
-                    />
-                    <div className={styles.fieldEditActions}>
-                      <button type="button" className={styles.fieldEditSaveBtn} onClick={() => saveLessonFieldEdit("lesson-title")}>Save</button>
-                      <button type="button" className={styles.fieldEditCancelBtn} onClick={cancelEditLessonField}>Cancel</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className={styles.fieldLabelRow}>
-                    <h3 style={{ margin: 0 }}>{lessonPlanPreview.presentationTitle}</h3>
-                    <button
-                      type="button"
-                      className={styles.syllabusSectionActionButton}
-                      title="Edit title"
-                      aria-label="Edit presentation title"
-                      onClick={() => startEditLessonField("lesson-title", lessonPlanPreview.presentationTitle)}
-                    >
-                      <PencilIcon />
-                    </button>
-                  </div>
-                )}
-                <p className={styles.previewMeta}>
-                  {previewTab === "intro"
-                    ? "Module Introduction"
-                    : previewTab === "slides"
-                      ? `${lessonPlanPreview.slides.length} slides`
-                      : previewTab === "assignment"
-                        ? (assignmentPreview?.title ?? "Assignment")
-                        : "Grading Rubric"}
-                </p>
-              </div>
-              <button
-                type="button"
-                className={styles.previewCloseButton}
-                onClick={() => setLessonPlanPreview(null)}
-              >
-                Close
-              </button>
-            </div>
-
-            <div className={styles.lessonInnerTabs}>
-              <button
-                type="button"
-                className={`${styles.lessonInnerTab}${previewTab === "intro" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                onClick={() => setPreviewTab("intro")}
-              >
-                Introduction
-              </button>
-              <button
-                type="button"
-                className={`${styles.lessonInnerTab}${previewTab === "slides" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                onClick={() => setPreviewTab("slides")}
-              >
-                Slides
-              </button>
-              <button
-                type="button"
-                className={`${styles.lessonInnerTab}${previewTab === "assignment" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                onClick={() => setPreviewTab("assignment")}
-              >
-                Assignment
-              </button>
-              <button
-                type="button"
-                className={`${styles.lessonInnerTab}${previewTab === "rubric" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                onClick={() => setPreviewTab("rubric")}
-              >
-                Rubric
-              </button>
-            </div>
-
-            {previewTab === "intro" && (
-              <div className={styles.assignmentContent}>
-                {introPreview ? (
-                  <>
-                    <div className={styles.assignmentSection}>
-                      <div className={styles.fieldLabelRow}>
-                        <p className={styles.assignmentSectionLabel}>Where This Fits</p>
-                        <div className={styles.syllabusSectionActions}>
-                          <button
-                            type="button"
-                            className={styles.syllabusSectionActionButton}
-                            title={copiedKey === "intro-overview" ? "Copied" : "Copy"}
-                            aria-label={copiedKey === "intro-overview" ? "Copied" : "Copy overview"}
-                            onClick={() => handleCopy("intro-overview", introPreview.overview)}
-                          >
-                            <CopyIcon />
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.syllabusSectionActionButton}${lockedLessonFields.has("intro-overview") ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                            title={lockedLessonFields.has("intro-overview") ? "Locked" : "Lock"}
-                            aria-label={lockedLessonFields.has("intro-overview") ? "Unlock overview" : "Lock overview"}
-                            onClick={() => toggleLessonFieldLock("intro-overview")}
-                          >
-                            {lockedLessonFields.has("intro-overview") ? <LockClosedIcon /> : <LockOpenIcon />}
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.syllabusSectionActionButton}${editingLessonField === "intro-overview" ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                            title="Edit"
-                            aria-label="Edit overview"
-                            onClick={() => editingLessonField === "intro-overview" ? cancelEditLessonField() : startEditLessonField("intro-overview", introPreview.overview)}
-                          >
-                            <PencilIcon />
-                          </button>
-                        </div>
-                      </div>
-                      {editingLessonField === "intro-overview" ? (
-                        <div className={styles.fieldEditWrap}>
-                          <textarea
-                            className={styles.fieldEditArea}
-                            value={lessonFieldDraft}
-                            onChange={(e) => setLessonFieldDraft(e.target.value)}
-                            rows={Math.max(4, lessonFieldDraft.split("\n").length + 2)}
-                            autoFocus
-                          />
-                          <div className={styles.fieldEditActions}>
-                            <button type="button" className={styles.fieldEditSaveBtn} onClick={() => saveLessonFieldEdit("intro-overview")}>Save</button>
-                            <button type="button" className={styles.fieldEditCancelBtn} onClick={cancelEditLessonField}>Cancel</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className={styles.introText}>{introPreview.overview}</p>
-                      )}
-                    </div>
-                    <div className={styles.assignmentSection}>
-                      <div className={styles.fieldLabelRow}>
-                        <p className={styles.assignmentSectionLabel}>Key Terms</p>
-                        <div className={styles.syllabusSectionActions}>
-                          <button
-                            type="button"
-                            className={styles.syllabusSectionActionButton}
-                            title={copiedKey === "intro-keyTerms" ? "Copied" : "Copy"}
-                            aria-label={copiedKey === "intro-keyTerms" ? "Copied" : "Copy key terms"}
-                            onClick={() => handleCopy("intro-keyTerms", introPreview.keyTerms)}
-                          >
-                            <CopyIcon />
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.syllabusSectionActionButton}${lockedLessonFields.has("intro-keyTerms") ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                            title={lockedLessonFields.has("intro-keyTerms") ? "Locked" : "Lock"}
-                            aria-label={lockedLessonFields.has("intro-keyTerms") ? "Unlock key terms" : "Lock key terms"}
-                            onClick={() => toggleLessonFieldLock("intro-keyTerms")}
-                          >
-                            {lockedLessonFields.has("intro-keyTerms") ? <LockClosedIcon /> : <LockOpenIcon />}
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.syllabusSectionActionButton}${editingLessonField === "intro-keyTerms" ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                            title="Edit"
-                            aria-label="Edit key terms"
-                            onClick={() => editingLessonField === "intro-keyTerms" ? cancelEditLessonField() : startEditLessonField("intro-keyTerms", introPreview.keyTerms)}
-                          >
-                            <PencilIcon />
-                          </button>
-                        </div>
-                      </div>
-                      {editingLessonField === "intro-keyTerms" ? (
-                        <div className={styles.fieldEditWrap}>
-                          <textarea
-                            className={styles.fieldEditArea}
-                            value={lessonFieldDraft}
-                            onChange={(e) => setLessonFieldDraft(e.target.value)}
-                            rows={Math.max(4, lessonFieldDraft.split("\n").length + 2)}
-                            autoFocus
-                          />
-                          <div className={styles.fieldEditActions}>
-                            <button type="button" className={styles.fieldEditSaveBtn} onClick={() => saveLessonFieldEdit("intro-keyTerms")}>Save</button>
-                            <button type="button" className={styles.fieldEditCancelBtn} onClick={cancelEditLessonField}>Cancel</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className={styles.introText}>{introPreview.keyTerms}</p>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <p className={styles.emptyState}>Introduction generation failed — try regenerating.</p>
-                )}
-              </div>
-            )}
-
-            {previewTab === "slides" && (
-              <ol className={styles.lessonSlideList}>
-                {lessonPlanPreview.slides.map((slide, i) => (
-                  <li key={i} className={styles.lessonSlideCard}>
-                    <div className={styles.fieldLabelRow}>
-                      <span className={styles.lessonSlideNum}>Slide {i + 1}</span>
-                      <div className={styles.syllabusSectionActions}>
-                        <button
-                          type="button"
-                          className={styles.syllabusSectionActionButton}
-                          title={copiedKey === `slide-${i}` ? "Copied" : "Copy"}
-                          aria-label={copiedKey === `slide-${i}` ? "Copied" : `Copy slide ${i + 1}`}
-                          onClick={() => handleCopy(`slide-${i}`, [slide.title, ...slide.bullets].join("\n"))}
-                        >
-                          <CopyIcon />
-                        </button>
-                        <button
-                          type="button"
-                          className={`${styles.syllabusSectionActionButton}${lockedLessonFields.has(`slide-${i}`) ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                          title={lockedLessonFields.has(`slide-${i}`) ? "Locked" : "Lock"}
-                          aria-label={lockedLessonFields.has(`slide-${i}`) ? `Unlock slide ${i + 1}` : `Lock slide ${i + 1}`}
-                          onClick={() => toggleLessonFieldLock(`slide-${i}`)}
-                        >
-                          {lockedLessonFields.has(`slide-${i}`) ? <LockClosedIcon /> : <LockOpenIcon />}
-                        </button>
-                        <button
-                          type="button"
-                          className={`${styles.syllabusSectionActionButton}${editingLessonField === `slide-${i}` ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                          title="Edit"
-                          aria-label={`Edit slide ${i + 1}`}
-                          onClick={() => editingLessonField === `slide-${i}` ? cancelEditLessonField() : startEditLessonField(`slide-${i}`, [slide.title, ...slide.bullets].join("\n"))}
-                        >
-                          <PencilIcon />
-                        </button>
-                      </div>
-                    </div>
-                    {editingLessonField === `slide-${i}` ? (
-                      <div className={styles.fieldEditWrap}>
-                        <textarea
-                          className={styles.fieldEditArea}
-                          value={lessonFieldDraft}
-                          onChange={(e) => setLessonFieldDraft(e.target.value)}
-                          rows={Math.max(4, lessonFieldDraft.split("\n").length + 2)}
-                          placeholder="First line is the slide title; each additional line becomes a bullet point."
-                          autoFocus
-                        />
-                        <div className={styles.fieldEditActions}>
-                          <button type="button" className={styles.fieldEditSaveBtn} onClick={() => saveLessonFieldEdit(`slide-${i}`)}>Save</button>
-                          <button type="button" className={styles.fieldEditCancelBtn} onClick={cancelEditLessonField}>Cancel</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <p className={styles.lessonSlideTitle}>{slide.title}</p>
-                        {slide.bullets.length > 0 && (
-                          <ul className={styles.lessonSlideBullets}>
-                            {slide.bullets.map((b, j) => <li key={j}>{b}</li>)}
-                          </ul>
-                        )}
-                      </>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            )}
-
-            {previewTab === "assignment" && (
-              <div className={styles.assignmentContent}>
-                {assignmentPreview ? (
-                  <>
-                    <div className={styles.assignmentSection}>
-                      <div className={styles.fieldLabelRow}>
-                        <p className={styles.assignmentSectionLabel}>Overview</p>
-                        <div className={styles.syllabusSectionActions}>
-                          <button
-                            type="button"
-                            className={styles.syllabusSectionActionButton}
-                            title={copiedKey === "assignment-overview" ? "Copied" : "Copy"}
-                            aria-label={copiedKey === "assignment-overview" ? "Copied" : "Copy overview"}
-                            onClick={() => handleCopy("assignment-overview", assignmentPreview.overview)}
-                          >
-                            <CopyIcon />
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.syllabusSectionActionButton}${lockedLessonFields.has("assignment-overview") ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                            title={lockedLessonFields.has("assignment-overview") ? "Locked" : "Lock"}
-                            aria-label={lockedLessonFields.has("assignment-overview") ? "Unlock overview" : "Lock overview"}
-                            onClick={() => toggleLessonFieldLock("assignment-overview")}
-                          >
-                            {lockedLessonFields.has("assignment-overview") ? <LockClosedIcon /> : <LockOpenIcon />}
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.syllabusSectionActionButton}${editingLessonField === "assignment-overview" ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                            title="Edit"
-                            aria-label="Edit overview"
-                            onClick={() => editingLessonField === "assignment-overview" ? cancelEditLessonField() : startEditLessonField("assignment-overview", assignmentPreview.overview)}
-                          >
-                            <PencilIcon />
-                          </button>
-                        </div>
-                      </div>
-                      {editingLessonField === "assignment-overview" ? (
-                        <div className={styles.fieldEditWrap}>
-                          <textarea
-                            className={styles.fieldEditArea}
-                            value={lessonFieldDraft}
-                            onChange={(e) => setLessonFieldDraft(e.target.value)}
-                            rows={Math.max(4, lessonFieldDraft.split("\n").length + 2)}
-                            autoFocus
-                          />
-                          <div className={styles.fieldEditActions}>
-                            <button type="button" className={styles.fieldEditSaveBtn} onClick={() => saveLessonFieldEdit("assignment-overview")}>Save</button>
-                            <button type="button" className={styles.fieldEditCancelBtn} onClick={cancelEditLessonField}>Cancel</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className={styles.assignmentOverview}>{assignmentPreview.overview}</p>
-                      )}
-                    </div>
-                    <div className={styles.assignmentSection}>
-                      <p className={styles.assignmentSectionLabel}>Steps</p>
-                      <ol className={styles.assignmentStepList}>
-                        {assignmentPreview.steps.map((step, i) => (
-                          <li key={i} className={styles.assignmentStepCard}>
-                            <div className={styles.fieldEditActions} style={{ justifyContent: "flex-end", marginBottom: 4 }}>
-                              <button
-                                type="button"
-                                className={styles.syllabusSectionActionButton}
-                                title={copiedKey === `assignment-step-${i}` ? "Copied" : "Copy"}
-                                aria-label={copiedKey === `assignment-step-${i}` ? "Copied" : `Copy step ${i + 1}`}
-                                onClick={() => handleCopy(`assignment-step-${i}`, [step.stepTitle, step.description].join("\n"))}
-                              >
-                                <CopyIcon />
-                              </button>
-                              <button
-                                type="button"
-                                className={`${styles.syllabusSectionActionButton}${lockedLessonFields.has(`assignment-step-${i}`) ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                                title={lockedLessonFields.has(`assignment-step-${i}`) ? "Locked" : "Lock"}
-                                aria-label={lockedLessonFields.has(`assignment-step-${i}`) ? `Unlock step ${i + 1}` : `Lock step ${i + 1}`}
-                                onClick={() => toggleLessonFieldLock(`assignment-step-${i}`)}
-                              >
-                                {lockedLessonFields.has(`assignment-step-${i}`) ? <LockClosedIcon /> : <LockOpenIcon />}
-                              </button>
-                              <button
-                                type="button"
-                                className={`${styles.syllabusSectionActionButton}${editingLessonField === `assignment-step-${i}` ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                                title="Edit"
-                                aria-label={`Edit step ${i + 1}`}
-                                onClick={() => editingLessonField === `assignment-step-${i}` ? cancelEditLessonField() : startEditLessonField(`assignment-step-${i}`, [step.stepTitle, step.description].join("\n"))}
-                              >
-                                <PencilIcon />
-                              </button>
-                            </div>
-                            {editingLessonField === `assignment-step-${i}` ? (
-                              <div className={styles.fieldEditWrap}>
-                                <textarea
-                                  className={styles.fieldEditArea}
-                                  value={lessonFieldDraft}
-                                  onChange={(e) => setLessonFieldDraft(e.target.value)}
-                                  rows={Math.max(4, lessonFieldDraft.split("\n").length + 2)}
-                                  placeholder="First line is the step title; remaining lines become the description."
-                                  autoFocus
-                                />
-                                <div className={styles.fieldEditActions}>
-                                  <button type="button" className={styles.fieldEditSaveBtn} onClick={() => saveLessonFieldEdit(`assignment-step-${i}`)}>Save</button>
-                                  <button type="button" className={styles.fieldEditCancelBtn} onClick={cancelEditLessonField}>Cancel</button>
-                                </div>
-                              </div>
-                            ) : (
-                              <>
-                                <p className={styles.assignmentStepTitle}>{step.stepTitle}</p>
-                                <p className={styles.assignmentStepDesc}>{step.description}</p>
-                              </>
-                            )}
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                    <div className={styles.assignmentSection}>
-                      <div className={styles.fieldLabelRow}>
-                        <p className={styles.assignmentSectionLabel}>Free Tools</p>
-                        <div className={styles.syllabusSectionActions}>
-                          <button
-                            type="button"
-                            className={styles.syllabusSectionActionButton}
-                            title={copiedKey === "assignment-tools" ? "Copied" : "Copy"}
-                            aria-label={copiedKey === "assignment-tools" ? "Copied" : "Copy tools list"}
-                            onClick={() => handleCopy("assignment-tools", assignmentPreview.tools.join("\n"))}
-                          >
-                            <CopyIcon />
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.syllabusSectionActionButton}${lockedLessonFields.has("assignment-tools") ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                            title={lockedLessonFields.has("assignment-tools") ? "Locked" : "Lock"}
-                            aria-label={lockedLessonFields.has("assignment-tools") ? "Unlock tools" : "Lock tools"}
-                            onClick={() => toggleLessonFieldLock("assignment-tools")}
-                          >
-                            {lockedLessonFields.has("assignment-tools") ? <LockClosedIcon /> : <LockOpenIcon />}
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.syllabusSectionActionButton}${editingLessonField === "assignment-tools" ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                            title="Edit"
-                            aria-label="Edit tools list"
-                            onClick={() => editingLessonField === "assignment-tools" ? cancelEditLessonField() : startEditLessonField("assignment-tools", assignmentPreview.tools.join("\n"))}
-                          >
-                            <PencilIcon />
-                          </button>
-                        </div>
-                      </div>
-                      {editingLessonField === "assignment-tools" ? (
-                        <div className={styles.fieldEditWrap}>
-                          <textarea
-                            className={styles.fieldEditArea}
-                            value={lessonFieldDraft}
-                            onChange={(e) => setLessonFieldDraft(e.target.value)}
-                            rows={Math.max(3, lessonFieldDraft.split("\n").length + 2)}
-                            placeholder="One tool per line."
-                            autoFocus
-                          />
-                          <div className={styles.fieldEditActions}>
-                            <button type="button" className={styles.fieldEditSaveBtn} onClick={() => saveLessonFieldEdit("assignment-tools")}>Save</button>
-                            <button type="button" className={styles.fieldEditCancelBtn} onClick={cancelEditLessonField}>Cancel</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <ul className={styles.assignmentList}>
-                          {assignmentPreview.tools.map((t, i) => <li key={i}>{t}</li>)}
-                        </ul>
-                      )}
-                    </div>
-                    <div className={styles.assignmentSection}>
-                      <div className={styles.fieldLabelRow}>
-                        <p className={styles.assignmentSectionLabel}>Deliverables</p>
-                        <div className={styles.syllabusSectionActions}>
-                          <button
-                            type="button"
-                            className={styles.syllabusSectionActionButton}
-                            title={copiedKey === "assignment-deliverables" ? "Copied" : "Copy"}
-                            aria-label={copiedKey === "assignment-deliverables" ? "Copied" : "Copy deliverables list"}
-                            onClick={() => handleCopy("assignment-deliverables", assignmentPreview.deliverables.join("\n"))}
-                          >
-                            <CopyIcon />
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.syllabusSectionActionButton}${lockedLessonFields.has("assignment-deliverables") ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                            title={lockedLessonFields.has("assignment-deliverables") ? "Locked" : "Lock"}
-                            aria-label={lockedLessonFields.has("assignment-deliverables") ? "Unlock deliverables" : "Lock deliverables"}
-                            onClick={() => toggleLessonFieldLock("assignment-deliverables")}
-                          >
-                            {lockedLessonFields.has("assignment-deliverables") ? <LockClosedIcon /> : <LockOpenIcon />}
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.syllabusSectionActionButton}${editingLessonField === "assignment-deliverables" ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                            title="Edit"
-                            aria-label="Edit deliverables list"
-                            onClick={() => editingLessonField === "assignment-deliverables" ? cancelEditLessonField() : startEditLessonField("assignment-deliverables", assignmentPreview.deliverables.join("\n"))}
-                          >
-                            <PencilIcon />
-                          </button>
-                        </div>
-                      </div>
-                      {editingLessonField === "assignment-deliverables" ? (
-                        <div className={styles.fieldEditWrap}>
-                          <textarea
-                            className={styles.fieldEditArea}
-                            value={lessonFieldDraft}
-                            onChange={(e) => setLessonFieldDraft(e.target.value)}
-                            rows={Math.max(3, lessonFieldDraft.split("\n").length + 2)}
-                            placeholder="One deliverable per line."
-                            autoFocus
-                          />
-                          <div className={styles.fieldEditActions}>
-                            <button type="button" className={styles.fieldEditSaveBtn} onClick={() => saveLessonFieldEdit("assignment-deliverables")}>Save</button>
-                            <button type="button" className={styles.fieldEditCancelBtn} onClick={cancelEditLessonField}>Cancel</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <ul className={styles.assignmentList}>
-                          {assignmentPreview.deliverables.map((d, i) => <li key={i}>{d}</li>)}
-                        </ul>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <p className={styles.emptyState}>Assignment generation failed — try regenerating.</p>
-                )}
-              </div>
-            )}
-
-            {previewTab === "rubric" && (
-              <div className={styles.assignmentContent}>
-                {rubricPreview ? (
-                  <>
-                    <div className={styles.fieldLabelRow}>
-                      <p className={styles.assignmentSectionLabel}>Grading Rubric</p>
-                      <div className={styles.syllabusSectionActions}>
-                        <button
-                          type="button"
-                          className={styles.syllabusSectionActionButton}
-                          title={copiedKey === "rubric" ? "Copied" : "Copy"}
-                          aria-label={copiedKey === "rubric" ? "Copied" : "Copy rubric"}
-                          onClick={() => handleCopy("rubric", rubricPreview)}
-                        >
-                          <CopyIcon />
-                        </button>
-                        <button
-                          type="button"
-                          className={`${styles.syllabusSectionActionButton}${lockedLessonFields.has("rubric") ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                          title={lockedLessonFields.has("rubric") ? "Locked" : "Lock"}
-                          aria-label={lockedLessonFields.has("rubric") ? "Unlock rubric" : "Lock rubric"}
-                          onClick={() => toggleLessonFieldLock("rubric")}
-                        >
-                          {lockedLessonFields.has("rubric") ? <LockClosedIcon /> : <LockOpenIcon />}
-                        </button>
-                        <button
-                          type="button"
-                          className={`${styles.syllabusSectionActionButton}${editingLessonField === "rubric" ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                          title="Edit"
-                          aria-label="Edit rubric"
-                          onClick={() => editingLessonField === "rubric" ? cancelEditLessonField() : startEditLessonField("rubric", rubricPreview)}
-                        >
-                          <PencilIcon />
-                        </button>
-                      </div>
-                    </div>
-                    {editingLessonField === "rubric" ? (
-                      <div className={styles.fieldEditWrap}>
-                        <textarea
-                          className={styles.fieldEditArea}
-                          value={lessonFieldDraft}
-                          onChange={(e) => setLessonFieldDraft(e.target.value)}
-                          rows={Math.max(8, lessonFieldDraft.split("\n").length + 2)}
-                          autoFocus
-                        />
-                        <div className={styles.fieldEditActions}>
-                          <button type="button" className={styles.fieldEditSaveBtn} onClick={() => saveLessonFieldEdit("rubric")}>Save</button>
-                          <button type="button" className={styles.fieldEditCancelBtn} onClick={cancelEditLessonField}>Cancel</button>
-                        </div>
-                      </div>
-                    ) : (() => {
-                      const rows = parseGeneratedRubric(rubricPreview);
-                      return rows ? (
-                        <table className={styles.generatedRubricTable}>
-                          <thead>
-                            <tr>
-                              <th>Area</th>
-                              <th>Weight</th>
-                              <th>Performance Levels</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {rows.map((row, i) => (
-                              <tr key={i}>
-                                <td>{row.area}</td>
-                                <td>{row.weight.endsWith("%") ? row.weight : `${row.weight}%`}</td>
-                                <td>
-                                  {row.subcategories.length > 0 ? (
-                                    <ul className={styles.rubricSubcategoryList}>
-                                      {row.subcategories.map((sub) => (
-                                        <li key={sub.label}><strong>{sub.label}:</strong> {sub.description}</li>
-                                      ))}
-                                    </ul>
-                                  ) : row.description}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      ) : (
-                        <pre className={styles.generatedRubricBody}>{rubricPreview}</pre>
-                      );
-                    })()}
-                  </>
-                ) : (
-                  <p className={styles.emptyState}>Rubric generation failed — try regenerating.</p>
-                )}
-              </div>
-            )}
-
-            <div className={styles.lessonRevisionRow}>
-              <textarea
-                className={styles.lessonRevisionArea}
-                placeholder="Revision instructions — e.g. add a slide on X, make analogies more sports-focused, shorten slide 3…"
-                value={revisionPrompt}
-                onChange={(e) => setRevisionPrompt(e.target.value)}
-                rows={2}
-              />
-              <button
-                type="button"
-                className={styles.submitButton}
-                onClick={handleRegenerateLesson}
-                disabled={isRegenerating}
-              >
-                {isRegenerating ? "Regenerating…" : "Regenerate"}
-              </button>
-            </div>
-
-            <div className={styles.lessonPreviewFooter}>
-              <button
-                type="button"
-                className={styles.submitButton}
-                onClick={handleDownloadLessonPlan}
-              >
-                Download ZIP
-              </button>
-              <button
-                type="button"
-                className={styles.downloadButton}
-                onClick={() => setLessonPlanPreview(null)}
-              >
-                Close
-              </button>
-            </div>
-          </section>
-        </div>
+        <LessonPlanPreview
+          lessonPlanPreview={lessonPlanPreview}
+          assignmentPreview={assignmentPreview}
+          introPreview={introPreview}
+          rubricPreview={rubricPreview}
+          copiedKey={copiedKey}
+          onClose={() => setLessonPlanPreview(null)}
+          onCopy={handleCopy}
+          onSaveField={saveLessonFieldEdit}
+          onRegenerate={handleRegenerateLesson}
+          onDownload={handleDownloadLessonPlan}
+          icons={{ CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon }}
+        />
       )}
 
       {selectedPreview && (

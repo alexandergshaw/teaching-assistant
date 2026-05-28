@@ -5,18 +5,11 @@ import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
 import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, parseSyllabusAction, generateSyllabusSectionAction, generateSyllabusRemainingSectionsAction, reviseSyllabusAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type SyllabusSection } from "./actions";
 import LessonPlanPreview from "./components/LessonPlanPreview";
+import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
 import styles from "./page.module.css";
 import { parseGeneratedRubric } from "./utils/rubric";
 
-type PreviewFile = {
-  student: string;
-  name: string;
-  extension: string;
-  content: string;
-  truncated: boolean;
-  rawBase64?: string;
-  mimeType?: string;
-};
+
 
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
@@ -1609,54 +1602,11 @@ export default function Home() {
       )}
 
       {selectedPreview && (
-        <div className={styles.previewBackdrop} onClick={handleClosePreview}>
-          <section
-            className={styles.previewModal}
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Preview for ${selectedPreview.name}`}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className={styles.previewHeader}>
-              <div>
-                <p className={styles.previewMeta}>Student: {selectedPreview.student}</p>
-                <h3>{selectedPreview.name}</h3>
-                <p className={styles.previewMeta}>Type: {selectedPreview.extension}</p>
-              </div>
-              <button
-                type="button"
-                className={styles.previewCloseButton}
-                onClick={handleClosePreview}
-              >
-                Close
-              </button>
-            </div>
-            {previewBlobUrl && selectedPreview.mimeType === "application/pdf" ? (
-              <iframe
-                src={previewBlobUrl}
-                className={styles.previewIframe}
-                title={`Preview of ${selectedPreview.name}`}
-              />
-            ) : previewBlobUrl && selectedPreview.mimeType?.startsWith("image/") ? (
-              <div className={styles.previewImageWrap}>
-                <img
-                  src={previewBlobUrl}
-                  alt={`Preview of ${selectedPreview.name}`}
-                  className={styles.previewImage}
-                />
-              </div>
-            ) : (
-              <>
-                {selectedPreview.truncated && (
-                  <p className={styles.previewNotice}>
-                    Showing a partial preview because the extracted file content is large.
-                  </p>
-                )}
-                <pre className={styles.previewContent}>{selectedPreview.content}</pre>
-              </>
-            )}
-          </section>
-        </div>
+        <FilePreviewModal
+          selectedPreview={selectedPreview}
+          previewBlobUrl={previewBlobUrl}
+          onClose={handleClosePreview}
+        />
       )}
     </main>
   );

@@ -6,6 +6,7 @@ import { Tab, Tabs } from "@mui/material";
 import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, parseSyllabusAction, generateSyllabusSectionAction, generateSyllabusRemainingSectionsAction, reviseSyllabusAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type SyllabusSection } from "./actions";
 import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
+import LessonPlanningForm from "./components/LessonPlanningForm";
 import styles from "./page.module.css";
 import { parseGeneratedRubric } from "./utils/rubric";
 
@@ -1397,45 +1398,16 @@ export default function Home() {
         )}
 
         {activeTab === "lesson-planning" && (
-          <section className={styles.card}>
-            <div className={styles.header}>
-              <h1>Lesson Planning</h1>
-              <p>Plan and generate lesson content with AI assistance.</p>
-            </div>
-            <div className={styles.field}>
-              <label htmlFor="moduleObjectives">Module Objectives</label>
-              <textarea
-                id="moduleObjectives"
-                placeholder="Describe the learning objectives for this module…"
-                style={{ minHeight: "260px" }}
-                value={moduleObjectives}
-                onChange={(e) => setModuleObjectives(e.target.value)}
-              />
-            </div>
-            <div className={styles.field}>
-              <label htmlFor="lessonContext">Context</label>
-              <textarea
-                id="lessonContext"
-                placeholder="Add any background context, notes, or relevant information…"
-                style={{ minHeight: "180px" }}
-                value={lessonContext}
-                onChange={(e) => setLessonContext(e.target.value)}
-              />
-              <div className={styles.fileField}>
-                <input id="lessonContextFile" type="file" multiple ref={lessonContextFileRef} />
-                <p>Optionally attach any files for additional context.</p>
-              </div>
-            </div>
-            {lessonError && <p className={styles.error}>{lessonError}</p>}
-            <button
-              type="button"
-              className={styles.submitButton}
-              onClick={handleGenerateLesson}
-              disabled={isGeneratingLesson}
-            >
-              {isGeneratingLesson ? "Generating…" : "Generate"}
-            </button>
-          </section>
+          <LessonPlanningForm
+            moduleObjectives={moduleObjectives}
+            onModuleObjectivesChange={setModuleObjectives}
+            lessonContext={lessonContext}
+            onLessonContextChange={setLessonContext}
+            contextFileRef={lessonContextFileRef}
+            lessonError={lessonError}
+            isGeneratingLesson={isGeneratingLesson}
+            onGenerate={handleGenerateLesson}
+          />
         )}
       </div>
 

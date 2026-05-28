@@ -237,6 +237,36 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     }
   };
 
+  const handleRegenerateSection = async (i: number, revisionPrompt: string) => {
+    setCoursePlanningError(null);
+    const completedSections = parsedSections
+      .map((s, idx) => ({ heading: s.heading, content: sectionContents[idx] }))
+      .filter((s) => s.content);
+    const prompt = revisionPrompt.trim()
+      ? `${revisionPrompt.trim()}`
+      : undefined;
+    const sectionWithHint = prompt
+      ? { ...parsedSections[i], hint: `${parsedSections[i].hint ?? ""} Additional instruction: ${prompt}`.trim() }
+      : parsedSections[i];
+    const result = await generateSyllabusSectionAction(
+      courseTitle,
+      sectionWithHint,
+      completedSections.filter((s) => s.heading !== parsedSections[i].heading),
+      syllabusTemplateText || undefined,
+      coursePlanningContext.trim() || undefined,
+      coursePlanningContextFiles
+    );
+    if (typeof result === "string") {
+      setSectionContents((prev) => {
+        const next = [...prev];
+        next[i] = result;
+        return next;
+      });
+    } else {
+      setCoursePlanningError(result.error);
+    }
+  };
+
   const resetCoursePlanning = () => {
     setCoursePlanningStep("form");
     setParsedSections([]);
@@ -425,6 +455,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
           onRevisionFileChange={handleSyllabusRevisionFileChange}
           onRevisionPromptChange={setSyllabusRevisionPrompt}
           onRevise={handleReviseSyllabus}
+          onRegenerateSection={handleRegenerateSection}
           onDownload={handleDownloadSyllabus}
           icons={icons}
         />

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChangeEvent, ComponentType, RefObject } from "react";
+import type { ChangeEvent, ComponentType } from "react";
 import { useRef, useState } from "react";
 import type { SyllabusSection } from "../actions";
 import styles from "../page.module.css";
@@ -29,6 +29,7 @@ type SyllabusPreviewModalProps = {
   onRevisionFileChange: (e: ChangeEvent<HTMLInputElement>) => void;
   onRevisionPromptChange: (value: string) => void;
   onRevise: () => void;
+  onRegenerateSection: (i: number, revisionPrompt: string) => Promise<void>;
   onDownload: () => void;
   icons: SyllabusPreviewModalIcons;
 };
@@ -50,12 +51,23 @@ export default function SyllabusPreviewModal({
   onRevisionFileChange,
   onRevisionPromptChange,
   onRevise,
+  onRegenerateSection,
   onDownload,
   icons: { CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon },
 }: SyllabusPreviewModalProps) {
   const [editingSection, setEditingSection] = useState<number | null>(null);
   const [sectionDraft, setSectionDraft] = useState("");
+  const [regeneratingSection, setRegeneratingSection] = useState<number | null>(null);
   const revisionFileRef = useRef<HTMLInputElement>(null);
+
+  const handleRegenerateSection = async (i: number) => {
+    setRegeneratingSection(i);
+    try {
+      await onRegenerateSection(i, syllabusRevisionPrompt);
+    } finally {
+      setRegeneratingSection(null);
+    }
+  };
 
   const startEdit = (i: number) => {
     setEditingSection(i);
@@ -135,6 +147,24 @@ export default function SyllabusPreviewModal({
                       onClick={() => editingSection === i ? cancelEdit() : startEdit(i)}
                     >
                       <PencilIcon />
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.syllabusSectionActionButton}
+                      title={regeneratingSection === i ? "Regenerating…" : "Regenerate this section with revision instructions"}
+                      aria-label={`Regenerate ${section.heading}`}
+                      onClick={() => handleRegenerateSection(i)}
+                      disabled={regeneratingSection !== null || lockedSyllabusSections[i]}
+                    >
+                      {regeneratingSection === i ? (
+                        <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" style={{ opacity: 0.5 }}>
+                          <path fillRule="evenodd" d="M10 3a7 7 0 1 0 7 7h-1.5a5.5 5.5 0 1 1-1.6-3.9L12 8h4V4l-1.4 1.4A7 7 0 0 0 10 3Z" clipRule="evenodd" />
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                          <path d="M2 4.25A2.25 2.25 0 0 1 4.25 2h11.5A2.25 2.25 0 0 1 18 4.25v8.5A2.25 2.25 0 0 1 15.75 15h-3.105a3.501 3.501 0 0 1 1.1 1.5h.255a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1 0-1.5h.255A3.501 3.501 0 0 1 7.355 15H4.25A2.25 2.25 0 0 1 2 12.75v-8.5Zm1.5 0a.75.75 0 0 1 .75-.75h11.5a.75.75 0 0 1 .75.75v7.5a.75.75 0 0 1-.75.75H4.25a.75.75 0 0 1-.75-.75v-7.5Z" />
+                        </svg>
+                      )}
                     </button>
                   </div>
                 </div>

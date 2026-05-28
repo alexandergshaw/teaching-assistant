@@ -26,6 +26,81 @@ type CoursePlanningTabProps = {
 
 type CoursePlanningStep = "form" | "wizard" | "preview";
 
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function replaceSectionsInDocx(
+  xml: string,
+  sections: SyllabusSection[],
+  contents: string[]
+): string {
+  // Collect all <w:p> paragraph elements and the gaps between them
+  const paraRegex = /<w:p[ >][\s\S]*?<\/w:p>/g;
+  const paragraphs: string[] = [];
+  const gaps: string[] = [];
+  let lastIndex = 0;
+  let m: RegExpExecArray | null;
+
+  while ((m = paraRegex.exec(xml)) !== null) {
+    gaps.push(xml.slice(lastIndex, m.index));
+    paragraphs.push(m[0]);
+    lastIndex = m.index + m[0].length;
+  }
+  gaps.push(xml.slice(lastIndex)); // closing XML after last paragraph
+
+  const getText = (p: string) => p.replace(/<[^>]+>/g, "").trim();
+
+  // Map each section heading to the paragraph index that contains it
+  const headingIndices = sections.map((s) => {
+    const target = s.heading.trim().toLowerCase();
+    return paragraphs.findIndex((p) => {
+      const t = getText(p).toLowerCase();
+      return t === target || t.includes(target);
+    });
+  });
+
+  const out: string[] = [];
+  let cursor = 0;
+
+  for (let i = 0; i < sections.length; i++) {
+    const hIdx = headingIndices[i];
+    if (hIdx === -1 || hIdx < cursor) continue;
+
+    // Where this section's body ends (start of next found heading)
+    const nextHIdx =
+      headingIndices.slice(i + 1).find((idx) => idx !== -1 && idx > hIdx) ??
+      paragraphs.length;
+
+    // Preserve all paragraphs up to and including the heading
+    out.push(...paragraphs.slice(cursor, hIdx + 1));
+
+    const content = contents[i];
+    if (content) {
+      for (const line of content.split("\n")) {
+        out.push(
+          `<w:p><w:r><w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r></w:p>`
+        );
+      }
+    } else {
+      // No generated content — keep the original template body for this section
+      out.push(...paragraphs.slice(hIdx + 1, nextHIdx));
+    }
+
+    cursor = nextHIdx;
+  }
+
+  // Add any remaining paragraphs after the last section
+  out.push(...paragraphs.slice(cursor));
+
+  // Preamble XML (header, <w:body>) + paragraphs + closing XML (</w:body>, sectPr, </w:document>)
+  return gaps[0] + out.join("") + gaps[gaps.length - 1];
+}
+
 export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePlanningTabProps) {
   const syllabusFileRef = useRef<HTMLInputElement>(null);
   const [courseTitle, setCourseTitle] = useState("");
@@ -328,10 +403,43 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const handleDownloadSyllabus = async () => {
     setIsDownloadingSyllabus(true);
     try {
-      let output: string;
+      const ext = syllabusFileData?.name.split(".").pop()?.toLowerCase();
+      const baseName = courseTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
 
+      if (syllabusFileData && ext === "docx") {
+        // Reconstruct the original DOCX with generated content replacing section bodies
+        const JSZip = (await import("jszip")).default;
+        const binary = atob(syllabusFileData.base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+        const zip = await JSZip.loadAsync(bytes);
+        const docFile = zip.file("word/document.xml");
+        if (!docFile) throw new Error("Invalid DOCX: missing word/document.xml");
+
+        const originalXml = await docFile.async("string");
+        const modifiedXml = replaceSectionsInDocx(originalXml, parsedSections, sectionContents);
+        zip.file("word/document.xml", modifiedXml);
+
+        const blob = await zip.generateAsync({
+          type: "blob",
+          mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${baseName}_syllabus.docx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      // Non-DOCX: produce a .txt file
+      let output: string;
       if (syllabusTemplateText) {
-        // We have extracted template text (DOCX or plain-text upload) — replace each section body in-place
+        // Plain-text template: splice generated content in-place
         type FoundSection = { headingStart: number; headingEnd: number; sectionIndex: number };
         const found: FoundSection[] = [];
         for (let i = 0; i < parsedSections.length; i++) {
@@ -349,11 +457,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
             const nextStart = p + 1 < found.length ? found[p + 1].headingStart : syllabusTemplateText.length;
             const content = sectionContents[sectionIndex];
             result += syllabusTemplateText.slice(cursor, headingEnd);
-            if (content) {
-              result += "\n\n" + content + "\n\n";
-            } else {
-              result += syllabusTemplateText.slice(headingEnd, nextStart);
-            }
+            result += content ? "\n\n" + content + "\n\n" : syllabusTemplateText.slice(headingEnd, nextStart);
             cursor = nextStart;
           }
           result += syllabusTemplateText.slice(cursor);
@@ -362,7 +466,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
           output = buildSimpleSyllabus();
         }
       } else if (syllabusFileData) {
-        // PDF or other format — ask Gemini to reconstruct with template formatting
+        // PDF: ask Gemini to reconstruct with template formatting
         const result = await assembleSyllabusFromTemplateAction(syllabusFileData, parsedSections, sectionContents);
         output = "error" in result ? buildSimpleSyllabus() : result.text;
       } else {
@@ -373,7 +477,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${courseTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_")}_syllabus.txt`;
+      a.download = `${baseName}_syllabus.txt`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

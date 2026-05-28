@@ -26,19 +26,6 @@ type CoursePlanningTabProps = {
 
 type CoursePlanningStep = "form" | "preview";
 
-// Matches common AI-generated list markers: -, *, •, 1., a., etc.
-const LIST_MARKER_RE = /^(\s*[-•*]\s+|\s*\d+[.)]\s+|\s*[a-zA-Z][.)]\s+)/;
-
-function stripListMarkersFromContent(content: string): string {
-  return content
-    .split("\n")
-    .map((line) => {
-      const m = line.match(LIST_MARKER_RE);
-      return m ? line.slice(m[0].length) : line;
-    })
-    .join("\n");
-}
-
 function escapeXml(str: string): string {
   return str
     .replace(/&/g, "&amp;")
@@ -144,11 +131,7 @@ function replaceSectionsInDocx(
           out.push(makePara(plainPPr, ""));
           continue;
         }
-        // Strip any stray list markers the model may have emitted despite instructions,
-        // and always render as a plain paragraph using the template's body style.
-        const markerMatch = rawLine.match(LIST_MARKER_RE);
-        const lineText = markerMatch ? rawLine.slice(markerMatch[0].length) : rawLine;
-        out.push(makePara(plainPPr, lineText));
+        out.push(makePara(plainPPr, rawLine));
       }
     } else {
       // No generated content — keep the original template body for this section
@@ -197,7 +180,7 @@ function buildTextTemplateSyllabus(
     const nextStart = p + 1 < found.length ? found[p + 1].headingStart : templateText.length;
     const content = contents[sectionIndex];
     result += templateText.slice(cursor, headingEnd);
-    result += content ? "\n\n" + stripListMarkersFromContent(content) + "\n\n" : templateText.slice(headingEnd, nextStart);
+    result += content ? "\n\n" + content + "\n\n" : templateText.slice(headingEnd, nextStart);
     cursor = nextStart;
   }
   result += templateText.slice(cursor);
@@ -210,7 +193,7 @@ function buildSimpleSyllabus(sections: SyllabusSection[], contents: string[]): s
     const content = contents[i];
     if (!content) continue;
     const h = sections[i].heading;
-    lines.push(h, "=".repeat(h.length), "", stripListMarkersFromContent(content), "", "");
+    lines.push(h, "=".repeat(h.length), "", content, "", "");
   }
   return lines.join("\n");
 }

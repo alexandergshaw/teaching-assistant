@@ -346,7 +346,7 @@ const SYLLABUS_VERTICAL_LIST_REQUIREMENT =
   "Format every list vertically with one item per line.";
 
 const SYLLABUS_SCHEDULE_REQUIREMENT =
-  "For any course schedule or weekly plan section, include a Week number (e.g. Week 1, Week 2, …) AND the specific date(s) for that week — derive the dates from the academic calendar provided in context. List one week per line.";
+  "For any course schedule or weekly plan section, include a Week number (e.g. Week 1, Week 2, …) AND the specific date(s) for that week — derive the dates from the academic calendar provided in context. List one week per line. Be sure to include all breaks (e.g. holiday breaks, spring break, fall break, etc.) from the academic calendar as their own entries in the schedule.";
 
 async function appendSyllabusContextParts(
   parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>,

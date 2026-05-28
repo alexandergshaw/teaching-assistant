@@ -217,6 +217,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [semester, setSemester] = useState("");
   const [officeHours, setOfficeHours] = useState("");
   const [coursePlanningContext, setCoursePlanningContext] = useState("");
+  const [latePolicy, setLatePolicy] = useState("");
+  const [attendancePolicy, setAttendancePolicy] = useState("");
   const [coursePlanningContextFiles, setCoursePlanningContextFiles] = useState<
     Array<{ name: string; base64: string; mimeType: string }>
   >([]);
@@ -507,6 +509,28 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               placeholder="e.g. MWF 9:00–10:00am, Room 204"
               value={classTimes}
               onChange={(e) => setClassTimes(e.target.value)}
+            />
+          </div>
+          <div className={styles.field}>
+            <label htmlFor="latePolicy">Late/Makeup Work Policy</label>
+            <textarea
+              id="latePolicy"
+              className={styles.textInput}
+              placeholder="Describe your late or makeup work policy..."
+              value={latePolicy}
+              onChange={(e) => setLatePolicy(e.target.value)}
+              rows={3}
+            />
+          </div>
+          <div className={styles.field}>
+            <label htmlFor="attendancePolicy">Attendance Policy</label>
+            <textarea
+              id="attendancePolicy"
+              className={styles.textInput}
+              placeholder="Describe your attendance policy..."
+              value={attendancePolicy}
+              onChange={(e) => setAttendancePolicy(e.target.value)}
+              rows={3}
             />
           </div>
           <div className={styles.field}>

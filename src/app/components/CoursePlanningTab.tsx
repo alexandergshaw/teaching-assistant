@@ -28,6 +28,9 @@ type CoursePlanningStep = "form" | "wizard" | "preview";
 export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePlanningTabProps) {
   const syllabusFileRef = useRef<HTMLInputElement>(null);
   const [courseTitle, setCourseTitle] = useState("");
+  const [courseCode, setCourseCode] = useState("");
+  const [classTimes, setClassTimes] = useState("");
+  const [officeHours, setOfficeHours] = useState("");
   const [coursePlanningContext, setCoursePlanningContext] = useState("");
   const [coursePlanningContextFiles, setCoursePlanningContextFiles] = useState<
     Array<{ name: string; base64: string; mimeType: string }>
@@ -47,6 +50,16 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   >([]);
   const [lockedSyllabusSections, setLockedSyllabusSections] = useState<boolean[]>([]);
   const [isRevisingSyllabus, setIsRevisingSyllabus] = useState(false);
+
+  const getFullContext = () => {
+    const parts = [
+      courseCode.trim() && `Course Code: ${courseCode.trim()}`,
+      classTimes.trim() && `Class Times & Location: ${classTimes.trim()}`,
+      officeHours.trim() && `Office Hours: ${officeHours.trim()}`,
+      coursePlanningContext.trim(),
+    ].filter(Boolean) as string[];
+    return parts.length > 0 ? parts.join("\n") : undefined;
+  };
 
   const handleCoursePlanningContextFiles = async (e: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files ?? []);
@@ -90,7 +103,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       const result = await parseSyllabusAction(
         courseTitle,
         { name: file.name, base64, mimeType: file.type || "application/octet-stream" },
-        coursePlanningContext.trim() || undefined,
+        getFullContext(),
         coursePlanningContextFiles
       );
       if ("error" in result) { setCoursePlanningError(result.error); return; }
@@ -124,7 +137,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
           parsedSections[currentSectionIndex],
           completedSections,
           syllabusTemplateText || undefined,
-          coursePlanningContext.trim() || undefined,
+          getFullContext(),
           coursePlanningContextFiles
         );
         if (typeof result !== "string") { setCoursePlanningError(result.error); return; }
@@ -178,7 +191,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         updated,
         startIndex,
         syllabusTemplateText || undefined,
-        coursePlanningContext.trim() || undefined,
+        getFullContext(),
         coursePlanningContextFiles
       );
 
@@ -224,7 +237,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         syllabusTemplateText,
         syllabusRevisionPrompt.trim(),
         syllabusRevisionFiles,
-        coursePlanningContext.trim() || undefined,
+        getFullContext(),
         coursePlanningContextFiles,
         lockedSyllabusSections
       );
@@ -253,7 +266,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       sectionWithHint,
       completedSections.filter((s) => s.heading !== parsedSections[i].heading),
       syllabusTemplateText || undefined,
-      coursePlanningContext.trim() || undefined,
+      getFullContext(),
       coursePlanningContextFiles
     );
     if (typeof result === "string") {
@@ -323,6 +336,39 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               placeholder="e.g. Introduction to Data Science"
               value={courseTitle}
               onChange={(e) => setCourseTitle(e.target.value)}
+            />
+          </div>
+          <div className={styles.field}>
+            <label htmlFor="courseCode">Course Code</label>
+            <input
+              id="courseCode"
+              type="text"
+              className={styles.textInput}
+              placeholder="e.g. CS 101"
+              value={courseCode}
+              onChange={(e) => setCourseCode(e.target.value)}
+            />
+          </div>
+          <div className={styles.field}>
+            <label htmlFor="classTimes">Class Times &amp; Location</label>
+            <input
+              id="classTimes"
+              type="text"
+              className={styles.textInput}
+              placeholder="e.g. MWF 9:00–10:00am, Room 204"
+              value={classTimes}
+              onChange={(e) => setClassTimes(e.target.value)}
+            />
+          </div>
+          <div className={styles.field}>
+            <label htmlFor="officeHours">Office Hours</label>
+            <input
+              id="officeHours"
+              type="text"
+              className={styles.textInput}
+              placeholder="e.g. Tuesdays 2–4pm, Office 305"
+              value={officeHours}
+              onChange={(e) => setOfficeHours(e.target.value)}
             />
           </div>
           <div className={styles.field}>

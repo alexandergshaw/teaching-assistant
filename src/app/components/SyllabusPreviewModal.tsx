@@ -82,7 +82,7 @@ export default function SyllabusPreviewModal({
   };
 
   return (
-    <div className={styles.previewBackdrop} onClick={onClose}>
+    <div className={styles.previewBackdrop}>
       <section
         className={styles.lessonPreviewModal}
         role="dialog"

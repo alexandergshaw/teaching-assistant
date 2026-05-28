@@ -19,6 +19,7 @@ export default function SelectionChatWidget() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   const widgetRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -97,6 +98,19 @@ export default function SelectionChatWidget() {
     setMessages([]);
     setInput("");
     setError(null);
+    setCopiedIndex(null);
+  };
+
+  const copyMessage = async (text: string, index: number) => {
+    await navigator.clipboard.writeText(text);
+    setCopiedIndex(index);
+    setTimeout(() => setCopiedIndex((prev) => (prev === index ? null : prev)), 2000);
+  };
+
+  const resendMessage = (text: string) => {
+    if (isLoading) return;
+    setInput(text);
+    setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   const sendMessage = async () => {
@@ -179,11 +193,34 @@ export default function SelectionChatWidget() {
               </p>
             )}
             {messages.map((m, i) => (
-              <div
-                key={i}
-                className={m.role === "user" ? styles.selectionChatUserMsg : styles.selectionChatAiMsg}
-              >
-                {m.text}
+              <div key={i} className={styles.selectionChatMsgGroup}>
+                <div
+                  className={m.role === "user" ? styles.selectionChatUserMsg : styles.selectionChatAiMsg}
+                >
+                  {m.text}
+                </div>
+                <div className={m.role === "user" ? styles.selectionChatMsgActionsUser : styles.selectionChatMsgActionsAi}>
+                  {m.role === "model" ? (
+                    <button
+                      className={styles.selectionChatMsgAction}
+                      onClick={() => void copyMessage(m.text, i)}
+                      title={copiedIndex === i ? "Copied" : "Copy response"}
+                      aria-label={copiedIndex === i ? "Copied" : "Copy response"}
+                    >
+                      {copiedIndex === i ? <CheckIcon /> : <CopyIcon />}
+                    </button>
+                  ) : (
+                    <button
+                      className={styles.selectionChatMsgAction}
+                      onClick={() => resendMessage(m.text)}
+                      title="Edit and resend"
+                      aria-label="Edit and resend"
+                      disabled={isLoading}
+                    >
+                      <ResendIcon />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
             {isLoading && (
@@ -218,6 +255,31 @@ export default function SelectionChatWidget() {
         </div>
       )}
     </div>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="currentColor">
+      <path d="M7 3.5A2.5 2.5 0 0 1 9.5 1h6A2.5 2.5 0 0 1 18 3.5v8A2.5 2.5 0 0 1 15.5 14h-6A2.5 2.5 0 0 1 7 11.5v-8Zm2.5-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-6Z" />
+      <path d="M2 7.5A2.5 2.5 0 0 1 4.5 5h.75a.75.75 0 0 1 0 1.5H4.5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-.75a.75.75 0 0 1 1.5 0v.75A2.5 2.5 0 0 1 10.5 18h-6A2.5 2.5 0 0 1 2 15.5v-8Z" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="currentColor">
+      <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+function ResendIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="currentColor">
+      <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 0 1-9.201-4.925A5.5 5.5 0 0 1 15.1 4.9l1.647 1.629A.75.75 0 0 0 18 6V2a.75.75 0 0 0-.75-.75h-4a.75.75 0 0 0-.482 1.32l1.18 1.168a7 7 0 1 0 1.706 7.197.75.75 0 1 0-1.42-.49 5.502 5.502 0 0 1-.922 1.979Z" clipRule="evenodd" />
+    </svg>
   );
 }
 

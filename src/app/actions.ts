@@ -1120,7 +1120,7 @@ export async function selectionChatAction(
     const apiKey = getGeminiApiKey();
     const model = getGeminiModel();
 
-    const systemPrompt = `You are a helpful teaching assistant. The user has highlighted the following text and has a question about it. Answer concisely and helpfully.
+    const systemPrompt = `You are a helpful teaching assistant. The user has highlighted the following text and has a question about it. Answer concisely and helpfully. Use plain prose only — do not use any markdown formatting, bold, italics, bullet points, headers, or special symbols.
 
 HIGHLIGHTED TEXT:
 """
@@ -1129,7 +1129,7 @@ ${selectedText}
 
     const contents = [
       { role: "user" as const, parts: [{ text: systemPrompt }] },
-      { role: "model" as const, parts: [{ text: "Understood. I'll answer questions about the highlighted text." }] },
+      { role: "model" as const, parts: [{ text: "Understood. I'll answer questions about the highlighted text in plain prose with no formatting." }] },
       ...history.map((m) => ({ role: m.role as "user" | "model", parts: [{ text: m.text }] })),
       { role: "user" as const, parts: [{ text: question }] },
     ];

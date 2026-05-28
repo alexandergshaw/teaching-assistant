@@ -54,16 +54,29 @@ function replaceSectionsInDocx(
   gaps.push(xml.slice(lastIndex));
 
   const getText = (p: string) => p.replace(/<[^>]+>/g, "").trim();
+
   const getPPr = (p: string): string => {
     const r = p.match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
     return r ? r[0] : "";
   };
+
+  // Extract run properties from the first run in a paragraph — this carries
+  // font name, font size, bold, italic, color, spacing, etc.
+  const getRPr = (p: string): string => {
+    const runMatch = p.match(/<w:r[ >][\s\S]*?<\/w:r>/);
+    if (!runMatch) return "";
+    const rPrMatch = runMatch[0].match(/<w:rPr>[\s\S]*?<\/w:rPr>/);
+    return rPrMatch ? rPrMatch[0] : "";
+  };
+
   const hasNumPr = (p: string) => /<w:numPr>/.test(p);
   // Matches common AI-generated list markers: -, *, •, 1., a., etc.
   const LIST_MARKER_RE = /^(\s*[-•*]\s+|\s*\d+[.)]\s+|\s*[a-zA-Z][.)]\s+)/;
 
-  const makePara = (pPr: string, text: string): string =>
-    `<w:p>${pPr}<w:r><w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
+  // Build a paragraph that faithfully carries both paragraph and run properties
+  // from the template, with the supplied text as content.
+  const makePara = (pPr: string, rPr: string, text: string): string =>
+    `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
 
   // Map each section heading to the paragraph index that contains it
   const headingIndices = sections.map((s) => {
@@ -91,24 +104,31 @@ function replaceSectionsInDocx(
 
     const content = contents[i];
     if (content) {
-      // Pull paragraph style templates from the section's original body paragraphs
+      // Pull paragraph AND run style templates from the section's original body paragraphs
       const bodyParas = paragraphs.slice(hIdx + 1, nextHIdx);
       const listPara = bodyParas.find(hasNumPr);
       const plainPara = bodyParas.find((p) => !hasNumPr(p) && getText(p).length > 0);
+
+      // Fall back to heading paragraph's run properties if body paragraphs are missing
+      const headingPara = paragraphs[hIdx];
+      const fallbackRPr = getRPr(headingPara);
+
       const listPPr = listPara ? getPPr(listPara) : "";
+      const listRPr = listPara ? (getRPr(listPara) || fallbackRPr) : fallbackRPr;
       const plainPPr = plainPara ? getPPr(plainPara) : "";
+      const plainRPr = plainPara ? (getRPr(plainPara) || fallbackRPr) : fallbackRPr;
 
       for (const rawLine of content.split("\n")) {
         if (rawLine.trim() === "") {
-          out.push(makePara(plainPPr, ""));
+          out.push(makePara(plainPPr, plainRPr, ""));
           continue;
         }
         const markerMatch = rawLine.match(LIST_MARKER_RE);
         if (markerMatch && listPPr) {
           // Strip the markdown marker and use the template's DOCX list paragraph style
-          out.push(makePara(listPPr, rawLine.slice(markerMatch[0].length)));
+          out.push(makePara(listPPr, listRPr, rawLine.slice(markerMatch[0].length)));
         } else {
-          out.push(makePara(plainPPr, rawLine));
+          out.push(makePara(plainPPr, plainRPr, rawLine));
         }
       }
     } else {

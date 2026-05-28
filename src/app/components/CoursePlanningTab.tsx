@@ -73,10 +73,28 @@ function replaceSectionsInDocx(
   // Matches common AI-generated list markers: -, *, •, 1., a., etc.
   const LIST_MARKER_RE = /^(\s*[-•*]\s+|\s*\d+[.)]\s+|\s*[a-zA-Z][.)]\s+)/;
 
-  // Build a paragraph that faithfully carries both paragraph and run properties
-  // from the template, with the supplied text as content.
-  const makePara = (pPr: string, rPr: string, text: string): string =>
-    `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
+  // Fixed run properties: Times New Roman 12pt, no bold, no italic.
+  // Applied to every body paragraph we write so the output is consistent
+  // regardless of what styles the template happened to use in placeholder text.
+  const BODY_FONT_RPR =
+    `<w:rPr>` +
+    `<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>` +
+    `<w:b w:val="false"/><w:bCs w:val="false"/>` +
+    `<w:i w:val="false"/><w:iCs w:val="false"/>` +
+    `<w:sz w:val="24"/><w:szCs w:val="24"/>` +
+    `</w:rPr>`;
+
+  // Strip any <w:rPr> embedded inside <w:pPr> — that element styles only the
+  // paragraph mark and can inadvertently override run-level properties in some
+  // Word versions. Removing it keeps paragraph spacing/indent while letting our
+  // explicit run rPr take full control of font/size/bold.
+  const stripPPrRPr = (pPr: string): string =>
+    pPr.replace(/<w:rPr>[\s\S]*?<\/w:rPr>/, "");
+
+  // Build a body paragraph using the template's paragraph properties (spacing,
+  // indentation, style name) but our fixed run properties (font/size/weight).
+  const makePara = (pPr: string, text: string): string =>
+    `<w:p>${stripPPrRPr(pPr)}<w:r>${BODY_FONT_RPR}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
 
   // Map each section heading to the paragraph index that contains it
   const headingIndices = sections.map((s) => {
@@ -104,30 +122,22 @@ function replaceSectionsInDocx(
 
     const content = contents[i];
     if (content) {
-      // Pull paragraph AND run style templates from the section's original body paragraphs
+      // Pull paragraph properties (spacing, indent, style name) from the template's
+      // body paragraphs. Run properties (font/size/bold) are overridden by BODY_FONT_RPR.
       const bodyParas = paragraphs.slice(hIdx + 1, nextHIdx);
-      const listPara = bodyParas.find(hasNumPr);
       const plainPara = bodyParas.find((p) => !hasNumPr(p) && getText(p).length > 0);
-
-      // Fall back to heading paragraph's run properties if body paragraphs are missing
-      const headingPara = paragraphs[hIdx];
-      const fallbackRPr = getRPr(headingPara);
-
-      const listPPr = listPara ? getPPr(listPara) : "";
-      const listRPr = listPara ? (getRPr(listPara) || fallbackRPr) : fallbackRPr;
       const plainPPr = plainPara ? getPPr(plainPara) : "";
-      const plainRPr = plainPara ? (getRPr(plainPara) || fallbackRPr) : fallbackRPr;
 
       for (const rawLine of content.split("\n")) {
         if (rawLine.trim() === "") {
-          out.push(makePara(plainPPr, plainRPr, ""));
+          out.push(makePara(plainPPr, ""));
           continue;
         }
         // Strip any stray list markers the model may have emitted despite instructions,
         // and always render as a plain paragraph using the template's body style.
         const markerMatch = rawLine.match(LIST_MARKER_RE);
         const lineText = markerMatch ? rawLine.slice(markerMatch[0].length) : rawLine;
-        out.push(makePara(plainPPr, plainRPr, lineText));
+        out.push(makePara(plainPPr, lineText));
       }
     } else {
       // No generated content — keep the original template body for this section

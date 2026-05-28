@@ -7,6 +7,7 @@ import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssign
 import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
 import LessonPlanningForm from "./components/LessonPlanningForm";
+import SyllabusPreviewModal from "./components/SyllabusPreviewModal";
 import styles from "./page.module.css";
 import { parseGeneratedRubric } from "./utils/rubric";
 
@@ -207,9 +208,6 @@ export default function Home() {
   const [syllabusRevisionFiles, setSyllabusRevisionFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
   const [lockedSyllabusSections, setLockedSyllabusSections] = useState<boolean[]>([]);
   const [isRevisingSyllabus, setIsRevisingSyllabus] = useState(false);
-  const syllabusRevisionFileRef = useRef<HTMLInputElement>(null);
-  const [editingSyllabusSection, setEditingSyllabusSection] = useState<number | null>(null);
-  const [syllabusSectionDraft, setSyllabusSectionDraft] = useState<string>("");
   const run = state.run;
 
   const sortedResults = useMemo(() => {
@@ -836,21 +834,13 @@ export default function Home() {
     }
   };
 
-  const startEditSyllabusSection = (i: number) => {
-    setEditingSyllabusSection(i);
-    setSyllabusSectionDraft(sectionContents[i] ?? "");
-  };
-
-  const saveEditSyllabusSection = (i: number) => {
+  const saveEditSyllabusSection = (i: number, content: string) => {
     setSectionContents((prev) => {
       const next = [...prev];
-      next[i] = syllabusSectionDraft;
+      next[i] = content;
       return next;
     });
-    setEditingSyllabusSection(null);
   };
-
-  const cancelEditSyllabusSection = () => setEditingSyllabusSection(null);
 
   const handleCopy = async (copyKey: string, value: string) => {
     const text = value.trim();
@@ -1412,149 +1402,32 @@ export default function Home() {
       </div>
 
       {coursePlanningStep === "preview" && (
-        <div className={styles.previewBackdrop} onClick={resetCoursePlanning}>
-          <section
-            className={styles.lessonPreviewModal}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Syllabus preview"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className={styles.previewHeader}>
-              <div>
-                <h3>{courseTitle}</h3>
-                <p className={styles.previewMeta}>
-                  {sectionContents.filter(Boolean).length} of {parsedSections.length} sections compiled
-                </p>
-              </div>
-              <button
-                type="button"
-                className={styles.previewCloseButton}
-                onClick={resetCoursePlanning}
-              >
-                Close
-              </button>
-            </div>
-
-            <div className={styles.assignmentContent}>
-              {parsedSections.map((section, i) =>
-                sectionContents[i] ? (
-                  <div key={i} className={styles.syllabusSectionCard}>
-                    <div className={styles.syllabusSectionTopRow}>
-                      <p className={styles.syllabusSectionHeading}>{section.heading}</p>
-                      <div className={styles.syllabusSectionActions}>
-                        <button
-                          type="button"
-                          className={styles.syllabusSectionActionButton}
-                          title={
-                            copiedKey === `syllabus-section-${i}`
-                              ? "Copied"
-                              : "Copy section content"
-                          }
-                          aria-label={
-                            copiedKey === `syllabus-section-${i}`
-                              ? "Copied"
-                              : `Copy ${section.heading} section`
-                          }
-                          onClick={() => handleCopy(`syllabus-section-${i}`, sectionContents[i])}
-                        >
-                          <CopyIcon />
-                        </button>
-                        <button
-                          type="button"
-                          className={`${styles.syllabusSectionActionButton}${lockedSyllabusSections[i] ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                          title={lockedSyllabusSections[i] ? "Locked for revisions" : "Unlocked for revisions"}
-                          aria-label={lockedSyllabusSections[i] ? `Unlock ${section.heading}` : `Lock ${section.heading}`}
-                          onClick={() => {
-                            setLockedSyllabusSections((prev) => {
-                              const next = [...prev];
-                              next[i] = !next[i];
-                              return next;
-                            });
-                          }}
-                        >
-                          {lockedSyllabusSections[i] ? <LockClosedIcon /> : <LockOpenIcon />}
-                        </button>
-                        <button
-                          type="button"
-                          className={`${styles.syllabusSectionActionButton}${editingSyllabusSection === i ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
-                          title={editingSyllabusSection === i ? "Editing" : "Edit section"}
-                          aria-label={editingSyllabusSection === i ? `Stop editing ${section.heading}` : `Edit ${section.heading}`}
-                          onClick={() => editingSyllabusSection === i ? cancelEditSyllabusSection() : startEditSyllabusSection(i)}
-                        >
-                          <PencilIcon />
-                        </button>
-                      </div>
-                    </div>
-                    {editingSyllabusSection === i ? (
-                      <div className={styles.fieldEditWrap}>
-                        <textarea
-                          className={styles.fieldEditArea}
-                          value={syllabusSectionDraft}
-                          onChange={(e) => setSyllabusSectionDraft(e.target.value)}
-                          rows={Math.max(5, syllabusSectionDraft.split("\n").length + 2)}
-                          autoFocus
-                        />
-                        <div className={styles.fieldEditActions}>
-                          <button type="button" className={styles.fieldEditSaveBtn} onClick={() => saveEditSyllabusSection(i)}>Save</button>
-                          <button type="button" className={styles.fieldEditCancelBtn} onClick={cancelEditSyllabusSection}>Cancel</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className={styles.syllabusSectionContent}>{sectionContents[i]}</p>
-                    )}
-                  </div>
-                ) : null
-              )}
-            </div>
-
-            {coursePlanningError && <p className={styles.error}>{coursePlanningError}</p>}
-
-            <div className={styles.lessonRevisionRow}>
-              <input
-                ref={syllabusRevisionFileRef}
-                type="file"
-                multiple
-                style={{ display: "none" }}
-                onChange={handleSyllabusRevisionFileChange}
-              />
-              <textarea
-                className={styles.lessonRevisionArea}
-                placeholder="Revision instructions — e.g. make the grading policy stricter, add a late work policy, shorten the course description…"
-                value={syllabusRevisionPrompt}
-                onChange={(e) => setSyllabusRevisionPrompt(e.target.value)}
-                rows={2}
-                disabled={isRevisingSyllabus}
-              />
-              <button
-                type="button"
-                className={styles.downloadButton}
-                onClick={() => syllabusRevisionFileRef.current?.click()}
-                disabled={isRevisingSyllabus}
-                title="Attach additional context files"
-              >
-                {syllabusRevisionFiles.length > 0 ? `Files (${syllabusRevisionFiles.length})` : "Attach"}
-              </button>
-              <button
-                type="button"
-                className={styles.submitButton}
-                onClick={handleReviseSyllabus}
-                disabled={isRevisingSyllabus || (!syllabusRevisionPrompt.trim() && syllabusRevisionFiles.length === 0)}
-              >
-                {isRevisingSyllabus ? "Revising…" : "Revise"}
-              </button>
-            </div>
-
-            <div className={styles.lessonPreviewFooter}>
-              <button type="button" className={styles.submitButton} onClick={handleDownloadSyllabus}>
-                Download Syllabus
-              </button>
-              <button type="button" className={styles.downloadButton} onClick={resetCoursePlanning}>
-                Start Over
-              </button>
-            </div>
-          </section>
-        </div>
+        <SyllabusPreviewModal
+          courseTitle={courseTitle}
+          parsedSections={parsedSections}
+          sectionContents={sectionContents}
+          copiedKey={copiedKey}
+          lockedSyllabusSections={lockedSyllabusSections}
+          coursePlanningError={coursePlanningError}
+          syllabusRevisionPrompt={syllabusRevisionPrompt}
+          revisionFileCount={syllabusRevisionFiles.length}
+          isRevisingSyllabus={isRevisingSyllabus}
+          onClose={resetCoursePlanning}
+          onCopy={handleCopy}
+          onToggleLock={(i) =>
+            setLockedSyllabusSections((prev) => {
+              const next = [...prev];
+              next[i] = !next[i];
+              return next;
+            })
+          }
+          onSaveSection={saveEditSyllabusSection}
+          onRevisionFileChange={handleSyllabusRevisionFileChange}
+          onRevisionPromptChange={setSyllabusRevisionPrompt}
+          onRevise={handleReviseSyllabus}
+          onDownload={handleDownloadSyllabus}
+          icons={{ CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon }}
+        />
       )}
 
       {lessonPlanPreview && (

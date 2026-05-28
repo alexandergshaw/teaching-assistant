@@ -24,7 +24,7 @@ type CoursePlanningTabProps = {
   };
 };
 
-type CoursePlanningStep = "form" | "wizard" | "preview";
+type CoursePlanningStep = "form" | "preview";
 
 function escapeXml(str: string): string {
   return str
@@ -181,6 +181,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [courseTitle, setCourseTitle] = useState("");
   const [courseCode, setCourseCode] = useState("");
   const [classTimes, setClassTimes] = useState("");
+  const [semester, setSemester] = useState("");
   const [officeHours, setOfficeHours] = useState("");
   const [coursePlanningContext, setCoursePlanningContext] = useState("");
   const [coursePlanningContextFiles, setCoursePlanningContextFiles] = useState<
@@ -189,11 +190,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [coursePlanningStep, setCoursePlanningStep] = useState<CoursePlanningStep>("form");
   const [parsedSections, setParsedSections] = useState<SyllabusSection[]>([]);
   const [syllabusTemplateText, setSyllabusTemplateText] = useState("");
-  const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
   const [sectionContents, setSectionContents] = useState<string[]>([]);
-  const [currentSectionInput, setCurrentSectionInput] = useState("");
   const [isParsingTemplate, setIsParsingTemplate] = useState(false);
-  const [isGeneratingSection, setIsGeneratingSection] = useState(false);
   const [coursePlanningError, setCoursePlanningError] = useState<string | null>(null);
   const [syllabusRevisionPrompt, setSyllabusRevisionPrompt] = useState("");
   const [syllabusRevisionFiles, setSyllabusRevisionFiles] = useState<
@@ -209,6 +207,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const getFullContext = () => {
     const parts = [
       courseCode.trim() && `Course Code: ${courseCode.trim()}`,
+      semester.trim() && `Semester: ${semester.trim()}`,
       classTimes.trim() && `Class Times & Location: ${classTimes.trim()}`,
       officeHours.trim() && `Office Hours: ${officeHours.trim()}`,
       coursePlanningContext.trim(),
@@ -274,111 +273,32 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         reader.readAsDataURL(file);
       });
       setSyllabusFileData({ name: file.name, base64, mimeType: file.type || "application/octet-stream" });
-      const result = await parseSyllabusAction(
+      const parsed = await parseSyllabusAction(
         courseTitle,
         { name: file.name, base64, mimeType: file.type || "application/octet-stream" },
         getFullContext(),
         getContextFiles()
       );
-      if ("error" in result) { setCoursePlanningError(result.error); return; }
-      setParsedSections(result.sections);
-      setSyllabusTemplateText(result.templateText);
-      setSectionContents(new Array(result.sections.length).fill(""));
-      setLockedSyllabusSections(new Array(result.sections.length).fill(false));
-      setCurrentSectionIndex(0);
-      setCurrentSectionInput("");
-      setCoursePlanningStep("wizard");
-    } catch (err) {
-      setCoursePlanningError(err instanceof Error ? err.message : "Failed to parse template.");
-    } finally {
-      setIsParsingTemplate(false);
-    }
-  };
-
-  const handleSectionNext = async () => {
-    setCoursePlanningError(null);
-    const typed = currentSectionInput.trim();
-    let content = typed;
-    if (!typed) {
-      setIsGeneratingSection(true);
-      try {
-        const completedSections = parsedSections
-          .slice(0, currentSectionIndex)
-          .map((s, i) => ({ heading: s.heading, content: sectionContents[i] }))
-          .filter((s) => s.content);
-        const result = await generateSyllabusSectionAction(
-          courseTitle,
-          parsedSections[currentSectionIndex],
-          completedSections,
-          syllabusTemplateText || undefined,
-          getFullContext(),
-          getContextFiles()
-        );
-        if (typeof result !== "string") { setCoursePlanningError(result.error); return; }
-        content = result;
-      } finally {
-        setIsGeneratingSection(false);
-      }
-    }
-    const updated = [...sectionContents];
-    updated[currentSectionIndex] = content;
-    setSectionContents(updated);
-    if (currentSectionIndex + 1 < parsedSections.length) {
-      setCurrentSectionIndex(currentSectionIndex + 1);
-      setCurrentSectionInput("");
-    } else {
-      setCoursePlanningStep("preview");
-    }
-  };
-
-  const handleSectionSkip = () => {
-    const updated = [...sectionContents];
-    updated[currentSectionIndex] = "";
-    setSectionContents(updated);
-    if (currentSectionIndex + 1 < parsedSections.length) {
-      setCurrentSectionIndex(currentSectionIndex + 1);
-      setCurrentSectionInput("");
-    } else {
-      setCoursePlanningStep("preview");
-    }
-  };
-
-  const handleGenerateRemaining = async () => {
-    setCoursePlanningError(null);
-    setIsGeneratingSection(true);
-    const updated = [...sectionContents];
-    const typedCurrent = currentSectionInput.trim();
-    if (typedCurrent) {
-      updated[currentSectionIndex] = typedCurrent;
-    }
-    try {
-      const startIndex = currentSectionIndex + (typedCurrent ? 1 : 0);
-      if (startIndex >= parsedSections.length) {
-        setSectionContents(updated);
-        setCoursePlanningStep("preview");
-        return;
-      }
-
+      if ("error" in parsed) { setCoursePlanningError(parsed.error); return; }
+      setParsedSections(parsed.sections);
+      setSyllabusTemplateText(parsed.templateText);
+      setLockedSyllabusSections(new Array(parsed.sections.length).fill(false));
       const result = await generateSyllabusRemainingSectionsAction(
         courseTitle,
-        parsedSections,
-        updated,
-        startIndex,
-        syllabusTemplateText || undefined,
+        parsed.sections,
+        new Array(parsed.sections.length).fill(""),
+        0,
+        parsed.templateText || undefined,
         getFullContext(),
         getContextFiles()
       );
-
-      if ("error" in result) {
-        setCoursePlanningError(result.error);
-        setSectionContents(updated);
-        return;
-      }
-
+      if ("error" in result) { setCoursePlanningError(result.error); return; }
       setSectionContents(result.contents);
       setCoursePlanningStep("preview");
+    } catch (err) {
+      setCoursePlanningError(err instanceof Error ? err.message : "Failed to generate syllabus.");
     } finally {
-      setIsGeneratingSection(false);
+      setIsParsingTemplate(false);
     }
   };
 
@@ -458,8 +378,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setCoursePlanningStep("form");
     setParsedSections([]);
     setSectionContents([]);
-    setCurrentSectionIndex(0);
-    setCurrentSectionInput("");
     setCoursePlanningError(null);
     setSyllabusRevisionPrompt("");
     setSyllabusRevisionFiles([]);
@@ -537,6 +455,17 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
             />
           </div>
           <div className={styles.field}>
+            <label htmlFor="semester">Semester &amp; Year</label>
+            <input
+              id="semester"
+              type="text"
+              className={styles.textInput}
+              placeholder="e.g. Fall 2026"
+              value={semester}
+              onChange={(e) => setSemester(e.target.value)}
+            />
+          </div>
+          <div className={styles.field}>
             <label htmlFor="classTimes">Class Times &amp; Location</label>
             <input
               id="classTimes"
@@ -610,71 +539,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
             onClick={handleStartCoursePlanning}
             disabled={isParsingTemplate || !courseTitle.trim()}
           >
-            {isParsingTemplate ? "Parsing template…" : "Begin"}
+            {isParsingTemplate ? "Generating syllabus…" : "Generate Syllabus"}
           </button>
-        </section>
-      )}
-
-      {coursePlanningStep === "wizard" && parsedSections[currentSectionIndex] && (
-        <section className={styles.card}>
-          <div className={styles.header}>
-            <p className={styles.eyebrow}>Section {currentSectionIndex + 1} of {parsedSections.length}</p>
-            <h1>{parsedSections[currentSectionIndex].heading}</h1>
-            {parsedSections[currentSectionIndex].hint && (
-              <p>{parsedSections[currentSectionIndex].hint}</p>
-            )}
-          </div>
-          <div className={styles.field}>
-            <label htmlFor="sectionInput">Your Content</label>
-            <textarea
-              id="sectionInput"
-              placeholder="Paste your content here, or leave blank to generate with AI…"
-              value={currentSectionInput}
-              onChange={(e) => setCurrentSectionInput(e.target.value)}
-              disabled={isGeneratingSection}
-            />
-          </div>
-          {coursePlanningError && <p className={styles.error}>{coursePlanningError}</p>}
-          <div className={styles.lessonPreviewFooter}>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={resetCoursePlanning}
-              disabled={isGeneratingSection}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={handleSectionSkip}
-              disabled={isGeneratingSection}
-            >
-              Skip
-            </button>
-            {currentSectionIndex + 1 < parsedSections.length && (
-              <button
-                type="button"
-                className={styles.downloadButton}
-                onClick={handleGenerateRemaining}
-                disabled={isGeneratingSection}
-              >
-                {isGeneratingSection ? "Generating…" : "Generate All"}
-              </button>
-            )}
-            <button
-              type="button"
-              className={styles.submitButton}
-              onClick={handleSectionNext}
-              disabled={isGeneratingSection}
-            >
-              {isGeneratingSection
-                ? "Generating…"
-                : currentSectionIndex + 1 < parsedSections.length
-                  ? "Next"
-                  : "Finish"}
-            </button>
-          </div>
         </section>
       )}
 

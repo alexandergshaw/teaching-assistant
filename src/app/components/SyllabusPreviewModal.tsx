@@ -31,6 +31,7 @@ type SyllabusPreviewModalProps = {
   onRevise: () => void;
   onRegenerateSection: (i: number, revisionPrompt: string) => Promise<void>;
   onDownload: () => void;
+  isDownloadingSyllabus: boolean;
   icons: SyllabusPreviewModalIcons;
 };
 
@@ -53,6 +54,7 @@ export default function SyllabusPreviewModal({
   onRevise,
   onRegenerateSection,
   onDownload,
+  isDownloadingSyllabus,
   icons: { CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon },
 }: SyllabusPreviewModalProps) {
   const [editingSection, setEditingSection] = useState<number | null>(null);
@@ -228,8 +230,8 @@ export default function SyllabusPreviewModal({
         </div>
 
         <div className={styles.lessonPreviewFooter}>
-          <button type="button" className={styles.submitButton} onClick={onDownload}>
-            Download Syllabus
+          <button type="button" className={styles.submitButton} onClick={onDownload} disabled={isDownloadingSyllabus}>
+            {isDownloadingSyllabus ? "Preparing…" : "Download Syllabus"}
           </button>
           <button type="button" className={styles.downloadButton} onClick={onClose}>
             Start Over

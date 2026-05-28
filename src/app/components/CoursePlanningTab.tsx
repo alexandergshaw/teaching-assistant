@@ -7,6 +7,7 @@ import {
   generateSyllabusSectionAction,
   generateSyllabusRemainingSectionsAction,
   reviseSyllabusAction,
+  assembleSyllabusFromTemplateAction,
   type SyllabusSection,
 } from "../actions";
 import SyllabusPreviewModal from "./SyllabusPreviewModal";
@@ -50,8 +51,10 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   >([]);
   const [lockedSyllabusSections, setLockedSyllabusSections] = useState<boolean[]>([]);
   const [isRevisingSyllabus, setIsRevisingSyllabus] = useState(false);
+  const [isDownloadingSyllabus, setIsDownloadingSyllabus] = useState(false);
   const academicCalendarRef = useRef<HTMLInputElement>(null);
   const [academicCalendarFile, setAcademicCalendarFile] = useState<{ name: string; base64: string; mimeType: string } | null>(null);
+  const [syllabusFileData, setSyllabusFileData] = useState<{ name: string; base64: string; mimeType: string } | null>(null);
 
   const getFullContext = () => {
     const parts = [
@@ -120,6 +123,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
+      setSyllabusFileData({ name: file.name, base64, mimeType: file.type || "application/octet-stream" });
       const result = await parseSyllabusAction(
         courseTitle,
         { name: file.name, base64, mimeType: file.type || "application/octet-stream" },
@@ -310,6 +314,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setSyllabusRevisionPrompt("");
     setSyllabusRevisionFiles([]);
     setLockedSyllabusSections([]);
+    setSyllabusFileData(null);
   };
 
   const saveEditSyllabusSection = (i: number, content: string) => {
@@ -320,7 +325,65 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     });
   };
 
-  const handleDownloadSyllabus = () => {
+  const handleDownloadSyllabus = async () => {
+    setIsDownloadingSyllabus(true);
+    try {
+      let output: string;
+
+      if (syllabusTemplateText) {
+        // We have extracted template text (DOCX or plain-text upload) — replace each section body in-place
+        type FoundSection = { headingStart: number; headingEnd: number; sectionIndex: number };
+        const found: FoundSection[] = [];
+        for (let i = 0; i < parsedSections.length; i++) {
+          const heading = parsedSections[i].heading;
+          const idx = syllabusTemplateText.indexOf(heading);
+          if (idx !== -1) found.push({ headingStart: idx, headingEnd: idx + heading.length, sectionIndex: i });
+        }
+        found.sort((a, b) => a.headingStart - b.headingStart);
+
+        if (found.length > 0) {
+          let result = "";
+          let cursor = 0;
+          for (let p = 0; p < found.length; p++) {
+            const { headingEnd, sectionIndex } = found[p];
+            const nextStart = p + 1 < found.length ? found[p + 1].headingStart : syllabusTemplateText.length;
+            const content = sectionContents[sectionIndex];
+            result += syllabusTemplateText.slice(cursor, headingEnd);
+            if (content) {
+              result += "\n\n" + content + "\n\n";
+            } else {
+              result += syllabusTemplateText.slice(headingEnd, nextStart);
+            }
+            cursor = nextStart;
+          }
+          result += syllabusTemplateText.slice(cursor);
+          output = result;
+        } else {
+          output = buildSimpleSyllabus();
+        }
+      } else if (syllabusFileData) {
+        // PDF or other format — ask Gemini to reconstruct with template formatting
+        const result = await assembleSyllabusFromTemplateAction(syllabusFileData, parsedSections, sectionContents);
+        output = "error" in result ? buildSimpleSyllabus() : result.text;
+      } else {
+        output = buildSimpleSyllabus();
+      }
+
+      const blob = new Blob([output], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${courseTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_")}_syllabus.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsDownloadingSyllabus(false);
+    }
+  };
+
+  const buildSimpleSyllabus = () => {
     const lines: string[] = [];
     for (let i = 0; i < parsedSections.length; i++) {
       const content = sectionContents[i];
@@ -328,15 +391,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       const h = parsedSections[i].heading;
       lines.push(h, "=".repeat(h.length), "", content, "", "");
     }
-    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${courseTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_")}_syllabus.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    return lines.join("\n");
   };
 
   return (
@@ -406,6 +461,13 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
             </div>
           </div>
           <div className={styles.field}>
+            <label htmlFor="syllabusFile">Syllabus Template</label>
+            <div className={styles.fileField}>
+              <input id="syllabusFile" type="file" ref={syllabusFileRef} />
+              <p>Upload a syllabus template (.txt, .pdf, .docx, etc.) to use as a starting point.</p>
+            </div>
+          </div>
+          <div className={styles.field}>
             <label htmlFor="coursePlanningContext">Additional Context</label>
             <textarea
               id="coursePlanningContext"
@@ -427,13 +489,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               {coursePlanningContextFiles.length > 0 && (
                 <p>{coursePlanningContextFiles.length} context file(s) selected.</p>
               )}
-            </div>
-          </div>
-          <div className={styles.field}>
-            <label htmlFor="syllabusFile">Syllabus Template</label>
-            <div className={styles.fileField}>
-              <input id="syllabusFile" type="file" ref={syllabusFileRef} />
-              <p>Upload a syllabus template (.txt, .pdf, .docx, etc.) to use as a starting point.</p>
             </div>
           </div>
           {coursePlanningError && <p className={styles.error}>{coursePlanningError}</p>}
@@ -537,6 +592,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
           onRevise={handleReviseSyllabus}
           onRegenerateSection={handleRegenerateSection}
           onDownload={handleDownloadSyllabus}
+          isDownloadingSyllabus={isDownloadingSyllabus}
           icons={icons}
         />
       )}

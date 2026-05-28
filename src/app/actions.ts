@@ -928,6 +928,67 @@ export interface TestGeminiState {
   error: string | null;
 }
 
+export async function assembleSyllabusFromTemplateAction(
+  templateFile: { name: string; base64: string; mimeType: string },
+  sections: SyllabusSection[],
+  contents: string[]
+): Promise<{ text: string } | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const sectionsText = sections
+      .map((s, i) => `${s.heading}:\n${contents[i] || "(no content generated)"}`)
+      .join("\n\n---\n\n");
+
+    const prompt = `You are reconstructing a formatted syllabus document. The original template is attached. The generated content for each section is provided below.
+
+Your task: Reproduce the ENTIRE document, preserving every aspect of the original template's formatting — heading styles, spacing, line breaks, decorators, numbering, and any text that appears between sections or before the first section. For each section, replace only the body content with the generated content below. If a section has no generated content, keep the original placeholder text.
+
+Output ONLY the reconstructed document text — no preamble, no explanation.
+
+GENERATED SECTION CONTENT:
+${sectionsText}`;
+
+    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+      { text: prompt },
+    ];
+
+    if (templateFile.mimeType === "application/pdf" || templateFile.mimeType.startsWith("image/")) {
+      parts.push({ inlineData: { mimeType: templateFile.mimeType, data: templateFile.base64 } });
+    } else if (templateFile.mimeType.startsWith("text/")) {
+      const raw = Buffer.from(templateFile.base64, "base64").toString("utf-8");
+      parts.push({ text: `\n\nORIGINAL TEMPLATE:\n${raw}` });
+    }
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Assembly failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    return { text: text.trim() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
 export async function testGeminiAction(
   _prev: TestGeminiState,
   formData: FormData

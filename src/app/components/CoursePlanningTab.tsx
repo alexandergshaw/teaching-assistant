@@ -71,28 +71,9 @@ function replaceSectionsInDocx(
 
   const hasNumPr = (p: string) => /<w:numPr>/.test(p);
 
-  // Fixed run properties: Times New Roman 12pt, no bold, no italic.
-  // Applied to every body paragraph we write so the output is consistent
-  // regardless of what styles the template happened to use in placeholder text.
-  const BODY_FONT_RPR =
-    `<w:rPr>` +
-    `<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>` +
-    `<w:b w:val="false"/><w:bCs w:val="false"/>` +
-    `<w:i w:val="false"/><w:iCs w:val="false"/>` +
-    `<w:sz w:val="24"/><w:szCs w:val="24"/>` +
-    `</w:rPr>`;
-
-  // Strip any <w:rPr> embedded inside <w:pPr> — that element styles only the
-  // paragraph mark and can inadvertently override run-level properties in some
-  // Word versions. Removing it keeps paragraph spacing/indent while letting our
-  // explicit run rPr take full control of font/size/bold.
-  const stripPPrRPr = (pPr: string): string =>
-    pPr.replace(/<w:rPr>[\s\S]*?<\/w:rPr>/, "");
-
-  // Build a body paragraph using the template's paragraph properties (spacing,
-  // indentation, style name) but our fixed run properties (font/size/weight).
-  const makePara = (pPr: string, text: string): string =>
-    `<w:p>${stripPPrRPr(pPr)}<w:r>${BODY_FONT_RPR}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
+  // Build a body paragraph using the template's exact paragraph and run properties.
+  const makePara = (pPr: string, rPr: string, text: string): string =>
+    `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
 
   // Map each section heading to the paragraph index that contains it
   const headingIndices = sections.map((s) => {
@@ -120,18 +101,19 @@ function replaceSectionsInDocx(
 
     const content = contents[i];
     if (content) {
-      // Pull paragraph properties (spacing, indent, style name) from the template's
-      // body paragraphs. Run properties (font/size/bold) are overridden by BODY_FONT_RPR.
+      // Pull paragraph and run properties directly from the template's body
+      // paragraphs so the generated content matches the template's formatting exactly.
       const bodyParas = paragraphs.slice(hIdx + 1, nextHIdx);
       const plainPara = bodyParas.find((p) => !hasNumPr(p) && getText(p).length > 0);
       const plainPPr = plainPara ? getPPr(plainPara) : "";
+      const plainRPr = plainPara ? getRPr(plainPara) : "";
 
       for (const rawLine of content.split("\n")) {
         if (rawLine.trim() === "") {
-          out.push(makePara(plainPPr, ""));
+          out.push(makePara(plainPPr, plainRPr, ""));
           continue;
         }
-        out.push(makePara(plainPPr, rawLine));
+        out.push(makePara(plainPPr, plainRPr, rawLine));
       }
     } else {
       // No generated content — keep the original template body for this section

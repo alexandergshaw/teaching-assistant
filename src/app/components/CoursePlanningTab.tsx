@@ -107,12 +107,9 @@ function replaceSectionsInDocx(
       for (let j = 0; j < bodyParas.length; j++) {
         const p = bodyParas[j];
         if (j < lines.length) {
-          // Replace only the text content, keep all formatting/structure
+          // Replace only the first <w:t> in the paragraph, keep all formatting/structure
           const text = escapeXml(lines[j]);
-          // Replace <w:t>...</w:t> content in all runs in this paragraph
-          let replaced = p.replace(/<w:t[\s\S]*?<\/w:t>/g, (match) => {
-            return `<w:t xml:space=\"preserve\">${text}</w:t>`;
-          });
+          let replaced = p.replace(/<w:t[\s\S]*?<\/w:t>/, `<w:t xml:space=\"preserve\">${text}</w:t>`);
           out.push(replaced);
         } else {
           // No more content lines, keep template paragraph as-is

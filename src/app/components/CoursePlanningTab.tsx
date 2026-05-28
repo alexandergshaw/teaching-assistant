@@ -101,6 +101,81 @@ function replaceSectionsInDocx(
   return gaps[0] + out.join("") + gaps[gaps.length - 1];
 }
 
+function triggerFileDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function buildTextTemplateSyllabus(
+  templateText: string,
+  sections: SyllabusSection[],
+  contents: string[]
+): string | null {
+  type FoundSection = { headingStart: number; headingEnd: number; sectionIndex: number };
+  const found: FoundSection[] = [];
+  for (let i = 0; i < sections.length; i++) {
+    const idx = templateText.indexOf(sections[i].heading);
+    if (idx !== -1) found.push({ headingStart: idx, headingEnd: idx + sections[i].heading.length, sectionIndex: i });
+  }
+  if (found.length === 0) return null;
+  found.sort((a, b) => a.headingStart - b.headingStart);
+
+  let result = "";
+  let cursor = 0;
+  for (let p = 0; p < found.length; p++) {
+    const { headingEnd, sectionIndex } = found[p];
+    const nextStart = p + 1 < found.length ? found[p + 1].headingStart : templateText.length;
+    const content = contents[sectionIndex];
+    result += templateText.slice(cursor, headingEnd);
+    result += content ? "\n\n" + content + "\n\n" : templateText.slice(headingEnd, nextStart);
+    cursor = nextStart;
+  }
+  result += templateText.slice(cursor);
+  return result;
+}
+
+function buildSimpleSyllabus(sections: SyllabusSection[], contents: string[]): string {
+  const lines: string[] = [];
+  for (let i = 0; i < sections.length; i++) {
+    const content = contents[i];
+    if (!content) continue;
+    const h = sections[i].heading;
+    lines.push(h, "=".repeat(h.length), "", content, "", "");
+  }
+  return lines.join("\n");
+}
+
+async function downloadDocxSyllabus(
+  fileData: { name: string; base64: string; mimeType: string },
+  sections: SyllabusSection[],
+  contents: string[],
+  baseName: string
+): Promise<void> {
+  const JSZip = (await import("jszip")).default;
+  const binary = atob(fileData.base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+  const zip = await JSZip.loadAsync(bytes);
+  const docFile = zip.file("word/document.xml");
+  if (!docFile) throw new Error("Invalid DOCX: missing word/document.xml");
+
+  const modifiedXml = replaceSectionsInDocx(await docFile.async("string"), sections, contents);
+  zip.file("word/document.xml", modifiedXml);
+
+  const blob = await zip.generateAsync({
+    type: "blob",
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  });
+  triggerFileDownload(blob, `${baseName}_syllabus.docx`);
+}
+
 export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePlanningTabProps) {
   const syllabusFileRef = useRef<HTMLInputElement>(null);
   const [courseTitle, setCourseTitle] = useState("");
@@ -407,95 +482,28 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       const baseName = courseTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
 
       if (syllabusFileData && ext === "docx") {
-        // Reconstruct the original DOCX with generated content replacing section bodies
-        const JSZip = (await import("jszip")).default;
-        const binary = atob(syllabusFileData.base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-
-        const zip = await JSZip.loadAsync(bytes);
-        const docFile = zip.file("word/document.xml");
-        if (!docFile) throw new Error("Invalid DOCX: missing word/document.xml");
-
-        const originalXml = await docFile.async("string");
-        const modifiedXml = replaceSectionsInDocx(originalXml, parsedSections, sectionContents);
-        zip.file("word/document.xml", modifiedXml);
-
-        const blob = await zip.generateAsync({
-          type: "blob",
-          mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${baseName}_syllabus.docx`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        await downloadDocxSyllabus(syllabusFileData, parsedSections, sectionContents, baseName);
         return;
       }
 
-      // Non-DOCX: produce a .txt file
       let output: string;
       if (syllabusTemplateText) {
-        // Plain-text template: splice generated content in-place
-        type FoundSection = { headingStart: number; headingEnd: number; sectionIndex: number };
-        const found: FoundSection[] = [];
-        for (let i = 0; i < parsedSections.length; i++) {
-          const heading = parsedSections[i].heading;
-          const idx = syllabusTemplateText.indexOf(heading);
-          if (idx !== -1) found.push({ headingStart: idx, headingEnd: idx + heading.length, sectionIndex: i });
-        }
-        found.sort((a, b) => a.headingStart - b.headingStart);
-
-        if (found.length > 0) {
-          let result = "";
-          let cursor = 0;
-          for (let p = 0; p < found.length; p++) {
-            const { headingEnd, sectionIndex } = found[p];
-            const nextStart = p + 1 < found.length ? found[p + 1].headingStart : syllabusTemplateText.length;
-            const content = sectionContents[sectionIndex];
-            result += syllabusTemplateText.slice(cursor, headingEnd);
-            result += content ? "\n\n" + content + "\n\n" : syllabusTemplateText.slice(headingEnd, nextStart);
-            cursor = nextStart;
-          }
-          result += syllabusTemplateText.slice(cursor);
-          output = result;
-        } else {
-          output = buildSimpleSyllabus();
-        }
+        output = buildTextTemplateSyllabus(syllabusTemplateText, parsedSections, sectionContents)
+          ?? buildSimpleSyllabus(parsedSections, sectionContents);
       } else if (syllabusFileData) {
-        // PDF: ask Gemini to reconstruct with template formatting
         const result = await assembleSyllabusFromTemplateAction(syllabusFileData, parsedSections, sectionContents);
-        output = "error" in result ? buildSimpleSyllabus() : result.text;
+        output = "error" in result ? buildSimpleSyllabus(parsedSections, sectionContents) : result.text;
       } else {
-        output = buildSimpleSyllabus();
+        output = buildSimpleSyllabus(parsedSections, sectionContents);
       }
 
-      const blob = new Blob([output], { type: "text/plain;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${baseName}_syllabus.txt`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      triggerFileDownload(
+        new Blob([output], { type: "text/plain;charset=utf-8" }),
+        `${baseName}_syllabus.txt`
+      );
     } finally {
       setIsDownloadingSyllabus(false);
     }
-  };
-
-  const buildSimpleSyllabus = () => {
-    const lines: string[] = [];
-    for (let i = 0; i < parsedSections.length; i++) {
-      const content = sectionContents[i];
-      if (!content) continue;
-      const h = parsedSections[i].heading;
-      lines.push(h, "=".repeat(h.length), "", content, "", "");
-    }
-    return lines.join("\n");
   };
 
   return (

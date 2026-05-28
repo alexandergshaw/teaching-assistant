@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import SelectionChatWidget from "./components/SelectionChatWidget";
+import AiChatFab from "./components/AiChatFab";
 
 export const metadata: Metadata = {
   title: "Teaching Assistant",
@@ -17,6 +18,7 @@ export default function RootLayout({
       <body>
         {children}
         <SelectionChatWidget />
+        <AiChatFab />
       </body>
     </html>
   );

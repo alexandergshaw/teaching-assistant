@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChangeEvent, ComponentType } from "react";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import {
   parseSyllabusAction,
   generateSyllabusSectionAction,
@@ -216,6 +216,29 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [coursePlanningContext, setCoursePlanningContext] = useState("");
   const [latePolicy, setLatePolicy] = useState("");
   const [attendancePolicy, setAttendancePolicy] = useState("");
+
+  // Local storage keys
+  const LS_KEYS = {
+    courseTitle: "syllabus_courseTitle",
+    courseCode: "syllabus_courseCode",
+    classTimes: "syllabus_classTimes",
+    semester: "syllabus_semester",
+    officeHours: "syllabus_officeHours",
+    coursePlanningContext: "syllabus_coursePlanningContext",
+    latePolicy: "syllabus_latePolicy",
+    attendancePolicy: "syllabus_attendancePolicy",
+  };
+
+  useEffect(() => {
+    setCourseTitle(localStorage.getItem(LS_KEYS.courseTitle) || "");
+    setCourseCode(localStorage.getItem(LS_KEYS.courseCode) || "");
+    setClassTimes(localStorage.getItem(LS_KEYS.classTimes) || "");
+    setSemester(localStorage.getItem(LS_KEYS.semester) || "");
+    setOfficeHours(localStorage.getItem(LS_KEYS.officeHours) || "");
+    setCoursePlanningContext(localStorage.getItem(LS_KEYS.coursePlanningContext) || "");
+    setLatePolicy(localStorage.getItem(LS_KEYS.latePolicy) || "");
+    setAttendancePolicy(localStorage.getItem(LS_KEYS.attendancePolicy) || "");
+  }, []);
   const [coursePlanningContextFiles, setCoursePlanningContextFiles] = useState<
     Array<{ name: string; base64: string; mimeType: string }>
   >([]);
@@ -472,7 +495,10 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               className={styles.textInput}
               placeholder="e.g. Introduction to Data Science"
               value={courseTitle}
-              onChange={(e) => setCourseTitle(e.target.value)}
+              onChange={(e) => {
+                setCourseTitle(e.target.value);
+                localStorage.setItem(LS_KEYS.courseTitle, e.target.value);
+              }}
             />
           </div>
           <div className={styles.field}>
@@ -483,7 +509,10 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               className={styles.textInput}
               placeholder="e.g. CS 101"
               value={courseCode}
-              onChange={(e) => setCourseCode(e.target.value)}
+              onChange={(e) => {
+                setCourseCode(e.target.value);
+                localStorage.setItem(LS_KEYS.courseCode, e.target.value);
+              }}
             />
           </div>
           <div className={styles.field}>
@@ -494,7 +523,10 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               className={styles.textInput}
               placeholder="e.g. Fall 2026"
               value={semester}
-              onChange={(e) => setSemester(e.target.value)}
+              onChange={(e) => {
+                setSemester(e.target.value);
+                localStorage.setItem(LS_KEYS.semester, e.target.value);
+              }}
             />
           </div>
           <div className={styles.field}>
@@ -505,7 +537,10 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               className={styles.textInput}
               placeholder="e.g. MWF 9:00–10:00am, Room 204"
               value={classTimes}
-              onChange={(e) => setClassTimes(e.target.value)}
+              onChange={(e) => {
+                setClassTimes(e.target.value);
+                localStorage.setItem(LS_KEYS.classTimes, e.target.value);
+              }}
             />
           </div>
           <div className={styles.field}>
@@ -515,7 +550,10 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               className={styles.textInput}
               placeholder="Describe your late or makeup work policy..."
               value={latePolicy}
-              onChange={(e) => setLatePolicy(e.target.value)}
+              onChange={(e) => {
+                setLatePolicy(e.target.value);
+                localStorage.setItem(LS_KEYS.latePolicy, e.target.value);
+              }}
               rows={3}
             />
           </div>
@@ -526,7 +564,10 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               className={styles.textInput}
               placeholder="Describe your attendance policy..."
               value={attendancePolicy}
-              onChange={(e) => setAttendancePolicy(e.target.value)}
+              onChange={(e) => {
+                setAttendancePolicy(e.target.value);
+                localStorage.setItem(LS_KEYS.attendancePolicy, e.target.value);
+              }}
               rows={3}
             />
           </div>
@@ -538,7 +579,10 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               className={styles.textInput}
               placeholder="e.g. Tuesdays 2–4pm, Office 305"
               value={officeHours}
-              onChange={(e) => setOfficeHours(e.target.value)}
+              onChange={(e) => {
+                setOfficeHours(e.target.value);
+                localStorage.setItem(LS_KEYS.officeHours, e.target.value);
+              }}
             />
           </div>
           <div className={styles.field}>
@@ -568,7 +612,10 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               id="coursePlanningContext"
               placeholder="Optional context to guide syllabus generation (program goals, institution policies, audience details, tone, etc.)"
               value={coursePlanningContext}
-              onChange={(e) => setCoursePlanningContext(e.target.value)}
+              onChange={(e) => {
+                setCoursePlanningContext(e.target.value);
+                localStorage.setItem(LS_KEYS.coursePlanningContext, e.target.value);
+              }}
             />
           </div>
           <div className={styles.field}>

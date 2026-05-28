@@ -99,25 +99,29 @@ function replaceSectionsInDocx(
     // Preserve all paragraphs up to and including the heading
     out.push(...paragraphs.slice(cursor, hIdx + 1));
 
-    const content = contents[i];
-    if (content) {
-      // Pull paragraph and run properties directly from the template's body
-      // paragraphs so the generated content matches the template's formatting exactly.
-      const bodyParas = paragraphs.slice(hIdx + 1, nextHIdx);
-      const plainPara = bodyParas.find((p) => !hasNumPr(p) && getText(p).length > 0);
-      const plainPPr = plainPara ? getPPr(plainPara) : "";
-      const plainRPr = plainPara ? getRPr(plainPara) : "";
 
-      for (const rawLine of content.split("\n")) {
-        if (rawLine.trim() === "") {
-          out.push(makePara(plainPPr, plainRPr, ""));
-          continue;
+    const content = contents[i];
+    const bodyParas = paragraphs.slice(hIdx + 1, nextHIdx);
+    if (content) {
+      const lines = content.split("\n");
+      for (let j = 0; j < bodyParas.length; j++) {
+        const p = bodyParas[j];
+        if (j < lines.length) {
+          // Replace only the text content, keep all formatting/structure
+          const text = escapeXml(lines[j]);
+          // Replace <w:t>...</w:t> content in all runs in this paragraph
+          let replaced = p.replace(/<w:t[\s\S]*?<\/w:t>/g, (match) => {
+            return `<w:t xml:space=\"preserve\">${text}</w:t>`;
+          });
+          out.push(replaced);
+        } else {
+          // No more content lines, keep template paragraph as-is
+          out.push(p);
         }
-        out.push(makePara(plainPPr, plainRPr, rawLine));
       }
     } else {
       // No generated content — keep the original template body for this section
-      out.push(...paragraphs.slice(hIdx + 1, nextHIdx));
+      out.push(...bodyParas);
     }
 
     cursor = nextHIdx;

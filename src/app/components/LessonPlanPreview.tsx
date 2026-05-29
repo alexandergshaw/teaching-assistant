@@ -197,6 +197,13 @@ export default function LessonPlanPreview({
           </button>
           <button
             type="button"
+            className={`${styles.lessonInnerTab}${previewTab === "examples" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+            onClick={() => setPreviewTab("examples")}
+          >
+            Examples
+          </button>
+          <button
+            type="button"
             className={`${styles.lessonInnerTab}${previewTab === "assignment" ? ` ${styles.lessonInnerTabActive}` : ""}`}
             onClick={() => setPreviewTab("assignment")}
           >
@@ -208,13 +215,6 @@ export default function LessonPlanPreview({
             onClick={() => setPreviewTab("rubric")}
           >
             Rubric
-          </button>
-          <button
-            type="button"
-            className={`${styles.lessonInnerTab}${previewTab === "examples" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => setPreviewTab("examples")}
-          >
-            Examples
           </button>
         </div>
 
@@ -1065,10 +1065,16 @@ export default function LessonPlanPreview({
           <div className={styles.assignmentContent}>
             {examplesPreview && examplesPreview.examples.length > 0 ? (
               <ol className={styles.exampleList}>
-                {examplesPreview.examples.map((example, index) => (
-                  <li key={index} className={styles.exampleCard}>
-                    <div className={styles.fieldLabelRow}>
-                      <p className={styles.exampleTitle}>{example.title}</p>
+                {examplesPreview.examples.map((example, index) => {
+                  const prevConcept = index > 0 ? examplesPreview.examples[index - 1].concept : null;
+                  const showConceptHeader = example.concept && example.concept !== prevConcept;
+                  return (
+                    <li key={index} className={styles.exampleCard}>
+                      {showConceptHeader && (
+                        <p className={styles.exampleConceptHeader}>{example.concept}</p>
+                      )}
+                      <div className={styles.fieldLabelRow}>
+                        <p className={styles.exampleTitle}>{example.title}</p>
                       <div className={styles.syllabusSectionActions}>
                         <button
                           type="button"
@@ -1223,7 +1229,8 @@ export default function LessonPlanPreview({
                       )}
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ol>
             ) : (
               <p className={styles.emptyState}>

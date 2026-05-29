@@ -1211,6 +1211,15 @@
 
 /* ── Examples tab ──────────────────────────────────────────────────────── */
 
+.exampleConceptHeader {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
 .exampleList {
   display: flex;
   flex-direction: column;

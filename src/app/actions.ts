@@ -337,6 +337,7 @@ export async function generateAssignmentRubricAction(
 }
 
 export interface ExampleItem {
+  concept: string;
   title: string;
   content: string;
   explanation: string;
@@ -350,11 +351,16 @@ export interface ExamplesData {
 
 export async function generateExamplesAction(
   moduleObjectives: string,
-  contextText: string
+  contextText: string,
+  slides: SlideData[]
 ): Promise<ExamplesData | { error: string }> {
   try {
     const apiKey = getGeminiApiKey();
     const model = getGeminiModel();
+
+    const conceptList = slides
+      .map((s, i) => `${i + 1}. ${s.title}`)
+      .join("\n");
 
     const prompt = `You are an expert educator preparing in-class examples for a lecture.
 
@@ -364,22 +370,28 @@ ${moduleObjectives}
 CONTEXT:
 ${contextText || "(none provided)"}
 
+CONCEPTS INTRODUCED IN THIS LESSON (one per slide):
+${conceptList}
+
 First, determine the primary focus of this lesson:
 - "math" if the lesson is primarily about mathematics, statistics, or quantitative methods
 - "programming" if the lesson is primarily about programming, software, or coding
 - "general" for all other topics
 
-Then generate 4–5 examples appropriate to that focus:
-- For "math": worked problems with a clear problem statement and step-by-step solution
-- For "programming": short, complete, runnable code snippets (20–40 lines) with a brief explanation; pick the most natural language for the topic (e.g. Python for data science, JavaScript for web)
-- For "general": concrete worked examples, case studies, or demonstrations relevant to the topic
+Then generate exactly 2 examples for EACH concept listed above. Each example must:
+- Address only the single concept it is assigned to — do not mix in other concepts from the lesson.
+- Be appropriate to the lesson type:
+  - "math": a worked problem with a clear problem statement and step-by-step solution
+  - "programming": a short, complete, runnable code snippet (20–40 lines) with a brief explanation; use the most natural language for the topic
+  - "general": a concrete worked example, case study, or demonstration
 
 Return ONLY valid JSON:
 {
   "lessonType": "math" | "programming" | "general",
   "examples": [
     {
-      "title": "Short descriptive title",
+      "concept": "Exact concept name from the list above",
+      "title": "Short descriptive title for this specific example",
       "content": "The problem statement (math) or the full code snippet (programming) or the example scenario (general)",
       "explanation": "Step-by-step solution (math), what the code does and why (programming), or key takeaways (general)",
       "language": "python"
@@ -388,8 +400,10 @@ Return ONLY valid JSON:
 }
 
 Requirements:
+- Produce exactly 2 examples per concept, in concept order.
+- Each example must cover only its assigned concept — never blend it with another concept from the lesson.
+- "concept" must exactly match the concept name from the list above.
 - "language" is required only for programming examples (e.g. "python", "javascript", "java", "c", "sql"); omit it for math and general examples.
-- Examples must be concrete, self-contained, and directly related to the module objectives.
 - Math problems should include all working steps in "explanation".
 - Code examples must be complete and runnable as-is; use comments to annotate key lines.
 - Do not include any text outside the JSON object.`;
@@ -429,7 +443,7 @@ Requirements:
 
     const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
       lessonType?: string;
-      examples?: Array<{ title?: string; content?: string; explanation?: string; language?: string }>;
+      examples?: Array<{ concept?: string; title?: string; content?: string; explanation?: string; language?: string }>;
     };
 
     const lessonType =
@@ -440,6 +454,7 @@ Requirements:
     const examples: ExampleItem[] = (parsed.examples ?? [])
       .filter((e) => e.title && e.content && e.explanation)
       .map((e) => ({
+        concept: e.concept ?? "",
         title: e.title!,
         content: e.content!,
         explanation: e.explanation!,

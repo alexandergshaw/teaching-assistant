@@ -138,18 +138,23 @@ export default function Home() {
 
       setSavedLessonFiles(files);
 
-      const [slideResult, assignmentResult, rubricResult, introResult, examplesResult] = await Promise.all([
+      const [slideResult, assignmentResult, rubricResult, introResult] = await Promise.all([
         generateLessonPlanAction(moduleObjectives, lessonContext, files),
         generateAssignmentAction(moduleObjectives, lessonContext, files),
         generateAssignmentRubricAction(moduleObjectives, lessonContext),
         generateModuleIntroAction(moduleObjectives, lessonContext),
-        generateExamplesAction(moduleObjectives, lessonContext),
       ]);
 
       if ("error" in slideResult) {
         setLessonError(slideResult.error);
         return;
       }
+
+      const examplesResult = await generateExamplesAction(
+        moduleObjectives,
+        lessonContext,
+        slideResult.slides
+      );
 
       setLessonPlanPreview(slideResult);
       setAssignmentPreview("error" in assignmentResult ? null : assignmentResult);

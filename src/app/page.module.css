@@ -1209,6 +1209,83 @@
   color: var(--text-secondary);
 }
 
+/* ── Examples tab ──────────────────────────────────────────────────────── */
+
+.exampleList {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: example-counter;
+}
+
+.exampleCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--field-border);
+  background: var(--card-background);
+  counter-increment: example-counter;
+}
+
+.exampleTitle {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.exampleSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.exampleProblemText {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.exampleCodeWrap {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--field-border) 80%, transparent 20%);
+}
+
+.exampleCodeLang {
+  display: block;
+  padding: 4px 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--field-border) 30%, transparent 70%);
+  border-bottom: 1px solid color-mix(in srgb, var(--field-border) 60%, transparent 40%);
+}
+
+.exampleCodeBlock {
+  margin: 0;
+  padding: 14px 16px;
+  font-family: "Fira Code", "Cascadia Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--field-background) 60%, #f1f5f9 40%);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+
+
 .lessonPreviewFooter {
   display: flex;
   align-items: center;

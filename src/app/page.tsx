@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
-import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData } from "./actions";
+import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData } from "./actions";
 import CoursePlanningTab from "./components/CoursePlanningTab";
 import GradingTab from "./components/GradingTab";
 import LessonPlanPreview from "./components/LessonPlanPreview";
@@ -74,6 +74,7 @@ export default function Home() {
   const [assignmentPreview, setAssignmentPreview] = useState<AssignmentData | null>(null);
   const [rubricPreview, setRubricPreview] = useState<string | null>(null);
   const [introPreview, setIntroPreview] = useState<ModuleIntroData | null>(null);
+  const [examplesPreview, setExamplesPreview] = useState<ExamplesData | null>(null);
   const [savedLessonFiles, setSavedLessonFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
   const lessonContextFileRef = useRef<HTMLInputElement>(null);
 
@@ -137,11 +138,12 @@ export default function Home() {
 
       setSavedLessonFiles(files);
 
-      const [slideResult, assignmentResult, rubricResult, introResult] = await Promise.all([
+      const [slideResult, assignmentResult, rubricResult, introResult, examplesResult] = await Promise.all([
         generateLessonPlanAction(moduleObjectives, lessonContext, files),
         generateAssignmentAction(moduleObjectives, lessonContext, files),
         generateAssignmentRubricAction(moduleObjectives, lessonContext),
         generateModuleIntroAction(moduleObjectives, lessonContext),
+        generateExamplesAction(moduleObjectives, lessonContext),
       ]);
 
       if ("error" in slideResult) {
@@ -153,6 +155,7 @@ export default function Home() {
       setAssignmentPreview("error" in assignmentResult ? null : assignmentResult);
       setRubricPreview(typeof rubricResult === "string" ? rubricResult : null);
       setIntroPreview("error" in introResult ? null : introResult);
+      setExamplesPreview("error" in examplesResult ? null : examplesResult);
     } catch (err) {
       setLessonError(err instanceof Error ? err.message : "Generation failed.");
     } finally {
@@ -280,12 +283,30 @@ export default function Home() {
         }
       }
 
+      // ── Build examples.txt ───────────────────────────────────────────
+      let examplesText = "";
+      if (examplesPreview && examplesPreview.examples.length > 0) {
+        const lines: string[] = ["IN-CLASS EXAMPLES", "=================", ""];
+        examplesPreview.examples.forEach((ex, i) => {
+          lines.push(`EXAMPLE ${i + 1}: ${ex.title}`);
+          lines.push("-".repeat(`EXAMPLE ${i + 1}: ${ex.title}`.length));
+          lines.push("");
+          lines.push(ex.content);
+          lines.push("");
+          lines.push("EXPLANATION:");
+          lines.push(ex.explanation);
+          lines.push("");
+        });
+        examplesText = lines.join("\n");
+      }
+
       // ── Assemble ZIP ─────────────────────────────────────────────────
       const zip = new JSZip();
       if (introText) zip.file("introduction.txt", introText);
       zip.file("slides.pptx", pptxData);
       if (assignmentText) zip.file("assignment.txt", assignmentText);
       if (rubricText) zip.file("rubric.txt", rubricText);
+      if (examplesText) zip.file("examples.txt", examplesText);
 
       const safeName = lessonPlanPreview.presentationTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
       const blob = await zip.generateAsync({ type: "blob" });
@@ -341,6 +362,22 @@ export default function Home() {
       setAssignmentPreview((prev) => prev ? { ...prev, deliverables } : prev);
     } else if (key === "rubric") {
       setRubricPreview(draft);
+    } else if (key.startsWith("example-content-")) {
+      const idx = parseInt(key.slice(16), 10);
+      setExamplesPreview((prev) => {
+        if (!prev) return prev;
+        const examples = [...prev.examples];
+        examples[idx] = { ...examples[idx], content: draft };
+        return { ...prev, examples };
+      });
+    } else if (key.startsWith("example-explanation-")) {
+      const idx = parseInt(key.slice(20), 10);
+      setExamplesPreview((prev) => {
+        if (!prev) return prev;
+        const examples = [...prev.examples];
+        examples[idx] = { ...examples[idx], explanation: draft };
+        return { ...prev, examples };
+      });
     }
   };
 
@@ -455,6 +492,7 @@ export default function Home() {
           assignmentPreview={assignmentPreview}
           introPreview={introPreview}
           rubricPreview={rubricPreview}
+          examplesPreview={examplesPreview}
           copiedKey={copiedKey}
           onClose={() => setLessonPlanPreview(null)}
           onCopy={handleCopy}

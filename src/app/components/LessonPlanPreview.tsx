@@ -4,13 +4,14 @@ import type { ComponentType } from "react";
 import { useState } from "react";
 import type {
   AssignmentData,
+  ExamplesData,
   GenerateLessonPlanResult,
   ModuleIntroData,
 } from "../actions";
 import styles from "../page.module.css";
 import { parseGeneratedRubric } from "../utils/rubric";
 
-type PreviewTab = "intro" | "slides" | "assignment" | "rubric";
+type PreviewTab = "intro" | "slides" | "assignment" | "rubric" | "examples";
 
 type LessonPlanPreviewIcons = {
   CopyIcon: ComponentType;
@@ -24,6 +25,7 @@ type LessonPlanPreviewProps = {
   assignmentPreview: AssignmentData | null;
   introPreview: ModuleIntroData | null;
   rubricPreview: string | null;
+  examplesPreview: ExamplesData | null;
   copiedKey: string | null;
   onClose: () => void;
   onCopy: (copyKey: string, value: string) => Promise<void>;
@@ -38,6 +40,7 @@ export default function LessonPlanPreview({
   assignmentPreview,
   introPreview,
   rubricPreview,
+  examplesPreview,
   copiedKey,
   onClose,
   onCopy,
@@ -163,7 +166,9 @@ export default function LessonPlanPreview({
                   ? `${lessonPlanPreview.slides.length} slides`
                   : previewTab === "assignment"
                     ? (assignmentPreview?.title ?? "Assignment")
-                    : "Grading Rubric"}
+                    : previewTab === "examples"
+                      ? "In-Class Examples"
+                      : "Grading Rubric"}
             </p>
           </div>
           <button
@@ -203,6 +208,13 @@ export default function LessonPlanPreview({
             onClick={() => setPreviewTab("rubric")}
           >
             Rubric
+          </button>
+          <button
+            type="button"
+            className={`${styles.lessonInnerTab}${previewTab === "examples" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+            onClick={() => setPreviewTab("examples")}
+          >
+            Examples
           </button>
         </div>
 
@@ -1044,6 +1056,178 @@ export default function LessonPlanPreview({
             ) : (
               <p className={styles.emptyState}>
                 Rubric generation failed — try regenerating.
+              </p>
+            )}
+          </div>
+        )}
+
+        {previewTab === "examples" && (
+          <div className={styles.assignmentContent}>
+            {examplesPreview && examplesPreview.examples.length > 0 ? (
+              <ol className={styles.exampleList}>
+                {examplesPreview.examples.map((example, index) => (
+                  <li key={index} className={styles.exampleCard}>
+                    <div className={styles.fieldLabelRow}>
+                      <p className={styles.exampleTitle}>{example.title}</p>
+                      <div className={styles.syllabusSectionActions}>
+                        <button
+                          type="button"
+                          className={styles.syllabusSectionActionButton}
+                          title={copiedKey === `example-${index}` ? "Copied" : "Copy"}
+                          aria-label={
+                            copiedKey === `example-${index}`
+                              ? "Copied"
+                              : `Copy example ${index + 1}`
+                          }
+                          onClick={() =>
+                            onCopy(
+                              `example-${index}`,
+                              [example.title, example.content, example.explanation].join("\n\n")
+                            )
+                          }
+                        >
+                          <CopyIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className={`${styles.syllabusSectionActionButton}${lockedLessonFields.has(`example-${index}`) ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
+                          title={
+                            lockedLessonFields.has(`example-${index}`) ? "Locked" : "Lock"
+                          }
+                          aria-label={
+                            lockedLessonFields.has(`example-${index}`)
+                              ? `Unlock example ${index + 1}`
+                              : `Lock example ${index + 1}`
+                          }
+                          onClick={() => toggleLessonFieldLock(`example-${index}`)}
+                        >
+                          {lockedLessonFields.has(`example-${index}`) ? (
+                            <LockClosedIcon />
+                          ) : (
+                            <LockOpenIcon />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className={styles.exampleSection}>
+                      <div className={styles.fieldLabelRow}>
+                        <p className={styles.assignmentSectionLabel}>
+                          {examplesPreview.lessonType === "programming" ? "Code" : "Problem"}
+                        </p>
+                        <button
+                          type="button"
+                          className={`${styles.syllabusSectionActionButton}${editingLessonField === `example-content-${index}` ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
+                          title="Edit"
+                          aria-label={`Edit example ${index + 1} content`}
+                          onClick={() =>
+                            editingLessonField === `example-content-${index}`
+                              ? cancelEditLessonField()
+                              : startEditLessonField(
+                                  `example-content-${index}`,
+                                  example.content
+                                )
+                          }
+                        >
+                          <PencilIcon />
+                        </button>
+                      </div>
+                      {editingLessonField === `example-content-${index}` ? (
+                        <div className={styles.fieldEditWrap}>
+                          <textarea
+                            className={styles.fieldEditArea}
+                            value={lessonFieldDraft}
+                            onChange={(event) => setLessonFieldDraft(event.target.value)}
+                            rows={Math.max(6, lessonFieldDraft.split("\n").length + 2)}
+                            autoFocus
+                          />
+                          <div className={styles.fieldEditActions}>
+                            <button
+                              type="button"
+                              className={styles.fieldEditSaveBtn}
+                              onClick={() => saveLessonFieldEdit(`example-content-${index}`)}
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.fieldEditCancelBtn}
+                              onClick={cancelEditLessonField}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : examplesPreview.lessonType === "programming" ? (
+                        <div className={styles.exampleCodeWrap}>
+                          {example.language && (
+                            <span className={styles.exampleCodeLang}>{example.language}</span>
+                          )}
+                          <pre className={styles.exampleCodeBlock}><code>{example.content}</code></pre>
+                        </div>
+                      ) : (
+                        <p className={styles.exampleProblemText}>{example.content}</p>
+                      )}
+                    </div>
+
+                    <div className={styles.exampleSection}>
+                      <div className={styles.fieldLabelRow}>
+                        <p className={styles.assignmentSectionLabel}>
+                          {examplesPreview.lessonType === "programming" ? "Explanation" : "Solution"}
+                        </p>
+                        <button
+                          type="button"
+                          className={`${styles.syllabusSectionActionButton}${editingLessonField === `example-explanation-${index}` ? ` ${styles.syllabusSectionActionButtonActive}` : ""}`}
+                          title="Edit"
+                          aria-label={`Edit example ${index + 1} explanation`}
+                          onClick={() =>
+                            editingLessonField === `example-explanation-${index}`
+                              ? cancelEditLessonField()
+                              : startEditLessonField(
+                                  `example-explanation-${index}`,
+                                  example.explanation
+                                )
+                          }
+                        >
+                          <PencilIcon />
+                        </button>
+                      </div>
+                      {editingLessonField === `example-explanation-${index}` ? (
+                        <div className={styles.fieldEditWrap}>
+                          <textarea
+                            className={styles.fieldEditArea}
+                            value={lessonFieldDraft}
+                            onChange={(event) => setLessonFieldDraft(event.target.value)}
+                            rows={Math.max(4, lessonFieldDraft.split("\n").length + 2)}
+                            autoFocus
+                          />
+                          <div className={styles.fieldEditActions}>
+                            <button
+                              type="button"
+                              className={styles.fieldEditSaveBtn}
+                              onClick={() => saveLessonFieldEdit(`example-explanation-${index}`)}
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.fieldEditCancelBtn}
+                              onClick={cancelEditLessonField}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className={styles.introText}>{example.explanation}</p>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className={styles.emptyState}>
+                Examples generation failed — try regenerating.
               </p>
             )}
           </div>

@@ -336,6 +336,122 @@ export async function generateAssignmentRubricAction(
   }
 }
 
+export interface ExampleItem {
+  title: string;
+  content: string;
+  explanation: string;
+  language?: string;
+}
+
+export interface ExamplesData {
+  lessonType: "math" | "programming" | "general";
+  examples: ExampleItem[];
+}
+
+export async function generateExamplesAction(
+  moduleObjectives: string,
+  contextText: string
+): Promise<ExamplesData | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const prompt = `You are an expert educator preparing in-class examples for a lecture.
+
+MODULE OBJECTIVES:
+${moduleObjectives}
+
+CONTEXT:
+${contextText || "(none provided)"}
+
+First, determine the primary focus of this lesson:
+- "math" if the lesson is primarily about mathematics, statistics, or quantitative methods
+- "programming" if the lesson is primarily about programming, software, or coding
+- "general" for all other topics
+
+Then generate 4–5 examples appropriate to that focus:
+- For "math": worked problems with a clear problem statement and step-by-step solution
+- For "programming": short, complete, runnable code snippets (20–40 lines) with a brief explanation; pick the most natural language for the topic (e.g. Python for data science, JavaScript for web)
+- For "general": concrete worked examples, case studies, or demonstrations relevant to the topic
+
+Return ONLY valid JSON:
+{
+  "lessonType": "math" | "programming" | "general",
+  "examples": [
+    {
+      "title": "Short descriptive title",
+      "content": "The problem statement (math) or the full code snippet (programming) or the example scenario (general)",
+      "explanation": "Step-by-step solution (math), what the code does and why (programming), or key takeaways (general)",
+      "language": "python"
+    }
+  ]
+}
+
+Requirements:
+- "language" is required only for programming examples (e.g. "python", "javascript", "java", "c", "sql"); omit it for math and general examples.
+- Examples must be concrete, self-contained, and directly related to the module objectives.
+- Math problems should include all working steps in "explanation".
+- Code examples must be complete and runnable as-is; use comments to annotate key lines.
+- Do not include any text outside the JSON object.`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.5, maxOutputTokens: 3072 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Examples generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw =
+      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+    const trimmed = raw.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return { error: "Could not parse examples from the model response." };
+    }
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      lessonType?: string;
+      examples?: Array<{ title?: string; content?: string; explanation?: string; language?: string }>;
+    };
+
+    const lessonType =
+      parsed.lessonType === "math" || parsed.lessonType === "programming"
+        ? parsed.lessonType
+        : "general";
+
+    const examples: ExampleItem[] = (parsed.examples ?? [])
+      .filter((e) => e.title && e.content && e.explanation)
+      .map((e) => ({
+        title: e.title!,
+        content: e.content!,
+        explanation: e.explanation!,
+        ...(e.language ? { language: e.language } : {}),
+      }));
+
+    return { lessonType, examples };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
 export interface SyllabusSection {
   heading: string;
   hint: string;

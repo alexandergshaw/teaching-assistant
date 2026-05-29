@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import SelectionChatWidget from "./components/SelectionChatWidget";
 import AiChatFab from "./components/AiChatFab";
+import { SupabaseProvider } from "@/context/SupabaseProvider";
 
 export const metadata: Metadata = {
   title: "Teaching Assistant",
@@ -16,9 +17,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        {children}
-        <SelectionChatWidget />
-        <AiChatFab />
+        <SupabaseProvider>
+          {children}
+          <SelectionChatWidget />
+          <AiChatFab />
+        </SupabaseProvider>
       </body>
     </html>
   );

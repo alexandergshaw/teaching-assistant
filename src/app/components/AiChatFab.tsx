@@ -40,6 +40,15 @@ export default function AiChatFab() {
     setChatPosState(pos);
   }, []);
 
+  // Listen for the "open-ai-chat" event dispatched by the context menu.
+  useEffect(() => {
+    const handler = () => setOpen(true);
+    window.addEventListener("open-ai-chat", handler);
+    return () => window.removeEventListener("open-ai-chat", handler);
+  }, []);
+
+  // Position chat relative to FAB whenever it opens; reset session ID on each open.
+  const prevOpenRef = useRef(false);
   const [deadlinesPos, setDeadlinesPosState] = useState<Pos>({ x: 0, y: 0 });
   const deadlinesPosRef = useRef<Pos>({ x: 0, y: 0 });
   const setDeadlinesPos = useCallback((pos: Pos) => {

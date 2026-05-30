@@ -9,6 +9,8 @@ import {
 } from "@/lib/grade";
 import { OfficeParser, type SupportedFileType } from "officeparser";
 import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
+import { createClient } from "@/lib/supabase/server";
+import { logChatExchange } from "@/lib/supabase/chat-logs";
 
 export interface SlideData {
   title: string;
@@ -1245,7 +1247,8 @@ export interface SelectionChatMessage {
 export async function selectionChatAction(
   selectedText: string,
   question: string,
-  history: SelectionChatMessage[]
+  history: SelectionChatMessage[],
+  sessionId: string
 ): Promise<string | { error: string }> {
   try {
     const apiKey = getGeminiApiKey();
@@ -1286,10 +1289,31 @@ ${selectedText}
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
     };
 
-    const text =
+    const reply =
       data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
 
-    return text || "No response from the model.";
+    const replyText = reply || "No response from the model.";
+
+    // Log the user message and assistant reply to the database (non-blocking).
+    let userId: string | undefined;
+    try {
+      const supabase = await createClient();
+      const { data: session } = await supabase.auth.getUser();
+      userId = session.user?.id;
+    } catch {
+      // Non-fatal — continue without a user ID.
+    }
+
+    void logChatExchange({
+      sessionId,
+      source: "selection",
+      userMessage: question,
+      assistantReply: replyText,
+      contextText: selectedText,
+      userId,
+    });
+
+    return replyText;
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }

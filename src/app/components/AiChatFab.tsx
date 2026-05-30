@@ -1,12 +1,14 @@
 "use client";
 import { useState, useRef, useCallback, useEffect, useSyncExternalStore } from "react";
 import styles from "../page.module.css";
+import AiChatWindow from "./AiChatWindow";
+import type { ChatMessage } from "@/lib/chat/types";
 
 interface Pos { x: number; y: number }
 
 const FAB_SIZE = 52;
 const CHAT_W = 360;
-const CHAT_H = 440;
+const CHAT_H = 420;
 const DRAG_THRESHOLD = 5;
 
 function subscribe() { return () => {}; }
@@ -14,9 +16,12 @@ function subscribe() { return () => {}; }
 export default function AiChatFab() {
   const mounted = useSyncExternalStore(subscribe, () => true, () => false);
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
-  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Stable session ID for the lifetime of this chat window; regenerated on close.
+  const sessionIdRef = useRef<string>(crypto.randomUUID());
 
   const [fabPos, setFabPosState] = useState<Pos>(() => {
     if (typeof window === "undefined") return { x: 0, y: 0 };
@@ -35,7 +40,7 @@ export default function AiChatFab() {
     setChatPosState(pos);
   }, []);
 
-  // Position chat relative to FAB whenever it opens
+  // Position chat relative to FAB whenever it opens; reset session ID on each open.
   const prevOpenRef = useRef(false);
   useEffect(() => {
     if (open && !prevOpenRef.current) {
@@ -81,7 +86,7 @@ export default function AiChatFab() {
     document.addEventListener("mouseup", onUp);
   }, [setFabPos]);
 
-  // Chat header: drag to move window
+  // Chat window header: drag to reposition
   const onChatHeaderMouseDown = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("button")) return;
     e.preventDefault();
@@ -106,22 +111,39 @@ export default function AiChatFab() {
     document.addEventListener("mouseup", onUp);
   }, [setChatPos]);
 
-  async function sendMessage(e: React.FormEvent) {
-    e.preventDefault();
-    if (!input.trim()) return;
-    const userMsg = input;
-    setMessages(msgs => [...msgs, { role: "user", text: userMsg }]);
+  const handleSend = useCallback(async (text: string) => {
+    const nextMessages: ChatMessage[] = [...messages, { role: "user", text }];
+    setMessages(nextMessages);
     setLoading(true);
-    setInput("");
-    const response = await fetch("/api/ai-chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: [...messages, { role: "user", text: userMsg }] }),
-    });
-    const data = await response.json();
-    setMessages(msgs => [...msgs, { role: "assistant", text: data.reply }]);
-    setLoading(false);
-  }
+    setError(null);
+
+    try {
+      const response = await fetch("/api/ai-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: nextMessages, sessionId: sessionIdRef.current }),
+      });
+      const data = (await response.json()) as { reply?: string; error?: string };
+
+      if (!response.ok || data.error) {
+        setError(data.error ?? "Something went wrong.");
+      } else {
+        setMessages(msgs => [...msgs, { role: "assistant", text: data.reply ?? "" }]);
+      }
+    } catch {
+      setError("Failed to reach the server.");
+    } finally {
+      setLoading(false);
+    }
+  }, [messages]);
+
+  const handleClose = useCallback(() => {
+    setOpen(false);
+    setMessages([]);
+    setError(null);
+    // Fresh session ID for next time the window opens.
+    sessionIdRef.current = crypto.randomUUID();
+  }, []);
 
   if (!mounted) return null;
 
@@ -136,63 +158,20 @@ export default function AiChatFab() {
       >
         <ChatIcon />
       </button>
+
       {open && (
-        <div
-          className={styles.chatModal}
-          style={{ left: chatPos.x, top: chatPos.y }}
-          role="dialog"
-          aria-label="AI Chatbot"
-        >
-          <div className={styles.chatModalHeader} onMouseDown={onChatHeaderMouseDown}>
-            <div className={styles.chatModalHeaderLeft}>
-              <ChatIcon />
-              <span>AI Chatbot</span>
-            </div>
-            <button
-              aria-label="Close"
-              className={styles.chatModalClose}
-              onClick={() => setOpen(false)}
-            >
-              ×
-            </button>
-          </div>
-          <div className={styles.chatModalMessages}>
-            {messages.length === 0 && (
-              <p className={styles.chatModalEmpty}>Ask me anything!</p>
-            )}
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className={m.role === "user" ? styles.chatModalUserMsg : styles.chatModalAiMsg}
-              >
-                {m.text}
-              </div>
-            ))}
-            {loading && (
-              <div className={styles.chatModalAiMsg}>
-                <span className={styles.chatModalTyping}>···</span>
-              </div>
-            )}
-          </div>
-          <form onSubmit={sendMessage} className={styles.chatModalInputRow}>
-            <input
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder="Type your message..."
-              className={styles.chatModalInput}
-              disabled={loading}
-              autoFocus
-            />
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className={styles.chatModalSend}
-            >
-              Send
-            </button>
-          </form>
-        </div>
+        <AiChatWindow
+          messages={messages}
+          isLoading={loading}
+          error={error}
+          title="AI Chatbot"
+          icon={<ChatIcon />}
+          emptyMessage="Ask me anything!"
+          position={chatPos}
+          onHeaderMouseDown={onChatHeaderMouseDown}
+          onSend={handleSend}
+          onClose={handleClose}
+        />
       )}
     </>
   );

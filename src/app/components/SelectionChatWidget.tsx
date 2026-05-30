@@ -10,6 +10,8 @@ interface SelectionPos {
   y: number;
 }
 
+interface Pos { x: number; y: number }
+
 export default function SelectionChatWidget() {
   const [mounted, setMounted] = useState(false);
   const [icon, setIcon] = useState<{ x: number; y: number } | null>(null);
@@ -20,6 +22,13 @@ export default function SelectionChatWidget() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  const [dragPos, setDragPosState] = useState<Pos | null>(null);
+  const dragPosRef = useRef<Pos | null>(null);
+  const setDragPos = useCallback((pos: Pos | null) => {
+    dragPosRef.current = pos;
+    setDragPosState(pos);
+  }, []);
 
   const widgetRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -55,11 +64,12 @@ export default function SelectionChatWidget() {
       setIcon(null);
       setPendingText("");
       setChat(null);
+      setDragPos(null);
       setMessages([]);
       setInput("");
       setError(null);
     }
-  }, []);
+  }, [setDragPos]);
 
   useEffect(() => {
     document.addEventListener("mouseup", handleMouseUp);
@@ -84,7 +94,12 @@ export default function SelectionChatWidget() {
 
   const openChat = () => {
     if (!icon || !pendingText) return;
-    setChat({ text: pendingText, x: icon.x, y: icon.y });
+    const chatData: SelectionPos = { text: pendingText, x: icon.x, y: icon.y };
+    setChat(chatData);
+    setDragPos({
+      x: Math.max(8, Math.min(chatData.x - 200, window.innerWidth - 376)),
+      y: Math.max(8, Math.min(chatData.y + 12, window.innerHeight - 440)),
+    });
     setMessages([]);
     setInput("");
     setError(null);
@@ -95,6 +110,7 @@ export default function SelectionChatWidget() {
 
   const closeChat = () => {
     setChat(null);
+    setDragPos(null);
     setMessages([]);
     setInput("");
     setError(null);
@@ -139,17 +155,35 @@ export default function SelectionChatWidget() {
     }
   };
 
+  // Chat header drag handler
+  const onHeaderMouseDown = useCallback((e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
+    const startMouse: Pos = { x: e.clientX, y: e.clientY };
+    const startPos: Pos = { ...dragPosRef.current! };
+
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startMouse.x;
+      const dy = ev.clientY - startMouse.y;
+      setDragPos({
+        x: Math.max(0, startPos.x + dx),
+        y: Math.max(0, startPos.y + dy),
+      });
+    };
+
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [setDragPos]);
+
   if (!mounted) return null;
 
   const iconStyle = icon
     ? { top: icon.y + 6, left: icon.x - 15 }
-    : undefined;
-
-  const chatStyle = chat
-    ? {
-        top: Math.max(8, Math.min(chat.y + 12, window.innerHeight - 420)),
-        left: Math.max(8, Math.min(chat.x - 200, window.innerWidth - 376)),
-      }
     : undefined;
 
   return (
@@ -166,9 +200,14 @@ export default function SelectionChatWidget() {
         </button>
       )}
 
-      {chat && (
-        <div className={styles.selectionChatWindow} style={chatStyle} role="dialog" aria-label="AI chat">
-          <div className={styles.selectionChatHeader}>
+      {chat && dragPos && (
+        <div
+          className={styles.selectionChatWindow}
+          style={{ left: dragPos.x, top: dragPos.y }}
+          role="dialog"
+          aria-label="AI chat"
+        >
+          <div className={styles.selectionChatHeader} onMouseDown={onHeaderMouseDown}>
             <div className={styles.selectionChatHeaderLeft}>
               <SparkleIcon />
               <span>Ask AI</span>

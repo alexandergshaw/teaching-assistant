@@ -2,6 +2,7 @@
 import { useState, useRef, useCallback, useEffect, useSyncExternalStore } from "react";
 import styles from "../page.module.css";
 import AiChatWindow from "./AiChatWindow";
+import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
 import type { ChatMessage } from "@/lib/chat/types";
 
 interface Pos { x: number; y: number }
@@ -19,6 +20,8 @@ export default function AiChatFab() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { suggestions, recordPrompt } = usePromptSuggestions();
 
   // Stable session ID for the lifetime of this chat window; regenerated on close.
   const sessionIdRef = useRef<string>(crypto.randomUUID());
@@ -116,6 +119,7 @@ export default function AiChatFab() {
     setMessages(nextMessages);
     setLoading(true);
     setError(null);
+    recordPrompt(text);
 
     try {
       const response = await fetch("/api/ai-chat", {
@@ -135,7 +139,7 @@ export default function AiChatFab() {
     } finally {
       setLoading(false);
     }
-  }, [messages]);
+  }, [messages, recordPrompt]);
 
   const handleClose = useCallback(() => {
     setOpen(false);
@@ -167,6 +171,7 @@ export default function AiChatFab() {
           title="AI Chatbot"
           icon={<ChatIcon />}
           emptyMessage="Ask me anything!"
+          suggestions={suggestions}
           position={chatPos}
           onHeaderMouseDown={onChatHeaderMouseDown}
           onSend={handleSend}

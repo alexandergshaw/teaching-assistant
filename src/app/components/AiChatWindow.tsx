@@ -18,6 +18,8 @@ interface AiChatWindowProps {
   emptyMessage?: string;
   /** Optional context text shown at the top of the window (used by selection chat). */
   contextText?: string;
+  /** Suggested prompts shown as clickable bubbles when the chat is empty. */
+  suggestions?: string[];
   position: { x: number; y: number };
   onHeaderMouseDown: (e: React.MouseEvent) => void;
   onSend: (text: string) => void;
@@ -36,6 +38,7 @@ export default function AiChatWindow({
   icon,
   emptyMessage = "Ask me anything!",
   contextText,
+  suggestions = [],
   position,
   onHeaderMouseDown,
   onSend,
@@ -174,6 +177,23 @@ export default function AiChatWindow({
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Suggestion bubbles — shown when the chat is empty */}
+      {messages.length === 0 && suggestions.length > 0 && (
+        <div className={styles.suggestionBubbles} aria-label="Suggested prompts">
+          {suggestions.map((s) => (
+            <button
+              key={s}
+              className={styles.suggestionBubble}
+              onClick={() => onSend(s)}
+              disabled={isLoading}
+              title={s}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Input */}
       <div className={styles.selectionChatInputRow}>

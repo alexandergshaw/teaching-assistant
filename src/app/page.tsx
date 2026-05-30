@@ -18,6 +18,16 @@ const initialTestState: TestGeminiState = { result: null, error: null };
 
 type ActiveTab = "grading" | "lesson-planning" | "course-planning";
 
+function getCommentPrefix(language?: string): string {
+  const lang = (language ?? "").toLowerCase();
+  if (["sql", "haskell", "lua"].includes(lang)) return "--";
+  if (["python", "ruby", "bash", "shell", "r", "perl", "elixir", "coffeescript"].includes(lang)) return "#";
+  if (["html", "xml"].includes(lang)) return "<!--";
+  if (["css"].includes(lang)) return "/*";
+  if (lang) return "//";
+  return "#";
+}
+
 function CopyIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
@@ -291,15 +301,24 @@ export default function Home() {
       // ── Build examples.txt ───────────────────────────────────────────
       let examplesText = "";
       if (examplesPreview && examplesPreview.examples.length > 0) {
-        const lines: string[] = ["IN-CLASS EXAMPLES", "=================", ""];
+        const lines: string[] = [];
         examplesPreview.examples.forEach((ex, i) => {
-          lines.push(`EXAMPLE ${i + 1}: ${ex.title}`);
-          lines.push("-".repeat(`EXAMPLE ${i + 1}: ${ex.title}`.length));
+          const prefix = getCommentPrefix(ex.language);
+          const commentLine = (text: string) =>
+            text === "" ? "" : `${prefix} ${text}`;
+          if (i === 0) {
+            lines.push(commentLine("IN-CLASS EXAMPLES"));
+            lines.push(commentLine("================="));
+            lines.push("");
+          }
+          const heading = `EXAMPLE ${i + 1}: ${ex.title}`;
+          lines.push(commentLine(heading));
+          lines.push(commentLine("-".repeat(heading.length)));
           lines.push("");
           lines.push(ex.content);
           lines.push("");
-          lines.push("EXPLANATION:");
-          lines.push(ex.explanation);
+          lines.push(commentLine("EXPLANATION:"));
+          ex.explanation.split("\n").forEach((expLine) => lines.push(commentLine(expLine)));
           lines.push("");
         });
         examplesText = lines.join("\n");

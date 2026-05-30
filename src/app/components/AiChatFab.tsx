@@ -5,6 +5,7 @@ import SpeedDialAction from "@mui/material/SpeedDialAction";
 import SpeedDialIcon from "@mui/material/SpeedDialIcon";
 import AiChatWindow from "./AiChatWindow";
 import DeadlinesWindow from "./DeadlinesWindow";
+import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
 import type { ChatMessage } from "@/lib/chat/types";
 
 interface Pos { x: number; y: number }
@@ -26,6 +27,8 @@ export default function AiChatFab() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { suggestions, recordPrompt } = usePromptSuggestions();
 
   // Stable session ID for the lifetime of this chat window; regenerated on close.
   const sessionIdRef = useRef<string>(crypto.randomUUID());
@@ -113,6 +116,7 @@ export default function AiChatFab() {
     setMessages(nextMessages);
     setLoading(true);
     setError(null);
+    recordPrompt(text);
 
     try {
       const response = await fetch("/api/ai-chat", {
@@ -132,7 +136,7 @@ export default function AiChatFab() {
     } finally {
       setLoading(false);
     }
-  }, [messages]);
+  }, [messages, recordPrompt]);
 
   const handleChatClose = useCallback(() => {
     setChatOpen(false);
@@ -192,6 +196,7 @@ export default function AiChatFab() {
           title="AI Chatbot"
           icon={<ChatIcon />}
           emptyMessage="Ask me anything!"
+          suggestions={suggestions}
           position={chatPos}
           onHeaderMouseDown={onChatHeaderMouseDown}
           onSend={handleSend}

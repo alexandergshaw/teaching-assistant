@@ -1600,6 +1600,45 @@
   cursor: not-allowed;
 }
 
+/* ── Suggestion bubbles ─────────────────────────────────────────────────── */
+
+.suggestionBubbles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 4px;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  background: #f8fafc;
+  flex-shrink: 0;
+}
+
+.suggestionBubble {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 0.8rem;
+  color: #334155;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  line-height: 1.5;
+}
+
+.suggestionBubble:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.suggestionBubble:active {
+  background: #dbeafe;
+}
+
 @keyframes spin {
   from {
     transform: rotate(0deg);
@@ -1910,6 +1949,11 @@
     background: #0f172a;
     border-color: rgba(148, 163, 184, 0.12);
   }
+  
+  .suggestionBubbles {
+    background: #0f172a;
+    border-color: rgba(148, 163, 184, 0.12);
+  }
 
   .deadlinesInput {
     background: #1e293b;
@@ -1968,6 +2012,20 @@
   .deadlinesAddIconBtn:hover {
     background: rgba(148, 163, 184, 0.1);
     color: #60a5fa;
+  .suggestionBubble {
+    background: #1e293b;
+    border-color: rgba(148, 163, 184, 0.3);
+    color: #cbd5e1;
+  }
+
+  .suggestionBubble:hover {
+    background: #1e3a5f;
+    border-color: #60a5fa;
+    color: #93c5fd;
+  }
+
+  .suggestionBubble:active {
+    background: #1e3a5f;
   }
 }
 

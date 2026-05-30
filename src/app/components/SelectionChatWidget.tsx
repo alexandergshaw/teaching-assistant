@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { selectionChatAction } from "../actions";
 import styles from "../page.module.css";
 import AiChatWindow from "./AiChatWindow";
+import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
 import type { ChatMessage } from "@/lib/chat/types";
 
 interface SelectionPos {
@@ -22,6 +23,8 @@ export default function SelectionChatWidget() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { suggestions, recordPrompt } = usePromptSuggestions();
 
   const [dragPos, setDragPosState] = useState<Pos | null>(null);
   const dragPosRef = useRef<Pos | null>(null);
@@ -112,6 +115,7 @@ export default function SelectionChatWidget() {
     setMessages(nextMessages);
     setIsLoading(true);
     setError(null);
+    recordPrompt(text);
 
     const result = await selectionChatAction(
       chat.text,
@@ -127,7 +131,7 @@ export default function SelectionChatWidget() {
     } else {
       setError(result.error);
     }
-  }, [chat, isLoading, messages]);
+  }, [chat, isLoading, messages, recordPrompt]);
 
   // Chat header drag handler
   const onHeaderMouseDown = useCallback((e: React.MouseEvent) => {
@@ -183,6 +187,7 @@ export default function SelectionChatWidget() {
           icon={<SparkleIcon />}
           emptyMessage="Ask a question about the selected text."
           contextText={chat.text}
+          suggestions={suggestions}
           position={dragPos}
           onHeaderMouseDown={onHeaderMouseDown}
           onSend={handleSend}

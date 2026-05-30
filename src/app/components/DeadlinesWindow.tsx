@@ -1,13 +1,32 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import styles from "../page.module.css";
+import {
+  CALENDAR_EVENT_TYPE_LABELS,
+  categorizeEventType,
+  isCalendarEventType,
+  type CalendarEventType,
+  type ParsedCalendarResult,
+} from "@/lib/calendar-events";
 
 export interface DeadlineEvent {
   id: string;
   title: string;
   date: string;
+  /** End date for ranged events (e.g. finals week, spring break). ISO YYYY-MM-DD. */
+  endDate?: string;
+  /**
+   * Coarse legacy category. Retained for badge coloring and backward
+   * compatibility with any previously-stored events.
+   */
   type: "deadline" | "event";
+  /** Finer-grained event type extracted from a calendar/syllabus PDF. */
+  eventType?: CalendarEventType;
+  /** School / institution the event belongs to (parsed from the PDF). */
+  school?: string;
+  /** Specific course (e.g. "CS 106A"), when sourced from a syllabus. */
+  courseName?: string;
   description?: string;
 }
 
@@ -17,7 +36,17 @@ function loadEvents(): DeadlineEvent[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as DeadlineEvent[]) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is DeadlineEvent =>
+        !!item &&
+        typeof item === "object" &&
+        typeof (item as DeadlineEvent).id === "string" &&
+        typeof (item as DeadlineEvent).title === "string" &&
+        typeof (item as DeadlineEvent).date === "string"
+    );
   } catch {
     return [];
   }
@@ -37,6 +66,18 @@ function formatDate(dateStr: string): string {
   });
 }
 
+function formatDateRange(start: string, end?: string): string {
+  if (!end || end === start) return formatDate(start);
+  return `${formatDate(start)} – ${formatDate(end)}`;
+}
+
+function badgeLabel(event: DeadlineEvent): string {
+  if (event.eventType && isCalendarEventType(event.eventType)) {
+    return CALENDAR_EVENT_TYPE_LABELS[event.eventType];
+  }
+  return event.type === "deadline" ? "Deadline" : "Event";
+}
+
 interface DeadlinesWindowProps {
   position: { x: number; y: number };
   onHeaderMouseDown: (e: React.MouseEvent) => void;
@@ -54,6 +95,14 @@ export default function DeadlinesWindow({
   const [newDate, setNewDate] = useState("");
   const [newType, setNewType] = useState<"deadline" | "event">("deadline");
   const [newDescription, setNewDescription] = useState("");
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadStatus, setUploadStatus] = useState<
+    | { kind: "idle" }
+    | { kind: "uploading"; fileName: string }
+    | { kind: "success"; message: string }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
 
   const sortedEvents = [...events].sort(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
@@ -87,6 +136,90 @@ export default function DeadlinesWindow({
     [events]
   );
 
+  const handleUploadClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileSelected = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const input = e.target;
+      const file = input.files?.[0];
+      // Always reset the input so re-selecting the same file re-triggers change.
+      input.value = "";
+      if (!file) return;
+
+      setUploadStatus({ kind: "uploading", fileName: file.name });
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const res = await fetch("/api/parse-calendar", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) {
+          let message = `Upload failed (HTTP ${res.status}).`;
+          try {
+            const errBody = (await res.json()) as { error?: string };
+            if (errBody?.error) message = errBody.error;
+          } catch {
+            // Ignore JSON parse errors; keep generic message.
+          }
+          setUploadStatus({ kind: "error", message });
+          return;
+        }
+
+        const data = (await res.json()) as ParsedCalendarResult;
+        const parsedEvents = Array.isArray(data?.events) ? data.events : [];
+
+        if (parsedEvents.length === 0) {
+          setUploadStatus({
+            kind: "error",
+            message:
+              "No events could be extracted from that PDF. Try a different file.",
+          });
+          return;
+        }
+
+        const school = data.school;
+        const courseName = data.courseName;
+
+        const newEvents: DeadlineEvent[] = parsedEvents.map((ev) => ({
+          id: crypto.randomUUID(),
+          title: ev.title,
+          date: ev.date,
+          endDate: ev.endDate,
+          type: categorizeEventType(ev.type),
+          eventType: ev.type,
+          school,
+          courseName,
+          description: ev.description,
+        }));
+
+        const updated = [...events, ...newEvents];
+        setEvents(updated);
+        saveEvents(updated);
+
+        const schoolSuffix = school ? ` from ${school}` : "";
+        setUploadStatus({
+          kind: "success",
+          message: `Added ${newEvents.length} event${
+            newEvents.length === 1 ? "" : "s"
+          }${schoolSuffix}.`,
+        });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Unexpected upload error.";
+        setUploadStatus({ kind: "error", message });
+      }
+    },
+    [events]
+  );
+
+  const isUploading = uploadStatus.kind === "uploading";
+
   return (
     <div
       className={styles.selectionChatWindow}
@@ -101,6 +234,15 @@ export default function DeadlinesWindow({
           <span>Deadlines &amp; Events</span>
         </div>
         <div className={styles.deadlinesHeaderActions}>
+          <button
+            className={styles.deadlinesAddIconBtn}
+            onClick={handleUploadClick}
+            aria-label="Upload calendar or syllabus PDF"
+            title="Upload calendar/syllabus PDF"
+            disabled={isUploading}
+          >
+            <UploadIcon />
+          </button>
           <button
             className={styles.deadlinesAddIconBtn}
             onClick={() => setShowAddForm((f) => !f)}
@@ -118,6 +260,41 @@ export default function DeadlinesWindow({
           </button>
         </div>
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        onChange={handleFileSelected}
+        style={{ display: "none" }}
+        aria-hidden="true"
+      />
+
+      {/* Upload status banner */}
+      {uploadStatus.kind !== "idle" && (
+        <div
+          className={styles.deadlinesUploadStatus}
+          data-kind={uploadStatus.kind}
+          role="status"
+        >
+          {uploadStatus.kind === "uploading" && (
+            <span>Parsing {uploadStatus.fileName}…</span>
+          )}
+          {uploadStatus.kind === "success" && <span>{uploadStatus.message}</span>}
+          {uploadStatus.kind === "error" && (
+            <span>Error: {uploadStatus.message}</span>
+          )}
+          {uploadStatus.kind !== "uploading" && (
+            <button
+              className={styles.deadlinesUploadStatusClose}
+              onClick={() => setUploadStatus({ kind: "idle" })}
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Add event form */}
       {showAddForm && (
@@ -178,7 +355,7 @@ export default function DeadlinesWindow({
           <p className={styles.selectionChatEmpty}>
             No upcoming deadlines or events.
             <br />
-            Click + to add one.
+            Click + to add one, or upload a calendar/syllabus PDF.
           </p>
         )}
         {sortedEvents.map((event) => (
@@ -191,12 +368,17 @@ export default function DeadlinesWindow({
                     : styles.eventBadge
                 }`}
               >
-                {event.type === "deadline" ? "Deadline" : "Event"}
+                {badgeLabel(event)}
               </span>
               <div className={styles.deadlineItemTitle}>{event.title}</div>
               <div className={styles.deadlineItemDate}>
-                {formatDate(event.date)}
+                {formatDateRange(event.date, event.endDate)}
               </div>
+              {(event.school || event.courseName) && (
+                <div className={styles.deadlineItemSchool}>
+                  {[event.courseName, event.school].filter(Boolean).join(" · ")}
+                </div>
+              )}
               {event.description && (
                 <div className={styles.deadlineItemDesc}>
                   {event.description}
@@ -245,6 +427,21 @@ function PlusIcon() {
       focusable="false"
     >
       <path d="M19 13H13v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+    </svg>
+  );
+}
+
+function UploadIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M5 20h14v-2H5v2zm7-18L5.33 8.67l1.41 1.41L11 5.83V16h2V5.83l4.26 4.25 1.41-1.41L12 2z" />
     </svg>
   );
 }

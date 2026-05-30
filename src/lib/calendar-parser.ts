@@ -128,16 +128,14 @@ function coerceEventType(value: unknown): CalendarEventType {
 }
 
 function extractJsonObject(text: string): string | null {
-  // Strip common fences and find the first {...} block.
-  const cleaned = text
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-  if (cleaned.startsWith("{")) return cleaned;
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
+  // Prefer content inside a markdown fence block when present.
+  const fencedMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fencedMatch?.[1]?.trim() ?? text.trim();
+  // Always find the outermost {...} boundaries so any surrounding text is excluded.
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
   if (start === -1 || end === -1 || end <= start) return null;
-  return cleaned.slice(start, end + 1);
+  return candidate.slice(start, end + 1);
 }
 
 function parseModelResponse(raw: string): ParsedCalendarResult {

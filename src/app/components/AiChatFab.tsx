@@ -17,13 +17,40 @@ const DEADLINES_H = 480;
 const DIAL_BOTTOM = 24;
 const DIAL_RIGHT = 24;
 
+// ── localStorage helpers ──────────────────────────────────────────────────────
+
+const LS_PREFIX = "ta:";
+
+function readLS<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + key);
+    return raw !== null ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeLS<T>(key: string, value: T): void {
+  try {
+    localStorage.setItem(LS_PREFIX + key, JSON.stringify(value));
+  } catch {
+    // Quota exceeded or private-browsing restriction — silently ignore.
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function subscribe() { return () => {}; }
 
 export default function AiChatFab() {
   const mounted = useSyncExternalStore(subscribe, () => true, () => false);
   const [dialOpen, setDialOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [deadlinesOpen, setDeadlinesOpen] = useState(false);
+
+  // Restore open/closed state from localStorage.
+  const [chatOpen, setChatOpen] = useState<boolean>(() => readLS("chat-open", false));
+  const [deadlinesOpen, setDeadlinesOpen] = useState<boolean>(() => readLS("deadlines-open", false));
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,52 +60,67 @@ export default function AiChatFab() {
   // Stable session ID for the lifetime of this chat window; regenerated on close.
   const sessionIdRef = useRef<string>(crypto.randomUUID());
 
-  const [chatPos, setChatPosState] = useState<Pos>({ x: 0, y: 0 });
-  const chatPosRef = useRef<Pos>({ x: 0, y: 0 });
+  // Restore positions from localStorage.  If chatOpen/deadlinesOpen was persisted as true
+  // and no explicit position is saved we compute the default here — this is safe because the
+  // component returns null during SSR (via the `mounted` guard below), so there is no
+  // hydration mismatch.
+  const [chatPos, setChatPosState] = useState<Pos>(() => {
+    const saved = readLS<Pos | null>("chat-pos", null);
+    if (saved) return saved;
+    if (typeof window !== "undefined" && readLS<boolean>("chat-open", false)) {
+      return {
+        x: Math.max(8, window.innerWidth - CHAT_W - DIAL_RIGHT - 8),
+        y: Math.max(8, window.innerHeight - CHAT_H - 100),
+      };
+    }
+    return { x: 0, y: 0 };
+  });
+  const chatPosRef = useRef<Pos>(chatPos);
   const setChatPos = useCallback((pos: Pos) => {
     chatPosRef.current = pos;
     setChatPosState(pos);
   }, []);
 
-  // Listen for the "open-ai-chat" event dispatched by the context menu.
-  useEffect(() => {
-    const handler = () => setOpen(true);
-    window.addEventListener("open-ai-chat", handler);
-    return () => window.removeEventListener("open-ai-chat", handler);
-  }, []);
-
-  // Position chat relative to FAB whenever it opens; reset session ID on each open.
-  const prevOpenRef = useRef(false);
-  const [deadlinesPos, setDeadlinesPosState] = useState<Pos>({ x: 0, y: 0 });
-  const deadlinesPosRef = useRef<Pos>({ x: 0, y: 0 });
+  const [deadlinesPos, setDeadlinesPosState] = useState<Pos>(() => {
+    const saved = readLS<Pos | null>("deadlines-pos", null);
+    if (saved) return saved;
+    if (typeof window !== "undefined" && readLS<boolean>("deadlines-open", false)) {
+      return {
+        x: Math.max(8, window.innerWidth - DEADLINES_W - DIAL_RIGHT - 8),
+        y: Math.max(8, window.innerHeight - DEADLINES_H - 100),
+      };
+    }
+    return { x: 0, y: 0 };
+  });
+  const deadlinesPosRef = useRef<Pos>(deadlinesPos);
   const setDeadlinesPos = useCallback((pos: Pos) => {
     deadlinesPosRef.current = pos;
     setDeadlinesPosState(pos);
   }, []);
 
-  // Position chat window above the SpeedDial when it opens.
-  const prevChatOpenRef = useRef(false);
-  useEffect(() => {
-    if (chatOpen && !prevChatOpenRef.current) {
-      setChatPos({
-        x: Math.max(8, window.innerWidth - CHAT_W - DIAL_RIGHT - 8),
-        y: Math.max(8, window.innerHeight - CHAT_H - 100),
-      });
-    }
-    prevChatOpenRef.current = chatOpen;
-  }, [chatOpen, setChatPos]);
+  // Persist open/closed state to localStorage whenever it changes.
+  useEffect(() => { writeLS("chat-open", chatOpen); }, [chatOpen]);
+  useEffect(() => { writeLS("deadlines-open", deadlinesOpen); }, [deadlinesOpen]);
 
-  // Position deadlines window above the SpeedDial when it opens.
-  const prevDeadlinesOpenRef = useRef(false);
+  // Persist position to localStorage whenever it changes.
+  useEffect(() => { writeLS("chat-pos", chatPos); }, [chatPos]);
+  useEffect(() => { writeLS("deadlines-pos", deadlinesPos); }, [deadlinesPos]);
+
+  // Listen for the "open-ai-chat" event dispatched by the context menu.
+  // Calling setState in a subscribed event callback (not directly in the effect body) is fine.
   useEffect(() => {
-    if (deadlinesOpen && !prevDeadlinesOpenRef.current) {
-      setDeadlinesPos({
-        x: Math.max(8, window.innerWidth - DEADLINES_W - DIAL_RIGHT - 8),
-        y: Math.max(8, window.innerHeight - DEADLINES_H - 100),
-      });
-    }
-    prevDeadlinesOpenRef.current = deadlinesOpen;
-  }, [deadlinesOpen, setDeadlinesPos]);
+    const handler = () => {
+      setChatOpen(true);
+      if (!readLS<Pos | null>("chat-pos", null)) {
+        setChatPos({
+          x: Math.max(8, window.innerWidth - CHAT_W - DIAL_RIGHT - 8),
+          y: Math.max(8, window.innerHeight - CHAT_H - 100),
+        });
+      }
+    };
+    window.addEventListener("open-ai-chat", handler);
+    return () => window.removeEventListener("open-ai-chat", handler);
+  }, [setChatPos]);
 
   // Chat window header: drag to reposition
   const onChatHeaderMouseDown = useCallback((e: React.MouseEvent) => {
@@ -176,15 +218,28 @@ export default function AiChatFab() {
         }}
         icon={<SpeedDialIcon />}
         open={dialOpen}
-        onOpen={() => setDialOpen(true)}
-        onClose={() => setDialOpen(false)}
+        onOpen={(_, reason) => {
+          // Open only on an explicit click — never on hover.
+          if (reason === "toggle") setDialOpen(true);
+        }}
+        onClose={(_, reason) => {
+          // Keep open when the mouse moves away; close on click-away, Escape, or focus loss.
+          if (reason !== "mouseLeave") setDialOpen(false);
+        }}
       >
         <SpeedDialAction
           icon={<ChatIcon />}
           title="AI Chatbot"
           onClick={() => {
             setDialOpen(false);
-            setChatOpen((o) => !o);
+            const nextOpen = !chatOpen;
+            setChatOpen(nextOpen);
+            if (nextOpen && !readLS<Pos | null>("chat-pos", null)) {
+              setChatPos({
+                x: Math.max(8, window.innerWidth - CHAT_W - DIAL_RIGHT - 8),
+                y: Math.max(8, window.innerHeight - CHAT_H - 100),
+              });
+            }
           }}
         />
         <SpeedDialAction
@@ -192,7 +247,14 @@ export default function AiChatFab() {
           title="Deadlines & Events"
           onClick={() => {
             setDialOpen(false);
-            setDeadlinesOpen((o) => !o);
+            const nextOpen = !deadlinesOpen;
+            setDeadlinesOpen(nextOpen);
+            if (nextOpen && !readLS<Pos | null>("deadlines-pos", null)) {
+              setDeadlinesPos({
+                x: Math.max(8, window.innerWidth - DEADLINES_W - DIAL_RIGHT - 8),
+                y: Math.max(8, window.innerHeight - DEADLINES_H - 100),
+              });
+            }
           }}
         />
       </SpeedDial>

@@ -100,9 +100,13 @@ export default function DeadlinesWindow({
   const [uploadStatus, setUploadStatus] = useState<
     | { kind: "idle" }
     | { kind: "uploading"; fileName: string }
+    | { kind: "parsing" }
     | { kind: "success"; message: string }
     | { kind: "error"; message: string }
   >({ kind: "idle" });
+
+  const [showTextForm, setShowTextForm] = useState(false);
+  const [pasteText, setPasteText] = useState("");
 
   const sortedEvents = [...events].sort(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
@@ -218,7 +222,79 @@ export default function DeadlinesWindow({
     [events]
   );
 
-  const isUploading = uploadStatus.kind === "uploading";
+  const handleTextParse = useCallback(async () => {
+    const text = pasteText.trim();
+    if (!text) return;
+
+    setUploadStatus({ kind: "parsing" });
+    setShowTextForm(false);
+    setPasteText("");
+
+    try {
+      const res = await fetch("/api/parse-calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!res.ok) {
+        let message = `Parse failed (HTTP ${res.status}).`;
+        try {
+          const errBody = (await res.json()) as { error?: string };
+          if (errBody?.error) message = errBody.error;
+        } catch {
+          // Ignore JSON parse errors; keep generic message.
+        }
+        setUploadStatus({ kind: "error", message });
+        return;
+      }
+
+      const data = (await res.json()) as ParsedCalendarResult;
+      const parsedEvents = Array.isArray(data?.events) ? data.events : [];
+
+      if (parsedEvents.length === 0) {
+        setUploadStatus({
+          kind: "error",
+          message:
+            "No events could be extracted from that text. Try including dates and event names.",
+        });
+        return;
+      }
+
+      const school = data.school;
+      const courseName = data.courseName;
+
+      const newEvents: DeadlineEvent[] = parsedEvents.map((ev) => ({
+        id: crypto.randomUUID(),
+        title: ev.title,
+        date: ev.date,
+        endDate: ev.endDate,
+        type: categorizeEventType(ev.type),
+        eventType: ev.type,
+        school,
+        courseName,
+        description: ev.description,
+      }));
+
+      const updated = [...events, ...newEvents];
+      setEvents(updated);
+      saveEvents(updated);
+
+      const schoolSuffix = school ? ` from ${school}` : "";
+      setUploadStatus({
+        kind: "success",
+        message: `Added ${newEvents.length} event${
+          newEvents.length === 1 ? "" : "s"
+        }${schoolSuffix}.`,
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Unexpected error parsing text.";
+      setUploadStatus({ kind: "error", message });
+    }
+  }, [events, pasteText]);
+
+  const isUploading = uploadStatus.kind === "uploading" || uploadStatus.kind === "parsing";
 
   return (
     <div
@@ -245,7 +321,22 @@ export default function DeadlinesWindow({
           </button>
           <button
             className={styles.deadlinesAddIconBtn}
-            onClick={() => setShowAddForm((f) => !f)}
+            onClick={() => {
+              setShowTextForm((f) => !f);
+              setShowAddForm(false);
+            }}
+            aria-label="Paste text to parse"
+            title="Paste text to parse"
+            disabled={isUploading}
+          >
+            <TextIcon />
+          </button>
+          <button
+            className={styles.deadlinesAddIconBtn}
+            onClick={() => {
+              setShowAddForm((f) => !f);
+              setShowTextForm(false);
+            }}
             aria-label="Add event"
             title="Add event"
           >
@@ -280,11 +371,14 @@ export default function DeadlinesWindow({
           {uploadStatus.kind === "uploading" && (
             <span>Parsing {uploadStatus.fileName}…</span>
           )}
+          {uploadStatus.kind === "parsing" && (
+            <span>Parsing text…</span>
+          )}
           {uploadStatus.kind === "success" && <span>{uploadStatus.message}</span>}
           {uploadStatus.kind === "error" && (
             <span>Error: {uploadStatus.message}</span>
           )}
-          {uploadStatus.kind !== "uploading" && (
+          {uploadStatus.kind !== "uploading" && uploadStatus.kind !== "parsing" && (
             <button
               className={styles.deadlinesUploadStatusClose}
               onClick={() => setUploadStatus({ kind: "idle" })}
@@ -293,6 +387,37 @@ export default function DeadlinesWindow({
               ×
             </button>
           )}
+        </div>
+      )}
+
+      {/* Paste text form */}
+      {showTextForm && (
+        <div className={styles.deadlinesAddForm}>
+          <textarea
+            className={`${styles.deadlinesInput} ${styles.deadlinesTextarea}`}
+            placeholder="Paste syllabus or calendar text here…"
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            rows={6}
+          />
+          <div className={styles.deadlinesFormActions}>
+            <button
+              className={styles.deadlinesCancelBtn}
+              onClick={() => {
+                setShowTextForm(false);
+                setPasteText("");
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              className={styles.deadlinesAddBtn}
+              onClick={handleTextParse}
+              disabled={!pasteText.trim()}
+            >
+              Parse
+            </button>
+          </div>
         </div>
       )}
 
@@ -427,6 +552,21 @@ function PlusIcon() {
       focusable="false"
     >
       <path d="M19 13H13v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+    </svg>
+  );
+}
+
+function TextIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z" />
     </svg>
   );
 }

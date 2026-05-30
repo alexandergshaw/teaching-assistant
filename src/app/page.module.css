@@ -1752,6 +1752,12 @@
   background: #f1f5f9;
 }
 
+.deadlinesTextarea {
+  resize: vertical;
+  min-height: 100px;
+  line-height: 1.4;
+}
+
 .deadlinesUploadStatus {
   display: flex;
   align-items: center;

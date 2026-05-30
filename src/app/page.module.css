@@ -1752,6 +1752,49 @@
   background: #f1f5f9;
 }
 
+.deadlinesUploadStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  background: #eff6ff;
+  color: #1e3a8a;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+}
+
+.deadlinesUploadStatus[data-kind="success"] {
+  background: #ecfdf5;
+  color: #065f46;
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.deadlinesUploadStatus[data-kind="error"] {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.deadlinesUploadStatusClose {
+  background: transparent;
+  border: none;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  color: inherit;
+  padding: 0 2px;
+}
+
+.deadlineItemSchool {
+  font-size: 0.72rem;
+  color: var(--text-secondary, #475569);
+  font-weight: 500;
+}
+
 .deadlineItem {
   display: flex;
   align-items: flex-start;

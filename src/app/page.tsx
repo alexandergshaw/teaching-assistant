@@ -204,10 +204,12 @@ export default function Home() {
   const handleDownloadLessonPlan = async () => {
     if (!lessonPlanPreview) return;
     try {
-      const [{ default: PptxGenJS }, { default: JSZip }] = await Promise.all([
+      const [{ default: PptxGenJS }, { default: JSZip }, docxModule] = await Promise.all([
         import("pptxgenjs"),
         import("jszip"),
+        import("docx"),
       ]);
+      const { Document, Packer, Paragraph, TextRun, HeadingLevel } = docxModule;
 
       // ── Build PPTX ──────────────────────────────────────────────────
       const prs = new PptxGenJS();
@@ -235,47 +237,44 @@ export default function Home() {
 
       const pptxData = await prs.write({ outputType: "arraybuffer" }) as ArrayBuffer;
 
-      // ── Build introduction.txt ───────────────────────────────────────
-      let introText = "";
+      // ── Build introduction.docx ──────────────────────────────────────
+      let introDocxBuffer: ArrayBuffer | null = null;
       if (introPreview) {
-        introText = [
-          "MODULE INTRODUCTION",
-          "===================",
-          "",
-          "WHERE THIS FITS",
-          "---------------",
-          introPreview.overview,
-          "",
-          "KEY TERMS",
-          "---------",
-          introPreview.keyTerms,
-        ].join("\n");
+        const introDoc = new Document({
+          sections: [{
+            children: [
+              new Paragraph({ text: "Module Introduction", heading: HeadingLevel.HEADING_1 }),
+              new Paragraph({ text: "Where This Fits", heading: HeadingLevel.HEADING_2 }),
+              new Paragraph({ children: [new TextRun(introPreview.overview)] }),
+              new Paragraph({ text: "Key Terms", heading: HeadingLevel.HEADING_2 }),
+              new Paragraph({ children: [new TextRun(introPreview.keyTerms)] }),
+            ],
+          }],
+        });
+        introDocxBuffer = await Packer.toArrayBuffer(introDoc);
       }
 
-      // ── Build assignment.txt ─────────────────────────────────────────
-      let assignmentText = "";
+      // ── Build assignment.docx ────────────────────────────────────────
+      let assignmentDocxBuffer: ArrayBuffer | null = null;
       if (assignmentPreview) {
-        const header = `ASSIGNMENT: ${assignmentPreview.title}`;
-        assignmentText = [
-          header,
-          "=".repeat(header.length),
-          "",
-          "OVERVIEW",
-          "--------",
-          assignmentPreview.overview,
-          "",
-          "STEPS",
-          "-----",
-          ...assignmentPreview.steps.map((s, i) => `${i + 1}. ${s.stepTitle}\n   ${s.description}`),
-          "",
-          "FREE TOOLS",
-          "----------",
-          ...assignmentPreview.tools.map((t) => `- ${t}`),
-          "",
-          "DELIVERABLES",
-          "------------",
-          ...assignmentPreview.deliverables.map((d) => `- ${d}`),
-        ].join("\n");
+        const assignmentChildren = [
+          new Paragraph({ text: `Assignment: ${assignmentPreview.title}`, heading: HeadingLevel.HEADING_1 }),
+          new Paragraph({ text: "Overview", heading: HeadingLevel.HEADING_2 }),
+          new Paragraph({ children: [new TextRun(assignmentPreview.overview)] }),
+          new Paragraph({ text: "Steps", heading: HeadingLevel.HEADING_2 }),
+          ...assignmentPreview.steps.map((s, i) => new Paragraph({
+            children: [
+              new TextRun({ text: `${i + 1}. ${s.stepTitle}`, bold: true }),
+              new TextRun({ text: `  ${s.description}` }),
+            ],
+          })),
+          new Paragraph({ text: "Free Tools", heading: HeadingLevel.HEADING_2 }),
+          ...assignmentPreview.tools.map((t) => new Paragraph({ children: [new TextRun(`• ${t}`)] })),
+          new Paragraph({ text: "Deliverables", heading: HeadingLevel.HEADING_2 }),
+          ...assignmentPreview.deliverables.map((d) => new Paragraph({ children: [new TextRun(`• ${d}`)] })),
+        ];
+        const assignmentDoc = new Document({ sections: [{ children: assignmentChildren }] });
+        assignmentDocxBuffer = await Packer.toArrayBuffer(assignmentDoc);
       }
 
       // ── Build rubric.txt ─────────────────────────────────────────────
@@ -326,9 +325,9 @@ export default function Home() {
 
       // ── Assemble ZIP ─────────────────────────────────────────────────
       const zip = new JSZip();
-      if (introText) zip.file("introduction.txt", introText);
+      if (introDocxBuffer) zip.file("introduction.docx", introDocxBuffer);
       zip.file("slides.pptx", pptxData);
-      if (assignmentText) zip.file("assignment.txt", assignmentText);
+      if (assignmentDocxBuffer) zip.file("assignment.docx", assignmentDocxBuffer);
       if (rubricText) zip.file("rubric.txt", rubricText);
       if (examplesText) zip.file("examples.txt", examplesText);
 

@@ -1681,7 +1681,9 @@ export async function generateLecturePlansAction(
     // Extract relevant text content per assignment
     const assignmentContents: { name: string; content: string }[] = [];
 
-    for (const folder of Array.from(assignmentFolders).sort()) {
+    for (const folder of Array.from(assignmentFolders).sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+    )) {
       const folderPrefix = assignmentsPrefix + folder + "/";
       const folderFiles = allPaths.filter((p) => p.startsWith(folderPrefix) && !zip.files[p].dir);
 

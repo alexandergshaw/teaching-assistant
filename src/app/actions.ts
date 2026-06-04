@@ -1514,6 +1514,8 @@ export interface AssignmentPlan {
   assignmentName: string;
   presentationTitle: string;
   slides: SlideData[];
+  moduleIntroduction: string;
+  assignmentInstructions: string;
 }
 
 async function generateSlidesForAssignment(
@@ -1602,6 +1604,115 @@ Requirements:
   };
 }
 
+async function generateModuleIntroForAssignment(
+  assignmentName: string,
+  content: string
+): Promise<{ text: string } | { error: string }> {
+  const apiKey = getGeminiApiKey();
+  const model = getGeminiModel();
+
+  const prompt = `You are an expert educator writing a module introduction document for a programming course.
+
+ASSIGNMENT / MODULE: ${assignmentName}
+
+ASSIGNMENT CONTENT:
+${content}
+
+Write a well-formatted module introduction for the week this assignment covers. The document should:
+1. Open with an engaging overview of the topic and why it matters.
+2. Include a section called "Real-World Applications" with at least 3 concrete, specific examples of how these concepts or technologies are used in real software, industry products, or everyday technology that students will recognise (e.g., how the concept powers a well-known app, framework, or system).
+3. Include a brief section called "What You Will Learn" that lists the key skills and concepts students will gain.
+4. Be written in clear, motivating language appropriate for undergraduate students.
+5. Use plain text formatting with clear section headings (no markdown symbols like # or *).
+
+Do not include the assignment instructions or grading criteria — focus only on introducing the module topic.`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    return { error: `Gemini API error for module intro "${assignmentName}": HTTP ${response.status} — ${body.slice(0, 200)}` };
+  }
+
+  const data = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+
+  const result =
+    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+  if (!result.trim()) {
+    return { error: `Module intro generation returned empty response for "${assignmentName}".` };
+  }
+
+  return { text: result.trim() };
+}
+
+async function generateAssignmentInstructionsForAssignment(
+  assignmentName: string,
+  readmeContent: string
+): Promise<{ text: string } | { error: string }> {
+  const apiKey = getGeminiApiKey();
+  const model = getGeminiModel();
+
+  const prompt = `You are an expert educator writing a formal assignment instruction sheet for a programming course.
+
+ASSIGNMENT: ${assignmentName}
+
+README / ASSIGNMENT SOURCE:
+${readmeContent}
+
+Using the README content above, write a complete, student-facing assignment instruction document. The document should:
+1. Start with an "Assignment Overview" section that clearly states the purpose and learning objectives.
+2. Include a "Instructions" section that details exactly what students must do, broken into numbered steps or tasks pulled from the README.
+3. Include a "Requirements" section listing any technical or functional requirements mentioned in the README (e.g., methods to implement, expected behaviour, constraints).
+4. End with a "Deliverables" section. The deliverable is ALWAYS: submit the up-to-date zip of the entire codebase with all completed files included.
+5. Use plain text formatting with clear section headings (no markdown symbols like # or *).
+6. Write in clear, direct language appropriate for undergraduate students.
+
+Do not invent requirements not present in the README. If the README is sparse, note that students should refer to the course discussion board for clarification.`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 2048 },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    return { error: `Gemini API error for assignment instructions "${assignmentName}": HTTP ${response.status} — ${body.slice(0, 200)}` };
+  }
+
+  const data = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+
+  const result =
+    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+  if (!result.trim()) {
+    return { error: `Assignment instructions generation returned empty response for "${assignmentName}".` };
+  }
+
+  return { text: result.trim() };
+}
+
 export async function generateLecturePlansAction(
   zipBase64: string,
   lectureDurationMinutes: number
@@ -1679,7 +1790,7 @@ export async function generateLecturePlansAction(
     }
 
     // Extract relevant text content per assignment
-    const assignmentContents: { name: string; content: string }[] = [];
+    const assignmentContents: { name: string; content: string; readmeContent: string }[] = [];
 
     for (const folder of Array.from(assignmentFolders).sort((a, b) =>
       a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
@@ -1726,7 +1837,22 @@ export async function generateLecturePlansAction(
       }
 
       if (content.trim()) {
-        assignmentContents.push({ name: folder, content });
+        // Extract README content specifically for assignment instructions
+        const readmeFile = mdFiles.find((p) =>
+          p.slice(folderPrefix.length).toLowerCase().startsWith("readme")
+        ) ?? mdFiles[0];
+        let readmeContent = "";
+        if (readmeFile) {
+          try {
+            readmeContent = await zip.files[readmeFile].async("string");
+            if (readmeContent.length > MAX_FILE_CHARS) {
+              readmeContent = readmeContent.slice(0, MAX_FILE_CHARS) + "\n… (truncated)";
+            }
+          } catch {
+            // fall back to full content
+          }
+        }
+        assignmentContents.push({ name: folder, content, readmeContent: readmeContent || content });
       }
     }
 
@@ -1734,12 +1860,21 @@ export async function generateLecturePlansAction(
       return { error: "No readable text content found in the assignment folders." };
     }
 
-    // Generate slides for each assignment in parallel
+    // Generate slides, module intro, and assignment instructions for each assignment in parallel
     const results = await Promise.all(
-      assignmentContents.map(async ({ name, content }) => {
-        const result = await generateSlidesForAssignment(name, content, lectureDurationMinutes);
-        if ("error" in result) return null;
-        return { assignmentName: name, ...result } satisfies AssignmentPlan;
+      assignmentContents.map(async ({ name, content, readmeContent }) => {
+        const [slidesResult, introResult, instructionsResult] = await Promise.all([
+          generateSlidesForAssignment(name, content, lectureDurationMinutes),
+          generateModuleIntroForAssignment(name, content),
+          generateAssignmentInstructionsForAssignment(name, readmeContent),
+        ]);
+        if ("error" in slidesResult) return null;
+        return {
+          assignmentName: name,
+          ...slidesResult,
+          moduleIntroduction: "error" in introResult ? "" : introResult.text,
+          assignmentInstructions: "error" in instructionsResult ? "" : instructionsResult.text,
+        } satisfies AssignmentPlan;
       })
     );
 

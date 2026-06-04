@@ -224,32 +224,58 @@ export default function LecturePlanningTab() {
           </div>
 
           <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-            {plans.map((plan) => (
-              <li
-                key={plan.assignmentName}
-                role="button"
-                tabIndex={0}
-                onClick={() => setSelectedPlan(plan)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSelectedPlan(plan); }}
-                style={{
-                  background: "var(--field-background)",
-                  border: "1px solid var(--field-border)",
-                  borderRadius: 10,
-                  padding: "14px 18px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                  cursor: "pointer",
-                }}
-              >
-                <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
-                  {plan.presentationTitle}
-                </span>
-                <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-                  {plan.assignmentName} · {plan.slides.length} slide{plan.slides.length !== 1 ? "s" : ""}
-                </span>
-              </li>
-            ))}
+            {plans.map((plan) => {
+              const badges: string[] = [];
+              badges.push(`${plan.slides.length + 1} slide${plan.slides.length !== 0 ? "s" : ""}`);
+              if (plan.moduleIntroduction) badges.push("Module Intro");
+              if (plan.assignmentInstructions) badges.push("Instructions");
+              return (
+                <li
+                  key={plan.assignmentName}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedPlan(plan)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSelectedPlan(plan); }}
+                  style={{
+                    background: "var(--field-background)",
+                    border: "1px solid var(--field-border)",
+                    borderRadius: 10,
+                    padding: "14px 18px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                    {plan.presentationTitle}
+                  </span>
+                  <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)", fontWeight: 500 }}>
+                    {plan.assignmentName}
+                  </span>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+                    {badges.map((badge) => (
+                      <span
+                        key={badge}
+                        style={{
+                          fontSize: "0.72rem",
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                          padding: "2px 8px",
+                          borderRadius: 20,
+                          background: "color-mix(in srgb, var(--accent) 12%, transparent 88%)",
+                          color: "var(--accent)",
+                          border: "1px solid color-mix(in srgb, var(--accent) 25%, transparent 75%)",
+                        }}
+                      >
+                        {badge}
+                      </span>
+                    ))}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

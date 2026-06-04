@@ -96,6 +96,12 @@ export default function LecturePlanningTab() {
         const pptxData = await prs.write({ outputType: "arraybuffer" }) as ArrayBuffer;
         const safeName = plan.assignmentName.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
         outputZip.file(`${safeName}.pptx`, pptxData);
+        if (plan.moduleIntroduction) {
+          outputZip.file(`${safeName}_module_intro.txt`, plan.moduleIntroduction);
+        }
+        if (plan.assignmentInstructions) {
+          outputZip.file(`${safeName}_assignment_instructions.txt`, plan.assignmentInstructions);
+        }
       }
 
       const blob = await outputZip.generateAsync({ type: "blob" });

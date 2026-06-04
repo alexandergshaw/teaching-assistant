@@ -253,6 +253,12 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     coursePlanningContext: "syllabus_coursePlanningContext",
     latePolicy: "syllabus_latePolicy",
     attendancePolicy: "syllabus_attendancePolicy",
+    planningMode: "coursePlanning_planningMode",
+    courseDescription: "schedule_courseDescription",
+    scheduleTerm: "schedule_scheduleTerm",
+    scheduleStartDate: "schedule_scheduleStartDate",
+    scheduleWeeks: "schedule_scheduleWeeks",
+    scheduleTests: "schedule_scheduleTests",
   };
 
   useEffect(() => {
@@ -264,6 +270,15 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setCoursePlanningContext(localStorage.getItem(LS_KEYS.coursePlanningContext) || "");
     setLatePolicy(localStorage.getItem(LS_KEYS.latePolicy) || "");
     setAttendancePolicy(localStorage.getItem(LS_KEYS.attendancePolicy) || "");
+    const savedMode = localStorage.getItem(LS_KEYS.planningMode);
+    if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project") {
+      setPlanningMode(savedMode);
+    }
+    setCourseDescription(localStorage.getItem(LS_KEYS.courseDescription) || "");
+    setScheduleTerm(localStorage.getItem(LS_KEYS.scheduleTerm) || "");
+    setScheduleStartDate(localStorage.getItem(LS_KEYS.scheduleStartDate) || "");
+    setScheduleWeeks(localStorage.getItem(LS_KEYS.scheduleWeeks) || "");
+    setScheduleTests(localStorage.getItem(LS_KEYS.scheduleTests) || "");
   }, []);
   const [coursePlanningContextFiles, setCoursePlanningContextFiles] = useState<
     Array<{ name: string; base64: string; mimeType: string }>
@@ -605,21 +620,21 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
             <button
               type="button"
               className={`${styles.scheduleModeBtn}${planningMode === "syllabus" ? ` ${styles.active}` : ""}`}
-              onClick={() => setPlanningMode("syllabus")}
+              onClick={() => { setPlanningMode("syllabus"); localStorage.setItem(LS_KEYS.planningMode, "syllabus"); }}
             >
               Syllabus
             </button>
             <button
               type="button"
               className={`${styles.scheduleModeBtn}${planningMode === "schedule" ? ` ${styles.active}` : ""}`}
-              onClick={() => setPlanningMode("schedule")}
+              onClick={() => { setPlanningMode("schedule"); localStorage.setItem(LS_KEYS.planningMode, "schedule"); }}
             >
               Course Schedule
             </button>
             <button
               type="button"
               className={`${styles.scheduleModeBtn}${planningMode === "project" ? ` ${styles.active}` : ""}`}
-              onClick={() => setPlanningMode("project")}
+              onClick={() => { setPlanningMode("project"); localStorage.setItem(LS_KEYS.planningMode, "project"); }}
             >
               Course Project Planning
             </button>
@@ -782,7 +797,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   className={styles.textInput}
                   placeholder="Describe the course — its topics, goals, and audience."
                   value={courseDescription}
-                  onChange={(e) => setCourseDescription(e.target.value)}
+                  onChange={(e) => { setCourseDescription(e.target.value); localStorage.setItem(LS_KEYS.courseDescription, e.target.value); }}
                   rows={4}
                 />
               </div>
@@ -794,7 +809,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   className={styles.textInput}
                   placeholder="e.g. Fall 2026"
                   value={scheduleTerm}
-                  onChange={(e) => setScheduleTerm(e.target.value)}
+                  onChange={(e) => { setScheduleTerm(e.target.value); localStorage.setItem(LS_KEYS.scheduleTerm, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
@@ -804,7 +819,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   type="date"
                   className={styles.textInput}
                   value={scheduleStartDate}
-                  onChange={(e) => setScheduleStartDate(e.target.value)}
+                  onChange={(e) => { setScheduleStartDate(e.target.value); localStorage.setItem(LS_KEYS.scheduleStartDate, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
@@ -817,7 +832,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   min={1}
                   max={52}
                   value={scheduleWeeks}
-                  onChange={(e) => setScheduleWeeks(e.target.value)}
+                  onChange={(e) => { setScheduleWeeks(e.target.value); localStorage.setItem(LS_KEYS.scheduleWeeks, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
@@ -829,7 +844,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   placeholder="e.g. 3"
                   min={0}
                   value={scheduleTests}
-                  onChange={(e) => setScheduleTests(e.target.value)}
+                  onChange={(e) => { setScheduleTests(e.target.value); localStorage.setItem(LS_KEYS.scheduleTests, e.target.value); }}
                 />
               </div>
               {scheduleError && <p className={styles.error}>{scheduleError}</p>}

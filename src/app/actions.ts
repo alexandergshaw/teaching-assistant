@@ -1489,3 +1489,98 @@ Return ONLY the prompt text — no preamble, no explanation, no markdown code fe
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
 }
+
+export async function generateAssignmentSlidesAction(
+  assignmentName: string,
+  context: string,
+  lectureDurationMinutes: number
+): Promise<GenerateLessonPlanResult | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const slideCount = Math.max(5, Math.round(lectureDurationMinutes / 2));
+
+    const prompt = `You are an expert computer science educator creating a lecture slide deck for a single assignment.
+
+ASSIGNMENT NAME: ${assignmentName}
+
+ASSIGNMENT CONTEXT (README, documentation, tests, and code comments extracted from the codebase):
+${context || "(no context provided)"}
+
+LECTURE DURATION: ${lectureDurationMinutes} minutes — target approximately ${slideCount} slides total.
+
+Create a complete lecture slide deck that teaches students the core concepts behind this assignment so that by the end they understand the material well enough to complete it. Return ONLY valid JSON:
+{
+  "presentationTitle": "...",
+  "slides": [
+    { "title": "...", "bullets": ["...", "...", "..."] }
+  ]
+}
+
+Requirements:
+- "presentationTitle" should be a clear, descriptive lecture title based on the assignment name and concepts.
+- Include a title/overview slide as the first slide listing the key topics.
+- Cover prerequisite concepts students need before starting the assignment.
+- Walk through the assignment objectives and expectations.
+- Explain each key concept with concrete real-world analogies.
+- Include a slide on common pitfalls or tips specific to this assignment.
+- End with a summary/next-steps slide.
+- Maximum 3 bullets per slide; each bullet must be a single concise idea.
+- Target around ${slideCount} slides total to fill the ${lectureDurationMinutes}-minute lecture.
+- Do not include any text outside the JSON object.`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.6, maxOutputTokens: 4096 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Slide generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw =
+      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+    const trimmed = raw.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return { error: `Could not parse slide data for "${assignmentName}".` };
+    }
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      presentationTitle?: string;
+      slides?: Array<{ title?: string; bullets?: string[] }>;
+    };
+
+    if (!parsed.slides || !Array.isArray(parsed.slides)) {
+      return { error: `Model did not return valid slides for "${assignmentName}".` };
+    }
+
+    const slides: SlideData[] = parsed.slides
+      .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
+      .map((s) => ({ title: s.title!, bullets: (s.bullets ?? []).slice(0, 3) }));
+
+    return {
+      presentationTitle: parsed.presentationTitle ?? assignmentName,
+      slides,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}

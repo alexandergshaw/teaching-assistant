@@ -1429,3 +1429,63 @@ Requirements:
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
 }
+
+export async function generateCopilotProjectPromptAction(
+  fileContent: string,
+  fileName: string
+): Promise<{ prompt: string } | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const prompt = `You are an expert software engineering educator. A teacher has provided a course schedule (as a CSV or text file) and wants to create a hands-on software project that gives students practice with every topic and assignment in the course.
+
+FILE NAME: ${fileName}
+
+SCHEDULE CONTENT:
+${fileContent}
+
+Your task: Write a detailed GitHub Copilot prompt that the teacher can paste into GitHub Copilot (Agent mode) to scaffold a complete software project. The project must:
+- Cover every topic listed in the schedule in roughly the same order
+- Include code, tests, and comments that align with each week's topics
+- Reference or incorporate each assignment described in the schedule
+- Be realistic and buildable by a student over the course of the term
+- Follow modern best practices for whatever tech stack fits the course content
+
+The prompt you write should be self-contained — someone should be able to paste it directly into GitHub Copilot and get a fully scaffolded project back. Be specific about file structure, modules, features, and how the project evolves week by week to match the schedule.
+
+Return ONLY the prompt text — no preamble, no explanation, no markdown code fences. Just the raw prompt the teacher will paste into GitHub Copilot.`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.5, maxOutputTokens: 4096 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Prompt generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const result =
+      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+    if (!result.trim()) {
+      return { error: "The model did not return a prompt. Please try again." };
+    }
+
+    return { prompt: result.trim() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}

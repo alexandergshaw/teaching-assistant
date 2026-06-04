@@ -586,7 +586,7 @@
   transition: background 0.15s, color 0.15s;
 }
 
-.scheduleModeBtn:first-child {
+.scheduleModeBtn:not(:last-child) {
   border-right: 1px solid var(--field-border);
 }
 

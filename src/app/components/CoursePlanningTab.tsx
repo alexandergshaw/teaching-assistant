@@ -9,6 +9,7 @@ import {
   reviseSyllabusAction,
   assembleSyllabusFromTemplateAction,
   generateCourseScheduleAction,
+  generateCopilotProjectPromptAction,
   type SyllabusSection,
   type CourseScheduleRow,
 } from "../actions";
@@ -27,7 +28,7 @@ type CoursePlanningTabProps = {
 };
 
 type CoursePlanningStep = "form" | "preview";
-type PlanningMode = "syllabus" | "schedule";
+type PlanningMode = "syllabus" | "schedule" | "project";
 
 function escapeXml(str: string): string {
   return str
@@ -234,6 +235,14 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleGenerated, setScheduleGenerated] = useState(false);
 
+  // Course project planning state
+  const projectFileRef = useRef<HTMLInputElement>(null);
+  const [projectFileName, setProjectFileName] = useState<string | null>(null);
+  const [projectFileContent, setProjectFileContent] = useState<string | null>(null);
+  const [isGeneratingProjectPrompt, setIsGeneratingProjectPrompt] = useState(false);
+  const [projectPrompt, setProjectPrompt] = useState<string | null>(null);
+  const [projectError, setProjectError] = useState<string | null>(null);
+
   // Local storage keys
   const LS_KEYS = {
     courseTitle: "syllabus_courseTitle",
@@ -339,6 +348,56 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setScheduleGenerated(false);
     setScheduleRows([]);
     setScheduleError(null);
+  };
+
+  const handleExportScheduleCsv = () => {
+    const header = ["Week", "Dates", "Topics", "Assignment"];
+    const escapeCell = (val: string) => `"${val.replace(/"/g, '""')}"`;
+    const rows = [
+      header.join(","),
+      ...scheduleRows.map((r) =>
+        [String(r.week), escapeCell(r.dates), escapeCell(r.topics), escapeCell(r.assignment)].join(",")
+      ),
+    ];
+    triggerFileDownload(
+      new Blob([rows.join("\r\n")], { type: "text/csv;charset=utf-8" }),
+      "course_schedule.csv"
+    );
+  };
+
+  const handleProjectFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setProjectFileName(file.name);
+    setProjectPrompt(null);
+    setProjectError(null);
+    const reader = new FileReader();
+    reader.onload = () => setProjectFileContent(reader.result as string);
+    reader.onerror = () => setProjectError("Failed to read file.");
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  const handleGenerateProjectPrompt = async () => {
+    if (!projectFileContent || !projectFileName) {
+      setProjectError("Please upload a schedule file first.");
+      return;
+    }
+    setIsGeneratingProjectPrompt(true);
+    setProjectError(null);
+    setProjectPrompt(null);
+    try {
+      const result = await generateCopilotProjectPromptAction(projectFileContent, projectFileName);
+      if ("error" in result) {
+        setProjectError(result.error);
+      } else {
+        setProjectPrompt(result.prompt);
+      }
+    } catch (err) {
+      setProjectError(err instanceof Error ? err.message : "Failed to generate prompt.");
+    } finally {
+      setIsGeneratingProjectPrompt(false);
+    }
   };
 
   const handleCoursePlanningContextFiles = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -556,6 +615,13 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               onClick={() => setPlanningMode("schedule")}
             >
               Course Schedule
+            </button>
+            <button
+              type="button"
+              className={`${styles.scheduleModeBtn}${planningMode === "project" ? ` ${styles.active}` : ""}`}
+              onClick={() => setPlanningMode("project")}
+            >
+              Course Project Planning
             </button>
           </div>
 
@@ -811,7 +877,66 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                 >
                   Edit &amp; Regenerate
                 </button>
+                <button
+                  type="button"
+                  className={styles.submitButton}
+                  onClick={handleExportScheduleCsv}
+                >
+                  Export CSV
+                </button>
               </div>
+            </>
+          )}
+
+          {/* ── Course Project Planning mode ── */}
+          {planningMode === "project" && (
+            <>
+              <div className={styles.field}>
+                <label htmlFor="projectFile">Upload Schedule File</label>
+                <div className={styles.fileField}>
+                  <input
+                    id="projectFile"
+                    type="file"
+                    accept=".csv,.txt,text/csv,text/plain"
+                    ref={projectFileRef}
+                    onChange={handleProjectFileChange}
+                  />
+                  <p>Upload a CSV or text file containing your course schedule (topics and assignments).</p>
+                  {projectFileName && <p>Selected: {projectFileName}</p>}
+                </div>
+              </div>
+              {projectError && <p className={styles.error}>{projectError}</p>}
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleGenerateProjectPrompt}
+                disabled={isGeneratingProjectPrompt || !projectFileContent}
+              >
+                {isGeneratingProjectPrompt ? "Generating prompt…" : "Generate Copilot Prompt"}
+              </button>
+              {projectPrompt && (
+                <div className={styles.field}>
+                  <label>GitHub Copilot Prompt</label>
+                  <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: 8 }}>
+                    Copy the prompt below and paste it into GitHub Copilot (Agent mode) to scaffold a project covering all schedule topics.
+                  </p>
+                  <textarea
+                    className={styles.textInput}
+                    value={projectPrompt}
+                    readOnly
+                    rows={20}
+                    style={{ fontFamily: "monospace", fontSize: "0.85rem" }}
+                  />
+                  <button
+                    type="button"
+                    className={styles.submitButton}
+                    style={{ marginTop: 8 }}
+                    onClick={() => void navigator.clipboard.writeText(projectPrompt)}
+                  >
+                    Copy to Clipboard
+                  </button>
+                </div>
+              )}
             </>
           )}
         </section>

@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { generateLecturePlansAction, type AssignmentPlan } from "../actions";
 import styles from "../page.module.css";
+import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 
 export default function LecturePlanningTab() {
   const [lectureDuration, setLectureDuration] = useState("50");
@@ -10,6 +11,7 @@ export default function LecturePlanningTab() {
   const [error, setError] = useState<string | null>(null);
   const [plans, setPlans] = useState<AssignmentPlan[]>([]);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<AssignmentPlan | null>(null);
   const zipFileRef = useRef<HTMLInputElement>(null);
 
   const handleGenerate = async () => {
@@ -186,6 +188,10 @@ export default function LecturePlanningTab() {
             {plans.map((plan) => (
               <li
                 key={plan.assignmentName}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedPlan(plan)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSelectedPlan(plan); }}
                 style={{
                   background: "var(--field-background)",
                   border: "1px solid var(--field-border)",
@@ -194,6 +200,7 @@ export default function LecturePlanningTab() {
                   display: "flex",
                   flexDirection: "column",
                   gap: 4,
+                  cursor: "pointer",
                 }}
               >
                 <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
@@ -206,6 +213,13 @@ export default function LecturePlanningTab() {
             ))}
           </ul>
         </div>
+      )}
+
+      {selectedPlan && (
+        <LecturePlanPreviewModal
+          plan={selectedPlan}
+          onClose={() => setSelectedPlan(null)}
+        />
       )}
     </section>
   );

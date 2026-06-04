@@ -1335,16 +1335,11 @@ export async function generateCourseScheduleAction(
   term: string,
   startingDate: string,
   numberOfWeeks: number,
-  numberOfTests: number,
-  academicCalendarFile: { name: string; base64: string; mimeType: string } | null
+  numberOfTests: number
 ): Promise<CourseScheduleResult | { error: string }> {
   try {
     const apiKey = getGeminiApiKey();
     const model = getGeminiModel();
-
-    const calendarNote = academicCalendarFile
-      ? "An academic calendar has been attached. Use it to identify holidays, breaks, and non-instruction days, and reflect those in the schedule (e.g. mark break weeks with no topics)."
-      : "No academic calendar was provided. Use common sense for the term to avoid obvious conflicts.";
 
     const prompt = `You are an expert curriculum designer creating a weekly course schedule.
 
@@ -1356,9 +1351,7 @@ COURSE START DATE: ${startingDate}
 NUMBER OF WEEKS: ${numberOfWeeks}
 NUMBER OF TESTS: ${numberOfTests}
 
-ACADEMIC CALENDAR NOTE: ${calendarNote}
-
-Generate a complete ${numberOfWeeks}-week course schedule. Distribute ${numberOfTests} test(s) logically across the schedule (e.g. after major topic blocks). Calculate actual date ranges for each week starting from the provided start date (Monday–Friday format, e.g. "Aug 25 – Aug 29"). If the academic calendar shows a holiday or break in a given week, note it in the topics column and leave the assignment blank for that week.
+Generate a complete ${numberOfWeeks}-week course schedule. Distribute ${numberOfTests} test(s) logically across the schedule (e.g. after major topic blocks). Calculate actual date ranges for each week starting from the provided start date (Monday–Friday format, e.g. "Aug 25 – Aug 29"). Every week should have instructional content — do not include break weeks or non-instruction weeks.
 
 Return ONLY valid JSON in this exact format:
 {
@@ -1372,25 +1365,14 @@ Requirements:
 - Include exactly ${numberOfWeeks} rows (one per week).
 - "week" is the week number (1-based integer).
 - "dates" is the date range for that week (e.g. "Aug 25 – Aug 29").
-- "topics" describes the main subject(s) covered that week; for test weeks include "Test ${numberOfTests > 1 ? "N" : ""}" alongside the topic; for break weeks write "Break / No class".
-- "assignment" is a brief description of the homework or activity due that week; write "Test" for test weeks and leave blank ("") for break weeks.
+- "topics" describes the main subject(s) covered that week; for test weeks include "Test${numberOfTests > 1 ? " N" : ""}" alongside the topic.
+- "assignment" is a brief description of the homework or activity due that week; write "Test" for test weeks.
 - Space the ${numberOfTests} test(s) evenly across the schedule, placing them at the end of major topic blocks.
 - Do not include any text outside the JSON object.`;
 
-    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+    const parts: Array<{ text: string }> = [
       { text: prompt },
     ];
-
-    if (academicCalendarFile) {
-      if (academicCalendarFile.mimeType.startsWith("text/")) {
-        const calendarText = Buffer.from(academicCalendarFile.base64, "base64").toString("utf-8").trim();
-        if (calendarText) {
-          parts.push({ text: `\n\nACADEMIC CALENDAR (${academicCalendarFile.name}):\n${calendarText}` });
-        }
-      } else {
-        parts.push({ inlineData: { mimeType: academicCalendarFile.mimeType, data: academicCalendarFile.base64 } });
-      }
-    }
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,

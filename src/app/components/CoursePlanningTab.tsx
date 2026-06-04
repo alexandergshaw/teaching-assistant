@@ -10,6 +10,7 @@ import {
   assembleSyllabusFromTemplateAction,
   generateCourseScheduleAction,
   generateCopilotProjectPromptAction,
+  generateCourseProjectRubricAction,
   type SyllabusSection,
   type CourseScheduleRow,
 } from "../actions";
@@ -242,6 +243,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [projectFileContent, setProjectFileContent] = useState<string | null>(null);
   const [isGeneratingProjectPrompt, setIsGeneratingProjectPrompt] = useState(false);
   const [projectPrompt, setProjectPrompt] = useState<string | null>(null);
+  const [projectRubric, setProjectRubric] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
 
   // Local storage keys
@@ -388,6 +390,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     if (!file) return;
     setProjectFileName(file.name);
     setProjectPrompt(null);
+    setProjectRubric(null);
     setProjectError(null);
     const reader = new FileReader();
     reader.onload = () => setProjectFileContent(reader.result as string);
@@ -404,12 +407,24 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setIsGeneratingProjectPrompt(true);
     setProjectError(null);
     setProjectPrompt(null);
+    setProjectRubric(null);
     try {
-      const result = await generateCopilotProjectPromptAction(projectFileContent, projectFileName);
-      if ("error" in result) {
-        setProjectError(result.error);
+      const [promptResult, rubricResult] = await Promise.all([
+        generateCopilotProjectPromptAction(projectFileContent, projectFileName),
+        generateCourseProjectRubricAction(projectFileContent, projectFileName),
+      ]);
+      if ("error" in promptResult) {
+        setProjectError(promptResult.error);
       } else {
-        setProjectPrompt(result.prompt);
+        setProjectPrompt(promptResult.prompt);
+      }
+      if ("error" in rubricResult) {
+        // Non-fatal: show rubric error only if prompt also failed
+        if ("error" in promptResult) {
+          setProjectError(`Prompt: ${promptResult.error}; Rubric: ${rubricResult.error}`);
+        }
+      } else {
+        setProjectRubric(rubricResult.rubric);
       }
     } catch (err) {
       setProjectError(err instanceof Error ? err.message : "Failed to generate prompt.");
@@ -957,6 +972,29 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                     className={styles.submitButton}
                     style={{ marginTop: 8 }}
                     onClick={() => void navigator.clipboard.writeText(projectPrompt)}
+                  >
+                    Copy to Clipboard
+                  </button>
+                </div>
+              )}
+              {projectRubric && (
+                <div className={styles.field}>
+                  <label>Course-Wide Grading Rubric</label>
+                  <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: 8 }}>
+                    This 100-point rubric can be applied to every assignment in the course.
+                  </p>
+                  <textarea
+                    className={styles.textInput}
+                    value={projectRubric}
+                    readOnly
+                    rows={20}
+                    style={{ fontFamily: "monospace", fontSize: "0.85rem" }}
+                  />
+                  <button
+                    type="button"
+                    className={styles.submitButton}
+                    style={{ marginTop: 8 }}
+                    onClick={() => void navigator.clipboard.writeText(projectRubric)}
                   >
                     Copy to Clipboard
                   </button>

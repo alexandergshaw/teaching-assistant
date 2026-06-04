@@ -1445,14 +1445,32 @@ FILE NAME: ${fileName}
 SCHEDULE CONTENT:
 ${fileContent}
 
-Your task: Write a detailed GitHub Copilot prompt that the teacher can paste into GitHub Copilot (Agent mode) to scaffold a complete software project. The project must:
+Your task: Write a detailed GitHub Copilot prompt that the teacher can paste into GitHub Copilot (Agent mode) to scaffold a complete software project.
+
+Before writing the prompt, analyze the schedule to identify:
+1. Which weeks are review weeks (weeks with titles like "Review", "Exam Review", "Midterm Review", etc.) and what topics from prior weeks they cover.
+2. Which weeks are test/exam weeks (weeks with titles like "Midterm", "Final", "Exam", "Quiz", etc.) and what topics those assessments cover.
+3. The primary programming language and domain of the course (e.g., Python → data science; JavaScript → web development; Java → enterprise/Android; R → statistics/data analysis; SQL → data engineering) so the project can showcase skills that employers in that domain commonly want.
+
+The project must:
+- Be themed around employer-relevant skills for the course's language and domain (e.g., a data science pipeline and dashboard for Python courses, a full-stack web app for JavaScript courses, an Android app for Java courses) so students can showcase the project to prospective employers
+- Include a frontend (a web UI, dashboard, or interactive interface) that is part of the project repository and deployed to Vercel
 - Cover every topic listed in the schedule in roughly the same order
-- Include code, tests, and comments that align with each week's topics
 - Reference or incorporate each assignment described in the schedule
 - Be realistic and buildable by a student over the course of the term
 - Follow modern best practices for whatever tech stack fits the course content
 
-The prompt you write should be self-contained — someone should be able to paste it directly into GitHub Copilot and get a fully scaffolded project back. Be specific about file structure, modules, features, and how the project evolves week by week to match the schedule.
+Assignment structure rules — the prompt MUST specify all of the following:
+- There must be an "assignment0" folder that serves as an onboarding exercise. This assignment must walk students step-by-step through: (1) forking the repository, (2) deploying the fork to Vercel and getting a live preview URL, (3) creating a new branch, (4) opening the branch in GitHub Codespaces, (5) making a simple code change (e.g., changing a variable in a designated file to their own name so their name appears in the frontend), (6) running the unit tests for assignment0, (7) committing the change, (8) pushing the branch, (9) opening a pull request, (10) verifying the Vercel preview deployment on the PR, (11) merging the PR. The instructions for this assignment must be in assignment0/INSTRUCTIONS.md.
+- Every subsequent assignment (assignment1, assignment2, …) must live in its own folder named "assignment{N}".
+- In each assignment folder there must be exactly ONE file that students edit to complete the assignment. All other files in the folder must be read-only scaffolding. The prompt must name the file students edit.
+- Each assignment folder must contain an INSTRUCTIONS.md file with verbose, beginner-friendly instructions for that assignment, including several worked examples that illustrate the concepts WITHOUT giving away the solution. Examples should use different scenarios or data than the actual assignment tasks.
+- Each assignment folder must contain unit tests (e.g., test_assignment{N}.py, assignment{N}.test.js, etc.) that verify the student's implementation. Tests must import/require only the one file the student edits.
+- The assignment files must be wired into the frontend so that when a student completes an assignment and its unit tests pass, a new section or feature of the frontend becomes active/unlocked. The prompt must describe exactly how this integration works (e.g., a shared data module the frontend reads, an API route, a config flag, etc.).
+- Review weeks (identified from the schedule) must have their own review guide or study materials in a "reviewN" folder describing exactly which topics and assignments are covered in that review.
+- Test/exam weeks (identified from the schedule) must be noted in the project README with the topics they assess, but no assignment folder is needed for those weeks.
+
+The prompt you write should be self-contained — someone should be able to paste it directly into GitHub Copilot Agent mode and get a fully scaffolded project back. Be specific about: the repository's top-level file structure, each assignment folder's contents (listing every file by name), the frontend framework and how it is structured, the Vercel configuration, how assignment completion unlocks frontend features, and how the project evolves week by week to match the schedule.
 
 Return ONLY the prompt text — no preamble, no explanation, no markdown code fences. Just the raw prompt the teacher will paste into GitHub Copilot.`;
 
@@ -1463,7 +1481,7 @@ Return ONLY the prompt text — no preamble, no explanation, no markdown code fe
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.5, maxOutputTokens: 4096 },
+          generationConfig: { temperature: 0.5, maxOutputTokens: 8192 },
         }),
       }
     );

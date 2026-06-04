@@ -813,16 +813,16 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="scheduleCalendar">Academic Calendar (PDF)</label>
+                <label htmlFor="scheduleCalendar">Academic Calendar (PDF or Text)</label>
                 <div className={styles.fileField}>
                   <input
                     id="scheduleCalendar"
                     type="file"
-                    accept=".pdf,application/pdf"
+                    accept=".pdf,.txt,application/pdf,text/plain"
                     ref={scheduleCalendarRef}
                     onChange={handleScheduleCalendarChange}
                   />
-                  <p>Upload your institution&apos;s academic calendar PDF so the schedule can account for holidays and breaks.</p>
+                  <p>Upload your institution&apos;s academic calendar (PDF or .txt) so the schedule can account for holidays and breaks.</p>
                   {scheduleCalendarFile && <p>{scheduleCalendarFile.name}</p>}
                 </div>
               </div>

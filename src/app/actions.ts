@@ -1318,3 +1318,123 @@ ${selectedText}
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
 }
+
+export interface CourseScheduleRow {
+  week: number;
+  dates: string;
+  topics: string;
+  assignment: string;
+}
+
+export interface CourseScheduleResult {
+  rows: CourseScheduleRow[];
+}
+
+export async function generateCourseScheduleAction(
+  courseDescription: string,
+  term: string,
+  startingDate: string,
+  numberOfWeeks: number,
+  numberOfTests: number,
+  academicCalendarFile: { name: string; base64: string; mimeType: string } | null
+): Promise<CourseScheduleResult | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const calendarNote = academicCalendarFile
+      ? "An academic calendar has been attached. Use it to identify holidays, breaks, and non-instruction days, and reflect those in the schedule (e.g. mark break weeks with no topics)."
+      : "No academic calendar was provided. Use common sense for the term to avoid obvious conflicts.";
+
+    const prompt = `You are an expert curriculum designer creating a weekly course schedule.
+
+COURSE DESCRIPTION:
+${courseDescription}
+
+TERM: ${term}
+COURSE START DATE: ${startingDate}
+NUMBER OF WEEKS: ${numberOfWeeks}
+NUMBER OF TESTS: ${numberOfTests}
+
+ACADEMIC CALENDAR NOTE: ${calendarNote}
+
+Generate a complete ${numberOfWeeks}-week course schedule. Distribute ${numberOfTests} test(s) logically across the schedule (e.g. after major topic blocks). Calculate actual date ranges for each week starting from the provided start date (Monday–Friday format, e.g. "Aug 25 – Aug 29"). If the academic calendar shows a holiday or break in a given week, note it in the topics column and leave the assignment blank for that week.
+
+Return ONLY valid JSON in this exact format:
+{
+  "rows": [
+    { "week": 1, "dates": "...", "topics": "...", "assignment": "..." },
+    ...
+  ]
+}
+
+Requirements:
+- Include exactly ${numberOfWeeks} rows (one per week).
+- "week" is the week number (1-based integer).
+- "dates" is the date range for that week (e.g. "Aug 25 – Aug 29").
+- "topics" describes the main subject(s) covered that week; for test weeks include "Test ${numberOfTests > 1 ? "N" : ""}" alongside the topic; for break weeks write "Break / No class".
+- "assignment" is a brief description of the homework or activity due that week; write "Test" for test weeks and leave blank ("") for break weeks.
+- Space the ${numberOfTests} test(s) evenly across the schedule, placing them at the end of major topic blocks.
+- Do not include any text outside the JSON object.`;
+
+    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+      { text: prompt },
+    ];
+
+    if (academicCalendarFile) {
+      parts.push({ inlineData: { mimeType: academicCalendarFile.mimeType, data: academicCalendarFile.base64 } });
+    }
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Schedule generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const trimmed = raw.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return { error: "Could not parse the schedule from the model response." };
+    }
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      rows?: Array<{ week?: unknown; dates?: unknown; topics?: unknown; assignment?: unknown }>;
+    };
+
+    if (!parsed.rows || !Array.isArray(parsed.rows)) {
+      return { error: "Model did not return a valid schedule." };
+    }
+
+    const rows: CourseScheduleRow[] = parsed.rows
+      .filter((r) => typeof r.week === "number" || typeof r.week === "string")
+      .map((r) => ({
+        week: typeof r.week === "number" ? r.week : parseInt(String(r.week), 10),
+        dates: typeof r.dates === "string" ? r.dates : "",
+        topics: typeof r.topics === "string" ? r.topics : "",
+        assignment: typeof r.assignment === "string" ? r.assignment : "",
+      }));
+
+    return { rows };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}

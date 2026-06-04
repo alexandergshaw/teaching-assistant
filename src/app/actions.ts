@@ -1382,7 +1382,14 @@ Requirements:
     ];
 
     if (academicCalendarFile) {
-      parts.push({ inlineData: { mimeType: academicCalendarFile.mimeType, data: academicCalendarFile.base64 } });
+      if (academicCalendarFile.mimeType.startsWith("text/")) {
+        const calendarText = Buffer.from(academicCalendarFile.base64, "base64").toString("utf-8").trim();
+        if (calendarText) {
+          parts.push({ text: `\n\nACADEMIC CALENDAR (${academicCalendarFile.name}):\n${calendarText}` });
+        }
+      } else {
+        parts.push({ inlineData: { mimeType: academicCalendarFile.mimeType, data: academicCalendarFile.base64 } });
+      }
     }
 
     const response = await fetch(

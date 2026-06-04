@@ -1508,6 +1508,133 @@ Return ONLY the prompt text — no preamble, no explanation, no markdown code fe
   }
 }
 
+export async function generateCourseProjectRubricAction(
+  fileContent: string,
+  fileName: string
+): Promise<{ rubric: string } | { error: string }> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const model = getGeminiModel();
+
+    const prompt = `You are an expert educator. A teacher has provided a course schedule and wants a single universal grading rubric that can be applied consistently to every assignment in the course.
+
+FILE NAME: ${fileName}
+
+SCHEDULE CONTENT:
+${fileContent}
+
+Based on the course schedule above, identify the overall learning goals and skills students are expected to develop across all assignments. Then create a single, course-wide grading rubric that applies fairly to every assignment regardless of topic.
+
+The rubric must have exactly:
+- 3 criteria (rows), each tied to a skill or quality that every assignment can be assessed against
+- 3 performance levels (columns): Excellent, Satisfactory, Needs Improvement
+- A total of exactly 100 points distributed across the 3 criteria (you may choose any reasonable point weights that sum to 100, e.g. 40/30/30 or 35/35/30)
+
+Return ONLY valid JSON in this exact shape:
+{
+  "rubric": {
+    "criteria": [
+      {
+        "name": "...",
+        "points": <number>,
+        "levels": {
+          "excellent": { "score": <number>, "description": "..." },
+          "satisfactory": { "score": <number>, "description": "..." },
+          "needsImprovement": { "score": <number>, "description": "..." }
+        }
+      }
+    ]
+  }
+}
+
+Rules:
+- Each criterion's "points" is the maximum points for that criterion; the three "points" values must sum to exactly 100.
+- For each criterion: excellent.score == points, satisfactory.score == roughly 75% of points (round to nearest whole number), needsImprovement.score == roughly 50% of points (round to nearest whole number).
+- Criteria must be broadly applicable to every assignment (e.g. "Technical Correctness", "Code Quality / Clarity", "Completeness & Requirements"). Adapt the names to match the course domain.
+- Descriptions must be specific enough to be actionable but general enough to apply to any assignment in the course.
+- Do not include any text outside the JSON object.`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 1500 },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { error: `Rubric generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const raw =
+      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+    if (!raw.trim()) {
+      return { error: "The model did not return a rubric. Please try again." };
+    }
+
+    // Extract JSON
+    const fencedMatch = raw.trim().match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? raw.trim();
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return { error: "Could not parse rubric from the model response." };
+    }
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      rubric?: {
+        criteria?: Array<{
+          name?: string;
+          points?: number;
+          levels?: {
+            excellent?: { score?: number; description?: string };
+            satisfactory?: { score?: number; description?: string };
+            needsImprovement?: { score?: number; description?: string };
+          };
+        }>;
+      };
+    };
+
+    const criteria = parsed.rubric?.criteria;
+    if (!Array.isArray(criteria) || criteria.length === 0) {
+      return { error: "Could not parse rubric criteria from the model response." };
+    }
+
+    // Format as readable text
+    const lines: string[] = ["COURSE-WIDE GRADING RUBRIC (100 points)\n"];
+    lines.push(
+      ["Criterion", "Excellent", "Satisfactory", "Needs Improvement"]
+        .map((h) => h.padEnd(28))
+        .join(" | ")
+    );
+    lines.push("-".repeat(110));
+    for (const c of criteria) {
+      const name = `${c.name ?? "Criterion"} (${c.points ?? "?"}pts)`;
+      const ex = `${c.levels?.excellent?.score ?? "?"} pts — ${c.levels?.excellent?.description ?? ""}`;
+      const sat = `${c.levels?.satisfactory?.score ?? "?"} pts — ${c.levels?.satisfactory?.description ?? ""}`;
+      const ni = `${c.levels?.needsImprovement?.score ?? "?"} pts — ${c.levels?.needsImprovement?.description ?? ""}`;
+      lines.push(`\n${name}`);
+      lines.push(`  Excellent:         ${ex}`);
+      lines.push(`  Satisfactory:      ${sat}`);
+      lines.push(`  Needs Improvement: ${ni}`);
+    }
+
+    return { rubric: lines.join("\n") };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
 // ── Lecture Planning ─────────────────────────────────────────────────────────
 
 export interface AssignmentPlan {

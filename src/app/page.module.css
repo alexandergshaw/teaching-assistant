@@ -500,6 +500,101 @@
   background: color-mix(in srgb, var(--field-background) 97%, var(--accent) 3%);
 }
 
+.courseScheduleWrap {
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+.courseScheduleTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.courseScheduleTable th,
+.courseScheduleTable td {
+  padding: 9px 13px;
+  text-align: left;
+  border: 1px solid var(--field-border);
+  vertical-align: top;
+}
+
+.courseScheduleTable th {
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.courseScheduleTable td:first-child {
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text-primary);
+  width: 60px;
+}
+
+.courseScheduleTable td:nth-child(2) {
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-weight: 500;
+  width: 140px;
+}
+
+.courseScheduleTable td:nth-child(3) {
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.courseScheduleTable td:last-child {
+  color: var(--text-secondary);
+  line-height: 1.5;
+  width: 200px;
+}
+
+.courseScheduleTable tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--field-background) 97%, var(--accent) 3%);
+}
+
+.scheduleActions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+.scheduleModeToggle {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  overflow: hidden;
+  width: fit-content;
+}
+
+.scheduleModeBtn {
+  padding: 8px 20px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  background: var(--field-background);
+  color: var(--text-secondary);
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.scheduleModeBtn:first-child {
+  border-right: 1px solid var(--field-border);
+}
+
+.scheduleModeBtn.active {
+  background: color-mix(in srgb, var(--field-background) 80%, var(--accent) 20%);
+  color: var(--text-primary);
+}
+
 .checklistCard h2 {
   font-size: 1.05rem;
   font-weight: 700;

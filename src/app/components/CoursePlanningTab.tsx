@@ -8,7 +8,9 @@ import {
   generateSyllabusRemainingSectionsAction,
   reviseSyllabusAction,
   assembleSyllabusFromTemplateAction,
+  generateCourseScheduleAction,
   type SyllabusSection,
+  type CourseScheduleRow,
 } from "../actions";
 import SyllabusPreviewModal from "./SyllabusPreviewModal";
 import styles from "../page.module.css";
@@ -25,6 +27,7 @@ type CoursePlanningTabProps = {
 };
 
 type CoursePlanningStep = "form" | "preview";
+type PlanningMode = "syllabus" | "schedule";
 
 function escapeXml(str: string): string {
   return str
@@ -217,6 +220,22 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [latePolicy, setLatePolicy] = useState("");
   const [attendancePolicy, setAttendancePolicy] = useState("");
 
+  // Planning mode toggle
+  const [planningMode, setPlanningMode] = useState<PlanningMode>("syllabus");
+
+  // Course schedule state
+  const scheduleCalendarRef = useRef<HTMLInputElement>(null);
+  const [courseDescription, setCourseDescription] = useState("");
+  const [scheduleTerm, setScheduleTerm] = useState("");
+  const [scheduleStartDate, setScheduleStartDate] = useState("");
+  const [scheduleWeeks, setScheduleWeeks] = useState("");
+  const [scheduleTests, setScheduleTests] = useState("");
+  const [scheduleCalendarFile, setScheduleCalendarFile] = useState<{ name: string; base64: string; mimeType: string } | null>(null);
+  const [scheduleRows, setScheduleRows] = useState<CourseScheduleRow[]>([]);
+  const [isGeneratingSchedule, setIsGeneratingSchedule] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [scheduleGenerated, setScheduleGenerated] = useState(false);
+
   // Local storage keys
   const LS_KEYS = {
     courseTitle: "syllabus_courseTitle",
@@ -286,6 +305,72 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     });
     setAcademicCalendarFile({ name: file.name, base64, mimeType: file.type || "application/octet-stream" });
     e.target.value = "";
+  };
+
+  const handleScheduleCalendarChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    setScheduleCalendarFile({ name: file.name, base64, mimeType: file.type || "application/octet-stream" });
+    e.target.value = "";
+  };
+
+  const handleGenerateSchedule = async () => {
+    if (!courseDescription.trim()) {
+      setScheduleError("Please enter a course description.");
+      return;
+    }
+    if (!scheduleTerm.trim()) {
+      setScheduleError("Please enter the term (e.g. Fall 2026).");
+      return;
+    }
+    if (!scheduleStartDate) {
+      setScheduleError("Please select the course start date.");
+      return;
+    }
+    const weeks = parseInt(scheduleWeeks, 10);
+    if (!weeks || weeks < 1 || weeks > 52) {
+      setScheduleError("Please enter a valid number of weeks (1–52).");
+      return;
+    }
+    const tests = parseInt(scheduleTests, 10);
+    if (isNaN(tests) || tests < 0) {
+      setScheduleError("Please enter a valid number of tests (0 or more).");
+      return;
+    }
+    setIsGeneratingSchedule(true);
+    setScheduleError(null);
+    try {
+      const result = await generateCourseScheduleAction(
+        courseDescription.trim(),
+        scheduleTerm.trim(),
+        scheduleStartDate,
+        weeks,
+        tests,
+        scheduleCalendarFile
+      );
+      if ("error" in result) {
+        setScheduleError(result.error);
+        return;
+      }
+      setScheduleRows(result.rows);
+      setScheduleGenerated(true);
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : "Failed to generate schedule.");
+    } finally {
+      setIsGeneratingSchedule(false);
+    }
+  };
+
+  const resetSchedule = () => {
+    setScheduleGenerated(false);
+    setScheduleRows([]);
+    setScheduleError(null);
   };
 
   const handleCoursePlanningContextFiles = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -485,163 +570,310 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         <section className={styles.card}>
           <div className={styles.header}>
             <h1>Course Planning</h1>
-            <p>Upload a syllabus template and we will walk through each section together, letting you write or generate content for each one.</p>
+            <p>Build a syllabus or generate a weekly course schedule with the help of AI.</p>
           </div>
-          <div className={styles.field}>
-            <label htmlFor="courseTitle">Course Title</label>
-            <input
-              id="courseTitle"
-              type="text"
-              className={styles.textInput}
-              placeholder="e.g. Introduction to Data Science"
-              value={courseTitle}
-              onChange={(e) => {
-                setCourseTitle(e.target.value);
-                localStorage.setItem(LS_KEYS.courseTitle, e.target.value);
-              }}
-            />
+
+          {/* Mode toggle */}
+          <div className={styles.scheduleModeToggle}>
+            <button
+              type="button"
+              className={`${styles.scheduleModeBtn}${planningMode === "syllabus" ? ` ${styles.active}` : ""}`}
+              onClick={() => setPlanningMode("syllabus")}
+            >
+              Syllabus
+            </button>
+            <button
+              type="button"
+              className={`${styles.scheduleModeBtn}${planningMode === "schedule" ? ` ${styles.active}` : ""}`}
+              onClick={() => setPlanningMode("schedule")}
+            >
+              Course Schedule
+            </button>
           </div>
-          <div className={styles.field}>
-            <label htmlFor="courseCode">Course Code</label>
-            <input
-              id="courseCode"
-              type="text"
-              className={styles.textInput}
-              placeholder="e.g. CS 101"
-              value={courseCode}
-              onChange={(e) => {
-                setCourseCode(e.target.value);
-                localStorage.setItem(LS_KEYS.courseCode, e.target.value);
-              }}
-            />
-          </div>
-          <div className={styles.field}>
-            <label htmlFor="semester">Semester &amp; Year</label>
-            <input
-              id="semester"
-              type="text"
-              className={styles.textInput}
-              placeholder="e.g. Fall 2026"
-              value={semester}
-              onChange={(e) => {
-                setSemester(e.target.value);
-                localStorage.setItem(LS_KEYS.semester, e.target.value);
-              }}
-            />
-          </div>
-          <div className={styles.field}>
-            <label htmlFor="classTimes">Class Times &amp; Location</label>
-            <input
-              id="classTimes"
-              type="text"
-              className={styles.textInput}
-              placeholder="e.g. MWF 9:00–10:00am, Room 204"
-              value={classTimes}
-              onChange={(e) => {
-                setClassTimes(e.target.value);
-                localStorage.setItem(LS_KEYS.classTimes, e.target.value);
-              }}
-            />
-          </div>
-          <div className={styles.field}>
-            <label htmlFor="latePolicy">Late/Makeup Work Policy</label>
-            <textarea
-              id="latePolicy"
-              className={styles.textInput}
-              placeholder="Describe your late or makeup work policy..."
-              value={latePolicy}
-              onChange={(e) => {
-                setLatePolicy(e.target.value);
-                localStorage.setItem(LS_KEYS.latePolicy, e.target.value);
-              }}
-              rows={3}
-            />
-          </div>
-          <div className={styles.field}>
-            <label htmlFor="attendancePolicy">Attendance Policy</label>
-            <textarea
-              id="attendancePolicy"
-              className={styles.textInput}
-              placeholder="Describe your attendance policy..."
-              value={attendancePolicy}
-              onChange={(e) => {
-                setAttendancePolicy(e.target.value);
-                localStorage.setItem(LS_KEYS.attendancePolicy, e.target.value);
-              }}
-              rows={3}
-            />
-          </div>
-          <div className={styles.field}>
-            <label htmlFor="officeHours">Office Hours</label>
-            <input
-              id="officeHours"
-              type="text"
-              className={styles.textInput}
-              placeholder="e.g. Tuesdays 2–4pm, Office 305"
-              value={officeHours}
-              onChange={(e) => {
-                setOfficeHours(e.target.value);
-                localStorage.setItem(LS_KEYS.officeHours, e.target.value);
-              }}
-            />
-          </div>
-          <div className={styles.field}>
-            <label htmlFor="academicCalendar">Academic Calendar</label>
-            <div className={styles.fileField}>
-              <input
-                id="academicCalendar"
-                type="file"
-                accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                ref={academicCalendarRef}
-                onChange={handleAcademicCalendarChange}
-              />
-              <p>Upload your institution&apos;s academic calendar (PDF or DOCX) to inform key dates and deadlines.</p>
-              {academicCalendarFile && <p>{academicCalendarFile.name}</p>}
-            </div>
-          </div>
-          <div className={styles.field}>
-            <label htmlFor="syllabusFile">Syllabus Template</label>
-            <div className={styles.fileField}>
-              <input id="syllabusFile" type="file" ref={syllabusFileRef} />
-              <p>Upload a syllabus template (.txt, .pdf, .docx, etc.) to use as a starting point.</p>
-            </div>
-          </div>
-          <div className={styles.field}>
-            <label htmlFor="coursePlanningContext">Additional Context</label>
-            <textarea
-              id="coursePlanningContext"
-              placeholder="Optional context to guide syllabus generation (program goals, institution policies, audience details, tone, etc.)"
-              value={coursePlanningContext}
-              onChange={(e) => {
-                setCoursePlanningContext(e.target.value);
-                localStorage.setItem(LS_KEYS.coursePlanningContext, e.target.value);
-              }}
-            />
-          </div>
-          <div className={styles.field}>
-            <label htmlFor="coursePlanningContextFiles">Additional Context Files</label>
-            <div className={styles.fileField}>
-              <input
-                id="coursePlanningContextFiles"
-                type="file"
-                multiple
-                onChange={handleCoursePlanningContextFiles}
-              />
-              <p>Attach multiple supporting files (optional). Text, PDF, image, and DOCX files are used as extra context.</p>
-              {coursePlanningContextFiles.length > 0 && (
-                <p>{coursePlanningContextFiles.length} context file(s) selected.</p>
-              )}
-            </div>
-          </div>
-          {coursePlanningError && <p className={styles.error}>{coursePlanningError}</p>}
-          <button
-            type="button"
-            className={styles.submitButton}
-            onClick={handleStartCoursePlanning}
-            disabled={isParsingTemplate || !courseTitle.trim()}
-          >
-            {isParsingTemplate ? "Generating syllabus…" : "Generate Syllabus"}
-          </button>
+
+          {/* ── Syllabus mode ── */}
+          {planningMode === "syllabus" && (
+            <>
+              <div className={styles.field}>
+                <label htmlFor="courseTitle">Course Title</label>
+                <input
+                  id="courseTitle"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. Introduction to Data Science"
+                  value={courseTitle}
+                  onChange={(e) => {
+                    setCourseTitle(e.target.value);
+                    localStorage.setItem(LS_KEYS.courseTitle, e.target.value);
+                  }}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="courseCode">Course Code</label>
+                <input
+                  id="courseCode"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. CS 101"
+                  value={courseCode}
+                  onChange={(e) => {
+                    setCourseCode(e.target.value);
+                    localStorage.setItem(LS_KEYS.courseCode, e.target.value);
+                  }}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="semester">Semester &amp; Year</label>
+                <input
+                  id="semester"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. Fall 2026"
+                  value={semester}
+                  onChange={(e) => {
+                    setSemester(e.target.value);
+                    localStorage.setItem(LS_KEYS.semester, e.target.value);
+                  }}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="classTimes">Class Times &amp; Location</label>
+                <input
+                  id="classTimes"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. MWF 9:00–10:00am, Room 204"
+                  value={classTimes}
+                  onChange={(e) => {
+                    setClassTimes(e.target.value);
+                    localStorage.setItem(LS_KEYS.classTimes, e.target.value);
+                  }}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="latePolicy">Late/Makeup Work Policy</label>
+                <textarea
+                  id="latePolicy"
+                  className={styles.textInput}
+                  placeholder="Describe your late or makeup work policy..."
+                  value={latePolicy}
+                  onChange={(e) => {
+                    setLatePolicy(e.target.value);
+                    localStorage.setItem(LS_KEYS.latePolicy, e.target.value);
+                  }}
+                  rows={3}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="attendancePolicy">Attendance Policy</label>
+                <textarea
+                  id="attendancePolicy"
+                  className={styles.textInput}
+                  placeholder="Describe your attendance policy..."
+                  value={attendancePolicy}
+                  onChange={(e) => {
+                    setAttendancePolicy(e.target.value);
+                    localStorage.setItem(LS_KEYS.attendancePolicy, e.target.value);
+                  }}
+                  rows={3}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="officeHours">Office Hours</label>
+                <input
+                  id="officeHours"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. Tuesdays 2–4pm, Office 305"
+                  value={officeHours}
+                  onChange={(e) => {
+                    setOfficeHours(e.target.value);
+                    localStorage.setItem(LS_KEYS.officeHours, e.target.value);
+                  }}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="academicCalendar">Academic Calendar</label>
+                <div className={styles.fileField}>
+                  <input
+                    id="academicCalendar"
+                    type="file"
+                    accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    ref={academicCalendarRef}
+                    onChange={handleAcademicCalendarChange}
+                  />
+                  <p>Upload your institution&apos;s academic calendar (PDF or DOCX) to inform key dates and deadlines.</p>
+                  {academicCalendarFile && <p>{academicCalendarFile.name}</p>}
+                </div>
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="syllabusFile">Syllabus Template</label>
+                <div className={styles.fileField}>
+                  <input id="syllabusFile" type="file" ref={syllabusFileRef} />
+                  <p>Upload a syllabus template (.txt, .pdf, .docx, etc.) to use as a starting point.</p>
+                </div>
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="coursePlanningContext">Additional Context</label>
+                <textarea
+                  id="coursePlanningContext"
+                  placeholder="Optional context to guide syllabus generation (program goals, institution policies, audience details, tone, etc.)"
+                  value={coursePlanningContext}
+                  onChange={(e) => {
+                    setCoursePlanningContext(e.target.value);
+                    localStorage.setItem(LS_KEYS.coursePlanningContext, e.target.value);
+                  }}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="coursePlanningContextFiles">Additional Context Files</label>
+                <div className={styles.fileField}>
+                  <input
+                    id="coursePlanningContextFiles"
+                    type="file"
+                    multiple
+                    onChange={handleCoursePlanningContextFiles}
+                  />
+                  <p>Attach multiple supporting files (optional). Text, PDF, image, and DOCX files are used as extra context.</p>
+                  {coursePlanningContextFiles.length > 0 && (
+                    <p>{coursePlanningContextFiles.length} context file(s) selected.</p>
+                  )}
+                </div>
+              </div>
+              {coursePlanningError && <p className={styles.error}>{coursePlanningError}</p>}
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleStartCoursePlanning}
+                disabled={isParsingTemplate || !courseTitle.trim()}
+              >
+                {isParsingTemplate ? "Generating syllabus…" : "Generate Syllabus"}
+              </button>
+            </>
+          )}
+
+          {/* ── Course Schedule mode ── */}
+          {planningMode === "schedule" && !scheduleGenerated && (
+            <>
+              <div className={styles.field}>
+                <label htmlFor="courseDescription">Course Description</label>
+                <textarea
+                  id="courseDescription"
+                  className={styles.textInput}
+                  placeholder="Describe the course — its topics, goals, and audience."
+                  value={courseDescription}
+                  onChange={(e) => setCourseDescription(e.target.value)}
+                  rows={4}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="scheduleTerm">Term</label>
+                <input
+                  id="scheduleTerm"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. Fall 2026"
+                  value={scheduleTerm}
+                  onChange={(e) => setScheduleTerm(e.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="scheduleStartDate">Course Start Date</label>
+                <input
+                  id="scheduleStartDate"
+                  type="date"
+                  className={styles.textInput}
+                  value={scheduleStartDate}
+                  onChange={(e) => setScheduleStartDate(e.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="scheduleWeeks">Number of Weeks</label>
+                <input
+                  id="scheduleWeeks"
+                  type="number"
+                  className={styles.textInput}
+                  placeholder="e.g. 15"
+                  min={1}
+                  max={52}
+                  value={scheduleWeeks}
+                  onChange={(e) => setScheduleWeeks(e.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="scheduleTests">Number of Tests</label>
+                <input
+                  id="scheduleTests"
+                  type="number"
+                  className={styles.textInput}
+                  placeholder="e.g. 3"
+                  min={0}
+                  value={scheduleTests}
+                  onChange={(e) => setScheduleTests(e.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="scheduleCalendar">Academic Calendar (PDF)</label>
+                <div className={styles.fileField}>
+                  <input
+                    id="scheduleCalendar"
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    ref={scheduleCalendarRef}
+                    onChange={handleScheduleCalendarChange}
+                  />
+                  <p>Upload your institution&apos;s academic calendar PDF so the schedule can account for holidays and breaks.</p>
+                  {scheduleCalendarFile && <p>{scheduleCalendarFile.name}</p>}
+                </div>
+              </div>
+              {scheduleError && <p className={styles.error}>{scheduleError}</p>}
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleGenerateSchedule}
+                disabled={isGeneratingSchedule || !courseDescription.trim() || !scheduleTerm.trim() || !scheduleStartDate || !scheduleWeeks || !scheduleTests}
+              >
+                {isGeneratingSchedule ? "Generating schedule…" : "Generate Schedule"}
+              </button>
+            </>
+          )}
+
+          {/* ── Schedule result table ── */}
+          {planningMode === "schedule" && scheduleGenerated && (
+            <>
+              <div className={styles.courseScheduleWrap}>
+                <table className={styles.courseScheduleTable}>
+                  <thead>
+                    <tr>
+                      <th>Week</th>
+                      <th>Dates</th>
+                      <th>Topics</th>
+                      <th>Assignment</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scheduleRows.map((row) => (
+                      <tr key={row.week}>
+                        <td>{row.week}</td>
+                        <td>{row.dates}</td>
+                        <td>{row.topics}</td>
+                        <td>{row.assignment}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className={styles.scheduleActions}>
+                <button
+                  type="button"
+                  className={styles.submitButton}
+                  onClick={resetSchedule}
+                >
+                  Edit &amp; Regenerate
+                </button>
+              </div>
+            </>
+          )}
         </section>
       )}
 

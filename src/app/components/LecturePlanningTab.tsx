@@ -8,6 +8,9 @@ import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 async function buildDocxFromPlainText(text: string): Promise<ArrayBuffer> {
   const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import("docx");
 
+  const FONT = "Times New Roman";
+  const COLOR = "000000";
+
   const children: InstanceType<typeof Paragraph>[] = [];
   const lines = text.split("\n");
   let firstHeadingFound = false;
@@ -24,13 +27,13 @@ async function buildDocxFromPlainText(text: string): Promise<ArrayBuffer> {
     if (isHeading) {
       const level = !firstHeadingFound ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2;
       firstHeadingFound = true;
-      children.push(new Paragraph({ text: trimmed, heading: level }));
+      children.push(new Paragraph({ children: [new TextRun({ text: trimmed, font: FONT, color: COLOR, bold: true })], heading: level }));
     } else if (/^\d+\.\s+/.test(trimmed)) {
-      children.push(new Paragraph({ children: [new TextRun(trimmed)] }));
+      children.push(new Paragraph({ children: [new TextRun({ text: trimmed.replace(/^\d+\.\s+/, ""), font: FONT, color: COLOR })], bullet: { level: 0 } }));
     } else if (/^[-•*]\s+/.test(trimmed)) {
-      children.push(new Paragraph({ children: [new TextRun(trimmed.slice(trimmed.indexOf(" ") + 1))], bullet: { level: 0 } }));
+      children.push(new Paragraph({ children: [new TextRun({ text: trimmed.slice(trimmed.indexOf(" ") + 1), font: FONT, color: COLOR })], bullet: { level: 0 } }));
     } else {
-      children.push(new Paragraph({ children: [new TextRun(trimmed)] }));
+      children.push(new Paragraph({ children: [new TextRun({ text: trimmed, font: FONT, color: COLOR })] }));
     }
   }
 

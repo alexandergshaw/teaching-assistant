@@ -375,9 +375,11 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         [String(r.week), escapeCell(r.dates), escapeCell(r.topics), escapeCell(r.assignment)].join(",")
       ),
     ];
+    const courseName = courseDescription.split("\n")[0].trim().slice(0, 60);
+    const sanitized = courseName.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
     triggerFileDownload(
       new Blob([rows.join("\r\n")], { type: "text/csv;charset=utf-8" }),
-      "course_schedule.csv"
+      `${sanitized}_schedule.csv`
     );
   };
 

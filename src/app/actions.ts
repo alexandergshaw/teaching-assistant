@@ -1549,6 +1549,7 @@ Requirements:
 - The first slide should be a title/overview slide listing the key topics.
 - Cover the concepts introduced in the README or assignment description, highlight what students must implement, and explain any relevant patterns shown in the unit tests or code comments.
 - Use real-world analogies and concrete examples that students will recognise.
+- For every concept-focused slide, immediately follow it with two additional slides: (1) a concrete example slide that illustrates the concept with a worked scenario, code snippet, or case study the instructor can show students, and (2) a step-by-step walkthrough slide that breaks down the example so the instructor can talk through it with the class line-by-line or step-by-step. Label these slides clearly (e.g. "Example: <concept>" and "Walkthrough: <concept>").
 - Do not include any text outside the JSON object.`;
 
   const response = await fetch(

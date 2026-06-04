@@ -5,20 +5,37 @@ import { generateLecturePlansAction, type AssignmentPlan } from "../actions";
 import styles from "../page.module.css";
 import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildDocxFromPlainText(text: string, Document: any, Paragraph: any, TextRun: any, HeadingLevel: any): any {
-  const children = [];
-  const blocks = text.split(/\n{2,}/);
-  for (const block of blocks) {
-    const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
-    if (lines.length === 0) continue;
-    if (lines.length === 1 && lines[0].length < 80) {
-      children.push(new Paragraph({ text: lines[0], heading: HeadingLevel.HEADING_2 }));
+async function buildDocxFromPlainText(text: string): Promise<ArrayBuffer> {
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import("docx");
+
+  const children: InstanceType<typeof Paragraph>[] = [];
+  const lines = text.split("\n");
+  let firstHeadingFound = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+
+    const prevBlank = i === 0 || !lines[i - 1].trim();
+    const nextBlank = i >= lines.length - 1 || !lines[i + 1].trim();
+    const isListItem = /^(\d+\.|[-•*])\s/.test(trimmed);
+    const isHeading = trimmed.length < 80 && !isListItem && prevBlank && nextBlank;
+
+    if (isHeading) {
+      const level = !firstHeadingFound ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2;
+      firstHeadingFound = true;
+      children.push(new Paragraph({ text: trimmed, heading: level }));
+    } else if (/^\d+\.\s+/.test(trimmed)) {
+      children.push(new Paragraph({ children: [new TextRun(trimmed)] }));
+    } else if (/^[-•*]\s+/.test(trimmed)) {
+      children.push(new Paragraph({ children: [new TextRun(trimmed.slice(trimmed.indexOf(" ") + 1))], bullet: { level: 0 } }));
     } else {
-      children.push(new Paragraph({ children: [new TextRun(lines.join(" "))] }));
+      children.push(new Paragraph({ children: [new TextRun(trimmed)] }));
     }
   }
-  return new Document({ sections: [{ children }] });
+
+  const doc = new Document({ sections: [{ children }] });
+  return Packer.toArrayBuffer(doc);
 }
 
 export default function LecturePlanningTab() {
@@ -78,12 +95,10 @@ export default function LecturePlanningTab() {
     if (plans.length === 0) return;
     setIsDownloading(true);
     try {
-      const [{ default: PptxGenJS }, { default: JSZip }, docxModule] = await Promise.all([
+      const [{ default: PptxGenJS }, { default: JSZip }] = await Promise.all([
         import("pptxgenjs"),
         import("jszip"),
-        import("docx"),
       ]);
-      const { Document, Packer, Paragraph, TextRun, HeadingLevel } = docxModule;
 
       const outputZip = new JSZip();
 
@@ -115,12 +130,10 @@ export default function LecturePlanningTab() {
         const safeName = plan.assignmentName.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
         outputZip.file(`${safeName}.pptx`, pptxData);
         if (plan.moduleIntroduction) {
-          const introDoc = buildDocxFromPlainText(plan.moduleIntroduction, Document, Paragraph, TextRun, HeadingLevel);
-          outputZip.file(`${safeName}_module_intro.docx`, await Packer.toArrayBuffer(introDoc));
+          outputZip.file(`${safeName}_module_intro.docx`, await buildDocxFromPlainText(plan.moduleIntroduction));
         }
         if (plan.assignmentInstructions) {
-          const instructionsDoc = buildDocxFromPlainText(plan.assignmentInstructions, Document, Paragraph, TextRun, HeadingLevel);
-          outputZip.file(`${safeName}_assignment_instructions.docx`, await Packer.toArrayBuffer(instructionsDoc));
+          outputZip.file(`${safeName}_assignment_instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions));
         }
       }
 

@@ -1507,3 +1507,247 @@ Return ONLY the prompt text — no preamble, no explanation, no markdown code fe
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
 }
+
+// ── Lecture Planning ─────────────────────────────────────────────────────────
+
+export interface AssignmentPlan {
+  assignmentName: string;
+  presentationTitle: string;
+  slides: SlideData[];
+}
+
+async function generateSlidesForAssignment(
+  assignmentName: string,
+  content: string,
+  lectureDurationMinutes: number
+): Promise<{ presentationTitle: string; slides: SlideData[] } | { error: string }> {
+  const apiKey = getGeminiApiKey();
+  const model = getGeminiModel();
+
+  const prompt = `You are an expert educator creating a lecture slide deck for a programming course assignment.
+
+ASSIGNMENT: ${assignmentName}
+LECTURE DURATION: ${lectureDurationMinutes} minutes
+
+ASSIGNMENT CONTENT:
+${content}
+
+Based on the assignment content above, create a complete lecture slide deck that teaches students the concepts they need to understand and complete this assignment. Scale the number of slides to fit a ${lectureDurationMinutes}-minute lecture (roughly 1–2 minutes per slide on average).
+
+Return ONLY valid JSON:
+{
+  "presentationTitle": "...",
+  "slides": [
+    { "title": "...", "bullets": ["...", "...", "..."] }
+  ]
+}
+
+Requirements:
+- Each slide must have a "title" and a "bullets" array.
+- Maximum 4 bullets per slide.
+- Each bullet must be a single, concise idea — no sub-points.
+- The first slide should be a title/overview slide listing the key topics.
+- Cover the concepts introduced in the README or assignment description, highlight what students must implement, and explain any relevant patterns shown in the unit tests or code comments.
+- Use real-world analogies and concrete examples that students will recognise.
+- Do not include any text outside the JSON object.`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.6, maxOutputTokens: 4096 },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    return { error: `Gemini API error for "${assignmentName}": HTTP ${response.status} — ${body.slice(0, 200)}` };
+  }
+
+  const data = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+
+  const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  const trimmed = raw.trim();
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    return { error: `Could not parse slide data for "${assignmentName}".` };
+  }
+
+  const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+    presentationTitle?: string;
+    slides?: Array<{ title?: string; bullets?: string[] }>;
+  };
+
+  if (!parsed.slides || !Array.isArray(parsed.slides)) {
+    return { error: `Model did not return a valid slides array for "${assignmentName}".` };
+  }
+
+  const slides: SlideData[] = parsed.slides
+    .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
+    .map((s) => ({ title: s.title!, bullets: (s.bullets ?? []).slice(0, 4) }));
+
+  return {
+    presentationTitle: parsed.presentationTitle ?? assignmentName,
+    slides,
+  };
+}
+
+export async function generateLecturePlansAction(
+  zipBase64: string,
+  lectureDurationMinutes: number
+): Promise<AssignmentPlan[] | { error: string }> {
+  const TEXT_EXTENSIONS = new Set([
+    ".md", ".txt", ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cpp", ".c",
+    ".h", ".cs", ".go", ".rs", ".rb", ".php", ".swift", ".kt", ".r", ".sql",
+    ".sh", ".yaml", ".yml", ".json", ".html", ".css", ".scss",
+  ]);
+
+  const ASSIGNMENTS_PATTERN = /^(assignments?|homeworks?|hw|labs?|projects?|exercises?|problems?)$/i;
+
+  const MAX_FILE_CHARS = 3000;
+  const MAX_TOTAL_CHARS = 12000;
+
+  try {
+    const JSZip = (await import("jszip")).default;
+    const buffer = Buffer.from(zipBase64, "base64");
+    const zip = await JSZip.loadAsync(buffer);
+
+    const allPaths = Object.keys(zip.files);
+
+    // Collect top-level folder names
+    const topFolders = new Set<string>();
+    for (const path of allPaths) {
+      const m = path.match(/^([^/]+)\//);
+      if (m) topFolders.add(m[1]);
+    }
+
+    // Find the assignments prefix (top-level first, then one level deep)
+    let assignmentsPrefix = "";
+    for (const folder of topFolders) {
+      if (ASSIGNMENTS_PATTERN.test(folder)) {
+        assignmentsPrefix = folder + "/";
+        break;
+      }
+    }
+
+    if (!assignmentsPrefix) {
+      // Try one level deep (zip may wrap the repo in a root folder)
+      for (const path of allPaths) {
+        const m = path.match(/^[^/]+\/([^/]+)\//);
+        if (m && ASSIGNMENTS_PATTERN.test(m[1])) {
+          const firstSlash = path.indexOf("/");
+          const secondSlash = path.indexOf("/", firstSlash + 1);
+          if (firstSlash !== -1 && secondSlash !== -1) {
+            assignmentsPrefix = path.slice(0, secondSlash + 1);
+            break;
+          }
+        }
+      }
+    }
+
+    if (!assignmentsPrefix) {
+      return {
+        error:
+          "No assignments folder found in the uploaded zip. Expected a top-level folder named 'assignments', 'homework', 'labs', or similar.",
+      };
+    }
+
+    // Find assignment subfolders
+    const assignmentFolders = new Set<string>();
+    for (const path of allPaths) {
+      if (path.startsWith(assignmentsPrefix)) {
+        const relative = path.slice(assignmentsPrefix.length);
+        const parts = relative.split("/");
+        if (parts.length >= 2 && parts[0]) {
+          assignmentFolders.add(parts[0]);
+        }
+      }
+    }
+
+    if (assignmentFolders.size === 0) {
+      return { error: "No assignment subfolders found inside the assignments folder." };
+    }
+
+    // Extract relevant text content per assignment
+    const assignmentContents: { name: string; content: string }[] = [];
+
+    for (const folder of Array.from(assignmentFolders).sort()) {
+      const folderPrefix = assignmentsPrefix + folder + "/";
+      const folderFiles = allPaths.filter((p) => p.startsWith(folderPrefix) && !zip.files[p].dir);
+
+      const mdFiles = folderFiles.filter((p) => p.toLowerCase().endsWith(".md"));
+      const testFiles = folderFiles.filter((p) => {
+        const name = p.toLowerCase();
+        return (name.includes("test") || name.includes("spec")) && !p.toLowerCase().endsWith(".md");
+      });
+      const otherFiles = folderFiles.filter((p) => {
+        const ext = p.includes(".") ? "." + p.split(".").pop()!.toLowerCase() : "";
+        const name = p.toLowerCase();
+        return (
+          TEXT_EXTENSIONS.has(ext) &&
+          !p.toLowerCase().endsWith(".md") &&
+          !name.includes("test") &&
+          !name.includes("spec")
+        );
+      });
+
+      const orderedFiles = [...mdFiles, ...testFiles, ...otherFiles];
+      let content = "";
+      let totalChars = 0;
+
+      for (const filePath of orderedFiles) {
+        if (totalChars >= MAX_TOTAL_CHARS) break;
+        const ext = filePath.includes(".") ? "." + filePath.split(".").pop()!.toLowerCase() : "";
+        if (!TEXT_EXTENSIONS.has(ext)) continue;
+
+        try {
+          let fileContent = await zip.files[filePath].async("string");
+          const fileName = filePath.slice(folderPrefix.length);
+          if (fileContent.length > MAX_FILE_CHARS) {
+            fileContent = fileContent.slice(0, MAX_FILE_CHARS) + "\n… (truncated)";
+          }
+          content += `\n\n=== ${fileName} ===\n${fileContent}`;
+          totalChars += fileContent.length;
+        } catch {
+          // skip unreadable / binary files
+        }
+      }
+
+      if (content.trim()) {
+        assignmentContents.push({ name: folder, content });
+      }
+    }
+
+    if (assignmentContents.length === 0) {
+      return { error: "No readable text content found in the assignment folders." };
+    }
+
+    // Generate slides for each assignment in parallel
+    const results = await Promise.all(
+      assignmentContents.map(async ({ name, content }) => {
+        const result = await generateSlidesForAssignment(name, content, lectureDurationMinutes);
+        if ("error" in result) return null;
+        return { assignmentName: name, ...result } satisfies AssignmentPlan;
+      })
+    );
+
+    const plans = results.filter((r): r is AssignmentPlan => r !== null);
+
+    if (plans.length === 0) {
+      return { error: "Failed to generate slides for any assignment. Check your Gemini API key and try again." };
+    }
+
+    return plans;
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}

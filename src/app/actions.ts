@@ -1840,6 +1840,134 @@ Do not invent requirements not present in the README. If the README is sparse, n
   return { text: result.trim() };
 }
 
+export async function generateCourseRubricFromZipAction(
+  zipBase64: string
+): Promise<string | { error: string }> {
+  const TEXT_EXTENSIONS = new Set([
+    ".md", ".txt", ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cpp", ".c",
+    ".h", ".cs", ".go", ".rs", ".rb", ".php", ".swift", ".kt", ".r", ".sql",
+    ".sh", ".yaml", ".yml", ".json", ".html", ".css", ".scss",
+  ]);
+
+  const ASSIGNMENTS_PATTERN = /^(assignments?|homeworks?|hw|labs?|projects?|exercises?|problems?)$/i;
+  const MAX_FILE_CHARS = 3000;
+
+  try {
+    const JSZip = (await import("jszip")).default;
+    const buffer = Buffer.from(zipBase64, "base64");
+    const zip = await JSZip.loadAsync(buffer);
+
+    const allPaths = Object.keys(zip.files);
+
+    const topFolders = new Set<string>();
+    for (const path of allPaths) {
+      const m = path.match(/^([^/]+)\//);
+      if (m) topFolders.add(m[1]);
+    }
+
+    let assignmentsPrefix = "";
+    for (const folder of topFolders) {
+      if (ASSIGNMENTS_PATTERN.test(folder)) {
+        assignmentsPrefix = folder + "/";
+        break;
+      }
+    }
+
+    if (!assignmentsPrefix) {
+      for (const path of allPaths) {
+        const m = path.match(/^[^/]+\/([^/]+)\//);
+        if (m && ASSIGNMENTS_PATTERN.test(m[1])) {
+          const firstSlash = path.indexOf("/");
+          const secondSlash = path.indexOf("/", firstSlash + 1);
+          if (firstSlash !== -1 && secondSlash !== -1) {
+            assignmentsPrefix = path.slice(0, secondSlash + 1);
+            break;
+          }
+        }
+      }
+    }
+
+    if (!assignmentsPrefix) {
+      return {
+        error: "No assignments folder found in the uploaded zip. Expected a top-level folder named 'assignments', 'homework', 'labs', or similar.",
+      };
+    }
+
+    const assignmentFolders = new Set<string>();
+    for (const path of allPaths) {
+      if (path.startsWith(assignmentsPrefix)) {
+        const relative = path.slice(assignmentsPrefix.length);
+        const parts = relative.split("/");
+        if (parts.length >= 2 && parts[0]) {
+          assignmentFolders.add(parts[0]);
+        }
+      }
+    }
+
+    if (assignmentFolders.size === 0) {
+      return { error: "No assignment subfolders found inside the assignments folder." };
+    }
+
+    // Collect the README/instructions from every assignment
+    const aggregatedInstructions: string[] = [];
+
+    for (const folder of Array.from(assignmentFolders).sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+    )) {
+      const folderPrefix = assignmentsPrefix + folder + "/";
+      const folderFiles = allPaths.filter((p) => p.startsWith(folderPrefix) && !zip.files[p].dir);
+
+      const mdFiles = folderFiles.filter((p) => p.toLowerCase().endsWith(".md"));
+      const readmeFile =
+        mdFiles.find((p) => p.slice(folderPrefix.length).toLowerCase().startsWith("readme")) ??
+        mdFiles[0];
+
+      if (readmeFile) {
+        try {
+          let content = await zip.files[readmeFile].async("string");
+          if (content.length > MAX_FILE_CHARS) {
+            content = content.slice(0, MAX_FILE_CHARS) + "\n… (truncated)";
+          }
+          if (content.trim()) {
+            aggregatedInstructions.push(`=== ${folder} ===\n${content.trim()}`);
+          }
+        } catch {
+          // skip unreadable file
+        }
+      } else {
+        // Fall back to any text file in the folder
+        const textFiles = folderFiles.filter((p) => {
+          const ext = p.includes(".") ? "." + p.split(".").pop()!.toLowerCase() : "";
+          return TEXT_EXTENSIONS.has(ext);
+        });
+        for (const filePath of textFiles.slice(0, 2)) {
+          try {
+            let content = await zip.files[filePath].async("string");
+            if (content.length > MAX_FILE_CHARS) {
+              content = content.slice(0, MAX_FILE_CHARS) + "\n… (truncated)";
+            }
+            if (content.trim()) {
+              aggregatedInstructions.push(`=== ${folder} ===\n${content.trim()}`);
+              break;
+            }
+          } catch {
+            // skip
+          }
+        }
+      }
+    }
+
+    if (aggregatedInstructions.length === 0) {
+      return { error: "No readable assignment instructions found in the uploaded zip." };
+    }
+
+    const aggregatedText = aggregatedInstructions.join("\n\n");
+    return await generateRubric(aggregatedText);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
 export async function generateLecturePlansAction(
   zipBase64: string,
   lectureDurationMinutes: number

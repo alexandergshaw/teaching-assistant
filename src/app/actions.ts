@@ -1368,6 +1368,8 @@ Requirements:
 - "topics" describes the main subject(s) covered that week; for test weeks include "Test${numberOfTests > 1 ? " N" : ""}" alongside the topic.
 - "assignment" is a brief description of the homework or activity due that week; write "Test" for test weeks.
 - Space the ${numberOfTests} test(s) evenly across the schedule, placing them at the end of major topic blocks.
+- Each test week must be immediately preceded by a review week (e.g. "Review" or "Review: [topic]").
+- No new topics are introduced in review weeks or test weeks; these weeks consolidate previously covered material.
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<{ text: string }> = [

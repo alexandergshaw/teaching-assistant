@@ -224,13 +224,11 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [planningMode, setPlanningMode] = useState<PlanningMode>("syllabus");
 
   // Course schedule state
-  const scheduleCalendarRef = useRef<HTMLInputElement>(null);
   const [courseDescription, setCourseDescription] = useState("");
   const [scheduleTerm, setScheduleTerm] = useState("");
   const [scheduleStartDate, setScheduleStartDate] = useState("");
   const [scheduleWeeks, setScheduleWeeks] = useState("");
   const [scheduleTests, setScheduleTests] = useState("");
-  const [scheduleCalendarFile, setScheduleCalendarFile] = useState<{ name: string; base64: string; mimeType: string } | null>(null);
   const [scheduleRows, setScheduleRows] = useState<CourseScheduleRow[]>([]);
   const [isGeneratingSchedule, setIsGeneratingSchedule] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
@@ -274,8 +272,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [lockedSyllabusSections, setLockedSyllabusSections] = useState<boolean[]>([]);
   const [isRevisingSyllabus, setIsRevisingSyllabus] = useState(false);
   const [isDownloadingSyllabus, setIsDownloadingSyllabus] = useState(false);
-  const academicCalendarRef = useRef<HTMLInputElement>(null);
-  const [academicCalendarFile, setAcademicCalendarFile] = useState<{ name: string; base64: string; mimeType: string } | null>(null);
   const [syllabusFileData, setSyllabusFileData] = useState<{ name: string; base64: string; mimeType: string } | null>(null);
 
   const getFullContext = () => {
@@ -290,35 +286,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   };
 
   const getContextFiles = () => [
-    ...(academicCalendarFile ? [academicCalendarFile] : []),
     ...coursePlanningContextFiles,
   ];
-
-  const handleAcademicCalendarChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const base64 = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-    setAcademicCalendarFile({ name: file.name, base64, mimeType: file.type || "application/octet-stream" });
-    e.target.value = "";
-  };
-
-  const handleScheduleCalendarChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const base64 = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-    setScheduleCalendarFile({ name: file.name, base64, mimeType: file.type || "application/octet-stream" });
-    e.target.value = "";
-  };
 
   const handleGenerateSchedule = async () => {
     if (!courseDescription.trim()) {
@@ -351,8 +320,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         scheduleTerm.trim(),
         scheduleStartDate,
         weeks,
-        tests,
-        scheduleCalendarFile
+        tests
       );
       if ("error" in result) {
         setScheduleError(result.error);
@@ -693,20 +661,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="academicCalendar">Academic Calendar</label>
-                <div className={styles.fileField}>
-                  <input
-                    id="academicCalendar"
-                    type="file"
-                    accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    ref={academicCalendarRef}
-                    onChange={handleAcademicCalendarChange}
-                  />
-                  <p>Upload your institution&apos;s academic calendar (PDF or DOCX) to inform key dates and deadlines.</p>
-                  {academicCalendarFile && <p>{academicCalendarFile.name}</p>}
-                </div>
-              </div>
-              <div className={styles.field}>
                 <label htmlFor="syllabusFile">Syllabus Template</label>
                 <div className={styles.fileField}>
                   <input id="syllabusFile" type="file" ref={syllabusFileRef} />
@@ -811,20 +765,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   value={scheduleTests}
                   onChange={(e) => setScheduleTests(e.target.value)}
                 />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="scheduleCalendar">Academic Calendar (PDF or Text)</label>
-                <div className={styles.fileField}>
-                  <input
-                    id="scheduleCalendar"
-                    type="file"
-                    accept=".pdf,.txt,application/pdf,text/plain"
-                    ref={scheduleCalendarRef}
-                    onChange={handleScheduleCalendarChange}
-                  />
-                  <p>Upload your institution&apos;s academic calendar (PDF or .txt) so the schedule can account for holidays and breaks.</p>
-                  {scheduleCalendarFile && <p>{scheduleCalendarFile.name}</p>}
-                </div>
               </div>
               {scheduleError && <p className={styles.error}>{scheduleError}</p>}
               <button

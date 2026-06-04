@@ -5,7 +5,6 @@ import { Tab, Tabs } from "@mui/material";
 import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData } from "./actions";
 import CoursePlanningTab from "./components/CoursePlanningTab";
 import GradingTab from "./components/GradingTab";
-import LecturePlanningTab from "./components/LecturePlanningTab";
 import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
 import LessonPlanningForm from "./components/LessonPlanningForm";
@@ -17,7 +16,7 @@ import { parseGeneratedRubric } from "./utils/rubric";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "grading" | "lesson-planning" | "course-planning" | "lecture-planning";
+type ActiveTab = "grading" | "lesson-planning" | "course-planning";
 
 function getCommentPrefix(language?: string): string {
   const lang = (language ?? "").toLowerCase();
@@ -71,7 +70,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "lesson-planning";
     const saved = localStorage.getItem("ta-active-tab");
-    return saved === "grading" || saved === "lesson-planning" || saved === "course-planning" || saved === "lecture-planning" ? saved : "lesson-planning";
+    return saved === "grading" || saved === "lesson-planning" || saved === "course-planning" ? saved : "lesson-planning";
   });
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
@@ -474,13 +473,8 @@ export default function Home() {
         >
           <Tab label="New Build Courses" value="course-planning" disableRipple />
           <Tab label="Pre Built Courses" value="lesson-planning" disableRipple />
-          <Tab label="Lecture Planning" value="lecture-planning" disableRipple />
           <Tab label="Grading" value="grading" disableRipple />
         </Tabs>
-
-        {activeTab === "lecture-planning" && (
-          <LecturePlanningTab />
-        )}
 
         {activeTab === "grading" && (
           <GradingTab

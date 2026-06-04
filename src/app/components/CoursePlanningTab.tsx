@@ -14,6 +14,7 @@ import {
   type CourseScheduleRow,
 } from "../actions";
 import SyllabusPreviewModal from "./SyllabusPreviewModal";
+import LecturePlanningTab from "./LecturePlanningTab";
 import styles from "../page.module.css";
 
 type CoursePlanningTabProps = {
@@ -28,7 +29,7 @@ type CoursePlanningTabProps = {
 };
 
 type CoursePlanningStep = "form" | "preview";
-type PlanningMode = "syllabus" | "schedule" | "project";
+type PlanningMode = "syllabus" | "schedule" | "project" | "lecture";
 
 function escapeXml(str: string): string {
   return str
@@ -271,7 +272,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setLatePolicy(localStorage.getItem(LS_KEYS.latePolicy) || "");
     setAttendancePolicy(localStorage.getItem(LS_KEYS.attendancePolicy) || "");
     const savedMode = localStorage.getItem(LS_KEYS.planningMode);
-    if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project") {
+    if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project" || savedMode === "lecture") {
       setPlanningMode(savedMode);
     }
     setCourseDescription(localStorage.getItem(LS_KEYS.courseDescription) || "");
@@ -638,6 +639,13 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
             >
               Course Project Planning
             </button>
+            <button
+              type="button"
+              className={`${styles.scheduleModeBtn}${planningMode === "lecture" ? ` ${styles.active}` : ""}`}
+              onClick={() => { setPlanningMode("lecture"); localStorage.setItem(LS_KEYS.planningMode, "lecture"); }}
+            >
+              Lecture Planning
+            </button>
           </div>
 
           {/* ── Syllabus mode ── */}
@@ -953,6 +961,10 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                 </div>
               )}
             </>
+          )}
+
+          {planningMode === "lecture" && (
+            <LecturePlanningTab />
           )}
         </section>
       )}

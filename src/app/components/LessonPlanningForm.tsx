@@ -27,7 +27,7 @@ export default function LessonPlanningForm({
   return (
     <section className={styles.card}>
       <div className={styles.header}>
-        <h1>Lesson Planning</h1>
+        <h1>Pre Built Courses</h1>
         <p>Plan and generate lesson content with AI assistance.</p>
       </div>
       <div className={styles.field}>

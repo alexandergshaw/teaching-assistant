@@ -472,8 +472,8 @@ export default function Home() {
             minHeight: 44,
           }}
         >
-          <Tab label="Course Planning" value="course-planning" disableRipple />
-          <Tab label="Lesson Planning" value="lesson-planning" disableRipple />
+          <Tab label="New Build Courses" value="course-planning" disableRipple />
+          <Tab label="Pre Built Courses" value="lesson-planning" disableRipple />
           <Tab label="Lecture Planning" value="lecture-planning" disableRipple />
           <Tab label="Grading" value="grading" disableRipple />
         </Tabs>

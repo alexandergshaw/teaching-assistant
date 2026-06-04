@@ -611,7 +611,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       {coursePlanningStep === "form" && (
         <section className={styles.card}>
           <div className={styles.header}>
-            <h1>Course Planning</h1>
+            <h1>New Build Courses</h1>
             <p>Build a syllabus or generate a weekly course schedule with the help of AI.</p>
           </div>
 

@@ -1,3 +1,9 @@
+<!-- BEGIN:no-emoji-rule -->
+# No Emojis in Codebase
+
+Never insert emojis into any code, comments, strings, variable names, documentation, or any other part of the codebase.
+<!-- END:no-emoji-rule -->
+
 <!-- BEGIN:nextjs-agent-rules -->
 # This is NOT the Next.js you know
 

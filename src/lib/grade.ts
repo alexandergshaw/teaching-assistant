@@ -705,7 +705,8 @@ The rubric text must:
   "  Needs Improvement (50% — 50% deducted): [Significant deficiencies that reduce the score by half]"
 - Be specific and actionable, not generic.
 - Use plain prose only, no markdown.
-- Do not include text outside the JSON object.`;
+- Do not include text outside the JSON object.
+- IMPORTANT: Every criterion must evaluate only the presence or absence of things in the submitted code itself (e.g. specific functions, classes, variables, logic, structure, or required features). Do NOT include criteria that require running tests, checking commits, verifying deployments, or evaluating anything outside the code files themselves.`;
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,

@@ -323,10 +323,24 @@ export default function Home() {
         examplesText = lines.join("\n");
       }
 
+      // ── Build lecture.docx ──────────────────────────────────────────
+      const lectureChildren = [
+        new Paragraph({ text: lessonPlanPreview.presentationTitle, heading: HeadingLevel.HEADING_1 }),
+      ];
+      for (const slide of lessonPlanPreview.slides) {
+        lectureChildren.push(new Paragraph({ text: slide.title, heading: HeadingLevel.HEADING_2 }));
+        for (const bullet of slide.bullets) {
+          lectureChildren.push(new Paragraph({ children: [new TextRun(`• ${bullet}`)] }));
+        }
+      }
+      const lectureDoc = new Document({ sections: [{ children: lectureChildren }] });
+      const lectureDocxBuffer = await Packer.toArrayBuffer(lectureDoc);
+
       // ── Assemble ZIP ─────────────────────────────────────────────────
       const zip = new JSZip();
       if (introDocxBuffer) zip.file("introduction.docx", introDocxBuffer);
       zip.file("slides.pptx", pptxData);
+      zip.file("lecture.docx", lectureDocxBuffer);
       if (assignmentDocxBuffer) zip.file("assignment.docx", assignmentDocxBuffer);
       if (rubricText) zip.file("rubric.txt", rubricText);
       if (examplesText) zip.file("examples.txt", examplesText);

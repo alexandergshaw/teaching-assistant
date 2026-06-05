@@ -239,6 +239,7 @@ export default function LecturePlanningTab() {
     const file = zipFileRef.current?.files?.[0];
     if (!file) {
       setRubricError("Please select a zip file of your course repository.");
+      setRubricStatus("idle");
       return;
     }
 

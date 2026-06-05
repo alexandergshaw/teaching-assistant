@@ -1654,7 +1654,7 @@ async function generateSlidesForAssignment(
   const apiKey = getGeminiApiKey();
   const model = getGeminiModel();
 
-  const prompt = `You are an expert educator creating a lecture slide deck for a programming course assignment.
+  const prompt = `You are an expert educator creating a lecture slide deck for a programming course assignment. The slides must be fully self-contained — students reading them after class must be able to understand every concept without relying on any verbal explanation from the instructor.
 
 ASSIGNMENT: ${assignmentName}
 LECTURE DURATION: ${lectureDurationMinutes} minutes
@@ -1675,11 +1675,11 @@ Return ONLY valid JSON:
 Requirements:
 - Each slide must have a "title" and a "bullets" array.
 - Maximum 4 bullets per slide.
-- Each bullet must be a single, concise idea — no sub-points.
-- The first slide should be a title/overview slide listing the key topics.
+- Each bullet must be a complete, self-explanatory sentence (or two) that a student can fully understand without any verbal elaboration. Define every term you introduce, explain how each concept works, and state why it matters for the assignment. Never use bare keywords or vague one-liners — write as if the student is reading the slide alone with no instructor present.
+- The first slide should be a title/overview slide listing the key topics covered in the lecture.
 - Cover the concepts introduced in the README or assignment description, highlight what students must implement, and explain any relevant patterns shown in the unit tests or code comments.
-- Use real-world analogies and concrete examples that students will recognise.
-- For every concept-focused slide, immediately follow it with two additional slides: (1) a concrete example slide that illustrates the concept with a worked scenario, code snippet, or case study the instructor can show students, and (2) a step-by-step walkthrough slide that breaks down the example so the instructor can talk through it with the class line-by-line or step-by-step. Label these slides clearly (e.g. "Example: <concept>" and "Walkthrough: <concept>").
+- Use real-world analogies and concrete examples that students will recognise; integrate the analogy into the bullet itself so it is self-contained.
+- For every concept-focused slide, immediately follow it with two additional slides: (1) a concrete example slide that shows a worked scenario, code snippet, or case study with enough context that a student can follow it independently, and (2) a step-by-step walkthrough slide that explains each step or line in plain English so the student understands the reasoning without needing the instructor to narrate it. Label these slides clearly (e.g. "Example: <concept>" and "Walkthrough: <concept>").
 - Do not include any text outside the JSON object.`;
 
   const response = await fetch(
@@ -1689,7 +1689,7 @@ Requirements:
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.6, maxOutputTokens: 4096 },
+        generationConfig: { temperature: 0.6, maxOutputTokens: 8192 },
       }),
     }
   );

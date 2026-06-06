@@ -29,7 +29,7 @@ type CoursePlanningTabProps = {
 };
 
 type CoursePlanningStep = "form" | "preview";
-type PlanningMode = "syllabus" | "schedule" | "project" | "lecture";
+type PlanningMode = "syllabus" | "schedule" | "project" | "lecture" | "e2e";
 
 function escapeXml(str: string): string {
   return str
@@ -244,6 +244,18 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [projectPrompt, setProjectPrompt] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
 
+  // End to End tab state
+  const [e2eCourseDescription, setE2eCourseDescription] = useState("");
+  const [e2eScheduleTerm, setE2eScheduleTerm] = useState("");
+  const [e2eScheduleStartDate, setE2eScheduleStartDate] = useState("");
+  const [e2eScheduleWeeks, setE2eScheduleWeeks] = useState("");
+  const [e2eScheduleTests, setE2eScheduleTests] = useState("");
+  const [e2eRows, setE2eRows] = useState<CourseScheduleRow[]>([]);
+  const [isGeneratingE2e, setIsGeneratingE2e] = useState(false);
+  const [e2eError, setE2eError] = useState<string | null>(null);
+  const [e2eGenerated, setE2eGenerated] = useState(false);
+  const [e2eCopilotPrompt, setE2eCopilotPrompt] = useState<string | null>(null);
+
   // Local storage keys
   const LS_KEYS = {
     courseTitle: "syllabus_courseTitle",
@@ -260,6 +272,11 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     scheduleStartDate: "schedule_scheduleStartDate",
     scheduleWeeks: "schedule_scheduleWeeks",
     scheduleTests: "schedule_scheduleTests",
+    e2eCourseDescription: "e2e_courseDescription",
+    e2eScheduleTerm: "e2e_scheduleTerm",
+    e2eScheduleStartDate: "e2e_scheduleStartDate",
+    e2eScheduleWeeks: "e2e_scheduleWeeks",
+    e2eScheduleTests: "e2e_scheduleTests",
   };
 
   useEffect(() => {
@@ -272,7 +289,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setLatePolicy(localStorage.getItem(LS_KEYS.latePolicy) || "");
     setAttendancePolicy(localStorage.getItem(LS_KEYS.attendancePolicy) || "");
     const savedMode = localStorage.getItem(LS_KEYS.planningMode);
-    if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project" || savedMode === "lecture") {
+    if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project" || savedMode === "lecture" || savedMode === "e2e") {
       setPlanningMode(savedMode);
     }
     setCourseDescription(localStorage.getItem(LS_KEYS.courseDescription) || "");
@@ -280,6 +297,11 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setScheduleStartDate(localStorage.getItem(LS_KEYS.scheduleStartDate) || "");
     setScheduleWeeks(localStorage.getItem(LS_KEYS.scheduleWeeks) || "");
     setScheduleTests(localStorage.getItem(LS_KEYS.scheduleTests) || "");
+    setE2eCourseDescription(localStorage.getItem(LS_KEYS.e2eCourseDescription) || "");
+    setE2eScheduleTerm(localStorage.getItem(LS_KEYS.e2eScheduleTerm) || "");
+    setE2eScheduleStartDate(localStorage.getItem(LS_KEYS.e2eScheduleStartDate) || "");
+    setE2eScheduleWeeks(localStorage.getItem(LS_KEYS.e2eScheduleWeeks) || "");
+    setE2eScheduleTests(localStorage.getItem(LS_KEYS.e2eScheduleTests) || "");
   }, []);
   const [coursePlanningContextFiles, setCoursePlanningContextFiles] = useState<
     Array<{ name: string; base64: string; mimeType: string }>
@@ -382,6 +404,97 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       `${sanitized}_schedule.csv`
     );
   };
+
+  const handleGenerateE2e = async () => {
+    if (!e2eCourseDescription.trim()) {
+      setE2eError("Please enter a course description.");
+      return;
+    }
+    if (!e2eScheduleTerm.trim()) {
+      setE2eError("Please enter the term (e.g. Fall 2026).");
+      return;
+    }
+    if (!e2eScheduleStartDate) {
+      setE2eError("Please select the course start date.");
+      return;
+    }
+    const weeks = parseInt(e2eScheduleWeeks, 10);
+    if (!weeks || weeks < 1 || weeks > 52) {
+      setE2eError("Please enter a valid number of weeks (1–52).");
+      return;
+    }
+    const tests = parseInt(e2eScheduleTests, 10);
+    if (isNaN(tests) || tests < 0) {
+      setE2eError("Please enter a valid number of tests (0 or more).");
+      return;
+    }
+    setIsGeneratingE2e(true);
+    setE2eError(null);
+    setE2eCopilotPrompt(null);
+    try {
+      const scheduleResult = await generateCourseScheduleAction(
+        e2eCourseDescription.trim(),
+        e2eScheduleTerm.trim(),
+        e2eScheduleStartDate,
+        weeks,
+        tests
+      );
+      if ("error" in scheduleResult) {
+        setE2eError(scheduleResult.error);
+        return;
+      }
+      const rows = scheduleResult.rows;
+      setE2eRows(rows);
+      setE2eGenerated(true);
+
+      // Convert schedule rows to CSV for Copilot prompt generation
+      const escapeCell = (val: string) => `"${val.replace(/"/g, '""')}"`;
+      const csvLines = [
+        ["Week", "Dates", "Topics", "Assignment"].join(","),
+        ...rows.map((r) =>
+          [String(r.week), escapeCell(r.dates), escapeCell(r.topics), escapeCell(r.assignment)].join(",")
+        ),
+      ];
+      const csvContent = csvLines.join("\r\n");
+      const sanitized =
+        e2eCourseDescription.split("\n")[0].trim().slice(0, 60).replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
+      const promptResult = await generateCopilotProjectPromptAction(csvContent, `${sanitized}_schedule.csv`);
+      if ("error" in promptResult) {
+        setE2eError(promptResult.error);
+      } else {
+        setE2eCopilotPrompt(promptResult.prompt);
+      }
+    } catch (err) {
+      setE2eError(err instanceof Error ? err.message : "Failed to generate End to End output.");
+    } finally {
+      setIsGeneratingE2e(false);
+    }
+  };
+
+  const resetE2e = () => {
+    setE2eGenerated(false);
+    setE2eRows([]);
+    setE2eError(null);
+    setE2eCopilotPrompt(null);
+  };
+
+  const handleExportE2eCsv = () => {
+    const header = ["Week", "Dates", "Topics", "Assignment"];
+    const escapeCell = (val: string) => `"${val.replace(/"/g, '""')}"`;
+    const rows = [
+      header.join(","),
+      ...e2eRows.map((r) =>
+        [String(r.week), escapeCell(r.dates), escapeCell(r.topics), escapeCell(r.assignment)].join(",")
+      ),
+    ];
+    const courseName = e2eCourseDescription.split("\n")[0].trim().slice(0, 60);
+    const sanitized = courseName.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
+    triggerFileDownload(
+      new Blob([rows.join("\r\n")], { type: "text/csv;charset=utf-8" }),
+      `${sanitized}_schedule.csv`
+    );
+  };
+
 
   const handleProjectFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -647,6 +760,13 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               onClick={() => { setPlanningMode("lecture"); localStorage.setItem(LS_KEYS.planningMode, "lecture"); }}
             >
               Lecture Planning
+            </button>
+            <button
+              type="button"
+              className={`${styles.scheduleModeBtn}${planningMode === "e2e" ? ` ${styles.active}` : ""}`}
+              onClick={() => { setPlanningMode("e2e"); localStorage.setItem(LS_KEYS.planningMode, "e2e"); }}
+            >
+              End to End
             </button>
           </div>
 
@@ -967,6 +1087,149 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
 
           {planningMode === "lecture" && (
             <LecturePlanningTab />
+          )}
+
+          {/* ── End to End mode – form ── */}
+          {planningMode === "e2e" && !e2eGenerated && (
+            <>
+              <div className={styles.field}>
+                <label htmlFor="e2eCourseDescription">Course Description</label>
+                <textarea
+                  id="e2eCourseDescription"
+                  className={styles.textInput}
+                  placeholder="Describe the course — its topics, goals, and audience."
+                  value={e2eCourseDescription}
+                  onChange={(e) => { setE2eCourseDescription(e.target.value); localStorage.setItem(LS_KEYS.e2eCourseDescription, e.target.value); }}
+                  rows={4}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="e2eScheduleTerm">Term</label>
+                <input
+                  id="e2eScheduleTerm"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. Fall 2026"
+                  value={e2eScheduleTerm}
+                  onChange={(e) => { setE2eScheduleTerm(e.target.value); localStorage.setItem(LS_KEYS.e2eScheduleTerm, e.target.value); }}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="e2eScheduleStartDate">Course Start Date</label>
+                <input
+                  id="e2eScheduleStartDate"
+                  type="date"
+                  className={styles.textInput}
+                  value={e2eScheduleStartDate}
+                  onChange={(e) => { setE2eScheduleStartDate(e.target.value); localStorage.setItem(LS_KEYS.e2eScheduleStartDate, e.target.value); }}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="e2eScheduleWeeks">Number of Weeks</label>
+                <input
+                  id="e2eScheduleWeeks"
+                  type="number"
+                  className={styles.textInput}
+                  placeholder="e.g. 15"
+                  min={1}
+                  max={52}
+                  value={e2eScheduleWeeks}
+                  onChange={(e) => { setE2eScheduleWeeks(e.target.value); localStorage.setItem(LS_KEYS.e2eScheduleWeeks, e.target.value); }}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="e2eScheduleTests">Number of Tests</label>
+                <input
+                  id="e2eScheduleTests"
+                  type="number"
+                  className={styles.textInput}
+                  placeholder="e.g. 3"
+                  min={0}
+                  value={e2eScheduleTests}
+                  onChange={(e) => { setE2eScheduleTests(e.target.value); localStorage.setItem(LS_KEYS.e2eScheduleTests, e.target.value); }}
+                />
+              </div>
+              {e2eError && <p className={styles.error}>{e2eError}</p>}
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleGenerateE2e}
+                disabled={isGeneratingE2e || !e2eCourseDescription.trim() || !e2eScheduleTerm.trim() || !e2eScheduleStartDate || !e2eScheduleWeeks || !e2eScheduleTests}
+              >
+                {isGeneratingE2e ? "Generating…" : "Generate"}
+              </button>
+            </>
+          )}
+
+          {/* ── End to End mode – results ── */}
+          {planningMode === "e2e" && e2eGenerated && (
+            <>
+              <div className={styles.courseScheduleWrap}>
+                <table className={styles.courseScheduleTable}>
+                  <thead>
+                    <tr>
+                      <th>Week</th>
+                      <th>Dates</th>
+                      <th>Topics</th>
+                      <th>Assignment</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {e2eRows.map((row) => (
+                      <tr key={row.week}>
+                        <td>{row.week}</td>
+                        <td>{row.dates}</td>
+                        <td>{row.topics}</td>
+                        <td>{row.assignment}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className={styles.scheduleActions}>
+                <button
+                  type="button"
+                  className={styles.submitButton}
+                  onClick={resetE2e}
+                >
+                  Edit &amp; Regenerate
+                </button>
+                <button
+                  type="button"
+                  className={styles.submitButton}
+                  onClick={handleExportE2eCsv}
+                >
+                  Download CSV
+                </button>
+              </div>
+              {e2eError && <p className={styles.error}>{e2eError}</p>}
+              {isGeneratingE2e && !e2eCopilotPrompt && (
+                <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", marginTop: 16 }}>Generating GitHub Copilot prompt…</p>
+              )}
+              {e2eCopilotPrompt && (
+                <div className={styles.field} style={{ marginTop: 24 }}>
+                  <label>GitHub Copilot Prompt</label>
+                  <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: 8 }}>
+                    Copy the prompt below and paste it into GitHub Copilot (Agent mode) to scaffold a project covering all schedule topics.
+                  </p>
+                  <textarea
+                    className={styles.textInput}
+                    value={e2eCopilotPrompt}
+                    readOnly
+                    rows={20}
+                    style={{ fontFamily: "monospace", fontSize: "0.85rem" }}
+                  />
+                  <button
+                    type="button"
+                    className={styles.submitButton}
+                    style={{ marginTop: 8 }}
+                    onClick={() => void navigator.clipboard.writeText(e2eCopilotPrompt)}
+                  >
+                    Copy to Clipboard
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </section>
       )}

@@ -11,13 +11,21 @@ import { OfficeParser, type SupportedFileType } from "officeparser";
 import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
+import type { AttachedFile } from "@/lib/chat/types";
 import {
   PROFESSIONAL_SPEECH_RULE,
   DOCUMENT_HEADER_RULES,
+  NO_MARKDOWN_SYNTAX_RULE,
   DOCUMENT_LABEL_BOLD_RULE,
   DOCUMENT_SECTION_NEWLINE_RULE,
   normalizeHeadingSpacing,
 } from "@/lib/formatting-rules";
+import {
+  generateExternalResourcesForTopic,
+  type ExternalResource,
+} from "@/lib/external-resources";
+
+export type { ExternalResource };
 
 export interface SlideData {
   title: string;
@@ -768,7 +776,7 @@ COURSE TITLE: ${courseTitle}
 SECTION: ${section.heading}
 GUIDANCE: ${section.hint || "Write appropriate content for this syllabus section."}${templateBlock}${additionalContextBlock}${contextFilesSummary}${contextBlock}
 
-Write the content for the "${section.heading}" section of this syllabus. Be specific, professional, and practical. Use the guidance, the original template, and any previously completed sections for context and consistency. Write only the section content — do not include the heading itself, markdown formatting, or any preamble. ${SYLLABUS_VERTICAL_LIST_REQUIREMENT} ${SYLLABUS_SCHEDULE_REQUIREMENT} ${PROFESSIONAL_SPEECH_RULE} If any headings appear, use normal sentence case — never all caps. If you need to make a late policy, be sure that assignments submitted after the deadline can only earn a maxiumum of 85%, be sure it encourages resubmissions and prevents AI abuse in a way that is not time demanding for the instructor.`;
+Write the content for the "${section.heading}" section of this syllabus. Be specific, professional, and practical. Use the guidance, the original template, and any previously completed sections for context and consistency. Write only the section content — do not include the heading itself, markdown formatting, or any preamble. ${SYLLABUS_VERTICAL_LIST_REQUIREMENT} ${SYLLABUS_SCHEDULE_REQUIREMENT} ${PROFESSIONAL_SPEECH_RULE} ${NO_MARKDOWN_SYNTAX_RULE} If any headings appear, use Title Case — never all caps and never sentence case — and never include a colon in a heading. If you need to make a late policy, be sure that assignments submitted after the deadline can only earn a maxiumum of 85%, be sure it encourages resubmissions and prevents AI abuse in a way that is not time demanding for the instructor.`;
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
       { text: prompt },
@@ -1098,7 +1106,7 @@ export async function assembleSyllabusFromTemplateAction(
 
 Your task: Reproduce the ENTIRE document, preserving every aspect of the original template's formatting — heading styles, spacing, line breaks, decorators, numbering, and any text that appears between sections or before the first section. For each section, replace only the body content with the generated content below. If a section has no generated content, keep the original placeholder text.
 
-Output ONLY the reconstructed document text — no preamble, no explanation. ${PROFESSIONAL_SPEECH_RULE} Any headings you generate must be in normal sentence case — never all caps.
+Output ONLY the reconstructed document text — no preamble, no explanation. ${PROFESSIONAL_SPEECH_RULE} ${NO_MARKDOWN_SYNTAX_RULE} Any headings you generate must be in Title Case — never all caps and never sentence case — and must never contain a colon.
 
 GENERATED SECTION CONTENT:
 ${sectionsText}`;
@@ -1263,7 +1271,8 @@ export async function selectionChatAction(
   selectedText: string,
   question: string,
   history: SelectionChatMessage[],
-  sessionId: string
+  sessionId: string,
+  fileAttachments: AttachedFile[] = []
 ): Promise<string | { error: string }> {
   try {
     const apiKey = getGeminiApiKey();
@@ -1276,11 +1285,27 @@ HIGHLIGHTED TEXT:
 ${selectedText}
 """`;
 
+    type GeminiPart =
+      | { text: string }
+      | { inline_data: { mime_type: string; data: string } };
+
+    const buildFileParts = (files: AttachedFile[]): GeminiPart[] =>
+      files.map((f) =>
+        f.isText
+          ? { text: `\n\n[Attached file: ${f.name}]\n${f.data}` }
+          : { inline_data: { mime_type: f.mimeType, data: f.data } }
+      );
+
+    const lastUserParts: GeminiPart[] = [
+      { text: question },
+      ...buildFileParts(fileAttachments),
+    ];
+
     const contents = [
       { role: "user" as const, parts: [{ text: systemPrompt }] },
       { role: "model" as const, parts: [{ text: "Understood. I'll answer questions about the highlighted text in plain prose with no formatting." }] },
       ...history.map((m) => ({ role: m.role as "user" | "model", parts: [{ text: m.text }] })),
-      { role: "user" as const, parts: [{ text: question }] },
+      { role: "user" as const, parts: lastUserParts },
     ];
 
     const response = await fetch(
@@ -1661,6 +1686,7 @@ export interface AssignmentPlan {
   slides: SlideData[];
   moduleIntroduction: string;
   assignmentInstructions: string;
+  externalResources: ExternalResource[];
 }
 
 async function generateSlidesForAssignment(
@@ -2137,13 +2163,14 @@ export async function generateLecturePlansAction(
       return { error: "No readable text content found in the assignment folders." };
     }
 
-    // Generate slides, module intro, and assignment instructions for each assignment in parallel
+    // Generate slides, module intro, assignment instructions, and external resources for each assignment in parallel
     const results = await Promise.all(
       assignmentContents.map(async ({ name, content, readmeContent }) => {
-        const [slidesResult, introResult, instructionsResult] = await Promise.all([
+        const [slidesResult, introResult, instructionsResult, resourcesResult] = await Promise.all([
           generateSlidesForAssignment(name, content, lectureDurationMinutes),
           generateModuleIntroForAssignment(name, content),
           generateAssignmentInstructionsForAssignment(name, readmeContent),
+          generateExternalResourcesForTopic(name, content),
         ]);
         if ("error" in slidesResult) return null;
         return {
@@ -2151,6 +2178,7 @@ export async function generateLecturePlansAction(
           ...slidesResult,
           moduleIntroduction: "error" in introResult ? "" : introResult.text,
           assignmentInstructions: "error" in instructionsResult ? "" : instructionsResult.text,
+          externalResources: "error" in resourcesResult ? [] : resourcesResult,
         } satisfies AssignmentPlan;
       })
     );
@@ -2165,4 +2193,11 @@ export async function generateLecturePlansAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
+}
+
+export async function generateExternalResourcesAction(
+  topic: string,
+  context: string
+): Promise<ExternalResource[] | { error: string }> {
+  return generateExternalResourcesForTopic(topic, context);
 }

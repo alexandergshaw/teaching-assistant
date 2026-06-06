@@ -245,11 +245,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [projectError, setProjectError] = useState<string | null>(null);
 
   // End to End tab state
-  const [e2eCourseDescription, setE2eCourseDescription] = useState("");
-  const [e2eScheduleTerm, setE2eScheduleTerm] = useState("");
-  const [e2eScheduleStartDate, setE2eScheduleStartDate] = useState("");
-  const [e2eScheduleWeeks, setE2eScheduleWeeks] = useState("");
-  const [e2eScheduleTests, setE2eScheduleTests] = useState("");
   const [e2eRows, setE2eRows] = useState<CourseScheduleRow[]>([]);
   const [isGeneratingE2e, setIsGeneratingE2e] = useState(false);
   const [e2eError, setE2eError] = useState<string | null>(null);
@@ -272,11 +267,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     scheduleStartDate: "schedule_scheduleStartDate",
     scheduleWeeks: "schedule_scheduleWeeks",
     scheduleTests: "schedule_scheduleTests",
-    e2eCourseDescription: "e2e_courseDescription",
-    e2eScheduleTerm: "e2e_scheduleTerm",
-    e2eScheduleStartDate: "e2e_scheduleStartDate",
-    e2eScheduleWeeks: "e2e_scheduleWeeks",
-    e2eScheduleTests: "e2e_scheduleTests",
   };
 
   useEffect(() => {
@@ -297,11 +287,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setScheduleStartDate(localStorage.getItem(LS_KEYS.scheduleStartDate) || "");
     setScheduleWeeks(localStorage.getItem(LS_KEYS.scheduleWeeks) || "");
     setScheduleTests(localStorage.getItem(LS_KEYS.scheduleTests) || "");
-    setE2eCourseDescription(localStorage.getItem(LS_KEYS.e2eCourseDescription) || "");
-    setE2eScheduleTerm(localStorage.getItem(LS_KEYS.e2eScheduleTerm) || "");
-    setE2eScheduleStartDate(localStorage.getItem(LS_KEYS.e2eScheduleStartDate) || "");
-    setE2eScheduleWeeks(localStorage.getItem(LS_KEYS.e2eScheduleWeeks) || "");
-    setE2eScheduleTests(localStorage.getItem(LS_KEYS.e2eScheduleTests) || "");
   }, []);
   const [coursePlanningContextFiles, setCoursePlanningContextFiles] = useState<
     Array<{ name: string; base64: string; mimeType: string }>
@@ -406,24 +391,24 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   };
 
   const handleGenerateE2e = async () => {
-    if (!e2eCourseDescription.trim()) {
+    if (!courseDescription.trim()) {
       setE2eError("Please enter a course description.");
       return;
     }
-    if (!e2eScheduleTerm.trim()) {
+    if (!scheduleTerm.trim()) {
       setE2eError("Please enter the term (e.g. Fall 2026).");
       return;
     }
-    if (!e2eScheduleStartDate) {
+    if (!scheduleStartDate) {
       setE2eError("Please select the course start date.");
       return;
     }
-    const weeks = parseInt(e2eScheduleWeeks, 10);
+    const weeks = parseInt(scheduleWeeks, 10);
     if (!weeks || weeks < 1 || weeks > 52) {
       setE2eError("Please enter a valid number of weeks (1–52).");
       return;
     }
-    const tests = parseInt(e2eScheduleTests, 10);
+    const tests = parseInt(scheduleTests, 10);
     if (isNaN(tests) || tests < 0) {
       setE2eError("Please enter a valid number of tests (0 or more).");
       return;
@@ -433,9 +418,9 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setE2eCopilotPrompt(null);
     try {
       const scheduleResult = await generateCourseScheduleAction(
-        e2eCourseDescription.trim(),
-        e2eScheduleTerm.trim(),
-        e2eScheduleStartDate,
+        courseDescription.trim(),
+        scheduleTerm.trim(),
+        scheduleStartDate,
         weeks,
         tests
       );
@@ -457,7 +442,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       ];
       const csvContent = csvLines.join("\r\n");
       const sanitized =
-        e2eCourseDescription.split("\n")[0].trim().slice(0, 60).replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
+        courseDescription.split("\n")[0].trim().slice(0, 60).replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
       const promptResult = await generateCopilotProjectPromptAction(csvContent, `${sanitized}_schedule.csv`);
       if ("error" in promptResult) {
         setE2eError(promptResult.error);
@@ -487,7 +472,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         [String(r.week), escapeCell(r.dates), escapeCell(r.topics), escapeCell(r.assignment)].join(",")
       ),
     ];
-    const courseName = e2eCourseDescription.split("\n")[0].trim().slice(0, 60);
+    const courseName = courseDescription.split("\n")[0].trim().slice(0, 60);
     const sanitized = courseName.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
     triggerFileDownload(
       new Blob([rows.join("\r\n")], { type: "text/csv;charset=utf-8" }),
@@ -1098,8 +1083,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   id="e2eCourseDescription"
                   className={styles.textInput}
                   placeholder="Describe the course — its topics, goals, and audience."
-                  value={e2eCourseDescription}
-                  onChange={(e) => { setE2eCourseDescription(e.target.value); localStorage.setItem(LS_KEYS.e2eCourseDescription, e.target.value); }}
+                  value={courseDescription}
+                  onChange={(e) => { setCourseDescription(e.target.value); localStorage.setItem(LS_KEYS.courseDescription, e.target.value); }}
                   rows={4}
                 />
               </div>
@@ -1110,8 +1095,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   type="text"
                   className={styles.textInput}
                   placeholder="e.g. Fall 2026"
-                  value={e2eScheduleTerm}
-                  onChange={(e) => { setE2eScheduleTerm(e.target.value); localStorage.setItem(LS_KEYS.e2eScheduleTerm, e.target.value); }}
+                  value={scheduleTerm}
+                  onChange={(e) => { setScheduleTerm(e.target.value); localStorage.setItem(LS_KEYS.scheduleTerm, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
@@ -1120,8 +1105,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   id="e2eScheduleStartDate"
                   type="date"
                   className={styles.textInput}
-                  value={e2eScheduleStartDate}
-                  onChange={(e) => { setE2eScheduleStartDate(e.target.value); localStorage.setItem(LS_KEYS.e2eScheduleStartDate, e.target.value); }}
+                  value={scheduleStartDate}
+                  onChange={(e) => { setScheduleStartDate(e.target.value); localStorage.setItem(LS_KEYS.scheduleStartDate, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
@@ -1133,8 +1118,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   placeholder="e.g. 15"
                   min={1}
                   max={52}
-                  value={e2eScheduleWeeks}
-                  onChange={(e) => { setE2eScheduleWeeks(e.target.value); localStorage.setItem(LS_KEYS.e2eScheduleWeeks, e.target.value); }}
+                  value={scheduleWeeks}
+                  onChange={(e) => { setScheduleWeeks(e.target.value); localStorage.setItem(LS_KEYS.scheduleWeeks, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
@@ -1145,8 +1130,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   className={styles.textInput}
                   placeholder="e.g. 3"
                   min={0}
-                  value={e2eScheduleTests}
-                  onChange={(e) => { setE2eScheduleTests(e.target.value); localStorage.setItem(LS_KEYS.e2eScheduleTests, e.target.value); }}
+                  value={scheduleTests}
+                  onChange={(e) => { setScheduleTests(e.target.value); localStorage.setItem(LS_KEYS.scheduleTests, e.target.value); }}
                 />
               </div>
               {e2eError && <p className={styles.error}>{e2eError}</p>}
@@ -1154,7 +1139,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                 type="button"
                 className={styles.submitButton}
                 onClick={handleGenerateE2e}
-                disabled={isGeneratingE2e || !e2eCourseDescription.trim() || !e2eScheduleTerm.trim() || !e2eScheduleStartDate || !e2eScheduleWeeks || !e2eScheduleTests}
+                disabled={isGeneratingE2e || !courseDescription.trim() || !scheduleTerm.trim() || !scheduleStartDate || !scheduleWeeks || !scheduleTests}
               >
                 {isGeneratingE2e ? "Generating…" : "Generate"}
               </button>

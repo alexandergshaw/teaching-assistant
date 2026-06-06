@@ -19,6 +19,12 @@ import {
   DOCUMENT_SECTION_NEWLINE_RULE,
   normalizeHeadingSpacing,
 } from "@/lib/formatting-rules";
+import {
+  generateExternalResourcesForTopic,
+  type ExternalResource,
+} from "@/lib/external-resources";
+
+export type { ExternalResource };
 
 export interface SlideData {
   title: string;
@@ -1679,6 +1685,7 @@ export interface AssignmentPlan {
   slides: SlideData[];
   moduleIntroduction: string;
   assignmentInstructions: string;
+  externalResources: ExternalResource[];
 }
 
 async function generateSlidesForAssignment(
@@ -2155,13 +2162,14 @@ export async function generateLecturePlansAction(
       return { error: "No readable text content found in the assignment folders." };
     }
 
-    // Generate slides, module intro, and assignment instructions for each assignment in parallel
+    // Generate slides, module intro, assignment instructions, and external resources for each assignment in parallel
     const results = await Promise.all(
       assignmentContents.map(async ({ name, content, readmeContent }) => {
-        const [slidesResult, introResult, instructionsResult] = await Promise.all([
+        const [slidesResult, introResult, instructionsResult, resourcesResult] = await Promise.all([
           generateSlidesForAssignment(name, content, lectureDurationMinutes),
           generateModuleIntroForAssignment(name, content),
           generateAssignmentInstructionsForAssignment(name, readmeContent),
+          generateExternalResourcesForTopic(name, content),
         ]);
         if ("error" in slidesResult) return null;
         return {
@@ -2169,6 +2177,7 @@ export async function generateLecturePlansAction(
           ...slidesResult,
           moduleIntroduction: "error" in introResult ? "" : introResult.text,
           assignmentInstructions: "error" in instructionsResult ? "" : instructionsResult.text,
+          externalResources: "error" in resourcesResult ? [] : resourcesResult,
         } satisfies AssignmentPlan;
       })
     );
@@ -2183,4 +2192,11 @@ export async function generateLecturePlansAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
+}
+
+export async function generateExternalResourcesAction(
+  topic: string,
+  context: string
+): Promise<ExternalResource[] | { error: string }> {
+  return generateExternalResourcesForTopic(topic, context);
 }

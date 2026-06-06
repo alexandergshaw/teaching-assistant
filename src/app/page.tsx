@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
-import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData } from "./actions";
+import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, generateExternalResourcesAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData, type ExternalResource } from "./actions";
 import CoursePlanningTab from "./components/CoursePlanningTab";
 import CourseLibraryTab from "./components/CourseLibraryTab";
 import GradingTab from "./components/GradingTab";
@@ -11,6 +11,7 @@ import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModa
 import LessonPlanningForm from "./components/LessonPlanningForm";
 import styles from "./page.module.css";
 import { parseGeneratedRubric } from "./utils/rubric";
+import { buildExternalResourcesDocx } from "./utils/external-resources-docx";
 
 
 
@@ -86,6 +87,7 @@ export default function Home() {
   const [rubricPreview, setRubricPreview] = useState<string | null>(null);
   const [introPreview, setIntroPreview] = useState<ModuleIntroData | null>(null);
   const [examplesPreview, setExamplesPreview] = useState<ExamplesData | null>(null);
+  const [externalResourcesPreview, setExternalResourcesPreview] = useState<ExternalResource[] | null>(null);
   const [savedLessonFiles, setSavedLessonFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
   const lessonContextFileRef = useRef<HTMLInputElement>(null);
 
@@ -149,11 +151,12 @@ export default function Home() {
 
       setSavedLessonFiles(files);
 
-      const [slideResult, assignmentResult, rubricResult, introResult] = await Promise.all([
+      const [slideResult, assignmentResult, rubricResult, introResult, resourcesResult] = await Promise.all([
         generateLessonPlanAction(moduleObjectives, lessonContext, files),
         generateAssignmentAction(moduleObjectives, lessonContext, files),
         generateAssignmentRubricAction(moduleObjectives, lessonContext),
         generateModuleIntroAction(moduleObjectives, lessonContext),
+        generateExternalResourcesAction(moduleObjectives, lessonContext),
       ]);
 
       if ("error" in slideResult) {
@@ -172,6 +175,7 @@ export default function Home() {
       setRubricPreview(typeof rubricResult === "string" ? rubricResult : null);
       setIntroPreview("error" in introResult ? null : introResult);
       setExamplesPreview("error" in examplesResult ? null : examplesResult);
+      setExternalResourcesPreview("error" in resourcesResult ? null : resourcesResult);
     } catch (err) {
       setLessonError(err instanceof Error ? err.message : "Generation failed.");
     } finally {
@@ -345,6 +349,9 @@ export default function Home() {
       if (assignmentDocxBuffer) zip.file("assignment.docx", assignmentDocxBuffer);
       if (rubricText) zip.file("rubric.txt", rubricText);
       if (examplesText) zip.file("examples.txt", examplesText);
+      if (externalResourcesPreview && externalResourcesPreview.length > 0) {
+        zip.file("external_resources.docx", await buildExternalResourcesDocx(lessonPlanPreview.presentationTitle, externalResourcesPreview));
+      }
 
       const safeName = lessonPlanPreview.presentationTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
       const blob = await zip.generateAsync({ type: "blob" });

@@ -21,6 +21,31 @@ const DOCUMENT_HEADER_RULES =
 const DOCUMENT_LABEL_BOLD_RULE =
   "Whenever a sentence or paragraph begins with a label followed by a colon (e.g., 'Social Media Feeds: When you open an app like Instagram...'), that label and its colon must be bolded. This applies to any short descriptive label at the start of a sentence or paragraph before a colon.";
 
+const DOCUMENT_SECTION_NEWLINE_RULE =
+  "Always place a blank line (empty line) before each section heading. There must be exactly one blank line between the end of a section's content and the heading of the next section.";
+
+/**
+ * Post-processes AI-generated plain text to ensure there is always a blank
+ * line before lines that look like section headings (short, non-list lines
+ * that are followed by a blank line).
+ */
+function normalizeHeadingSpacing(text: string): string {
+  const lines = text.split("\n");
+  const result: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    const prevTrimmed = i > 0 ? lines[i - 1].trim() : "";
+    const nextTrimmed = i < lines.length - 1 ? lines[i + 1].trim() : "";
+    const isListItem = /^(\d+\.|[-•*])\s/.test(trimmed);
+    // A heading candidate: short, non-list, non-blank, followed by a blank line
+    if (trimmed && trimmed.length < 80 && !isListItem && !nextTrimmed && prevTrimmed) {
+      result.push(""); // insert blank line before the heading
+    }
+    result.push(lines[i]);
+  }
+  return result.join("\n");
+}
+
 export interface SlideData {
   title: string;
   bullets: string[];
@@ -1771,6 +1796,7 @@ Write a well-formatted module introduction for the week this assignment covers. 
 3. Include a brief section called "What You Will Learn" that lists the key skills and concepts students will gain.
 4. Be written in clear, motivating language appropriate for undergraduate students.
 5. Use plain text formatting with clear section headings (no markdown symbols like # or *).
+6. ${DOCUMENT_SECTION_NEWLINE_RULE}
 
 Do not include the assignment instructions or grading criteria — focus only on introducing the module topic.
 ${DOCUMENT_LABEL_BOLD_RULE}`;
@@ -1803,7 +1829,7 @@ ${DOCUMENT_LABEL_BOLD_RULE}`;
     return { error: `Module intro generation returned empty response for "${assignmentName}".` };
   }
 
-  return { text: result.trim() };
+  return { text: normalizeHeadingSpacing(result.trim()) };
 }
 
 async function generateAssignmentInstructionsForAssignment(
@@ -1827,6 +1853,7 @@ Using the README content above, write a complete, student-facing assignment inst
 4. End with a "Deliverables" section. The deliverable is ALWAYS: submit the up-to-date zip of the entire codebase with all completed files included.
 5. Use plain text formatting with clear section headings (no markdown symbols like # or *).
 6. Write in clear, direct language appropriate for undergraduate students.
+7. ${DOCUMENT_SECTION_NEWLINE_RULE}
 
 Do not invent requirements not present in the README. If the README is sparse, note that students should refer to the course discussion board for clarification.
 ${DOCUMENT_LABEL_BOLD_RULE}`;
@@ -1859,7 +1886,7 @@ ${DOCUMENT_LABEL_BOLD_RULE}`;
     return { error: `Assignment instructions generation returned empty response for "${assignmentName}".` };
   }
 
-  return { text: result.trim() };
+  return { text: normalizeHeadingSpacing(result.trim()) };
 }
 
 export async function generateCourseRubricFromZipAction(

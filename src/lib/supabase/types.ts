@@ -12,6 +12,130 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      courses: {
+        Row: {
+          id: string;
+          created_at: string;
+          user_id: string;
+          title: string;
+          description: string | null;
+          term: string | null;
+          /** Storage path to the uploaded CSV schedule file. */
+          schedule_file_path: string | null;
+          schedule_file_name: string | null;
+          gemini_prompt: string | null;
+          /** Storage path to the uploaded ZIP codebase archive. */
+          codebase_file_path: string | null;
+          codebase_file_name: string | null;
+        };
+        Insert: {
+          id?: string;
+          created_at?: string;
+          user_id: string;
+          title: string;
+          description?: string | null;
+          term?: string | null;
+          schedule_file_path?: string | null;
+          schedule_file_name?: string | null;
+          gemini_prompt?: string | null;
+          codebase_file_path?: string | null;
+          codebase_file_name?: string | null;
+        };
+        Update: {
+          id?: string;
+          created_at?: string;
+          user_id?: string;
+          title?: string;
+          description?: string | null;
+          term?: string | null;
+          schedule_file_path?: string | null;
+          schedule_file_name?: string | null;
+          gemini_prompt?: string | null;
+          codebase_file_path?: string | null;
+          codebase_file_name?: string | null;
+        };
+      };
+      lectures: {
+        Row: {
+          id: string;
+          created_at: string;
+          course_id: string;
+          title: string;
+          /** Storage path to the uploaded PowerPoint file (.pptx / .ppt). */
+          file_path: string | null;
+          file_name: string | null;
+        };
+        Insert: {
+          id?: string;
+          created_at?: string;
+          course_id: string;
+          title: string;
+          file_path?: string | null;
+          file_name?: string | null;
+        };
+        Update: {
+          id?: string;
+          created_at?: string;
+          course_id?: string;
+          title?: string;
+          file_path?: string | null;
+          file_name?: string | null;
+        };
+      };
+      assignment_instructions: {
+        Row: {
+          id: string;
+          created_at: string;
+          course_id: string;
+          title: string;
+          /** Storage path to the uploaded Word document (.docx). */
+          file_path: string | null;
+          file_name: string | null;
+        };
+        Insert: {
+          id?: string;
+          created_at?: string;
+          course_id: string;
+          title: string;
+          file_path?: string | null;
+          file_name?: string | null;
+        };
+        Update: {
+          id?: string;
+          created_at?: string;
+          course_id?: string;
+          title?: string;
+          file_path?: string | null;
+          file_name?: string | null;
+        };
+      };
+      module_introductions: {
+        Row: {
+          id: string;
+          created_at: string;
+          course_id: string;
+          title: string;
+          /** Storage path to the uploaded Word document (.docx). */
+          file_path: string | null;
+          file_name: string | null;
+        };
+        Insert: {
+          id?: string;
+          created_at?: string;
+          course_id: string;
+          title: string;
+          file_path?: string | null;
+          file_name?: string | null;
+        };
+        Update: {
+          id?: string;
+          created_at?: string;
+          course_id?: string;
+          title?: string;
+          file_path?: string | null;
+          file_name?: string | null;
+        };
+      };
       ai_chat_messages: {
         Row: {
           id: string;

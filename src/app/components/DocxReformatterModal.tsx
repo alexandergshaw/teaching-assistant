@@ -34,7 +34,9 @@ function triggerDownload(base64: string, filename: string): void {
 
 export default function DocxReformatterModal({ onClose }: DocxReformatterModalProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const templateInputRef = useRef<HTMLInputElement>(null);
   const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [templateFile, setTemplateFile] = useState<File | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -48,6 +50,14 @@ export default function DocxReformatterModal({ onClose }: DocxReformatterModalPr
       }
     }
     setEntries((prev) => [...prev, ...next]);
+  };
+
+  const setTemplate = (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    const f = fileList[0];
+    if (f.name.toLowerCase().endsWith(".docx")) {
+      setTemplateFile(f);
+    }
   };
 
   const removeEntry = (index: number) => {
@@ -65,6 +75,7 @@ export default function DocxReformatterModal({ onClose }: DocxReformatterModalPr
 
     const formData = new FormData();
     entries.forEach((e) => formData.append("files", e.file));
+    if (templateFile) formData.append("template", templateFile);
 
     try {
       const response = await fetch("/api/reformat-docx", {
@@ -166,6 +177,45 @@ export default function DocxReformatterModal({ onClose }: DocxReformatterModalPr
             multiple
             style={{ display: "none" }}
             onChange={(e) => addFiles(e.target.files)}
+            onClick={(e) => { (e.target as HTMLInputElement).value = ""; }}
+          />
+        </div>
+
+        {/* Template (optional) */}
+        <div className={styles.reformatterTemplateSection}>
+          <div className={styles.reformatterTemplateLabel}>
+            <span style={{ fontWeight: 650, color: "var(--text-primary)" }}>Template (optional)</span>
+            <span className={styles.previewMeta}>
+              Upload a .docx file whose structure and style the reformatted documents should match.
+            </span>
+          </div>
+          {templateFile ? (
+            <div className={styles.reformatterFileItem}>
+              <span className={styles.reformatterFileName}>{templateFile.name}</span>
+              <button
+                type="button"
+                className={styles.reformatterRemoveBtn}
+                onClick={() => setTemplateFile(null)}
+                aria-label="Remove template file"
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className={styles.reformatterTemplateButton}
+              onClick={() => templateInputRef.current?.click()}
+            >
+              Choose template .docx
+            </button>
+          )}
+          <input
+            ref={templateInputRef}
+            type="file"
+            accept=".docx"
+            style={{ display: "none" }}
+            onChange={(e) => setTemplate(e.target.files)}
             onClick={(e) => { (e.target as HTMLInputElement).value = ""; }}
           />
         </div>

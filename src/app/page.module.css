@@ -2603,6 +2603,41 @@
   background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
 }
 
+.reformatterTemplateSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--field-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--field-background) 97%, var(--accent) 3%);
+}
+
+.reformatterTemplateLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reformatterTemplateButton {
+  align-self: flex-start;
+  padding: 8px 16px;
+  border: 1px solid var(--field-border);
+  border-radius: 999px;
+  background: var(--field-background);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.reformatterTemplateButton:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--field-background) 92%, var(--accent) 8%);
+}
+
 .reformatterFileList {
   list-style: none;
   display: flex;

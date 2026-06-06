@@ -112,11 +112,11 @@ async function buildDocxFromPlainText(text: string): Promise<Buffer> {
 
 // ── Gemini reformatter ────────────────────────────────────────────────────────
 
-async function reformatTextWithGemini(text: string): Promise<string> {
+async function reformatTextWithGemini(text: string, templateText?: string): Promise<string> {
   const apiKey = getGeminiApiKey();
   const model = getGeminiModel();
 
-  const systemPrompt = [
+  const systemPromptLines = [
     "You are a document formatter. Your only job is to take the provided document text and reformat it according to the rules below, then return the fully reformatted document text — nothing else.",
     "",
     "FORMATTING RULES:",
@@ -125,9 +125,24 @@ async function reformatTextWithGemini(text: string): Promise<string> {
     `3. ${NO_MARKDOWN_SYNTAX_RULE}`,
     `4. ${DOCUMENT_LABEL_BOLD_RULE}`,
     `5. ${DOCUMENT_SECTION_NEWLINE_RULE}`,
+  ];
+
+  if (templateText) {
+    systemPromptLines.push(
+      "",
+      "A TEMPLATE document is provided below. Use it as the reference for the desired structure, layout, section ordering, headings, tone, and overall formatting style. Match the template's structure and style as closely as possible while preserving the original document's actual content. Do not copy the template's content into the output — only mirror its formatting and organisation.",
+      "",
+      "TEMPLATE DOCUMENT:",
+      templateText
+    );
+  }
+
+  systemPromptLines.push(
     "",
-    "Return only the reformatted document text. Do not add commentary, explanations, or any text that was not in the original.",
-  ].join("\n");
+    "Return only the reformatted document text. Do not add commentary, explanations, or any text that was not in the original."
+  );
+
+  const systemPrompt = systemPromptLines.join("\n");
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -167,6 +182,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No files provided." }, { status: 400 });
     }
 
+    // Optional template file used to guide the reformatting style/structure.
+    const templateFile = formData.get("template");
+    let templateText: string | undefined;
+    if (templateFile && typeof templateFile !== "string") {
+      try {
+        const templateBuffer = Buffer.from(await templateFile.arrayBuffer());
+        const extracted = await extractDocxText(templateBuffer);
+        if (extracted) templateText = extracted;
+      } catch {
+        // Ignore template extraction failures; reformatting proceeds without it.
+      }
+    }
+
     const results: Array<{ filename: string; base64: string; error?: string }> = [];
 
     for (const file of files) {
@@ -181,7 +209,7 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        const reformatted = await reformatTextWithGemini(extractedText);
+        const reformatted = await reformatTextWithGemini(extractedText, templateText);
         const normalized = normalizeHeadingSpacing(reformatted);
         const docxBuffer = await buildDocxFromPlainText(normalized);
         results.push({ filename, base64: docxBuffer.toString("base64") });

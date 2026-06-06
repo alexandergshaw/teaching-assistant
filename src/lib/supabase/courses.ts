@@ -110,6 +110,39 @@ function table(supabase: any, name: string) {
 }
 
 /**
+ * Guarantees the private "course-files" Storage bucket exists before any
+ * upload is attempted.
+ *
+ * The bucket is normally provisioned by the SQL migration, but that step is
+ * easy to miss (e.g. when only the table migrations are applied) and a missing
+ * bucket makes every upload fail with "Bucket not found" — which surfaces to
+ * the user as a save error on the End to End subtab. Creating it here, with the
+ * service-role client, makes the save path self-healing and idempotent.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function ensureBucket(supabase: any): Promise<void> {
+  const { data: existing, error: getError } = await supabase.storage.getBucket(
+    BUCKET
+  );
+  if (existing && !getError) {
+    return;
+  }
+
+  const { error: createError } = await supabase.storage.createBucket(BUCKET, {
+    public: false,
+  });
+
+  // A concurrent request may have created the bucket between our check and the
+  // create call; treat an "already exists" response as success.
+  if (createError) {
+    const message = createError.message?.toLowerCase() ?? "";
+    if (!message.includes("already exists")) {
+      throw new Error(`Failed to prepare file storage: ${createError.message}`);
+    }
+  }
+}
+
+/**
  * Creates a course row from the End to End subtab, uploads the generated
  * schedule CSV, and links it to the course. Returns the new course id.
  */
@@ -139,29 +172,41 @@ export async function saveEndToEndCourse(
   const courseId = course.id as string;
 
   if (input.scheduleCsv) {
-    const fileName = input.scheduleFileName ?? "schedule.csv";
-    const path = storagePath(owner, courseId, "schedule", fileName);
-    const { error: uploadError } = await supabase.storage
-      .from(BUCKET)
-      .upload(path, new Blob([input.scheduleCsv], { type: "text/csv" }), {
-        contentType: "text/csv",
-        upsert: false,
-      });
+    try {
+      await ensureBucket(supabase);
 
-    if (uploadError) {
-      throw new Error(uploadError.message);
-    }
+      const fileName = input.scheduleFileName ?? "schedule.csv";
+      const path = storagePath(owner, courseId, "schedule", fileName);
+      const { error: uploadError } = await supabase.storage
+        .from(BUCKET)
+        .upload(path, Buffer.from(input.scheduleCsv, "utf-8"), {
+          contentType: "text/csv",
+          upsert: false,
+        });
 
-    const update: Database["public"]["Tables"]["courses"]["Update"] = {
-      schedule_file_path: path,
-      schedule_file_name: fileName,
-    };
-    const { error: updateError } = await table(supabase, "courses")
-      .update(update)
-      .eq("id", courseId);
+      if (uploadError) {
+        throw new Error(uploadError.message);
+      }
 
-    if (updateError) {
-      throw new Error(updateError.message);
+      const update: Database["public"]["Tables"]["courses"]["Update"] = {
+        schedule_file_path: path,
+        schedule_file_name: fileName,
+      };
+      const { error: updateError } = await table(supabase, "courses")
+        .update(update)
+        .eq("id", courseId);
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+    } catch (err) {
+      // The course row was already inserted; remove it so a failed save does
+      // not leave an orphaned, file-less course behind (and so retries do not
+      // accumulate duplicates).
+      await table(supabase, "courses").delete().eq("id", courseId);
+      throw err instanceof Error
+        ? err
+        : new Error("Failed to save course schedule.");
     }
   }
 
@@ -189,6 +234,11 @@ export async function saveLecturePlanFiles(
   }
 
   const owner = (course.user_id as string | null) ?? input.userId ?? "anonymous";
+
+  const hasUploads = Boolean(input.codebaseZipBase64) || input.files.length > 0;
+  if (hasUploads) {
+    await ensureBucket(supabase);
+  }
 
   if (input.codebaseZipBase64) {
     const fileName = input.codebaseZipFileName ?? "course-repository.zip";

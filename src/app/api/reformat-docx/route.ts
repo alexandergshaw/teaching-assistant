@@ -50,13 +50,13 @@ async function buildDocxFromHtml(html: string): Promise<Buffer> {
 
   function decodeHtmlEntities(str: string): string {
     return str
-      .replace(/&amp;/g, "&")
       .replace(/&lt;/g, "<")
       .replace(/&gt;/g, ">")
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'")
       .replace(/&apos;/g, "'")
-      .replace(/&nbsp;/g, " ");
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&"); // last, to avoid double-unescaping
   }
 
   type Token =

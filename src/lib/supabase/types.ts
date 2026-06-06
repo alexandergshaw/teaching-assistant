@@ -16,7 +16,7 @@ export interface Database {
         Row: {
           id: string;
           created_at: string;
-          user_id: string;
+          user_id: string | null;
           title: string;
           description: string | null;
           term: string | null;
@@ -31,7 +31,7 @@ export interface Database {
         Insert: {
           id?: string;
           created_at?: string;
-          user_id: string;
+          user_id?: string | null;
           title: string;
           description?: string | null;
           term?: string | null;

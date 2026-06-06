@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { generateLecturePlansAction, generateCourseRubricFromZipAction, type AssignmentPlan } from "../actions";
 import { parseGeneratedRubric } from "../utils/rubric";
+import { buildExternalResourcesDocx } from "../utils/external-resources-docx";
 import styles from "../page.module.css";
 import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 
@@ -228,6 +229,9 @@ export default function LecturePlanningTab() {
         if (plan.assignmentInstructions) {
           outputZip.file(`${safeName}_assignment_instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions));
         }
+        if (plan.externalResources && plan.externalResources.length > 0) {
+          outputZip.file(`${safeName}_external_resources.docx`, await buildExternalResourcesDocx(plan.assignmentName, plan.externalResources));
+        }
       }
 
       const blob = await outputZip.generateAsync({ type: "blob" });
@@ -373,6 +377,7 @@ export default function LecturePlanningTab() {
               badges.push(`${plan.slides.length + 1} slide${plan.slides.length !== 0 ? "s" : ""}`);
               if (plan.moduleIntroduction) badges.push("Module Intro");
               if (plan.assignmentInstructions) badges.push("Instructions");
+              if (plan.externalResources && plan.externalResources.length > 0) badges.push("Resources");
               return (
                 <li
                   key={plan.assignmentName}

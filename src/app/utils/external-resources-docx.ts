@@ -14,7 +14,7 @@ export async function buildExternalResourcesDocx(
   assignmentName: string,
   resources: ExternalResource[]
 ): Promise<ArrayBuffer> {
-  const { Document, Packer, Paragraph, TextRun, HeadingLevel, ExternalHyperlink } = await import("docx");
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, ExternalHyperlink } = await import("docx");
 
   const FONT = "Times New Roman";
   const COLOR = "000000";
@@ -26,6 +26,7 @@ export async function buildExternalResourcesDocx(
     new Paragraph({
       children: [new TextRun({ text: `External Resources: ${assignmentName}`, font: FONT, color: COLOR, bold: true })],
       heading: HeadingLevel.HEADING_1,
+      alignment: AlignmentType.CENTER,
     })
   );
 
@@ -56,6 +57,7 @@ export async function buildExternalResourcesDocx(
       new Paragraph({
         children: [new TextRun({ text: sectionLabel, font: FONT, color: COLOR, bold: true })],
         heading: HeadingLevel.HEADING_2,
+        alignment: AlignmentType.CENTER,
       })
     );
 

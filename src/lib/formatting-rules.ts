@@ -18,6 +18,12 @@ export const DOCUMENT_LABEL_BOLD_RULE =
 export const DOCUMENT_SECTION_NEWLINE_RULE =
   "Always place a blank line (empty line) before each section heading. There must be exactly one blank line between the end of a section's content and the heading of the next section.";
 
+export const DOCUMENT_HEADING_CENTER_RULE =
+  "All headings must be horizontally centered.";
+
+export const HTML_OUTPUT_RULE =
+  "Output the document as clean, structured HTML. Use <h1> for the document title only, <h2> for section headings, <p> for body paragraphs, <ul>/<li> for bullet lists, <ol>/<li> for numbered lists, <strong> for bold text, and <em> for italic text. Do not use CSS, class, id, or style attributes. Do not wrap in <html>, <head>, or <body> tags. Return only the HTML — no markdown code fences, no preamble.";
+
 /**
  * Post-processes AI-generated plain text to ensure there is always a blank
  * line before lines that look like section headings (short, non-list lines

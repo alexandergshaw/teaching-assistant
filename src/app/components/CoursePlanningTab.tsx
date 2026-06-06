@@ -246,6 +246,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [projectError, setProjectError] = useState<string | null>(null);
 
   // End to End tab state
+  const [e2eCourseName, setE2eCourseName] = useState("");
   const [e2eRows, setE2eRows] = useState<CourseScheduleRow[]>([]);
   const [isGeneratingE2e, setIsGeneratingE2e] = useState(false);
   const [e2eError, setE2eError] = useState<string | null>(null);
@@ -270,6 +271,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     scheduleStartDate: "schedule_scheduleStartDate",
     scheduleWeeks: "schedule_scheduleWeeks",
     scheduleTests: "schedule_scheduleTests",
+    e2eCourseName: "e2e_courseName",
   };
 
   useEffect(() => {
@@ -290,6 +292,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setScheduleStartDate(localStorage.getItem(LS_KEYS.scheduleStartDate) || "");
     setScheduleWeeks(localStorage.getItem(LS_KEYS.scheduleWeeks) || "");
     setScheduleTests(localStorage.getItem(LS_KEYS.scheduleTests) || "");
+    setE2eCourseName(localStorage.getItem(LS_KEYS.e2eCourseName) || "");
   }, []);
   const [coursePlanningContextFiles, setCoursePlanningContextFiles] = useState<
     Array<{ name: string; base64: string; mimeType: string }>
@@ -394,6 +397,10 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   };
 
   const handleGenerateE2e = async () => {
+    if (!e2eCourseName.trim()) {
+      setE2eError("Please enter a course name.");
+      return;
+    }
     if (!courseDescription.trim()) {
       setE2eError("Please enter a course description.");
       return;
@@ -448,7 +455,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       const csvContent = csvLines.join("\r\n");
       const sanitized =
         e2eCourseName.trim().slice(0, 60).replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
-        courseDescription.split("\n")[0].trim().slice(0, 60).replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
       const promptResult = await generateCopilotProjectPromptAction(csvContent, `${sanitized}_schedule.csv`);
       let geminiPrompt: string | null = null;
       if ("error" in promptResult) {
@@ -463,8 +469,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       setE2eSaveStatus("saving");
       const saveResult = await saveEndToEndCourseAction({
         title: e2eCourseName.trim(),
-        description: e2eCourseDescription.trim(),
-        term: e2eScheduleTerm.trim(),
+        description: courseDescription.trim(),
+        term: scheduleTerm.trim(),
         scheduleCsv: csvContent,
         scheduleFileName: `${sanitized}_schedule.csv`,
         geminiPrompt,

@@ -12,6 +12,110 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      courses: {
+        Row: {
+          id: string;
+          created_at: string;
+          user_id: string;
+          title: string;
+          description: string | null;
+          term: string | null;
+          schedule: string | null;
+          gemini_prompt: string | null;
+          codebase: string | null;
+        };
+        Insert: {
+          id?: string;
+          created_at?: string;
+          user_id: string;
+          title: string;
+          description?: string | null;
+          term?: string | null;
+          schedule?: string | null;
+          gemini_prompt?: string | null;
+          codebase?: string | null;
+        };
+        Update: {
+          id?: string;
+          created_at?: string;
+          user_id?: string;
+          title?: string;
+          description?: string | null;
+          term?: string | null;
+          schedule?: string | null;
+          gemini_prompt?: string | null;
+          codebase?: string | null;
+        };
+      };
+      lectures: {
+        Row: {
+          id: string;
+          created_at: string;
+          course_id: string;
+          title: string;
+          content: string | null;
+        };
+        Insert: {
+          id?: string;
+          created_at?: string;
+          course_id: string;
+          title: string;
+          content?: string | null;
+        };
+        Update: {
+          id?: string;
+          created_at?: string;
+          course_id?: string;
+          title?: string;
+          content?: string | null;
+        };
+      };
+      assignment_instructions: {
+        Row: {
+          id: string;
+          created_at: string;
+          course_id: string;
+          title: string;
+          instructions: string | null;
+        };
+        Insert: {
+          id?: string;
+          created_at?: string;
+          course_id: string;
+          title: string;
+          instructions?: string | null;
+        };
+        Update: {
+          id?: string;
+          created_at?: string;
+          course_id?: string;
+          title?: string;
+          instructions?: string | null;
+        };
+      };
+      module_introductions: {
+        Row: {
+          id: string;
+          created_at: string;
+          course_id: string;
+          title: string;
+          content: string | null;
+        };
+        Insert: {
+          id?: string;
+          created_at?: string;
+          course_id: string;
+          title: string;
+          content?: string | null;
+        };
+        Update: {
+          id?: string;
+          created_at?: string;
+          course_id?: string;
+          title?: string;
+          content?: string | null;
+        };
+      };
       ai_chat_messages: {
         Row: {
           id: string;

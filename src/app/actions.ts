@@ -12,6 +12,12 @@ import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
 
+const PROFESSIONAL_SPEECH_RULE =
+  "Write in professional, natural human speech. Avoid AI-sounding filler phrases like 'Certainly!', 'Great question!', 'Of course!', 'Absolutely!', or 'It's worth noting that'. Be direct and clear.";
+
+const DOCUMENT_HEADER_RULES =
+  "When using headers, follow this hierarchy only: document title (Title), then H1, then H2, then bold text for sub-points. Do not use H3 or any deeper heading levels. All headers must be in normal sentence case — never all caps.";
+
 export interface SlideData {
   title: string;
   bullets: string[];
@@ -66,6 +72,7 @@ Requirements:
 - "overview": Exactly 2-3 sentences. Explain where these module concepts fit in the broader field or discipline — the big picture, why it matters, and how it connects to what students may already know or have learned previously. Write directly to the student.
 - "keyTerms": Exactly 2-3 sentences that introduce the most important terms or concepts students will encounter in this module, defining each briefly in plain language. Write directly to the student.
 - Use clear, engaging language. Avoid jargon unless you define it immediately.
+- ${PROFESSIONAL_SPEECH_RULE}
 - Do not include any text outside the JSON object.`;
 
     const response = await fetch(
@@ -159,6 +166,7 @@ Requirements:
 - Use plenty of real-world analogies and concrete examples that students will immediately recognise (everyday technology, social media, sports, food, pop culture, etc.).
 - The first slide should be a title/overview slide listing the key topics.
 - Include enough slides to thoroughly cover every objective.
+- ${PROFESSIONAL_SPEECH_RULE}
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<
@@ -262,6 +270,7 @@ Requirements:
 - 4–8 concrete, sequential steps that a student can complete working alone.
 - Tie every step clearly to the module objectives.
 - Deliverables should be specific and assessable.
+- ${PROFESSIONAL_SPEECH_RULE}
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<
@@ -408,6 +417,7 @@ Requirements:
 - "language" is required only for programming examples (e.g. "python", "javascript", "java", "c", "sql"); omit it for math and general examples.
 - Math problems should include all working steps in "explanation".
 - Code examples must be complete and runnable as-is; use comments to annotate key lines.
+- ${PROFESSIONAL_SPEECH_RULE}
 - Do not include any text outside the JSON object.`;
 
     const response = await fetch(
@@ -757,7 +767,7 @@ COURSE TITLE: ${courseTitle}
 SECTION: ${section.heading}
 GUIDANCE: ${section.hint || "Write appropriate content for this syllabus section."}${templateBlock}${additionalContextBlock}${contextFilesSummary}${contextBlock}
 
-Write the content for the "${section.heading}" section of this syllabus. Be specific, professional, and practical. Use the guidance, the original template, and any previously completed sections for context and consistency. Write only the section content — do not include the heading itself, markdown formatting, or any preamble. ${SYLLABUS_VERTICAL_LIST_REQUIREMENT} ${SYLLABUS_SCHEDULE_REQUIREMENT} If you need to make a late policy, be sure that assignments submitted after the deadline can only earn a maxiumum of 85%, be sure it encourages resubmissions and prevents AI abuse in a way that is not time demanding for the instructor.`;
+Write the content for the "${section.heading}" section of this syllabus. Be specific, professional, and practical. Use the guidance, the original template, and any previously completed sections for context and consistency. Write only the section content — do not include the heading itself, markdown formatting, or any preamble. ${SYLLABUS_VERTICAL_LIST_REQUIREMENT} ${SYLLABUS_SCHEDULE_REQUIREMENT} ${PROFESSIONAL_SPEECH_RULE} If any headings appear, use normal sentence case — never all caps. If you need to make a late policy, be sure that assignments submitted after the deadline can only earn a maxiumum of 85%, be sure it encourages resubmissions and prevents AI abuse in a way that is not time demanding for the instructor.`;
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
       { text: prompt },
@@ -848,6 +858,8 @@ Requirements:
 - Use existing filled sections for consistency.
 - ${SYLLABUS_VERTICAL_LIST_REQUIREMENT}
 - ${SYLLABUS_SCHEDULE_REQUIREMENT}
+- ${PROFESSIONAL_SPEECH_RULE}
+- If any headings appear, use normal sentence case — never all caps.
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
@@ -972,6 +984,8 @@ Requirements:
 - Apply the revision instructions intelligently; leave unaffected sections unchanged.
 - ${SYLLABUS_VERTICAL_LIST_REQUIREMENT}
 - ${SYLLABUS_SCHEDULE_REQUIREMENT}
+- ${PROFESSIONAL_SPEECH_RULE}
+- If any headings appear, use normal sentence case — never all caps.
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
@@ -1083,7 +1097,7 @@ export async function assembleSyllabusFromTemplateAction(
 
 Your task: Reproduce the ENTIRE document, preserving every aspect of the original template's formatting — heading styles, spacing, line breaks, decorators, numbering, and any text that appears between sections or before the first section. For each section, replace only the body content with the generated content below. If a section has no generated content, keep the original placeholder text.
 
-Output ONLY the reconstructed document text — no preamble, no explanation.
+Output ONLY the reconstructed document text — no preamble, no explanation. ${PROFESSIONAL_SPEECH_RULE} Any headings you generate must be in normal sentence case — never all caps.
 
 GENERATED SECTION CONTENT:
 ${sectionsText}`;
@@ -1254,7 +1268,7 @@ export async function selectionChatAction(
     const apiKey = getGeminiApiKey();
     const model = getGeminiModel();
 
-    const systemPrompt = `You are a helpful teaching assistant. The user has highlighted the following text and has a question about it. Answer concisely and helpfully. Use plain prose only — do not use any markdown formatting, bold, italics, bullet points, headers, or special symbols.
+    const systemPrompt = `You are a helpful teaching assistant. The user has highlighted the following text and has a question about it. Answer concisely and helpfully. Use plain prose only — do not use any markdown formatting, bold, italics, bullet points, headers, or special symbols. ${PROFESSIONAL_SPEECH_RULE}
 
 HIGHLIGHTED TEXT:
 """
@@ -1471,6 +1485,8 @@ Assignment structure rules — the prompt MUST specify all of the following:
 - Test/exam weeks (identified from the schedule) must also have their own full assignment folder named "examN" (or "midterm", "final", etc.) containing: an INSTRUCTIONS.md that describes the topics assessed and provides a practice exercise mirroring the exam format, one editable file students complete as a practice exercise, unit tests that verify the practice exercise, and the same frontend-unlock wiring as regular assignments. The project README must also note these weeks and the topics they assess. All instructions must follow the no-terminal rule above.
 
 The prompt you write should be self-contained — someone should be able to paste it directly into GitHub Copilot Agent mode and get a fully scaffolded project back. Be specific about: the repository's top-level file structure, each assignment folder's contents (listing every file by name), the frontend framework and how it is structured, the Vercel configuration, how assignment completion unlocks frontend features, and how the project evolves week by week to match the schedule.
+
+${PROFESSIONAL_SPEECH_RULE} ${DOCUMENT_HEADER_RULES}
 
 Return ONLY the prompt text — no preamble, no explanation, no markdown code fences. Just the raw prompt the teacher will paste into GitHub Copilot.`;
 

@@ -5,6 +5,7 @@ import SpeedDialAction from "@mui/material/SpeedDialAction";
 import SpeedDialIcon from "@mui/material/SpeedDialIcon";
 import AiChatWindow from "./AiChatWindow";
 import DeadlinesWindow from "./DeadlinesWindow";
+import DocxReformatterModal from "./DocxReformatterModal";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
 import type { ChatMessage } from "@/lib/chat/types";
 
@@ -50,6 +51,7 @@ export default function AiChatFab() {
   // Restore open/closed state from localStorage.
   const [chatOpen, setChatOpen] = useState<boolean>(() => readLS("chat-open", false));
   const [deadlinesOpen, setDeadlinesOpen] = useState<boolean>(() => readLS("deadlines-open", false));
+  const [reformatterOpen, setReformatterOpen] = useState(false);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -257,6 +259,14 @@ export default function AiChatFab() {
             }
           }}
         />
+        <SpeedDialAction
+          icon={<DocxIcon />}
+          title="Reformat DOCX Files"
+          onClick={() => {
+            setDialOpen(false);
+            setReformatterOpen(true);
+          }}
+        />
       </SpeedDial>
 
       {chatOpen && (
@@ -282,6 +292,10 @@ export default function AiChatFab() {
           onClose={() => setDeadlinesOpen(false)}
         />
       )}
+
+      {reformatterOpen && (
+        <DocxReformatterModal onClose={() => setReformatterOpen(false)} />
+      )}
     </>
   );
 }
@@ -302,6 +316,27 @@ function CalendarIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
       <path d="M19 4h-1V2h-2v2H8V2H6v2H5C3.89 2 3 2.9 3 4v16c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 18H5V8h14v14z" />
       <path d="M7 10h5v5H7z" />
+    </svg>
+  );
+}
+
+function DocxIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+      <path
+        d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 2v6h6M9 13h6M9 17h6M9 9h1"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

@@ -20,9 +20,13 @@ export interface Database {
           title: string;
           description: string | null;
           term: string | null;
-          schedule: string | null;
+          /** Storage path to the uploaded CSV schedule file. */
+          schedule_file_path: string | null;
+          schedule_file_name: string | null;
           gemini_prompt: string | null;
-          codebase: string | null;
+          /** Storage path to the uploaded ZIP codebase archive. */
+          codebase_file_path: string | null;
+          codebase_file_name: string | null;
         };
         Insert: {
           id?: string;
@@ -31,9 +35,11 @@ export interface Database {
           title: string;
           description?: string | null;
           term?: string | null;
-          schedule?: string | null;
+          schedule_file_path?: string | null;
+          schedule_file_name?: string | null;
           gemini_prompt?: string | null;
-          codebase?: string | null;
+          codebase_file_path?: string | null;
+          codebase_file_name?: string | null;
         };
         Update: {
           id?: string;
@@ -42,9 +48,11 @@ export interface Database {
           title?: string;
           description?: string | null;
           term?: string | null;
-          schedule?: string | null;
+          schedule_file_path?: string | null;
+          schedule_file_name?: string | null;
           gemini_prompt?: string | null;
-          codebase?: string | null;
+          codebase_file_path?: string | null;
+          codebase_file_name?: string | null;
         };
       };
       lectures: {
@@ -53,21 +61,25 @@ export interface Database {
           created_at: string;
           course_id: string;
           title: string;
-          content: string | null;
+          /** Storage path to the uploaded PowerPoint file (.pptx / .ppt). */
+          file_path: string | null;
+          file_name: string | null;
         };
         Insert: {
           id?: string;
           created_at?: string;
           course_id: string;
           title: string;
-          content?: string | null;
+          file_path?: string | null;
+          file_name?: string | null;
         };
         Update: {
           id?: string;
           created_at?: string;
           course_id?: string;
           title?: string;
-          content?: string | null;
+          file_path?: string | null;
+          file_name?: string | null;
         };
       };
       assignment_instructions: {
@@ -76,21 +88,25 @@ export interface Database {
           created_at: string;
           course_id: string;
           title: string;
-          instructions: string | null;
+          /** Storage path to the uploaded Word document (.docx). */
+          file_path: string | null;
+          file_name: string | null;
         };
         Insert: {
           id?: string;
           created_at?: string;
           course_id: string;
           title: string;
-          instructions?: string | null;
+          file_path?: string | null;
+          file_name?: string | null;
         };
         Update: {
           id?: string;
           created_at?: string;
           course_id?: string;
           title?: string;
-          instructions?: string | null;
+          file_path?: string | null;
+          file_name?: string | null;
         };
       };
       module_introductions: {
@@ -99,21 +115,25 @@ export interface Database {
           created_at: string;
           course_id: string;
           title: string;
-          content: string | null;
+          /** Storage path to the uploaded Word document (.docx). */
+          file_path: string | null;
+          file_name: string | null;
         };
         Insert: {
           id?: string;
           created_at?: string;
           course_id: string;
           title: string;
-          content?: string | null;
+          file_path?: string | null;
+          file_name?: string | null;
         };
         Update: {
           id?: string;
           created_at?: string;
           course_id?: string;
           title?: string;
-          content?: string | null;
+          file_path?: string | null;
+          file_name?: string | null;
         };
       };
       ai_chat_messages: {

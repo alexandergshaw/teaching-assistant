@@ -342,6 +342,7 @@ export default function LecturePlanningTab() {
     setIsDownloading(true);
     try {
       const { default: JSZip } = await import("jszip");
+      const { default: PptxGenJS } = await import("pptxgenjs");
 
       const outputZip = new JSZip();
 

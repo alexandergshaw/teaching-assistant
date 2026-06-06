@@ -34,7 +34,18 @@ async function buildDocxFromPlainText(text: string): Promise<ArrayBuffer> {
     } else if (/^[-•*]\s+/.test(trimmed)) {
       children.push(new Paragraph({ children: [new TextRun({ text: trimmed.slice(trimmed.indexOf(" ") + 1), font: FONT, color: COLOR })], bullet: { level: 0 } }));
     } else {
-      children.push(new Paragraph({ children: [new TextRun({ text: trimmed, font: FONT, color: COLOR })] }));
+      // Bold a leading "Label:" pattern if the paragraph starts with one.
+      const labelMatch = trimmed.match(/^([A-Za-z][^:\n]{1,59}):\s+([\s\S]+)/);
+      if (labelMatch) {
+        children.push(new Paragraph({
+          children: [
+            new TextRun({ text: labelMatch[1] + ":", font: FONT, color: COLOR, bold: true }),
+            new TextRun({ text: " " + labelMatch[2], font: FONT, color: COLOR }),
+          ],
+        }));
+      } else {
+        children.push(new Paragraph({ children: [new TextRun({ text: trimmed, font: FONT, color: COLOR })] }));
+      }
     }
   }
 

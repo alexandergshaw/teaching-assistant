@@ -54,6 +54,13 @@ export async function POST(req: NextRequest) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          systemInstruction: {
+            parts: [
+              {
+                text: "You are a helpful teaching assistant. Write in professional, natural human speech — not AI-sounding. Avoid filler phrases like 'Certainly!', 'Great question!', 'Of course!', 'Absolutely!', or 'It's worth noting that'. If your response uses headers, follow this hierarchy only: document title, then H1, then H2, then bold text for sub-points. Never go deeper than bold text. All headers must be in normal sentence case — never all caps.",
+              },
+            ],
+          },
           contents,
           generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
         }),

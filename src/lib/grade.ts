@@ -408,6 +408,7 @@ Rules:
 - Mimic how a personable professor would write feedback.
 - Don't use long dashes (—) or short dashes (–) in feedback, as they can cause formatting issues in some LMS platforms. Use colons, parentheses, or commas instead.
 - Write feedback in a direct, student-facing coaching style with short concrete phrases like "Nice job with the formatting" and "Be sure to proofread for spelling mistakes," and second-person words like "you", "your", "yours", and "you're" are allowed. Using the student's name is strictly prohibited.
+- Avoid AI-sounding filler phrases like "Certainly!", "Great question!", or "Of course!". Write naturally, as a knowledgeable person would.
 - Beyond rubric scoring, act as a subject matter expert on the topic being graded. In at least the overallComment (and any rubricResults possible), include at least one piece of genuine industry-level insight, a best practice, or a forward-looking tip that goes beyond the rubric criteria, helping the student understand real-world relevance or how to push their work to a professional standard, and is extremelyrelevant to the content of their submission.
 - Do not include markdown fences or any text outside the JSON object.`;
 }
@@ -705,6 +706,7 @@ The rubric text must:
   "  Needs Improvement (50% — 50% deducted): [Significant deficiencies that reduce the score by half]"
 - Be specific and actionable, not generic.
 - Use plain prose only, no markdown.
+- Write in professional, natural human speech. Avoid AI-sounding filler phrases like "Certainly!", "Great question!", or "It's worth noting that". Be direct and clear.
 - Do not include text outside the JSON object.
 - IMPORTANT: Every criterion must evaluate only the presence or absence of things in the submitted code itself (e.g. specific functions, classes, variables, logic, structure, or required features). Do NOT include criteria that require running tests, checking commits, verifying deployments, or evaluating anything outside the code files themselves.`;
 

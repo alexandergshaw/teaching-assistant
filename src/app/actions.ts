@@ -11,6 +11,7 @@ import { OfficeParser, type SupportedFileType } from "officeparser";
 import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
+import type { AttachedFile } from "@/lib/chat/types";
 
 export interface SlideData {
   title: string;
@@ -1248,7 +1249,8 @@ export async function selectionChatAction(
   selectedText: string,
   question: string,
   history: SelectionChatMessage[],
-  sessionId: string
+  sessionId: string,
+  fileAttachments: AttachedFile[] = []
 ): Promise<string | { error: string }> {
   try {
     const apiKey = getGeminiApiKey();
@@ -1261,11 +1263,27 @@ HIGHLIGHTED TEXT:
 ${selectedText}
 """`;
 
+    type GeminiPart =
+      | { text: string }
+      | { inline_data: { mime_type: string; data: string } };
+
+    const buildFileParts = (files: AttachedFile[]): GeminiPart[] =>
+      files.map((f) =>
+        f.isText
+          ? { text: `\n\n[Attached file: ${f.name}]\n${f.data}` }
+          : { inline_data: { mime_type: f.mimeType, data: f.data } }
+      );
+
+    const lastUserParts: GeminiPart[] = [
+      { text: question },
+      ...buildFileParts(fileAttachments),
+    ];
+
     const contents = [
       { role: "user" as const, parts: [{ text: systemPrompt }] },
       { role: "model" as const, parts: [{ text: "Understood. I'll answer questions about the highlighted text in plain prose with no formatting." }] },
       ...history.map((m) => ({ role: m.role as "user" | "model", parts: [{ text: m.text }] })),
-      { role: "user" as const, parts: [{ text: question }] },
+      { role: "user" as const, parts: lastUserParts },
     ];
 
     const response = await fetch(

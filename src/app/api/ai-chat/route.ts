@@ -2,17 +2,31 @@ import { NextRequest, NextResponse } from "next/server";
 import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
-import type { ChatMessage } from "@/lib/chat/types";
+import type { AttachedFile, ChatMessage } from "@/lib/chat/types";
 
 interface RequestBody {
   messages: ChatMessage[];
   sessionId: string;
+  fileAttachments?: AttachedFile[];
+}
+
+type GeminiPart =
+  | { text: string }
+  | { inline_data: { mime_type: string; data: string } };
+
+function buildFileParts(files: AttachedFile[]): GeminiPart[] {
+  return files.map((f) => {
+    if (f.isText) {
+      return { text: `\n\n[Attached file: ${f.name}]\n${f.data}` };
+    }
+    return { inline_data: { mime_type: f.mimeType, data: f.data } };
+  });
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as RequestBody;
-    const { messages, sessionId } = body;
+    const { messages, sessionId, fileAttachments = [] } = body;
 
     if (!Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json({ error: "messages is required" }, { status: 400 });
@@ -21,10 +35,18 @@ export async function POST(req: NextRequest) {
     const apiKey = getGeminiApiKey();
     const model = getGeminiModel();
 
-    const contents = messages.map((m) => ({
-      role: m.role === "assistant" ? ("model" as const) : ("user" as const),
-      parts: [{ text: m.text }],
-    }));
+    const contents = messages.map((m, i) => {
+      const isLastUser = m.role === "user" && i === messages.length - 1;
+      const textPart: GeminiPart = { text: m.text };
+      const parts: GeminiPart[] =
+        isLastUser && fileAttachments.length > 0
+          ? [textPart, ...buildFileParts(fileAttachments)]
+          : [textPart];
+      return {
+        role: m.role === "assistant" ? ("model" as const) : ("user" as const),
+        parts,
+      };
+    });
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,

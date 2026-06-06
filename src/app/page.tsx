@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
 import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData } from "./actions";
 import CoursePlanningTab from "./components/CoursePlanningTab";
+import CourseLibraryTab from "./components/CourseLibraryTab";
 import GradingTab from "./components/GradingTab";
 import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
@@ -16,7 +17,7 @@ import { parseGeneratedRubric } from "./utils/rubric";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "grading" | "lesson-planning" | "course-planning";
+type ActiveTab = "grading" | "lesson-planning" | "course-planning" | "course-library";
 
 function getCommentPrefix(language?: string): string {
   const lang = (language ?? "").toLowerCase();
@@ -70,7 +71,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "lesson-planning";
     const saved = localStorage.getItem("ta-active-tab");
-    return saved === "grading" || saved === "lesson-planning" || saved === "course-planning" ? saved : "lesson-planning";
+    return saved === "grading" || saved === "lesson-planning" || saved === "course-planning" || saved === "course-library" ? (saved as ActiveTab) : "lesson-planning";
   });
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
@@ -487,6 +488,7 @@ export default function Home() {
           <Tab label="New Build Courses" value="course-planning" disableRipple />
           <Tab label="Pre Built Courses" value="lesson-planning" disableRipple />
           <Tab label="Grading" value="grading" disableRipple />
+          <Tab label="Course Library" value="course-library" disableRipple />
         </Tabs>
 
         {activeTab === "grading" && (
@@ -520,6 +522,10 @@ export default function Home() {
             isGeneratingLesson={isGeneratingLesson}
             onGenerate={handleGenerateLesson}
           />
+        )}
+
+        {activeTab === "course-library" && (
+          <CourseLibraryTab />
         )}
       </div>
 

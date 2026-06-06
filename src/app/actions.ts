@@ -15,6 +15,7 @@ import type { AttachedFile } from "@/lib/chat/types";
 import {
   PROFESSIONAL_SPEECH_RULE,
   DOCUMENT_HEADER_RULES,
+  NO_MARKDOWN_SYNTAX_RULE,
   DOCUMENT_LABEL_BOLD_RULE,
   DOCUMENT_SECTION_NEWLINE_RULE,
   normalizeHeadingSpacing,
@@ -775,7 +776,7 @@ COURSE TITLE: ${courseTitle}
 SECTION: ${section.heading}
 GUIDANCE: ${section.hint || "Write appropriate content for this syllabus section."}${templateBlock}${additionalContextBlock}${contextFilesSummary}${contextBlock}
 
-Write the content for the "${section.heading}" section of this syllabus. Be specific, professional, and practical. Use the guidance, the original template, and any previously completed sections for context and consistency. Write only the section content — do not include the heading itself, markdown formatting, or any preamble. ${SYLLABUS_VERTICAL_LIST_REQUIREMENT} ${SYLLABUS_SCHEDULE_REQUIREMENT} ${PROFESSIONAL_SPEECH_RULE} If any headings appear, use normal sentence case — never all caps. If you need to make a late policy, be sure that assignments submitted after the deadline can only earn a maxiumum of 85%, be sure it encourages resubmissions and prevents AI abuse in a way that is not time demanding for the instructor.`;
+Write the content for the "${section.heading}" section of this syllabus. Be specific, professional, and practical. Use the guidance, the original template, and any previously completed sections for context and consistency. Write only the section content — do not include the heading itself, markdown formatting, or any preamble. ${SYLLABUS_VERTICAL_LIST_REQUIREMENT} ${SYLLABUS_SCHEDULE_REQUIREMENT} ${PROFESSIONAL_SPEECH_RULE} ${NO_MARKDOWN_SYNTAX_RULE} If any headings appear, use Title Case — never all caps and never sentence case — and never include a colon in a heading. If you need to make a late policy, be sure that assignments submitted after the deadline can only earn a maxiumum of 85%, be sure it encourages resubmissions and prevents AI abuse in a way that is not time demanding for the instructor.`;
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
       { text: prompt },
@@ -1105,7 +1106,7 @@ export async function assembleSyllabusFromTemplateAction(
 
 Your task: Reproduce the ENTIRE document, preserving every aspect of the original template's formatting — heading styles, spacing, line breaks, decorators, numbering, and any text that appears between sections or before the first section. For each section, replace only the body content with the generated content below. If a section has no generated content, keep the original placeholder text.
 
-Output ONLY the reconstructed document text — no preamble, no explanation. ${PROFESSIONAL_SPEECH_RULE} Any headings you generate must be in normal sentence case — never all caps.
+Output ONLY the reconstructed document text — no preamble, no explanation. ${PROFESSIONAL_SPEECH_RULE} ${NO_MARKDOWN_SYNTAX_RULE} Any headings you generate must be in Title Case — never all caps and never sentence case — and must never contain a colon.
 
 GENERATED SECTION CONTENT:
 ${sectionsText}`;

@@ -4,6 +4,7 @@ import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
 import {
   PROFESSIONAL_SPEECH_RULE,
   DOCUMENT_HEADER_RULES,
+  NO_MARKDOWN_SYNTAX_RULE,
   DOCUMENT_LABEL_BOLD_RULE,
   DOCUMENT_SECTION_NEWLINE_RULE,
   normalizeHeadingSpacing,
@@ -121,8 +122,9 @@ async function reformatTextWithGemini(text: string): Promise<string> {
     "FORMATTING RULES:",
     `1. ${PROFESSIONAL_SPEECH_RULE}`,
     `2. ${DOCUMENT_HEADER_RULES}`,
-    `3. ${DOCUMENT_LABEL_BOLD_RULE}`,
-    `4. ${DOCUMENT_SECTION_NEWLINE_RULE}`,
+    `3. ${NO_MARKDOWN_SYNTAX_RULE}`,
+    `4. ${DOCUMENT_LABEL_BOLD_RULE}`,
+    `5. ${DOCUMENT_SECTION_NEWLINE_RULE}`,
     "",
     "Return only the reformatted document text. Do not add commentary, explanations, or any text that was not in the original.",
   ].join("\n");

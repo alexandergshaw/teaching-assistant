@@ -18,6 +18,9 @@ const PROFESSIONAL_SPEECH_RULE =
 const DOCUMENT_HEADER_RULES =
   "When using headers, follow this hierarchy only: document title (Title), then H1, then H2, then bold text for sub-points. Do not use H3 or any deeper heading levels. All headers must be in normal sentence case — never all caps.";
 
+const DOCUMENT_LABEL_BOLD_RULE =
+  "Whenever a sentence or paragraph begins with a label followed by a colon (e.g., 'Social Media Feeds: When you open an app like Instagram...'), that label and its colon must be bolded. This applies to any short descriptive label at the start of a sentence or paragraph before a colon.";
+
 export interface SlideData {
   title: string;
   bullets: string[];
@@ -1769,7 +1772,8 @@ Write a well-formatted module introduction for the week this assignment covers. 
 4. Be written in clear, motivating language appropriate for undergraduate students.
 5. Use plain text formatting with clear section headings (no markdown symbols like # or *).
 
-Do not include the assignment instructions or grading criteria — focus only on introducing the module topic.`;
+Do not include the assignment instructions or grading criteria — focus only on introducing the module topic.
+${DOCUMENT_LABEL_BOLD_RULE}`;
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -1824,7 +1828,8 @@ Using the README content above, write a complete, student-facing assignment inst
 5. Use plain text formatting with clear section headings (no markdown symbols like # or *).
 6. Write in clear, direct language appropriate for undergraduate students.
 
-Do not invent requirements not present in the README. If the README is sparse, note that students should refer to the course discussion board for clarification.`;
+Do not invent requirements not present in the README. If the README is sparse, note that students should refer to the course discussion board for clarification.
+${DOCUMENT_LABEL_BOLD_RULE}`;
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,

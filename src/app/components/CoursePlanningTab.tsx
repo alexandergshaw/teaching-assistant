@@ -1184,7 +1184,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                 type="button"
                 className={styles.submitButton}
                 onClick={handleGenerateE2e}
-                disabled={isGeneratingE2e || !courseDescription.trim() || !scheduleTerm.trim() || !scheduleStartDate || !scheduleWeeks || !scheduleTests}
+                disabled={isGeneratingE2e || !e2eCourseName.trim() || !courseDescription.trim() || !scheduleTerm.trim() || !scheduleStartDate || !scheduleWeeks || !scheduleTests}
               >
                 {isGeneratingE2e ? "Generating…" : "Generate"}
               </button>

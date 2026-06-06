@@ -5,7 +5,7 @@ import { selectionChatAction } from "../actions";
 import styles from "../page.module.css";
 import AiChatWindow from "./AiChatWindow";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
-import type { ChatMessage } from "@/lib/chat/types";
+import type { AttachedFile, ChatMessage } from "@/lib/chat/types";
 
 interface SelectionPos {
   text: string;
@@ -109,7 +109,7 @@ export default function SelectionChatWidget() {
     setError(null);
   };
 
-  const handleSend = useCallback(async (text: string) => {
+  const handleSend = useCallback(async (text: string, files: AttachedFile[]) => {
     if (!chat || isLoading) return;
     const nextMessages: ChatMessage[] = [...messages, { role: "user", text }];
     setMessages(nextMessages);
@@ -122,7 +122,8 @@ export default function SelectionChatWidget() {
       text,
       // Map to the "user" | "model" shape the server action expects.
       messages.map((m) => ({ role: m.role === "assistant" ? "model" : m.role, text: m.text })),
-      sessionIdRef.current
+      sessionIdRef.current,
+      files
     );
     setIsLoading(false);
 

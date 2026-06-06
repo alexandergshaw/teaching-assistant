@@ -13,6 +13,7 @@ import {
   type SyllabusSection,
   type CourseScheduleRow,
 } from "../actions";
+import { saveEndToEndCourseAction } from "../courseActions";
 import SyllabusPreviewModal from "./SyllabusPreviewModal";
 import LecturePlanningTab from "./LecturePlanningTab";
 import styles from "../page.module.css";
@@ -250,6 +251,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [e2eError, setE2eError] = useState<string | null>(null);
   const [e2eGenerated, setE2eGenerated] = useState(false);
   const [e2eCopilotPrompt, setE2eCopilotPrompt] = useState<string | null>(null);
+  const [e2eSaveStatus, setE2eSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [e2eSaveError, setE2eSaveError] = useState<string | null>(null);
 
   // Local storage keys
   const LS_KEYS = {
@@ -416,6 +419,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setIsGeneratingE2e(true);
     setE2eError(null);
     setE2eCopilotPrompt(null);
+    setE2eSaveStatus("idle");
+    setE2eSaveError(null);
     try {
       const scheduleResult = await generateCourseScheduleAction(
         courseDescription.trim(),
@@ -442,12 +447,33 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       ];
       const csvContent = csvLines.join("\r\n");
       const sanitized =
+        e2eCourseName.trim().slice(0, 60).replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
         courseDescription.split("\n")[0].trim().slice(0, 60).replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
       const promptResult = await generateCopilotProjectPromptAction(csvContent, `${sanitized}_schedule.csv`);
+      let geminiPrompt: string | null = null;
       if ("error" in promptResult) {
         setE2eError(promptResult.error);
       } else {
+        geminiPrompt = promptResult.prompt;
         setE2eCopilotPrompt(promptResult.prompt);
+      }
+
+      // Persist the course and its schedule to the database so it appears in
+      // the Course Library tab.
+      setE2eSaveStatus("saving");
+      const saveResult = await saveEndToEndCourseAction({
+        title: e2eCourseName.trim(),
+        description: e2eCourseDescription.trim(),
+        term: e2eScheduleTerm.trim(),
+        scheduleCsv: csvContent,
+        scheduleFileName: `${sanitized}_schedule.csv`,
+        geminiPrompt,
+      });
+      if ("error" in saveResult) {
+        setE2eSaveStatus("error");
+        setE2eSaveError(saveResult.error);
+      } else {
+        setE2eSaveStatus("saved");
       }
     } catch (err) {
       setE2eError(err instanceof Error ? err.message : "Failed to generate End to End output.");
@@ -461,6 +487,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setE2eRows([]);
     setE2eError(null);
     setE2eCopilotPrompt(null);
+    setE2eSaveStatus("idle");
+    setE2eSaveError(null);
   };
 
   const handleExportE2eCsv = () => {
@@ -1078,6 +1106,17 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
           {planningMode === "e2e" && !e2eGenerated && (
             <>
               <div className={styles.field}>
+                <label htmlFor="e2eCourseName">Course Name</label>
+                <input
+                  id="e2eCourseName"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. Introduction to Python"
+                  value={e2eCourseName}
+                  onChange={(e) => { setE2eCourseName(e.target.value); localStorage.setItem(LS_KEYS.e2eCourseName, e.target.value); }}
+                />
+              </div>
+              <div className={styles.field}>
                 <label htmlFor="e2eCourseDescription">Course Description</label>
                 <textarea
                   id="e2eCourseDescription"
@@ -1188,6 +1227,15 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                 </button>
               </div>
               {e2eError && <p className={styles.error}>{e2eError}</p>}
+              {e2eSaveStatus === "saving" && (
+                <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", marginTop: 16 }}>Saving course to the Course Library…</p>
+              )}
+              {e2eSaveStatus === "saved" && (
+                <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", marginTop: 16 }}>Saved to the Course Library.</p>
+              )}
+              {e2eSaveStatus === "error" && e2eSaveError && (
+                <p className={styles.error}>Could not save to the Course Library: {e2eSaveError}</p>
+              )}
               {isGeneratingE2e && !e2eCopilotPrompt && (
                 <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", marginTop: 16 }}>Generating GitHub Copilot prompt…</p>
               )}

@@ -43,11 +43,51 @@ async function extractDocxText(buffer: Buffer): Promise<string | null> {
 
 // ── DOCX builder ──────────────────────────────────────────────────────────────
 
+/**
+ * Removes inline markdown emphasis markers (**bold**, __bold__, *italic*,
+ * _italic_) and returns the plain text, used for headings where the whole
+ * line is rendered with explicit formatting.
+ */
+function stripInlineMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/(^|[^*])\*(?!\s)([^*]+?)\*(?!\*)/g, "$1$2")
+    .replace(/(^|[^_])_(?!\s)([^_]+?)_(?!_)/g, "$1$2");
+}
+
 async function buildDocxFromPlainText(text: string): Promise<Buffer> {
-  const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import("docx");
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = await import("docx");
 
   const FONT = "Times New Roman";
   const COLOR = "000000";
+
+  type RunOptions = { font: string; color: string; bold?: boolean };
+
+  // Converts a line that may contain inline markdown bold markers (**text** or
+  // __text__) into a sequence of TextRuns with the emphasised segments actually
+  // bolded, rather than leaving the literal asterisks/underscores in the output.
+  const buildInlineRuns = (content: string, base: RunOptions): InstanceType<typeof TextRun>[] => {
+    const runs: InstanceType<typeof TextRun>[] = [];
+    const regex = /\*\*(.+?)\*\*|__(.+?)__/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(content)) !== null) {
+      if (match.index > lastIndex) {
+        runs.push(new TextRun({ ...base, text: content.slice(lastIndex, match.index) }));
+      }
+      const boldText = match[1] ?? match[2] ?? "";
+      runs.push(new TextRun({ ...base, text: boldText, bold: true }));
+      lastIndex = regex.lastIndex;
+    }
+    if (lastIndex < content.length) {
+      runs.push(new TextRun({ ...base, text: content.slice(lastIndex) }));
+    }
+    if (runs.length === 0) {
+      runs.push(new TextRun({ ...base, text: content }));
+    }
+    return runs;
+  };
 
   const children: InstanceType<typeof Paragraph>[] = [];
   const lines = text.split("\n");
@@ -67,40 +107,42 @@ async function buildDocxFromPlainText(text: string): Promise<Buffer> {
       firstHeadingFound = true;
       children.push(
         new Paragraph({
-          children: [new TextRun({ text: trimmed, font: FONT, color: COLOR, bold: true })],
+          children: [
+            new TextRun({ text: stripInlineMarkdown(trimmed), font: FONT, color: COLOR, bold: true }),
+          ],
           heading: level,
+          alignment: AlignmentType.CENTER,
         })
       );
     } else if (/^\d+\.\s+/.test(trimmed)) {
       children.push(
         new Paragraph({
-          children: [new TextRun({ text: trimmed.replace(/^\d+\.\s+/, ""), font: FONT, color: COLOR })],
+          children: buildInlineRuns(trimmed.replace(/^\d+\.\s+/, ""), { font: FONT, color: COLOR }),
           bullet: { level: 0 },
         })
       );
     } else if (/^[-•*]\s+/.test(trimmed)) {
       children.push(
         new Paragraph({
-          children: [
-            new TextRun({ text: trimmed.slice(trimmed.indexOf(" ") + 1), font: FONT, color: COLOR }),
-          ],
+          children: buildInlineRuns(trimmed.slice(trimmed.indexOf(" ") + 1), { font: FONT, color: COLOR }),
           bullet: { level: 0 },
         })
       );
     } else {
-      const labelMatch = trimmed.match(/^([A-Za-z][^:\n]{1,59}):\s+([\s\S]+)/);
+      const labelMatch = trimmed.match(/^(?:\*\*|__)?([A-Za-z][^:\n]{1,59}?)(?:\*\*|__)?:\s+([\s\S]+)/);
       if (labelMatch) {
         children.push(
           new Paragraph({
             children: [
-              new TextRun({ text: labelMatch[1] + ":", font: FONT, color: COLOR, bold: true }),
-              new TextRun({ text: " " + labelMatch[2], font: FONT, color: COLOR }),
+              new TextRun({ text: stripInlineMarkdown(labelMatch[1]) + ":", font: FONT, color: COLOR, bold: true }),
+              new TextRun({ text: " ", font: FONT, color: COLOR }),
+              ...buildInlineRuns(labelMatch[2], { font: FONT, color: COLOR }),
             ],
           })
         );
       } else {
         children.push(
-          new Paragraph({ children: [new TextRun({ text: trimmed, font: FONT, color: COLOR })] })
+          new Paragraph({ children: buildInlineRuns(trimmed, { font: FONT, color: COLOR }) })
         );
       }
     }
@@ -130,7 +172,15 @@ async function reformatTextWithGemini(text: string, templateText?: string): Prom
   if (templateText) {
     systemPromptLines.push(
       "",
-      "A TEMPLATE document is provided below. Use it as the reference for the desired structure, layout, section ordering, headings, tone, and overall formatting style. Match the template's structure and style as closely as possible while preserving the original document's actual content. Do not copy the template's content into the output — only mirror its formatting and organisation.",
+      "A TEMPLATE document is provided below. You MUST follow it strictly as the authoritative reference for structure, layout, section ordering, headings, tone, and overall formatting style.",
+      "Strict template requirements:",
+      "- Reproduce the template's section headings, in the same order, using the exact heading wording where the template defines fixed section names.",
+      "- Match the template's hierarchy of headings and sub-points exactly (which sections are headings vs. bold labels vs. body text).",
+      "- Match the template's tone, phrasing conventions, and overall organisation.",
+      "- Headings must be written on their own line with a blank line before and after so they are rendered as actual centered headings — never inline and never with markdown symbols.",
+      "- Apply emphasis as real bold text. Never output literal '**' or '__' around words; the label/bold content must be plain words that the formatter will render bold.",
+      "- Preserve the original document's actual content and facts. Do NOT copy the template's example content into the output — only mirror its formatting and organisation.",
+      "If the source document is missing a section the template defines, only include it when the source contains relevant content for it; never invent content to fill the template.",
       "",
       "TEMPLATE DOCUMENT:",
       templateText

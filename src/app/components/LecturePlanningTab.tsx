@@ -31,10 +31,10 @@ async function buildDocxFromPlainText(
   const hasTemplate = Array.isArray(templateHeadings) && templateHeadings.length > 0;
   const allowedHeadings = new Set((templateHeadings ?? []).map(normalizeHeading));
 
-  // Build the runs for a bullet item. When the line begins with a short label
-  // followed by a colon (e.g. "Encapsulation: hides internal state"), the label
-  // and its colon are bolded and the remainder is left as normal text.
-  const buildBulletRuns = (content: string): InstanceType<typeof TextRun>[] => {
+  // Build the runs for a line of body text. When the line begins with a short
+  // label followed by a colon (e.g. "Encapsulation: hides internal state"), the
+  // label and its colon are bolded and the remainder is left as normal text.
+  const buildLabeledRuns = (content: string): InstanceType<typeof TextRun>[] => {
     const labelMatch = content.match(/^([^:\n]{1,80}:)(\s[\s\S]*)?$/);
     if (labelMatch) {
       const runs = [
@@ -94,11 +94,11 @@ async function buildDocxFromPlainText(
         })
       );
     } else if (/^\d+\.\s+/.test(trimmed)) {
-      children.push(new Paragraph({ children: buildBulletRuns(trimmed.replace(/^\d+\.\s+/, "")), bullet: { level: 0 } }));
+      children.push(new Paragraph({ children: buildLabeledRuns(trimmed.replace(/^\d+\.\s+/, "")), bullet: { level: 0 } }));
     } else if (/^[-•*]\s+/.test(trimmed)) {
-      children.push(new Paragraph({ children: buildBulletRuns(trimmed.slice(trimmed.indexOf(" ") + 1)), bullet: { level: 0 } }));
+      children.push(new Paragraph({ children: buildLabeledRuns(trimmed.slice(trimmed.indexOf(" ") + 1)), bullet: { level: 0 } }));
     } else {
-      children.push(new Paragraph({ children: [new TextRun({ text: trimmed, font: FONT, color: COLOR })] }));
+      children.push(new Paragraph({ children: buildLabeledRuns(trimmed) }));
     }
   }
 

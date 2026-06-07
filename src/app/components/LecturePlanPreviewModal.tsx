@@ -23,9 +23,9 @@ function isHeadingLine(line: string): boolean {
   return words.length <= 8;
 }
 
-// Render bullet content, bolding a leading short label that ends in a colon
+// Render body content, bolding a leading short label that ends in a colon
 // (e.g. "Encapsulation: hides internal state").
-function renderBulletContent(content: string): ReactNode {
+function renderLabeledContent(content: string): ReactNode {
   const labelMatch = content.match(/^([^:\n]{1,80}:)(\s[\s\S]*)?$/);
   if (labelMatch) {
     return (
@@ -48,7 +48,7 @@ function PlainTextSection({ text }: { text: string }) {
     if (paragraph.length > 0) {
       elements.push(
         <p key={`p-${elements.length}`} className={styles.introText}>
-          {paragraph.join(" ")}
+          {renderLabeledContent(paragraph.join(" "))}
         </p>
       );
       paragraph = [];
@@ -102,7 +102,7 @@ function PlainTextSection({ text }: { text: string }) {
       flushParagraph();
       elements.push(
         <p key={`li-${elements.length}`} className={styles.introText}>
-          {renderBulletContent(listMatch[1].trim())}
+          {renderLabeledContent(listMatch[1].trim())}
         </p>
       );
       return;

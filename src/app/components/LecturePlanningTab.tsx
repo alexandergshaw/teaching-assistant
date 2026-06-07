@@ -217,6 +217,9 @@ export default function LecturePlanningTab() {
         if (plan.assignmentInstructions) {
           outputZip.file(`${safeName}_assignment_instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions));
         }
+        if (plan.externalResources) {
+          outputZip.file(`${safeName}_external_resources.docx`, await buildDocxFromPlainText(plan.externalResources));
+        }
       }
 
       const blob = await outputZip.generateAsync({ type: "blob" });
@@ -362,6 +365,7 @@ export default function LecturePlanningTab() {
               badges.push(`${plan.slides.length + 1} slide${plan.slides.length !== 0 ? "s" : ""}`);
               if (plan.moduleIntroduction) badges.push("Module Intro");
               if (plan.assignmentInstructions) badges.push("Instructions");
+              if (plan.externalResources) badges.push("Resources");
               return (
                 <li
                   key={plan.assignmentName}

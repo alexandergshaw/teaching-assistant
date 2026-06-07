@@ -1644,6 +1644,7 @@ export interface AssignmentPlan {
   slides: SlideData[];
   moduleIntroduction: string;
   assignmentInstructions: string;
+  externalResources: string;
 }
 
 async function generateSlidesForAssignment(
@@ -1836,6 +1837,71 @@ Do not invent requirements not present in the README. If the README is sparse, n
 
   if (!result.trim()) {
     return { error: `Assignment instructions generation returned empty response for "${assignmentName}".` };
+  }
+
+  return { text: result.trim() };
+}
+
+async function generateExternalResourcesForAssignment(
+  assignmentName: string,
+  content: string
+): Promise<{ text: string } | { error: string }> {
+  const apiKey = getGeminiApiKey();
+  const model = getGeminiModel();
+
+  const prompt = `You are an expert educator curating a weekly external resources guide for a programming course.
+
+ASSIGNMENT / WEEK: ${assignmentName}
+
+ASSIGNMENT CONTENT:
+${content}
+
+Using the assignment content above, create a student-facing document of FREE external resources only.
+
+Required structure (plain text with section headings, no markdown symbols):
+1. "Weekly Focus" section (2-4 sentences) summarizing what students should learn this week.
+2. "Essential Tutorials" section with at least 4 resources.
+3. "Official Documentation" section with at least 3 resources.
+4. "Practice and Reference" section with at least 3 resources.
+5. "Suggested Learning Order" section with a short step-by-step path through the resources.
+
+For every resource include:
+- Resource title
+- URL
+- Why it helps for this assignment (1-2 concise sentences)
+
+Hard requirements:
+- Every resource must be freely accessible (no paid-only content).
+- Prefer high-quality sources (official docs, MDN, Python docs, freeCodeCamp, Microsoft Learn, university/open course material, reputable blog tutorials).
+- Keep language concise and practical for undergraduate students.
+- Do not include assignment instructions or grading criteria.`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 3072 },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    return { error: `Gemini API error for external resources "${assignmentName}": HTTP ${response.status} — ${body.slice(0, 200)}` };
+  }
+
+  const data = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+
+  const result =
+    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+  if (!result.trim()) {
+    return { error: `External resources generation returned empty response for "${assignmentName}".` };
   }
 
   return { text: result.trim() };
@@ -2116,13 +2182,14 @@ export async function generateLecturePlansAction(
       return { error: "No readable text content found in the assignment folders." };
     }
 
-    // Generate slides, module intro, and assignment instructions for each assignment in parallel
+    // Generate slides and companion documents for each assignment in parallel.
     const results = await Promise.all(
       assignmentContents.map(async ({ name, content, readmeContent }) => {
-        const [slidesResult, introResult, instructionsResult] = await Promise.all([
+        const [slidesResult, introResult, instructionsResult, externalResourcesResult] = await Promise.all([
           generateSlidesForAssignment(name, content, lectureDurationMinutes),
           generateModuleIntroForAssignment(name, content),
           generateAssignmentInstructionsForAssignment(name, readmeContent),
+          generateExternalResourcesForAssignment(name, content),
         ]);
         if ("error" in slidesResult) return null;
         return {
@@ -2130,6 +2197,7 @@ export async function generateLecturePlansAction(
           ...slidesResult,
           moduleIntroduction: "error" in introResult ? "" : introResult.text,
           assignmentInstructions: "error" in instructionsResult ? "" : instructionsResult.text,
+          externalResources: "error" in externalResourcesResult ? "" : externalResourcesResult.text,
         } satisfies AssignmentPlan;
       })
     );

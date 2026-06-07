@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { AssignmentPlan } from "../actions";
 import styles from "../page.module.css";
 
-type Tab = "slides" | "intro" | "instructions";
+type Tab = "slides" | "intro" | "instructions" | "resources";
 
 type LecturePlanPreviewModalProps = {
   plan: AssignmentPlan;
@@ -29,6 +29,7 @@ export default function LecturePlanPreviewModal({ plan, onClose }: LecturePlanPr
     { id: "slides", label: `Slides (${plan.slides.length + 1})` },
     { id: "intro", label: "Module Intro", hidden: !plan.moduleIntroduction },
     { id: "instructions", label: "Assignment Instructions", hidden: !plan.assignmentInstructions },
+    { id: "resources", label: "External Resources", hidden: !plan.externalResources },
   ];
 
   return (
@@ -103,6 +104,15 @@ export default function LecturePlanPreviewModal({ plan, onClose }: LecturePlanPr
             <div className={styles.assignmentSection}>
               <p className={styles.assignmentSectionLabel}>Assignment Instructions</p>
               <PlainTextSection text={plan.assignmentInstructions} />
+            </div>
+          </div>
+        )}
+
+        {activeTab === "resources" && plan.externalResources && (
+          <div className={styles.assignmentContent}>
+            <div className={styles.assignmentSection}>
+              <p className={styles.assignmentSectionLabel}>External Resources</p>
+              <PlainTextSection text={plan.externalResources} />
             </div>
           </div>
         )}

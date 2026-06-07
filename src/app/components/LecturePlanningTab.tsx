@@ -88,7 +88,7 @@ async function buildDocxFromPlainText(
       // Every heading after the first (the title) gets a blank line above it.
       children.push(
         new Paragraph({
-          children: [new TextRun({ text: headingText, font: FONT, color: COLOR, bold: true })],
+          children: [new TextRun({ text: headingText.toUpperCase(), font: FONT, color: COLOR, bold: true })],
           heading: level,
           ...(isTitle ? {} : { spacing: { before: 240 } }),
         })

@@ -27,11 +27,7 @@ function PlainTextSection({ text }: { text: string }) {
   const lines = text.split(/\n/);
   const elements: ReactNode[] = [];
   let paragraph: string[] = [];
-  let isFirstHeading = true;
-
-  // If the document uses markdown heading markers, rely on them: the first
-  // level-1 (#) heading is the title and everything else is a section heading.
-  const hasMarkdownHeadings = lines.some((l) => /^#{1,6}\s+/.test(l.trim()));
+  let firstHeadingFound = false;
 
   const flushParagraph = () => {
     if (paragraph.length > 0) {
@@ -53,23 +49,23 @@ function PlainTextSection({ text }: { text: string }) {
 
     const markdownMatch = line.match(/^(#{1,6})\s+(.*)$/);
     let headingText: string | null = null;
-    let isTitle = false;
+    let markdownIsTitle = false;
 
-    if (hasMarkdownHeadings) {
-      // Deterministic: a level-1 (#) marker is the title, deeper levels are sections.
-      if (markdownMatch) {
-        headingText = markdownMatch[2].trim();
-        isTitle = markdownMatch[1].length === 1 && isFirstHeading;
-      }
+    if (markdownMatch) {
+      // Explicit markdown heading marker.
+      headingText = markdownMatch[2].trim();
+      markdownIsTitle = markdownMatch[1].length === 1;
     } else if (isHeadingLine(line)) {
-      // Fallback heuristic for documents without markdown markers.
+      // Heuristic for headings without a markdown marker.
       headingText = line.replace(/:$/, "").trim();
-      isTitle = isFirstHeading;
     }
 
     if (headingText !== null) {
       flushParagraph();
-      isFirstHeading = false;
+      // The title is whichever heading is marked with a single # marker, or
+      // failing any markdown markers, simply the first heading encountered.
+      const isTitle = markdownMatch ? markdownIsTitle : !firstHeadingFound;
+      firstHeadingFound = true;
       if (isTitle) {
         elements.push(
           <h2 key={`h-${elements.length}`} className={styles.introTitle}>

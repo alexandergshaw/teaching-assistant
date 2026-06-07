@@ -35,11 +35,6 @@ async function buildDocxFromPlainText(
   const lines = text.split("\n");
   let firstHeadingFound = false;
 
-  // Detect whether the document uses markdown heading markers (# / ##). When it
-  // does we trust those markers exclusively: a level-1 marker is the document
-  // title and deeper markers are section headings.
-  const hasMarkdownHeadings = lines.some((l) => /^#{1,6}\s+/.test(l.trim()));
-
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (!trimmed) continue;
@@ -52,25 +47,26 @@ async function buildDocxFromPlainText(
 
     let isHeading: boolean;
     let headingText = trimmed;
-    let isTitleLevel = false;
+    let markdownIsTitle = false;
 
-    if (hasMarkdownHeadings) {
-      isHeading = markdownMatch !== null;
-      if (markdownMatch) {
-        headingText = markdownMatch[2].trim();
-        isTitleLevel = markdownMatch[1].length === 1;
-      }
+    if (markdownMatch) {
+      // Explicit markdown heading marker.
+      isHeading = true;
+      headingText = markdownMatch[2].trim();
+      markdownIsTitle = markdownMatch[1].length === 1;
     } else if (hasTemplate) {
+      // Template supplied: only exact heading matches are promoted.
       isHeading = allowedHeadings.has(normalizeHeading(trimmed));
     } else {
+      // Heuristic: a short, isolated, non-list line is a heading.
       isHeading = trimmed.length < 80 && !isListItem && prevBlank && nextBlank;
     }
 
     if (isHeading) {
-      const level =
-        (hasMarkdownHeadings ? isTitleLevel : !firstHeadingFound)
-          ? HeadingLevel.HEADING_1
-          : HeadingLevel.HEADING_2;
+      // The title is whichever heading is marked with a single # marker, or
+      // failing any markdown markers, simply the first heading encountered.
+      const isTitle = markdownMatch ? markdownIsTitle : !firstHeadingFound;
+      const level = isTitle ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2;
       firstHeadingFound = true;
       children.push(new Paragraph({ children: [new TextRun({ text: headingText, font: FONT, color: COLOR, bold: true })], heading: level }));
     } else if (/^\d+\.\s+/.test(trimmed)) {

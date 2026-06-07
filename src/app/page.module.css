@@ -164,6 +164,36 @@
   color: var(--text-secondary);
 }
 
+.savedFileNote {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.savedFileNote strong {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.clearFileButton {
+  border: 1px solid var(--field-border);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.clearFileButton:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
 .field textarea {
   min-height: 220px;
   padding: 16px 18px;

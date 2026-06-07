@@ -1,10 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { generateLecturePlansAction, generateCourseRubricFromZipAction, type AssignmentPlan } from "../actions";
 import { parseGeneratedRubric } from "../utils/rubric";
+import { saveFile, loadFile, deleteFile } from "../../lib/file-persistence";
 import styles from "../page.module.css";
 import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
+
+const ZIP_FILE_KEY = "lecture-planning-zip";
+const INTRO_TEMPLATE_KEY = "lecture-planning-intro-template";
+const INSTRUCTIONS_TEMPLATE_KEY = "lecture-planning-instructions-template";
 
 async function buildDocxFromPlainText(
   text: string,
@@ -121,6 +126,56 @@ export default function LecturePlanningTab() {
   const introTemplateRef = useRef<HTMLInputElement>(null);
   const instructionsTemplateRef = useRef<HTMLInputElement>(null);
 
+  // Files are persisted to IndexedDB so that uploads survive page refreshes.
+  // Browsers do not allow programmatically setting a file input's value, so the
+  // restored files are tracked in state and used directly by the handlers.
+  const [zipFile, setZipFile] = useState<File | null>(null);
+  const [introTemplateFile, setIntroTemplateFile] = useState<File | null>(null);
+  const [instructionsTemplateFile, setInstructionsTemplateFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [zip, intro, instructions] = await Promise.all([
+        loadFile(ZIP_FILE_KEY),
+        loadFile(INTRO_TEMPLATE_KEY),
+        loadFile(INSTRUCTIONS_TEMPLATE_KEY),
+      ]);
+      if (cancelled) return;
+      if (zip) setZipFile(zip);
+      if (intro) setIntroTemplateFile(intro);
+      if (instructions) setInstructionsTemplateFile(instructions);
+    })().catch(() => {
+      // Restoring persisted files is best-effort; ignore failures.
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleFileChange = (
+    file: File | null,
+    key: string,
+    setFile: (file: File | null) => void
+  ) => {
+    setFile(file);
+    if (file) {
+      saveFile(key, file).catch(() => {});
+    } else {
+      deleteFile(key).catch(() => {});
+    }
+  };
+
+  const handleClearFile = (
+    key: string,
+    setFile: (file: File | null) => void,
+    inputRef: React.RefObject<HTMLInputElement | null>
+  ) => {
+    setFile(null);
+    if (inputRef.current) inputRef.current.value = "";
+    deleteFile(key).catch(() => {});
+  };
+
   const readFileAsBase64 = (file: File) =>
     new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -133,7 +188,7 @@ export default function LecturePlanningTab() {
     });
 
   const handleGenerate = async () => {
-    const file = zipFileRef.current?.files?.[0];
+    const file = zipFile;
     if (!file) {
       setError("Please select a zip file of your course repository.");
       return;
@@ -152,8 +207,6 @@ export default function LecturePlanningTab() {
     try {
       const base64 = await readFileAsBase64(file);
 
-      const introTemplateFile = introTemplateRef.current?.files?.[0];
-      const instructionsTemplateFile = instructionsTemplateRef.current?.files?.[0];
       const introTemplateBase64 = introTemplateFile
         ? await readFileAsBase64(introTemplateFile)
         : undefined;
@@ -319,7 +372,7 @@ export default function LecturePlanningTab() {
   };
 
   const handleGenerateRubric = async () => {
-    const file = zipFileRef.current?.files?.[0];
+    const file = zipFile;
     if (!file) {
       setRubricError("Please select a zip file of your course repository.");
       setRubricStatus("idle");
@@ -401,7 +454,20 @@ export default function LecturePlanningTab() {
             type="file"
             accept=".zip,application/zip,application/x-zip-compressed"
             ref={zipFileRef}
+            onChange={(e) => handleFileChange(e.target.files?.[0] ?? null, ZIP_FILE_KEY, setZipFile)}
           />
+          {zipFile && (
+            <p className={styles.savedFileNote}>
+              Saved: <strong>{zipFile.name}</strong>
+              <button
+                type="button"
+                className={styles.clearFileButton}
+                onClick={() => handleClearFile(ZIP_FILE_KEY, setZipFile, zipFileRef)}
+              >
+                Remove
+              </button>
+            </p>
+          )}
           <p>
             Upload a zip of your template repository. The zip must contain an{" "}
             <code>assignments</code> folder (or similar) with one subfolder per assignment.
@@ -419,7 +485,20 @@ export default function LecturePlanningTab() {
             type="file"
             accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             ref={introTemplateRef}
+            onChange={(e) => handleFileChange(e.target.files?.[0] ?? null, INTRO_TEMPLATE_KEY, setIntroTemplateFile)}
           />
+          {introTemplateFile && (
+            <p className={styles.savedFileNote}>
+              Saved: <strong>{introTemplateFile.name}</strong>
+              <button
+                type="button"
+                className={styles.clearFileButton}
+                onClick={() => handleClearFile(INTRO_TEMPLATE_KEY, setIntroTemplateFile, introTemplateRef)}
+              >
+                Remove
+              </button>
+            </p>
+          )}
           <p>
             Optional. Upload a .docx whose structure, headings, and formatting the generated
             module intro documents must follow exactly. Leave empty to use the default layout.
@@ -435,7 +514,20 @@ export default function LecturePlanningTab() {
             type="file"
             accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             ref={instructionsTemplateRef}
+            onChange={(e) => handleFileChange(e.target.files?.[0] ?? null, INSTRUCTIONS_TEMPLATE_KEY, setInstructionsTemplateFile)}
           />
+          {instructionsTemplateFile && (
+            <p className={styles.savedFileNote}>
+              Saved: <strong>{instructionsTemplateFile.name}</strong>
+              <button
+                type="button"
+                className={styles.clearFileButton}
+                onClick={() => handleClearFile(INSTRUCTIONS_TEMPLATE_KEY, setInstructionsTemplateFile, instructionsTemplateRef)}
+              >
+                Remove
+              </button>
+            </p>
+          )}
           <p>
             Optional. Upload a .docx whose structure, headings, and formatting the generated
             assignment instruction documents must follow exactly. Leave empty to use the default layout.

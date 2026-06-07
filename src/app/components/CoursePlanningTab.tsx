@@ -29,7 +29,7 @@ type CoursePlanningTabProps = {
 };
 
 type CoursePlanningStep = "form" | "preview";
-type PlanningMode = "syllabus" | "schedule" | "project" | "lecture" | "e2e";
+type PlanningMode = "syllabus" | "schedule" | "project" | "lecture" | "e2e" | "redo";
 
 function escapeXml(str: string): string {
   return str
@@ -252,6 +252,13 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [e2eGenerated, setE2eGenerated] = useState(false);
   const [e2eCopilotPrompt, setE2eCopilotPrompt] = useState<string | null>(null);
 
+  // Redo tab state
+  const [redoCourseName, setRedoCourseName] = useState("");
+  const [redoCourseDescription, setRedoCourseDescription] = useState("");
+  const [redoStartDate, setRedoStartDate] = useState("");
+  const [redoWeeks, setRedoWeeks] = useState("");
+  const [redoTests, setRedoTests] = useState("");
+
   // Local storage keys
   const LS_KEYS = {
     courseTitle: "syllabus_courseTitle",
@@ -269,6 +276,11 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     scheduleWeeks: "schedule_scheduleWeeks",
     scheduleTests: "schedule_scheduleTests",
     e2eCourseName: "e2e_courseName",
+    redoCourseName: "redo_courseName",
+    redoCourseDescription: "redo_courseDescription",
+    redoStartDate: "redo_startDate",
+    redoWeeks: "redo_weeks",
+    redoTests: "redo_tests",
   };
 
   useEffect(() => {
@@ -281,7 +293,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setLatePolicy(localStorage.getItem(LS_KEYS.latePolicy) || "");
     setAttendancePolicy(localStorage.getItem(LS_KEYS.attendancePolicy) || "");
     const savedMode = localStorage.getItem(LS_KEYS.planningMode);
-    if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project" || savedMode === "lecture" || savedMode === "e2e") {
+    if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project" || savedMode === "lecture" || savedMode === "e2e" || savedMode === "redo") {
       setPlanningMode(savedMode);
     }
     setCourseDescription(localStorage.getItem(LS_KEYS.courseDescription) || "");
@@ -290,6 +302,11 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setScheduleWeeks(localStorage.getItem(LS_KEYS.scheduleWeeks) || "");
     setScheduleTests(localStorage.getItem(LS_KEYS.scheduleTests) || "");
     setE2eCourseName(localStorage.getItem(LS_KEYS.e2eCourseName) || "");
+    setRedoCourseName(localStorage.getItem(LS_KEYS.redoCourseName) || "");
+    setRedoCourseDescription(localStorage.getItem(LS_KEYS.redoCourseDescription) || "");
+    setRedoStartDate(localStorage.getItem(LS_KEYS.redoStartDate) || "");
+    setRedoWeeks(localStorage.getItem(LS_KEYS.redoWeeks) || "");
+    setRedoTests(localStorage.getItem(LS_KEYS.redoTests) || "");
   }, []);
   const [coursePlanningContextFiles, setCoursePlanningContextFiles] = useState<
     Array<{ name: string; base64: string; mimeType: string }>
@@ -759,6 +776,13 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
               onClick={() => { setPlanningMode("e2e"); localStorage.setItem(LS_KEYS.planningMode, "e2e"); }}
             >
               End to End
+            </button>
+            <button
+              type="button"
+              className={`${styles.scheduleModeBtn}${planningMode === "redo" ? ` ${styles.active}` : ""}`}
+              onClick={() => { setPlanningMode("redo"); localStorage.setItem(LS_KEYS.planningMode, "redo"); }}
+            >
+              Redo
             </button>
           </div>
 
@@ -1232,6 +1256,69 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   </button>
                 </div>
               )}
+            </>
+          )}
+
+          {/* ── Redo mode ── */}
+          {planningMode === "redo" && (
+            <>
+              <div className={styles.field}>
+                <label htmlFor="redoCourseName">Course Name</label>
+                <input
+                  id="redoCourseName"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. Introduction to Python"
+                  value={redoCourseName}
+                  onChange={(e) => { setRedoCourseName(e.target.value); localStorage.setItem(LS_KEYS.redoCourseName, e.target.value); }}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="redoCourseDescription">Course Description</label>
+                <textarea
+                  id="redoCourseDescription"
+                  className={styles.textInput}
+                  placeholder="Describe the course — its topics, goals, and audience."
+                  value={redoCourseDescription}
+                  onChange={(e) => { setRedoCourseDescription(e.target.value); localStorage.setItem(LS_KEYS.redoCourseDescription, e.target.value); }}
+                  rows={8}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="redoStartDate">Course Start Date</label>
+                <input
+                  id="redoStartDate"
+                  type="date"
+                  className={styles.textInput}
+                  value={redoStartDate}
+                  onChange={(e) => { setRedoStartDate(e.target.value); localStorage.setItem(LS_KEYS.redoStartDate, e.target.value); }}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="redoWeeks">Number of Weeks</label>
+                <input
+                  id="redoWeeks"
+                  type="number"
+                  className={styles.textInput}
+                  placeholder="e.g. 15"
+                  min={1}
+                  max={52}
+                  value={redoWeeks}
+                  onChange={(e) => { setRedoWeeks(e.target.value); localStorage.setItem(LS_KEYS.redoWeeks, e.target.value); }}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="redoTests">Number of Tests</label>
+                <input
+                  id="redoTests"
+                  type="number"
+                  className={styles.textInput}
+                  placeholder="e.g. 3"
+                  min={0}
+                  value={redoTests}
+                  onChange={(e) => { setRedoTests(e.target.value); localStorage.setItem(LS_KEYS.redoTests, e.target.value); }}
+                />
+              </div>
             </>
           )}
         </section>

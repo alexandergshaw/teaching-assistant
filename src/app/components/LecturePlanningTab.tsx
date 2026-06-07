@@ -6,11 +6,30 @@ import { parseGeneratedRubric } from "../utils/rubric";
 import styles from "../page.module.css";
 import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 
-async function buildDocxFromPlainText(text: string): Promise<ArrayBuffer> {
+async function buildDocxFromPlainText(
+  text: string,
+  templateHeadings?: string[]
+): Promise<ArrayBuffer> {
   const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import("docx");
 
   const FONT = "Times New Roman";
   const COLOR = "000000";
+
+  // Normalize heading text for robust matching (case, surrounding punctuation,
+  // numbering prefixes, and whitespace are ignored).
+  const normalizeHeading = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/^[\d.)\s-]+/, "")
+      .replace(/[:.\s]+$/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  // When a template was supplied, ONLY lines that exactly match one of the
+  // template's real headings may receive heading formatting. Body text is never
+  // promoted to a heading, no matter how short or isolated it is.
+  const hasTemplate = Array.isArray(templateHeadings) && templateHeadings.length > 0;
+  const allowedHeadings = new Set((templateHeadings ?? []).map(normalizeHeading));
 
   const children: InstanceType<typeof Paragraph>[] = [];
   const lines = text.split("\n");
@@ -23,7 +42,9 @@ async function buildDocxFromPlainText(text: string): Promise<ArrayBuffer> {
     const prevBlank = i === 0 || !lines[i - 1].trim();
     const nextBlank = i >= lines.length - 1 || !lines[i + 1].trim();
     const isListItem = /^(\d+\.|[-•*])\s/.test(trimmed);
-    const isHeading = trimmed.length < 80 && !isListItem && prevBlank && nextBlank;
+    const isHeading = hasTemplate
+      ? allowedHeadings.has(normalizeHeading(trimmed))
+      : trimmed.length < 80 && !isListItem && prevBlank && nextBlank;
 
     if (isHeading) {
       const level = !firstHeadingFound ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2;
@@ -231,10 +252,10 @@ export default function LecturePlanningTab() {
         const weekLabel = `Week ${planIndex + 1}`;
         outputZip.file(`${weekLabel} Slides.pptx`, pptxData);
         if (plan.moduleIntroduction) {
-          outputZip.file(`${weekLabel} Introduction.docx`, await buildDocxFromPlainText(plan.moduleIntroduction));
+          outputZip.file(`${weekLabel} Introduction.docx`, await buildDocxFromPlainText(plan.moduleIntroduction, plan.introTemplateHeadings));
         }
         if (plan.assignmentInstructions) {
-          outputZip.file(`${weekLabel} Assignment Instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions));
+          outputZip.file(`${weekLabel} Assignment Instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions, plan.instructionsTemplateHeadings));
         }
       }
 

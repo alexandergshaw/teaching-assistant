@@ -1644,6 +1644,12 @@ export interface AssignmentPlan {
   slides: SlideData[];
   moduleIntroduction: string;
   assignmentInstructions: string;
+  // The exact heading lines found in the supplied templates (paragraphs styled
+  // as headings/titles in the .docx). When a template is provided, only these
+  // lines may receive heading formatting in the generated document — body text
+  // must never be promoted to a heading. Empty when no template was supplied.
+  introTemplateHeadings: string[];
+  instructionsTemplateHeadings: string[];
 }
 
 // Extract plain text from a base64-encoded .docx template (best effort).
@@ -1669,6 +1675,43 @@ async function extractDocxTemplateText(base64: string): Promise<string> {
     return "";
   }
 }
+
+// Extract the exact heading lines from a base64-encoded .docx template by
+// inspecting which paragraphs are styled as headings/titles in the document.
+// This lets the generated document apply heading formatting ONLY where the
+// template actually has a heading, never to ordinary body text.
+async function extractDocxTemplateHeadings(base64: string): Promise<string[]> {
+  try {
+    const JSZip = (await import("jszip")).default;
+    const buffer = Buffer.from(base64, "base64");
+    const zip = await JSZip.loadAsync(buffer);
+    const documentXml = zip.file("word/document.xml");
+    if (!documentXml) return [];
+    const xml = await documentXml.async("string");
+
+    const headings: string[] = [];
+    const paragraphs = xml.match(/<w:p[ >][\s\S]*?<\/w:p>/g) ?? [];
+    for (const paragraph of paragraphs) {
+      const styleMatch = paragraph.match(/<w:pStyle\s+w:val="([^"]*)"/);
+      if (!styleMatch || !/heading|title/i.test(styleMatch[1])) continue;
+
+      const text = (paragraph.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g) ?? [])
+        .map((run) => run.replace(/<[^>]+>/g, ""))
+        .join("")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .trim();
+      if (text) headings.push(text);
+    }
+    return headings;
+  } catch {
+    return [];
+  }
+}
+
 
 function buildStrictTemplateBlock(templateText: string): string {
   if (!templateText.trim()) return "";
@@ -2158,6 +2201,15 @@ export async function generateLecturePlansAction(
       ? await extractDocxTemplateText(instructionsTemplateBase64)
       : "";
 
+    // Extract the template's real heading lines so the downloaded document only
+    // applies heading formatting where the template itself has a heading.
+    const introTemplateHeadings = introTemplateBase64
+      ? await extractDocxTemplateHeadings(introTemplateBase64)
+      : [];
+    const instructionsTemplateHeadings = instructionsTemplateBase64
+      ? await extractDocxTemplateHeadings(instructionsTemplateBase64)
+      : [];
+
     // Generate slides and companion documents for each assignment in parallel.
     const results = await Promise.all(
       assignmentContents.map(async ({ name, content, readmeContent }) => {
@@ -2172,6 +2224,8 @@ export async function generateLecturePlansAction(
           ...slidesResult,
           moduleIntroduction: "error" in introResult ? "" : introResult.text,
           assignmentInstructions: "error" in instructionsResult ? "" : instructionsResult.text,
+          introTemplateHeadings,
+          instructionsTemplateHeadings,
         } satisfies AssignmentPlan;
       })
     );

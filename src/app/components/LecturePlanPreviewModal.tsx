@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { ReactNode } from "react";
 import type { AssignmentPlan } from "../actions";
 import styles from "../page.module.css";
 
@@ -11,15 +12,63 @@ type LecturePlanPreviewModalProps = {
   onClose: () => void;
 };
 
+function isHeadingLine(line: string): boolean {
+  if (/^#{1,6}\s+/.test(line)) return true;
+  const stripped = line.trim();
+  if (stripped.length === 0 || stripped.length > 60) return false;
+  if (/[.:,;?!]$/.test(stripped)) return false;
+  if (/^[0-9]+[.)]/.test(stripped)) return false;
+  if (/^[-*•]/.test(stripped)) return false;
+  return stripped.split(/\s+/).length <= 8;
+}
+
 function PlainTextSection({ text }: { text: string }) {
-  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
-  return (
-    <div className={styles.assignmentContent}>
-      {paragraphs.map((para, i) => (
-        <p key={i} className={styles.introText}>{para}</p>
-      ))}
-    </div>
-  );
+  const lines = text.split(/\n/);
+  const elements: ReactNode[] = [];
+  let paragraph: string[] = [];
+  let headingCount = 0;
+
+  const flushParagraph = () => {
+    if (paragraph.length > 0) {
+      elements.push(
+        <p key={`p-${elements.length}`} className={styles.introText}>
+          {paragraph.join(" ")}
+        </p>
+      );
+      paragraph = [];
+    }
+  };
+
+  lines.forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      return;
+    }
+    if (isHeadingLine(line)) {
+      flushParagraph();
+      const headingText = line.replace(/^#{1,6}\s+/, "").trim();
+      headingCount += 1;
+      if (headingCount === 1) {
+        elements.push(
+          <h2 key={`h-${elements.length}`} className={styles.introTitle}>
+            {headingText}
+          </h2>
+        );
+      } else {
+        elements.push(
+          <h3 key={`h-${elements.length}`} className={styles.introHeading}>
+            {headingText}
+          </h3>
+        );
+      }
+      return;
+    }
+    paragraph.push(line);
+  });
+  flushParagraph();
+
+  return <div className={styles.assignmentContent}>{elements}</div>;
 }
 
 export default function LecturePlanPreviewModal({ plan, onClose }: LecturePlanPreviewModalProps) {

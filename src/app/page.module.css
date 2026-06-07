@@ -1239,6 +1239,22 @@
   color: var(--text-secondary);
 }
 
+.introTitle {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+
+.introHeading {
+  margin: 10px 0 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
 .assignmentStepList {
   display: flex;
   flex-direction: column;

@@ -1883,7 +1883,7 @@ Hard requirements:
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 3072 },
+        generationConfig: { temperature: 0.5, maxOutputTokens: 8192 },
       }),
     }
   );
@@ -2192,6 +2192,9 @@ export async function generateLecturePlansAction(
           generateExternalResourcesForAssignment(name, content),
         ]);
         if ("error" in slidesResult) return null;
+        if ("error" in externalResourcesResult) {
+          console.warn(`External resources generation failed for "${name}": ${externalResourcesResult.error}`);
+        }
         return {
           assignmentName: name,
           ...slidesResult,

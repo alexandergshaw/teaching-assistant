@@ -1824,11 +1824,12 @@ ASSIGNMENT CONTENT:
 ${content}
 
 Write a well-formatted module introduction for the week this assignment covers. The document should:
-1. Open with an engaging overview of the topic and why it matters.
-2. Include a section called "Real-World Applications" with at least 3 concrete, specific examples of how these concepts or technologies are used in real software, industry products, or everyday technology that students will recognise (e.g., how the concept powers a well-known app, framework, or system).
-3. Include a brief section called "What You Will Learn" that lists the key skills and concepts students will gain.
-4. Be written in clear, motivating language appropriate for undergraduate students.
-5. Use plain text formatting with clear section headings (no markdown symbols like # or *).
+1. Start with a single document title on the very first line, written as a markdown level-1 heading (e.g. "# Module Introduction: <topic>"). This title must be the only level-1 heading in the document.
+2. Open with an engaging overview of the topic and why it matters.
+3. Include a section called "Real-World Applications" with at least 3 concrete, specific examples of how these concepts or technologies are used in real software, industry products, or everyday technology that students will recognise (e.g., how the concept powers a well-known app, framework, or system).
+4. Include a brief section called "What You Will Learn" that lists the key skills and concepts students will gain.
+5. Be written in clear, motivating language appropriate for undergraduate students.
+6. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Real-World Applications"). Do not use any other markdown symbols (no bold, italics, or bullet asterisks) in the body text.
 
 Do not include the assignment instructions or grading criteria — focus only on introducing the module topic.${buildStrictTemplateBlock(templateText)}`;
 
@@ -1879,13 +1880,14 @@ README / ASSIGNMENT SOURCE:
 ${readmeContent}
 
 Using the README content above, write a complete, student-facing assignment instruction document. The document should:
-1. Start with an "Assignment Overview" section that clearly states the purpose and learning objectives.
-2. Include a "Instructions" section that details exactly what students must do, broken into numbered steps or tasks pulled from the README.
-3. Include a "Requirements" section listing any technical or functional requirements mentioned in the README (e.g., methods to implement, expected behaviour, constraints).
-4. Include a "Helpful Free Resources" section with at least 5 free external resources (tutorials, official documentation, guides, or reference material) that help students complete this assignment. For each resource, give the title, the URL, and one short sentence on why it helps. Every resource must be freely accessible (no paywalls) and come from a reputable source (e.g. official docs, MDN, Python docs, freeCodeCamp, Microsoft Learn, university or open course material).
-5. End with a "Deliverables" section. The deliverable is ALWAYS: submit the up-to-date zip of the entire codebase with all completed files included.
-6. Use plain text formatting with clear section headings (no markdown symbols like # or *).
-7. Write in clear, direct language appropriate for undergraduate students.
+1. Start with a single document title on the very first line, written as a markdown level-1 heading (e.g. "# <Assignment Name>"). This title must be the only level-1 heading in the document.
+2. Include an "Assignment Overview" section that clearly states the purpose and learning objectives.
+3. Include a "Instructions" section that details exactly what students must do, broken into numbered steps or tasks pulled from the README.
+4. Include a "Requirements" section listing any technical or functional requirements mentioned in the README (e.g., methods to implement, expected behaviour, constraints).
+5. Include a "Helpful Free Resources" section with at least 5 free external resources (tutorials, official documentation, guides, or reference material) that help students complete this assignment. For each resource, give the title, the URL, and one short sentence on why it helps. Every resource must be freely accessible (no paywalls) and come from a reputable source (e.g. official docs, MDN, Python docs, freeCodeCamp, Microsoft Learn, university or open course material).
+6. End with a "Deliverables" section. The deliverable is ALWAYS: submit the up-to-date zip of the entire codebase with all completed files included.
+7. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Instructions"). Do not use any other markdown symbols (no bold, italics, or bullet asterisks) in the body text.
+8. Write in clear, direct language appropriate for undergraduate students.
 
 Do not invent requirements not present in the README. If the README is sparse, note that students should refer to the course discussion board for clarification. The "Helpful Free Resources" section should always be included regardless of how sparse the README is.${buildStrictTemplateBlock(templateText)}`;
 

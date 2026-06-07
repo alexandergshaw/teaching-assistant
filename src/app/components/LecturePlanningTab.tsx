@@ -35,21 +35,44 @@ async function buildDocxFromPlainText(
   const lines = text.split("\n");
   let firstHeadingFound = false;
 
+  // Detect whether the document uses markdown heading markers (# / ##). When it
+  // does we trust those markers exclusively: a level-1 marker is the document
+  // title and deeper markers are section headings.
+  const hasMarkdownHeadings = lines.some((l) => /^#{1,6}\s+/.test(l.trim()));
+
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (!trimmed) continue;
 
+    const markdownMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
+
     const prevBlank = i === 0 || !lines[i - 1].trim();
     const nextBlank = i >= lines.length - 1 || !lines[i + 1].trim();
     const isListItem = /^(\d+\.|[-•*])\s/.test(trimmed);
-    const isHeading = hasTemplate
-      ? allowedHeadings.has(normalizeHeading(trimmed))
-      : trimmed.length < 80 && !isListItem && prevBlank && nextBlank;
+
+    let isHeading: boolean;
+    let headingText = trimmed;
+    let isTitleLevel = false;
+
+    if (hasMarkdownHeadings) {
+      isHeading = markdownMatch !== null;
+      if (markdownMatch) {
+        headingText = markdownMatch[2].trim();
+        isTitleLevel = markdownMatch[1].length === 1;
+      }
+    } else if (hasTemplate) {
+      isHeading = allowedHeadings.has(normalizeHeading(trimmed));
+    } else {
+      isHeading = trimmed.length < 80 && !isListItem && prevBlank && nextBlank;
+    }
 
     if (isHeading) {
-      const level = !firstHeadingFound ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2;
+      const level =
+        (hasMarkdownHeadings ? isTitleLevel : !firstHeadingFound)
+          ? HeadingLevel.HEADING_1
+          : HeadingLevel.HEADING_2;
       firstHeadingFound = true;
-      children.push(new Paragraph({ children: [new TextRun({ text: trimmed, font: FONT, color: COLOR, bold: true })], heading: level }));
+      children.push(new Paragraph({ children: [new TextRun({ text: headingText, font: FONT, color: COLOR, bold: true })], heading: level }));
     } else if (/^\d+\.\s+/.test(trimmed)) {
       children.push(new Paragraph({ children: [new TextRun({ text: trimmed.replace(/^\d+\.\s+/, ""), font: FONT, color: COLOR })], bullet: { level: 0 } }));
     } else if (/^[-•*]\s+/.test(trimmed)) {

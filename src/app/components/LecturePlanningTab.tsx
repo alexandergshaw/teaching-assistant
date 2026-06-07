@@ -137,7 +137,7 @@ export default function LecturePlanningTab() {
       const BODY_TEXT = "1e293b";
       const SUBTITLE_TEXT = "94a3b8";
 
-      for (const plan of plans) {
+      for (const [planIndex, plan] of plans.entries()) {
         const prs = new PptxGenJS();
         prs.layout = "LAYOUT_WIDE";
 
@@ -228,13 +228,13 @@ export default function LecturePlanningTab() {
         }
 
         const pptxData = await prs.write({ outputType: "arraybuffer" }) as ArrayBuffer;
-        const safeName = plan.assignmentName.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
-        outputZip.file(`${safeName}.pptx`, pptxData);
+        const weekLabel = `Week ${planIndex + 1}`;
+        outputZip.file(`${weekLabel} Slides.pptx`, pptxData);
         if (plan.moduleIntroduction) {
-          outputZip.file(`${safeName}_module_intro.docx`, await buildDocxFromPlainText(plan.moduleIntroduction));
+          outputZip.file(`${weekLabel} Introduction.docx`, await buildDocxFromPlainText(plan.moduleIntroduction));
         }
         if (plan.assignmentInstructions) {
-          outputZip.file(`${safeName}_assignment_instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions));
+          outputZip.file(`${weekLabel} Assignment Instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions));
         }
       }
 

@@ -85,7 +85,14 @@ async function buildDocxFromPlainText(
       const isTitle = markdownMatch ? markdownIsTitle : !firstHeadingFound;
       const level = isTitle ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2;
       firstHeadingFound = true;
-      children.push(new Paragraph({ children: [new TextRun({ text: headingText, font: FONT, color: COLOR, bold: true })], heading: level }));
+      // Every heading after the first (the title) gets a blank line above it.
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: headingText, font: FONT, color: COLOR, bold: true })],
+          heading: level,
+          ...(isTitle ? {} : { spacing: { before: 240 } }),
+        })
+      );
     } else if (/^\d+\.\s+/.test(trimmed)) {
       children.push(new Paragraph({ children: buildBulletRuns(trimmed.replace(/^\d+\.\s+/, "")), bullet: { level: 0 } }));
     } else if (/^[-•*]\s+/.test(trimmed)) {

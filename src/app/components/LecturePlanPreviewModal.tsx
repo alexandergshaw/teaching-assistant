@@ -29,7 +29,7 @@ export default function LecturePlanPreviewModal({ plan, onClose }: LecturePlanPr
     { id: "slides", label: `Slides (${plan.slides.length + 1})` },
     { id: "intro", label: "Module Intro", hidden: !plan.moduleIntroduction },
     { id: "instructions", label: "Assignment Instructions", hidden: !plan.assignmentInstructions },
-    { id: "resources", label: "External Resources", hidden: !plan.externalResources },
+    { id: "resources", label: "External Resources", hidden: !plan.externalResources && !plan.externalResourcesError },
   ];
 
   return (
@@ -108,11 +108,17 @@ export default function LecturePlanPreviewModal({ plan, onClose }: LecturePlanPr
           </div>
         )}
 
-        {activeTab === "resources" && plan.externalResources && (
+        {activeTab === "resources" && (plan.externalResources || plan.externalResourcesError) && (
           <div className={styles.assignmentContent}>
             <div className={styles.assignmentSection}>
               <p className={styles.assignmentSectionLabel}>External Resources</p>
-              <PlainTextSection text={plan.externalResources} />
+              {plan.externalResources ? (
+                <PlainTextSection text={plan.externalResources} />
+              ) : (
+                <p className={styles.introText} style={{ color: "var(--text-secondary)" }}>
+                  Resource guide could not be generated. {plan.externalResourcesError}
+                </p>
+              )}
             </div>
           </div>
         )}

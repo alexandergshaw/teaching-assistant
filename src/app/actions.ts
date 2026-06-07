@@ -1645,6 +1645,7 @@ export interface AssignmentPlan {
   moduleIntroduction: string;
   assignmentInstructions: string;
   externalResources: string;
+  externalResourcesError?: string;
 }
 
 async function generateSlidesForAssignment(
@@ -1894,14 +1895,26 @@ Hard requirements:
   }
 
   const data = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
+      finishReason?: string;
+    }>;
+    promptFeedback?: { blockReason?: string };
   };
 
+  const candidate = data.candidates?.[0];
   const result =
-    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    candidate?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
 
   if (!result.trim()) {
-    return { error: `External resources generation returned empty response for "${assignmentName}".` };
+    const finishReason = candidate?.finishReason ?? "unknown";
+    const blockReason = data.promptFeedback?.blockReason;
+    const detail = blockReason
+      ? `blocked: ${blockReason}`
+      : `finishReason: ${finishReason}`;
+    return {
+      error: `External resources generation returned empty response for "${assignmentName}" (${detail}).`,
+    };
   }
 
   return { text: result.trim() };
@@ -2201,6 +2214,7 @@ export async function generateLecturePlansAction(
           moduleIntroduction: "error" in introResult ? "" : introResult.text,
           assignmentInstructions: "error" in instructionsResult ? "" : instructionsResult.text,
           externalResources: "error" in externalResourcesResult ? "" : externalResourcesResult.text,
+          ...("error" in externalResourcesResult ? { externalResourcesError: externalResourcesResult.error } : {}),
         } satisfies AssignmentPlan;
       })
     );

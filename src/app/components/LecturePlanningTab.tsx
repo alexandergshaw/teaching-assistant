@@ -123,14 +123,14 @@ async function buildLecturePlanFiles(plans: AssignmentPlan[]): Promise<BuiltLect
     // Assignment name (subtle label above title)
     titleSlide.addText(plan.assignmentName.toUpperCase(), {
       x: 0.5, y: 1.6, w: "90%", h: 0.45,
-      fontSize: 13, color: SUBTITLE_TEXT, align: "center",
+      fontSize: 13, color: SUBTITLE_TEXT, align: "left",
       charSpacing: 2.5,
     });
 
     // Presentation title
     titleSlide.addText(plan.presentationTitle, {
       x: 0.5, y: 2.05, w: "90%", h: 2.0,
-      fontSize: 42, bold: true, align: "center", color: WHITE,
+      fontSize: 42, bold: true, align: "left", color: WHITE,
       lineSpacingMultiple: 1.1,
     });
 
@@ -379,14 +379,14 @@ export default function LecturePlanningTab() {
         // Assignment name (subtle label above title)
         titleSlide.addText(plan.assignmentName.toUpperCase(), {
           x: 0.5, y: 1.6, w: "90%", h: 0.45,
-          fontSize: 13, color: SUBTITLE_TEXT, align: "center",
+          fontSize: 13, color: SUBTITLE_TEXT, align: "left",
           charSpacing: 2.5,
         });
 
         // Presentation title
         titleSlide.addText(plan.presentationTitle, {
           x: 0.5, y: 2.05, w: "90%", h: 2.0,
-          fontSize: 42, bold: true, align: "center", color: WHITE,
+          fontSize: 42, bold: true, align: "left", color: WHITE,
           lineSpacingMultiple: 1.1,
         });
 

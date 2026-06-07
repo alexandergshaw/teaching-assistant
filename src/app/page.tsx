@@ -223,7 +223,7 @@ export default function Home() {
       const titleSlide = prs.addSlide();
       titleSlide.addText(lessonPlanPreview.presentationTitle, {
         x: 0.5, y: 2.2, w: "90%", h: 1.8,
-        fontSize: 40, bold: true, align: "center", color: "1a1a2e",
+        fontSize: 40, bold: true, align: "left", color: "1a1a2e",
       });
 
       for (const slide of lessonPlanPreview.slides) {

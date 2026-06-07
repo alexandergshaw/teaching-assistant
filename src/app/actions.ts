@@ -1644,8 +1644,6 @@ export interface AssignmentPlan {
   slides: SlideData[];
   moduleIntroduction: string;
   assignmentInstructions: string;
-  externalResources: string;
-  externalResourcesError?: string;
 }
 
 async function generateSlidesForAssignment(
@@ -1806,11 +1804,12 @@ Using the README content above, write a complete, student-facing assignment inst
 1. Start with an "Assignment Overview" section that clearly states the purpose and learning objectives.
 2. Include a "Instructions" section that details exactly what students must do, broken into numbered steps or tasks pulled from the README.
 3. Include a "Requirements" section listing any technical or functional requirements mentioned in the README (e.g., methods to implement, expected behaviour, constraints).
-4. End with a "Deliverables" section. The deliverable is ALWAYS: submit the up-to-date zip of the entire codebase with all completed files included.
-5. Use plain text formatting with clear section headings (no markdown symbols like # or *).
-6. Write in clear, direct language appropriate for undergraduate students.
+4. Include a "Helpful Free Resources" section with at least 5 free external resources (tutorials, official documentation, guides, or reference material) that help students complete this assignment. For each resource, give the title, the URL, and one short sentence on why it helps. Every resource must be freely accessible (no paywalls) and come from a reputable source (e.g. official docs, MDN, Python docs, freeCodeCamp, Microsoft Learn, university or open course material).
+5. End with a "Deliverables" section. The deliverable is ALWAYS: submit the up-to-date zip of the entire codebase with all completed files included.
+6. Use plain text formatting with clear section headings (no markdown symbols like # or *).
+7. Write in clear, direct language appropriate for undergraduate students.
 
-Do not invent requirements not present in the README. If the README is sparse, note that students should refer to the course discussion board for clarification.`;
+Do not invent requirements not present in the README. If the README is sparse, note that students should refer to the course discussion board for clarification. The "Helpful Free Resources" section should always be included regardless of how sparse the README is.`;
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -1819,7 +1818,7 @@ Do not invent requirements not present in the README. If the README is sparse, n
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 2048 },
+        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
       }),
     }
   );
@@ -1838,83 +1837,6 @@ Do not invent requirements not present in the README. If the README is sparse, n
 
   if (!result.trim()) {
     return { error: `Assignment instructions generation returned empty response for "${assignmentName}".` };
-  }
-
-  return { text: result.trim() };
-}
-
-async function generateExternalResourcesForAssignment(
-  assignmentName: string,
-  content: string
-): Promise<{ text: string } | { error: string }> {
-  const apiKey = getGeminiApiKey();
-  const model = getGeminiModel();
-
-  const prompt = `You are an expert educator curating a weekly external resources guide for a programming course.
-
-ASSIGNMENT / WEEK: ${assignmentName}
-
-ASSIGNMENT CONTENT:
-${content}
-
-Using the assignment content above, create a student-facing document of FREE external resources only.
-
-Required structure (plain text with section headings, no markdown symbols):
-1. "Weekly Focus" section (2-4 sentences) summarizing what students should learn this week.
-2. "Essential Tutorials" section with at least 4 resources.
-3. "Official Documentation" section with at least 3 resources.
-4. "Practice and Reference" section with at least 3 resources.
-5. "Suggested Learning Order" section with a short step-by-step path through the resources.
-
-For every resource include:
-- Resource title
-- URL
-- Why it helps for this assignment (1-2 concise sentences)
-
-Hard requirements:
-- Every resource must be freely accessible (no paid-only content).
-- Prefer high-quality sources (official docs, MDN, Python docs, freeCodeCamp, Microsoft Learn, university/open course material, reputable blog tutorials).
-- Keep language concise and practical for undergraduate students.
-- Do not include assignment instructions or grading criteria.`;
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 8192 },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const body = await response.text();
-    return { error: `Gemini API error for external resources "${assignmentName}": HTTP ${response.status} — ${body.slice(0, 200)}` };
-  }
-
-  const data = (await response.json()) as {
-    candidates?: Array<{
-      content?: { parts?: Array<{ text?: string }> };
-      finishReason?: string;
-    }>;
-    promptFeedback?: { blockReason?: string };
-  };
-
-  const candidate = data.candidates?.[0];
-  const result =
-    candidate?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-
-  if (!result.trim()) {
-    const finishReason = candidate?.finishReason ?? "unknown";
-    const blockReason = data.promptFeedback?.blockReason;
-    const detail = blockReason
-      ? `blocked: ${blockReason}`
-      : `finishReason: ${finishReason}`;
-    return {
-      error: `External resources generation returned empty response for "${assignmentName}" (${detail}).`,
-    };
   }
 
   return { text: result.trim() };
@@ -2198,23 +2120,17 @@ export async function generateLecturePlansAction(
     // Generate slides and companion documents for each assignment in parallel.
     const results = await Promise.all(
       assignmentContents.map(async ({ name, content, readmeContent }) => {
-        const [slidesResult, introResult, instructionsResult, externalResourcesResult] = await Promise.all([
+        const [slidesResult, introResult, instructionsResult] = await Promise.all([
           generateSlidesForAssignment(name, content, lectureDurationMinutes),
           generateModuleIntroForAssignment(name, content),
           generateAssignmentInstructionsForAssignment(name, readmeContent),
-          generateExternalResourcesForAssignment(name, content),
         ]);
         if ("error" in slidesResult) return null;
-        if ("error" in externalResourcesResult) {
-          console.warn(`External resources generation failed for "${name}": ${externalResourcesResult.error}`);
-        }
         return {
           assignmentName: name,
           ...slidesResult,
           moduleIntroduction: "error" in introResult ? "" : introResult.text,
           assignmentInstructions: "error" in instructionsResult ? "" : instructionsResult.text,
-          externalResources: "error" in externalResourcesResult ? "" : externalResourcesResult.text,
-          ...("error" in externalResourcesResult ? { externalResourcesError: externalResourcesResult.error } : {}),
         } satisfies AssignmentPlan;
       })
     );

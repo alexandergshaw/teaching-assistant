@@ -111,7 +111,7 @@ async function buildDocxFromPlainText(text: string): Promise<Buffer> {
             new TextRun({ text: stripInlineMarkdown(trimmed), font: FONT, color: COLOR, bold: true }),
           ],
           heading: level,
-          alignment: AlignmentType.CENTER,
+          alignment: AlignmentType.LEFT,
         })
       );
     } else if (/^\d+\.\s+/.test(trimmed)) {
@@ -177,7 +177,7 @@ async function reformatTextWithGemini(text: string, templateText?: string): Prom
       "- Reproduce the template's section headings, in the same order, using the exact heading wording where the template defines fixed section names.",
       "- Match the template's hierarchy of headings and sub-points exactly (which sections are headings vs. bold labels vs. body text).",
       "- Match the template's tone, phrasing conventions, and overall organisation.",
-      "- Headings must be written on their own line with a blank line before and after so they are rendered as actual centered headings — never inline and never with markdown symbols.",
+      "- Headings must be written on their own line with a blank line before and after so they are rendered as actual headings — never inline and never with markdown symbols.",
       "- Apply emphasis as real bold text. Never output literal '**' or '__' around words; the label/bold content must be plain words that the formatter will render bold.",
       "- Preserve the original document's actual content and facts. Do NOT copy the template's example content into the output — only mirror its formatting and organisation.",
       "If the source document is missing a section the template defines, only include it when the source contains relevant content for it; never invent content to fill the template.",

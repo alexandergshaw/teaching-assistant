@@ -31,6 +31,23 @@ async function buildDocxFromPlainText(
   const hasTemplate = Array.isArray(templateHeadings) && templateHeadings.length > 0;
   const allowedHeadings = new Set((templateHeadings ?? []).map(normalizeHeading));
 
+  // Build the runs for a bullet item. When the line begins with a short label
+  // followed by a colon (e.g. "Encapsulation: hides internal state"), the label
+  // and its colon are bolded and the remainder is left as normal text.
+  const buildBulletRuns = (content: string): InstanceType<typeof TextRun>[] => {
+    const labelMatch = content.match(/^([^:\n]{1,80}:)(\s[\s\S]*)?$/);
+    if (labelMatch) {
+      const runs = [
+        new TextRun({ text: labelMatch[1], font: FONT, color: COLOR, bold: true }),
+      ];
+      if (labelMatch[2]) {
+        runs.push(new TextRun({ text: labelMatch[2], font: FONT, color: COLOR }));
+      }
+      return runs;
+    }
+    return [new TextRun({ text: content, font: FONT, color: COLOR })];
+  };
+
   const children: InstanceType<typeof Paragraph>[] = [];
   const lines = text.split("\n");
   let firstHeadingFound = false;
@@ -70,9 +87,9 @@ async function buildDocxFromPlainText(
       firstHeadingFound = true;
       children.push(new Paragraph({ children: [new TextRun({ text: headingText, font: FONT, color: COLOR, bold: true })], heading: level }));
     } else if (/^\d+\.\s+/.test(trimmed)) {
-      children.push(new Paragraph({ children: [new TextRun({ text: trimmed.replace(/^\d+\.\s+/, ""), font: FONT, color: COLOR })], bullet: { level: 0 } }));
+      children.push(new Paragraph({ children: buildBulletRuns(trimmed.replace(/^\d+\.\s+/, "")), bullet: { level: 0 } }));
     } else if (/^[-•*]\s+/.test(trimmed)) {
-      children.push(new Paragraph({ children: [new TextRun({ text: trimmed.slice(trimmed.indexOf(" ") + 1), font: FONT, color: COLOR })], bullet: { level: 0 } }));
+      children.push(new Paragraph({ children: buildBulletRuns(trimmed.slice(trimmed.indexOf(" ") + 1)), bullet: { level: 0 } }));
     } else {
       children.push(new Paragraph({ children: [new TextRun({ text: trimmed, font: FONT, color: COLOR })] }));
     }

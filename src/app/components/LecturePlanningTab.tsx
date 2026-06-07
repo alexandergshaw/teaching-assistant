@@ -54,6 +54,19 @@ export default function LecturePlanningTab() {
   const [generatedRubric, setGeneratedRubric] = useState<string | null>(null);
   const [rubricCopied, setRubricCopied] = useState(false);
   const zipFileRef = useRef<HTMLInputElement>(null);
+  const introTemplateRef = useRef<HTMLInputElement>(null);
+  const instructionsTemplateRef = useRef<HTMLInputElement>(null);
+
+  const readFileAsBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result.split(",")[1] ?? "");
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
 
   const handleGenerate = async () => {
     const file = zipFileRef.current?.files?.[0];
@@ -73,17 +86,23 @@ export default function LecturePlanningTab() {
     setPlans([]);
 
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          resolve(result.split(",")[1] ?? "");
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+      const base64 = await readFileAsBase64(file);
 
-      const result = await generateLecturePlansAction(base64, minutes);
+      const introTemplateFile = introTemplateRef.current?.files?.[0];
+      const instructionsTemplateFile = instructionsTemplateRef.current?.files?.[0];
+      const introTemplateBase64 = introTemplateFile
+        ? await readFileAsBase64(introTemplateFile)
+        : undefined;
+      const instructionsTemplateBase64 = instructionsTemplateFile
+        ? await readFileAsBase64(instructionsTemplateFile)
+        : undefined;
+
+      const result = await generateLecturePlansAction(
+        base64,
+        minutes,
+        introTemplateBase64,
+        instructionsTemplateBase64
+      );
 
       if ("error" in result) {
         setError(result.error);
@@ -324,6 +343,38 @@ export default function LecturePlanningTab() {
             <code>assignments</code> folder (or similar) with one subfolder per assignment.
             Each subfolder should include the README, any unit tests, and assignment source files.
             Maximum upload size: ~7 MB zip.
+          </p>
+        </div>
+      </div>
+
+      <div className={styles.field}>
+        <label htmlFor="introTemplate">Module Intro Template (.docx, optional)</label>
+        <div className={styles.fileField}>
+          <input
+            id="introTemplate"
+            type="file"
+            accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ref={introTemplateRef}
+          />
+          <p>
+            Optional. Upload a .docx whose structure, headings, and formatting the generated
+            module intro documents must follow exactly. Leave empty to use the default layout.
+          </p>
+        </div>
+      </div>
+
+      <div className={styles.field}>
+        <label htmlFor="instructionsTemplate">Assignment Instructions Template (.docx, optional)</label>
+        <div className={styles.fileField}>
+          <input
+            id="instructionsTemplate"
+            type="file"
+            accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ref={instructionsTemplateRef}
+          />
+          <p>
+            Optional. Upload a .docx whose structure, headings, and formatting the generated
+            assignment instruction documents must follow exactly. Leave empty to use the default layout.
           </p>
         </div>
       </div>

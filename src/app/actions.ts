@@ -1646,6 +1646,35 @@ export interface AssignmentPlan {
   assignmentInstructions: string;
 }
 
+// Extract plain text from a base64-encoded .docx template (best effort).
+async function extractDocxTemplateText(base64: string): Promise<string> {
+  try {
+    const JSZip = (await import("jszip")).default;
+    const buffer = Buffer.from(base64, "base64");
+    const zip = await JSZip.loadAsync(buffer);
+    const documentXml = zip.file("word/document.xml");
+    if (!documentXml) return "";
+    let xml = await documentXml.async("string");
+    xml = xml
+      .replace(/<w:tab\s*\/?>/g, "\t")
+      .replace(/<w:br\s*\/?>/g, "\n")
+      .replace(/<w:p[^>]*>/g, "\n")
+      .replace(/<[^>]+>/g, "");
+    return xml
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  } catch {
+    return "";
+  }
+}
+
+function buildStrictTemplateBlock(templateText: string): string {
+  if (!templateText.trim()) return "";
+  return `\n\nSTRICT TEMPLATE TO FOLLOW (this takes ABSOLUTE PRECEDENCE over every other structural instruction in this prompt):\n${templateText}\n\nTEMPLATE RULES (mandatory):\n- Reproduce the template's exact section headings, wording of headings, and their order. Do not add, remove, rename, merge, split, or reorder any section.\n- Match the template's formatting, heading style, capitalization, numbering/bullet conventions, tone, and overall structure precisely.\n- Replace any placeholder text in the template (e.g. bracketed prompts, sample text, "TODO", "[...]") with real content tailored to this assignment.\n- Preserve any fixed/boilerplate wording in the template verbatim.\n- If a default section described elsewhere in this prompt is not present in the template, only include it if the template has a clearly appropriate place for it; otherwise omit it. The template's structure wins in every conflict.`;
+}
+
 async function generateSlidesForAssignment(
   assignmentName: string,
   content: string,
@@ -1734,7 +1763,8 @@ Requirements:
 
 async function generateModuleIntroForAssignment(
   assignmentName: string,
-  content: string
+  content: string,
+  templateText = ""
 ): Promise<{ text: string } | { error: string }> {
   const apiKey = getGeminiApiKey();
   const model = getGeminiModel();
@@ -1753,7 +1783,7 @@ Write a well-formatted module introduction for the week this assignment covers. 
 4. Be written in clear, motivating language appropriate for undergraduate students.
 5. Use plain text formatting with clear section headings (no markdown symbols like # or *).
 
-Do not include the assignment instructions or grading criteria — focus only on introducing the module topic.`;
+Do not include the assignment instructions or grading criteria — focus only on introducing the module topic.${buildStrictTemplateBlock(templateText)}`;
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -1788,7 +1818,8 @@ Do not include the assignment instructions or grading criteria — focus only on
 
 async function generateAssignmentInstructionsForAssignment(
   assignmentName: string,
-  readmeContent: string
+  readmeContent: string,
+  templateText = ""
 ): Promise<{ text: string } | { error: string }> {
   const apiKey = getGeminiApiKey();
   const model = getGeminiModel();
@@ -1809,7 +1840,7 @@ Using the README content above, write a complete, student-facing assignment inst
 6. Use plain text formatting with clear section headings (no markdown symbols like # or *).
 7. Write in clear, direct language appropriate for undergraduate students.
 
-Do not invent requirements not present in the README. If the README is sparse, note that students should refer to the course discussion board for clarification. The "Helpful Free Resources" section should always be included regardless of how sparse the README is.`;
+Do not invent requirements not present in the README. If the README is sparse, note that students should refer to the course discussion board for clarification. The "Helpful Free Resources" section should always be included regardless of how sparse the README is.${buildStrictTemplateBlock(templateText)}`;
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -1972,7 +2003,9 @@ export async function generateCourseRubricFromZipAction(
 
 export async function generateLecturePlansAction(
   zipBase64: string,
-  lectureDurationMinutes: number
+  lectureDurationMinutes: number,
+  introTemplateBase64?: string,
+  instructionsTemplateBase64?: string
 ): Promise<AssignmentPlan[] | { error: string }> {
   const TEXT_EXTENSIONS = new Set([
     ".md", ".txt", ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cpp", ".c",
@@ -2117,13 +2150,21 @@ export async function generateLecturePlansAction(
       return { error: "No readable text content found in the assignment folders." };
     }
 
+    // Extract strict templates (if provided) once, then reuse for every assignment.
+    const introTemplateText = introTemplateBase64
+      ? await extractDocxTemplateText(introTemplateBase64)
+      : "";
+    const instructionsTemplateText = instructionsTemplateBase64
+      ? await extractDocxTemplateText(instructionsTemplateBase64)
+      : "";
+
     // Generate slides and companion documents for each assignment in parallel.
     const results = await Promise.all(
       assignmentContents.map(async ({ name, content, readmeContent }) => {
         const [slidesResult, introResult, instructionsResult] = await Promise.all([
           generateSlidesForAssignment(name, content, lectureDurationMinutes),
-          generateModuleIntroForAssignment(name, content),
-          generateAssignmentInstructionsForAssignment(name, readmeContent),
+          generateModuleIntroForAssignment(name, content, introTemplateText),
+          generateAssignmentInstructionsForAssignment(name, readmeContent, instructionsTemplateText),
         ]);
         if ("error" in slidesResult) return null;
         return {

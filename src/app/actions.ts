@@ -1657,6 +1657,12 @@ export interface AssignmentPlan {
 }
 
 // Extract plain text from a base64-encoded .docx template (best effort).
+// Paragraphs that use Word's native list/bullet formatting (a <w:numPr>
+// element in the paragraph properties, or a list-style paragraph style) are
+// emitted with an explicit "- " (bulleted) or "1. " (numbered) marker so the
+// downstream AI sees — and reproduces — the template's bullet structure. Word
+// stores list formatting structurally, not as literal characters, so without
+// this step bullets are silently lost when the template is flattened to text.
 async function extractDocxTemplateText(base64: string): Promise<string> {
   try {
     const JSZip = (await import("jszip")).default;
@@ -1664,15 +1670,81 @@ async function extractDocxTemplateText(base64: string): Promise<string> {
     const zip = await JSZip.loadAsync(buffer);
     const documentXml = zip.file("word/document.xml");
     if (!documentXml) return "";
-    let xml = await documentXml.async("string");
-    xml = xml
-      .replace(/<w:tab\s*\/?>/g, "\t")
-      .replace(/<w:br\s*\/?>/g, "\n")
-      .replace(/<w:p[^>]*>/g, "\n")
-      .replace(/<[^>]+>/g, "");
-    return xml
-      .replace(/\r\n/g, "\n")
-      .replace(/\r/g, "\n")
+    const xml = await documentXml.async("string");
+
+    const decodeEntities = (value: string) =>
+      value
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'");
+
+    // Convert a single <w:p> paragraph block into its plain text, preserving
+    // tabs and intra-paragraph line breaks.
+    const paragraphText = (paragraph: string): string => {
+      const withBreaks = paragraph
+        .replace(/<w:tab\s*\/?>/g, "\t")
+        .replace(/<w:br\s*\/?>/g, "\n")
+        .replace(/<w:cr\s*\/?>/g, "\n");
+      const runs = withBreaks.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g) ?? [];
+      const text = runs.map((run) => run.replace(/<[^>]+>/g, "")).join("");
+      return decodeEntities(text);
+    };
+
+    // A paragraph is a list item when its properties contain a numbering
+    // reference (<w:numPr>) or its paragraph style name looks like a list.
+    const isListParagraph = (paragraph: string): boolean => {
+      const props = paragraph.match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
+      const propsXml = props ? props[0] : "";
+      if (/<w:numPr\b/.test(propsXml)) return true;
+      const styleMatch = propsXml.match(/<w:pStyle\s+w:val="([^"]*)"/);
+      return !!styleMatch && /list|bullet/i.test(styleMatch[1]);
+    };
+
+    // Distinguish numbered lists from bulleted ones when the numbering format
+    // is discoverable; default to a bullet marker otherwise.
+    const numberingXml = await zip.file("word/numbering.xml")?.async("string");
+    const isNumberedList = (paragraph: string): boolean => {
+      if (!numberingXml) return false;
+      const numIdMatch = paragraph.match(/<w:numId\s+w:val="(\d+)"/);
+      if (!numIdMatch) return false;
+      const numId = numIdMatch[1];
+      const numDef = numberingXml.match(
+        new RegExp(`<w:num\\s+w:numId="${numId}"[\\s\\S]*?<w:abstractNumId\\s+w:val="(\\d+)"`)
+      );
+      if (!numDef) return false;
+      const abstractId = numDef[1];
+      const abstract = numberingXml.match(
+        new RegExp(`<w:abstractNum\\s+w:abstractNumId="${abstractId}"[\\s\\S]*?</w:abstractNum>`)
+      );
+      if (!abstract) return false;
+      const fmtMatch = abstract[0].match(/<w:numFmt\s+w:val="([^"]*)"/);
+      return !!fmtMatch && fmtMatch[1] !== "bullet" && fmtMatch[1] !== "none";
+    };
+
+    const paragraphs = xml.match(/<w:p[ >][\s\S]*?<\/w:p>/g) ?? [];
+    const lines: string[] = [];
+    let orderedCounter = 0;
+    for (const paragraph of paragraphs) {
+      const text = paragraphText(paragraph).trim();
+      if (isListParagraph(paragraph)) {
+        if (!text) continue;
+        if (isNumberedList(paragraph)) {
+          orderedCounter += 1;
+          lines.push(`${orderedCounter}. ${text}`);
+        } else {
+          orderedCounter = 0;
+          lines.push(`- ${text}`);
+        }
+      } else {
+        orderedCounter = 0;
+        lines.push(text);
+      }
+    }
+
+    return lines
+      .join("\n")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
   } catch {
@@ -1719,7 +1791,7 @@ async function extractDocxTemplateHeadings(base64: string): Promise<string[]> {
 
 function buildStrictTemplateBlock(templateText: string): string {
   if (!templateText.trim()) return "";
-  return `\n\nSTRICT TEMPLATE TO FOLLOW (this takes ABSOLUTE PRECEDENCE over every other structural instruction in this prompt):\n${templateText}\n\nTEMPLATE RULES (mandatory):\n- Reproduce the template's exact section headings, wording of headings, and their order. Do not add, remove, rename, merge, split, or reorder any section.\n- Match the template's formatting, heading style, capitalization, numbering/bullet conventions, tone, and overall structure precisely.\n- Replace any placeholder text in the template (e.g. bracketed prompts, sample text, "TODO", "[...]") with real content tailored to this assignment.\n- Preserve any fixed/boilerplate wording in the template verbatim.\n- If a default section described elsewhere in this prompt is not present in the template, only include it if the template has a clearly appropriate place for it; otherwise omit it. The template's structure wins in every conflict.`;
+  return `\n\nSTRICT TEMPLATE TO FOLLOW (this takes ABSOLUTE PRECEDENCE over every other structural instruction in this prompt):\n${templateText}\n\nTEMPLATE RULES (mandatory):\n- Reproduce the template's exact section headings, wording of headings, and their order. Do not add, remove, rename, merge, split, or reorder any section.\n- Match the template's formatting, heading style, capitalization, numbering/bullet conventions, tone, and overall structure precisely.\n- The template marks bulleted list items with a leading "- " and numbered list items with a leading "1. ", "2. ", etc. Wherever the template uses these list markers, your output MUST use the same list markers (start each such line with "- " for bullets or "N. " for numbered items). Wherever the template uses ordinary paragraphs, keep them as paragraphs with no list marker.\n- Replace any placeholder text in the template (e.g. bracketed prompts, sample text, "TODO", "[...]") with real content tailored to this assignment.\n- Preserve any fixed/boilerplate wording in the template verbatim.\n- If a default section described elsewhere in this prompt is not present in the template, only include it if the template has a clearly appropriate place for it; otherwise omit it. The template's structure wins in every conflict.`;
 }
 
 async function generateSlidesForAssignment(

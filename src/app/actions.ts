@@ -1644,6 +1644,10 @@ export interface AssignmentPlan {
   slides: SlideData[];
   moduleIntroduction: string;
   assignmentInstructions: string;
+  // The week number parsed from the assignment folder name in the codebase
+  // (e.g. "week3" -> 3). Falls back to the assignment's position in the sorted
+  // list when the folder name contains no number.
+  weekNumber: number;
   // The exact heading lines found in the supplied templates (paragraphs styled
   // as headings/titles in the .docx). When a template is provided, only these
   // lines may receive heading formatting in the generated document — body text
@@ -2212,18 +2216,23 @@ export async function generateLecturePlansAction(
 
     // Generate slides and companion documents for each assignment in parallel.
     const results = await Promise.all(
-      assignmentContents.map(async ({ name, content, readmeContent }) => {
+      assignmentContents.map(async ({ name, content, readmeContent }, index) => {
         const [slidesResult, introResult, instructionsResult] = await Promise.all([
           generateSlidesForAssignment(name, content, lectureDurationMinutes),
           generateModuleIntroForAssignment(name, content, introTemplateText),
           generateAssignmentInstructionsForAssignment(name, readmeContent, instructionsTemplateText),
         ]);
         if ("error" in slidesResult) return null;
+        // Derive the week number from the assignment folder name (e.g.
+        // "week3", "Week 3", "assignment-03"). Fall back to the sorted position.
+        const parsedWeek = name.match(/\d+/)?.[0];
+        const weekNumber = parsedWeek ? parseInt(parsedWeek, 10) : index + 1;
         return {
           assignmentName: name,
           ...slidesResult,
           moduleIntroduction: "error" in introResult ? "" : introResult.text,
           assignmentInstructions: "error" in instructionsResult ? "" : instructionsResult.text,
+          weekNumber,
           introTemplateHeadings,
           instructionsTemplateHeadings,
         } satisfies AssignmentPlan;

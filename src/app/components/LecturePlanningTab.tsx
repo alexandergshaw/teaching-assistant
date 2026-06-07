@@ -158,7 +158,7 @@ export default function LecturePlanningTab() {
       const BODY_TEXT = "1e293b";
       const SUBTITLE_TEXT = "94a3b8";
 
-      for (const [planIndex, plan] of plans.entries()) {
+      for (const plan of plans) {
         const prs = new PptxGenJS();
         prs.layout = "LAYOUT_WIDE";
 
@@ -249,7 +249,7 @@ export default function LecturePlanningTab() {
         }
 
         const pptxData = await prs.write({ outputType: "arraybuffer" }) as ArrayBuffer;
-        const weekLabel = `Week ${planIndex + 1}`;
+        const weekLabel = `Week ${plan.weekNumber}`;
         outputZip.file(`${weekLabel} Slides.pptx`, pptxData);
         if (plan.moduleIntroduction) {
           outputZip.file(`${weekLabel} Introduction.docx`, await buildDocxFromPlainText(plan.moduleIntroduction, plan.introTemplateHeadings));

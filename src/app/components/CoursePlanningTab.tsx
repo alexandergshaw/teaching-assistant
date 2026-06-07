@@ -258,6 +258,11 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [redoStartDate, setRedoStartDate] = useState("");
   const [redoWeeks, setRedoWeeks] = useState("");
   const [redoTests, setRedoTests] = useState("");
+  const [redoRows, setRedoRows] = useState<CourseScheduleRow[]>([]);
+  const [isGeneratingRedo, setIsGeneratingRedo] = useState(false);
+  const [redoError, setRedoError] = useState<string | null>(null);
+  const [redoGenerated, setRedoGenerated] = useState(false);
+  const [redoCopilotPrompt, setRedoCopilotPrompt] = useState<string | null>(null);
 
   // Local storage keys
   const LS_KEYS = {
@@ -497,6 +502,96 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       ),
     ];
     const courseName = courseDescription.split("\n")[0].trim().slice(0, 60);
+    const sanitized = courseName.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
+    triggerFileDownload(
+      new Blob([rows.join("\r\n")], { type: "text/csv;charset=utf-8" }),
+      `${sanitized}_schedule.csv`
+    );
+  };
+
+  const handleGenerateRedo = async () => {
+    if (!redoCourseName.trim()) {
+      setRedoError("Please enter a course name.");
+      return;
+    }
+    if (!redoCourseDescription.trim()) {
+      setRedoError("Please enter a course description.");
+      return;
+    }
+    if (!redoStartDate) {
+      setRedoError("Please select the course start date.");
+      return;
+    }
+    const weeks = parseInt(redoWeeks, 10);
+    if (!weeks || weeks < 1 || weeks > 52) {
+      setRedoError("Please enter a valid number of weeks (1–52).");
+      return;
+    }
+    const tests = parseInt(redoTests, 10);
+    if (isNaN(tests) || tests < 0) {
+      setRedoError("Please enter a valid number of tests (0 or more).");
+      return;
+    }
+    setIsGeneratingRedo(true);
+    setRedoError(null);
+    setRedoCopilotPrompt(null);
+    try {
+      const scheduleResult = await generateCourseScheduleAction(
+        redoCourseDescription.trim(),
+        redoCourseName.trim(),
+        redoStartDate,
+        weeks,
+        tests
+      );
+      if ("error" in scheduleResult) {
+        setRedoError(scheduleResult.error);
+        return;
+      }
+      const rows = scheduleResult.rows;
+      setRedoRows(rows);
+      setRedoGenerated(true);
+
+      // Convert schedule rows to CSV for Copilot prompt generation
+      const escapeCell = (val: string) => `"${val.replace(/"/g, '""')}"`;
+      const csvLines = [
+        ["Week", "Dates", "Topics", "Assignment"].join(","),
+        ...rows.map((r) =>
+          [String(r.week), escapeCell(r.dates), escapeCell(r.topics), escapeCell(r.assignment)].join(",")
+        ),
+      ];
+      const csvContent = csvLines.join("\r\n");
+      const sanitized =
+        redoCourseName.trim().slice(0, 60).replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
+      const promptResult = await generateCopilotProjectPromptAction(csvContent, `${sanitized}_schedule.csv`);
+      if ("error" in promptResult) {
+        setRedoError(promptResult.error);
+      } else {
+        setRedoCopilotPrompt(promptResult.prompt);
+      }
+    } catch (err) {
+      setRedoError(err instanceof Error ? err.message : "Failed to generate schedule.");
+    } finally {
+      setIsGeneratingRedo(false);
+    }
+  };
+
+  const resetRedo = () => {
+    setRedoGenerated(false);
+    setRedoRows([]);
+    setRedoError(null);
+    setRedoCopilotPrompt(null);
+  };
+
+  const handleExportRedoCsv = () => {
+    const header = ["Week", "Dates", "Topics", "Assignment"];
+    const escapeCell = (val: string) => `"${val.replace(/"/g, '""')}"`;
+    const rows = [
+      header.join(","),
+      ...redoRows.map((r) =>
+        [String(r.week), escapeCell(r.dates), escapeCell(r.topics), escapeCell(r.assignment)].join(",")
+      ),
+    ];
+    const courseName = redoCourseName.trim().slice(0, 60);
     const sanitized = courseName.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
     triggerFileDownload(
       new Blob([rows.join("\r\n")], { type: "text/csv;charset=utf-8" }),
@@ -1260,7 +1355,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
           )}
 
           {/* ── Redo mode ── */}
-          {planningMode === "redo" && (
+          {planningMode === "redo" && !redoGenerated && (
             <>
               <div className={styles.field}>
                 <label htmlFor="redoCourseName">Course Name</label>
@@ -1319,6 +1414,86 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   onChange={(e) => { setRedoTests(e.target.value); localStorage.setItem(LS_KEYS.redoTests, e.target.value); }}
                 />
               </div>
+              {redoError && <p className={styles.error}>{redoError}</p>}
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleGenerateRedo}
+                disabled={isGeneratingRedo || !redoCourseName.trim() || !redoCourseDescription.trim() || !redoStartDate || !redoWeeks || !redoTests}
+              >
+                {isGeneratingRedo ? "Generating…" : "Generate"}
+              </button>
+            </>
+          )}
+
+          {/* ── Redo result table ── */}
+          {planningMode === "redo" && redoGenerated && (
+            <>
+              <div className={styles.courseScheduleWrap}>
+                <table className={styles.courseScheduleTable}>
+                  <thead>
+                    <tr>
+                      <th>Week</th>
+                      <th>Dates</th>
+                      <th>Topics</th>
+                      <th>Assignment</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {redoRows.map((row) => (
+                      <tr key={row.week}>
+                        <td>{row.week}</td>
+                        <td>{row.dates}</td>
+                        <td>{row.topics}</td>
+                        <td>{row.assignment}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className={styles.scheduleActions}>
+                <button
+                  type="button"
+                  className={styles.submitButton}
+                  onClick={resetRedo}
+                >
+                  Edit &amp; Regenerate
+                </button>
+                <button
+                  type="button"
+                  className={styles.submitButton}
+                  onClick={handleExportRedoCsv}
+                >
+                  Download CSV
+                </button>
+              </div>
+              {redoError && <p className={styles.error}>{redoError}</p>}
+              {isGeneratingRedo && !redoCopilotPrompt && (
+                <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", marginTop: 16 }}>Generating GitHub Copilot prompt…</p>
+              )}
+              {redoCopilotPrompt && (
+                <div className={styles.field} style={{ marginTop: 24 }}>
+                  <label>GitHub Copilot Prompt</label>
+                  <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: 8 }}>
+                    Copy the prompt below and paste it into GitHub Copilot (Agent mode) to scaffold a course-long project covering all schedule topics, with one assignment per week.
+                  </p>
+                  <textarea
+                    className={styles.textInput}
+                    value={redoCopilotPrompt}
+                    readOnly
+                    rows={20}
+                    style={{ fontFamily: "monospace", fontSize: "0.85rem" }}
+                  />
+                  <button
+                    type="button"
+                    className={styles.submitButton}
+                    style={{ marginTop: 8 }}
+                    onClick={() => void navigator.clipboard.writeText(redoCopilotPrompt)}
+                  >
+                    Copy to Clipboard
+                  </button>
+                </div>
+              )}
             </>
           )}
         </section>

@@ -2189,9 +2189,29 @@ export async function generateLectureDeckAction(
 
 export async function generateCourseMaterialsAction(
   zipBase64: string
-): Promise<CourseEngineFile | { error: string }> {
+): Promise<(CourseEngineFile & { rubricCsv: string | null }) | { error: string }> {
   try {
-    return await courseEngineMaterials(zipBase64);
+    const materials = await courseEngineMaterials(zipBase64);
+
+    // The materials package already contains the deterministic rubric.csv, so
+    // pull it out here and hand it back with the file — that lets the UI show
+    // the rubric from this single call instead of re-hitting /materials.
+    let rubricCsv: string | null = null;
+    try {
+      const JSZip = (await import("jszip")).default;
+      const out = await JSZip.loadAsync(Buffer.from(materials.base64, "base64"));
+      const rubricFile =
+        out.file("rubric.csv") ??
+        out.file(Object.keys(out.files).find((p) => /(^|\/)rubric\.csv$/i.test(p)) ?? "");
+      if (rubricFile) {
+        const csv = (await rubricFile.async("string")).trim();
+        rubricCsv = csv || null;
+      }
+    } catch {
+      // Rubric extraction is best-effort; the package download still succeeds.
+    }
+
+    return { ...materials, rubricCsv };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Materials generation failed." };
   }

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { generateLecturePlansAction, generateCourseRubricFromZipAction, generateCourseMaterialsAction, type AssignmentPlan } from "../actions";
 import { parseGeneratedRubric } from "../utils/rubric";
 import { saveFile, loadFile, deleteFile } from "../../lib/file-persistence";
-import { getStoredProvider } from "@/lib/llm-provider";
+import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
 import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 
@@ -129,6 +129,7 @@ async function buildDocxFromPlainText(
 }
 
 export default function LecturePlanningTab() {
+  const [provider] = useLlmProvider();
   const [lectureDuration, setLectureDuration] = useState("50");
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -226,6 +227,8 @@ export default function LecturePlanningTab() {
 
       // Course Engine path: it returns a finished course-materials.zip from the
       // project, so download it directly and skip the per-assignment preview.
+      // The package also includes rubric.csv, so surface it in the rubric panel
+      // from this single call (avoids a second /materials request).
       if (getStoredProvider() === "other") {
         const materials = await generateCourseMaterialsAction(base64);
         if ("error" in materials) {
@@ -234,6 +237,11 @@ export default function LecturePlanningTab() {
           return;
         }
         downloadBase64File(materials.base64, materials.fileName, materials.mimeType);
+        if (materials.rubricCsv) {
+          setGeneratedRubric(materials.rubricCsv);
+          setRubricStatus("done");
+          setRubricError(null);
+        }
         setStatus("done");
         return;
       }
@@ -665,22 +673,25 @@ export default function LecturePlanningTab() {
             Course-Wide Rubric
           </h2>
           <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--text-secondary)" }}>
-            Generate a universal grading rubric derived from all assignment instructions in the uploaded zip.
-            This rubric can be copied and pasted into the Grading tab.
+            {provider === "other"
+              ? "The grading rubric is produced together with the lecture package above — generate it there and it will appear here. It can be copied and pasted into the Grading tab."
+              : "Generate a universal grading rubric derived from all assignment instructions in the uploaded zip. This rubric can be copied and pasted into the Grading tab."}
           </p>
         </div>
 
         {rubricError && <p className={styles.error}>{rubricError}</p>}
 
-        <button
-          type="button"
-          className={styles.submitButton}
-          onClick={handleGenerateRubric}
-          disabled={rubricStatus === "loading"}
-          style={{ marginBottom: 16 }}
-        >
-          {rubricStatus === "loading" ? "Generating Rubric…" : "Generate Course Rubric"}
-        </button>
+        {provider !== "other" && (
+          <button
+            type="button"
+            className={styles.submitButton}
+            onClick={handleGenerateRubric}
+            disabled={rubricStatus === "loading"}
+            style={{ marginBottom: 16 }}
+          >
+            {rubricStatus === "loading" ? "Generating Rubric…" : "Generate Course Rubric"}
+          </button>
+        )}
 
         {rubricStatus === "done" && generatedRubric && (() => {
           const rows = parseGeneratedRubric(generatedRubric);

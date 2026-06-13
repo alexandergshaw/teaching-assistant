@@ -9,6 +9,13 @@ import {
 } from "@/lib/grade";
 import { OfficeParser, type SupportedFileType } from "officeparser";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
+import {
+  courseEngineSchedule,
+  courseEngineLecture,
+  courseEngineMaterials,
+  type CourseEngineFile,
+  type ScheduleResponse,
+} from "@/lib/course-engine";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
 
@@ -1195,6 +1202,43 @@ export interface CourseScheduleResult {
   rows: CourseScheduleRow[];
 }
 
+// Format the Monday–Friday range for week N (1-based) starting from an ISO
+// date (YYYY-MM-DD), e.g. "Aug 25 – Aug 29". Used when the Course Engine
+// schedule endpoint supplies topics but no calendar dates (Gemini does both).
+function weekDateRange(startISO: string, weekNumber: number): string {
+  if (!startISO) return "";
+  const start = new Date(`${startISO}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return "";
+
+  // Snap to the Monday of the start week, then advance to the requested week.
+  const day = start.getDay(); // 0 Sun … 6 Sat
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const monday = new Date(start);
+  monday.setDate(start.getDate() + mondayOffset + (weekNumber - 1) * 7);
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+
+  const fmt = (d: Date) =>
+    d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return `${fmt(monday)} – ${fmt(friday)}`;
+}
+
+// Adapt the Course Engine schedule response to the CourseScheduleRow shape the
+// UI already renders. The endpoint provides per-week topics + citations but no
+// dates or per-week assignments, so dates are derived locally and assignment is
+// left blank.
+function scheduleResponseToRows(
+  resp: ScheduleResponse,
+  startingDate: string
+): CourseScheduleRow[] {
+  return (resp.weeks ?? []).map((w) => ({
+    week: w.week,
+    dates: weekDateRange(startingDate, w.week),
+    topics: (w.topics ?? []).join(", "),
+    assignment: "",
+  }));
+}
+
 export async function generateCourseScheduleAction(
   courseDescription: string,
   term: string,
@@ -1204,6 +1248,11 @@ export async function generateCourseScheduleAction(
   provider: LlmProvider = "gemini"
 ): Promise<CourseScheduleResult | { error: string }> {
   try {
+    if (provider === "other") {
+      const resp = await courseEngineSchedule(courseDescription.trim(), numberOfWeeks);
+      return { rows: scheduleResponseToRows(resp, startingDate) };
+    }
+
     const prompt = `You are an expert curriculum designer creating a weekly course schedule.
 
 COURSE DESCRIPTION:
@@ -2119,5 +2168,31 @@ export async function generateLecturePlansAction(
     return plans;
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+// ── Course Engine binary endpoints ──────────────────────────────────────────
+// These wrap the Course Engine API's file-returning endpoints. They are invoked
+// only when the provider toggle is set to "other"; the result is a base64 file
+// the client downloads directly (no in-app editable preview).
+
+export async function generateLectureDeckAction(
+  objectives: string,
+  title?: string
+): Promise<CourseEngineFile | { error: string }> {
+  try {
+    return await courseEngineLecture(objectives, title);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Lecture generation failed." };
+  }
+}
+
+export async function generateCourseMaterialsAction(
+  zipBase64: string
+): Promise<CourseEngineFile | { error: string }> {
+  try {
+    return await courseEngineMaterials(zipBase64);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Materials generation failed." };
   }
 }

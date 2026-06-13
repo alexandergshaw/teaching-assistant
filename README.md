@@ -31,6 +31,15 @@ Set these values in your local `.env.local` and in your deployment provider:
 
 The grading pipeline uses these limits to reduce free-tier quota spikes by capping per-run workload and pacing requests.
 
+### Course Engine API (the "Other API" provider)
+
+When the in-app provider toggle is set to **Other API**, the matched features (course
+schedule, lecture deck, and course materials) call the Course Engine service instead
+of Gemini. All other features stay on Gemini regardless of the toggle.
+
+- `COURSE_ENGINE_URL` (optional, default: `https://testing-knowledge-engine.vercel.app`)
+- `COURSE_ENGINE_API_KEY` (optional) — only required if the Course Engine project enforces a key; sent as `X-API-Key`. Never exposed to the client.
+
 ## Supported Submission File Types
 
 The grader can now extract text from common source and document formats inside the uploaded zip archive, including:

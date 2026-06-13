@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { generateLecturePlansAction, generateCourseRubricFromZipAction, type AssignmentPlan } from "../actions";
+import { generateLecturePlansAction, generateCourseRubricFromZipAction, generateCourseMaterialsAction, type AssignmentPlan } from "../actions";
 import { parseGeneratedRubric } from "../utils/rubric";
 import { saveFile, loadFile, deleteFile } from "../../lib/file-persistence";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -11,6 +11,22 @@ import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 const ZIP_FILE_KEY = "lecture-planning-zip";
 const INTRO_TEMPLATE_KEY = "lecture-planning-intro-template";
 const INSTRUCTIONS_TEMPLATE_KEY = "lecture-planning-instructions-template";
+
+// Decode a base64 payload (e.g. the Course Engine materials zip) and download it.
+function downloadBase64File(base64: string, fileName: string, mimeType: string) {
+  const byteChars = atob(base64);
+  const byteArray = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
+  const blob = new Blob([byteArray], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 async function buildDocxFromPlainText(
   text: string,
@@ -207,6 +223,20 @@ export default function LecturePlanningTab() {
 
     try {
       const base64 = await readFileAsBase64(file);
+
+      // Course Engine path: it returns a finished course-materials.zip from the
+      // project, so download it directly and skip the per-assignment preview.
+      if (getStoredProvider() === "other") {
+        const materials = await generateCourseMaterialsAction(base64);
+        if ("error" in materials) {
+          setError(materials.error);
+          setStatus("error");
+          return;
+        }
+        downloadBase64File(materials.base64, materials.fileName, materials.mimeType);
+        setStatus("done");
+        return;
+      }
 
       const introTemplateBase64 = introTemplateFile
         ? await readFileAsBase64(introTemplateFile)

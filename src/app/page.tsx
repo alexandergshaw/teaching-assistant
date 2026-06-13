@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
-import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData } from "./actions";
+import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, generateLectureDeckAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData } from "./actions";
 import CoursePlanningTab from "./components/CoursePlanningTab";
 import GradingTab from "./components/GradingTab";
 import LessonPlanPreview from "./components/LessonPlanPreview";
@@ -19,6 +19,23 @@ const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
 type ActiveTab = "grading" | "lesson-planning" | "course-planning";
+
+// Decode a base64 payload (e.g. a file returned by the Course Engine API) and
+// trigger a browser download.
+function downloadBase64File(base64: string, fileName: string, mimeType: string) {
+  const byteChars = atob(base64);
+  const byteArray = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
+  const blob = new Blob([byteArray], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 function getCommentPrefix(language?: string): string {
   const lang = (language ?? "").toLowerCase();
@@ -131,6 +148,18 @@ export default function Home() {
     setIsGeneratingLesson(true);
     setLessonError(null);
     try {
+      // Course Engine path: it returns a finished .pptx deck (objectives only),
+      // so download it directly and skip the Gemini companion bundle + preview.
+      if (getStoredProvider() === "other") {
+        const deck = await generateLectureDeckAction(moduleObjectives);
+        if ("error" in deck) {
+          setLessonError(deck.error);
+          return;
+        }
+        downloadBase64File(deck.base64, deck.fileName, deck.mimeType);
+        return;
+      }
+
       const fileList = lessonContextFileRef.current?.files;
       const files: Array<{ name: string; base64: string; mimeType: string }> = [];
       if (fileList) {

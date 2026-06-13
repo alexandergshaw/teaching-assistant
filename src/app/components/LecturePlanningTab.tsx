@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { generateLecturePlansAction, generateCourseRubricFromZipAction, type AssignmentPlan } from "../actions";
 import { parseGeneratedRubric } from "../utils/rubric";
 import { saveFile, loadFile, deleteFile } from "../../lib/file-persistence";
+import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
 import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 
@@ -218,7 +219,8 @@ export default function LecturePlanningTab() {
         base64,
         minutes,
         introTemplateBase64,
-        instructionsTemplateBase64
+        instructionsTemplateBase64,
+        getStoredProvider()
       );
 
       if ("error" in result) {
@@ -395,7 +397,7 @@ export default function LecturePlanningTab() {
         reader.readAsDataURL(file);
       });
 
-      const result = await generateCourseRubricFromZipAction(base64);
+      const result = await generateCourseRubricFromZipAction(base64, getStoredProvider());
 
       if (typeof result === "object" && "error" in result) {
         setRubricError(result.error);

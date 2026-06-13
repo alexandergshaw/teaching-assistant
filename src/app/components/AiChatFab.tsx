@@ -7,6 +7,7 @@ import AiChatWindow from "./AiChatWindow";
 import DeadlinesWindow from "./DeadlinesWindow";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
 import type { ChatMessage } from "@/lib/chat/types";
+import { getStoredProvider } from "@/lib/llm-provider";
 
 interface Pos { x: number; y: number }
 
@@ -173,7 +174,7 @@ export default function AiChatFab() {
       const response = await fetch("/api/ai-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages, sessionId: sessionIdRef.current }),
+        body: JSON.stringify({ messages: nextMessages, sessionId: sessionIdRef.current, provider: getStoredProvider() }),
       });
       const data = (await response.json()) as { reply?: string; error?: string };
 

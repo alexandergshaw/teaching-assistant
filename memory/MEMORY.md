@@ -1,0 +1,1 @@
+- [LLM provider toggle](llm-provider-toggle.md) — all LLM calls go through callLlm(); UI toggle picks gemini vs a to-be-wired "other" API

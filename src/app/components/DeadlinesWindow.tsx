@@ -9,6 +9,7 @@ import {
   type CalendarEventType,
   type ParsedCalendarResult,
 } from "@/lib/calendar-events";
+import { getStoredProvider } from "@/lib/llm-provider";
 
 export interface DeadlineEvent {
   id: string;
@@ -157,6 +158,7 @@ export default function DeadlinesWindow({
       try {
         const formData = new FormData();
         formData.append("file", file);
+        formData.append("provider", getStoredProvider());
 
         const res = await fetch("/api/parse-calendar", {
           method: "POST",
@@ -234,7 +236,7 @@ export default function DeadlinesWindow({
       const res = await fetch("/api/parse-calendar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, provider: getStoredProvider() }),
       });
 
       if (!res.ok) {

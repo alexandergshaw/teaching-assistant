@@ -8,7 +8,7 @@ import {
   type GradingRun,
 } from "@/lib/grade";
 import { OfficeParser, type SupportedFileType } from "officeparser";
-import { getGeminiApiKey, getGeminiModel } from "@/lib/gemini";
+import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
 
@@ -42,12 +42,10 @@ export interface ModuleIntroData {
 
 export async function generateModuleIntroAction(
   moduleObjectives: string,
-  contextText: string
+  contextText: string,
+  provider: LlmProvider = "gemini"
 ): Promise<ModuleIntroData | { error: string }> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
-
     const prompt = `You are an expert educator writing a module introduction for students.
 
 MODULE OBJECTIVES:
@@ -68,29 +66,19 @@ Requirements:
 - Use clear, engaging language. Avoid jargon unless you define it immediately.
 - Do not include any text outside the JSON object.`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.5, maxOutputTokens: 512 },
-        }),
-      }
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 512 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      return { error: `Module intro generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    if (!result.ok) {
+      return { error: `Module intro generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const raw =
-      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const raw = result.text;
 
     const trimmed = raw.trim();
     const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -120,12 +108,10 @@ export async function generateLessonPlanAction(
   contextText: string,
   files: Array<{ name: string; base64: string; mimeType: string }>,
   revisionPrompt?: string,
-  currentSlides?: SlideData[]
+  currentSlides?: SlideData[],
+  provider: LlmProvider = "gemini"
 ): Promise<GenerateLessonPlanResult | { error: string }> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
-
     const filesSummary =
       files.length > 0
         ? `\n\nATTACHED FILES (${files.length}):\n${files.map((f) => `- ${f.name}`).join("\n")}`
@@ -168,29 +154,19 @@ Requirements:
       ...files.map((f) => ({ inlineData: { mimeType: f.mimeType, data: f.base64 } })),
     ];
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts }],
-          generationConfig: { temperature: 0.6, maxOutputTokens: 4096 },
-        }),
-      }
+        contents: [{ role: "user", parts }],
+        generationConfig: { temperature: 0.6, maxOutputTokens: 4096 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      return { error: `Gemini API error: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    if (!result.ok) {
+      return { error: `LLM API error: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const raw =
-      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const raw = result.text;
 
     const trimmed = raw.trim();
     const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -226,12 +202,10 @@ Requirements:
 export async function generateAssignmentAction(
   moduleObjectives: string,
   contextText: string,
-  files: Array<{ name: string; base64: string; mimeType: string }>
+  files: Array<{ name: string; base64: string; mimeType: string }>,
+  provider: LlmProvider = "gemini"
 ): Promise<AssignmentData | { error: string }> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
-
     const filesSummary =
       files.length > 0
         ? `\n\nATTACHED FILES (${files.length}):\n${files.map((f) => `- ${f.name}`).join("\n")}`
@@ -271,29 +245,19 @@ Requirements:
       ...files.map((f) => ({ inlineData: { mimeType: f.mimeType, data: f.base64 } })),
     ];
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts }],
-          generationConfig: { temperature: 0.5, maxOutputTokens: 2048 },
-        }),
-      }
+        contents: [{ role: "user", parts }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 2048 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      return { error: `Assignment generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    if (!result.ok) {
+      return { error: `Assignment generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const raw =
-      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const raw = result.text;
 
     const trimmed = raw.trim();
     const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -328,11 +292,12 @@ Requirements:
 
 export async function generateAssignmentRubricAction(
   moduleObjectives: string,
-  contextText: string
+  contextText: string,
+  provider: LlmProvider = "gemini"
 ): Promise<string | { error: string }> {
   try {
     const instructions = `MODULE OBJECTIVES:\n${moduleObjectives}${contextText ? `\n\nCONTEXT:\n${contextText}` : ""}`;
-    return await generateRubric(instructions);
+    return await generateRubric(instructions, provider);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Rubric generation failed." };
   }
@@ -354,11 +319,10 @@ export interface ExamplesData {
 export async function generateExamplesAction(
   moduleObjectives: string,
   contextText: string,
-  slides: SlideData[]
+  slides: SlideData[],
+  provider: LlmProvider = "gemini"
 ): Promise<ExamplesData | { error: string }> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
 
     const conceptList = slides
       .map((s, i) => `${i + 1}. ${s.title}`)
@@ -410,29 +374,19 @@ Requirements:
 - Code examples must be complete and runnable as-is; use comments to annotate key lines.
 - Do not include any text outside the JSON object.`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.5, maxOutputTokens: 3072 },
-        }),
-      }
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 3072 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      return { error: `Examples generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    if (!result.ok) {
+      return { error: `Examples generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const raw =
-      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const raw = result.text;
 
     const trimmed = raw.trim();
     const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -533,12 +487,10 @@ export async function parseSyllabusAction(
   courseTitle: string,
   file: { name: string; base64: string; mimeType: string },
   additionalContext?: string,
-  contextFiles: SyllabusContextFile[] = []
+  contextFiles: SyllabusContextFile[] = [],
+  provider: LlmProvider = "gemini"
 ): Promise<{ sections: SyllabusSection[]; templateText: string } | { error: string }> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
-
     const additionalContextBlock = additionalContext?.trim()
       ? `\n\nADDITIONAL COURSE CONTEXT:\n${additionalContext.trim()}`
       : "";
@@ -581,28 +533,19 @@ Requirements:
       ];
       await appendSyllabusContextParts(parts, contextFiles);
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      const result = await callLlm(
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
-          }),
-        }
+          contents: [{ role: "user", parts }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+        },
+        provider
       );
 
-      if (!response.ok) {
-        const body = await response.text();
-        return { error: `Syllabus parsing failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+      if (!result.ok) {
+        return { error: `Syllabus parsing failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
       }
 
-      const data = (await response.json()) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      };
-
-      const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+      const raw = result.text;
       const trimmed = raw.trim();
       const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
       const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
@@ -677,28 +620,19 @@ Requirements:
       await appendSyllabusContextParts(parts, contextFiles);
     }
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
-        }),
-      }
+        contents: [{ role: "user", parts }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      return { error: `Syllabus parsing failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    if (!result.ok) {
+      return { error: `Syllabus parsing failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const raw = result.text;
     const trimmed = raw.trim();
     const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
     const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
@@ -727,12 +661,10 @@ export async function generateSyllabusSectionAction(
   completedSections: Array<{ heading: string; content: string }>,
   templateText?: string,
   additionalContext?: string,
-  contextFiles: SyllabusContextFile[] = []
+  contextFiles: SyllabusContextFile[] = [],
+  provider: LlmProvider = "gemini"
 ): Promise<string | { error: string }> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
-
     const templateBlock = templateText
       ? `\n\nORIGINAL SYLLABUS TEMPLATE:\n${templateText}`
       : "";
@@ -764,28 +696,19 @@ Write the content for the "${section.heading}" section of this syllabus. Be spec
     ];
     await appendSyllabusContextParts(parts, contextFiles);
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts }],
-          generationConfig: { temperature: 0.5, maxOutputTokens: 1024 },
-        }),
-      }
+        contents: [{ role: "user", parts }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 1024 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      return { error: `Section generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    if (!result.ok) {
+      return { error: `Section generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const raw = result.text;
     return raw.trim() || "Could not generate content for this section.";
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
@@ -799,12 +722,10 @@ export async function generateSyllabusRemainingSectionsAction(
   startIndex: number,
   templateText?: string,
   additionalContext?: string,
-  contextFiles: SyllabusContextFile[] = []
+  contextFiles: SyllabusContextFile[] = [],
+  provider: LlmProvider = "gemini"
 ): Promise<{ contents: string[] } | { error: string }> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
-
     const existingBlock = sections
       .map((s, i) => `${s.heading}:\n${currentContents[i] || "(empty)"}`)
       .join("\n\n");
@@ -855,28 +776,19 @@ Requirements:
     ];
     await appendSyllabusContextParts(parts, contextFiles);
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts }],
-          generationConfig: { temperature: 0.5, maxOutputTokens: 4096 },
-        }),
-      }
+        contents: [{ role: "user", parts }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 4096 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      return { error: `Section generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    if (!result.ok) {
+      return { error: `Section generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const raw = result.text;
     const trimmed = raw.trim();
     const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
     const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
@@ -922,12 +834,10 @@ export async function reviseSyllabusAction(
   files: Array<{ name: string; base64: string; mimeType: string }> = [],
   additionalContext?: string,
   contextFiles: SyllabusContextFile[] = [],
-  lockedSections: boolean[] = []
+  lockedSections: boolean[] = [],
+  provider: LlmProvider = "gemini"
 ): Promise<{ contents: string[] } | { error: string }> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
-
     const syllabusText = sections
       .map((s, i) => `${s.heading}:\n${contents[i] || "(empty)"}`)
       .join("\n\n");
@@ -1008,28 +918,19 @@ Requirements:
       }
     }
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts }],
-          generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
-        }),
-      }
+        contents: [{ role: "user", parts }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      return { error: `Syllabus revision failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    if (!result.ok) {
+      return { error: `Syllabus revision failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const raw = result.text;
     const trimmed = raw.trim();
     const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
     const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
@@ -1069,12 +970,10 @@ export interface TestGeminiState {
 export async function assembleSyllabusFromTemplateAction(
   templateFile: { name: string; base64: string; mimeType: string },
   sections: SyllabusSection[],
-  contents: string[]
+  contents: string[],
+  provider: LlmProvider = "gemini"
 ): Promise<{ text: string } | { error: string }> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
-
     const sectionsText = sections
       .map((s, i) => `${s.heading}:\n${contents[i] || "(no content generated)"}`)
       .join("\n\n---\n\n");
@@ -1099,28 +998,19 @@ ${sectionsText}`;
       parts.push({ text: `\n\nORIGINAL TEMPLATE:\n${raw}` });
     }
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
-        }),
-      }
+        contents: [{ role: "user", parts }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      return { error: `Assembly failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    if (!result.ok) {
+      return { error: `Assembly failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const text = result.text;
     return { text: text.trim() };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
@@ -1132,8 +1022,7 @@ export async function testGeminiAction(
   formData: FormData
 ): Promise<TestGeminiState> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
+    const provider = normalizeProvider(formData.get("provider") as string | null);
 
     const file = formData.get("studentSubmissions") as File | null;
     if (!file || file.size === 0) {
@@ -1152,34 +1041,23 @@ export async function testGeminiAction(
     const [fileName, content] = entries[0];
     const truncated = content.length > 2000 ? content.slice(0, 2000) + "\n\n[truncated]" : content;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: `Summarize this student file in one sentence.\n\nFile: ${fileName}\n\n${truncated}` }],
-            },
-          ],
-        }),
-      }
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: `Summarize this student file in one sentence.\n\nFile: ${fileName}\n\n${truncated}` }],
+          },
+        ],
+      },
+      provider
     );
 
-    const body = await response.text();
-
-    if (!response.ok) {
-      return { result: null, error: `HTTP ${response.status}: ${body}` };
+    if (!result.ok) {
+      return { result: null, error: `HTTP ${result.status}: ${result.body}` };
     }
 
-    const data = JSON.parse(body) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-    const text =
-      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ??
-      "(no response text)";
+    const text = result.text || "(no response text)";
 
     return { result: `[${fileName}] ${text}`, error: null };
   } catch (err) {
@@ -1204,6 +1082,7 @@ export async function gradeAction(
   const assignmentInstructions =
     (formData.get("assignmentInstructions") as string | null) ?? "";
   const rubric = (formData.get("rubric") as string | null) ?? "";
+  const provider = normalizeProvider(formData.get("provider") as string | null);
 
   if (!file || file.size === 0) {
     return { run: null, error: "Please upload a student submissions zip file." };
@@ -1216,13 +1095,13 @@ export async function gradeAction(
   try {
     const effectiveRubric = rubric.trim()
       ? rubric
-      : await generateRubric(assignmentInstructions);
+      : await generateRubric(assignmentInstructions, provider);
     const generatedRubric = rubric.trim() ? undefined : effectiveRubric;
 
     const zipBuffer = await file.arrayBuffer();
     const [run, fullCreditChecklist] = await Promise.all([
-      gradeSubmissions(zipBuffer, assignmentInstructions, effectiveRubric),
-      synthesizeFullCreditChecklist(assignmentInstructions, effectiveRubric),
+      gradeSubmissions(zipBuffer, assignmentInstructions, effectiveRubric, provider),
+      synthesizeFullCreditChecklist(assignmentInstructions, effectiveRubric, provider),
     ]);
 
     return {
@@ -1248,12 +1127,10 @@ export async function selectionChatAction(
   selectedText: string,
   question: string,
   history: SelectionChatMessage[],
-  sessionId: string
+  sessionId: string,
+  provider: LlmProvider = "gemini"
 ): Promise<string | { error: string }> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
-
     const systemPrompt = `You are a helpful teaching assistant. The user has highlighted the following text and has a question about it. Answer concisely and helpfully. Use plain prose only — do not use any markdown formatting, bold, italics, bullet points, headers, or special symbols.
 
 HIGHLIGHTED TEXT:
@@ -1268,31 +1145,19 @@ ${selectedText}
       { role: "user" as const, parts: [{ text: question }] },
     ];
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents,
-          generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-        }),
-      }
+        contents,
+        generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      return { error: `Chat failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    if (!result.ok) {
+      return { error: `Chat failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const reply =
-      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-
-    const replyText = reply || "No response from the model.";
+    const replyText = result.text || "No response from the model.";
 
     // Log the user message and assistant reply to the database (non-blocking).
     let userId: string | undefined;
@@ -1335,12 +1200,10 @@ export async function generateCourseScheduleAction(
   term: string,
   startingDate: string,
   numberOfWeeks: number,
-  numberOfTests: number
+  numberOfTests: number,
+  provider: LlmProvider = "gemini"
 ): Promise<CourseScheduleResult | { error: string }> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
-
     const prompt = `You are an expert curriculum designer creating a weekly course schedule.
 
 COURSE DESCRIPTION:
@@ -1376,28 +1239,19 @@ Requirements:
       { text: prompt },
     ];
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts }],
-          generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
-        }),
-      }
+        contents: [{ role: "user", parts }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      return { error: `Schedule generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    if (!result.ok) {
+      return { error: `Schedule generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const raw = result.text;
     const trimmed = raw.trim();
     const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
     const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
@@ -1432,12 +1286,10 @@ Requirements:
 
 export async function generateCopilotProjectPromptAction(
   fileContent: string,
-  fileName: string
+  fileName: string,
+  provider: LlmProvider = "gemini"
 ): Promise<{ prompt: string } | { error: string }> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
-
     const prompt = `You are an expert software engineering educator. A teacher has provided a course schedule (as a CSV or text file) and wants to create a hands-on software project that gives students practice with every topic and assignment in the course.
 
 FILE NAME: ${fileName}
@@ -1474,35 +1326,25 @@ The prompt you write should be self-contained — someone should be able to past
 
 Return ONLY the prompt text — no preamble, no explanation, no markdown code fences. Just the raw prompt the teacher will paste into GitHub Copilot.`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const llmResult = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.5, maxOutputTokens: 8192 },
-        }),
-      }
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 8192 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      return { error: `Prompt generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    if (!llmResult.ok) {
+      return { error: `Prompt generation failed: HTTP ${llmResult.status} — ${llmResult.body.slice(0, 200)}` };
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
+    const generated = llmResult.text;
 
-    const result =
-      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-
-    if (!result.trim()) {
+    if (!generated.trim()) {
       return { error: "The model did not return a prompt. Please try again." };
     }
 
-    return { prompt: result.trim() };
+    return { prompt: generated.trim() };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
@@ -1510,12 +1352,10 @@ Return ONLY the prompt text — no preamble, no explanation, no markdown code fe
 
 export async function generateCourseProjectRubricAction(
   fileContent: string,
-  fileName: string
+  fileName: string,
+  provider: LlmProvider = "gemini"
 ): Promise<{ rubric: string } | { error: string }> {
   try {
-    const apiKey = getGeminiApiKey();
-    const model = getGeminiModel();
-
     const prompt = `You are an expert educator. A teacher has provided a course schedule and wants a single universal grading rubric that can be applied consistently to every assignment in the course.
 
 FILE NAME: ${fileName}
@@ -1555,29 +1395,19 @@ Rules:
 - IMPORTANT: Every criterion must evaluate only the presence or absence of things in the submitted code itself (e.g. specific functions, classes, variables, logic, structure, or required features). Do NOT include criteria that require running tests, checking commits, verifying deployments, or evaluating anything outside the code files themselves.
 - Do not include any text outside the JSON object.`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 1500 },
-        }),
-      }
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 1500 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const body = await response.text();
-      return { error: `Rubric generation failed: HTTP ${response.status} — ${body.slice(0, 200)}` };
+    if (!result.ok) {
+      return { error: `Rubric generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const raw =
-      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const raw = result.text;
 
     if (!raw.trim()) {
       return { error: "The model did not return a rubric. Please try again." };
@@ -1797,11 +1627,9 @@ function buildStrictTemplateBlock(templateText: string): string {
 async function generateSlidesForAssignment(
   assignmentName: string,
   content: string,
-  lectureDurationMinutes: number
+  lectureDurationMinutes: number,
+  provider: LlmProvider
 ): Promise<{ presentationTitle: string; slides: SlideData[] } | { error: string }> {
-  const apiKey = getGeminiApiKey();
-  const model = getGeminiModel();
-
   const prompt = `You are an expert educator creating a lecture slide deck for a programming course assignment. The slides must be fully self-contained — students reading them after class must be able to understand every concept without relying on any verbal explanation from the instructor.
 
 ASSIGNMENT: ${assignmentName}
@@ -1830,28 +1658,19 @@ Requirements:
 - For every concept-focused slide, immediately follow it with two additional slides: (1) a concrete example slide that shows a worked scenario, code snippet, or case study with enough context that a student can follow it independently, and (2) a step-by-step walkthrough slide that explains each step or line in plain English so the student understands the reasoning without needing the instructor to narrate it. Label these slides clearly (e.g. "Example: <concept>" and "Walkthrough: <concept>").
 - Do not include any text outside the JSON object.`;
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+  const result = await callLlm(
     {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.6, maxOutputTokens: 8192 },
-      }),
-    }
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.6, maxOutputTokens: 8192 },
+    },
+    provider
   );
 
-  if (!response.ok) {
-    const body = await response.text();
-    return { error: `Gemini API error for "${assignmentName}": HTTP ${response.status} — ${body.slice(0, 200)}` };
+  if (!result.ok) {
+    return { error: `LLM API error for "${assignmentName}": HTTP ${result.status} — ${result.body.slice(0, 200)}` };
   }
 
-  const data = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-
-  const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  const raw = result.text;
   const trimmed = raw.trim();
   const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
@@ -1883,11 +1702,9 @@ Requirements:
 async function generateModuleIntroForAssignment(
   assignmentName: string,
   content: string,
-  templateText = ""
+  templateText = "",
+  provider: LlmProvider = "gemini"
 ): Promise<{ text: string } | { error: string }> {
-  const apiKey = getGeminiApiKey();
-  const model = getGeminiModel();
-
   const prompt = `You are an expert educator writing a module introduction document for a programming course.
 
 ASSIGNMENT / MODULE: ${assignmentName}
@@ -1905,45 +1722,33 @@ Write a well-formatted module introduction for the week this assignment covers. 
 
 Do not include the assignment instructions or grading criteria — focus only on introducing the module topic.${buildStrictTemplateBlock(templateText)}`;
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+  const result = await callLlm(
     {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
-      }),
-    }
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+    },
+    provider
   );
 
-  if (!response.ok) {
-    const body = await response.text();
-    return { error: `Gemini API error for module intro "${assignmentName}": HTTP ${response.status} — ${body.slice(0, 200)}` };
+  if (!result.ok) {
+    return { error: `LLM API error for module intro "${assignmentName}": HTTP ${result.status} — ${result.body.slice(0, 200)}` };
   }
 
-  const data = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
+  const text = result.text;
 
-  const result =
-    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-
-  if (!result.trim()) {
+  if (!text.trim()) {
     return { error: `Module intro generation returned empty response for "${assignmentName}".` };
   }
 
-  return { text: result.trim() };
+  return { text: text.trim() };
 }
 
 async function generateAssignmentInstructionsForAssignment(
   assignmentName: string,
   readmeContent: string,
-  templateText = ""
+  templateText = "",
+  provider: LlmProvider = "gemini"
 ): Promise<{ text: string } | { error: string }> {
-  const apiKey = getGeminiApiKey();
-  const model = getGeminiModel();
-
   const prompt = `You are an expert educator writing a formal assignment instruction sheet for a programming course.
 
 ASSIGNMENT: ${assignmentName}
@@ -1963,39 +1768,30 @@ Using the README content above, write a complete, student-facing assignment inst
 
 Do not invent requirements not present in the README. If the README is sparse, note that students should refer to the course discussion board for clarification. The "Helpful Free Resources" section should always be included regardless of how sparse the README is.${buildStrictTemplateBlock(templateText)}`;
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+  const result = await callLlm(
     {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
-      }),
-    }
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+    },
+    provider
   );
 
-  if (!response.ok) {
-    const body = await response.text();
-    return { error: `Gemini API error for assignment instructions "${assignmentName}": HTTP ${response.status} — ${body.slice(0, 200)}` };
+  if (!result.ok) {
+    return { error: `LLM API error for assignment instructions "${assignmentName}": HTTP ${result.status} — ${result.body.slice(0, 200)}` };
   }
 
-  const data = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
+  const text = result.text;
 
-  const result =
-    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-
-  if (!result.trim()) {
+  if (!text.trim()) {
     return { error: `Assignment instructions generation returned empty response for "${assignmentName}".` };
   }
 
-  return { text: result.trim() };
+  return { text: text.trim() };
 }
 
 export async function generateCourseRubricFromZipAction(
-  zipBase64: string
+  zipBase64: string,
+  provider: LlmProvider = "gemini"
 ): Promise<string | { error: string }> {
   const TEXT_EXTENSIONS = new Set([
     ".md", ".txt", ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cpp", ".c",
@@ -2116,7 +1912,7 @@ export async function generateCourseRubricFromZipAction(
     }
 
     const aggregatedText = aggregatedInstructions.join("\n\n");
-    return await generateRubric(aggregatedText);
+    return await generateRubric(aggregatedText, provider);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
@@ -2126,7 +1922,8 @@ export async function generateLecturePlansAction(
   zipBase64: string,
   lectureDurationMinutes: number,
   introTemplateBase64?: string,
-  instructionsTemplateBase64?: string
+  instructionsTemplateBase64?: string,
+  provider: LlmProvider = "gemini"
 ): Promise<AssignmentPlan[] | { error: string }> {
   const TEXT_EXTENSIONS = new Set([
     ".md", ".txt", ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cpp", ".c",
@@ -2292,9 +2089,9 @@ export async function generateLecturePlansAction(
     const results = await Promise.all(
       assignmentContents.map(async ({ name, content, readmeContent }, index) => {
         const [slidesResult, introResult, instructionsResult] = await Promise.all([
-          generateSlidesForAssignment(name, content, lectureDurationMinutes),
-          generateModuleIntroForAssignment(name, content, introTemplateText),
-          generateAssignmentInstructionsForAssignment(name, readmeContent, instructionsTemplateText),
+          generateSlidesForAssignment(name, content, lectureDurationMinutes, provider),
+          generateModuleIntroForAssignment(name, content, introTemplateText, provider),
+          generateAssignmentInstructionsForAssignment(name, readmeContent, instructionsTemplateText, provider),
         ]);
         if ("error" in slidesResult) return null;
         // Derive the week number from the assignment folder name (e.g.

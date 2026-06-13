@@ -8,6 +8,8 @@ import GradingTab from "./components/GradingTab";
 import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
 import LessonPlanningForm from "./components/LessonPlanningForm";
+import ProviderToggle from "./components/ProviderToggle";
+import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "./page.module.css";
 import { parseGeneratedRubric } from "./utils/rubric";
 
@@ -148,11 +150,12 @@ export default function Home() {
 
       setSavedLessonFiles(files);
 
+      const provider = getStoredProvider();
       const [slideResult, assignmentResult, rubricResult, introResult] = await Promise.all([
-        generateLessonPlanAction(moduleObjectives, lessonContext, files),
-        generateAssignmentAction(moduleObjectives, lessonContext, files),
-        generateAssignmentRubricAction(moduleObjectives, lessonContext),
-        generateModuleIntroAction(moduleObjectives, lessonContext),
+        generateLessonPlanAction(moduleObjectives, lessonContext, files, undefined, undefined, provider),
+        generateAssignmentAction(moduleObjectives, lessonContext, files, provider),
+        generateAssignmentRubricAction(moduleObjectives, lessonContext, provider),
+        generateModuleIntroAction(moduleObjectives, lessonContext, provider),
       ]);
 
       if ("error" in slideResult) {
@@ -163,7 +166,8 @@ export default function Home() {
       const examplesResult = await generateExamplesAction(
         moduleObjectives,
         lessonContext,
-        slideResult.slides
+        slideResult.slides,
+        provider
       );
 
       setLessonPlanPreview(slideResult);
@@ -187,7 +191,8 @@ export default function Home() {
         lessonContext,
         savedLessonFiles,
         revisionPrompt.trim() || undefined,
-        lessonPlanPreview.slides
+        lessonPlanPreview.slides,
+        getStoredProvider()
       );
       if ("error" in result) {
         setLessonError(result.error);
@@ -461,6 +466,9 @@ export default function Home() {
   return (
     <main className={styles.page}>
       <div className={styles.tabContainer}>
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: "8px 4px 0" }}>
+          <ProviderToggle />
+        </div>
         <Tabs
           value={activeTab}
           onChange={(_, v: ActiveTab) => setActiveTab(v)}

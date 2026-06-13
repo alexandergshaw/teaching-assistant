@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { selectionChatAction } from "../actions";
+import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
 import AiChatWindow from "./AiChatWindow";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
@@ -122,7 +123,8 @@ export default function SelectionChatWidget() {
       text,
       // Map to the "user" | "model" shape the server action expects.
       messages.map((m) => ({ role: m.role === "assistant" ? "model" : m.role, text: m.text })),
-      sessionIdRef.current
+      sessionIdRef.current,
+      getStoredProvider()
     );
     setIsLoading(false);
 

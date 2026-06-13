@@ -1,13 +1,12 @@
 import JSZip from "jszip";
 import { OfficeParser, type SupportedFileType } from "officeparser";
 import {
-  getGeminiApiKey,
   getGeminiInterRequestDelayMs,
   getGeminiMaxCharsPerSubmission,
   getGeminiMaxOutputTokens,
   getGeminiMaxSubmissions,
-  getGeminiModel,
 } from "./gemini";
+import { callLlm, type LlmProvider } from "./llm";
 
 const TEXT_EXTENSIONS = new Set([
   "txt",
@@ -614,7 +613,8 @@ function parseInferredFileNameLookup(
 }
 
 async function inferFileNameConvention(
-  rawFileNames: string[]
+  rawFileNames: string[],
+  provider: LlmProvider
 ): Promise<InferredFileNameLookup> {
   const fallback: InferredFileNameLookup = {
     byRaw: new Map<string, InferredFileNameParts>(),
@@ -625,66 +625,31 @@ async function inferFileNameConvention(
     return fallback;
   }
 
-  const apiKey = getGeminiApiKey();
-  const model = getGeminiModel();
-
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: buildFileNameConventionPrompt(rawFileNames),
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0,
-            maxOutputTokens: 1200,
-          },
-        }),
-      }
+        contents: [
+          { role: "user", parts: [{ text: buildFileNameConventionPrompt(rawFileNames) }] },
+        ],
+        generationConfig: { temperature: 0, maxOutputTokens: 1200 },
+      },
+      provider
     );
 
-    if (!response.ok) {
+    if (!result.ok) {
       return fallback;
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{
-            text?: string;
-          }>;
-        };
-      }>;
-    };
-
-    const raw =
-      data.candidates?.[0]?.content?.parts
-        ?.map((part) => part.text ?? "")
-        .join("")
-        .trim() ?? "";
-
-    return parseInferredFileNameLookup(raw, rawFileNames);
+    return parseInferredFileNameLookup(result.text.trim(), rawFileNames);
   } catch {
     return fallback;
   }
 }
 
-export async function generateRubric(assignmentInstructions: string): Promise<string> {
-  const apiKey = getGeminiApiKey();
-  const model = getGeminiModel();
-
+export async function generateRubric(
+  assignmentInstructions: string,
+  provider: LlmProvider = "gemini"
+): Promise<string> {
   const prompt = `You are a teaching assistant creating a grading rubric.
 
 ASSIGNMENT INSTRUCTIONS:
@@ -708,29 +673,19 @@ The rubric text must:
 - Do not include text outside the JSON object.
 - IMPORTANT: Every criterion must evaluate only the presence or absence of things in the submitted code itself (e.g. specific functions, classes, variables, logic, structure, or required features). Do NOT include criteria that require running tests, checking commits, verifying deployments, or evaluating anything outside the code files themselves.`;
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+  const result = await callLlm(
     {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 1500 },
-      }),
-    }
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.3, maxOutputTokens: 1500 },
+    },
+    provider
   );
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Rubric generation failed: HTTP ${response.status} ${body}`);
+  if (!result.ok) {
+    throw new Error(`Rubric generation failed: HTTP ${result.status} ${result.body}`);
   }
 
-  const data = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-
-  const raw =
-    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  const raw = result.text;
 
   const jsonText = extractJsonObject(raw);
   if (jsonText) {
@@ -753,60 +708,28 @@ The rubric text must:
 
 export async function synthesizeFullCreditChecklist(
   assignmentInstructions: string,
-  rubric: string
+  rubric: string,
+  provider: LlmProvider = "gemini"
 ): Promise<string[]> {
-  const apiKey = getGeminiApiKey();
-  const model = getGeminiModel();
   const fallback = defaultFullCreditChecklist();
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    const result = await callLlm(
       {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: buildChecklistPrompt(assignmentInstructions, rubric),
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 300,
-          },
-        }),
-      }
+        contents: [
+          { role: "user", parts: [{ text: buildChecklistPrompt(assignmentInstructions, rubric) }] },
+        ],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 300 },
+      },
+      provider
     );
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error(`[Gemini synthesizeFullCreditChecklist] HTTP ${response.status}:`, errorBody);
-      throw new Error(normalizeGeminiError(response.status, errorBody));
+    if (!result.ok) {
+      console.error(`[LLM synthesizeFullCreditChecklist] HTTP ${result.status}:`, result.body);
+      throw new Error(normalizeGeminiError(result.status, result.body));
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{
-            text?: string;
-          }>;
-        };
-      }>;
-    };
-
-    const rawChecklist =
-      data.candidates?.[0]?.content?.parts
-        ?.map((part) => part.text ?? "")
-        .join("")
-        .trim() ?? "";
+    const rawChecklist = result.text.trim();
 
     const parsed = parseChecklistResponse(rawChecklist);
     const normalized = parsed.slice(0, 3);
@@ -1215,59 +1138,32 @@ function groupSubmissionsByStudent(
 async function gradeSubmission(
   systemPrompt: string,
   studentName: string,
-  content: string
+  content: string,
+  provider: LlmProvider
 ): Promise<GradeResult> {
-  const apiKey = getGeminiApiKey();
-  const model = getGeminiModel();
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+  const result = await callLlm(
     {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text: `${systemPrompt}\n\nStudent: ${studentName}\n\nSubmission:\n${content}`,
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: `${systemPrompt}\n\nStudent: ${studentName}\n\nSubmission:\n${content}` },
+          ],
         },
-      }),
-    }
+      ],
+      generationConfig: { temperature: 0.2, maxOutputTokens },
+    },
+    provider
   );
 
-  if (!response.ok) {
-    const errorBody = await response.text();
-    console.error(`[Gemini gradeSubmission] HTTP ${response.status}:`, errorBody);
-    throw new Error(normalizeGeminiError(response.status, errorBody));
+  if (!result.ok) {
+    console.error(`[LLM gradeSubmission] HTTP ${result.status}:`, result.body);
+    throw new Error(normalizeGeminiError(result.status, result.body));
   }
 
-  const data = (await response.json()) as {
-    candidates?: Array<{
-      content?: {
-        parts?: Array<{
-          text?: string;
-        }>;
-      };
-    }>;
-  };
-
-  const feedback =
-    data.candidates?.[0]?.content?.parts
-      ?.map((part) => part.text ?? "")
-      .join("")
-      .trim() || "No feedback generated.";
+  const feedback = result.text.trim() || "No feedback generated.";
   const parsed = parseRubricResponse(feedback);
   const totalScore = deriveTotalScore(parsed.totalScore, parsed.rubricAreas);
 
@@ -1290,13 +1186,14 @@ async function gradeSubmission(
 export async function gradeSubmissions(
   zipBuffer: ArrayBuffer,
   assignmentInstructions: string,
-  rubric: string
+  rubric: string,
+  provider: LlmProvider = "gemini"
 ): Promise<GradingRun> {
   const { submissions, rawData, attemptedSupportedFiles, failedSupportedFiles } =
     await extractSubmissions(zipBuffer);
 
   const rawFileNames = Object.keys(submissions);
-  const inferredFileNameLookup = await inferFileNameConvention(rawFileNames);
+  const inferredFileNameLookup = await inferFileNameConvention(rawFileNames, provider);
   const studentSubmissions = groupSubmissionsByStudent(
     submissions,
     inferredFileNameLookup,
@@ -1332,7 +1229,7 @@ export async function gradeSubmissions(
     const truncated = truncateSubmission(content, maxCharsPerSubmission);
 
     try {
-      const result = await gradeSubmission(systemPrompt, student, truncated);
+      const result = await gradeSubmission(systemPrompt, student, truncated, provider);
       results.push({ ...result, mergedFileCount, submittedFiles });
     } catch (error) {
       const message =

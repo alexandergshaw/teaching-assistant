@@ -1,9 +1,6 @@
 import { OfficeParser } from "officeparser";
-import {
-  getGeminiApiKey,
-  getGeminiMaxOutputTokens,
-  getGeminiModel,
-} from "./gemini";
+import { getGeminiMaxOutputTokens } from "./gemini";
+import { callLlm, type LlmProvider } from "./llm";
 import {
   CALENDAR_EVENT_TYPES,
   isCalendarEventType,
@@ -25,6 +22,8 @@ export interface ParseCalendarOptions {
   schoolHint?: string;
   // Optional override for the file name to give the model better grounding.
   fileName?: string;
+  // Which LLM provider to route the call through. Defaults to "gemini".
+  provider?: LlmProvider;
 }
 
 /**
@@ -200,42 +199,29 @@ export async function parseCalendarFromText(
     return { events: [] };
   }
 
-  const apiKey = getGeminiApiKey();
-  const model = getGeminiModel();
   const maxOutputTokens = Math.max(getGeminiMaxOutputTokens(), 2048);
 
   const prompt = buildPrompt(text, options);
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+  const result = await callLlm(
     {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens,
-          responseMimeType: "application/json",
-        },
-      }),
-    }
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens,
+        responseMimeType: "application/json",
+      },
+    },
+    options.provider ?? "gemini"
   );
 
-  if (!response.ok) {
-    const body = await response.text();
+  if (!result.ok) {
     throw new Error(
-      `Gemini API error: HTTP ${response.status} — ${body.slice(0, 300)}`
+      `LLM API error: HTTP ${result.status} — ${result.body.slice(0, 300)}`
     );
   }
 
-  const data = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-
-  const raw =
-    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ??
-    "";
+  const raw = result.text;
 
   if (!raw.trim()) {
     return { events: [] };

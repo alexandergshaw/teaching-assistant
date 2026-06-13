@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseCalendarFromText, parseCalendarPdf } from "@/lib/calendar-parser";
+import { normalizeProvider } from "@/lib/llm";
 
 // Allow up to ~10 MB syllabi.
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -14,7 +15,7 @@ export async function POST(req: NextRequest) {
 
     // --- JSON text path ---
     if (contentType.toLowerCase().includes("application/json")) {
-      const body = (await req.json()) as { text?: unknown; schoolHint?: unknown };
+      const body = (await req.json()) as { text?: unknown; schoolHint?: unknown; provider?: unknown };
 
       const text =
         typeof body.text === "string" ? body.text.trim() : "";
@@ -37,7 +38,10 @@ export async function POST(req: NextRequest) {
           ? body.schoolHint.trim()
           : undefined;
 
-      const result = await parseCalendarFromText(text, { schoolHint });
+      const provider = normalizeProvider(
+        typeof body.provider === "string" ? body.provider : undefined
+      );
+      const result = await parseCalendarFromText(text, { schoolHint, provider });
       return NextResponse.json(result);
     }
 
@@ -56,6 +60,10 @@ export async function POST(req: NextRequest) {
       typeof schoolHintEntry === "string" && schoolHintEntry.trim()
         ? schoolHintEntry.trim()
         : undefined;
+    const providerEntry = formData.get("provider");
+    const provider = normalizeProvider(
+      typeof providerEntry === "string" ? providerEntry : undefined
+    );
 
     if (!(file instanceof File)) {
       return NextResponse.json(
@@ -93,6 +101,7 @@ export async function POST(req: NextRequest) {
     const result = await parseCalendarPdf(buffer, {
       fileName,
       schoolHint,
+      provider,
     });
 
     return NextResponse.json(result);

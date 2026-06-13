@@ -15,6 +15,7 @@ import {
 } from "../actions";
 import SyllabusPreviewModal from "./SyllabusPreviewModal";
 import LecturePlanningTab from "./LecturePlanningTab";
+import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
 
 type CoursePlanningTabProps = {
@@ -345,7 +346,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         scheduleTerm.trim(),
         scheduleStartDate,
         weeks,
-        tests
+        tests,
+        getStoredProvider()
       );
       if ("error" in result) {
         setScheduleError(result.error);
@@ -405,7 +407,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setProjectError(null);
     setProjectPrompt(null);
     try {
-      const promptResult = await generateCopilotProjectPromptAction(projectFileContent, projectFileName);
+      const promptResult = await generateCopilotProjectPromptAction(projectFileContent, projectFileName, getStoredProvider());
       if ("error" in promptResult) {
         setProjectError(promptResult.error);
       } else {
@@ -462,7 +464,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         courseTitle,
         { name: file.name, base64, mimeType: file.type || "application/octet-stream" },
         getFullContext(),
-        getContextFiles()
+        getContextFiles(),
+        getStoredProvider()
       );
       if ("error" in parsed) { setCoursePlanningError(parsed.error); return; }
       setParsedSections(parsed.sections);
@@ -475,7 +478,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         0,
         parsed.templateText || undefined,
         getFullContext(),
-        getContextFiles()
+        getContextFiles(),
+        getStoredProvider()
       );
       if ("error" in result) { setCoursePlanningError(result.error); return; }
       setSectionContents(result.contents);
@@ -518,7 +522,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         syllabusRevisionFiles,
         getFullContext(),
         getContextFiles(),
-        lockedSyllabusSections
+        lockedSyllabusSections,
+        getStoredProvider()
       );
       if ("error" in result) { setCoursePlanningError(result.error); return; }
       setSectionContents(result.contents);
@@ -546,7 +551,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       completedSections.filter((s) => s.heading !== parsedSections[i].heading),
       syllabusTemplateText || undefined,
       getFullContext(),
-      getContextFiles()
+      getContextFiles(),
+      getStoredProvider()
     );
     if (typeof result === "string") {
       setSectionContents((prev) => {
@@ -594,7 +600,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         output = buildTextTemplateSyllabus(syllabusTemplateText, parsedSections, sectionContents)
           ?? buildSimpleSyllabus(parsedSections, sectionContents);
       } else if (syllabusFileData) {
-        const result = await assembleSyllabusFromTemplateAction(syllabusFileData, parsedSections, sectionContents);
+        const result = await assembleSyllabusFromTemplateAction(syllabusFileData, parsedSections, sectionContents, getStoredProvider());
         output = "error" in result ? buildSimpleSyllabus(parsedSections, sectionContents) : result.text;
       } else {
         output = buildSimpleSyllabus(parsedSections, sectionContents);

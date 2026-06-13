@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import type { GradeActionState, TestGeminiState } from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
 import { parseGeneratedRubric } from "../utils/rubric";
+import { useLlmProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -142,6 +143,7 @@ export default function GradingTab({
   onCopy,
   onOpenPreview,
 }: GradingTabProps) {
+  const [selectedProvider] = useLlmProvider();
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
@@ -264,6 +266,7 @@ export default function GradingTab({
       </div>
 
       <form className={styles.form} action={formAction}>
+        <input type="hidden" name="provider" value={selectedProvider} />
         {pending && (
           <div className={styles.loadingState} role="status" aria-live="polite">
             <span className={styles.spinner} aria-hidden="true" />

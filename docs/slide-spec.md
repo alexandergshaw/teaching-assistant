@@ -21,11 +21,26 @@ A deck is `{ "presentationTitle": "string", "slides": [ ... ] }`.
 ## 2. Deck-level ordering
 
 1. Slide 1 - Title / overview. Lists the key topics/objectives. No code.
-2. Body. Walk the objectives in order. Each objective produces a concept slide
+2. Slide 2 - Case Study. A real-world case study / news story about the module's
+   subject (section 2a). Applies to every deck, coding or not.
+3. Body. Walk the objectives in order. Each objective produces a concept slide
    (prose, no code); if that concept is a coding concept, the concept slide is
    immediately followed by a fixed 4-slide unit (section 3).
-3. Non-coding concepts produce just the concept slide (no unit).
-4. (Optional) a references/sources slide at the end.
+4. Non-coding concepts produce just the concept slide (no unit).
+5. (Optional) a references/sources slide at the end.
+
+### 2a. The Case Study slide
+
+- `title` begins with `Case Study:`. Prose only - no `code`.
+- Presents a specific, well-known, widely-documented real event about the
+  module's subject: the organization/product involved and roughly when.
+- Prefer a dramatic, motivating story - a high-profile failure, security breach,
+  or outage, OR an impressive system that was built.
+- Bullets summarize what happened; the last bullet ties the story to what
+  students are about to learn.
+- Enforcement is prompt-only and there is no deterministic fallback (a real news
+  story cannot be synthesized), so factual accuracy depends on the model. The
+  prompt demands well-known events and forbids fabrication.
 
 ## 3. The coding-concept unit
 

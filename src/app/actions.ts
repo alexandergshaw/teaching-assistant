@@ -206,6 +206,7 @@ Create a complete set of lecture slides that fully address the module objectives
   "presentationTitle": "...",
   "slides": [
     { "title": "...", "bullets": ["...", "...", "..."] },
+    { "title": "Case Study: ...", "bullets": ["...", "...", "..."] },
     { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
     { "title": "Walkthrough: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
     { "title": "Practice: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
@@ -219,6 +220,7 @@ Requirements:
 - Each bullet must be a single, concise idea — no sub-points.
 - Use plenty of real-world analogies and concrete examples that students will immediately recognise (everyday technology, social media, sports, food, pop culture, etc.).
 - The first slide should be a title/overview slide listing the key topics.
+- The SECOND slide MUST be a real-world case study or news story about this module's subject, with "title" beginning with "Case Study:". Name a specific, well-known, widely-documented real event (the organization or product involved and roughly when it happened). Prefer a dramatic, motivating story — a high-profile failure, security breach, or outage, OR an impressive system that was built — to show students why this matters. Use the bullets to summarize what happened, and make the last bullet connect the story to what students are about to learn. Do not put "code" on this slide. Stick to established facts; never invent events or fabricate specifics.
 - Include enough slides to thoroughly cover every objective.
 - CODING CONCEPTS: Whenever a slide introduces a coding concept (a loop, conditional, variable, function, class, data structure, etc.), it MUST be followed immediately by exactly four slides, in this order:
   1. Example slide — "title" begins with "Example:"; demonstrate that exact concept with a short, correct, self-contained snippet in "code" (use real newlines) and "codeLanguage" set; keep "bullets" to at most one short caption.
@@ -1838,6 +1840,7 @@ Return ONLY valid JSON:
   "presentationTitle": "...",
   "slides": [
     { "title": "...", "bullets": ["...", "...", "..."] },
+    { "title": "Case Study: ...", "bullets": ["...", "...", "..."] },
     { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
     { "title": "Walkthrough: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
     { "title": "Practice: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
@@ -1850,6 +1853,7 @@ Requirements:
 - Maximum 4 bullets per slide.
 - Each bullet must be a complete, self-explanatory sentence (or two) that a student can fully understand without any verbal elaboration. Define every term you introduce, explain how each concept works, and state why it matters for the assignment. Never use bare keywords or vague one-liners — write as if the student is reading the slide alone with no instructor present.
 - The first slide should be a title/overview slide listing the key topics covered in the lecture.
+- The SECOND slide MUST be a real-world case study or news story about this lecture's subject, with "title" beginning with "Case Study:". Name a specific, well-known, widely-documented real event (the organization or product involved and roughly when it happened). Prefer a dramatic, motivating story — a high-profile failure, security breach, or outage, OR an impressive system that was built — to show students why this matters. Use the bullets to summarize what happened, and make the last bullet connect the story to what students are about to learn. Do not put "code" on this slide. Stick to established facts; never invent events or fabricate specifics.
 - Cover the concepts introduced in the README or assignment description, highlight what students must implement, and explain any relevant patterns shown in the unit tests or code comments.
 - Use real-world analogies and concrete examples that students will recognise; integrate the analogy into the bullet itself so it is self-contained.
 - For every concept-focused slide, immediately follow it with a concrete example slide and a step-by-step walkthrough slide that explains each step or line in plain English so the student understands the reasoning without needing the instructor to narrate it. Label these slides clearly (e.g. "Example: <concept>" and "Walkthrough: <concept>").

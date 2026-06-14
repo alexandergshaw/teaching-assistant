@@ -56,27 +56,31 @@ function toSlideData(
   return slide;
 }
 
-// Ensure the Walkthrough and Practice slides that follow an Example slide carry
-// the Example's code block. The Example teaches the concept with code, the
-// Walkthrough explains that same code line by line, and the Practice uses it as
-// a reference — so all three should display it. The Answer slide keeps its own
-// solution code and is never overwritten. When Gemini omits the code on a
-// Walkthrough or Practice slide, propagate it from the most recent Example here.
+// Force the Walkthrough and Practice slides that follow an Example slide to
+// display the Example's reference code. The Example teaches the concept with
+// code, the Walkthrough explains that same code line by line, and the Practice
+// gives students that worked example to reference while they attempt the
+// challenge. Critically, the Practice slide must NOT reveal the answer, so we
+// overwrite whatever code the model put there with the Example's reference code
+// (not just fill when missing — the model might otherwise leak the solution).
+// The Answer slide keeps its own distinct solution code and is never touched.
 function propagateExampleCodeToFollowups(slides: SlideData[]): SlideData[] {
   let exampleCode: string | undefined;
   let exampleLanguage: string | undefined;
   for (const slide of slides) {
     if (slide.title.startsWith("Example:")) {
-      // Remember this example's code as the source for the slides that follow.
+      // Remember this example's code as the reference for the slides that follow.
       exampleCode = slide.code;
       exampleLanguage = slide.codeLanguage;
     } else if (
       (slide.title.startsWith("Walkthrough:") || slide.title.startsWith("Practice:")) &&
-      exampleCode &&
-      !slide.code
+      exampleCode
     ) {
+      // Always use the Example's reference code, overriding any code the model
+      // produced for these slides (a Practice snippet could otherwise spoil the
+      // answer; a Walkthrough must match the example it explains).
       slide.code = exampleCode;
-      if (exampleLanguage && !slide.codeLanguage) {
+      if (exampleLanguage) {
         slide.codeLanguage = exampleLanguage;
       }
     }
@@ -203,8 +207,8 @@ Create a complete set of lecture slides that fully address the module objectives
   "slides": [
     { "title": "...", "bullets": ["...", "...", "..."] },
     { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
-    { "title": "Walkthrough: ...", "bullets": ["...", "..."] },
-    { "title": "Practice: ...", "bullets": ["...", "..."], "codeLanguage": "python" },
+    { "title": "Walkthrough: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
+    { "title": "Practice: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
     { "title": "Answer: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" }
   ]
 }
@@ -219,7 +223,7 @@ Requirements:
 - CODING CONCEPTS: Whenever a slide introduces a coding concept (a loop, conditional, variable, function, class, data structure, etc.), it MUST be followed immediately by exactly four slides, in this order:
   1. Example slide — "title" begins with "Example:"; demonstrate that exact concept with a short, correct, self-contained snippet in "code" (use real newlines) and "codeLanguage" set; keep "bullets" to at most one short caption.
   2. Walkthrough slide — "title" begins with "Walkthrough:"; explain the example code line by line in "bullets" while showing the same code in the "code" field; use the exact code from the Example slide so students can read both the code and the explanation together.
-  3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets", set "codeLanguage", and include the Example code (or modified starter code) in "code" so the student has a reference.
+  3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets" and set "codeLanguage". Its "code" field MUST repeat the SAME reference code shown on the Example/Walkthrough slide so the student has a worked example to reference — it must NOT contain the solution to the practice challenge or any code that gives away the answer.
   4. Answer slide — "title" begins with "Answer:"; give the correct, runnable solution to that exact practice challenge in "code" with "codeLanguage" set, plus at most one "bullets" caption.
 - All of Example, Walkthrough, Practice, and Answer slides must include "code"/"codeLanguage". Do not omit "code" on Walkthrough or Practice slides. If the module teaches no programming, omit code fields and the Example/Walkthrough/Practice/Answer slides entirely.
 - Do not include any text outside the JSON object.`;
@@ -1835,8 +1839,8 @@ Return ONLY valid JSON:
   "slides": [
     { "title": "...", "bullets": ["...", "...", "..."] },
     { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
-    { "title": "Walkthrough: ...", "bullets": ["...", "..."] },
-    { "title": "Practice: ...", "bullets": ["...", "..."], "codeLanguage": "python" },
+    { "title": "Walkthrough: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
+    { "title": "Practice: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
     { "title": "Answer: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" }
   ]
 }
@@ -1852,7 +1856,7 @@ Requirements:
 - CODING CONCEPTS: When the concept being introduced is a coding concept (a loop, conditional, variable, function, class, data structure, etc.), follow it with exactly these four slides, in this order:
   1. Example slide — "title" begins with "Example:"; demonstrate that exact concept with a short, correct, self-contained snippet in "code" (use real newlines) and "codeLanguage" set; keep "bullets" to at most one short caption.
   2. Walkthrough slide — "title" begins with "Walkthrough:"; explain the example code line by line in "bullets" while showing the same code in the "code" field; use the exact code from the Example slide so students can read both the code and the explanation together.
-  3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets", set "codeLanguage", and include the Example code (or modified starter code) in "code" so the student has a reference.
+  3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets" and set "codeLanguage". Its "code" field MUST repeat the SAME reference code shown on the Example/Walkthrough slide so the student has a worked example to reference — it must NOT contain the solution to the practice challenge or any code that gives away the answer.
   4. Answer slide — "title" begins with "Answer:"; give the correct, runnable solution to that exact practice challenge in "code" with "codeLanguage" set, plus at most one "bullets" caption.
 - All of Example, Walkthrough, Practice, and Answer slides must include "code"/"codeLanguage". Do not omit "code" on Walkthrough or Practice slides. Omit code only on conceptual slides.
 - Do not include any text outside the JSON object.`;

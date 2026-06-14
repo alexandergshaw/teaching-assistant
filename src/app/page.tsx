@@ -389,7 +389,9 @@ export default function Home() {
       setLessonPlanPreview((prev) => {
         if (!prev) return prev;
         const slides = [...prev.slides];
-        slides[idx] = { title, bullets };
+        // Preserve any example code block on the slide; only title/bullets are
+        // editable through this textarea.
+        slides[idx] = { ...slides[idx], title, bullets };
         return { ...prev, slides };
       });
     } else if (key === "assignment-overview") {

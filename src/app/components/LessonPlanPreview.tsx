@@ -502,6 +502,18 @@ export default function LessonPlanPreview({
                         ))}
                       </ul>
                     )}
+                    {slide.code && (
+                      <div className={styles.exampleCodeWrap}>
+                        {slide.codeLanguage && (
+                          <span className={styles.exampleCodeLang}>
+                            {slide.codeLanguage}
+                          </span>
+                        )}
+                        <pre className={styles.exampleCodeBlock}>
+                          <code>{slide.code}</code>
+                        </pre>
+                      </div>
+                    )}
                   </>
                 )}
               </li>

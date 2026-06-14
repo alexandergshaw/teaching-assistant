@@ -28,6 +28,32 @@ import { logChatExchange } from "@/lib/supabase/chat-logs";
 export interface SlideData {
   title: string;
   bullets: string[];
+  // Optional example code snippet, rendered as a formatted monospace code block
+  // in the generated deck. Populated on the example slide that immediately
+  // follows a coding-concept slide (loops, conditionals, functions, etc.).
+  code?: string;
+  // Language label for the code block (e.g. "python", "javascript").
+  codeLanguage?: string;
+}
+
+// Normalize a parsed slide from the model into SlideData, carrying through an
+// optional example code block when present. Shared by every Gemini slide path
+// so code slides are handled identically everywhere.
+function toSlideData(
+  raw: { title?: string; bullets?: string[]; code?: string; codeLanguage?: string },
+  maxBullets: number
+): SlideData {
+  const slide: SlideData = {
+    title: raw.title!,
+    bullets: (raw.bullets ?? []).slice(0, maxBullets),
+  };
+  if (typeof raw.code === "string" && raw.code.trim()) {
+    slide.code = raw.code.replace(/\s+$/, "");
+  }
+  if (typeof raw.codeLanguage === "string" && raw.codeLanguage.trim()) {
+    slide.codeLanguage = raw.codeLanguage.trim();
+  }
+  return slide;
 }
 
 export interface GenerateLessonPlanResult {
@@ -147,7 +173,8 @@ Create a complete set of lecture slides that fully address the module objectives
 {
   "presentationTitle": "...",
   "slides": [
-    { "title": "...", "bullets": ["...", "...", "..."] }
+    { "title": "...", "bullets": ["...", "...", "..."] },
+    { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" }
   ]
 }
 
@@ -158,6 +185,7 @@ Requirements:
 - Use plenty of real-world analogies and concrete examples that students will immediately recognise (everyday technology, social media, sports, food, pop culture, etc.).
 - The first slide should be a title/overview slide listing the key topics.
 - Include enough slides to thoroughly cover every objective.
+- CODING CONCEPTS: Whenever a slide introduces a coding concept (a loop, conditional, variable, function, class, data structure, etc.), the very next slide MUST be an example slide that demonstrates that exact concept with real code. Give it a "title" beginning with "Example:", put a short, correct, self-contained snippet in the "code" field (use real newlines), and set "codeLanguage" to the language (e.g. "python"). Keep its "bullets" to at most one short caption. Only include "code"/"codeLanguage" on these example slides — omit them on conceptual slides. If the module teaches no programming, omit code fields entirely.
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<
@@ -192,7 +220,7 @@ Requirements:
 
     const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
       presentationTitle?: string;
-      slides?: Array<{ title?: string; bullets?: string[] }>;
+      slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
     };
 
     if (!parsed.slides || !Array.isArray(parsed.slides)) {
@@ -201,7 +229,7 @@ Requirements:
 
     const slides: SlideData[] = parsed.slides
       .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
-      .map((s) => ({ title: s.title!, bullets: (s.bullets ?? []).slice(0, 3) }));
+      .map((s) => toSlideData(s, 3));
 
     return {
       presentationTitle: parsed.presentationTitle ?? "Lesson Plan",
@@ -1767,7 +1795,8 @@ Return ONLY valid JSON:
 {
   "presentationTitle": "...",
   "slides": [
-    { "title": "...", "bullets": ["...", "...", "..."] }
+    { "title": "...", "bullets": ["...", "...", "..."] },
+    { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" }
   ]
 }
 
@@ -1778,7 +1807,8 @@ Requirements:
 - The first slide should be a title/overview slide listing the key topics covered in the lecture.
 - Cover the concepts introduced in the README or assignment description, highlight what students must implement, and explain any relevant patterns shown in the unit tests or code comments.
 - Use real-world analogies and concrete examples that students will recognise; integrate the analogy into the bullet itself so it is self-contained.
-- For every concept-focused slide, immediately follow it with two additional slides: (1) a concrete example slide that shows a worked scenario, code snippet, or case study with enough context that a student can follow it independently, and (2) a step-by-step walkthrough slide that explains each step or line in plain English so the student understands the reasoning without needing the instructor to narrate it. Label these slides clearly (e.g. "Example: <concept>" and "Walkthrough: <concept>").
+- For every concept-focused slide, immediately follow it with two additional slides: (1) a concrete example slide and (2) a step-by-step walkthrough slide that explains each step or line in plain English so the student understands the reasoning without needing the instructor to narrate it. Label these slides clearly (e.g. "Example: <concept>" and "Walkthrough: <concept>").
+- CODING CONCEPTS: Whenever the concept being introduced is a coding concept (a loop, conditional, variable, function, class, data structure, etc.), the example slide that immediately follows it MUST demonstrate that exact concept with real code: put a short, correct, self-contained snippet in the "code" field (use real newlines) and set "codeLanguage" to the language (e.g. "python"). Keep that slide's "bullets" to at most one short caption. Only put "code"/"codeLanguage" on these example slides — omit them on conceptual and walkthrough slides.
 - Do not include any text outside the JSON object.`;
 
   const result = await callLlm(
@@ -1805,7 +1835,7 @@ Requirements:
 
   const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
     presentationTitle?: string;
-    slides?: Array<{ title?: string; bullets?: string[] }>;
+    slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
   };
 
   if (!parsed.slides || !Array.isArray(parsed.slides)) {
@@ -1814,7 +1844,7 @@ Requirements:
 
   const slides: SlideData[] = parsed.slides
     .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
-    .map((s) => ({ title: s.title!, bullets: (s.bullets ?? []).slice(0, 4) }));
+    .map((s) => toSlideData(s, 4));
 
   return {
     presentationTitle: parsed.presentationTitle ?? assignmentName,

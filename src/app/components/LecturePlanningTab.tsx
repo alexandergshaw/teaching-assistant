@@ -5,6 +5,7 @@ import { generateLecturePlansAction, generateCourseRubricFromZipAction, generate
 import { parseGeneratedRubric } from "../utils/rubric";
 import { saveFile, loadFile, deleteFile } from "../../lib/file-persistence";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
+import { buildSlidesPptx } from "@/lib/pptx";
 import styles from "../page.module.css";
 import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 
@@ -279,112 +280,16 @@ export default function LecturePlanningTab() {
     if (plans.length === 0) return;
     setIsDownloading(true);
     try {
-      const [{ default: PptxGenJS }, { default: JSZip }] = await Promise.all([
-        import("pptxgenjs"),
-        import("jszip"),
-      ]);
+      const { default: JSZip } = await import("jszip");
 
       const outputZip = new JSZip();
 
-      // Professional color palette
-      const NAVY = "1a2744";
-      const ACCENT = "2563eb";
-      const WHITE = "ffffff";
-      const LIGHT_BG = "f4f6fb";
-      const BODY_TEXT = "1e293b";
-      const SUBTITLE_TEXT = "94a3b8";
-
       for (const plan of plans) {
-        const prs = new PptxGenJS();
-        prs.layout = "LAYOUT_WIDE";
-
-        // ── Title slide ──────────────────────────────────────────────
-        const titleSlide = prs.addSlide();
-        titleSlide.background = { fill: NAVY };
-
-        // Decorative accent bar across the middle-bottom
-        titleSlide.addShape(prs.ShapeType.rect, {
-          x: 0, y: 4.6, w: "100%", h: 0.12,
-          fill: { color: ACCENT },
-          line: { color: ACCENT, width: 0 },
+        const pptxData = await buildSlidesPptx({
+          presentationTitle: plan.presentationTitle,
+          slides: plan.slides,
+          subtitle: plan.assignmentName,
         });
-
-        // Left-edge accent stripe
-        titleSlide.addShape(prs.ShapeType.rect, {
-          x: 0, y: 0, w: 0.18, h: "100%",
-          fill: { color: ACCENT },
-          line: { color: ACCENT, width: 0 },
-        });
-
-        // Assignment name (subtle label above title)
-        titleSlide.addText(plan.assignmentName.toUpperCase(), {
-          x: 0.5, y: 1.6, w: "90%", h: 0.45,
-          fontSize: 13, color: SUBTITLE_TEXT, align: "center",
-          charSpacing: 2.5,
-        });
-
-        // Presentation title
-        titleSlide.addText(plan.presentationTitle, {
-          x: 0.5, y: 2.05, w: "90%", h: 2.0,
-          fontSize: 42, bold: true, align: "center", color: WHITE,
-          lineSpacingMultiple: 1.1,
-        });
-
-        // ── Content slides ───────────────────────────────────────────
-        for (const slide of plan.slides) {
-          const s = prs.addSlide();
-          s.background = { fill: LIGHT_BG };
-
-          // Header bar
-          s.addShape(prs.ShapeType.rect, {
-            x: 0, y: 0, w: "100%", h: 1.35,
-            fill: { color: NAVY },
-            line: { color: NAVY, width: 0 },
-          });
-
-          // Accent strip below header
-          s.addShape(prs.ShapeType.rect, {
-            x: 0, y: 1.35, w: "100%", h: 0.07,
-            fill: { color: ACCENT },
-            line: { color: ACCENT, width: 0 },
-          });
-
-          // Left-edge accent stripe (continues into content)
-          s.addShape(prs.ShapeType.rect, {
-            x: 0, y: 1.42, w: 0.12, h: 5.33,
-            fill: { color: ACCENT },
-            line: { color: ACCENT, width: 0 },
-          });
-
-          // Slide title in header
-          s.addText(slide.title, {
-            x: 0.4, y: 0.12, w: "92%", h: 1.11,
-            fontSize: 26, bold: true, color: WHITE,
-            valign: "middle",
-          });
-
-          // Bullet content
-          if (slide.bullets.length > 0) {
-            s.addText(
-              slide.bullets.map((b) => ({
-                text: b,
-                options: {
-                  bullet: { type: "bullet" },
-                  paraSpaceBefore: 10,
-                  color: BODY_TEXT,
-                  fontSize: 18,
-                },
-              })),
-              {
-                x: 0.45, y: 1.6, w: "91%", h: 5.0,
-                valign: "top",
-                lineSpacingMultiple: 1.2,
-              }
-            );
-          }
-        }
-
-        const pptxData = await prs.write({ outputType: "arraybuffer" }) as ArrayBuffer;
         const weekLabel = `Week ${plan.weekNumber}`;
         outputZip.file(`${weekLabel} Slides.pptx`, pptxData);
         if (plan.moduleIntroduction) {

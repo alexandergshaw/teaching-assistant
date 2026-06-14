@@ -10,6 +10,7 @@ import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModa
 import LessonPlanningForm from "./components/LessonPlanningForm";
 import ProviderToggle from "./components/ProviderToggle";
 import { getStoredProvider } from "@/lib/llm-provider";
+import { buildSlidesPptx } from "@/lib/pptx";
 import styles from "./page.module.css";
 import { parseGeneratedRubric } from "./utils/rubric";
 
@@ -238,38 +239,17 @@ export default function Home() {
   const handleDownloadLessonPlan = async () => {
     if (!lessonPlanPreview) return;
     try {
-      const [{ default: PptxGenJS }, { default: JSZip }, docxModule] = await Promise.all([
-        import("pptxgenjs"),
+      const [{ default: JSZip }, docxModule] = await Promise.all([
         import("jszip"),
         import("docx"),
       ]);
       const { Document, Packer, Paragraph, TextRun, HeadingLevel } = docxModule;
 
       // ── Build PPTX ──────────────────────────────────────────────────
-      const prs = new PptxGenJS();
-      prs.layout = "LAYOUT_WIDE";
-
-      const titleSlide = prs.addSlide();
-      titleSlide.addText(lessonPlanPreview.presentationTitle, {
-        x: 0.5, y: 2.2, w: "90%", h: 1.8,
-        fontSize: 40, bold: true, align: "center", color: "1a1a2e",
+      const pptxData = await buildSlidesPptx({
+        presentationTitle: lessonPlanPreview.presentationTitle,
+        slides: lessonPlanPreview.slides,
       });
-
-      for (const slide of lessonPlanPreview.slides) {
-        const s = prs.addSlide();
-        s.addText(slide.title, {
-          x: 0.5, y: 0.3, w: "90%", h: 1,
-          fontSize: 28, bold: true, color: "1a1a2e",
-        });
-        if (slide.bullets.length > 0) {
-          s.addText(
-            slide.bullets.map((b) => ({ text: b, options: { bullet: true, paraSpaceBefore: 8 } })),
-            { x: 0.5, y: 1.55, w: "90%", h: 4, fontSize: 18, color: "2d2d2d", valign: "top" }
-          );
-        }
-      }
-
-      const pptxData = await prs.write({ outputType: "arraybuffer" }) as ArrayBuffer;
 
       // ── Build introduction.docx ──────────────────────────────────────
       let introDocxBuffer: ArrayBuffer | null = null;

@@ -6,6 +6,11 @@ import styles from "../page.module.css";
 type LessonPlanningFormProps = {
   moduleObjectives: string;
   onModuleObjectivesChange: (value: string) => void;
+  moduleTitle: string;
+  onModuleTitleChange: (value: string) => void;
+  // The module title is only consumed by the Course Engine ("other") provider's
+  // /api/v1/lecture endpoint, so the control is shown only for that provider.
+  showModuleTitle: boolean;
   lessonContext: string;
   onLessonContextChange: (value: string) => void;
   contextFileRef: RefObject<HTMLInputElement | null>;
@@ -17,6 +22,9 @@ type LessonPlanningFormProps = {
 export default function LessonPlanningForm({
   moduleObjectives,
   onModuleObjectivesChange,
+  moduleTitle,
+  onModuleTitleChange,
+  showModuleTitle,
   lessonContext,
   onLessonContextChange,
   contextFileRef,
@@ -30,6 +38,24 @@ export default function LessonPlanningForm({
         <h1>Pre Built Courses</h1>
         <p>Plan and generate lesson content with AI assistance.</p>
       </div>
+      {showModuleTitle && (
+        <div className={styles.field}>
+          <label htmlFor="moduleTitle">Module Title</label>
+          <input
+            id="moduleTitle"
+            type="text"
+            className={styles.textInput}
+            placeholder="e.g. Introduction to Python"
+            value={moduleTitle}
+            onChange={(e) => onModuleTitleChange(e.target.value)}
+          />
+          <p className={styles.fieldHint}>
+            Titles the lecture deck and biases source retrieval (e.g. resolves
+            &ldquo;for loop&rdquo; to the programming sense). Defaults to
+            &ldquo;Module Lecture&rdquo; if left blank.
+          </p>
+        </div>
+      )}
       <div className={styles.field}>
         <label htmlFor="moduleObjectives">Module Objectives</label>
         <textarea

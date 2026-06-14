@@ -9,7 +9,7 @@ import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
 import LessonPlanningForm from "./components/LessonPlanningForm";
 import ProviderToggle from "./components/ProviderToggle";
-import { getStoredProvider } from "@/lib/llm-provider";
+import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildSlidesPptx } from "@/lib/pptx";
 import styles from "./page.module.css";
 import { parseGeneratedRubric } from "./utils/rubric";
@@ -97,7 +97,9 @@ export default function Home() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyResetTimerRef = useRef<number | null>(null);
   const [moduleObjectives, setModuleObjectives] = useState("");
+  const [moduleTitle, setModuleTitle] = useState("");
   const [lessonContext, setLessonContext] = useState("");
+  const [provider] = useLlmProvider();
   const [isGeneratingLesson, setIsGeneratingLesson] = useState(false);
   const [lessonError, setLessonError] = useState<string | null>(null);
   const [lessonPlanPreview, setLessonPlanPreview] = useState<GenerateLessonPlanResult | null>(null);
@@ -152,7 +154,10 @@ export default function Home() {
       // Course Engine path: it returns a finished .pptx deck (objectives only),
       // so download it directly and skip the Gemini companion bundle + preview.
       if (getStoredProvider() === "other") {
-        const deck = await generateLectureDeckAction(moduleObjectives);
+        const deck = await generateLectureDeckAction(
+          moduleObjectives,
+          moduleTitle.trim() || undefined
+        );
         if ("error" in deck) {
           setLessonError(deck.error);
           return;
@@ -532,6 +537,9 @@ export default function Home() {
           <LessonPlanningForm
             moduleObjectives={moduleObjectives}
             onModuleObjectivesChange={setModuleObjectives}
+            moduleTitle={moduleTitle}
+            onModuleTitleChange={setModuleTitle}
+            showModuleTitle={provider === "other"}
             lessonContext={lessonContext}
             onLessonContextChange={setLessonContext}
             contextFileRef={lessonContextFileRef}

@@ -223,6 +223,12 @@
   color: #94a3b8;
 }
 
+.fieldHint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
 .textInput:focus {
   outline: 2px solid rgba(37, 99, 235, 0.2);
   outline-offset: 2px;

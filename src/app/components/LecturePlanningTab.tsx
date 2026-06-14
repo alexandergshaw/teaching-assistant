@@ -462,6 +462,37 @@ export default function LecturePlanningTab() {
     }
   };
 
+  const handleDownloadRubricCsv = () => {
+    if (!generatedRubric) return;
+    const rows = parseGeneratedRubric(generatedRubric);
+    let csv: string;
+    if (rows) {
+      // Gemini text rubric: serialize the parsed rows to CSV.
+      const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+      const lines = ["Criterion,Weight,Performance Levels"];
+      for (const row of rows) {
+        const weight = row.weight.endsWith("%") ? row.weight : `${row.weight}%`;
+        const levels = row.subcategories.length > 0
+          ? row.subcategories.map((s) => `${s.label}: ${s.description}`).join(" | ")
+          : row.description;
+        lines.push([esc(row.area), esc(weight), esc(levels)].join(","));
+      }
+      csv = lines.join("\r\n");
+    } else {
+      // Course Engine path: generatedRubric is already rubric.csv — download as-is.
+      csv = generatedRubric;
+    }
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "rubric.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <section className={styles.card}>
       <div className={styles.header}>
@@ -701,13 +732,22 @@ export default function LecturePlanningTab() {
                 <span style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--text-primary)" }}>
                   Generated rubric — applies to all assignments
                 </span>
-                <button
-                  type="button"
-                  className={styles.downloadButton}
-                  onClick={handleCopyRubric}
-                >
-                  {rubricCopied ? "Copied!" : "Copy Rubric"}
-                </button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    className={styles.downloadButton}
+                    onClick={handleCopyRubric}
+                  >
+                    {rubricCopied ? "Copied!" : "Copy Rubric"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.downloadButton}
+                    onClick={handleDownloadRubricCsv}
+                  >
+                    Download CSV
+                  </button>
+                </div>
               </div>
               {rows ? (
                 <table className={styles.generatedRubricTable}>

@@ -13,6 +13,7 @@ import {
   courseEngineSchedule,
   courseEngineLecture,
   courseEngineMaterials,
+  courseEngineCopilotPrompt,
   type CourseEngineFile,
   type ScheduleResponse,
 } from "@/lib/course-engine";
@@ -1339,6 +1340,13 @@ export async function generateCopilotProjectPromptAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ prompt: string } | { error: string }> {
   try {
+    if (provider === "other") {
+      const resp = await courseEngineCopilotPrompt(fileContent, fileName);
+      return resp.prompt
+        ? { prompt: resp.prompt }
+        : { error: "Course Engine returned an empty prompt." };
+    }
+
     const prompt = `You are an expert software engineering educator. A teacher has provided a course schedule (as a CSV or text file) and wants to create a hands-on software project that gives students practice with every topic and assignment in the course.
 
 FILE NAME: ${fileName}

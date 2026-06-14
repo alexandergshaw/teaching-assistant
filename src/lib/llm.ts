@@ -53,9 +53,12 @@ export async function callLlm(
   req: LlmRequest,
   provider: LlmProvider = DEFAULT_PROVIDER
 ): Promise<LlmResult> {
-  if (provider === "other") {
-    return callOtherProvider(req);
-  }
+  // Generic text generation always uses Gemini. The Course Engine ("other")
+  // provider does not implement this generic interface — it is wired per-feature
+  // at the action level (schedule / lecture / materials). Any call that reaches
+  // here with "other" is an unmatched feature, which transparently falls back to
+  // Gemini rather than failing.
+  void provider;
   return callGemini(req);
 }
 
@@ -88,16 +91,4 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
     data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
 
   return { ok: true, text };
-}
-
-/**
- * Placeholder for the alternative provider. Wire the real API in here; until
- * then, selecting "other" surfaces a clear error rather than silently failing.
- */
-async function callOtherProvider(_req: LlmRequest): Promise<LlmResult> {
-  return {
-    ok: false,
-    status: 501,
-    body: "The alternative provider is not configured yet.",
-  };
 }

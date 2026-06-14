@@ -125,6 +125,30 @@ export async function courseEngineSchedule(
   return (await response.json()) as ScheduleResponse;
 }
 
+export interface CopilotPromptResponse {
+  prompt: string;
+  language?: string;
+  weeks?: number;
+}
+
+/** Endpoint 6 — schedule text to a ready-to-paste GitHub Copilot prompt (deterministic). */
+export async function courseEngineCopilotPrompt(
+  schedule: string,
+  fileName?: string
+): Promise<CopilotPromptResponse> {
+  const response = await fetch(`${getCourseEngineUrl()}/api/v1/copilot-prompt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ schedule, ...(fileName ? { fileName } : {}) }),
+  });
+
+  if (!response.ok) {
+    throw await toFriendlyError(response);
+  }
+
+  return (await response.json()) as CopilotPromptResponse;
+}
+
 /** Endpoint 4 — learning objectives to a ready-to-teach .pptx (binary). */
 export async function courseEngineLecture(
   objectives: string,

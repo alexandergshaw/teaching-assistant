@@ -174,7 +174,10 @@ Create a complete set of lecture slides that fully address the module objectives
   "presentationTitle": "...",
   "slides": [
     { "title": "...", "bullets": ["...", "...", "..."] },
-    { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" }
+    { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
+    { "title": "Walkthrough: ...", "bullets": ["...", "..."] },
+    { "title": "Practice: ...", "bullets": ["...", "..."], "codeLanguage": "python" },
+    { "title": "Answer: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" }
   ]
 }
 
@@ -185,7 +188,12 @@ Requirements:
 - Use plenty of real-world analogies and concrete examples that students will immediately recognise (everyday technology, social media, sports, food, pop culture, etc.).
 - The first slide should be a title/overview slide listing the key topics.
 - Include enough slides to thoroughly cover every objective.
-- CODING CONCEPTS: Whenever a slide introduces a coding concept (a loop, conditional, variable, function, class, data structure, etc.), the very next slide MUST be an example slide that demonstrates that exact concept with real code. Give it a "title" beginning with "Example:", put a short, correct, self-contained snippet in the "code" field (use real newlines), and set "codeLanguage" to the language (e.g. "python"). Keep its "bullets" to at most one short caption. Only include "code"/"codeLanguage" on these example slides — omit them on conceptual slides. If the module teaches no programming, omit code fields entirely.
+- CODING CONCEPTS: Whenever a slide introduces a coding concept (a loop, conditional, variable, function, class, data structure, etc.), it MUST be followed immediately by exactly four slides, in this order:
+  1. Example slide — "title" begins with "Example:"; demonstrate that exact concept with a short, correct, self-contained snippet in "code" (use real newlines) and "codeLanguage" set; keep "bullets" to at most one short caption.
+  2. Walkthrough slide — "title" begins with "Walkthrough:"; explain the example line by line in "bullets"; no "code".
+  3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets" and set "codeLanguage". Include starter/scaffold code in "code" only if it genuinely helps; otherwise omit "code".
+  4. Answer slide — "title" begins with "Answer:"; give the correct, runnable solution to that exact practice challenge in "code" with "codeLanguage" set, plus at most one "bullets" caption.
+- Only Example, Practice, and Answer slides may include "code"/"codeLanguage" — omit those fields on conceptual and walkthrough slides. If the module teaches no programming, omit code fields and the Example/Walkthrough/Practice/Answer slides entirely.
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<
@@ -1796,7 +1804,10 @@ Return ONLY valid JSON:
   "presentationTitle": "...",
   "slides": [
     { "title": "...", "bullets": ["...", "...", "..."] },
-    { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" }
+    { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
+    { "title": "Walkthrough: ...", "bullets": ["...", "..."] },
+    { "title": "Practice: ...", "bullets": ["...", "..."], "codeLanguage": "python" },
+    { "title": "Answer: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" }
   ]
 }
 
@@ -1807,8 +1818,13 @@ Requirements:
 - The first slide should be a title/overview slide listing the key topics covered in the lecture.
 - Cover the concepts introduced in the README or assignment description, highlight what students must implement, and explain any relevant patterns shown in the unit tests or code comments.
 - Use real-world analogies and concrete examples that students will recognise; integrate the analogy into the bullet itself so it is self-contained.
-- For every concept-focused slide, immediately follow it with two additional slides: (1) a concrete example slide and (2) a step-by-step walkthrough slide that explains each step or line in plain English so the student understands the reasoning without needing the instructor to narrate it. Label these slides clearly (e.g. "Example: <concept>" and "Walkthrough: <concept>").
-- CODING CONCEPTS: Whenever the concept being introduced is a coding concept (a loop, conditional, variable, function, class, data structure, etc.), the example slide that immediately follows it MUST demonstrate that exact concept with real code: put a short, correct, self-contained snippet in the "code" field (use real newlines) and set "codeLanguage" to the language (e.g. "python"). Keep that slide's "bullets" to at most one short caption. Only put "code"/"codeLanguage" on these example slides — omit them on conceptual and walkthrough slides.
+- For every concept-focused slide, immediately follow it with a concrete example slide and a step-by-step walkthrough slide that explains each step or line in plain English so the student understands the reasoning without needing the instructor to narrate it. Label these slides clearly (e.g. "Example: <concept>" and "Walkthrough: <concept>").
+- CODING CONCEPTS: When the concept being introduced is a coding concept (a loop, conditional, variable, function, class, data structure, etc.), follow it with exactly these four slides, in this order:
+  1. Example slide — "title" begins with "Example:"; demonstrate that exact concept with a short, correct, self-contained snippet in "code" (use real newlines) and "codeLanguage" set; keep "bullets" to at most one short caption.
+  2. Walkthrough slide — "title" begins with "Walkthrough:"; explain the example line by line in "bullets"; no "code".
+  3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets" and set "codeLanguage". Include starter/scaffold code in "code" only if it genuinely helps; otherwise omit "code".
+  4. Answer slide — "title" begins with "Answer:"; give the correct, runnable solution to that exact practice challenge in "code" with "codeLanguage" set, plus at most one "bullets" caption.
+- Only Example, Practice, and Answer slides may carry "code"/"codeLanguage" — omit those fields on conceptual and walkthrough slides.
 - Do not include any text outside the JSON object.`;
 
   const result = await callLlm(

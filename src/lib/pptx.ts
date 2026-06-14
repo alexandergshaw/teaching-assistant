@@ -114,54 +114,95 @@ export async function buildSlidesPptx({
     });
 
     const hasCode = typeof slide.code === "string" && slide.code.length > 0;
+    const bulletCount = slide.bullets.length;
 
-    // Bullet content. When the slide also carries a code block, the bullets act
-    // as a short caption above it and get a smaller share of the slide.
-    if (slide.bullets.length > 0) {
+    // A slide that pairs a code block with several explanation bullets (a
+    // line-by-line walkthrough) is laid out in two columns — code on the left,
+    // bullets on the right — so neither gets clipped. A code slide with just a
+    // short caption keeps the simpler stacked layout (caption above, code below).
+    const twoColumn = hasCode && bulletCount >= 2;
+
+    if (twoColumn) {
+      // Left column: language label + code panel.
+      if (slide.codeLanguage) {
+        s.addText(slide.codeLanguage.toUpperCase(), {
+          x: 0.45, y: 1.55, w: 6.2, h: 0.3,
+          fontSize: 11, bold: true, color: ACCENT,
+          charSpacing: 2, align: "left",
+        });
+      }
+      s.addText(slide.code as string, {
+        x: 0.45, y: 1.9, w: 6.2, h: 4.9,
+        fontFace: "Courier New", fontSize: 13, color: CODE_TEXT,
+        fill: { color: CODE_BG }, align: "left", valign: "top",
+        margin: 10, lineSpacingMultiple: 1.1,
+      });
+      // Right column: explanation bullets.
       s.addText(
         slide.bullets.map((b) => ({
           text: b,
           options: {
             bullet: { type: "bullet" },
-            paraSpaceBefore: 10,
+            paraSpaceBefore: 8,
             color: BODY_TEXT,
-            fontSize: 18,
+            fontSize: 16,
           },
         })),
         {
-          x: 0.45, y: 1.6, w: "91%", h: hasCode ? 1.5 : 5.0,
+          x: 6.95, y: 1.9, w: 5.9, h: 4.9,
           valign: "top",
-          lineSpacingMultiple: 1.2,
+          lineSpacingMultiple: 1.15,
         }
       );
-    }
-
-    // Example code block, rendered as a monospace panel on a dark background.
-    if (hasCode) {
-      const hasBullets = slide.bullets.length > 0;
-      const labelY = hasBullets ? 3.2 : 1.55;
-      const codeY = hasBullets ? 3.5 : 1.9;
-      const codeH = hasBullets ? 3.3 : 4.9;
-
-      if (slide.codeLanguage) {
-        s.addText(slide.codeLanguage.toUpperCase(), {
-          x: 0.45, y: labelY, w: "91%", h: 0.3,
-          fontSize: 11, bold: true, color: ACCENT,
-          charSpacing: 2, align: "left",
-        });
+    } else {
+      // Stacked layout. When the slide also carries a code block, the bullets
+      // act as a short caption above it and get a smaller share of the slide.
+      if (bulletCount > 0) {
+        s.addText(
+          slide.bullets.map((b) => ({
+            text: b,
+            options: {
+              bullet: { type: "bullet" },
+              paraSpaceBefore: 10,
+              color: BODY_TEXT,
+              fontSize: 18,
+            },
+          })),
+          {
+            x: 0.45, y: 1.6, w: "91%", h: hasCode ? 1.5 : 5.0,
+            valign: "top",
+            lineSpacingMultiple: 1.2,
+          }
+        );
       }
 
-      s.addText(slide.code as string, {
-        x: 0.45, y: codeY, w: "91%", h: codeH,
-        fontFace: "Courier New",
-        fontSize: 14,
-        color: CODE_TEXT,
-        fill: { color: CODE_BG },
-        align: "left",
-        valign: "top",
-        margin: 10,
-        lineSpacingMultiple: 1.1,
-      });
+      // Code block, rendered as a monospace panel on a dark background.
+      if (hasCode) {
+        const hasBullets = bulletCount > 0;
+        const labelY = hasBullets ? 3.2 : 1.55;
+        const codeY = hasBullets ? 3.5 : 1.9;
+        const codeH = hasBullets ? 3.3 : 4.9;
+
+        if (slide.codeLanguage) {
+          s.addText(slide.codeLanguage.toUpperCase(), {
+            x: 0.45, y: labelY, w: "91%", h: 0.3,
+            fontSize: 11, bold: true, color: ACCENT,
+            charSpacing: 2, align: "left",
+          });
+        }
+
+        s.addText(slide.code as string, {
+          x: 0.45, y: codeY, w: "91%", h: codeH,
+          fontFace: "Courier New",
+          fontSize: 14,
+          color: CODE_TEXT,
+          fill: { color: CODE_BG },
+          align: "left",
+          valign: "top",
+          margin: 10,
+          lineSpacingMultiple: 1.1,
+        });
+      }
     }
   }
 

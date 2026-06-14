@@ -56,24 +56,28 @@ function toSlideData(
   return slide;
 }
 
-// Ensure walkthrough slides carry the code from their preceding example slides.
-// The example slide teaches the concept with code; the walkthrough explains that
-// same code line by line, so both should display it. If Gemini omitted the code
-// on the walkthrough, propagate it here.
-function propagateExampleCodeToWalkthroughs(slides: SlideData[]): SlideData[] {
-  for (let i = 0; i < slides.length - 1; i++) {
-    const current = slides[i];
-    const next = slides[i + 1];
-    // Example slide is immediately followed by Walkthrough: copy code if walkthrough lacks it.
-    if (
-      current.title.startsWith("Example:") &&
-      next.title.startsWith("Walkthrough:") &&
-      current.code &&
-      !next.code
+// Ensure the Walkthrough and Practice slides that follow an Example slide carry
+// the Example's code block. The Example teaches the concept with code, the
+// Walkthrough explains that same code line by line, and the Practice uses it as
+// a reference — so all three should display it. The Answer slide keeps its own
+// solution code and is never overwritten. When Gemini omits the code on a
+// Walkthrough or Practice slide, propagate it from the most recent Example here.
+function propagateExampleCodeToFollowups(slides: SlideData[]): SlideData[] {
+  let exampleCode: string | undefined;
+  let exampleLanguage: string | undefined;
+  for (const slide of slides) {
+    if (slide.title.startsWith("Example:")) {
+      // Remember this example's code as the source for the slides that follow.
+      exampleCode = slide.code;
+      exampleLanguage = slide.codeLanguage;
+    } else if (
+      (slide.title.startsWith("Walkthrough:") || slide.title.startsWith("Practice:")) &&
+      exampleCode &&
+      !slide.code
     ) {
-      next.code = current.code;
-      if (current.codeLanguage && !next.codeLanguage) {
-        next.codeLanguage = current.codeLanguage;
+      slide.code = exampleCode;
+      if (exampleLanguage && !slide.codeLanguage) {
+        slide.codeLanguage = exampleLanguage;
       }
     }
   }
@@ -263,7 +267,7 @@ Requirements:
       .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
       .map((s) => toSlideData(s, 3));
 
-    slides = propagateExampleCodeToWalkthroughs(slides);
+    slides = propagateExampleCodeToFollowups(slides);
 
     return {
       presentationTitle: parsed.presentationTitle ?? "Lesson Plan",
@@ -1888,7 +1892,7 @@ Requirements:
     .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
     .map((s) => toSlideData(s, 4));
 
-  slides = propagateExampleCodeToWalkthroughs(slides);
+  slides = propagateExampleCodeToFollowups(slides);
 
   return {
     presentationTitle: parsed.presentationTitle ?? assignmentName,

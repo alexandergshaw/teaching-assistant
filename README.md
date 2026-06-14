@@ -48,6 +48,35 @@ materials `rubric.csv`) via that service instead of Gemini:
 - `GRADING_ENGINE_URL` (required to use the deterministic grader) — base URL of the grading service.
 - `GRADING_API_KEY` (optional) — only required if the grading service enforces a key; sent as `X-API-Key`. Never exposed to the client.
 
+## Course Engine: Lecture Deck (`/api/v1/lecture`)
+
+When the provider toggle is **Other API**, generating a lesson on the Lesson Planning
+tab calls the Course Engine lecture endpoint, which returns a finished PowerPoint
+(`module-lecture.pptx`) built deterministically — **no LLM**. Content is retrieved from
+trusted sources (Wikipedia/Wikiversity for explanations, Stack Overflow for code), so the
+deck is bounded by what those sources provide. The call fans out per objective and per
+concept, so it can take several seconds (allow 30s+; cold starts add more).
+
+- **Method / path:** `POST /api/v1/lecture` on `COURSE_ENGINE_URL`
+- **Auth:** optional — only when the Course Engine project sets a key, sent as
+  `X-API-Key: <COURSE_ENGINE_API_KEY>` (server-side only, never exposed to the client)
+- **Request (`application/json`):**
+  - `objectives` (required) — string or string array, 10–4000 chars, any format (list,
+    numbered/bulleted, or prose); capped at ~20 objectives
+  - `title` (optional, default `"Module Lecture"`) — titles the deck and **biases source
+    retrieval and language inference** (e.g. a `title` of "Introduction to Python" resolves
+    "for loop" to the programming sense rather than a generic one)
+- **Response:** a binary `.pptx` (title slide, agenda, one explanation slide per objective,
+  per-concept `Example: <Concept>` slides with code for programming topics or prose
+  otherwise, and a cited-references slide). The client downloads it directly — there is no
+  in-app editable preview for this path.
+
+The **Module Title** field on the Lesson Planning form (shown only under the Other API
+provider) supplies `title`; leaving it blank sends no title and the service applies its
+`"Module Lecture"` default. Only `objectives` and `title` are wired from the app — the raw
+endpoint also exposes the usual error envelope (`{ "error": { "code", "message" } }`) for
+invalid input or auth failures.
+
 ## Supported Submission File Types
 
 The grader can now extract text from common source and document formats inside the uploaded zip archive, including:

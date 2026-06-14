@@ -56,6 +56,30 @@ function toSlideData(
   return slide;
 }
 
+// Ensure walkthrough slides carry the code from their preceding example slides.
+// The example slide teaches the concept with code; the walkthrough explains that
+// same code line by line, so both should display it. If Gemini omitted the code
+// on the walkthrough, propagate it here.
+function propagateExampleCodeToWalkthroughs(slides: SlideData[]): SlideData[] {
+  for (let i = 0; i < slides.length - 1; i++) {
+    const current = slides[i];
+    const next = slides[i + 1];
+    // Example slide is immediately followed by Walkthrough: copy code if walkthrough lacks it.
+    if (
+      current.title.startsWith("Example:") &&
+      next.title.startsWith("Walkthrough:") &&
+      current.code &&
+      !next.code
+    ) {
+      next.code = current.code;
+      if (current.codeLanguage && !next.codeLanguage) {
+        next.codeLanguage = current.codeLanguage;
+      }
+    }
+  }
+  return slides;
+}
+
 export interface GenerateLessonPlanResult {
   presentationTitle: string;
   slides: SlideData[];
@@ -190,10 +214,10 @@ Requirements:
 - Include enough slides to thoroughly cover every objective.
 - CODING CONCEPTS: Whenever a slide introduces a coding concept (a loop, conditional, variable, function, class, data structure, etc.), it MUST be followed immediately by exactly four slides, in this order:
   1. Example slide — "title" begins with "Example:"; demonstrate that exact concept with a short, correct, self-contained snippet in "code" (use real newlines) and "codeLanguage" set; keep "bullets" to at most one short caption.
-  2. Walkthrough slide — "title" begins with "Walkthrough:"; explain the example line by line in "bullets"; no "code".
-  3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets" and set "codeLanguage". Include starter/scaffold code in "code" only if it genuinely helps; otherwise omit "code".
+  2. Walkthrough slide — "title" begins with "Walkthrough:"; explain the example code line by line in "bullets" while showing the same code in the "code" field; use the exact code from the Example slide so students can read both the code and the explanation together.
+  3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets", set "codeLanguage", and include the Example code (or modified starter code) in "code" so the student has a reference.
   4. Answer slide — "title" begins with "Answer:"; give the correct, runnable solution to that exact practice challenge in "code" with "codeLanguage" set, plus at most one "bullets" caption.
-- Only Example, Practice, and Answer slides may include "code"/"codeLanguage" — omit those fields on conceptual and walkthrough slides. If the module teaches no programming, omit code fields and the Example/Walkthrough/Practice/Answer slides entirely.
+- All of Example, Walkthrough, Practice, and Answer slides must include "code"/"codeLanguage". Do not omit "code" on Walkthrough or Practice slides. If the module teaches no programming, omit code fields and the Example/Walkthrough/Practice/Answer slides entirely.
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<
@@ -235,9 +259,11 @@ Requirements:
       return { error: "Model did not return a valid slides array." };
     }
 
-    const slides: SlideData[] = parsed.slides
+    let slides: SlideData[] = parsed.slides
       .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
       .map((s) => toSlideData(s, 3));
+
+    slides = propagateExampleCodeToWalkthroughs(slides);
 
     return {
       presentationTitle: parsed.presentationTitle ?? "Lesson Plan",
@@ -1821,10 +1847,10 @@ Requirements:
 - For every concept-focused slide, immediately follow it with a concrete example slide and a step-by-step walkthrough slide that explains each step or line in plain English so the student understands the reasoning without needing the instructor to narrate it. Label these slides clearly (e.g. "Example: <concept>" and "Walkthrough: <concept>").
 - CODING CONCEPTS: When the concept being introduced is a coding concept (a loop, conditional, variable, function, class, data structure, etc.), follow it with exactly these four slides, in this order:
   1. Example slide — "title" begins with "Example:"; demonstrate that exact concept with a short, correct, self-contained snippet in "code" (use real newlines) and "codeLanguage" set; keep "bullets" to at most one short caption.
-  2. Walkthrough slide — "title" begins with "Walkthrough:"; explain the example line by line in "bullets"; no "code".
-  3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets" and set "codeLanguage". Include starter/scaffold code in "code" only if it genuinely helps; otherwise omit "code".
+  2. Walkthrough slide — "title" begins with "Walkthrough:"; explain the example code line by line in "bullets" while showing the same code in the "code" field; use the exact code from the Example slide so students can read both the code and the explanation together.
+  3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets", set "codeLanguage", and include the Example code (or modified starter code) in "code" so the student has a reference.
   4. Answer slide — "title" begins with "Answer:"; give the correct, runnable solution to that exact practice challenge in "code" with "codeLanguage" set, plus at most one "bullets" caption.
-- Only Example, Practice, and Answer slides may carry "code"/"codeLanguage" — omit those fields on conceptual and walkthrough slides.
+- All of Example, Walkthrough, Practice, and Answer slides must include "code"/"codeLanguage". Do not omit "code" on Walkthrough or Practice slides. Omit code only on conceptual slides.
 - Do not include any text outside the JSON object.`;
 
   const result = await callLlm(
@@ -1858,9 +1884,11 @@ Requirements:
     return { error: `Model did not return a valid slides array for "${assignmentName}".` };
   }
 
-  const slides: SlideData[] = parsed.slides
+  let slides: SlideData[] = parsed.slides
     .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
     .map((s) => toSlideData(s, 4));
+
+  slides = propagateExampleCodeToWalkthroughs(slides);
 
   return {
     presentationTitle: parsed.presentationTitle ?? assignmentName,

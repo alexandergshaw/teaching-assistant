@@ -17,6 +17,11 @@ import {
   type CourseEngineFile,
   type ScheduleResponse,
 } from "@/lib/course-engine";
+import {
+  gradeViaGradingEngine,
+  detectRubricSource,
+  type GradingApiResponse,
+} from "@/lib/grading-engine";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
 
@@ -1080,6 +1085,34 @@ export interface GradeActionState {
   run: GradingRun | null;
   error: string | null;
   generatedRubric?: string;
+  warnings?: string[];
+}
+
+// Map the deterministic Grading API response onto the app's GradingRun so the
+// existing results matrix in GradingTab renders it unchanged. The grader returns
+// no per-student files and no full-credit checklist, so those degrade to "-" /
+// hidden in the UI.
+function gradingApiToRun(resp: GradingApiResponse): GradingRun {
+  return {
+    rubricAreaNames: resp.criteria,
+    fullCreditChecklist: [],
+    results: resp.students.map((s) => {
+      const passedCount = s.criteria.filter((c) => c.passed).length;
+      return {
+        student: s.student,
+        totalScore: `${s.total}/${s.possible}`,
+        overallComment: `${passedCount}/${s.criteria.length} checks passed`,
+        feedback: "",
+        mergedFileCount: 0,
+        submittedFiles: [],
+        rubricAreas: s.criteria.map((c) => ({
+          area: c.criterion,
+          score: `${c.points_earned}/${c.points_possible}`,
+          comment: c.detail,
+        })),
+      };
+    }),
+  };
 }
 
 export async function gradeAction(
@@ -1091,16 +1124,49 @@ export async function gradeAction(
     (formData.get("assignmentInstructions") as string | null) ?? "";
   const rubric = (formData.get("rubric") as string | null) ?? "";
   const provider = normalizeProvider(formData.get("provider") as string | null);
+  const rubricFile = formData.get("rubricFile") as File | null;
 
   if (!file || file.size === 0) {
     return { run: null, error: "Please upload a student submissions zip file." };
   }
 
-  if (!assignmentInstructions.trim()) {
-    return { run: null, error: "Please provide assignment instructions." };
-  }
-
   try {
+    // Deterministic Grading API path (provider toggle = "other").
+    if (provider === "other") {
+      let rubricText = "";
+      let rubricName: string | undefined;
+      if (rubricFile && rubricFile.size > 0) {
+        rubricText = await rubricFile.text();
+        rubricName = rubricFile.name;
+      } else if (rubric.trim()) {
+        rubricText = rubric;
+      }
+      if (!rubricText.trim()) {
+        return {
+          run: null,
+          error:
+            "Provide a rubric (upload a CSV/JSON file or paste one) to grade with the deterministic grader.",
+        };
+      }
+      const zipBase64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+      const resp = await gradeViaGradingEngine(
+        zipBase64,
+        detectRubricSource(rubricText, rubricName)
+      );
+      const warnings = [
+        ...resp.warnings,
+        ...(resp.unmapped_criteria?.length
+          ? [`Excluded (unmapped): ${resp.unmapped_criteria.join(", ")}`]
+          : []),
+      ];
+      return { run: gradingApiToRun(resp), error: null, warnings };
+    }
+
+    // Gemini path.
+    if (!assignmentInstructions.trim()) {
+      return { run: null, error: "Please provide assignment instructions." };
+    }
+
     const effectiveRubric = rubric.trim()
       ? rubric
       : await generateRubric(assignmentInstructions, provider);

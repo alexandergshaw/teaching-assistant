@@ -41,6 +41,13 @@ of the toggle.
 - `COURSE_ENGINE_URL` (optional, default: `https://testing-knowledge-engine.vercel.app`)
 - `COURSE_ENGINE_API_KEY` (optional) — only required if the Course Engine project enforces a key; sent as `X-API-Key`. Never exposed to the client.
 
+Grading is handled by a **separate** dedicated service. When the toggle is **Other API**,
+the Grading tab grades deterministically against a check-based rubric (CSV/JSON, e.g. the
+materials `rubric.csv`) via that service instead of Gemini:
+
+- `GRADING_ENGINE_URL` (required to use the deterministic grader) — base URL of the grading service.
+- `GRADING_API_KEY` (optional) — only required if the grading service enforces a key; sent as `X-API-Key`. Never exposed to the client.
+
 ## Supported Submission File Types
 
 The grader can now extract text from common source and document formats inside the uploaded zip archive, including:

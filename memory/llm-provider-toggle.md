@@ -16,4 +16,6 @@ The active provider is chosen via an in-app UI toggle (`src/app/components/Provi
 - `generateCourseRubricFromZipAction` → calls `/materials` and extracts `rubric.csv`.
 - `generateCopilotProjectPromptAction` → `POST /api/v1/copilot-prompt` (deterministic, JSON in/out; returns `{ prompt }`).
 
-Every other feature (syllabus, chat, calendar, grading, standalone intro/assignment/examples) ignores the toggle and always uses Gemini.
+Grading uses a **separate** dedicated service (NOT the Course Engine), client in `src/lib/grading-engine.ts` (env: `GRADING_ENGINE_URL` required, optional `GRADING_API_KEY`; error envelope `{error, messages}`). When the toggle is `"other"`, `gradeAction` (`src/app/actions.ts`) branches to `gradeViaGradingEngine` → `POST /api/v1/grade` (multipart: `submissions` zip + one of `rubric_csv`/`rubric_json`/`rubric_text`, auto-detected from an uploaded file or the pasted rubric). The deterministic per-criterion result is mapped to `GradingRun` via `gradingApiToRun` so the existing GradingTab matrix renders it (Files column shows "-", no full-credit checklist). The `GradingTab` shows a CSV/JSON rubric-file upload only when the toggle is `"other"`, and renders `state.warnings`.
+
+Every other feature (syllabus, chat, calendar, standalone intro/assignment/examples) ignores the toggle and always uses Gemini.

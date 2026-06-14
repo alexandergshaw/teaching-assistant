@@ -316,6 +316,22 @@ export default function GradingTab({
           />
         </div>
 
+        {selectedProvider === "other" && (
+          <div className={styles.field}>
+            <label htmlFor="rubric-file">Rubric file (CSV/JSON)</label>
+            <input
+              id="rubric-file"
+              name="rubricFile"
+              type="file"
+              accept=".csv,.json,application/json,text/csv"
+            />
+            <p>
+              Upload a check-based rubric for the deterministic grader (for example the
+              rubric.csv produced by Course materials), or paste one in the Rubric box above.
+            </p>
+          </div>
+        )}
+
         {state.error && (
           <p role="alert" className={styles.error}>
             {state.error}
@@ -378,6 +394,17 @@ export default function GradingTab({
           </details>
         );
       })()}
+
+      {state.warnings && state.warnings.length > 0 && (
+        <section className={styles.checklistCard}>
+          <h2>Grading Notes</h2>
+          <ul>
+            {state.warnings.map((item, index) => (
+              <li key={`grading-warning-${index + 1}`}>{item}</li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {run && run.fullCreditChecklist.length > 0 && (
         <section className={styles.checklistCard}>

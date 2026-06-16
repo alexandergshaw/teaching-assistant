@@ -1,5 +1,4 @@
 import JSZip from "jszip";
-import { OfficeParser, type SupportedFileType } from "officeparser";
 import {
   getGeminiInterRequestDelayMs,
   getGeminiMaxCharsPerSubmission,
@@ -7,165 +6,14 @@ import {
   getGeminiMaxSubmissions,
 } from "./gemini";
 import { callLlm, type LlmProvider } from "./llm";
-
-const TEXT_EXTENSIONS = new Set([
-  "txt",
-  "md",
-  "markdown",
-  "py",
-  "js",
-  "ts",
-  "tsx",
-  "jsx",
-  "java",
-  "c",
-  "cpp",
-  "cs",
-  "html",
-  "htm",
-  "css",
-  "json",
-  "xml",
-  "rb",
-  "go",
-  "rs",
-  "csv",
-  "ipynb",
-  "yml",
-  "yaml",
-  "sql",
-  "sh",
-  "bash",
-  "zsh",
-  "php",
-  "swift",
-  "kt",
-  "kts",
-  "scala",
-  "r",
-  "m",
-  "tex",
-]);
-
-const DOCUMENT_EXTENSIONS = new Set([
-  "docx",
-  "doc",
-  "pptx",
-  "ppt",
-  "xlsx",
-  "xls",
-  "odt",
-  "odp",
-  "ods",
-  "pdf",
-  "rtf",
-]);
-
-const OFFICE_FILE_TYPE_HINTS: Record<string, SupportedFileType> = {
-  docx: "docx",
-  pptx: "pptx",
-  xlsx: "xlsx",
-  odt: "odt",
-  odp: "odp",
-  ods: "ods",
-  pdf: "pdf",
-  rtf: "rtf",
-};
+import {
+  DOCUMENT_EXTENSIONS,
+  TEXT_EXTENSIONS,
+  extractTextFromBuffer,
+  getFileExtension,
+} from "./office-extract";
 
 const MAX_NESTED_ZIP_DEPTH = 3;
-
-function getFileExtension(name: string): string {
-  const lastDot = name.lastIndexOf(".");
-  if (lastDot === -1 || lastDot === name.length - 1) {
-    return "";
-  }
-
-  return name.slice(lastDot + 1).toLowerCase();
-}
-
-function decodeXmlEntities(value: string): string {
-  return value
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'");
-}
-
-function normalizeWhitespace(value: string): string {
-  return value
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-async function extractDocxText(buffer: Buffer): Promise<string | null> {
-  const zip = await JSZip.loadAsync(buffer);
-  const documentXml = zip.file("word/document.xml");
-
-  if (!documentXml) {
-    return null;
-  }
-
-  let xml = await documentXml.async("string");
-  xml = xml
-    .replace(/<w:tab\s*\/?>/g, "\t")
-    .replace(/<w:br\s*\/?>/g, "\n")
-    .replace(/<w:p[^>]*>/g, "\n")
-    .replace(/<[^>]+>/g, "");
-
-  return normalizeWhitespace(decodeXmlEntities(xml));
-}
-
-async function extractPptxText(buffer: Buffer): Promise<string | null> {
-  const zip = await JSZip.loadAsync(buffer);
-  const slideFiles = Object.values(zip.files)
-    .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/i.test(entry.name))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-
-  if (slideFiles.length === 0) {
-    return null;
-  }
-
-  const slides: string[] = [];
-
-  for (const slide of slideFiles) {
-    const xml = await slide.async("string");
-    const textMatches = Array.from(xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g));
-    const text = textMatches
-      .map((match) => decodeXmlEntities(match[1] ?? "").trim())
-      .filter(Boolean)
-      .join("\n");
-
-    if (text) {
-      slides.push(text);
-    }
-  }
-
-  return normalizeWhitespace(slides.join("\n\n"));
-}
-
-async function extractXlsxText(buffer: Buffer): Promise<string | null> {
-  const zip = await JSZip.loadAsync(buffer);
-  const sharedStringsFile = zip.file("xl/sharedStrings.xml");
-
-  if (!sharedStringsFile) {
-    return null;
-  }
-
-  const xml = await sharedStringsFile.async("string");
-  const matches = Array.from(xml.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g));
-  const values = matches
-    .map((match) => decodeXmlEntities(match[1] ?? "").trim())
-    .filter(Boolean);
-
-  if (values.length === 0) {
-    return null;
-  }
-
-  return normalizeWhitespace(values.join("\n"));
-}
 
 async function extractTextFromFile(
   name: string,
@@ -178,39 +26,7 @@ async function extractTextFromFile(
   }
 
   if (DOCUMENT_EXTENSIONS.has(extension)) {
-    const buffer = await file.async("nodebuffer");
-
-    // OOXML fallbacks are resilient for common LMS submissions.
-    if (extension === "docx") {
-      const docxText = await extractDocxText(buffer);
-      if (docxText) {
-        return docxText;
-      }
-    }
-
-    if (extension === "pptx") {
-      const pptxText = await extractPptxText(buffer);
-      if (pptxText) {
-        return pptxText;
-      }
-    }
-
-    if (extension === "xlsx") {
-      const xlsxText = await extractXlsxText(buffer);
-      if (xlsxText) {
-        return xlsxText;
-      }
-    }
-
-    const fileType = OFFICE_FILE_TYPE_HINTS[extension];
-    const ast = fileType
-      ? await OfficeParser.parseOffice(buffer, { fileType })
-      : await OfficeParser.parseOffice(buffer);
-
-    const conversion = await ast.to("text");
-    return typeof conversion.value === "string"
-      ? normalizeWhitespace(conversion.value)
-      : null;
+    return extractTextFromBuffer(name, await file.async("nodebuffer"));
   }
 
   return null;

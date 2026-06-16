@@ -7,8 +7,9 @@ import {
   generateRubric,
   type GradingRun,
 } from "@/lib/grade";
-import { OfficeParser, type SupportedFileType } from "officeparser";
+import { extractTextFromBuffer } from "@/lib/office-extract";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
+import { filesToLlmParts } from "@/lib/llm-files";
 import {
   courseEngineSchedule,
   courseEngineLecture,
@@ -234,7 +235,7 @@ Requirements:
       { text: string } | { inlineData: { mimeType: string; data: string } }
     > = [
       { text: prompt },
-      ...files.map((f) => ({ inlineData: { mimeType: f.mimeType, data: f.base64 } })),
+      ...(await filesToLlmParts(files)),
     ];
 
     const result = await callLlm(
@@ -327,7 +328,7 @@ Requirements:
       { text: string } | { inlineData: { mimeType: string; data: string } }
     > = [
       { text: prompt },
-      ...files.map((f) => ({ inlineData: { mimeType: f.mimeType, data: f.base64 } })),
+      ...(await filesToLlmParts(files)),
     ];
 
     const result = await callLlm(
@@ -524,48 +525,7 @@ async function appendSyllabusContextParts(
   parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>,
   files: SyllabusContextFile[]
 ) {
-  for (const file of files) {
-    if (file.mimeType === "application/pdf" || file.mimeType.startsWith("image/")) {
-      parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
-      continue;
-    }
-
-    if (file.mimeType.startsWith("text/")) {
-      const text = Buffer.from(file.base64, "base64").toString("utf-8").trim();
-      if (text) {
-        parts.push({ text: `\n\nADDITIONAL CONTEXT FILE (${file.name}):\n${text}` });
-      }
-      continue;
-    }
-
-    const ext = file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "";
-    if (ext === "docx") {
-      try {
-        const JSZip = (await import("jszip")).default;
-        const buffer = Buffer.from(file.base64, "base64");
-        const zip = await JSZip.loadAsync(buffer);
-        const documentXml = zip.file("word/document.xml");
-        if (documentXml) {
-          let xml = await documentXml.async("string");
-          xml = xml
-            .replace(/<w:tab\s*\/?>/g, "\t")
-            .replace(/<w:br\s*\/?>/g, "\n")
-            .replace(/<w:p[^>]*>/g, "\n")
-            .replace(/<[^>]+>/g, "");
-          const text = xml
-            .replace(/\r\n/g, "\n")
-            .replace(/\r/g, "\n")
-            .replace(/\n{3,}/g, "\n\n")
-            .trim();
-          if (text) {
-            parts.push({ text: `\n\nADDITIONAL CONTEXT FILE (${file.name}):\n${text}` });
-          }
-        }
-      } catch {
-        // Ignore unreadable context files instead of failing the full request.
-      }
-    }
-  }
+  parts.push(...(await filesToLlmParts(files, "ADDITIONAL CONTEXT FILE")));
 }
 
 export async function parseSyllabusAction(
@@ -649,51 +609,13 @@ Requirements:
       if (sections.length === 0) return { error: "No sections found in the syllabus template." };
       return { sections, templateText };
     } else {
-      // Extract plain text from DOCX / PPTX / XLSX / etc.
-      const buffer = Buffer.from(file.base64, "base64");
-      const ext = file.name.includes(".")
-        ? file.name.split(".").pop()!.toLowerCase()
-        : "";
-
+      // Extract plain text from DOCX / PPTX / XLSX / etc. via the shared extractor.
       try {
-        // For DOCX, direct XML extraction is most reliable (matches grade.ts approach).
-        if (ext === "docx") {
-          const JSZip = (await import("jszip")).default;
-          const zip = await JSZip.loadAsync(buffer);
-          const documentXml = zip.file("word/document.xml");
-          if (documentXml) {
-            let xml = await documentXml.async("string");
-            xml = xml
-              .replace(/<w:tab\s*\/?>/g, "\t")
-              .replace(/<w:br\s*\/?>/g, "\n")
-              .replace(/<w:p[^>]*>/g, "\n")
-              .replace(/<[^>]+>/g, "");
-            extractedText = xml
-              .replace(/\r\n/g, "\n")
-              .replace(/\r/g, "\n")
-              .replace(/\n{3,}/g, "\n\n")
-              .trim();
-          }
-        }
-
-        // Fall back to OfficeParser with explicit fileType for other formats (or if XML extraction yielded nothing).
-        if (!extractedText) {
-          const officeFileTypes: Record<string, SupportedFileType> = {
-            docx: "docx",
-            pptx: "pptx",
-            xlsx: "xlsx",
-            odt: "odt",
-            odp: "odp",
-            ods: "ods",
-            rtf: "rtf",
-          };
-          const fileType = officeFileTypes[ext];
-          const ast = fileType
-            ? await OfficeParser.parseOffice(buffer, { fileType })
-            : await OfficeParser.parseOffice(buffer);
-          const conversion = await ast.to("text");
-          extractedText = typeof conversion.value === "string" ? conversion.value.trim() : "";
-        }
+        const text = await extractTextFromBuffer(
+          file.name,
+          Buffer.from(file.base64, "base64")
+        );
+        extractedText = text?.trim() ?? "";
       } catch {
         return { error: "Could not read the uploaded file. Please try a .txt, .pdf, or .docx file." };
       }
@@ -974,34 +896,7 @@ Requirements:
     ];
     await appendSyllabusContextParts(parts, contextFiles);
 
-    for (const file of files) {
-      if (file.mimeType === "application/pdf" || file.mimeType.startsWith("image/")) {
-        parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
-      } else if (file.mimeType.startsWith("text/")) {
-        const text = Buffer.from(file.base64, "base64").toString("utf-8").trim();
-        if (text) parts.push({ text: `\n\nATTACHED FILE (${file.name}):\n${text}` });
-      } else {
-        const ext = file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "";
-        if (ext === "docx") {
-          try {
-            const JSZip = (await import("jszip")).default;
-            const buffer = Buffer.from(file.base64, "base64");
-            const zip = await JSZip.loadAsync(buffer);
-            const documentXml = zip.file("word/document.xml");
-            if (documentXml) {
-              let xml = await documentXml.async("string");
-              xml = xml
-                .replace(/<w:tab\s*\/?>/g, "\t")
-                .replace(/<w:br\s*\/?>/g, "\n")
-                .replace(/<w:p[^>]*>/g, "\n")
-                .replace(/<[^>]+>/g, "");
-              const text = xml.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
-              if (text) parts.push({ text: `\n\nATTACHED FILE (${file.name}):\n${text}` });
-            }
-          } catch { /* skip unreadable file */ }
-        }
-      }
-    }
+    parts.push(...(await filesToLlmParts(files, "ATTACHED FILE")));
 
     const result = await callLlm(
       {
@@ -1076,12 +971,7 @@ ${sectionsText}`;
       { text: prompt },
     ];
 
-    if (templateFile.mimeType === "application/pdf" || templateFile.mimeType.startsWith("image/")) {
-      parts.push({ inlineData: { mimeType: templateFile.mimeType, data: templateFile.base64 } });
-    } else if (templateFile.mimeType.startsWith("text/")) {
-      const raw = Buffer.from(templateFile.base64, "base64").toString("utf-8");
-      parts.push({ text: `\n\nORIGINAL TEMPLATE:\n${raw}` });
-    }
+    parts.push(...(await filesToLlmParts([templateFile], "ORIGINAL TEMPLATE")));
 
     const result = await callLlm(
       {

@@ -21,11 +21,10 @@ const initialTestState: TestGeminiState = { result: null, error: null };
 
 type ActiveTab = "grading" | "lesson-planning" | "course-planning";
 
-// Flip to true once the Course Engine /api/v1/lecture endpoint accepts file
-// uploads. Until then, the "Other API" lecture path stays objectives-only (the
-// endpoint has no file parameter and would reject one). When enabled, the first
-// attached context file is forwarded to the lecture generator.
-const COURSE_ENGINE_ACCEPTS_LECTURE_FILES = false;
+// The hosted Course Engine runs on Vercel, which caps the request body at
+// ~4.5 MB. Reject larger uploads client-side with a clear message rather than
+// letting the platform fail the request opaquely.
+const COURSE_ENGINE_MAX_UPLOAD_BYTES = 4.5 * 1024 * 1024;
 
 // Read a browser File into the app's standard upload shape (base64, no data: prefix).
 async function readUploadFile(
@@ -169,25 +168,38 @@ export default function Home() {
   };
 
   const handleGenerateLesson = async () => {
-    if (!moduleObjectives.trim()) {
-      setLessonError("Please enter module objectives before generating.");
+    // The Course Engine lecture endpoint accepts a file in place of objectives,
+    // so on that provider an attached file alone is enough to generate.
+    const isCourseEngine = getStoredProvider() === "other";
+    const lectureFileInput = isCourseEngine
+      ? lessonContextFileRef.current?.files?.[0]
+      : undefined;
+
+    if (!moduleObjectives.trim() && !lectureFileInput) {
+      setLessonError(
+        isCourseEngine
+          ? "Enter module objectives or attach a file to generate the lecture."
+          : "Please enter module objectives before generating."
+      );
       return;
     }
+
+    if (lectureFileInput && lectureFileInput.size > COURSE_ENGINE_MAX_UPLOAD_BYTES) {
+      setLessonError("That file is too large (max ~4.5 MB). Upload a smaller file or paste the objectives instead.");
+      return;
+    }
+
     setIsGeneratingLesson(true);
     setLessonError(null);
     try {
       // Course Engine path: it returns a finished .pptx deck, so download it
-      // directly and skip the Gemini companion bundle + preview. Once the
-      // endpoint accepts uploads, the first attached context file (e.g. an
-      // existing class deck) is forwarded alongside the objectives.
-      if (getStoredProvider() === "other") {
-        let lectureFile: { name: string; base64: string; mimeType: string } | undefined;
-        if (COURSE_ENGINE_ACCEPTS_LECTURE_FILES) {
-          const firstFile = lessonContextFileRef.current?.files?.[0];
-          if (firstFile) {
-            lectureFile = await readUploadFile(firstFile);
-          }
-        }
+      // directly and skip the Gemini companion bundle + preview. The first
+      // attached context file (e.g. an existing class deck) is forwarded
+      // alongside the objectives so the engine can seed from it.
+      if (isCourseEngine) {
+        const lectureFile = lectureFileInput
+          ? await readUploadFile(lectureFileInput)
+          : undefined;
         const deck = await generateLectureDeckAction(
           moduleObjectives,
           moduleTitle.trim() || undefined,

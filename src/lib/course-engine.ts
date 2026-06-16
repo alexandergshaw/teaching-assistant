@@ -175,7 +175,11 @@ export async function courseEngineLecture(
   let response: Response;
   if (file) {
     const form = new FormData();
-    form.append("objectives", objectives);
+    // Only send objectives when non-empty; with a file present the engine can
+    // derive them from the upload, and an empty field can trip length validation.
+    if (objectives.trim()) {
+      form.append("objectives", objectives);
+    }
     if (title) {
       form.append("title", title);
     }

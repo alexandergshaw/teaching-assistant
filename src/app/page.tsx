@@ -174,6 +174,7 @@ export default function Home() {
     const lectureFileInput = isCourseEngine
       ? lessonContextFileRef.current?.files?.[0]
       : undefined;
+    const homeworkFileInput = homeworkFileRef.current?.files?.[0];
 
     if (!moduleObjectives.trim() && !lectureFileInput) {
       setLessonError(
@@ -184,26 +185,42 @@ export default function Home() {
       return;
     }
 
-    if (lectureFileInput && lectureFileInput.size > COURSE_ENGINE_MAX_UPLOAD_BYTES) {
-      setLessonError("That file is too large (max ~4.5 MB). Upload a smaller file or paste the objectives instead.");
-      return;
+    // The Course Engine (Vercel) caps the request body at ~4.5 MB; validate the
+    // files it will receive up front. The Gemini path extracts text server-side
+    // and is not subject to this cap.
+    if (isCourseEngine) {
+      const oversized = [lectureFileInput, homeworkFileInput].find(
+        (f) => f && f.size > COURSE_ENGINE_MAX_UPLOAD_BYTES
+      );
+      if (oversized) {
+        setLessonError(`"${oversized.name}" is too large (max ~4.5 MB). Upload a smaller file or paste the text instead.`);
+        return;
+      }
     }
 
     setIsGeneratingLesson(true);
     setLessonError(null);
     try {
       // Course Engine path: it returns a finished .pptx deck, so download it
-      // directly and skip the Gemini companion bundle + preview. The first
-      // attached context file (e.g. an existing class deck) is forwarded
-      // alongside the objectives so the engine can seed from it.
+      // directly and skip the Gemini companion bundle + preview. The attached
+      // context file (an existing class deck) seeds the objectives, and the
+      // homework (text and/or file) tunes prerequisite coverage.
       if (isCourseEngine) {
         const lectureFile = lectureFileInput
           ? await readUploadFile(lectureFileInput)
           : undefined;
+        const homeworkFile = homeworkFileInput
+          ? await readUploadFile(homeworkFileInput)
+          : undefined;
+        const homework =
+          homeworkText.trim() || homeworkFile
+            ? { text: homeworkText.trim() || undefined, file: homeworkFile }
+            : undefined;
         const deck = await generateLectureDeckAction(
           moduleObjectives,
           moduleTitle.trim() || undefined,
-          lectureFile
+          lectureFile,
+          homework
         );
         if ("error" in deck) {
           setLessonError(deck.error);
@@ -588,14 +605,13 @@ export default function Home() {
             onModuleObjectivesChange={setModuleObjectives}
             moduleTitle={moduleTitle}
             onModuleTitleChange={setModuleTitle}
-            showModuleTitle={provider === "other"}
+            isCourseEngine={provider === "other"}
             lessonContext={lessonContext}
             onLessonContextChange={setLessonContext}
             contextFileRef={lessonContextFileRef}
             homeworkText={homeworkText}
             onHomeworkTextChange={setHomeworkText}
             homeworkFileRef={homeworkFileRef}
-            showHomework={provider === "gemini"}
             lessonError={lessonError}
             isGeneratingLesson={isGeneratingLesson}
             onGenerate={handleGenerateLesson}

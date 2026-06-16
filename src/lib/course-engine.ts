@@ -156,24 +156,38 @@ export interface CourseEngineUploadFile {
   mimeType: string;
 }
 
+/** Optional homework assignment the deck should prepare students for. */
+export interface CourseEngineHomework {
+  text?: string;
+  file?: CourseEngineUploadFile;
+}
+
 /**
  * Endpoint 4 — learning objectives to a ready-to-teach .pptx (binary).
  *
  * When `file` is supplied (e.g. an existing class deck), the request is sent as
  * multipart/form-data so the Course Engine can derive objectives/topics from the
- * uploaded artifact in addition to the typed objectives. This requires the
- * endpoint to support file upload; until then callers omit `file` and the
- * request stays the JSON form it has always used.
+ * uploaded artifact in addition to the typed objectives.
+ *
+ * An optional `homework` (text and/or file) makes the deck cover the
+ * prerequisite skills the assignment needs, without restating its questions or
+ * revealing answers. Homework is supplemental — it never substitutes for
+ * objectives/file and is never rendered in the deck.
  */
 export async function courseEngineLecture(
   objectives: string,
   title?: string,
-  file?: CourseEngineUploadFile
+  file?: CourseEngineUploadFile,
+  homework?: CourseEngineHomework
 ): Promise<CourseEngineFile> {
   const url = `${getCourseEngineUrl()}/api/v1/lecture`;
 
+  const homeworkText = homework?.text?.trim();
+  const homeworkFile = homework?.file;
+  const usesFiles = Boolean(file || homeworkFile);
+
   let response: Response;
-  if (file) {
+  if (usesFiles) {
     const form = new FormData();
     // Only send objectives when non-empty; with a file present the engine can
     // derive them from the upload, and an empty field can trip length validation.
@@ -183,18 +197,34 @@ export async function courseEngineLecture(
     if (title) {
       form.append("title", title);
     }
-    const bytes = Buffer.from(file.base64, "base64");
-    form.append("file", new Blob([bytes], { type: file.mimeType }), file.name);
+    if (file) {
+      const bytes = Buffer.from(file.base64, "base64");
+      form.append("file", new Blob([bytes], { type: file.mimeType }), file.name);
+    }
+    if (homeworkText) {
+      form.append("homework", homeworkText);
+    }
+    if (homeworkFile) {
+      const bytes = Buffer.from(homeworkFile.base64, "base64");
+      form.append("homeworkFile", new Blob([bytes], { type: homeworkFile.mimeType }), homeworkFile.name);
+    }
     response = await fetch(url, {
       method: "POST",
       headers: { ...authHeaders() }, // let fetch set the multipart boundary
       body: form,
     });
   } else {
+    const payload: { objectives: string; title?: string; homework?: string } = { objectives };
+    if (title) {
+      payload.title = title;
+    }
+    if (homeworkText) {
+      payload.homework = homeworkText;
+    }
     response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify(title ? { objectives, title } : { objectives }),
+      body: JSON.stringify(payload),
     });
   }
 

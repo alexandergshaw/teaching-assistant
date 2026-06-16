@@ -17,6 +17,7 @@ import {
   courseEngineCopilotPrompt,
   type CourseEngineFile,
   type CourseEngineUploadFile,
+  type CourseEngineHomework,
   type ScheduleResponse,
 } from "@/lib/course-engine";
 import {
@@ -2247,10 +2248,11 @@ export async function generateLecturePlansAction(
 export async function generateLectureDeckAction(
   objectives: string,
   title?: string,
-  file?: CourseEngineUploadFile
+  file?: CourseEngineUploadFile,
+  homework?: CourseEngineHomework
 ): Promise<CourseEngineFile | { error: string }> {
   try {
-    return await courseEngineLecture(objectives, title, file);
+    return await courseEngineLecture(objectives, title, file, homework);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Lecture generation failed." };
   }

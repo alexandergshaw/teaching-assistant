@@ -8,18 +8,16 @@ type LessonPlanningFormProps = {
   onModuleObjectivesChange: (value: string) => void;
   moduleTitle: string;
   onModuleTitleChange: (value: string) => void;
-  // The module title is only consumed by the Course Engine ("other") provider's
-  // /api/v1/lecture endpoint, so the control is shown only for that provider.
-  showModuleTitle: boolean;
+  // True when the Course Engine ("other") provider is active. Gates the
+  // Module Title control (only that endpoint uses it) and tailors the Context
+  // file hint (the file seeds the deck on Course Engine vs. adds context on Gemini).
+  isCourseEngine: boolean;
   lessonContext: string;
   onLessonContextChange: (value: string) => void;
   contextFileRef: RefObject<HTMLInputElement | null>;
   homeworkText: string;
   onHomeworkTextChange: (value: string) => void;
   homeworkFileRef: RefObject<HTMLInputElement | null>;
-  // The homework input only feeds the Gemini slide generator, so it is shown
-  // only for that provider.
-  showHomework: boolean;
   lessonError: string | null;
   isGeneratingLesson: boolean;
   onGenerate: () => void;
@@ -30,14 +28,13 @@ export default function LessonPlanningForm({
   onModuleObjectivesChange,
   moduleTitle,
   onModuleTitleChange,
-  showModuleTitle,
+  isCourseEngine,
   lessonContext,
   onLessonContextChange,
   contextFileRef,
   homeworkText,
   onHomeworkTextChange,
   homeworkFileRef,
-  showHomework,
   lessonError,
   isGeneratingLesson,
   onGenerate,
@@ -48,7 +45,7 @@ export default function LessonPlanningForm({
         <h1>Pre Built Courses</h1>
         <p>Plan and generate lesson content with AI assistance.</p>
       </div>
-      {showModuleTitle && (
+      {isCourseEngine && (
         <div className={styles.field}>
           <label htmlFor="moduleTitle">Module Title</label>
           <input
@@ -87,30 +84,32 @@ export default function LessonPlanningForm({
         />
         <div className={styles.fileField}>
           <input id="lessonContextFile" type="file" multiple ref={contextFileRef} />
-          <p>Optionally attach any files for additional context.</p>
-        </div>
-      </div>
-      {showHomework && (
-        <div className={styles.field}>
-          <label htmlFor="homeworkAssignment">Homework Assignment (optional)</label>
-          <textarea
-            id="homeworkAssignment"
-            placeholder="Paste the homework assignment students will complete after this lecture…"
-            style={{ minHeight: "180px" }}
-            value={homeworkText}
-            onChange={(e) => onHomeworkTextChange(e.target.value)}
-          />
-          <div className={styles.fileField}>
-            <input id="homeworkFile" type="file" ref={homeworkFileRef} />
-            <p>Optionally attach the assignment file (.pdf, .docx, .pptx, .txt…).</p>
-          </div>
-          <p className={styles.fieldHint}>
-            The slides will teach everything students need to complete this
-            assignment, without restating its questions or giving away the
-            answers.
+          <p>
+            {isCourseEngine
+              ? "Optionally attach an existing deck or document to base this lecture on (the first file is used as the source; .pptx, .docx, .pdf… up to ~4.5 MB)."
+              : "Optionally attach any files for additional context."}
           </p>
         </div>
-      )}
+      </div>
+      <div className={styles.field}>
+        <label htmlFor="homeworkAssignment">Homework Assignment (optional)</label>
+        <textarea
+          id="homeworkAssignment"
+          placeholder="Paste the homework assignment students will complete after this lecture…"
+          style={{ minHeight: "180px" }}
+          value={homeworkText}
+          onChange={(e) => onHomeworkTextChange(e.target.value)}
+        />
+        <div className={styles.fileField}>
+          <input id="homeworkFile" type="file" ref={homeworkFileRef} />
+          <p>Optionally attach the assignment file (.pdf, .docx, .pptx, .txt…).</p>
+        </div>
+        <p className={styles.fieldHint}>
+          The slides will teach everything students need to complete this
+          assignment, without restating its questions or giving away the
+          answers.
+        </p>
+      </div>
       {lessonError && <p className={styles.error}>{lessonError}</p>}
       <button
         type="button"

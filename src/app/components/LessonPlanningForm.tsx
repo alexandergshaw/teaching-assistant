@@ -14,6 +14,12 @@ type LessonPlanningFormProps = {
   lessonContext: string;
   onLessonContextChange: (value: string) => void;
   contextFileRef: RefObject<HTMLInputElement | null>;
+  homeworkText: string;
+  onHomeworkTextChange: (value: string) => void;
+  homeworkFileRef: RefObject<HTMLInputElement | null>;
+  // The homework input only feeds the Gemini slide generator, so it is shown
+  // only for that provider.
+  showHomework: boolean;
   lessonError: string | null;
   isGeneratingLesson: boolean;
   onGenerate: () => void;
@@ -28,6 +34,10 @@ export default function LessonPlanningForm({
   lessonContext,
   onLessonContextChange,
   contextFileRef,
+  homeworkText,
+  onHomeworkTextChange,
+  homeworkFileRef,
+  showHomework,
   lessonError,
   isGeneratingLesson,
   onGenerate,
@@ -80,6 +90,27 @@ export default function LessonPlanningForm({
           <p>Optionally attach any files for additional context.</p>
         </div>
       </div>
+      {showHomework && (
+        <div className={styles.field}>
+          <label htmlFor="homeworkAssignment">Homework Assignment (optional)</label>
+          <textarea
+            id="homeworkAssignment"
+            placeholder="Paste the homework assignment students will complete after this lecture…"
+            style={{ minHeight: "180px" }}
+            value={homeworkText}
+            onChange={(e) => onHomeworkTextChange(e.target.value)}
+          />
+          <div className={styles.fileField}>
+            <input id="homeworkFile" type="file" ref={homeworkFileRef} />
+            <p>Optionally attach the assignment file (.pdf, .docx, .pptx, .txt…).</p>
+          </div>
+          <p className={styles.fieldHint}>
+            The slides will teach everything students need to complete this
+            assignment, without restating its questions or giving away the
+            answers.
+          </p>
+        </div>
+      )}
       {lessonError && <p className={styles.error}>{lessonError}</p>}
       <button
         type="button"

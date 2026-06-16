@@ -21,6 +21,28 @@ const initialTestState: TestGeminiState = { result: null, error: null };
 
 type ActiveTab = "grading" | "lesson-planning" | "course-planning";
 
+// Flip to true once the Course Engine /api/v1/lecture endpoint accepts file
+// uploads. Until then, the "Other API" lecture path stays objectives-only (the
+// endpoint has no file parameter and would reject one). When enabled, the first
+// attached context file is forwarded to the lecture generator.
+const COURSE_ENGINE_ACCEPTS_LECTURE_FILES = false;
+
+// Read a browser File into the app's standard upload shape (base64, no data: prefix).
+async function readUploadFile(
+  file: File
+): Promise<{ name: string; base64: string; mimeType: string }> {
+  const base64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(",")[1] ?? "");
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  return { name: file.name, base64, mimeType: file.type || "application/octet-stream" };
+}
+
 // Decode a base64 payload (e.g. a file returned by the Course Engine API) and
 // trigger a browser download.
 function downloadBase64File(base64: string, fileName: string, mimeType: string) {
@@ -109,6 +131,9 @@ export default function Home() {
   const [examplesPreview, setExamplesPreview] = useState<ExamplesData | null>(null);
   const [savedLessonFiles, setSavedLessonFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
   const lessonContextFileRef = useRef<HTMLInputElement>(null);
+  const [homeworkText, setHomeworkText] = useState("");
+  const homeworkFileRef = useRef<HTMLInputElement>(null);
+  const [savedHomeworkFiles, setSavedHomeworkFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
 
   useEffect(() => {
     localStorage.setItem("ta-active-tab", activeTab);
@@ -151,12 +176,22 @@ export default function Home() {
     setIsGeneratingLesson(true);
     setLessonError(null);
     try {
-      // Course Engine path: it returns a finished .pptx deck (objectives only),
-      // so download it directly and skip the Gemini companion bundle + preview.
+      // Course Engine path: it returns a finished .pptx deck, so download it
+      // directly and skip the Gemini companion bundle + preview. Once the
+      // endpoint accepts uploads, the first attached context file (e.g. an
+      // existing class deck) is forwarded alongside the objectives.
       if (getStoredProvider() === "other") {
+        let lectureFile: { name: string; base64: string; mimeType: string } | undefined;
+        if (COURSE_ENGINE_ACCEPTS_LECTURE_FILES) {
+          const firstFile = lessonContextFileRef.current?.files?.[0];
+          if (firstFile) {
+            lectureFile = await readUploadFile(firstFile);
+          }
+        }
         const deck = await generateLectureDeckAction(
           moduleObjectives,
-          moduleTitle.trim() || undefined
+          moduleTitle.trim() || undefined,
+          lectureFile
         );
         if ("error" in deck) {
           setLessonError(deck.error);
@@ -170,24 +205,25 @@ export default function Home() {
       const files: Array<{ name: string; base64: string; mimeType: string }> = [];
       if (fileList) {
         for (const file of Array.from(fileList)) {
-          const base64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const result = reader.result as string;
-              resolve(result.split(",")[1] ?? "");
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-          });
-          files.push({ name: file.name, base64, mimeType: file.type || "application/octet-stream" });
+          files.push(await readUploadFile(file));
         }
       }
 
       setSavedLessonFiles(files);
 
+      const homeworkFileList = homeworkFileRef.current?.files;
+      const homeworkFiles: Array<{ name: string; base64: string; mimeType: string }> = [];
+      if (homeworkFileList) {
+        for (const file of Array.from(homeworkFileList)) {
+          homeworkFiles.push(await readUploadFile(file));
+        }
+      }
+      setSavedHomeworkFiles(homeworkFiles);
+      const homework = { text: homeworkText.trim() || undefined, files: homeworkFiles };
+
       const provider = getStoredProvider();
       const [slideResult, assignmentResult, rubricResult, introResult] = await Promise.all([
-        generateLessonPlanAction(moduleObjectives, lessonContext, files, undefined, undefined, provider),
+        generateLessonPlanAction(moduleObjectives, lessonContext, files, undefined, undefined, provider, homework),
         generateAssignmentAction(moduleObjectives, lessonContext, files, provider),
         generateAssignmentRubricAction(moduleObjectives, lessonContext, provider),
         generateModuleIntroAction(moduleObjectives, lessonContext, provider),
@@ -227,7 +263,8 @@ export default function Home() {
         savedLessonFiles,
         revisionPrompt.trim() || undefined,
         lessonPlanPreview.slides,
-        getStoredProvider()
+        getStoredProvider(),
+        { text: homeworkText.trim() || undefined, files: savedHomeworkFiles }
       );
       if ("error" in result) {
         setLessonError(result.error);
@@ -543,6 +580,10 @@ export default function Home() {
             lessonContext={lessonContext}
             onLessonContextChange={setLessonContext}
             contextFileRef={lessonContextFileRef}
+            homeworkText={homeworkText}
+            onHomeworkTextChange={setHomeworkText}
+            homeworkFileRef={homeworkFileRef}
+            showHomework={provider === "gemini"}
             lessonError={lessonError}
             isGeneratingLesson={isGeneratingLesson}
             onGenerate={handleGenerateLesson}

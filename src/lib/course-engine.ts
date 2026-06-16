@@ -149,16 +149,50 @@ export async function courseEngineCopilotPrompt(
   return (await response.json()) as CopilotPromptResponse;
 }
 
-/** Endpoint 4 — learning objectives to a ready-to-teach .pptx (binary). */
+/** A file the caller uploads to an endpoint (matches the app's file shape). */
+export interface CourseEngineUploadFile {
+  name: string;
+  base64: string;
+  mimeType: string;
+}
+
+/**
+ * Endpoint 4 — learning objectives to a ready-to-teach .pptx (binary).
+ *
+ * When `file` is supplied (e.g. an existing class deck), the request is sent as
+ * multipart/form-data so the Course Engine can derive objectives/topics from the
+ * uploaded artifact in addition to the typed objectives. This requires the
+ * endpoint to support file upload; until then callers omit `file` and the
+ * request stays the JSON form it has always used.
+ */
 export async function courseEngineLecture(
   objectives: string,
-  title?: string
+  title?: string,
+  file?: CourseEngineUploadFile
 ): Promise<CourseEngineFile> {
-  const response = await fetch(`${getCourseEngineUrl()}/api/v1/lecture`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify(title ? { objectives, title } : { objectives }),
-  });
+  const url = `${getCourseEngineUrl()}/api/v1/lecture`;
+
+  let response: Response;
+  if (file) {
+    const form = new FormData();
+    form.append("objectives", objectives);
+    if (title) {
+      form.append("title", title);
+    }
+    const bytes = Buffer.from(file.base64, "base64");
+    form.append("file", new Blob([bytes], { type: file.mimeType }), file.name);
+    response = await fetch(url, {
+      method: "POST",
+      headers: { ...authHeaders() }, // let fetch set the multipart boundary
+      body: form,
+    });
+  } else {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(title ? { objectives, title } : { objectives }),
+    });
+  }
 
   if (!response.ok) {
     throw await toFriendlyError(response);

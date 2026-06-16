@@ -16,6 +16,7 @@ import {
   courseEngineMaterials,
   courseEngineCopilotPrompt,
   type CourseEngineFile,
+  type CourseEngineUploadFile,
   type ScheduleResponse,
 } from "@/lib/course-engine";
 import {
@@ -181,7 +182,11 @@ export async function generateLessonPlanAction(
   files: Array<{ name: string; base64: string; mimeType: string }>,
   revisionPrompt?: string,
   currentSlides?: SlideData[],
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  homework?: {
+    text?: string;
+    files?: Array<{ name: string; base64: string; mimeType: string }>;
+  }
 ): Promise<GenerateLessonPlanResult | { error: string }> {
   try {
     const filesSummary =
@@ -194,13 +199,25 @@ export async function generateLessonPlanAction(
         ? `\n\nCURRENT SLIDE DECK (JSON):\n${JSON.stringify(currentSlides, null, 2)}\n\nREVISION INSTRUCTIONS:\n${revisionPrompt}\n\nUpdate the slide deck based on the revision instructions. Preserve slides that don't need to change; modify, add, or remove slides as needed.`
         : "";
 
+    const homeworkText = homework?.text?.trim() ?? "";
+    const homeworkFiles = homework?.files ?? [];
+    const hasHomework = homeworkText.length > 0 || homeworkFiles.length > 0;
+
+    const homeworkSection = hasHomework
+      ? `\n\nHOMEWORK ASSIGNMENT (the slides must prepare students to complete this, WITHOUT revealing its answers):\n${homeworkText || "(provided as an attached file below)"}`
+      : "";
+
+    const homeworkRequirement = hasHomework
+      ? `\n- HOMEWORK PREPARATION: A homework assignment is provided above. Ensure the deck teaches every concept, skill, and technique a student needs to complete it confidently on their own. The Example, Practice, and Answer slides MUST use different problems than the homework's own questions. Never restate the homework's exact questions, never solve any homework problem, and never reveal its answers — the goal is to prepare students to do it themselves, not to do it for them.`
+      : "";
+
     const prompt = `You are an expert educator creating a lecture slide deck.
 
 MODULE OBJECTIVES:
 ${moduleObjectives}
 
 CONTEXT:
-${contextText || "(none provided)"}${filesSummary}${revisionSection}
+${contextText || "(none provided)"}${filesSummary}${revisionSection}${homeworkSection}
 
 Create a complete set of lecture slides that fully address the module objectives. Return ONLY valid JSON:
 {
@@ -228,7 +245,7 @@ Requirements:
   2. Walkthrough slide — "title" begins with "Walkthrough:"; explain the example code line by line in "bullets" while showing the same code in the "code" field; use the exact code from the Example slide so students can read both the code and the explanation together.
   3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets" and set "codeLanguage". Its "code" field MUST repeat the SAME reference code shown on the Example/Walkthrough slide so the student has a worked example to reference — it must NOT contain the solution to the practice challenge or any code that gives away the answer.
   4. Answer slide — "title" begins with "Answer:"; give the correct, runnable solution to that exact practice challenge in "code" with "codeLanguage" set, plus at most one "bullets" caption.
-- All of Example, Walkthrough, Practice, and Answer slides must include "code"/"codeLanguage". Do not omit "code" on Walkthrough or Practice slides. If the module teaches no programming, omit code fields and the Example/Walkthrough/Practice/Answer slides entirely.
+- All of Example, Walkthrough, Practice, and Answer slides must include "code"/"codeLanguage". Do not omit "code" on Walkthrough or Practice slides. If the module teaches no programming, omit code fields and the Example/Walkthrough/Practice/Answer slides entirely.${homeworkRequirement}
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<
@@ -236,6 +253,7 @@ Requirements:
     > = [
       { text: prompt },
       ...(await filesToLlmParts(files)),
+      ...(await filesToLlmParts(homeworkFiles, "HOMEWORK ASSIGNMENT")),
     ];
 
     const result = await callLlm(
@@ -2228,10 +2246,11 @@ export async function generateLecturePlansAction(
 
 export async function generateLectureDeckAction(
   objectives: string,
-  title?: string
+  title?: string,
+  file?: CourseEngineUploadFile
 ): Promise<CourseEngineFile | { error: string }> {
   try {
-    return await courseEngineLecture(objectives, title);
+    return await courseEngineLecture(objectives, title, file);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Lecture generation failed." };
   }

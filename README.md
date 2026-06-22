@@ -85,8 +85,8 @@ materials `rubric.csv`) via that service instead of Gemini:
 ### Canvas grading
 
 The Grading tab can grade Canvas **discussions and assignments** directly from a
-URL (Canvas has no UI export, but its API does). Choose **Canvas** as the source
-and paste either a discussion link (`.../discussion_topics/…`) or an assignment
+URL (Canvas has no UI export, but its API does). Choose **Single Assignment** as
+the source and paste either a discussion link (`.../discussion_topics/…`) or an assignment
 link (`.../assignments/…`) — the type is auto-detected from the URL. The
 institution is selected automatically from the link's hostname, then each
 student's work (discussion posts/replies, or assignment text + uploaded files) is
@@ -116,9 +116,31 @@ MCC is preconfigured, so set `MCC_CANVAS_API_TOKEN`. To add another school: add 
 entry to the `CANVAS_INSTITUTIONS` list (code, name, host) and set its
 `<CODE>_CANVAS_API_TOKEN`.
 
+### Grading: Live Feed & institutions
+
+The Grading tab's **Live Feed** sub-tab is a cross-school dashboard of everything
+waiting to be graded. At the top you register schools by **acronym** (MCC, MPCC,
+…); the list is stored in the browser and drives env-var lookups — set the
+secrets in the environment, the UI just selects which schools to poll. Per
+acronym:
+
+- `<ACRONYM>_CANVAS_URL` — Canvas base URL (e.g. `https://canvas.mccneb.edu`). Required.
+- `<ACRONYM>_CANVAS_API_TOKEN` — instructor token. Required.
+- `<ACRONYM>_LLM_URL` / `<ACRONYM>_LLM_API` — that school's grading-service URL +
+  key for the deterministic ("Other API") grader. Optional; falls back to the
+  global `GRADING_ENGINE_URL` / `GRADING_API_KEY`.
+
+On open (and via **Refresh**) the Live Feed scans each school's **active teacher
+courses** for assignments and graded discussions with `needs_grading_count > 0`,
+showing one row per assignment/discussion with its description and rubric. The
+**Auto Grade** button runs the exact same pipeline as the Single Assignment flow
+(grade → review matrix → post back to Canvas), routed to that school's grader.
+The acronym table flags whether each school's Canvas / grader env vars are set.
+All polling and grading is owner-gated (owner allowlist + MFA).
+
 ### Canvas announcements & inbox
 
-The **Canvas** tab posts course announcements and replies to Canvas inbox
+The **Communications** tab posts course announcements and replies to Canvas inbox
 messages, reusing the same per-institution token as grading (no new env vars).
 
 - **Announcements**: paste any link from the course (a course home,

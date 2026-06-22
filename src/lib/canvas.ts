@@ -185,6 +185,47 @@ function resolveDefaultInstitution(): {
   );
 }
 
+/**
+ * Resolve Canvas credentials for an institution acronym (MCC, MPCC, ...) used by
+ * the Live Feed, which has no course URL to key off. Everything is env-driven:
+ *   <CODE>_CANVAS_URL        (required) — base URL, e.g. https://canvas.mccneb.edu
+ *   <CODE>_CANVAS_API_TOKEN  (required) — instructor token
+ * The host is derived from the base URL only for error/display purposes.
+ */
+function resolveInstitutionByCode(code: string): {
+  institution: CanvasInstitution;
+  token: string;
+  baseUrl: string;
+} {
+  const upper = code.trim().toUpperCase();
+  if (!upper) {
+    throw new Error("An institution acronym is required.");
+  }
+  const baseRaw = process.env[`${upper}_CANVAS_URL`];
+  const token = process.env[`${upper}_CANVAS_API_TOKEN`] || undefined;
+  if (!baseRaw) {
+    throw new Error(
+      `Canvas base URL is not configured for ${upper}. Set ${upper}_CANVAS_URL in the environment.`
+    );
+  }
+  if (!token) {
+    throw new Error(
+      `Canvas API token is not configured for ${upper}. Set ${upper}_CANVAS_API_TOKEN in the environment.`
+    );
+  }
+  let host = "";
+  try {
+    host = new URL(baseRaw).host.toLowerCase();
+  } catch {
+    // Base URL is malformed; keep host blank — the fetch below will surface it.
+  }
+  return {
+    institution: { code: upper, name: upper, host },
+    token,
+    baseUrl: baseRaw.replace(/\/+$/, ""),
+  };
+}
+
 /** Follow the RFC-5988 Link header to the next page, if any. */
 function parseNextLink(linkHeader: string | null): string | null {
   if (!linkHeader) return null;
@@ -486,6 +527,128 @@ export async function fetchCanvasMeta(
   }
 
   return { description, rubricText };
+}
+
+// ── Grading queue (Live Feed) ───────────────────────────────────────────────
+//
+// Across an institution's active teacher courses, surface every assignment and
+// graded discussion that currently has submissions needing grading, with the
+// description and rubric needed for the Live Feed table. Credentials come from
+// the acronym's env vars (resolveInstitutionByCode); the canonical canvasUrl is
+// built so the existing single-URL grading pipeline can grade it unchanged.
+
+/** One assignment/discussion needing grading, one row in the Live Feed table. */
+export interface CanvasQueueItem {
+  institution: string;
+  courseId: string;
+  courseName: string;
+  kind: "assignment" | "discussion";
+  /** Resource id used in the URL (assignment id, or discussion topic id). */
+  id: string;
+  /** Always the assignment id, for posting grades back. */
+  assignmentId: string;
+  title: string;
+  needsGradingCount: number;
+  htmlUrl: string;
+  canvasUrl: string;
+  description: string;
+  rubricText: string;
+}
+
+interface CanvasCourseListItem {
+  id?: number;
+  name?: string;
+}
+
+interface CanvasAssignmentListItem {
+  id?: number;
+  name?: string;
+  description?: string | null;
+  html_url?: string;
+  needs_grading_count?: number;
+  submission_types?: string[];
+  rubric?: CanvasRubricCriterion[];
+  discussion_topic?: { id?: number } | null;
+}
+
+async function listActiveTeacherCourses(ctx: {
+  institution: CanvasInstitution;
+  token: string;
+  baseUrl: string;
+}): Promise<Array<{ id: string; name: string }>> {
+  const { institution, token, baseUrl } = ctx;
+  let next: string | null = `${baseUrl}/api/v1/courses?enrollment_type=teacher&enrollment_state=active&per_page=100`;
+  const courses: Array<{ id: string; name: string }> = [];
+  while (next) {
+    const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) {
+      throw canvasError(response.status, institution);
+    }
+    const page = (await response.json()) as CanvasCourseListItem[];
+    for (const course of page) {
+      if (typeof course.id === "number") {
+        courses.push({ id: String(course.id), name: course.name?.trim() || `Course ${course.id}` });
+      }
+    }
+    next = parseNextLink(response.headers.get("link"));
+  }
+  return courses;
+}
+
+/**
+ * Build the grading queue for an institution acronym: assignments and graded
+ * discussions with needs_grading_count > 0 across its active teacher courses.
+ * Description and rubric come straight from the assignment list response, so the
+ * scan costs one courses call plus one assignments call per course.
+ */
+export async function listGradingQueue(code: string): Promise<CanvasQueueItem[]> {
+  const ctx = resolveInstitutionByCode(code);
+  const { institution, token, baseUrl } = ctx;
+  const courses = await listActiveTeacherCourses(ctx);
+
+  const items: CanvasQueueItem[] = [];
+  for (const course of courses) {
+    let next: string | null = `${baseUrl}/api/v1/courses/${course.id}/assignments?bucket=ungraded&include[]=needs_grading_count&per_page=100`;
+    while (next) {
+      const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
+      if (!response.ok) {
+        throw canvasError(response.status, institution);
+      }
+      const page = (await response.json()) as CanvasAssignmentListItem[];
+      for (const assignment of page) {
+        if (typeof assignment.id !== "number") continue;
+        if (!assignment.needs_grading_count || assignment.needs_grading_count <= 0) continue;
+
+        const isDiscussion =
+          (assignment.submission_types?.includes("discussion_topic") ?? false) &&
+          typeof assignment.discussion_topic?.id === "number";
+        const canvasUrl = isDiscussion
+          ? `${baseUrl}/courses/${course.id}/discussion_topics/${assignment.discussion_topic!.id}`
+          : `${baseUrl}/courses/${course.id}/assignments/${assignment.id}`;
+
+        items.push({
+          institution: institution.code,
+          courseId: course.id,
+          courseName: course.name,
+          kind: isDiscussion ? "discussion" : "assignment",
+          id: isDiscussion ? String(assignment.discussion_topic!.id) : String(assignment.id),
+          assignmentId: String(assignment.id),
+          title: assignment.name?.trim() || `Assignment ${assignment.id}`,
+          needsGradingCount: assignment.needs_grading_count,
+          htmlUrl: assignment.html_url ?? canvasUrl,
+          canvasUrl,
+          description: assignment.description ? htmlToText(assignment.description) : "",
+          rubricText: formatRubric(assignment.rubric),
+        });
+      }
+      next = parseNextLink(response.headers.get("link"));
+    }
+  }
+
+  items.sort(
+    (a, b) => a.courseName.localeCompare(b.courseName) || a.title.localeCompare(b.title)
+  );
+  return items;
 }
 
 /**

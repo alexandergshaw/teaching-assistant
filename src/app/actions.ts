@@ -20,9 +20,11 @@ import {
   listConversations,
   getConversation,
   replyToConversation,
+  listGradingQueue,
   type CanvasAnnouncement,
   type CanvasConversationSummary,
   type CanvasConversationDetail,
+  type CanvasQueueItem,
 } from "@/lib/canvas";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
@@ -1335,12 +1337,83 @@ Write the instructor's reply. Respond directly to the most recent message, in a 
   }
 }
 
+// ── Live Feed (Grading) ─────────────────────────────────────────────────────
+
+/**
+ * Report, per institution acronym, whether its Canvas and grading-service env
+ * vars are configured — so the Live Feed table can flag missing setup without
+ * exposing any secret values.
+ */
+export async function checkInstitutionsAction(
+  acronyms: string[]
+): Promise<
+  | { statuses: Array<{ acronym: string; canvasConfigured: boolean; llmConfigured: boolean }> }
+  | { error: string }
+> {
+  try {
+    await requireOwner();
+    const statuses = acronyms.map((raw) => {
+      const code = raw.trim().toUpperCase();
+      return {
+        acronym: code,
+        canvasConfigured:
+          !!process.env[`${code}_CANVAS_URL`] && !!process.env[`${code}_CANVAS_API_TOKEN`],
+        llmConfigured: !!process.env[`${code}_LLM_URL`] && !!process.env[`${code}_LLM_API`],
+      };
+    });
+    return { statuses };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not check institutions." };
+  }
+}
+
+/**
+ * Build the grading queue across the given institution acronyms: assignments and
+ * graded discussions that currently have submissions needing grading, with their
+ * description and rubric. Per-institution failures are reported, not fatal.
+ */
+export async function listGradingQueueAction(
+  acronyms: string[]
+): Promise<
+  { rows: CanvasQueueItem[]; errors: Array<{ acronym: string; error: string }> } | { error: string }
+> {
+  try {
+    await requireOwner();
+    const rows: CanvasQueueItem[] = [];
+    const errors: Array<{ acronym: string; error: string }> = [];
+    await Promise.all(
+      acronyms.map(async (raw) => {
+        const code = raw.trim().toUpperCase();
+        if (!code) return;
+        try {
+          rows.push(...(await listGradingQueue(code)));
+        } catch (err) {
+          errors.push({
+            acronym: code,
+            error: err instanceof Error ? err.message : "Failed to load.",
+          });
+        }
+      })
+    );
+    rows.sort(
+      (a, b) =>
+        a.institution.localeCompare(b.institution) ||
+        a.courseName.localeCompare(b.courseName) ||
+        a.title.localeCompare(b.title)
+    );
+    return { rows, errors };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the grading queue." };
+  }
+}
+
 // Grade a submissions zip with the deterministic ("Other") grading service.
 // Shared by the uploaded-zip path and the Canvas path (which synthesizes a zip).
 async function gradeZipViaEngine(
   zipBase64: string,
   rubric: string,
-  rubricFile: File | null
+  rubricFile: File | null,
+  institutionCode?: string
 ): Promise<GradeActionState> {
   let rubricText = "";
   let rubricName: string | undefined;
@@ -1359,7 +1432,8 @@ async function gradeZipViaEngine(
   }
   const resp = await gradeViaGradingEngine(
     zipBase64,
-    detectRubricSource(rubricText, rubricName)
+    detectRubricSource(rubricText, rubricName),
+    institutionCode
   );
   const warnings = [
     ...resp.warnings,
@@ -1381,6 +1455,9 @@ export async function gradeAction(
   const rubric = (formData.get("rubric") as string | null) ?? "";
   const provider = normalizeProvider(formData.get("provider") as string | null);
   const rubricFile = formData.get("rubricFile") as File | null;
+  // Optional institution acronym (Live Feed Auto Grade) — routes the
+  // deterministic grader to that school's endpoint; blank uses the global one.
+  const institution = ((formData.get("institution") as string | null) ?? "").trim() || undefined;
 
   try {
     await requireOwner();
@@ -1392,7 +1469,7 @@ export async function gradeAction(
       if (provider === "other") {
         const { students } = await fetchCanvasWork(canvasUrl);
         const zipBase64 = await canvasWorkToZipBase64(students);
-        return gradeZipViaEngine(zipBase64, rubric, rubricFile);
+        return gradeZipViaEngine(zipBase64, rubric, rubricFile, institution);
       }
 
       if (!assignmentInstructions.trim()) {
@@ -1414,7 +1491,7 @@ export async function gradeAction(
     // Deterministic Grading API path (provider toggle = "other").
     if (provider === "other") {
       const zipBase64 = Buffer.from(await file.arrayBuffer()).toString("base64");
-      return gradeZipViaEngine(zipBase64, rubric, rubricFile);
+      return gradeZipViaEngine(zipBase64, rubric, rubricFile, institution);
     }
 
     // Gemini path.

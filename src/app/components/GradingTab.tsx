@@ -1,18 +1,24 @@
 "use client";
 
 import type { ChangeEvent } from "react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchCanvasMetaAction,
   postCanvasGradesAction,
+  checkInstitutionsAction,
+  listGradingQueueAction,
   type GradeActionState,
   type TestGeminiState,
 } from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
+import type { CanvasQueueItem } from "@/lib/canvas";
+import type { LlmProvider } from "@/lib/llm";
 import { parseGeneratedRubric } from "../utils/rubric";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import styles from "../page.module.css";
+
+type GradingMode = "zip" | "canvas" | "livefeed";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 
@@ -154,6 +160,292 @@ function buildCsvContent(state: GradeActionState, edits: Record<string, RowEdit>
   return rows.join("\n");
 }
 
+// ── Live Feed panel ─────────────────────────────────────────────────────────
+
+const INSTITUTIONS_KEY = "ta-institutions";
+
+function readInstitutions(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(INSTITUTIONS_KEY) ?? "[]");
+    return Array.isArray(parsed)
+      ? parsed.filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+type InstitutionStatus = { canvasConfigured: boolean; llmConfigured: boolean };
+
+function LiveFeedPanel({
+  provider,
+  pending,
+  onAutoGrade,
+}: {
+  provider: LlmProvider;
+  pending: boolean;
+  onAutoGrade: (row: CanvasQueueItem) => void;
+}) {
+  const [institutions, setInstitutions] = useState<string[]>(() => readInstitutions());
+  const [newAcronym, setNewAcronym] = useState("");
+  const [statuses, setStatuses] = useState<Record<string, InstitutionStatus>>({});
+  const [rows, setRows] = useState<CanvasQueueItem[]>([]);
+  const [queueErrors, setQueueErrors] = useState<Array<{ acronym: string; error: string }>>([]);
+  const [queueState, setQueueState] = useState<{
+    status: "idle" | "loading" | "error";
+    message: string;
+  }>(() => ({ status: readInstitutions().length > 0 ? "loading" : "idle", message: "" }));
+
+  const persistInstitutions = (next: string[]) => {
+    setInstitutions(next);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(INSTITUTIONS_KEY, JSON.stringify(next));
+    }
+  };
+
+  const refreshStatuses = useCallback(async (codes: string[]) => {
+    if (codes.length === 0) {
+      setStatuses({});
+      return;
+    }
+    const result = await checkInstitutionsAction(codes);
+    if ("error" in result) return;
+    const map: Record<string, InstitutionStatus> = {};
+    for (const s of result.statuses) {
+      map[s.acronym] = { canvasConfigured: s.canvasConfigured, llmConfigured: s.llmConfigured };
+    }
+    setStatuses(map);
+  }, []);
+
+  const refreshQueue = useCallback(async (codes: string[]) => {
+    if (codes.length === 0) {
+      setRows([]);
+      setQueueErrors([]);
+      setQueueState({ status: "idle", message: "" });
+      return;
+    }
+    setQueueState({ status: "loading", message: "" });
+    const result = await listGradingQueueAction(codes);
+    if ("error" in result) {
+      setQueueState({ status: "error", message: result.error });
+      return;
+    }
+    setRows(result.rows);
+    setQueueErrors(result.errors);
+    setQueueState({ status: "idle", message: "" });
+  }, []);
+
+  // Load statuses + queue for the saved institutions on mount and whenever the
+  // list changes. Guarded so the effect body performs no synchronous setState.
+  useEffect(() => {
+    if (institutions.length === 0) return;
+    let active = true;
+    (async () => {
+      await refreshStatuses(institutions);
+      if (!active) return;
+      await refreshQueue(institutions);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [institutions, refreshStatuses, refreshQueue]);
+
+  const addInstitution = () => {
+    const code = newAcronym.trim().toUpperCase();
+    if (!code || institutions.includes(code)) {
+      setNewAcronym("");
+      return;
+    }
+    persistInstitutions([...institutions, code]);
+    setNewAcronym("");
+  };
+
+  const removeInstitution = (code: string) => {
+    const next = institutions.filter((c) => c !== code);
+    persistInstitutions(next);
+    if (next.length === 0) {
+      setRows([]);
+      setStatuses({});
+      setQueueErrors([]);
+      setQueueState({ status: "idle", message: "" });
+    }
+  };
+
+  const graderLabel = provider === "other" ? "deterministic grader" : "AI grader";
+
+  return (
+    <div className={styles.form}>
+      <div className={styles.field}>
+        <label htmlFor="institution-acronym">Institutions</label>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <input
+            id="institution-acronym"
+            type="text"
+            className={styles.textInput}
+            style={{ maxWidth: 240, textTransform: "uppercase" }}
+            placeholder="Add an acronym (e.g. MCC)"
+            value={newAcronym}
+            onChange={(e) => setNewAcronym(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addInstitution();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className={styles.downloadButton}
+            onClick={addInstitution}
+            disabled={!newAcronym.trim()}
+          >
+            Add institution
+          </button>
+        </div>
+        <p className={styles.fieldHint}>
+          Each acronym maps to env vars: <code>&lt;ACRONYM&gt;_CANVAS_URL</code>,{" "}
+          <code>&lt;ACRONYM&gt;_CANVAS_API_TOKEN</code>, and optionally{" "}
+          <code>&lt;ACRONYM&gt;_LLM_URL</code> / <code>&lt;ACRONYM&gt;_LLM_API</code> for that
+          school&apos;s grader. Set the secrets in the environment; this list only selects which
+          schools to poll.
+        </p>
+
+        {institutions.length > 0 && (
+          <table className={styles.generatedRubricTable} style={{ marginTop: 8 }}>
+            <thead>
+              <tr>
+                <th>Acronym</th>
+                <th>Canvas</th>
+                <th>Grader</th>
+                <th aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {institutions.map((code) => {
+                const st = statuses[code];
+                return (
+                  <tr key={code}>
+                    <td>{code}</td>
+                    <td>{st ? (st.canvasConfigured ? "Configured" : "Missing env") : "—"}</td>
+                    <td>{st ? (st.llmConfigured ? "School grader" : "Global grader") : "—"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className={styles.clearFileButton}
+                        onClick={() => removeInstitution(code)}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className={styles.resultsHeader} style={{ paddingTop: 0 }}>
+        <h2>Needs grading</h2>
+        <button
+          type="button"
+          className={styles.downloadButton}
+          onClick={() => {
+            void refreshStatuses(institutions);
+            void refreshQueue(institutions);
+          }}
+          disabled={institutions.length === 0 || queueState.status === "loading"}
+        >
+          {queueState.status === "loading" ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+
+      {institutions.length === 0 && (
+        <p className={styles.emptyState}>Add an institution above to load its grading queue.</p>
+      )}
+      {queueState.status === "error" && <p className={styles.error}>{queueState.message}</p>}
+      {queueErrors.map((e) => (
+        <p key={e.acronym} className={styles.error}>
+          {e.acronym}: {e.error}
+        </p>
+      ))}
+      {queueState.status === "idle" && institutions.length > 0 && rows.length === 0 && (
+        <p className={styles.emptyState}>Nothing is waiting to be graded right now.</p>
+      )}
+
+      {rows.length > 0 && (
+        <div className={styles.matrixWrap}>
+          <table className={styles.generatedRubricTable} style={{ minWidth: 900 }}>
+            <thead>
+              <tr>
+                <th>Institution</th>
+                <th>Course</th>
+                <th>Assignment / Discussion</th>
+                <th>Description</th>
+                <th>Rubric</th>
+                <th>Needs grading</th>
+                <th aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={`${row.institution}-${row.kind}-${row.id}`}>
+                  <td>{row.institution}</td>
+                  <td>{row.courseName}</td>
+                  <td>
+                    <a href={row.htmlUrl} target="_blank" rel="noopener noreferrer">
+                      {row.title}
+                    </a>
+                    <div className={styles.fieldHint}>{row.kind}</div>
+                  </td>
+                  <td style={{ maxWidth: 320 }}>
+                    {row.description ? (
+                      <details>
+                        <summary>View</summary>
+                        <div style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{row.description}</div>
+                      </details>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td style={{ maxWidth: 320 }}>
+                    {row.rubricText ? (
+                      <details>
+                        <summary>View</summary>
+                        <div style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{row.rubricText}</div>
+                      </details>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td>{row.needsGradingCount}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className={styles.submitButton}
+                      style={{ minWidth: 0, padding: "8px 14px" }}
+                      onClick={() => onAutoGrade(row)}
+                      disabled={pending}
+                    >
+                      Auto Grade
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className={styles.fieldHint}>
+        Auto Grade runs the same workflow as a single Canvas URL, using the {graderLabel}. Results
+        appear below, where you can edit and post them back to Canvas.
+      </p>
+    </div>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 type GradingTabProps = {
@@ -176,9 +468,10 @@ export default function GradingTab({
   onOpenPreview,
 }: GradingTabProps) {
   const [selectedProvider] = useLlmProvider();
-  const [source, setSource] = useState<"zip" | "canvas">(() => {
+  const [source, setSource] = useState<GradingMode>(() => {
     if (typeof window === "undefined") return "zip";
-    return localStorage.getItem("ta-grading-source") === "canvas" ? "canvas" : "zip";
+    const saved = localStorage.getItem("ta-grading-source");
+    return saved === "canvas" || saved === "livefeed" ? saved : "zip";
   });
   const [canvasUrl, setCanvasUrl] = useState("");
   const [canvasRetrieved, setCanvasRetrieved] = useState(false);
@@ -188,7 +481,7 @@ export default function GradingTab({
 
   const [canvasMeta, setCanvasMeta] = useState<{ status: "idle" | "loading" | "done" | "error"; message: string }>({ status: "idle", message: "" });
 
-  const selectSource = (next: "zip" | "canvas") => {
+  const selectSource = (next: GradingMode) => {
     setSource(next);
     if (typeof window !== "undefined") localStorage.setItem("ta-grading-source", next);
   };
@@ -271,7 +564,23 @@ export default function GradingTab({
     () => (run?.results ?? []).filter((r) => typeof r.userId === "number"),
     [run]
   );
-  const canvasGradable = source === "canvas" && gradableResults.length > 0;
+  // Results carry Canvas user ids only when they came from Canvas (a single
+  // assignment or a Live Feed row), which is exactly when posting back applies.
+  const canvasGradable = gradableResults.length > 0;
+
+  // Live Feed "Auto Grade": grade a queue row through the very same pipeline as
+  // the Single Assignment form. Set canvasUrl so a later "Post grades" targets
+  // this assignment, then dispatch the grade action with the row's context.
+  const handleAutoGrade = (row: CanvasQueueItem) => {
+    setCanvasUrl(row.canvasUrl);
+    const fd = new FormData();
+    fd.set("canvasUrl", row.canvasUrl);
+    fd.set("assignmentInstructions", row.description || row.title);
+    fd.set("rubric", row.rubricText);
+    fd.set("provider", selectedProvider);
+    fd.set("institution", row.institution);
+    formAction(fd);
+  };
 
   const handlePostGrades = async () => {
     if (gradableResults.length === 0) return;
@@ -455,37 +764,57 @@ export default function GradingTab({
         </p>
       </div>
 
+      <div className={styles.lessonInnerTabs}>
+        <button
+          type="button"
+          className={`${styles.lessonInnerTab}${source === "zip" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+          onClick={() => selectSource("zip")}
+        >
+          Upload ZIP
+        </button>
+        <button
+          type="button"
+          className={`${styles.lessonInnerTab}${source === "canvas" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+          onClick={() => selectSource("canvas")}
+        >
+          Single Assignment
+        </button>
+        <button
+          type="button"
+          className={`${styles.lessonInnerTab}${source === "livefeed" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+          onClick={() => selectSource("livefeed")}
+        >
+          Live Feed
+        </button>
+      </div>
+
+      {pending && (
+        <div className={styles.loadingState} role="status" aria-live="polite">
+          <span className={styles.spinner} aria-hidden="true" />
+          <div>
+            <p className={styles.loadingTitle}>Grading In Progress</p>
+            <p className={styles.loadingText}>
+              Reviewing submissions now. This can take a moment for larger archives.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {state.error && (
+        <p role="alert" className={styles.error}>
+          {state.error}
+        </p>
+      )}
+
+      {source === "livefeed" ? (
+        <LiveFeedPanel
+          provider={selectedProvider}
+          pending={pending}
+          onAutoGrade={handleAutoGrade}
+        />
+      ) : (
       <form className={styles.form} action={formAction}>
         <input type="hidden" name="provider" value={selectedProvider} />
-        {pending && (
-          <div className={styles.loadingState} role="status" aria-live="polite">
-            <span className={styles.spinner} aria-hidden="true" />
-            <div>
-              <p className={styles.loadingTitle}>Grading In Progress</p>
-              <p className={styles.loadingText}>
-                Reviewing submissions now. This can take a moment for larger archives.
-              </p>
-            </div>
-          </div>
-        )}
-
-        <div className={styles.lessonInnerTabs}>
-          <button
-            type="button"
-            className={`${styles.lessonInnerTab}${source === "zip" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => selectSource("zip")}
-          >
-            Upload ZIP
-          </button>
-          <button
-            type="button"
-            className={`${styles.lessonInnerTab}${source === "canvas" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => selectSource("canvas")}
-          >
-            Canvas
-          </button>
-        </div>
-
         {source === "zip" ? (
           <div className={styles.field}>
             <label htmlFor="student-submissions">Student Submissions</label>
@@ -593,12 +922,6 @@ export default function GradingTab({
           </div>
         )}
 
-        {state.error && (
-          <p role="alert" className={styles.error}>
-            {state.error}
-          </p>
-        )}
-
         <button
           className={styles.submitButton}
           type="submit"
@@ -607,6 +930,7 @@ export default function GradingTab({
           {pending ? "Grading..." : "Start Review"}
         </button>
       </form>
+      )}
 
       {testState.result && (
         <p style={{ marginTop: "0.5rem", color: "green" }}>Gemini responded: {testState.result}</p>
@@ -617,9 +941,9 @@ export default function GradingTab({
 
       {run && run.results.length === 0 && (
         <p className={styles.emptyState}>
-          {source === "canvas"
-            ? "No discussion posts were found for that topic."
-            : "No supported submission files were found in the zip archive."}
+          {source === "zip"
+            ? "No supported submission files were found in the zip archive."
+            : "No discussion posts were found for that topic."}
         </p>
       )}
 

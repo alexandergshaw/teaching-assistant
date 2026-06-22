@@ -12,21 +12,33 @@
 
 const ZIP_MIME = "application/zip";
 
-export function getGradingEngineUrl(): string {
-  const url = process.env.GRADING_ENGINE_URL;
+/**
+ * Resolve the grading service URL. When an institution acronym is given and
+ * `<CODE>_LLM_URL` is set, that school's endpoint is used; otherwise it falls
+ * back to the global `GRADING_ENGINE_URL`. Lets each school point Auto Grade at
+ * its own grader.
+ */
+export function getGradingEngineUrl(code?: string): string {
+  const perInstitution = code ? process.env[`${code.trim().toUpperCase()}_LLM_URL`] : undefined;
+  const url = perInstitution || process.env.GRADING_ENGINE_URL;
   if (!url) {
-    throw new Error("Missing environment variable: GRADING_ENGINE_URL");
+    throw new Error(
+      code
+        ? `Missing grading service URL: set ${code.trim().toUpperCase()}_LLM_URL or GRADING_ENGINE_URL.`
+        : "Missing environment variable: GRADING_ENGINE_URL"
+    );
   }
   return url.replace(/\/+$/, "");
 }
 
-export function getGradingEngineApiKey(): string | undefined {
-  return process.env.GRADING_API_KEY || undefined;
+export function getGradingEngineApiKey(code?: string): string | undefined {
+  const perInstitution = code ? process.env[`${code.trim().toUpperCase()}_LLM_API`] : undefined;
+  return perInstitution || process.env.GRADING_API_KEY || undefined;
 }
 
 /** Auth header, only attached when the project has configured a key. */
-function authHeaders(): Record<string, string> {
-  const key = getGradingEngineApiKey();
+function authHeaders(code?: string): Record<string, string> {
+  const key = getGradingEngineApiKey(code);
   return key ? { "X-API-Key": key } : {};
 }
 
@@ -128,10 +140,14 @@ async function toGradingError(response: Response): Promise<Error> {
   }
 }
 
-/** Grade a submissions zip against a rubric via POST /api/v1/grade. */
+/**
+ * Grade a submissions zip against a rubric via POST /api/v1/grade. When `code`
+ * is given, routes to that institution's grading service (see getGradingEngineUrl).
+ */
 export async function gradeViaGradingEngine(
   zipBase64: string,
-  rubric: RubricSource
+  rubric: RubricSource,
+  code?: string
 ): Promise<GradingApiResponse> {
   const bytes = Buffer.from(zipBase64, "base64");
   const form = new FormData();
@@ -140,9 +156,9 @@ export async function gradeViaGradingEngine(
     rubric.kind === "csv" ? "rubric_csv" : rubric.kind === "json" ? "rubric_json" : "rubric_text";
   form.append(field, rubric.value);
 
-  const response = await fetch(`${getGradingEngineUrl()}/api/v1/grade`, {
+  const response = await fetch(`${getGradingEngineUrl(code)}/api/v1/grade`, {
     method: "POST",
-    headers: { ...authHeaders() }, // let fetch set the multipart boundary
+    headers: { ...authHeaders(code) }, // let fetch set the multipart boundary
     body: form,
   });
 

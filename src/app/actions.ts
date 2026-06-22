@@ -9,7 +9,21 @@ import {
   type GradingRun,
 } from "@/lib/grade";
 import { extractTextFromBuffer } from "@/lib/office-extract";
-import { fetchCanvasWork, canvasWorkToZipBase64, fetchCanvasMeta, postCanvasGrades } from "@/lib/canvas";
+import {
+  fetchCanvasWork,
+  canvasWorkToZipBase64,
+  fetchCanvasMeta,
+  postCanvasGrades,
+  getCourseName,
+  listAnnouncements,
+  createAnnouncement,
+  listConversations,
+  getConversation,
+  replyToConversation,
+  type CanvasAnnouncement,
+  type CanvasConversationSummary,
+  type CanvasConversationDetail,
+} from "@/lib/canvas";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -1132,6 +1146,192 @@ export async function postCanvasGradesAction(
     return await postCanvasGrades(url, grades);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post grades to Canvas." };
+  }
+}
+
+// ── Canvas announcements + inbox (the Canvas tab) ───────────────────────────
+//
+// Every action below is owner-gated (owner allowlist + AAL2) because it uses the
+// privileged Canvas API token, or — for the AI drafts — bills LLM usage. Each
+// returns plain serializable data or an { error } string the UI surfaces inline.
+
+/** Load a course's name + recent announcements for the announcements panel. */
+export async function listAnnouncementsAction(
+  courseUrl: string
+): Promise<{ courseName: string; announcements: CanvasAnnouncement[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const [courseName, announcements] = await Promise.all([
+      getCourseName(courseUrl),
+      listAnnouncements(courseUrl),
+    ]);
+    return { courseName, announcements };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load announcements." };
+  }
+}
+
+/** Post a new announcement to the course. */
+export async function createAnnouncementAction(
+  courseUrl: string,
+  title: string,
+  message: string
+): Promise<{ announcement: CanvasAnnouncement } | { error: string }> {
+  try {
+    await requireOwner();
+    const announcement = await createAnnouncement(courseUrl, title, message);
+    return { announcement };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not post the announcement." };
+  }
+}
+
+/** List the account Inbox conversations. */
+export async function listConversationsAction(): Promise<
+  { conversations: CanvasConversationSummary[] } | { error: string }
+> {
+  try {
+    await requireOwner();
+    return { conversations: await listConversations() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the inbox." };
+  }
+}
+
+/** Fetch one conversation's full thread. */
+export async function getConversationAction(
+  id: number
+): Promise<{ conversation: CanvasConversationDetail } | { error: string }> {
+  try {
+    await requireOwner();
+    return { conversation: await getConversation(id) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the conversation." };
+  }
+}
+
+/** Reply to a conversation, then return its refreshed thread. */
+export async function replyToConversationAction(
+  id: number,
+  body: string
+): Promise<{ conversation: CanvasConversationDetail } | { error: string }> {
+  try {
+    await requireOwner();
+    await replyToConversation(id, body);
+    return { conversation: await getConversation(id) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not send the reply." };
+  }
+}
+
+/**
+ * Draft an announcement (title + body) from a short instruction. The author
+ * reviews and edits before anything is posted.
+ */
+export async function draftAnnouncementAction(
+  instruction: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ title: string; message: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!instruction.trim()) {
+      return { error: "Describe what the announcement should say first." };
+    }
+
+    const prompt = `You are an instructor writing a course announcement for students.
+
+WHAT TO ANNOUNCE:
+${instruction.trim()}
+
+Write a clear, warm, professional announcement. Return ONLY valid JSON:
+{
+  "title": "...",
+  "message": "..."
+}
+
+Requirements:
+- "title": a short, specific subject line (no more than ~10 words).
+- "message": the announcement body, addressed directly to students. Use plain text with blank lines between paragraphs; do not use markdown, headings, or bullet symbols.
+- Keep it concise and actionable. Do not invent dates, links, or details that were not provided.
+- Do not include any text outside the JSON object.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 1024 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { error: `Draft failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+
+    const trimmed = result.text.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return { error: "Could not parse the draft from the model response." };
+    }
+
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      title?: string;
+      message?: string;
+    };
+
+    return { title: (parsed.title ?? "").trim(), message: (parsed.message ?? "").trim() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Draft a reply to a Canvas message, given the existing thread (oldest first)
+ * and an optional steer. Returns plain text the author can edit before sending.
+ */
+export async function draftMessageReplyAction(
+  threadText: string,
+  instructions: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ body: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!threadText.trim()) {
+      return { error: "Open a conversation before drafting a reply." };
+    }
+
+    const steer = instructions.trim()
+      ? `\n\nHOW TO REPLY:\n${instructions.trim()}`
+      : "";
+
+    const prompt = `You are an instructor replying to a student's message in the Canvas inbox.
+
+CONVERSATION SO FAR (oldest message first):
+${threadText.trim()}${steer}
+
+Write the instructor's reply. Respond directly to the most recent message, in a warm, helpful, professional tone. Output ONLY the reply text itself — plain text, no subject line, no salutation placeholder like "[Name]", no markdown. Do not invent facts, dates, grades, or links that are not present in the thread.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 1024 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { error: `Draft failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+
+    const body = result.text.trim();
+    if (!body) {
+      return { error: "The model returned an empty reply." };
+    }
+    return { body };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
 }
 

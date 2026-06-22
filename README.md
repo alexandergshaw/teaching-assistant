@@ -116,6 +116,26 @@ MCC is preconfigured, so set `MCC_CANVAS_API_TOKEN`. To add another school: add 
 entry to the `CANVAS_INSTITUTIONS` list (code, name, host) and set its
 `<CODE>_CANVAS_API_TOKEN`.
 
+### Canvas announcements & inbox
+
+The **Canvas** tab posts course announcements and replies to Canvas inbox
+messages, reusing the same per-institution token as grading (no new env vars).
+
+- **Announcements**: paste any link from the course (a course home,
+  `.../announcements`, or assignment URL — only the `.../courses/123` segment is
+  needed). Load the recent announcements, then compose a new one. The optional
+  **Draft with AI** button writes a title and body from a short instruction, which
+  you can edit; nothing posts until you click **Post announcement**. Announcements
+  are created as Canvas discussion topics flagged `is_announcement`.
+- **Inbox**: the account-wide Canvas inbox (the Conversations API), not tied to a
+  course. Open a conversation to read the thread and reply. **Draft reply with AI**
+  drafts a contextual response from the thread (plus an optional steer); the reply
+  sends only when you click **Send reply**.
+
+Every action is owner-gated (owner allowlist + MFA) like the rest of the Canvas
+features. The token needs announcement-create and conversation scopes, which an
+instructor personal access token already has.
+
 ## Course Engine: Lecture Deck (`/api/v1/lecture`)
 
 When the provider toggle is **Other API**, generating a lesson on the Lesson Planning

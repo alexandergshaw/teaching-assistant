@@ -32,3 +32,14 @@ export function parseCanvasUrl(url: string): ParsedCanvasUrl | null {
 export function detectCanvasUrlKind(url: string): CanvasUrlKind | null {
   return parseCanvasUrl(url)?.kind ?? null;
 }
+
+/**
+ * Pull the course id out of any Canvas course URL (a bare
+ * .../courses/123, or any deeper link like .../courses/123/announcements).
+ * Used by the announcements UI, which only needs the course — not a specific
+ * discussion or assignment. Null when the URL has no /courses/<id> segment.
+ */
+export function parseCanvasCourseId(url: string): string | null {
+  const match = url.match(/\/courses\/(\d+)/);
+  return match ? match[1] : null;
+}

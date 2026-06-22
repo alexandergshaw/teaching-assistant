@@ -11,7 +11,7 @@
  */
 
 import JSZip from "jszip";
-import { parseCanvasUrl } from "./canvas-url";
+import { parseCanvasUrl, parseCanvasCourseId } from "./canvas-url";
 
 /**
  * Registered Canvas institutions, keyed by hostname. The URL's host selects the
@@ -82,6 +82,19 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+// Wrap a plain-text body in minimal, escaped HTML so line breaks survive when
+// Canvas stores and renders it (announcement/message bodies are HTML fields).
+function textToHtml(text: string): string {
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return escaped
+    .split(/\n{2,}/)
+    .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
 interface CanvasViewEntry {
   id?: number;
   user_id?: number;
@@ -148,6 +161,28 @@ function resolveInstitution(url: string): {
     );
   }
   return { institution, token, baseUrl: institutionBaseUrl(institution) };
+}
+
+/**
+ * Resolve credentials for institution-wide calls that have no course URL to key
+ * off (e.g. the Inbox, which is account-wide). Picks the first registered
+ * institution that has a token configured. With a single institution this is
+ * unambiguous; if more are added, a chooser can select among them.
+ */
+function resolveDefaultInstitution(): {
+  institution: CanvasInstitution;
+  token: string;
+  baseUrl: string;
+} {
+  for (const institution of CANVAS_INSTITUTIONS) {
+    const token = institutionToken(institution);
+    if (token) {
+      return { institution, token, baseUrl: institutionBaseUrl(institution) };
+    }
+  }
+  throw new Error(
+    "No Canvas API token is configured. Set <CODE>_CANVAS_API_TOKEN for a registered institution."
+  );
 }
 
 /** Follow the RFC-5988 Link header to the next page, if any. */
@@ -601,4 +636,274 @@ export async function canvasWorkToZipBase64(
   }
 
   return zip.generateAsync({ type: "base64" });
+}
+
+// ── Announcements ───────────────────────────────────────────────────────────
+//
+// Canvas announcements are discussion topics flagged is_announcement. The host
+// selects the institution/token (same as grading); the URL only needs to carry
+// the course (a bare .../courses/123 link is enough).
+
+/** One announcement, ready for the UI. The message is plain text. */
+export interface CanvasAnnouncement {
+  id: number;
+  title: string;
+  message: string;
+  postedAt: string | null;
+  author: string;
+  htmlUrl: string;
+}
+
+interface CanvasDiscussionTopicListItem {
+  id?: number;
+  title?: string;
+  message?: string | null;
+  posted_at?: string | null;
+  html_url?: string;
+  author?: { display_name?: string } | null;
+  user_name?: string;
+}
+
+function toAnnouncement(
+  topic: CanvasDiscussionTopicListItem,
+  fallback?: { title?: string; message?: string }
+): CanvasAnnouncement {
+  return {
+    id: topic.id ?? 0,
+    title: (topic.title ?? fallback?.title ?? "(untitled)").trim() || "(untitled)",
+    message: topic.message
+      ? htmlToText(topic.message)
+      : (fallback?.message ?? "").trim(),
+    postedAt: topic.posted_at ?? null,
+    author: topic.author?.display_name?.trim() || topic.user_name?.trim() || "",
+    htmlUrl: topic.html_url ?? "",
+  };
+}
+
+/** Resolve a course URL to its id + credentials, or throw a clear error. */
+function resolveCourse(courseUrl: string): {
+  courseId: string;
+  institution: CanvasInstitution;
+  token: string;
+  baseUrl: string;
+} {
+  const courseId = parseCanvasCourseId(courseUrl);
+  if (!courseId) {
+    throw new Error(
+      "Could not read a course from that URL. Expected a link like .../courses/123."
+    );
+  }
+  return { courseId, ...resolveInstitution(courseUrl) };
+}
+
+/** Fetch the course's display name for a heading. */
+export async function getCourseName(courseUrl: string): Promise<string> {
+  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl);
+  const response = await fetch(`${baseUrl}/api/v1/courses/${courseId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+  const course = (await response.json()) as { name?: string; course_code?: string };
+  return course.name?.trim() || course.course_code?.trim() || `Course ${courseId}`;
+}
+
+/** List a course's recent announcements (newest first), one page of 50. */
+export async function listAnnouncements(courseUrl: string): Promise<CanvasAnnouncement[]> {
+  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl);
+  const response = await fetch(
+    `${baseUrl}/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&per_page=50`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+  const topics = (await response.json()) as CanvasDiscussionTopicListItem[];
+  return topics
+    .filter((t) => typeof t.id === "number")
+    .map((t) => toAnnouncement(t))
+    .sort((a, b) => (b.postedAt ?? "").localeCompare(a.postedAt ?? ""));
+}
+
+/** Post a new announcement to the course. Returns the created announcement. */
+export async function createAnnouncement(
+  courseUrl: string,
+  title: string,
+  message: string
+): Promise<CanvasAnnouncement> {
+  if (!title.trim()) throw new Error("An announcement needs a title.");
+  if (!message.trim()) throw new Error("An announcement needs a message.");
+  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl);
+
+  const params = new URLSearchParams();
+  params.append("title", title.trim());
+  params.append("message", textToHtml(message.trim()));
+  params.append("is_announcement", "true");
+
+  const response = await fetch(
+    `${baseUrl}/api/v1/courses/${courseId}/discussion_topics`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
+    }
+  );
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+  const topic = (await response.json()) as CanvasDiscussionTopicListItem;
+  return toAnnouncement(topic, { title, message });
+}
+
+// ── Inbox (Conversations) ───────────────────────────────────────────────────
+//
+// The Inbox is account-wide, not per-course, so these use the default
+// institution's token. Conversation bodies are plain text (not HTML), so they
+// pass through untouched apart from trimming.
+
+export interface CanvasConversationSummary {
+  id: number;
+  subject: string;
+  lastMessage: string;
+  participants: string[];
+  messageCount: number;
+  workflowState: string;
+  lastMessageAt: string | null;
+}
+
+export interface CanvasConversationMessage {
+  id: number;
+  author: string;
+  body: string;
+  createdAt: string | null;
+}
+
+export interface CanvasConversationDetail {
+  id: number;
+  subject: string;
+  participants: string[];
+  messages: CanvasConversationMessage[];
+}
+
+interface CanvasParticipant {
+  id?: number;
+  name?: string;
+  full_name?: string;
+}
+
+interface CanvasConversationListItem {
+  id?: number;
+  subject?: string | null;
+  workflow_state?: string;
+  last_message?: string | null;
+  last_message_at?: string | null;
+  message_count?: number;
+  participants?: CanvasParticipant[];
+}
+
+interface CanvasConversationDetailResponse {
+  id?: number;
+  subject?: string | null;
+  participants?: CanvasParticipant[];
+  messages?: Array<{
+    id?: number;
+    author_id?: number;
+    created_at?: string | null;
+    body?: string | null;
+  }>;
+}
+
+function participantName(p: CanvasParticipant): string {
+  return (p.name ?? p.full_name ?? (typeof p.id === "number" ? `User ${p.id}` : "")).trim();
+}
+
+/** List the account Inbox conversations (one page of 50, newest first). */
+export async function listConversations(): Promise<CanvasConversationSummary[]> {
+  const { institution, token, baseUrl } = resolveDefaultInstitution();
+  const response = await fetch(`${baseUrl}/api/v1/conversations?per_page=50`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+  const items = (await response.json()) as CanvasConversationListItem[];
+  return items
+    .filter((c) => typeof c.id === "number")
+    .map((c) => ({
+      id: c.id!,
+      subject: (c.subject ?? "").trim() || "(no subject)",
+      lastMessage: (c.last_message ?? "").trim(),
+      participants: (c.participants ?? []).map(participantName).filter(Boolean),
+      messageCount: typeof c.message_count === "number" ? c.message_count : 0,
+      workflowState: c.workflow_state ?? "",
+      lastMessageAt: c.last_message_at ?? null,
+    }));
+}
+
+/** Fetch one conversation's full thread, oldest message first. */
+export async function getConversation(id: number): Promise<CanvasConversationDetail> {
+  const { institution, token, baseUrl } = resolveDefaultInstitution();
+  const response = await fetch(`${baseUrl}/api/v1/conversations/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+  const data = (await response.json()) as CanvasConversationDetailResponse;
+
+  const names = new Map<number, string>();
+  for (const p of data.participants ?? []) {
+    if (typeof p.id === "number") {
+      names.set(p.id, participantName(p) || `User ${p.id}`);
+    }
+  }
+
+  const messages = (data.messages ?? [])
+    .filter((m) => typeof m.id === "number")
+    .map((m) => ({
+      id: m.id!,
+      author:
+        typeof m.author_id === "number"
+          ? names.get(m.author_id) ?? `User ${m.author_id}`
+          : "",
+      body: (m.body ?? "").trim(),
+      createdAt: m.created_at ?? null,
+    }))
+    // Canvas returns newest-first; reverse so the thread reads top-to-bottom.
+    .reverse();
+
+  return {
+    id: data.id ?? id,
+    subject: (data.subject ?? "").trim() || "(no subject)",
+    participants: [...names.values()],
+    messages,
+  };
+}
+
+/** Reply to a conversation. Canvas sends the reply to all participants. */
+export async function replyToConversation(id: number, body: string): Promise<void> {
+  if (!body.trim()) throw new Error("A reply needs a message.");
+  const { institution, token, baseUrl } = resolveDefaultInstitution();
+
+  const params = new URLSearchParams();
+  params.append("body", body.trim());
+
+  const response = await fetch(
+    `${baseUrl}/api/v1/conversations/${id}/add_message`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
+    }
+  );
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
 }

@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
 import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, generateLectureDeckAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData } from "./actions";
 import CoursePlanningTab from "./components/CoursePlanningTab";
+import CanvasTab from "./components/CanvasTab";
 import GradingTab from "./components/GradingTab";
 import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
@@ -19,7 +20,7 @@ import { parseGeneratedRubric } from "./utils/rubric";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "grading" | "lesson-planning" | "course-planning";
+type ActiveTab = "grading" | "lesson-planning" | "course-planning" | "canvas";
 
 // The hosted Course Engine runs on Vercel, which caps the request body at
 // ~4.5 MB. Reject larger uploads client-side with a clear message rather than
@@ -111,7 +112,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "lesson-planning";
     const saved = localStorage.getItem("ta-active-tab");
-    return saved === "grading" || saved === "lesson-planning" || saved === "course-planning" ? saved : "lesson-planning";
+    return saved === "grading" || saved === "lesson-planning" || saved === "course-planning" || saved === "canvas" ? saved : "lesson-planning";
   });
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
@@ -576,6 +577,7 @@ export default function Home() {
           <Tab label="New Build Courses" value="course-planning" disableRipple />
           <Tab label="Pre Built Courses" value="lesson-planning" disableRipple />
           <Tab label="Grading" value="grading" disableRipple />
+          <Tab label="Canvas" value="canvas" disableRipple />
         </Tabs>
 
         {activeTab === "grading" && (
@@ -597,6 +599,8 @@ export default function Home() {
             icons={{ CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon }}
           />
         )}
+
+        {activeTab === "canvas" && <CanvasTab />}
 
         {activeTab === "lesson-planning" && (
           <LessonPlanningForm

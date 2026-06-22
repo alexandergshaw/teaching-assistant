@@ -144,6 +144,7 @@ export default function GradingTab({
   onOpenPreview,
 }: GradingTabProps) {
   const [selectedProvider] = useLlmProvider();
+  const [source, setSource] = useState<"zip" | "canvas">("zip");
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
@@ -279,18 +280,54 @@ export default function GradingTab({
           </div>
         )}
 
-        <div className={styles.field}>
-          <label htmlFor="student-submissions">Student Submissions</label>
-          <div className={styles.fileField}>
-            <input
-              id="student-submissions"
-              name="studentSubmissions"
-              type="file"
-              accept=".zip,application/zip"
-            />
-            <p>Upload a zip archive that contains the student submissions.</p>
-          </div>
+        <div className={styles.lessonInnerTabs}>
+          <button
+            type="button"
+            className={`${styles.lessonInnerTab}${source === "zip" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+            onClick={() => setSource("zip")}
+          >
+            Upload ZIP
+          </button>
+          <button
+            type="button"
+            className={`${styles.lessonInnerTab}${source === "canvas" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+            onClick={() => setSource("canvas")}
+          >
+            Canvas Discussion
+          </button>
         </div>
+
+        {source === "zip" ? (
+          <div className={styles.field}>
+            <label htmlFor="student-submissions">Student Submissions</label>
+            <div className={styles.fileField}>
+              <input
+                id="student-submissions"
+                name="studentSubmissions"
+                type="file"
+                accept=".zip,application/zip"
+              />
+              <p>Upload a zip archive that contains the student submissions.</p>
+            </div>
+          </div>
+        ) : (
+          <div className={styles.field}>
+            <label htmlFor="discussion-url">Canvas Discussion URL</label>
+            <input
+              id="discussion-url"
+              name="discussionUrl"
+              type="url"
+              required
+              className={styles.textInput}
+              placeholder="https://canvas.mccneb.edu/courses/123/discussion_topics/456"
+            />
+            <p className={styles.fieldHint}>
+              Paste the discussion link. Each student&apos;s posts and replies are
+              pulled via the Canvas API and graded against the rubric. Uses the AI
+              grader.
+            </p>
+          </div>
+        )}
 
         <div className={styles.field}>
           <label htmlFor="assignment-instructions">Assignment Instructions</label>
@@ -316,7 +353,7 @@ export default function GradingTab({
           />
         </div>
 
-        {selectedProvider === "other" && (
+        {source === "zip" && selectedProvider === "other" && (
           <div className={styles.field}>
             <label htmlFor="rubric-file">Rubric file (CSV/JSON)</label>
             <input
@@ -352,7 +389,9 @@ export default function GradingTab({
 
       {run && run.results.length === 0 && (
         <p className={styles.emptyState}>
-          No supported submission files were found in the zip archive.
+          {source === "canvas"
+            ? "No discussion posts were found for that topic."
+            : "No supported submission files were found in the zip archive."}
         </p>
       )}
 

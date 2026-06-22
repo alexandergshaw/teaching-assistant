@@ -2,6 +2,7 @@
 
 import {
   gradeSubmissions,
+  gradeCanvasDiscussion,
   synthesizeFullCreditChecklist,
   extractSubmissions,
   generateRubric,
@@ -1101,17 +1102,35 @@ export async function gradeAction(
   formData: FormData
 ): Promise<GradeActionState> {
   const file = formData.get("studentSubmissions") as File | null;
+  const discussionUrl = ((formData.get("discussionUrl") as string | null) ?? "").trim();
   const assignmentInstructions =
     (formData.get("assignmentInstructions") as string | null) ?? "";
   const rubric = (formData.get("rubric") as string | null) ?? "";
   const provider = normalizeProvider(formData.get("provider") as string | null);
   const rubricFile = formData.get("rubricFile") as File | null;
 
-  if (!file || file.size === 0) {
-    return { run: null, error: "Please upload a student submissions zip file." };
-  }
-
   try {
+    // Canvas discussion source: grade each student's posts (LLM-based, since
+    // discussion text is free-form). Mirrors the Gemini zip path below.
+    if (discussionUrl) {
+      if (!assignmentInstructions.trim()) {
+        return { run: null, error: "Please provide assignment instructions." };
+      }
+      const effectiveRubric = rubric.trim()
+        ? rubric
+        : await generateRubric(assignmentInstructions, provider);
+      const generatedRubric = rubric.trim() ? undefined : effectiveRubric;
+      const [run, fullCreditChecklist] = await Promise.all([
+        gradeCanvasDiscussion(discussionUrl, assignmentInstructions, effectiveRubric, provider),
+        synthesizeFullCreditChecklist(assignmentInstructions, effectiveRubric, provider),
+      ]);
+      return { run: { ...run, fullCreditChecklist }, error: null, generatedRubric };
+    }
+
+    if (!file || file.size === 0) {
+      return { run: null, error: "Please upload a student submissions zip file." };
+    }
+
     // Deterministic Grading API path (provider toggle = "other").
     if (provider === "other") {
       let rubricText = "";

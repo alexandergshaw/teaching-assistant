@@ -12,6 +12,7 @@ import {
   extractTextFromBuffer,
   getFileExtension,
 } from "./office-extract";
+import { fetchCanvasDiscussion } from "./canvas";
 
 const MAX_NESTED_ZIP_DEPTH = 3;
 
@@ -1087,6 +1088,32 @@ export async function gradeSubmissions(
     };
   }
 
+  return gradeStudentEntries(
+    studentSubmissions,
+    assignmentInstructions,
+    rubric,
+    provider
+  );
+}
+
+/** One student's submission ready to grade (text + any attached files). */
+export interface StudentSubmissionEntry {
+  student: string;
+  content: string;
+  mergedFileCount: number;
+  submittedFiles: SubmittedFileInfo[];
+}
+
+/**
+ * Grade a list of per-student submissions against the rubric. Shared by the zip
+ * upload path and the Canvas discussion path so both produce identical runs.
+ */
+async function gradeStudentEntries(
+  studentSubmissions: StudentSubmissionEntry[],
+  assignmentInstructions: string,
+  rubric: string,
+  provider: LlmProvider
+): Promise<GradingRun> {
   const maxSubmissions = getGeminiMaxSubmissions();
   const maxCharsPerSubmission = getGeminiMaxCharsPerSubmission();
   const interRequestDelayMs = getGeminiInterRequestDelayMs();
@@ -1153,4 +1180,42 @@ export async function gradeSubmissions(
     rubricAreaNames,
     fullCreditChecklist: [],
   };
+}
+
+/**
+ * Grade a Canvas discussion board, one student per participant, reusing the same
+ * grading core as the zip path. Canvas gives us exact student names, so no
+ * filename-convention inference is needed.
+ */
+export async function gradeCanvasDiscussion(
+  discussionUrl: string,
+  assignmentInstructions: string,
+  rubric: string,
+  provider: LlmProvider = "gemini"
+): Promise<GradingRun> {
+  const students = await fetchCanvasDiscussion(discussionUrl);
+
+  const entries: StudentSubmissionEntry[] = students.map((s) => {
+    const preview = toPreviewContent(s.text);
+    return {
+      student: s.student,
+      content: s.text,
+      mergedFileCount: s.contributionCount,
+      submittedFiles: [
+        {
+          name: "Discussion post",
+          extension: "txt",
+          previewContent: preview.text,
+          previewTruncated: preview.truncated,
+          mimeType: "text/plain",
+        },
+      ],
+    };
+  });
+
+  if (entries.length === 0) {
+    return { results: [], rubricAreaNames: [], fullCreditChecklist: [] };
+  }
+
+  return gradeStudentEntries(entries, assignmentInstructions, rubric, provider);
 }

@@ -48,6 +48,16 @@ materials `rubric.csv`) via that service instead of Gemini:
 - `GRADING_ENGINE_URL` (required to use the deterministic grader) — base URL of the grading service.
 - `GRADING_API_KEY` (optional) — only required if the grading service enforces a key; sent as `X-API-Key`. Never exposed to the client.
 
+### Canvas discussion grading
+
+The Grading tab can grade a Canvas discussion board directly (Canvas has no UI
+export for discussions, but its API does). Choose **Canvas Discussion** as the
+source and paste the discussion link; each student's posts and replies are pulled
+via the Canvas API and graded with the AI grader against the rubric.
+
+- `CANVAS_URL` (optional, default: `https://canvas.mccneb.edu`) — your Canvas base URL.
+- `CANVAS_API_TOKEN` (required for discussion grading) — an instructor personal access token (Canvas: Account → Settings → New Access Token). Sent as `Authorization: Bearer`, server-side only, never exposed to the client.
+
 ## Course Engine: Lecture Deck (`/api/v1/lecture`)
 
 When the provider toggle is **Other API**, generating a lesson on the Lesson Planning

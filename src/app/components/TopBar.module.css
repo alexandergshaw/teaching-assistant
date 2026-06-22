@@ -4,11 +4,9 @@
   justify-content: space-between;
   gap: 16px;
   padding: 12px 24px;
-  background: var(--card-background, rgba(255, 255, 255, 0.92));
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  /* Match the rest of the site rather than reading as a separate white panel. */
+  background: var(--page-background, linear-gradient(180deg, #f4f7fb 0%, #e8eef7 100%));
   border-bottom: 1px solid var(--card-border, rgba(15, 23, 42, 0.08));
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
   position: sticky;
   top: 0;
   z-index: 50;
@@ -50,17 +48,6 @@
   gap: 18px;
 }
 
-.link {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--accent, #2563eb);
-}
-
-.link:hover {
-  color: var(--accent-hover, #1d4ed8);
-  text-decoration: underline;
-}
-
 .signout {
   font-size: 0.85rem;
   font-weight: 600;
@@ -76,4 +63,83 @@
 .signout:hover {
   border-color: var(--accent, #2563eb);
   color: var(--text-primary, #0f172a);
+}
+
+/* ── Settings dropdown ─────────────────────────────────────────────────────── */
+
+.settings {
+  position: relative;
+}
+
+.settingsButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary, #475569);
+  background: var(--field-background, #ffffff);
+  border: 1px solid var(--field-border, #cbd5e1);
+  border-radius: 8px;
+  padding: 6px 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.settingsButton:hover,
+.settingsButton[aria-expanded="true"] {
+  border-color: var(--accent, #2563eb);
+  color: var(--text-primary, #0f172a);
+}
+
+.settingsButton svg {
+  width: 16px;
+  height: 16px;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 230px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  background: var(--field-background, #ffffff);
+  border: 1px solid var(--card-border, rgba(15, 23, 42, 0.08));
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  z-index: 60;
+}
+
+.menuSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 8px 10px;
+}
+
+.menuLabel {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #475569);
+}
+
+.menuItem {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+  padding: 9px 8px;
+  border-radius: 8px;
+  border-top: 1px solid var(--card-border, rgba(15, 23, 42, 0.08));
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.menuItem:hover {
+  background: color-mix(in srgb, var(--field-background, #fff) 88%, var(--accent, #2563eb) 12%);
+  color: var(--accent, #2563eb);
 }

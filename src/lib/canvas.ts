@@ -45,11 +45,13 @@ function institutionForUrl(url: string): CanvasInstitution | null {
 }
 
 function institutionBaseUrl(inst: CanvasInstitution): string {
-  return (process.env[`${inst.code}_CANVAS_URL`] ?? `https://${inst.host}`).replace(/\/+$/, "");
+  return (process.env[`${inst.code}_CANVAS_URL`]?.trim() || `https://${inst.host}`).replace(/\/+$/, "");
 }
 
 function institutionToken(inst: CanvasInstitution): string | undefined {
-  return process.env[`${inst.code}_CANVAS_API_TOKEN`] || undefined;
+  // Trim so a trailing newline pasted into the env var doesn't produce an
+  // invalid "Authorization: Bearer …" header value.
+  return process.env[`${inst.code}_CANVAS_API_TOKEN`]?.trim() || undefined;
 }
 
 /** One student's work pulled from Canvas, ready to feed into grading. */
@@ -204,9 +206,11 @@ function resolveInstitutionByCode(code: string): {
   // Fall back to a hard-coded institution's host so a preconfigured school (e.g.
   // MCC) keeps working with just its token, even without <CODE>_CANVAS_URL set.
   const hardcoded = CANVAS_INSTITUTIONS.find((inst) => inst.code.toUpperCase() === upper);
+  // Trim env values: a trailing newline in the token makes the Authorization
+  // header invalid, and stray whitespace in the URL breaks request building.
   const baseRaw =
-    process.env[`${upper}_CANVAS_URL`] ?? (hardcoded ? `https://${hardcoded.host}` : undefined);
-  const token = process.env[`${upper}_CANVAS_API_TOKEN`] || undefined;
+    process.env[`${upper}_CANVAS_URL`]?.trim() || (hardcoded ? `https://${hardcoded.host}` : undefined);
+  const token = process.env[`${upper}_CANVAS_API_TOKEN`]?.trim() || undefined;
   if (!baseRaw) {
     throw new Error(
       `Canvas base URL is not configured for ${upper}. Set ${upper}_CANVAS_URL in the environment.`

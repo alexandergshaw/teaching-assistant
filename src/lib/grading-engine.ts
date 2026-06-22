@@ -19,8 +19,8 @@ const ZIP_MIME = "application/zip";
  * its own grader.
  */
 export function getGradingEngineUrl(code?: string): string {
-  const perInstitution = code ? process.env[`${code.trim().toUpperCase()}_LLM_URL`] : undefined;
-  const url = perInstitution || process.env.GRADING_ENGINE_URL;
+  const perInstitution = code ? process.env[`${code.trim().toUpperCase()}_LLM_URL`]?.trim() : undefined;
+  const url = perInstitution || process.env.GRADING_ENGINE_URL?.trim();
   if (!url) {
     throw new Error(
       code
@@ -32,8 +32,9 @@ export function getGradingEngineUrl(code?: string): string {
 }
 
 export function getGradingEngineApiKey(code?: string): string | undefined {
-  const perInstitution = code ? process.env[`${code.trim().toUpperCase()}_LLM_API`] : undefined;
-  return perInstitution || process.env.GRADING_API_KEY || undefined;
+  // Trim so a trailing newline in the env var doesn't make the X-API-Key header invalid.
+  const perInstitution = code ? process.env[`${code.trim().toUpperCase()}_LLM_API`]?.trim() : undefined;
+  return perInstitution || process.env.GRADING_API_KEY?.trim() || undefined;
 }
 
 /** Auth header, only attached when the project has configured a key. */

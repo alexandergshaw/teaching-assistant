@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChangeEvent } from "react";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   fetchCanvasMetaAction,
   postCanvasGradesAction,
@@ -75,30 +75,6 @@ function parseEarnedPoints(total: string): string {
   return num ? num[0] : "";
 }
 
-// Editable per-student grade/comment for Canvas write-back, keyed by user id.
-type PostRow = {
-  student: string;
-  grade: string;
-  comment: string;
-  status: "idle" | "posting" | "posted" | "error";
-  message?: string;
-};
-
-function seedPostRows(run: GradeActionState["run"]): Record<number, PostRow> {
-  const seeded: Record<number, PostRow> = {};
-  if (!run) return seeded;
-  for (const result of run.results) {
-    if (typeof result.userId !== "number") continue;
-    seeded[result.userId] = {
-      student: result.student,
-      grade: parseEarnedPoints(result.totalScore),
-      comment: result.feedback || result.overallComment || "",
-      status: "idle",
-    };
-  }
-  return seeded;
-}
-
 function parseScoreValue(value: string): number | null {
   const match = value.match(/-?\d+(?:\.\d+)?/);
   if (!match) return null;
@@ -106,18 +82,34 @@ function parseScoreValue(value: string): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-// ── Grading utilities ──────────────────────────────────────────────────────
+// Editable grade, overall comment, and per-criterion scores/comments per student
+// (keyed by student name, then by rubric area name).
+type AreaEdit = { score: string; comment: string };
+type RowEdit = { total: string; overall: string; areas: Record<string, AreaEdit> };
 
-function hasDeduction(score: string): boolean {
-  const match = score.match(/(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)/);
-  if (!match) return false;
-  const earned = Number.parseFloat(match[1]);
-  const possible = Number.parseFloat(match[2]);
-  return Number.isFinite(earned) && Number.isFinite(possible) && possible > 0 && earned < possible;
+function seedEdits(run: GradeActionState["run"]): Record<string, RowEdit> {
+  const seeded: Record<string, RowEdit> = {};
+  if (!run) return seeded;
+  for (const result of run.results) {
+    const areas: Record<string, AreaEdit> = {};
+    for (const area of result.rubricAreas) {
+      areas[area.area] = { score: area.score, comment: area.comment };
+    }
+    seeded[result.student] = {
+      total: result.totalScore,
+      overall: result.overallComment,
+      areas,
+    };
+  }
+  return seeded;
 }
 
+type PostState = { status: "idle" | "posting" | "posted" | "error"; message?: string };
+
+// ── Grading utilities ──────────────────────────────────────────────────────
+
 function formatFeedback(text: string): string {
-  return text.replace(/\s*[\u2013\u2014]\s*/g, ", ");
+  return text.replace(/\s*[–—]\s*/g, ", ");
 }
 
 function escapeCsvCell(value: string): string {
@@ -125,7 +117,7 @@ function escapeCsvCell(value: string): string {
   return `"${sanitized.replace(/"/g, '""')}"`;
 }
 
-function buildCsvContent(state: GradeActionState): string {
+function buildCsvContent(state: GradeActionState, edits: Record<string, RowEdit>): string {
   if (!state.run) return "";
 
   const header = ["Student"];
@@ -141,15 +133,17 @@ function buildCsvContent(state: GradeActionState): string {
   const rows = [header.map((cell) => escapeCsvCell(cell)).join(",")];
 
   for (const result of state.run.results) {
+    const edit = edits[result.student];
     const row: string[] = [result.student];
     const areaMap = new Map(result.rubricAreas.map((area) => [area.area, area]));
     for (const areaName of state.run.rubricAreaNames) {
       const area = areaMap.get(areaName);
-      row.push(area?.score ?? "");
-      row.push(area?.comment ?? "");
+      const areaEdit = edit?.areas?.[areaName];
+      row.push(areaEdit?.score ?? area?.score ?? "");
+      row.push(areaEdit?.comment ?? area?.comment ?? "");
     }
-    row.push(result.totalScore);
-    row.push(result.overallComment);
+    row.push(edit?.total ?? result.totalScore);
+    row.push(edit?.overall ?? result.overallComment);
     row.push(result.submittedFiles.map((file) => file.name).join("; "));
     row.push(
       Array.from(new Set(result.submittedFiles.map((file) => file.extension))).join("; ")
@@ -182,14 +176,22 @@ export default function GradingTab({
   onOpenPreview,
 }: GradingTabProps) {
   const [selectedProvider] = useLlmProvider();
-  const [source, setSource] = useState<"zip" | "canvas">("zip");
+  const [source, setSource] = useState<"zip" | "canvas">(() => {
+    if (typeof window === "undefined") return "zip";
+    return localStorage.getItem("ta-grading-source") === "canvas" ? "canvas" : "zip";
+  });
   const [canvasUrl, setCanvasUrl] = useState("");
+  const [canvasRetrieved, setCanvasRetrieved] = useState(false);
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
 
   const [canvasMeta, setCanvasMeta] = useState<{ status: "idle" | "loading" | "done" | "error"; message: string }>({ status: "idle", message: "" });
-  const lastMetaUrlRef = useRef("");
+
+  const selectSource = (next: "zip" | "canvas") => {
+    setSource(next);
+    if (typeof window !== "undefined") localStorage.setItem("ta-grading-source", next);
+  };
 
   const canvasUrlKind = detectCanvasUrlKind(canvasUrl);
   const graderLabel =
@@ -197,13 +199,15 @@ export default function GradingTab({
       ? "deterministic grader (against your CSV/JSON rubric)"
       : "AI grader";
 
-  // On a recognized Canvas URL, prefill instructions + rubric from Canvas without
-  // overriding anything already typed.
-  const loadCanvasMeta = async () => {
+  // Retrieve the assignment/discussion description + rubric from Canvas and show
+  // them as read-only fields. Triggered by the button below the URL.
+  const handleRetrieveCanvas = async () => {
     const url = canvasUrl.trim();
-    if (!url || !detectCanvasUrlKind(url) || url === lastMetaUrlRef.current) return;
-    lastMetaUrlRef.current = url;
-    setCanvasMeta({ status: "loading", message: "Loading details from Canvas…" });
+    if (!url || !detectCanvasUrlKind(url)) {
+      setCanvasMeta({ status: "error", message: "Enter a valid Canvas discussion or assignment URL first." });
+      return;
+    }
+    setCanvasMeta({ status: "loading", message: "Retrieving details from Canvas…" });
 
     const result = await fetchCanvasMetaAction(url);
     if ("error" in result) {
@@ -211,109 +215,121 @@ export default function GradingTab({
       return;
     }
 
-    const filled: string[] = [];
-    if (result.description && !assignmentInstructions.trim()) {
-      setAssignmentInstructions(result.description);
-      filled.push("instructions");
-    }
-    if (result.rubricText && !rubric.trim()) {
-      setRubric(result.rubricText);
-      filled.push(result.rubricSynthesized ? "rubric (synthesized from the description)" : "rubric");
-    }
+    setAssignmentInstructions(result.description);
+    setRubric(result.rubricText);
+    setCanvasRetrieved(true);
 
-    const base =
-      filled.length > 0
-        ? `Loaded ${filled.join(" + ")} from Canvas (editable below).`
-        : "Canvas details available; kept your existing text.";
+    const parts: string[] = [];
+    if (result.description) parts.push("instructions");
+    if (result.rubricText) parts.push("rubric");
+    const base = parts.length
+      ? `Retrieved ${parts.join(" + ")} from Canvas.`
+      : "Retrieved from Canvas.";
+    const noRubric = result.rubricText
+      ? ""
+      : " No rubric was found in Canvas; none will be synthesized. Grading uses the assignment instructions only (attach a rubric in Canvas for per-criterion scoring).";
     const caveat =
       selectedProvider === "other" && result.rubricText
         ? " Note: the deterministic grader needs a check-based CSV/JSON rubric; this Canvas rubric may not map to automated checks."
         : "";
-    setCanvasMeta({ status: "done", message: base + caveat });
+    setCanvasMeta({ status: "done", message: base + noRubric + caveat });
   };
 
   const run = state.run;
 
-  const [postRows, setPostRows] = useState<Record<number, PostRow>>(() => seedPostRows(run));
+  const [edits, setEdits] = useState<Record<string, RowEdit>>(() => seedEdits(run));
   const [prevRun, setPrevRun] = useState(run);
+  const [postStatus, setPostStatus] = useState<Record<string, PostState>>({});
   const [postSummary, setPostSummary] = useState("");
   const [posting, setPosting] = useState(false);
 
-  // Re-seed the editable post rows when a new run arrives (adjust-state-on-prop-
-  // change pattern, so edits stay local between runs).
+  // Re-seed editable rows when a new run arrives (adjust-state-on-prop-change).
   if (run !== prevRun) {
     setPrevRun(run);
-    setPostRows(seedPostRows(run));
+    setEdits(seedEdits(run));
+    setPostStatus({});
     setPostSummary("");
   }
 
-  const canvasGradable =
-    source === "canvas" &&
-    !!run &&
-    run.results.some((r) => typeof r.userId === "number");
+  const updateEdit = (student: string, patch: Partial<RowEdit>) =>
+    setEdits((prev) => ({
+      ...prev,
+      [student]: { ...(prev[student] ?? { total: "", overall: "", areas: {} }), ...patch },
+    }));
+
+  const updateArea = (student: string, areaName: string, patch: Partial<AreaEdit>) =>
+    setEdits((prev) => {
+      const row = prev[student] ?? { total: "", overall: "", areas: {} };
+      const area = row.areas[areaName] ?? { score: "", comment: "" };
+      return {
+        ...prev,
+        [student]: { ...row, areas: { ...row.areas, [areaName]: { ...area, ...patch } } },
+      };
+    });
+
+  const gradableResults = useMemo(
+    () => (run?.results ?? []).filter((r) => typeof r.userId === "number"),
+    [run]
+  );
+  const canvasGradable = source === "canvas" && gradableResults.length > 0;
 
   const handlePostGrades = async () => {
-    // Per-criterion scores ride along from the grading results (for assignments
-    // that have an attached Canvas rubric); overall grade/comment are the edited
-    // values.
-    const areasByUser = new Map<number, { area: string; score: string; comment: string }[]>();
-    for (const result of run?.results ?? []) {
-      if (typeof result.userId === "number") {
-        areasByUser.set(
-          result.userId,
-          result.rubricAreas.map((a) => ({ area: a.area, score: a.score, comment: a.comment }))
-        );
-      }
-    }
-
-    const rows = Object.entries(postRows).map(([userId, row]) => ({
-      userId: Number(userId),
-      grade: row.grade,
-      comment: row.comment,
-      rubricAreas: areasByUser.get(Number(userId)),
-    }));
-    if (rows.length === 0) return;
+    if (gradableResults.length === 0) return;
     if (
       !window.confirm(
-        `Post ${rows.length} grade(s) to Canvas? This writes to the live gradebook.`
+        `Post ${gradableResults.length} grade(s) to Canvas? This writes to the live gradebook.`
       )
     ) {
       return;
     }
 
+    const userIdToStudent = new Map<number, string>();
+    const payload = gradableResults.map((r) => {
+      const edit = edits[r.student] ?? { total: r.totalScore, overall: r.overallComment, areas: {} };
+      userIdToStudent.set(r.userId as number, r.student);
+      return {
+        userId: r.userId as number,
+        grade: parseEarnedPoints(edit.total),
+        comment: edit.overall,
+        rubricAreas: r.rubricAreas.map((a) => {
+          const ae = edit.areas[a.area] ?? { score: a.score, comment: a.comment };
+          return { area: a.area, score: ae.score, comment: ae.comment };
+        }),
+      };
+    });
+
     setPosting(true);
     setPostSummary("");
-    setPostRows((prev) => {
-      const next = { ...prev };
-      for (const id of Object.keys(next)) {
-        next[Number(id)] = { ...next[Number(id)], status: "posting", message: undefined };
-      }
+    setPostStatus(() => {
+      const next: Record<string, PostState> = {};
+      for (const r of gradableResults) next[r.student] = { status: "posting" };
       return next;
     });
 
-    const result = await postCanvasGradesAction(canvasUrl, rows);
+    const result = await postCanvasGradesAction(canvasUrl, payload);
     setPosting(false);
 
     if ("error" in result) {
       setPostSummary(result.error);
-      setPostRows((prev) => {
-        const next = { ...prev };
-        for (const id of Object.keys(next)) {
-          next[Number(id)] = { ...next[Number(id)], status: "error", message: result.error };
-        }
+      setPostStatus(() => {
+        const next: Record<string, PostState> = {};
+        for (const r of gradableResults) next[r.student] = { status: "error", message: result.error };
         return next;
       });
       return;
     }
 
-    const failed = new Map(result.failures.map((f) => [f.userId, f.error]));
-    setPostRows((prev) => {
-      const next = { ...prev };
-      for (const id of Object.keys(next)) {
-        const numId = Number(id);
-        next[numId] = failed.has(numId)
-          ? { ...next[numId], status: "error", message: failed.get(numId) }
-          : { ...next[numId], status: "posted", message: undefined };
+    const failedByStudent = new Map<string, string>();
+    for (const failure of result.failures) {
+      const student = userIdToStudent.get(failure.userId);
+      if (student) failedByStudent.set(student, failure.error);
+    }
+    setPostStatus(() => {
+      const next: Record<string, PostState> = {};
+      for (const r of gradableResults) {
+        next[r.student] = failedByStudent.has(r.student)
+          ? { status: "error", message: failedByStudent.get(r.student) }
+          : { status: "posted" };
       }
       return next;
     });
@@ -408,7 +424,7 @@ export default function GradingTab({
   };
 
   const handleExportCsv = () => {
-    const csvContent = buildCsvContent(state);
+    const csvContent = buildCsvContent(state, edits);
     if (!csvContent) return;
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -426,6 +442,8 @@ export default function GradingTab({
 
   const handleRubricChange = (e: ChangeEvent<HTMLTextAreaElement>) =>
     setRubric(e.target.value);
+
+  const showContextFields = source === "zip" || canvasRetrieved;
 
   return (
     <section className={styles.card}>
@@ -455,14 +473,14 @@ export default function GradingTab({
           <button
             type="button"
             className={`${styles.lessonInnerTab}${source === "zip" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => setSource("zip")}
+            onClick={() => selectSource("zip")}
           >
             Upload ZIP
           </button>
           <button
             type="button"
             className={`${styles.lessonInnerTab}${source === "canvas" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => setSource("canvas")}
+            onClick={() => selectSource("canvas")}
           >
             Canvas
           </button>
@@ -492,9 +510,21 @@ export default function GradingTab({
               className={styles.textInput}
               placeholder="Paste a discussion or assignment link (.../discussion_topics/… or .../assignments/…)"
               value={canvasUrl}
-              onChange={(e) => setCanvasUrl(e.target.value)}
-              onBlur={loadCanvasMeta}
+              onChange={(e) => {
+                setCanvasUrl(e.target.value);
+                setCanvasRetrieved(false);
+                setCanvasMeta({ status: "idle", message: "" });
+              }}
             />
+            <button
+              type="button"
+              className={styles.downloadButton}
+              onClick={handleRetrieveCanvas}
+              disabled={canvasMeta.status === "loading" || !canvasUrlKind}
+              style={{ alignSelf: "flex-start" }}
+            >
+              {canvasMeta.status === "loading" ? "Retrieving…" : "Retrieve from Canvas"}
+            </button>
             <p className={styles.fieldHint}>
               {canvasUrlKind === "discussion"
                 ? `Detected: discussion board. Each student's posts and replies are pulled via the Canvas API and graded with the ${graderLabel}.`
@@ -502,7 +532,7 @@ export default function GradingTab({
                   ? `Detected: assignment. Each student's submission text and uploaded files are pulled via the Canvas API and graded with the ${graderLabel}.`
                   : canvasUrl.trim()
                     ? "Unrecognized Canvas URL. Expecting a link like .../courses/123/discussion_topics/456 or .../courses/123/assignments/456."
-                    : `Paste a Canvas discussion or assignment link. The type is detected automatically and graded with the ${graderLabel}.`}
+                    : `Paste a Canvas discussion or assignment link, then retrieve it. The type is detected automatically and graded with the ${graderLabel}.`}
             </p>
             {canvasMeta.status !== "idle" && (
               <p
@@ -515,29 +545,37 @@ export default function GradingTab({
           </div>
         )}
 
-        <div className={styles.field}>
-          <label htmlFor="assignment-instructions">Assignment Instructions</label>
-          <textarea
-            id="assignment-instructions"
-            name="assignmentInstructions"
-            rows={10}
-            value={assignmentInstructions}
-            onChange={handleAssignmentInstructionsChange}
-            placeholder="Paste the assignment brief, requirements, and any special directions."
-          />
-        </div>
+        {showContextFields && (
+          <>
+            <div className={styles.field}>
+              <label htmlFor="assignment-instructions">Assignment Instructions</label>
+              <textarea
+                id="assignment-instructions"
+                name="assignmentInstructions"
+                rows={10}
+                readOnly={source === "canvas"}
+                value={assignmentInstructions}
+                onChange={handleAssignmentInstructionsChange}
+                placeholder="Paste the assignment brief, requirements, and any special directions."
+              />
+            </div>
 
-        <div className={styles.field}>
-          <label htmlFor="rubric">Rubric</label>
-          <textarea
-            id="rubric"
-            name="rubric"
-            rows={10}
-            value={rubric}
-            onChange={handleRubricChange}
-            placeholder="Paste the grading rubric, expectations, and scoring guidance."
-          />
-        </div>
+            {(source === "zip" || rubric.trim()) && (
+              <div className={styles.field}>
+                <label htmlFor="rubric">Rubric</label>
+                <textarea
+                  id="rubric"
+                  name="rubric"
+                  rows={10}
+                  readOnly={source === "canvas"}
+                  value={rubric}
+                  onChange={handleRubricChange}
+                  placeholder="Paste the grading rubric, expectations, and scoring guidance."
+                />
+              </div>
+            )}
+          </>
+        )}
 
         {selectedProvider === "other" && (
           <div className={styles.field}>
@@ -561,7 +599,11 @@ export default function GradingTab({
           </p>
         )}
 
-        <button className={styles.submitButton} type="submit" disabled={pending}>
+        <button
+          className={styles.submitButton}
+          type="submit"
+          disabled={pending || (source === "canvas" && !canvasRetrieved)}
+        >
           {pending ? "Grading..." : "Start Review"}
         </button>
       </form>
@@ -646,14 +688,36 @@ export default function GradingTab({
         <section className={styles.results}>
           <div className={styles.resultsHeader}>
             <h2>Grading Results</h2>
-            <button
-              className={styles.downloadButton}
-              type="button"
-              onClick={handleExportCsv}
-            >
-              Export CSV
-            </button>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+              {canvasGradable && (
+                <button
+                  className={styles.submitButton}
+                  type="button"
+                  onClick={handlePostGrades}
+                  disabled={posting}
+                >
+                  {posting ? "Posting…" : `Post ${gradableResults.length} grade(s) to Canvas`}
+                </button>
+              )}
+              <button
+                className={styles.downloadButton}
+                type="button"
+                onClick={handleExportCsv}
+              >
+                Export CSV
+              </button>
+            </div>
           </div>
+
+          {canvasGradable && (
+            <p className={styles.fieldHint}>
+              Edit grades and comments in the table, then post. Grades write to the
+              assignment&apos;s gradebook column and comments are added to each
+              submission. If the Canvas assignment has an attached rubric, the
+              per-criterion scores fill the SpeedGrader rubric too (matched by name).
+              {postSummary ? ` ${postSummary}` : ""}
+            </p>
+          )}
 
           <div className={styles.matrixWrap}>
             <table className={styles.matrix}>
@@ -713,10 +777,30 @@ export default function GradingTab({
                   const areaMap = new Map(
                     result.rubricAreas.map((area) => [area.area, area])
                   );
+                  const edit = edits[result.student] ?? {
+                    total: result.totalScore,
+                    overall: result.overallComment,
+                    areas: {},
+                  };
+                  const status = postStatus[result.student];
 
                   return (
                     <tr key={`${result.student}-matrix`}>
-                      <td>{result.student}</td>
+                      <td>
+                        {result.student}
+                        {status && status.status !== "idle" && (
+                          <div
+                            className={styles.fieldHint}
+                            style={{ color: status.status === "error" ? "var(--error, #b91c1c)" : undefined }}
+                          >
+                            {status.status === "posted"
+                              ? "Posted to Canvas"
+                              : status.status === "posting"
+                                ? "Posting…"
+                                : `Failed: ${status.message ?? ""}`}
+                          </div>
+                        )}
+                      </td>
                       <td>
                         {result.submittedFiles.length > 0 ? (
                           <ul className={styles.matrixFileList}>
@@ -780,9 +864,12 @@ export default function GradingTab({
                       </td>
                       {run.rubricAreaNames.map((areaName) => {
                         const area = areaMap.get(areaName);
+                        const areaEdit = area
+                          ? edit.areas[areaName] ?? { score: area.score, comment: area.comment }
+                          : null;
                         return (
                           <td key={`${result.student}-${areaName}`}>
-                            {area ? (
+                            {area && areaEdit ? (
                               <div className={styles.matrixCellDetail}>
                                 <button
                                   type="button"
@@ -800,16 +887,30 @@ export default function GradingTab({
                                   onClick={() =>
                                     onCopy(
                                       `${result.student}-${areaName}-comment`,
-                                      formatFeedback(area.comment || "No feedback provided.")
+                                      formatFeedback(areaEdit.comment || "No feedback provided.")
                                     )
                                   }
                                 >
                                   <CopyIcon />
                                 </button>
-                                <span className={`${styles.scoreBadge}${area && hasDeduction(area.score) ? ` ${styles.scoreBadgeDeducted}` : ""}`}>
-                                  Score: {area.score || "-"}
-                                </span>
-                                <p>{formatFeedback(area.comment || "No feedback provided.")}</p>
+                                <input
+                                  type="text"
+                                  className={styles.textInput}
+                                  style={{ minWidth: "64px", marginBottom: "4px" }}
+                                  aria-label={`${areaName} score for ${result.student}`}
+                                  value={areaEdit.score}
+                                  onChange={(e) =>
+                                    updateArea(result.student, areaName, { score: e.target.value })
+                                  }
+                                />
+                                <textarea
+                                  aria-label={`${areaName} feedback for ${result.student}`}
+                                  style={{ minHeight: "70px", width: "100%" }}
+                                  value={areaEdit.comment}
+                                  onChange={(e) =>
+                                    updateArea(result.student, areaName, { comment: e.target.value })
+                                  }
+                                />
                               </div>
                             ) : (
                               "-"
@@ -817,7 +918,16 @@ export default function GradingTab({
                           </td>
                         );
                       })}
-                      <td>{result.totalScore || "-"}</td>
+                      <td>
+                        <input
+                          type="text"
+                          className={styles.textInput}
+                          style={{ minWidth: "72px" }}
+                          aria-label={`Grade for ${result.student}`}
+                          value={edit.total}
+                          onChange={(e) => updateEdit(result.student, { total: e.target.value })}
+                        />
+                      </td>
                       <td>
                         <div className={styles.overallFeedbackWrap}>
                           <button
@@ -836,15 +946,18 @@ export default function GradingTab({
                             onClick={() =>
                               onCopy(
                                 `${result.student}-overall-comment`,
-                                formatFeedback(result.overallComment || "No overall feedback provided.")
+                                formatFeedback(edit.overall || "No overall feedback provided.")
                               )
                             }
                           >
                             <CopyIcon />
                           </button>
-                          <p className={styles.overallFeedbackCell}>
-                            {formatFeedback(result.overallComment || "No overall feedback provided.")}
-                          </p>
+                          <textarea
+                            aria-label={`Overall feedback for ${result.student}`}
+                            style={{ minHeight: "90px", width: "100%" }}
+                            value={edit.overall}
+                            onChange={(e) => updateEdit(result.student, { overall: e.target.value })}
+                          />
                         </div>
                       </td>
                     </tr>
@@ -853,86 +966,6 @@ export default function GradingTab({
               </tbody>
             </table>
           </div>
-        </section>
-      )}
-
-      {canvasGradable && (
-        <section className={styles.results}>
-          <div className={styles.resultsHeader}>
-            <h2>Review &amp; Post to Canvas</h2>
-            <button
-              type="button"
-              className={styles.submitButton}
-              onClick={handlePostGrades}
-              disabled={posting}
-            >
-              {posting
-                ? "Posting…"
-                : `Post ${Object.keys(postRows).length} grade(s) to Canvas`}
-            </button>
-          </div>
-          <p className={styles.fieldHint}>
-            Edit grades and comments, then post. Grades write to the
-            assignment&apos;s gradebook column and comments are added to each
-            submission. If the Canvas assignment has an attached rubric, the
-            per-criterion scores fill the SpeedGrader rubric too (matched by name).
-          </p>
-          {postSummary && <p className={styles.fieldHint}>{postSummary}</p>}
-          <ul className={styles.lessonSlideList}>
-            {(run?.results ?? [])
-              .filter((r) => typeof r.userId === "number")
-              .map((r) => {
-                const id = r.userId as number;
-                const row = postRows[id];
-                if (!row) return null;
-                return (
-                  <li key={id} className={styles.lessonSlideCard}>
-                    <div className={styles.fieldLabelRow}>
-                      <span className={styles.lessonSlideTitle}>{row.student}</span>
-                      {row.status !== "idle" && (
-                        <span className={styles.fieldHint}>
-                          {row.status === "posted"
-                            ? "Posted"
-                            : row.status === "posting"
-                              ? "Posting…"
-                              : `Failed: ${row.message ?? ""}`}
-                        </span>
-                      )}
-                    </div>
-                    <div className={styles.field}>
-                      <label htmlFor={`post-grade-${id}`}>Grade (points)</label>
-                      <input
-                        id={`post-grade-${id}`}
-                        type="text"
-                        className={styles.textInput}
-                        value={row.grade}
-                        onChange={(e) =>
-                          setPostRows((prev) => ({
-                            ...prev,
-                            [id]: { ...prev[id], grade: e.target.value },
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className={styles.field}>
-                      <label htmlFor={`post-comment-${id}`}>Comment</label>
-                      <textarea
-                        id={`post-comment-${id}`}
-                        rows={4}
-                        style={{ minHeight: "90px" }}
-                        value={row.comment}
-                        onChange={(e) =>
-                          setPostRows((prev) => ({
-                            ...prev,
-                            [id]: { ...prev[id], comment: e.target.value },
-                          }))
-                        }
-                      />
-                    </div>
-                  </li>
-                );
-              })}
-          </ul>
         </section>
       )}
     </section>

@@ -1104,23 +1104,10 @@ function gradingApiToRun(resp: GradingApiResponse): GradingRun {
  */
 export async function fetchCanvasMetaAction(
   url: string
-): Promise<{ description: string; rubricText: string; rubricSynthesized: boolean } | { error: string }> {
+): Promise<{ description: string; rubricText: string } | { error: string }> {
   try {
-    const meta = await fetchCanvasMeta(url);
-    let rubricText = meta.rubricText;
-    let rubricSynthesized = false;
-    // No rubric attached in Canvas: synthesize one from the description so the
-    // grading form always has a rubric to show and edit.
-    if (!rubricText.trim() && meta.description.trim()) {
-      try {
-        rubricText = await generateRubric(meta.description);
-        rubricSynthesized = Boolean(rubricText.trim());
-      } catch {
-        // Leave the rubric empty if synthesis fails; grading can still
-        // synthesize one at grade time for the AI grader.
-      }
-    }
-    return { description: meta.description, rubricText, rubricSynthesized };
+    // Return Canvas's own rubric only; never synthesize one when Canvas has none.
+    return await fetchCanvasMeta(url);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load Canvas details." };
   }
@@ -1206,15 +1193,13 @@ export async function gradeAction(
       if (!assignmentInstructions.trim()) {
         return { run: null, error: "Please provide assignment instructions." };
       }
-      const effectiveRubric = rubric.trim()
-        ? rubric
-        : await generateRubric(assignmentInstructions, provider);
-      const generatedRubric = rubric.trim() ? undefined : effectiveRubric;
+      // No rubric synthesis on the Canvas path: grade with whatever rubric was
+      // retrieved from Canvas (may be empty), using the instructions otherwise.
       const [run, fullCreditChecklist] = await Promise.all([
-        gradeCanvasUrl(canvasUrl, assignmentInstructions, effectiveRubric, provider),
-        synthesizeFullCreditChecklist(assignmentInstructions, effectiveRubric, provider),
+        gradeCanvasUrl(canvasUrl, assignmentInstructions, rubric, provider),
+        synthesizeFullCreditChecklist(assignmentInstructions, rubric, provider),
       ]);
-      return { run: { ...run, fullCreditChecklist }, error: null, generatedRubric };
+      return { run: { ...run, fullCreditChecklist }, error: null };
     }
 
     if (!file || file.size === 0) {

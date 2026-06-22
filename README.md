@@ -31,6 +31,23 @@ Set these values in your local `.env.local` and in your deployment provider:
 
 The grading pipeline uses these limits to reduce free-tier quota spikes by capping per-run workload and pacing requests.
 
+### Access control (owner-only)
+
+The app is gated to an allowlist of accounts so visitors cannot use your
+server-side credentials (e.g. the Canvas API token).
+
+- `OWNER_EMAILS` (required to use the app) — comma-separated list of the email
+  addresses allowed in. Fails closed: if unset, no one is authorized and every
+  page redirects to `/login`.
+- `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (required) —
+  Supabase project used for authentication.
+
+Sign-in uses Supabase Auth (email + password) at `/login`. Create your owner
+account in the Supabase dashboard (and disable public sign-ups there so only you
+can authenticate). Middleware redirects any non-owner to `/login`, and the
+privileged grading/Canvas server actions additionally verify the owner before
+running.
+
 ### Course Engine API (the "Other API" provider)
 
 When the in-app provider toggle is set to **Other API**, the matched features (course

@@ -29,6 +29,7 @@ import {
 } from "@/lib/grading-engine";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
+import { requireOwner } from "@/lib/supabase/auth";
 
 export interface SlideData {
   title: string;
@@ -1106,6 +1107,7 @@ export async function fetchCanvasMetaAction(
   url: string
 ): Promise<{ description: string; rubricText: string } | { error: string }> {
   try {
+    await requireOwner();
     // Return Canvas's own rubric only; never synthesize one when Canvas has none.
     return await fetchCanvasMeta(url);
   } catch (err) {
@@ -1126,6 +1128,7 @@ export async function postCanvasGradesAction(
   { posted: number; failures: Array<{ userId: number; error: string }> } | { error: string }
 > {
   try {
+    await requireOwner();
     return await postCanvasGrades(url, grades);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post grades to Canvas." };
@@ -1180,6 +1183,8 @@ export async function gradeAction(
   const rubricFile = formData.get("rubricFile") as File | null;
 
   try {
+    await requireOwner();
+
     // Canvas source: grade each student's discussion posts or assignment
     // submission (kind auto-detected from the URL). Routes by provider — the
     // deterministic grader gets a synthesized zip; Gemini grades the text/files.

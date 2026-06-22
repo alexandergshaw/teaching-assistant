@@ -6,6 +6,9 @@ import { parseGeneratedRubric } from "../utils/rubric";
 import { saveFile, loadFile, deleteFile } from "../../lib/file-persistence";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildSlidesPptx } from "@/lib/pptx";
+import { buildDocxFromPlainText } from "@/lib/docx";
+import { resolveDocumentAuthor } from "@/lib/author";
+import { useSupabase } from "@/context/SupabaseProvider";
 import styles from "../page.module.css";
 import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 
@@ -29,221 +32,18 @@ function downloadBase64File(base64: string, fileName: string, mimeType: string) 
   URL.revokeObjectURL(url);
 }
 
-async function buildDocxFromPlainText(
-  text: string,
-  templateHeadings?: string[]
-): Promise<ArrayBuffer> {
-  const {
-    Document,
-    Packer,
-    Paragraph,
-    TextRun,
-    ExternalHyperlink,
-    Footer,
-    PageNumber,
-    AlignmentType,
-    BorderStyle,
-    LevelFormat,
-  } = await import("docx");
-
-  // Professional, branded document palette (matches the app + slide decks).
-  const FONT = "Calibri";
-  const BODY = "1F2937"; // near-black slate for body copy
-  const NAVY = "1A2744"; // brand navy for the title + section headings
-  const ACCENT = "2563EB"; // link blue
-  const RULE = "D1D5DB"; // light divider under section headings
-  const MUTED = "6B7280"; // footer / secondary text
-
-  const URL_RE = /(https?:\/\/[^\s)]+)/g;
-
-  type Run = InstanceType<typeof TextRun> | InstanceType<typeof ExternalHyperlink>;
-
-  // Split a string into runs, turning bare URLs into real, styled hyperlinks.
-  const runsFromText = (content: string, bold = false): Run[] => {
-    const runs: Run[] = [];
-    for (const part of content.split(URL_RE)) {
-      if (!part) continue;
-      if (/^https?:\/\//.test(part)) {
-        runs.push(
-          new ExternalHyperlink({
-            link: part,
-            children: [new TextRun({ text: part, font: FONT, color: ACCENT, underline: {} })],
-          })
-        );
-      } else {
-        runs.push(new TextRun({ text: part, font: FONT, color: BODY, bold }));
-      }
-    }
-    return runs;
-  };
-
-  // Normalize heading text for robust matching (case, surrounding punctuation,
-  // numbering prefixes, and whitespace are ignored).
-  const normalizeHeading = (value: string) =>
-    value
-      .toLowerCase()
-      .replace(/^[\d.)\s-]+/, "")
-      .replace(/[:.\s]+$/, "")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  const hasTemplate = Array.isArray(templateHeadings) && templateHeadings.length > 0;
-  const allowedHeadings = new Set((templateHeadings ?? []).map(normalizeHeading));
-
-  // When a line begins with a short "Label:" prefix, bold the label and leave
-  // the remainder normal (with hyperlinks detected throughout).
-  const buildLabeledRuns = (content: string): Run[] => {
-    const labelMatch = content.match(/^([^:\n]{1,80}:)(\s[\s\S]*)?$/);
-    if (labelMatch) {
-      const runs: Run[] = [new TextRun({ text: labelMatch[1], font: FONT, color: BODY, bold: true })];
-      if (labelMatch[2]) runs.push(...runsFromText(labelMatch[2]));
-      return runs;
-    }
-    return runsFromText(content);
-  };
-
-  const children: InstanceType<typeof Paragraph>[] = [];
-  // Each contiguous run of "1. 2. 3." items gets its own numbering instance so
-  // numbering restarts per section instead of running on across the document.
-  type DocOptions = ConstructorParameters<typeof Document>[0];
-  type NumberingConfig = NonNullable<DocOptions["numbering"]>["config"][number];
-  const numberingConfigs: NumberingConfig[] = [];
-  let orderedGroups = 0;
-  let currentOrderedRef: string | null = null;
-  let prevWasOrdered = false;
-
-  const lines = text.split("\n");
-  let firstHeadingFound = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
-    if (!trimmed) continue;
-
-    const markdownMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
-    const prevBlank = i === 0 || !lines[i - 1].trim();
-    const nextBlank = i >= lines.length - 1 || !lines[i + 1].trim();
-    const isListItem = /^(\d+\.|[-•*])\s/.test(trimmed);
-
-    let isHeading: boolean;
-    let headingText = trimmed;
-    let markdownIsTitle = false;
-
-    if (markdownMatch) {
-      isHeading = true;
-      headingText = markdownMatch[2].trim();
-      markdownIsTitle = markdownMatch[1].length === 1;
-    } else if (hasTemplate) {
-      isHeading = allowedHeadings.has(normalizeHeading(trimmed));
-    } else {
-      isHeading = trimmed.length < 80 && !isListItem && prevBlank && nextBlank;
-    }
-
-    if (isHeading) {
-      prevWasOrdered = false;
-      const isTitle = markdownMatch ? markdownIsTitle : !firstHeadingFound;
-      firstHeadingFound = true;
-      if (isTitle) {
-        // Document title: large navy heading with a navy rule beneath it.
-        children.push(
-          new Paragraph({
-            children: [new TextRun({ text: headingText, font: FONT, color: NAVY, bold: true, size: 36 })],
-            spacing: { after: 200 },
-            border: { bottom: { style: BorderStyle.SINGLE, size: 12, space: 6, color: NAVY } },
-          })
-        );
-      } else {
-        // Section heading: navy small-caps with a light divider underneath.
-        children.push(
-          new Paragraph({
-            children: [
-              new TextRun({ text: headingText, font: FONT, color: NAVY, bold: true, size: 24, allCaps: true }),
-            ],
-            spacing: { before: 320, after: 120 },
-            border: { bottom: { style: BorderStyle.SINGLE, size: 4, space: 4, color: RULE } },
-          })
-        );
-      }
-    } else if (/^\d+\.\s+/.test(trimmed)) {
-      if (!prevWasOrdered) {
-        orderedGroups += 1;
-        currentOrderedRef = `ordered-${orderedGroups}`;
-        numberingConfigs.push({
-          reference: currentOrderedRef,
-          levels: [
-            {
-              level: 0,
-              format: LevelFormat.DECIMAL,
-              text: "%1.",
-              alignment: AlignmentType.START,
-              style: { paragraph: { indent: { left: 460, hanging: 260 } } },
-            },
-          ],
-        });
-      }
-      prevWasOrdered = true;
-      children.push(
-        new Paragraph({
-          children: buildLabeledRuns(trimmed.replace(/^\d+\.\s+/, "")),
-          numbering: { reference: currentOrderedRef as string, level: 0 },
-          spacing: { after: 80 },
-        })
-      );
-    } else if (/^[-•*]\s+/.test(trimmed)) {
-      prevWasOrdered = false;
-      children.push(
-        new Paragraph({
-          children: buildLabeledRuns(trimmed.slice(trimmed.indexOf(" ") + 1)),
-          bullet: { level: 0 },
-          spacing: { after: 80 },
-        })
-      );
-    } else {
-      prevWasOrdered = false;
-      children.push(new Paragraph({ children: buildLabeledRuns(trimmed) }));
-    }
-  }
-
-  const doc = new Document({
-    // App-wide professional defaults: clean body font, comfortable line spacing.
-    styles: {
-      default: {
-        document: {
-          run: { font: FONT, size: 22, color: BODY },
-          paragraph: { spacing: { after: 140, line: 276 } },
-        },
-      },
-    },
-    numbering: { config: numberingConfigs },
-    sections: [
-      {
-        properties: { page: { margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } },
-        footers: {
-          default: new Footer({
-            children: [
-              new Paragraph({
-                alignment: AlignmentType.CENTER,
-                children: [
-                  new TextRun({ children: [PageNumber.CURRENT], font: FONT, size: 18, color: MUTED }),
-                ],
-              }),
-            ],
-          }),
-        },
-        children,
-      },
-    ],
-  });
-  return Packer.toArrayBuffer(doc);
-}
-
 export default function LecturePlanningTab() {
+  const { user } = useSupabase();
   const [provider] = useLlmProvider();
   const [lectureDuration, setLectureDuration] = useState("50");
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [plans, setPlans] = useState<AssignmentPlan[]>([]);
+  // Snapshot of the plans exactly as generated, so the editor can reset a
+  // section back to its original AI output after the user edits it.
+  const [originalPlans, setOriginalPlans] = useState<AssignmentPlan[]>([]);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState<AssignmentPlan | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [rubricStatus, setRubricStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [rubricError, setRubricError] = useState<string | null>(null);
   const [generatedRubric, setGeneratedRubric] = useState<string | null>(null);
@@ -376,6 +176,7 @@ export default function LecturePlanningTab() {
       }
 
       setPlans(result);
+      setOriginalPlans(JSON.parse(JSON.stringify(result)) as AssignmentPlan[]);
       setStatus("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed. Please try again.");
@@ -391,19 +192,24 @@ export default function LecturePlanningTab() {
 
       const outputZip = new JSZip();
 
+      // Author stamped into every generated file's core properties so the
+      // download reads as the user's own work, not a tooling default.
+      const author = resolveDocumentAuthor(user);
+
       for (const plan of plans) {
         const pptxData = await buildSlidesPptx({
           presentationTitle: plan.presentationTitle,
           slides: plan.slides,
           subtitle: plan.assignmentName,
+          author,
         });
         const weekLabel = `Week ${plan.weekNumber}`;
         outputZip.file(`${weekLabel} Slides.pptx`, pptxData);
         if (plan.moduleIntroduction) {
-          outputZip.file(`${weekLabel} Introduction.docx`, await buildDocxFromPlainText(plan.moduleIntroduction, plan.introTemplateHeadings));
+          outputZip.file(`${weekLabel} Introduction.docx`, await buildDocxFromPlainText(plan.moduleIntroduction, plan.introTemplateHeadings, author));
         }
         if (plan.assignmentInstructions) {
-          outputZip.file(`${weekLabel} Assignment Instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions, plan.instructionsTemplateHeadings));
+          outputZip.file(`${weekLabel} Assignment Instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions, plan.instructionsTemplateHeadings, author));
         }
       }
 
@@ -421,6 +227,69 @@ export default function LecturePlanningTab() {
     } finally {
       setIsDownloading(false);
     }
+  };
+
+  // ── Editor wiring: edits persist into `plans` so the ZIP uses them ──────────
+
+  type EditablePlan = Pick<
+    AssignmentPlan,
+    "presentationTitle" | "moduleIntroduction" | "assignmentInstructions" | "slides"
+  >;
+
+  const updatePlan = (index: number, patch: Partial<EditablePlan>) => {
+    setPlans((prev) => prev.map((p, i) => (i === index ? { ...p, ...patch } : p)));
+  };
+
+  const resetSection = (index: number, section: keyof EditablePlan) => {
+    const original = originalPlans[index];
+    if (!original) return;
+    const value = original[section];
+    // Deep-copy arrays/objects so a later edit can't mutate the snapshot.
+    updatePlan(index, {
+      [section]: Array.isArray(value) ? JSON.parse(JSON.stringify(value)) : value,
+    } as Partial<EditablePlan>);
+  };
+
+  const downloadBlob = (data: BlobPart, fileName: string, mimeType: string) => {
+    const blob = new Blob([data], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadDoc = async (index: number, kind: "slides" | "intro" | "instructions") => {
+    const plan = plans[index];
+    if (!plan) return;
+    const author = resolveDocumentAuthor(user);
+    const weekLabel = `Week ${plan.weekNumber}`;
+    if (kind === "slides") {
+      const pptx = await buildSlidesPptx({
+        presentationTitle: plan.presentationTitle,
+        slides: plan.slides,
+        subtitle: plan.assignmentName,
+        author,
+      });
+      downloadBlob(
+        pptx,
+        `${weekLabel} Slides.pptx`,
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+      );
+      return;
+    }
+    const text = kind === "intro" ? plan.moduleIntroduction : plan.assignmentInstructions;
+    const headings = kind === "intro" ? plan.introTemplateHeadings : plan.instructionsTemplateHeadings;
+    const name = kind === "intro" ? "Introduction" : "Assignment Instructions";
+    const docx = await buildDocxFromPlainText(text, headings, author);
+    downloadBlob(
+      docx,
+      `${weekLabel} ${name}.docx`,
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    );
   };
 
   const handleGenerateRubric = async () => {
@@ -647,7 +516,7 @@ export default function LecturePlanningTab() {
           </div>
 
           <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-            {plans.map((plan) => {
+            {plans.map((plan, i) => {
               const badges: string[] = [];
               badges.push(`${plan.slides.length + 1} slide${plan.slides.length !== 0 ? "s" : ""}`);
               if (plan.moduleIntroduction) badges.push("Module Intro");
@@ -657,8 +526,8 @@ export default function LecturePlanningTab() {
                   key={plan.assignmentName}
                   role="button"
                   tabIndex={0}
-                  onClick={() => setSelectedPlan(plan)}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSelectedPlan(plan); }}
+                  onClick={() => setSelectedIndex(i)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSelectedIndex(i); }}
                   style={{
                     background: "var(--field-background)",
                     border: "1px solid var(--field-border)",
@@ -703,10 +572,16 @@ export default function LecturePlanningTab() {
         </div>
       )}
 
-      {selectedPlan && (
+      {selectedIndex !== null && plans[selectedIndex] && (
         <LecturePlanPreviewModal
-          plan={selectedPlan}
-          onClose={() => setSelectedPlan(null)}
+          plans={plans}
+          index={selectedIndex}
+          provider={provider}
+          onIndexChange={setSelectedIndex}
+          onUpdatePlan={updatePlan}
+          onResetSection={resetSection}
+          onDownloadDoc={downloadDoc}
+          onClose={() => setSelectedIndex(null)}
         />
       )}
 

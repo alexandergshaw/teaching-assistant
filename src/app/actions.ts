@@ -2475,6 +2475,122 @@ export async function generateCourseRubricFromZipAction(
   }
 }
 
+/**
+ * Revise one already-generated lecture-plan document (module intro or assignment
+ * instructions) from a freeform instruction, preserving its structure/headings.
+ * Used by the document editor's "Revise with AI" before download.
+ */
+export async function reviseLecturePlanTextAction(
+  section: "intro" | "instructions",
+  assignmentName: string,
+  currentText: string,
+  instruction: string,
+  templateText = "",
+  provider: LlmProvider = "gemini"
+): Promise<{ text: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!instruction.trim()) return { error: "Describe the change you want first." };
+    if (!currentText.trim()) return { error: "There is no document to revise yet." };
+
+    const docKind = section === "intro" ? "module introduction" : "assignment instruction sheet";
+    const prompt = `You are an expert educator revising a ${docKind} for a programming course.
+
+ASSIGNMENT / MODULE: ${assignmentName}
+
+CURRENT DOCUMENT:
+${currentText}
+
+REVISION INSTRUCTION:
+${instruction}
+
+Rewrite the document applying the instruction. Requirements:
+- Preserve the overall structure: keep the single level-1 title (one "# " line) and the level-2 "## " section headings. Do not use any other markdown (no bold, italics, or bullet asterisks) in body text.
+- Leave content the instruction does not touch intact.
+- Never tell students to use, post on, check, or refer to a course discussion board, forum, or message board.
+- Output ONLY the revised document text, with no preamble or explanation.${buildStrictTemplateBlock(templateText)}`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 2048 },
+      },
+      provider
+    );
+    if (!result.ok) {
+      return { error: `Revision failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+    const text = result.text.trim();
+    if (!text) return { error: "The model returned an empty document." };
+    return { text };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+/** Revise a lecture deck's slides from a freeform instruction (editor: "Revise slides"). */
+export async function reviseLectureSlidesAction(
+  presentationTitle: string,
+  currentSlides: SlideData[],
+  instruction: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ slides: SlideData[] } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!instruction.trim()) return { error: "Describe the change you want first." };
+
+    const prompt = `You are an expert educator revising a lecture slide deck titled "${presentationTitle}".
+
+CURRENT SLIDES (JSON):
+${JSON.stringify(currentSlides, null, 2)}
+
+REVISION INSTRUCTION:
+${instruction}
+
+Apply the instruction and return ONLY valid JSON of this shape:
+{ "slides": [ { "title": "...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" } ] }
+
+Requirements:
+- Maximum 3 bullets per slide; each bullet a single concise idea.
+- Preserve slides the instruction does not affect; modify, add, or remove slides as needed.
+- Keep "code"/"codeLanguage" only on coding Example/Walkthrough/Practice/Answer slides.
+- Do not include any text outside the JSON object.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.6, maxOutputTokens: 4096 },
+      },
+      provider
+    );
+    if (!result.ok) {
+      return { error: `Revision failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+
+    const trimmed = result.text.trim();
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fenced?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return { error: "Could not parse slides from the model response." };
+    }
+    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+      slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
+    };
+    if (!parsed.slides || !Array.isArray(parsed.slides)) {
+      return { error: "Model did not return a valid slides array." };
+    }
+    let slides: SlideData[] = parsed.slides
+      .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
+      .map((s) => toSlideData(s, 3));
+    slides = propagateExampleCodeToFollowups(slides);
+    return { slides };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
 export async function generateLecturePlansAction(
   zipBase64: string,
   lectureDurationMinutes: number,

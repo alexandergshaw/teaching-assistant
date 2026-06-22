@@ -13,6 +13,8 @@ import TopBar from "./components/TopBar";
 import { useInstitutionCounts } from "./components/InstitutionCounts";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildSlidesPptx } from "@/lib/pptx";
+import { resolveDocumentAuthor } from "@/lib/author";
+import { useSupabase } from "@/context/SupabaseProvider";
 import styles from "./page.module.css";
 import { parseGeneratedRubric } from "./utils/rubric";
 
@@ -119,6 +121,7 @@ function NavTabLabel({ text, count }: { text: string; count: number }) {
 
 export default function Home() {
   const [state, formAction, pending] = useActionState(gradeAction, initialState);
+  const { user } = useSupabase();
   const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
   const [testState] = useActionState(testGeminiAction, initialTestState);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
@@ -329,16 +332,23 @@ export default function Home() {
       ]);
       const { Document, Packer, Paragraph, TextRun, HeadingLevel } = docxModule;
 
+      // Author stamped into every file's core properties so the bundle reads as
+      // the user's own work, with no tooling defaults left behind.
+      const author = resolveDocumentAuthor(user);
+
       // ── Build PPTX ──────────────────────────────────────────────────
       const pptxData = await buildSlidesPptx({
         presentationTitle: lessonPlanPreview.presentationTitle,
         slides: lessonPlanPreview.slides,
+        author,
       });
 
       // ── Build introduction.docx ──────────────────────────────────────
       let introDocxBuffer: ArrayBuffer | null = null;
       if (introPreview) {
         const introDoc = new Document({
+          creator: author,
+          lastModifiedBy: author,
           sections: [{
             children: [
               new Paragraph({ text: "Module Introduction", heading: HeadingLevel.HEADING_1 }),
@@ -371,7 +381,7 @@ export default function Home() {
           new Paragraph({ text: "Deliverables", heading: HeadingLevel.HEADING_2 }),
           ...assignmentPreview.deliverables.map((d) => new Paragraph({ children: [new TextRun(`• ${d}`)] })),
         ];
-        const assignmentDoc = new Document({ sections: [{ children: assignmentChildren }] });
+        const assignmentDoc = new Document({ creator: author, lastModifiedBy: author, sections: [{ children: assignmentChildren }] });
         assignmentDocxBuffer = await Packer.toArrayBuffer(assignmentDoc);
       }
 
@@ -431,7 +441,7 @@ export default function Home() {
           lectureChildren.push(new Paragraph({ children: [new TextRun(`• ${bullet}`)] }));
         }
       }
-      const lectureDoc = new Document({ sections: [{ children: lectureChildren }] });
+      const lectureDoc = new Document({ creator: author, lastModifiedBy: author, sections: [{ children: lectureChildren }] });
       const lectureDocxBuffer = await Packer.toArrayBuffer(lectureDoc);
 
       // ── Assemble ZIP ─────────────────────────────────────────────────

@@ -23,6 +23,11 @@ export interface BuildSlidesOptions {
    * module name). Omitted when not supplied.
    */
   subtitle?: string;
+  /**
+   * Name written into the deck's core properties as the author. Supplied so the
+   * file reads as the user's own work rather than carrying pptxgenjs defaults.
+   */
+  author?: string;
 }
 
 // Professional color palette shared by every generated deck.
@@ -40,11 +45,23 @@ export async function buildSlidesPptx({
   presentationTitle,
   slides,
   subtitle,
+  author,
 }: BuildSlidesOptions): Promise<ArrayBuffer> {
   const { default: PptxGenJS } = await import("pptxgenjs");
 
   const prs = new PptxGenJS();
   prs.layout = "LAYOUT_WIDE";
+
+  // Stamp the document metadata. pptxgenjs otherwise leaves "PptxGenJS" in the
+  // author, company, subject and title fields, which would betray how the deck
+  // was produced. These are always assigned so the library defaults never leak:
+  // author/lastModifiedBy carry the user's name, the title mirrors the on-slide
+  // headline, and company/subject stay blank like a freshly authored file.
+  prs.author = author ?? "";
+  prs.company = "";
+  prs.revision = "1";
+  prs.subject = "";
+  prs.title = presentationTitle;
 
   // ── Title slide ──────────────────────────────────────────────
   const titleSlide = prs.addSlide();

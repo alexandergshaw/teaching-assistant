@@ -11,7 +11,7 @@
  */
 
 import JSZip from "jszip";
-import { parseCanvasUrl, parseCanvasCourseId } from "./canvas-url";
+import { parseCanvasUrl, parseCanvasCourseId, type ParsedCanvasUrl } from "./canvas-url";
 
 /**
  * Registered Canvas institutions, keyed by hostname. The URL's host selects the
@@ -481,8 +481,19 @@ export async function fetchCanvasMeta(
       "Could not read a discussion or assignment from that URL. Expected .../courses/123/discussion_topics/456 or .../courses/123/assignments/456."
     );
   }
+  return fetchCanvasMetaWith(resolveInstitution(url), parsed);
+}
 
-  const { institution, token, baseUrl } = resolveInstitution(url);
+/**
+ * Core of fetchCanvasMeta against an already-resolved institution context, so
+ * both the URL-host path (single assignment) and the acronym path (Live Feed)
+ * pull the description + rubric from the same authoritative show endpoints.
+ */
+async function fetchCanvasMetaWith(
+  ctx: { institution: CanvasInstitution; token: string; baseUrl: string },
+  parsed: ParsedCanvasUrl
+): Promise<{ description: string; rubricText: string }> {
+  const { institution, token, baseUrl } = ctx;
 
   if (parsed.kind === "assignment") {
     const assignment = await fetchAssignmentObject(
@@ -644,6 +655,26 @@ export async function listGradingQueue(code: string): Promise<CanvasQueueItem[]>
       next = parseNextLink(response.headers.get("link"));
     }
   }
+
+  // The assignments list often omits the full description (and a graded
+  // discussion's prompt lives on its topic, not the assignment), so pull each
+  // row's description + rubric from the same show endpoints the single-URL flow
+  // uses. Failures keep whatever the list gave.
+  await Promise.all(
+    items.map(async (item) => {
+      try {
+        const meta = await fetchCanvasMetaWith(ctx, {
+          kind: item.kind,
+          courseId: item.courseId,
+          id: item.id,
+        });
+        item.description = meta.description;
+        item.rubricText = meta.rubricText;
+      } catch {
+        // Keep the list-derived fallback values.
+      }
+    })
+  );
 
   items.sort(
     (a, b) => a.courseName.localeCompare(b.courseName) || a.title.localeCompare(b.title)

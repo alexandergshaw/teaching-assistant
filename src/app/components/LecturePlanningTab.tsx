@@ -200,16 +200,16 @@ export default function LecturePlanningTab() {
         const pptxData = await buildSlidesPptx({
           presentationTitle: plan.presentationTitle,
           slides: plan.slides,
-          subtitle: plan.assignmentName,
+          subtitle: plan.label,
           author,
         });
-        const weekLabel = `Week ${plan.weekNumber}`;
-        outputZip.file(`${weekLabel} Slides.pptx`, pptxData);
+        const fileLabel = plan.label;
+        outputZip.file(`${fileLabel} Slides.pptx`, pptxData);
         if (plan.moduleIntroduction) {
-          outputZip.file(`${weekLabel} Introduction.docx`, await buildDocxFromPlainText(plan.moduleIntroduction, plan.introTemplateHeadings, author));
+          outputZip.file(`${fileLabel} Introduction.docx`, await buildDocxFromPlainText(plan.moduleIntroduction, plan.introTemplateHeadings, author));
         }
         if (plan.assignmentInstructions) {
-          outputZip.file(`${weekLabel} Assignment Instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions, plan.instructionsTemplateHeadings, author));
+          outputZip.file(`${fileLabel} Assignment Instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions, plan.instructionsTemplateHeadings, author));
         }
       }
 
@@ -266,7 +266,7 @@ export default function LecturePlanningTab() {
     const plan = plans[index];
     if (!plan) return;
     const author = resolveDocumentAuthor(user);
-    const weekLabel = `Week ${plan.weekNumber}`;
+    const fileLabel = plan.label;
     if (kind === "slides") {
       const pptx = await buildSlidesPptx({
         presentationTitle: plan.presentationTitle,
@@ -276,7 +276,7 @@ export default function LecturePlanningTab() {
       });
       downloadBlob(
         pptx,
-        `${weekLabel} Slides.pptx`,
+        `${fileLabel} Slides.pptx`,
         "application/vnd.openxmlformats-officedocument.presentationml.presentation"
       );
       return;
@@ -287,7 +287,7 @@ export default function LecturePlanningTab() {
     const docx = await buildDocxFromPlainText(text, headings, author);
     downloadBlob(
       docx,
-      `${weekLabel} ${name}.docx`,
+      `${fileLabel} ${name}.docx`,
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     );
   };

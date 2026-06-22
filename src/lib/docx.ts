@@ -3,6 +3,8 @@
 // function so they stay visually identical. `docx` is imported dynamically so it
 // stays out of the main bundle until a download is requested.
 
+import { looksLikeAssignmentSlug, stripAssignmentSlugPrefix } from "./assignment-name";
+
 // The docx library writes an empty docProps/app.xml, whereas a file actually
 // saved from Word always names the application and version. This is the
 // extended-properties payload Word itself produces for a plain document, so the
@@ -152,17 +154,27 @@ export async function buildDocxFromPlainText(
     } else if (hasTemplate) {
       isHeading = allowedHeadings.has(normalizeHeading(trimmed));
     } else {
-      isHeading = trimmed.length < 80 && !isListItem && prevBlank && nextBlank;
+      // A short, isolated line is a heading — unless it is just a machine slug
+      // ("review2", "assignment3"), which must stay body text, never a heading.
+      isHeading =
+        trimmed.length < 80 &&
+        !isListItem &&
+        prevBlank &&
+        nextBlank &&
+        !looksLikeAssignmentSlug(trimmed);
     }
 
     if (isHeading) {
       const isTitle = markdownMatch ? markdownIsTitle : !firstHeadingFound;
       firstHeadingFound = true;
+      // Drop a leaked machine-slug prefix (e.g. "review1: ") while leaving a
+      // legitimate human title like "Assignment 3: …" untouched.
+      const cleanHeading = stripAssignmentSlugPrefix(headingText);
       if (isTitle) {
         // Document title: large navy heading with a navy rule beneath it.
         children.push(
           new Paragraph({
-            children: [new TextRun({ text: headingText, font: FONT, color: NAVY, bold: true, size: 36 })],
+            children: [new TextRun({ text: cleanHeading, font: FONT, color: NAVY, bold: true, size: 36 })],
             spacing: { after: 200 },
             border: { bottom: { style: BorderStyle.SINGLE, size: 12, space: 6, color: NAVY } },
           })
@@ -172,7 +184,7 @@ export async function buildDocxFromPlainText(
         children.push(
           new Paragraph({
             children: [
-              new TextRun({ text: headingText, font: FONT, color: NAVY, bold: true, size: 24, allCaps: true }),
+              new TextRun({ text: cleanHeading, font: FONT, color: NAVY, bold: true, size: 24, allCaps: true }),
             ],
             spacing: { before: 320, after: 120 },
             border: { bottom: { style: BorderStyle.SINGLE, size: 4, space: 4, color: RULE } },

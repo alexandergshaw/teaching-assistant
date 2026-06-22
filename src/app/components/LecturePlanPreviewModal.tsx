@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import type { AssignmentPlan, SlideData } from "../actions";
 import { reviseLecturePlanTextAction, reviseLectureSlidesAction } from "../actions";
 import type { LlmProvider } from "@/lib/llm";
+import { looksLikeAssignmentSlug, stripAssignmentSlugPrefix } from "@/lib/assignment-name";
 import styles from "../page.module.css";
 
 type Tab = "slides" | "intro" | "instructions";
@@ -100,7 +101,8 @@ function PlainTextSection({ text }: { text: string }) {
     if (markdownMatch) {
       headingText = markdownMatch[2].trim();
       markdownIsTitle = markdownMatch[1].length === 1;
-    } else if (isHeadingLine(line)) {
+    } else if (isHeadingLine(line) && !looksLikeAssignmentSlug(line)) {
+      // A bare machine slug ("review2", "assignment3") is body text, not a heading.
       headingText = line.replace(/:$/, "").trim();
     }
 
@@ -108,14 +110,16 @@ function PlainTextSection({ text }: { text: string }) {
       flushParagraph();
       const isTitle = markdownMatch ? markdownIsTitle : !firstHeadingFound;
       firstHeadingFound = true;
+      // Drop a leaked slug prefix; keep human titles like "Assignment 3: …".
+      const clean = stripAssignmentSlugPrefix(headingText);
       elements.push(
         isTitle ? (
           <h2 key={`h-${elements.length}`} className={styles.docPreviewTitle}>
-            {headingText}
+            {clean}
           </h2>
         ) : (
           <h3 key={`h-${elements.length}`} className={styles.docPreviewHeading}>
-            {headingText}
+            {clean}
           </h3>
         )
       );
@@ -250,7 +254,7 @@ export default function LecturePlanPreviewModal({
                 ‹
               </button>
               <span className={styles.weekNavLabel}>
-                Week {plan.weekNumber} · {index + 1} of {plans.length}
+                {plan.label} · {index + 1} of {plans.length}
               </span>
               <button
                 type="button"

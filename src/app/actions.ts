@@ -51,6 +51,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
 import { requireOwner } from "@/lib/supabase/auth";
+import { humanizeAssignmentName, stripAssignmentSlugPrefix } from "@/lib/assignment-name";
 
 export interface SlideData {
   title: string;
@@ -2013,6 +2014,10 @@ Rules:
 
 export interface AssignmentPlan {
   assignmentName: string;
+  // Human-readable, unique label derived from the folder slug (e.g. "Review 1",
+  // "Assignment 3"). Used for file names and the editor header so two folders
+  // with the same number (assignment1 / review1 / exam1) never collide.
+  label: string;
   presentationTitle: string;
   slides: SlideData[];
   moduleIntroduction: string;
@@ -2258,19 +2263,20 @@ Requirements:
 
 async function generateModuleIntroForAssignment(
   assignmentName: string,
+  displayTitle: string,
   content: string,
   templateText = "",
   provider: LlmProvider = "gemini"
 ): Promise<{ text: string } | { error: string }> {
   const prompt = `You are an expert educator writing a module introduction document for a programming course.
 
-ASSIGNMENT / MODULE: ${assignmentName}
+ASSIGNMENT / MODULE: ${displayTitle}
 
 ASSIGNMENT CONTENT:
 ${content}
 
 Write a well-formatted module introduction for the week this assignment covers. The document should:
-1. Start with a single document title on the very first line, written as a markdown level-1 heading (e.g. "# Module Introduction: <topic>"). This title must be the only level-1 heading in the document.
+1. Start with a single document title on the very first line, written exactly as the markdown level-1 heading "# Module Introduction: ${displayTitle}". This must be the only level-1 heading in the document. Never use folder names, file paths, or identifiers like "review1" or "assignment3" as the title or any heading.
 2. Open with an engaging overview of the topic and why it matters.
 3. Include a section called "Real-World Applications" with at least 3 concrete, specific examples of how these concepts or technologies are used in real software, industry products, or everyday technology that students will recognise (e.g., how the concept powers a well-known app, framework, or system).
 4. Include a brief section called "What You Will Learn" that lists the key skills and concepts students will gain.
@@ -2302,19 +2308,20 @@ Do not include the assignment instructions or grading criteria — focus only on
 
 async function generateAssignmentInstructionsForAssignment(
   assignmentName: string,
+  displayTitle: string,
   readmeContent: string,
   templateText = "",
   provider: LlmProvider = "gemini"
 ): Promise<{ text: string } | { error: string }> {
   const prompt = `You are an expert educator writing a formal assignment instruction sheet for a programming course.
 
-ASSIGNMENT: ${assignmentName}
+ASSIGNMENT: ${displayTitle}
 
 README / ASSIGNMENT SOURCE:
 ${readmeContent}
 
 Using the README content above, write a complete, student-facing assignment instruction document. The document should:
-1. Start with a single document title on the very first line, written as a markdown level-1 heading (e.g. "# <Assignment Name>"). This title must be the only level-1 heading in the document.
+1. Start with the document title on the very first line, written exactly as the markdown level-1 heading "# ${displayTitle}". This must be the only level-1 heading. Never use folder names, file paths, or identifiers like "review1" or "assignment3" as the title or any heading.
 2. Include an "Assignment Overview" section that clearly states the purpose and learning objectives.
 3. Include a "Instructions" section that details exactly what students must do, broken into bulleted steps or tasks pulled from the README (each step on its own line starting with "- ").
 4. Include a "Requirements" section listing any technical or functional requirements mentioned in the README (e.g., methods to implement, expected behaviour, constraints).
@@ -2762,19 +2769,34 @@ export async function generateLecturePlansAction(
     // Generate slides and companion documents for each assignment in parallel.
     const results = await Promise.all(
       assignmentContents.map(async ({ name, content, readmeContent }, index) => {
+        // Map the folder slug to a clean human title/label. Strip a machine-slug
+        // prefix from the source H1 (e.g. "# review1: Review: Fundamentals" ->
+        // "Review: Fundamentals"); fall back to a humanized folder label. Clean
+        // the README the model sees so it can't echo the slug back as the title.
+        const sourceH1 = readmeContent.match(/^[ \t]*#[ \t]+(.+)$/m)?.[1]?.trim() ?? "";
+        const label = humanizeAssignmentName(name);
+        const displayTitle = stripAssignmentSlugPrefix(sourceH1, name) || label;
+        const cleanedReadme = sourceH1
+          ? readmeContent.replace(/^[ \t]*#[ \t]+.+$/m, `# ${displayTitle}`)
+          : readmeContent;
+
         const [slidesResult, introResult, instructionsResult] = await Promise.all([
           generateSlidesForAssignment(name, content, lectureDurationMinutes, provider),
-          generateModuleIntroForAssignment(name, content, introTemplateText, provider),
-          generateAssignmentInstructionsForAssignment(name, readmeContent, instructionsTemplateText, provider),
+          generateModuleIntroForAssignment(name, displayTitle, content, introTemplateText, provider),
+          generateAssignmentInstructionsForAssignment(name, displayTitle, cleanedReadme, instructionsTemplateText, provider),
         ]);
         if ("error" in slidesResult) return null;
         // Derive the week number from the assignment folder name (e.g.
         // "week3", "Week 3", "assignment-03"). Fall back to the sorted position.
+        // Only used for ordering now — file names use the unique label.
         const parsedWeek = name.match(/\d+/)?.[0];
         const weekNumber = parsedWeek ? parseInt(parsedWeek, 10) : index + 1;
         return {
           assignmentName: name,
           ...slidesResult,
+          // Override the deck title with the clean human title.
+          presentationTitle: displayTitle,
+          label,
           moduleIntroduction: "error" in introResult ? "" : introResult.text,
           assignmentInstructions: "error" in instructionsResult ? "" : instructionsResult.text,
           weekNumber,

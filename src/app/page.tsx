@@ -13,6 +13,7 @@ import TopBar from "./components/TopBar";
 import { useInstitutionCounts } from "./components/InstitutionCounts";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildSlidesPptx } from "@/lib/pptx";
+import { stampDocxAppProperties } from "@/lib/docx";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { useSupabase } from "@/context/SupabaseProvider";
 import styles from "./page.module.css";
@@ -359,7 +360,7 @@ export default function Home() {
             ],
           }],
         });
-        introDocxBuffer = await Packer.toArrayBuffer(introDoc);
+        introDocxBuffer = await stampDocxAppProperties(await Packer.toArrayBuffer(introDoc));
       }
 
       // ── Build assignment.docx ────────────────────────────────────────
@@ -382,7 +383,7 @@ export default function Home() {
           ...assignmentPreview.deliverables.map((d) => new Paragraph({ children: [new TextRun(`• ${d}`)] })),
         ];
         const assignmentDoc = new Document({ creator: author, lastModifiedBy: author, sections: [{ children: assignmentChildren }] });
-        assignmentDocxBuffer = await Packer.toArrayBuffer(assignmentDoc);
+        assignmentDocxBuffer = await stampDocxAppProperties(await Packer.toArrayBuffer(assignmentDoc));
       }
 
       // ── Build rubric.txt ─────────────────────────────────────────────
@@ -442,7 +443,7 @@ export default function Home() {
         }
       }
       const lectureDoc = new Document({ creator: author, lastModifiedBy: author, sections: [{ children: lectureChildren }] });
-      const lectureDocxBuffer = await Packer.toArrayBuffer(lectureDoc);
+      const lectureDocxBuffer = await stampDocxAppProperties(await Packer.toArrayBuffer(lectureDoc));
 
       // ── Assemble ZIP ─────────────────────────────────────────────────
       const zip = new JSZip();

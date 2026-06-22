@@ -1,6 +1,13 @@
 import type { User } from "@supabase/supabase-js";
 
 /**
+ * Owner's display name, used as the default author when nothing more specific
+ * is available so generated files read as this person's own work. Override per
+ * deployment with NEXT_PUBLIC_DOC_AUTHOR.
+ */
+const DEFAULT_AUTHOR = "Alex Shaw";
+
+/**
  * Resolve the human author name stamped into the core properties of every
  * generated document (.docx / .pptx) so a downloaded file reads as the user's
  * own work instead of carrying a tooling default such as "PptxGenJS" or
@@ -9,9 +16,7 @@ import type { User } from "@supabase/supabase-js";
  * Resolution order:
  *   1. NEXT_PUBLIC_DOC_AUTHOR - explicit override for the deployment owner.
  *   2. The signed-in user's profile name (full_name / name in user_metadata).
- *   3. A readable name derived from the email local part.
- *   4. Empty string - the file then records no author at all, which is still a
- *      normal state for a hand-made document (and never names a tool).
+ *   3. DEFAULT_AUTHOR - the owner's name, so files are always attributed.
  */
 export function resolveDocumentAuthor(
   user?: Pick<User, "email" | "user_metadata"> | null
@@ -26,14 +31,5 @@ export function resolveDocumentAuthor(
     if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
   }
 
-  const local = user?.email?.split("@")[0]?.trim();
-  if (local) {
-    return local
-      .split(/[._-]+/)
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ");
-  }
-
-  return "";
+  return DEFAULT_AUTHOR;
 }

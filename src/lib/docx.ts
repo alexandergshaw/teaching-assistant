@@ -3,6 +3,46 @@
 // function so they stay visually identical. `docx` is imported dynamically so it
 // stays out of the main bundle until a download is requested.
 
+// The docx library writes an empty docProps/app.xml, whereas a file actually
+// saved from Word always names the application and version. This is the
+// extended-properties payload Word itself produces for a plain document, so the
+// finished file is indistinguishable from one the user saved by hand. Counts are
+// left at zero (Word recomputes them on next open) and Company is blank.
+const WORD_APP_XML =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' +
+  '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">' +
+  "<Template>Normal.dotm</Template>" +
+  "<TotalTime>1</TotalTime>" +
+  "<Pages>1</Pages>" +
+  "<Words>0</Words>" +
+  "<Characters>0</Characters>" +
+  "<Application>Microsoft Office Word</Application>" +
+  "<DocSecurity>0</DocSecurity>" +
+  "<Lines>0</Lines>" +
+  "<Paragraphs>0</Paragraphs>" +
+  "<ScaleCrop>false</ScaleCrop>" +
+  "<Company></Company>" +
+  "<LinksUpToDate>false</LinksUpToDate>" +
+  "<CharactersWithSpaces>0</CharactersWithSpaces>" +
+  "<SharedDoc>false</SharedDoc>" +
+  "<HyperlinksChanged>false</HyperlinksChanged>" +
+  "<AppVersion>16.0000</AppVersion>" +
+  "</Properties>";
+
+/**
+ * Rewrite a packed .docx so its docProps/app.xml matches what Microsoft Word
+ * writes, instead of the empty placeholder the docx library emits. Every .docx
+ * the app produces is passed through here before download so the extended
+ * properties carry no sign of how the file was generated.
+ */
+export async function stampDocxAppProperties(buffer: ArrayBuffer): Promise<ArrayBuffer> {
+  const { default: JSZip } = await import("jszip");
+  const zip = await JSZip.loadAsync(buffer);
+  zip.file("docProps/app.xml", WORD_APP_XML);
+  // DEFLATE so the repacked file matches the compression Word itself uses.
+  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
+}
+
 /**
  * Render markdown-ish plain text (a title, "## section" headings or heuristic
  * headings, paragraphs, "1." / "-" lists, and bare URLs) into a polished,
@@ -30,7 +70,6 @@ export async function buildDocxFromPlainText(
     PageNumber,
     AlignmentType,
     BorderStyle,
-    LevelFormat,
   } = await import("docx");
 
   // Professional, branded document palette (matches the app + slide decks).
@@ -90,15 +129,6 @@ export async function buildDocxFromPlainText(
   };
 
   const children: InstanceType<typeof Paragraph>[] = [];
-  // Each contiguous run of "1. 2. 3." items gets its own numbering instance so
-  // numbering restarts per section instead of running on across the document.
-  type DocOptions = ConstructorParameters<typeof Document>[0];
-  type NumberingConfig = NonNullable<DocOptions["numbering"]>["config"][number];
-  const numberingConfigs: NumberingConfig[] = [];
-  let orderedGroups = 0;
-  let currentOrderedRef: string | null = null;
-  let prevWasOrdered = false;
-
   const lines = text.split("\n");
   let firstHeadingFound = false;
 
@@ -126,7 +156,6 @@ export async function buildDocxFromPlainText(
     }
 
     if (isHeading) {
-      prevWasOrdered = false;
       const isTitle = markdownMatch ? markdownIsTitle : !firstHeadingFound;
       firstHeadingFound = true;
       if (isTitle) {
@@ -150,42 +179,17 @@ export async function buildDocxFromPlainText(
           })
         );
       }
-    } else if (/^\d+\.\s+/.test(trimmed)) {
-      if (!prevWasOrdered) {
-        orderedGroups += 1;
-        currentOrderedRef = `ordered-${orderedGroups}`;
-        numberingConfigs.push({
-          reference: currentOrderedRef,
-          levels: [
-            {
-              level: 0,
-              format: LevelFormat.DECIMAL,
-              text: "%1.",
-              alignment: AlignmentType.START,
-              style: { paragraph: { indent: { left: 460, hanging: 260 } } },
-            },
-          ],
-        });
-      }
-      prevWasOrdered = true;
+    } else if (/^(?:\d+\.|[-•*])\s+/.test(trimmed)) {
+      // List items always render as bullets — generated documents never use
+      // numbered lists, so a "1." line is stripped of its number and bulleted.
       children.push(
         new Paragraph({
-          children: buildLabeledRuns(trimmed.replace(/^\d+\.\s+/, "")),
-          numbering: { reference: currentOrderedRef as string, level: 0 },
-          spacing: { after: 80 },
-        })
-      );
-    } else if (/^[-•*]\s+/.test(trimmed)) {
-      prevWasOrdered = false;
-      children.push(
-        new Paragraph({
-          children: buildLabeledRuns(trimmed.slice(trimmed.indexOf(" ") + 1)),
+          children: buildLabeledRuns(trimmed.replace(/^(?:\d+\.|[-•*])\s+/, "")),
           bullet: { level: 0 },
           spacing: { after: 80 },
         })
       );
     } else {
-      prevWasOrdered = false;
       children.push(new Paragraph({ children: buildLabeledRuns(trimmed) }));
     }
   }
@@ -205,7 +209,6 @@ export async function buildDocxFromPlainText(
         },
       },
     },
-    numbering: { config: numberingConfigs },
     sections: [
       {
         properties: { page: { margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } },
@@ -225,5 +228,5 @@ export async function buildDocxFromPlainText(
       },
     ],
   });
-  return Packer.toArrayBuffer(doc);
+  return stampDocxAppProperties(await Packer.toArrayBuffer(doc));
 }

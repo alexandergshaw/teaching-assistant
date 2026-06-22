@@ -2323,7 +2323,7 @@ Using the README content above, write a complete, student-facing assignment inst
 7. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Instructions"). Do not use any other markdown symbols (no bold, italics, or bullet asterisks) in the body text.
 8. Write in clear, direct language appropriate for undergraduate students.
 
-Do not invent requirements not present in the README. If the README is sparse, note that students should refer to the course discussion board for clarification. The "Helpful Free Resources" section should always be included regardless of how sparse the README is.${buildStrictTemplateBlock(templateText)}`;
+Do not invent requirements not present in the README. If the README is sparse, note that students should contact the instructor (for example during office hours) for clarification. Never tell students to use, post on, check, or refer to a course discussion board, forum, or message board anywhere in the document. The "Helpful Free Resources" section should always be included regardless of how sparse the README is.${buildStrictTemplateBlock(templateText)}`;
 
   const result = await callLlm(
     {

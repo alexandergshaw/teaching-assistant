@@ -1,8 +1,8 @@
 "use client";
 
 import type { ChangeEvent } from "react";
-import { useMemo, useState } from "react";
-import type { GradeActionState, TestGeminiState } from "../actions";
+import { useMemo, useRef, useState } from "react";
+import { fetchCanvasMetaAction, type GradeActionState, type TestGeminiState } from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
 import { parseGeneratedRubric } from "../utils/rubric";
 import { useLlmProvider } from "@/lib/llm-provider";
@@ -151,11 +151,49 @@ export default function GradingTab({
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
 
+  const [canvasMeta, setCanvasMeta] = useState<{ status: "idle" | "loading" | "done" | "error"; message: string }>({ status: "idle", message: "" });
+  const lastMetaUrlRef = useRef("");
+
   const canvasUrlKind = detectCanvasUrlKind(canvasUrl);
   const graderLabel =
     selectedProvider === "other"
       ? "deterministic grader (against your CSV/JSON rubric)"
       : "AI grader";
+
+  // On a recognized Canvas URL, prefill instructions + rubric from Canvas without
+  // overriding anything already typed.
+  const loadCanvasMeta = async () => {
+    const url = canvasUrl.trim();
+    if (!url || !detectCanvasUrlKind(url) || url === lastMetaUrlRef.current) return;
+    lastMetaUrlRef.current = url;
+    setCanvasMeta({ status: "loading", message: "Loading details from Canvas…" });
+
+    const result = await fetchCanvasMetaAction(url);
+    if ("error" in result) {
+      setCanvasMeta({ status: "error", message: result.error });
+      return;
+    }
+
+    const filled: string[] = [];
+    if (result.description && !assignmentInstructions.trim()) {
+      setAssignmentInstructions(result.description);
+      filled.push("instructions");
+    }
+    if (result.rubricText && !rubric.trim()) {
+      setRubric(result.rubricText);
+      filled.push(result.rubricSynthesized ? "rubric (synthesized from the description)" : "rubric");
+    }
+
+    const base =
+      filled.length > 0
+        ? `Loaded ${filled.join(" + ")} from Canvas (editable below).`
+        : "Canvas details available; kept your existing text.";
+    const caveat =
+      selectedProvider === "other" && result.rubricText
+        ? " Note: the deterministic grader needs a check-based CSV/JSON rubric; this Canvas rubric may not map to automated checks."
+        : "";
+    setCanvasMeta({ status: "done", message: base + caveat });
+  };
 
   const run = state.run;
 
@@ -330,6 +368,7 @@ export default function GradingTab({
               placeholder="Paste a discussion or assignment link (.../discussion_topics/… or .../assignments/…)"
               value={canvasUrl}
               onChange={(e) => setCanvasUrl(e.target.value)}
+              onBlur={loadCanvasMeta}
             />
             <p className={styles.fieldHint}>
               {canvasUrlKind === "discussion"
@@ -340,6 +379,14 @@ export default function GradingTab({
                     ? "Unrecognized Canvas URL. Expecting a link like .../courses/123/discussion_topics/456 or .../courses/123/assignments/456."
                     : `Paste a Canvas discussion or assignment link. The type is detected automatically and graded with the ${graderLabel}.`}
             </p>
+            {canvasMeta.status !== "idle" && (
+              <p
+                className={styles.fieldHint}
+                style={{ color: canvasMeta.status === "error" ? "var(--error, #b91c1c)" : undefined }}
+              >
+                {canvasMeta.message}
+              </p>
+            )}
           </div>
         )}
 

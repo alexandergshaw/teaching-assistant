@@ -9,7 +9,7 @@ import {
   type GradingRun,
 } from "@/lib/grade";
 import { extractTextFromBuffer } from "@/lib/office-extract";
-import { fetchCanvasWork, canvasWorkToZipBase64 } from "@/lib/canvas";
+import { fetchCanvasWork, canvasWorkToZipBase64, fetchCanvasMeta } from "@/lib/canvas";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -1096,6 +1096,34 @@ function gradingApiToRun(resp: GradingApiResponse): GradingRun {
       };
     }),
   };
+}
+
+/**
+ * Fetch a Canvas assignment/discussion's description + rubric so the grading
+ * form can prefill the instructions and rubric boxes from a pasted URL.
+ */
+export async function fetchCanvasMetaAction(
+  url: string
+): Promise<{ description: string; rubricText: string; rubricSynthesized: boolean } | { error: string }> {
+  try {
+    const meta = await fetchCanvasMeta(url);
+    let rubricText = meta.rubricText;
+    let rubricSynthesized = false;
+    // No rubric attached in Canvas: synthesize one from the description so the
+    // grading form always has a rubric to show and edit.
+    if (!rubricText.trim() && meta.description.trim()) {
+      try {
+        rubricText = await generateRubric(meta.description);
+        rubricSynthesized = Boolean(rubricText.trim());
+      } catch {
+        // Leave the rubric empty if synthesis fails; grading can still
+        // synthesize one at grade time for the AI grader.
+      }
+    }
+    return { description: meta.description, rubricText, rubricSynthesized };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load Canvas details." };
+  }
 }
 
 // Grade a submissions zip with the deterministic ("Other") grading service.

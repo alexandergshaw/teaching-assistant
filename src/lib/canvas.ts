@@ -310,6 +310,131 @@ async function fetchAssignment(
   return students;
 }
 
+interface CanvasRubricRating {
+  description?: string;
+  long_description?: string;
+  points?: number;
+}
+
+interface CanvasRubricCriterion {
+  description?: string;
+  long_description?: string;
+  points?: number;
+  ratings?: CanvasRubricRating[];
+}
+
+interface CanvasAssignmentObject {
+  description?: string | null;
+  rubric?: CanvasRubricCriterion[];
+}
+
+interface CanvasDiscussionTopicObject {
+  message?: string | null;
+  assignment_id?: number | null;
+  assignment?: CanvasAssignmentObject | null;
+}
+
+// Render a Canvas rubric (criteria + point-rating tiers) as plain rubric text.
+function formatRubric(rubric: CanvasRubricCriterion[] | undefined): string {
+  if (!rubric || rubric.length === 0) return "";
+  const lines: string[] = [];
+  for (const criterion of rubric) {
+    const name = (criterion.description ?? "Criterion").trim();
+    const points = typeof criterion.points === "number" ? ` (${criterion.points} pts)` : "";
+    const detail = (criterion.long_description ?? "").trim();
+    lines.push(`${name}${points}: ${detail || name}`);
+    for (const rating of criterion.ratings ?? []) {
+      const ratingName = (rating.description ?? "").trim();
+      const ratingPoints = typeof rating.points === "number" ? ` (${rating.points} pts)` : "";
+      const ratingDetail = (rating.long_description ?? "").trim();
+      if (ratingName || ratingDetail) {
+        lines.push(`  ${ratingName}${ratingPoints}: ${ratingDetail || ratingName}`);
+      }
+    }
+  }
+  return lines.join("\n");
+}
+
+async function fetchAssignmentObject(
+  baseUrl: string,
+  token: string,
+  institution: CanvasInstitution,
+  courseId: string,
+  assignmentId: string
+): Promise<CanvasAssignmentObject> {
+  const response = await fetch(
+    `${baseUrl}/api/v1/courses/${courseId}/assignments/${assignmentId}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+  return (await response.json()) as CanvasAssignmentObject;
+}
+
+/**
+ * Fetch the assignment/discussion description and any attached rubric for a URL,
+ * so the grading form can prefill the instructions and rubric. The rubric text
+ * is descriptive (criteria + point tiers); it suits the AI grader but generally
+ * not the deterministic engine (which needs check-based rules).
+ */
+export async function fetchCanvasMeta(
+  url: string
+): Promise<{ description: string; rubricText: string }> {
+  const parsed = parseCanvasUrl(url);
+  if (!parsed) {
+    throw new Error(
+      "Could not read a discussion or assignment from that URL. Expected .../courses/123/discussion_topics/456 or .../courses/123/assignments/456."
+    );
+  }
+
+  const { institution, token, baseUrl } = resolveInstitution(url);
+
+  if (parsed.kind === "assignment") {
+    const assignment = await fetchAssignmentObject(
+      baseUrl,
+      token,
+      institution,
+      parsed.courseId,
+      parsed.id
+    );
+    return {
+      description: assignment.description ? htmlToText(assignment.description) : "",
+      rubricText: formatRubric(assignment.rubric),
+    };
+  }
+
+  // Discussion: the topic message is the description; a graded discussion links
+  // to an assignment that may carry the rubric.
+  const response = await fetch(
+    `${baseUrl}/api/v1/courses/${parsed.courseId}/discussion_topics/${parsed.id}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+  const topic = (await response.json()) as CanvasDiscussionTopicObject;
+  const description = topic.message ? htmlToText(topic.message) : "";
+
+  let rubricText = formatRubric(topic.assignment?.rubric);
+  if (!rubricText && topic.assignment_id) {
+    try {
+      const assignment = await fetchAssignmentObject(
+        baseUrl,
+        token,
+        institution,
+        parsed.courseId,
+        String(topic.assignment_id)
+      );
+      rubricText = formatRubric(assignment.rubric);
+    } catch {
+      // Rubric is optional; ignore if the linked assignment can't be read.
+    }
+  }
+
+  return { description, rubricText };
+}
+
 /**
  * Pack Canvas work into a base64 zip that mirrors a Canvas "Download
  * Submissions" archive: flat files named `<lastfirst>_<userId>_<seq>_<name>`,

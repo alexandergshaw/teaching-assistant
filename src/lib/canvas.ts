@@ -495,7 +495,13 @@ export async function postCanvasGrades(
         }
       );
       if (!response.ok) {
-        failures.push({ userId, error: canvasError(response.status, institution).message });
+        const error =
+          response.status === 404
+            ? "No submission found for this student in Canvas (HTTP 404)."
+            : response.status === 401 || response.status === 403
+              ? `Not authorized to post this grade (check ${institution.code}_CANVAS_API_TOKEN's grading access).`
+              : `Canvas rejected the grade (HTTP ${response.status}).`;
+        failures.push({ userId, error });
         continue;
       }
       posted += 1;

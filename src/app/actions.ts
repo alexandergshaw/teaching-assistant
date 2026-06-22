@@ -2208,6 +2208,10 @@ export interface AssignmentPlan {
   label: string;
   presentationTitle: string;
   slides: SlideData[];
+  // True when slide generation failed for this assignment after retries, so the
+  // deck above is an empty placeholder. The UI surfaces this so the instructor
+  // can regenerate rather than silently shipping a blank deck.
+  slidesFailed?: boolean;
   moduleIntroduction: string;
   assignmentInstructions: string;
   // The week number parsed from the assignment folder name in the codebase
@@ -2787,6 +2791,29 @@ Requirements:
   }
 }
 
+/**
+ * Map over `items` running at most `limit` tasks concurrently, preserving order.
+ * The lecture-plan generator makes three LLM calls per assignment; without a cap
+ * a large course fires dozens of Gemini requests at once and trips the per-minute
+ * rate limit, which (before retries existed) silently dropped whole assignments.
+ */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  const workers = Array.from({ length: workerCount }, async () => {
+    for (let current = next++; current < items.length; current = next++) {
+      results[current] = await fn(items[current], current);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 export async function generateLecturePlansAction(
   zipBase64: string,
   lectureDurationMinutes: number,
@@ -2954,9 +2981,15 @@ export async function generateLecturePlansAction(
       ? await extractDocxTemplateHeadings(instructionsTemplateBase64)
       : [];
 
-    // Generate slides and companion documents for each assignment in parallel.
-    const results = await Promise.all(
-      assignmentContents.map(async ({ name, content, readmeContent }, index) => {
+    // Generate slides and companion documents for each assignment. Run a bounded
+    // number of assignments at once (each makes three LLM calls) so we stay under
+    // the provider's rate limit; the transport layer additionally retries
+    // transient failures so a single hiccup never drops an assignment.
+    const LECTURE_PLAN_CONCURRENCY = 4;
+    const results = await mapWithConcurrency(
+      assignmentContents,
+      LECTURE_PLAN_CONCURRENCY,
+      async ({ name, content, readmeContent }, index) => {
         // Map the folder slug to a clean human title/label. Strip a machine-slug
         // prefix from the source H1 (e.g. "# review1: Review: Fundamentals" ->
         // "Review: Fundamentals"); fall back to a humanized folder label. Clean
@@ -2977,7 +3010,15 @@ export async function generateLecturePlansAction(
           generateModuleIntroForAssignment(name, displayTitle, content, introTemplateText, provider),
           generateAssignmentInstructionsForAssignment(name, displayTitle, cleanedReadme, instructionsTemplateText, provider),
         ]);
-        if ("error" in slidesResult) return null;
+        // Never drop the whole assignment when only the slide deck fails — that
+        // silently removed an assignment from the output with no feedback. Keep
+        // the assignment (its intro/instructions are usually fine) with an empty
+        // deck so it stays visible and can be regenerated.
+        const slidesFailed = "error" in slidesResult;
+        if (slidesFailed) {
+          console.error(`Slide generation failed for "${name}": ${slidesResult.error}`);
+        }
+        const slides = slidesFailed ? [] : slidesResult.slides;
         // Derive the week number from the assignment folder name (e.g.
         // "week3", "Week 3", "assignment-03"). Fall back to the sorted position.
         // Only used for ordering now — file names use the unique label.
@@ -2985,8 +3026,9 @@ export async function generateLecturePlansAction(
         const weekNumber = parsedWeek ? parseInt(parsedWeek, 10) : index + 1;
         return {
           assignmentName: name,
-          ...slidesResult,
-          // Override the deck title with the clean human title.
+          slides,
+          slidesFailed,
+          // Use the clean human title for the deck.
           presentationTitle: displayTitle,
           label,
           moduleIntroduction: "error" in introResult ? "" : introResult.text,
@@ -2995,13 +3037,13 @@ export async function generateLecturePlansAction(
           introTemplateHeadings,
           instructionsTemplateHeadings,
         } satisfies AssignmentPlan;
-      })
+      }
     );
 
-    const plans = results.filter((r): r is AssignmentPlan => r !== null);
+    const plans = results;
 
     if (plans.length === 0) {
-      return { error: "Failed to generate slides for any assignment. Check your Gemini API key and try again." };
+      return { error: "No assignments could be generated from the uploaded zip." };
     }
 
     return plans;

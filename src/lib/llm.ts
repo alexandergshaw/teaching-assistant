@@ -62,33 +62,86 @@ export async function callLlm(
   return callGemini(req);
 }
 
+// Transport hardening. Features such as lecture-plan generation fan out many
+// calls at once, so a single transient failure (a rate-limit or a brief server
+// blip) must not be fatal — without retries one failed call silently drops a
+// whole assignment from the output. We retry rate-limit/5xx responses and
+// network errors with exponential backoff + jitter, honoring Retry-After.
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 4;
+const BASE_DELAY_MS = 600;
+const MAX_DELAY_MS = 8000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Parse a Retry-After header (delta-seconds or HTTP date) into milliseconds. */
+function parseRetryAfter(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const when = Date.parse(value);
+  if (!Number.isNaN(when)) return Math.max(0, when - Date.now());
+  return null;
+}
+
+/** Backoff before retry `attempt` (0-based): honor Retry-After, else exp + jitter. */
+function backoffDelay(attempt: number, retryAfter: string | null): number {
+  const headerMs = parseRetryAfter(retryAfter);
+  if (headerMs !== null) return Math.min(headerMs, 20_000);
+  const exp = Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS);
+  return exp + Math.floor(Math.random() * 400);
+}
+
 async function callGemini(req: LlmRequest): Promise<LlmResult> {
   const apiKey = getGeminiApiKey();
   const model = getGeminiModel();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const body = JSON.stringify({
+    contents: req.contents,
+    ...(req.generationConfig ? { generationConfig: req.generationConfig } : {}),
+  });
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: req.contents,
-        ...(req.generationConfig ? { generationConfig: req.generationConfig } : {}),
-      }),
+  let lastResult: LlmResult = { ok: false, status: 0, body: "Request was never attempted." };
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const isLastAttempt = attempt === MAX_ATTEMPTS - 1;
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+    } catch (err) {
+      // Network/transport error — always transient, retry with backoff.
+      lastResult = { ok: false, status: 0, body: err instanceof Error ? err.message : "Network error" };
+      if (isLastAttempt) return lastResult;
+      await sleep(backoffDelay(attempt, null));
+      continue;
     }
-  );
 
-  if (!response.ok) {
-    const body = await response.text();
-    return { ok: false, status: response.status, body };
+    if (!response.ok) {
+      const errBody = await response.text();
+      lastResult = { ok: false, status: response.status, body: errBody };
+      if (!isLastAttempt && RETRYABLE_STATUS.has(response.status)) {
+        await sleep(backoffDelay(attempt, response.headers.get("retry-after")));
+        continue;
+      }
+      return lastResult;
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const text =
+      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+    return { ok: true, text };
   }
 
-  const data = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-
-  const text =
-    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-
-  return { ok: true, text };
+  return lastResult;
 }

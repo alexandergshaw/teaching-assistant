@@ -515,10 +515,37 @@ export default function LecturePlanningTab() {
             </button>
           </div>
 
+          {(() => {
+            const failed = plans.filter((p) => p.slidesFailed);
+            if (failed.length === 0) return null;
+            return (
+              <div
+                role="alert"
+                style={{
+                  padding: "12px 16px",
+                  borderRadius: 10,
+                  background: "color-mix(in srgb, #f59e0b 12%, transparent 88%)",
+                  border: "1px solid color-mix(in srgb, #f59e0b 35%, transparent 65%)",
+                  color: "var(--text-primary)",
+                  fontSize: "0.9rem",
+                  lineHeight: 1.5,
+                }}
+              >
+                <strong>Slides could not be generated for {failed.length} assignment{failed.length !== 1 ? "s" : ""}:</strong>{" "}
+                {failed.map((p) => p.label).join(", ")}. The model failed even after retries, so{" "}
+                {failed.length !== 1 ? "their decks are empty placeholders" : "its deck is an empty placeholder"}. Re-run generation to try
+                again (transient model errors usually clear on a retry), or open {failed.length !== 1 ? "an assignment" : "it"} and use
+                Revise slides to build the deck.
+              </div>
+            );
+          })()}
+
           <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
             {plans.map((plan, i) => {
               const badges: string[] = [];
-              badges.push(`${plan.slides.length + 1} slide${plan.slides.length !== 0 ? "s" : ""}`);
+              if (!plan.slidesFailed) {
+                badges.push(`${plan.slides.length + 1} slide${plan.slides.length !== 0 ? "s" : ""}`);
+              }
               if (plan.moduleIntroduction) badges.push("Module Intro");
               if (plan.assignmentInstructions) badges.push("Instructions");
               return (
@@ -546,6 +573,23 @@ export default function LecturePlanningTab() {
                     {plan.assignmentName}
                   </span>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+                    {plan.slidesFailed && (
+                      <span
+                        style={{
+                          fontSize: "0.72rem",
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                          padding: "2px 8px",
+                          borderRadius: 20,
+                          background: "color-mix(in srgb, #f59e0b 14%, transparent 86%)",
+                          color: "#b45309",
+                          border: "1px solid color-mix(in srgb, #f59e0b 35%, transparent 65%)",
+                        }}
+                      >
+                        Slides failed
+                      </span>
+                    )}
                     {badges.map((badge) => (
                       <span
                         key={badge}

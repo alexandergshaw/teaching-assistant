@@ -2316,11 +2316,11 @@ ${readmeContent}
 Using the README content above, write a complete, student-facing assignment instruction document. The document should:
 1. Start with a single document title on the very first line, written as a markdown level-1 heading (e.g. "# <Assignment Name>"). This title must be the only level-1 heading in the document.
 2. Include an "Assignment Overview" section that clearly states the purpose and learning objectives.
-3. Include a "Instructions" section that details exactly what students must do, broken into numbered steps or tasks pulled from the README.
+3. Include a "Instructions" section that details exactly what students must do, broken into bulleted steps or tasks pulled from the README (each step on its own line starting with "- ").
 4. Include a "Requirements" section listing any technical or functional requirements mentioned in the README (e.g., methods to implement, expected behaviour, constraints).
 5. Include a "Helpful Free Resources" section with at least 5 free external resources (tutorials, official documentation, guides, or reference material) that help students complete this assignment. For each resource, give the title, the URL, and one short sentence on why it helps. Every resource must be freely accessible (no paywalls) and come from a reputable source (e.g. official docs, MDN, Python docs, freeCodeCamp, Microsoft Learn, university or open course material).
 6. End with a "Deliverables" section. The deliverable is ALWAYS: submit the up-to-date zip of the entire codebase with all completed files included.
-7. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Instructions"). Do not use any other markdown symbols (no bold, italics, or bullet asterisks) in the body text.
+7. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Instructions"). For any list, start each item on its own line with a hyphen ("- "); NEVER use numbered lists (no "1.", "2.", etc.). Do not use any other markdown symbols (no bold or italics) in the body text.
 8. Write in clear, direct language appropriate for undergraduate students.
 
 Do not invent requirements not present in the README. If the README is sparse, note that students should contact the instructor (for example during office hours) for clarification. Never tell students to use, post on, check, or refer to a course discussion board, forum, or message board anywhere in the document. The "Helpful Free Resources" section should always be included regardless of how sparse the README is.${buildStrictTemplateBlock(templateText)}`;
@@ -2505,7 +2505,8 @@ REVISION INSTRUCTION:
 ${instruction}
 
 Rewrite the document applying the instruction. Requirements:
-- Preserve the overall structure: keep the single level-1 title (one "# " line) and the level-2 "## " section headings. Do not use any other markdown (no bold, italics, or bullet asterisks) in body text.
+- Preserve the overall structure: keep the single level-1 title (one "# " line) and the level-2 "## " section headings.
+- For any list, start each item on its own line with a hyphen ("- "); NEVER use numbered lists (no "1.", "2.", etc.). Do not use any other markdown (no bold or italics) in body text.
 - Leave content the instruction does not touch intact.
 - Never tell students to use, post on, check, or refer to a course discussion board, forum, or message board.
 - Output ONLY the revised document text, with no preamble or explanation.${buildStrictTemplateBlock(templateText)}`;

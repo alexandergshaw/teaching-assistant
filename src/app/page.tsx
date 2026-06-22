@@ -371,9 +371,9 @@ export default function Home() {
           new Paragraph({ text: "Overview", heading: HeadingLevel.HEADING_2 }),
           new Paragraph({ children: [new TextRun(assignmentPreview.overview)] }),
           new Paragraph({ text: "Steps", heading: HeadingLevel.HEADING_2 }),
-          ...assignmentPreview.steps.map((s, i) => new Paragraph({
+          ...assignmentPreview.steps.map((s) => new Paragraph({
             children: [
-              new TextRun({ text: `${i + 1}. ${s.stepTitle}`, bold: true }),
+              new TextRun({ text: `• ${s.stepTitle}`, bold: true }),
               new TextRun({ text: `  ${s.description}` }),
             ],
           })),

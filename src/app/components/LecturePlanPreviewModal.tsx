@@ -122,16 +122,15 @@ function PlainTextSection({ text }: { text: string }) {
       return;
     }
 
-    const orderedMatch = line.match(/^(\d+)\.\s+(.*)$/);
-    const bulletMatch = line.match(/^[-•*]\s+(.*)$/);
-    if (orderedMatch || bulletMatch) {
+    // Numbered and bulleted lines both render as bullets — generated documents
+    // never use numbered lists.
+    const listMatch = line.match(/^(?:\d+\.|[-•*])\s+(.*)$/);
+    if (listMatch) {
       flushParagraph();
-      const marker = orderedMatch ? `${orderedMatch[1]}.` : "•";
-      const content = (orderedMatch ? orderedMatch[2] : bulletMatch![1]).trim();
       elements.push(
         <p key={`li-${elements.length}`} className={styles.docPreviewListItem}>
-          <span className={styles.docPreviewMarker}>{marker}</span>
-          <span>{renderLabeledContent(content)}</span>
+          <span className={styles.docPreviewMarker}>•</span>
+          <span>{renderLabeledContent(listMatch[1].trim())}</span>
         </p>
       );
       return;

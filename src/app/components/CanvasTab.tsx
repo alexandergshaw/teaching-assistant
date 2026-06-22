@@ -17,6 +17,8 @@ import type {
 } from "@/lib/canvas";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
+import { useInstitutionSelection } from "@/lib/institutions";
+import InstitutionSwitcher from "./InstitutionSwitcher";
 import styles from "../page.module.css";
 
 const COURSE_URL_KEY = "ta-canvas-course-url";
@@ -61,6 +63,7 @@ function formatWhen(iso: string | null): string {
 
 function AnnouncementsPanel() {
   const [provider] = useLlmProvider();
+  const { active: activeInstitution } = useInstitutionSelection();
 
   // Restore the last course URL so the tab reopens where it left off.
   const [courseUrl, setCourseUrl] = useState<string>(() =>
@@ -97,7 +100,7 @@ function AnnouncementsPanel() {
     if (!id) return;
     localStorage.setItem(COURSE_URL_KEY, url);
     setLoadState({ status: "loading", message: "" });
-    const result = await listAnnouncementsAction(url);
+    const result = await listAnnouncementsAction(url, activeInstitution || undefined);
     if ("error" in result) {
       setAnnouncements([]);
       setCourseName("");
@@ -151,7 +154,12 @@ function AnnouncementsPanel() {
     if (!courseId || !title.trim() || !message.trim()) return;
     setPosting(true);
     setPostNote(null);
-    const result = await createAnnouncementAction(courseUrl.trim(), title.trim(), message.trim());
+    const result = await createAnnouncementAction(
+      courseUrl.trim(),
+      title.trim(),
+      message.trim(),
+      activeInstitution || undefined
+    );
     setPosting(false);
     if ("error" in result) {
       setPostNote({ kind: "error", text: result.error });
@@ -361,6 +369,7 @@ function AnnouncementsPanel() {
 
 function InboxPanel() {
   const [provider] = useLlmProvider();
+  const { active: activeInstitution } = useInstitutionSelection();
 
   const [conversations, setConversations] = useState<CanvasConversationSummary[]>([]);
   const [inboxState, setInboxState] = useState<{ status: "loading" | "idle" | "error"; message: string }>({
@@ -383,23 +392,26 @@ function InboxPanel() {
 
   const loadInbox = useCallback(async () => {
     setInboxState({ status: "loading", message: "" });
-    const result = await listConversationsAction();
+    const result = await listConversationsAction(activeInstitution || undefined);
     if ("error" in result) {
       setInboxState({ status: "error", message: result.error });
       return;
     }
     setConversations(result.conversations);
     setInboxState({ status: "idle", message: "" });
-  }, []);
+  }, [activeInstitution]);
 
-  // Load the inbox on mount. The initial state is already "loading", and the
-  // fetch is started without a synchronous setState so this stays a pure
-  // external-system sync (no cascading renders).
+  // Load the inbox on mount and whenever the active institution changes. The
+  // fetch is started without a synchronous setState (await-first) so this stays
+  // a pure external-system sync; selection is cleared since it belonged to the
+  // previous school.
   useEffect(() => {
     let active = true;
     (async () => {
-      const result = await listConversationsAction();
+      const result = await listConversationsAction(activeInstitution || undefined);
       if (!active) return;
+      setSelectedId(null);
+      setConversation(null);
       if ("error" in result) {
         setInboxState({ status: "error", message: result.error });
       } else {
@@ -410,7 +422,7 @@ function InboxPanel() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [activeInstitution]);
 
   const openConversation = async (id: number) => {
     setSelectedId(id);
@@ -419,7 +431,7 @@ function InboxPanel() {
     setReplyInstr("");
     setReplyNote(null);
     setThreadState({ status: "loading", message: "" });
-    const result = await getConversationAction(id);
+    const result = await getConversationAction(id, activeInstitution || undefined);
     if ("error" in result) {
       setThreadState({ status: "error", message: result.error });
       return;
@@ -449,7 +461,11 @@ function InboxPanel() {
     if (selectedId === null || !replyBody.trim()) return;
     setSending(true);
     setReplyNote(null);
-    const result = await replyToConversationAction(selectedId, replyBody.trim());
+    const result = await replyToConversationAction(
+      selectedId,
+      replyBody.trim(),
+      activeInstitution || undefined
+    );
     setSending(false);
     if ("error" in result) {
       setReplyNote({ kind: "error", text: result.error });
@@ -632,6 +648,11 @@ export default function CanvasTab() {
           assistant. Drafting is optional — nothing is sent to Canvas until you post.
         </p>
       </header>
+
+      <div className={styles.field}>
+        <label>Institution</label>
+        <InstitutionSwitcher />
+      </div>
 
       <div className={styles.lessonInnerTabs}>
         <button

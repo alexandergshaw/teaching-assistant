@@ -1159,13 +1159,14 @@ export async function postCanvasGradesAction(
 
 /** Load a course's name + recent announcements for the announcements panel. */
 export async function listAnnouncementsAction(
-  courseUrl: string
+  courseUrl: string,
+  acronym?: string
 ): Promise<{ courseName: string; announcements: CanvasAnnouncement[] } | { error: string }> {
   try {
     await requireOwner();
     const [courseName, announcements] = await Promise.all([
-      getCourseName(courseUrl),
-      listAnnouncements(courseUrl),
+      getCourseName(courseUrl, acronym),
+      listAnnouncements(courseUrl, acronym),
     ]);
     return { courseName, announcements };
   } catch (err) {
@@ -1177,24 +1178,25 @@ export async function listAnnouncementsAction(
 export async function createAnnouncementAction(
   courseUrl: string,
   title: string,
-  message: string
+  message: string,
+  acronym?: string
 ): Promise<{ announcement: CanvasAnnouncement } | { error: string }> {
   try {
     await requireOwner();
-    const announcement = await createAnnouncement(courseUrl, title, message);
+    const announcement = await createAnnouncement(courseUrl, title, message, acronym);
     return { announcement };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post the announcement." };
   }
 }
 
-/** List the account Inbox conversations. */
-export async function listConversationsAction(): Promise<
-  { conversations: CanvasConversationSummary[] } | { error: string }
-> {
+/** List the account Inbox conversations for the selected institution (or default). */
+export async function listConversationsAction(
+  acronym?: string
+): Promise<{ conversations: CanvasConversationSummary[] } | { error: string }> {
   try {
     await requireOwner();
-    return { conversations: await listConversations() };
+    return { conversations: await listConversations(acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load the inbox." };
   }
@@ -1202,11 +1204,12 @@ export async function listConversationsAction(): Promise<
 
 /** Fetch one conversation's full thread. */
 export async function getConversationAction(
-  id: number
+  id: number,
+  acronym?: string
 ): Promise<{ conversation: CanvasConversationDetail } | { error: string }> {
   try {
     await requireOwner();
-    return { conversation: await getConversation(id) };
+    return { conversation: await getConversation(id, acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load the conversation." };
   }
@@ -1215,12 +1218,13 @@ export async function getConversationAction(
 /** Reply to a conversation, then return its refreshed thread. */
 export async function replyToConversationAction(
   id: number,
-  body: string
+  body: string,
+  acronym?: string
 ): Promise<{ conversation: CanvasConversationDetail } | { error: string }> {
   try {
     await requireOwner();
-    await replyToConversation(id, body);
-    return { conversation: await getConversation(id) };
+    await replyToConversation(id, body, acronym);
+    return { conversation: await getConversation(id, acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not send the reply." };
   }

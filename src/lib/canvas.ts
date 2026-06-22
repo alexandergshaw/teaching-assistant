@@ -201,7 +201,11 @@ function resolveInstitutionByCode(code: string): {
   if (!upper) {
     throw new Error("An institution acronym is required.");
   }
-  const baseRaw = process.env[`${upper}_CANVAS_URL`];
+  // Fall back to a hard-coded institution's host so a preconfigured school (e.g.
+  // MCC) keeps working with just its token, even without <CODE>_CANVAS_URL set.
+  const hardcoded = CANVAS_INSTITUTIONS.find((inst) => inst.code.toUpperCase() === upper);
+  const baseRaw =
+    process.env[`${upper}_CANVAS_URL`] ?? (hardcoded ? `https://${hardcoded.host}` : undefined);
   const token = process.env[`${upper}_CANVAS_API_TOKEN`] || undefined;
   if (!baseRaw) {
     throw new Error(
@@ -875,7 +879,10 @@ function toAnnouncement(
 }
 
 /** Resolve a course URL to its id + credentials, or throw a clear error. */
-function resolveCourse(courseUrl: string): {
+function resolveCourse(
+  courseUrl: string,
+  code?: string
+): {
   courseId: string;
   institution: CanvasInstitution;
   token: string;
@@ -887,12 +894,15 @@ function resolveCourse(courseUrl: string): {
       "Could not read a course from that URL. Expected a link like .../courses/123."
     );
   }
-  return { courseId, ...resolveInstitution(courseUrl) };
+  // With an acronym, the base URL/token come from that school's env vars; without
+  // one, fall back to matching the URL host (the original single-school behavior).
+  const ctx = code ? resolveInstitutionByCode(code) : resolveInstitution(courseUrl);
+  return { courseId, ...ctx };
 }
 
 /** Fetch the course's display name for a heading. */
-export async function getCourseName(courseUrl: string): Promise<string> {
-  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl);
+export async function getCourseName(courseUrl: string, code?: string): Promise<string> {
+  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
   const response = await fetch(`${baseUrl}/api/v1/courses/${courseId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -904,8 +914,11 @@ export async function getCourseName(courseUrl: string): Promise<string> {
 }
 
 /** List a course's recent announcements (newest first), one page of 50. */
-export async function listAnnouncements(courseUrl: string): Promise<CanvasAnnouncement[]> {
-  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl);
+export async function listAnnouncements(
+  courseUrl: string,
+  code?: string
+): Promise<CanvasAnnouncement[]> {
+  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
   const response = await fetch(
     `${baseUrl}/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&per_page=50`,
     { headers: { Authorization: `Bearer ${token}` } }
@@ -924,11 +937,12 @@ export async function listAnnouncements(courseUrl: string): Promise<CanvasAnnoun
 export async function createAnnouncement(
   courseUrl: string,
   title: string,
-  message: string
+  message: string,
+  code?: string
 ): Promise<CanvasAnnouncement> {
   if (!title.trim()) throw new Error("An announcement needs a title.");
   if (!message.trim()) throw new Error("An announcement needs a message.");
-  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl);
+  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
 
   const params = new URLSearchParams();
   params.append("title", title.trim());
@@ -1016,8 +1030,17 @@ function participantName(p: CanvasParticipant): string {
 }
 
 /** List the account Inbox conversations (one page of 50, newest first). */
-export async function listConversations(): Promise<CanvasConversationSummary[]> {
-  const { institution, token, baseUrl } = resolveDefaultInstitution();
+/** Inbox is account-wide; an acronym selects that school's token, else default. */
+function resolveInbox(code?: string): {
+  institution: CanvasInstitution;
+  token: string;
+  baseUrl: string;
+} {
+  return code ? resolveInstitutionByCode(code) : resolveDefaultInstitution();
+}
+
+export async function listConversations(code?: string): Promise<CanvasConversationSummary[]> {
+  const { institution, token, baseUrl } = resolveInbox(code);
   const response = await fetch(`${baseUrl}/api/v1/conversations?per_page=50`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1039,8 +1062,11 @@ export async function listConversations(): Promise<CanvasConversationSummary[]> 
 }
 
 /** Fetch one conversation's full thread, oldest message first. */
-export async function getConversation(id: number): Promise<CanvasConversationDetail> {
-  const { institution, token, baseUrl } = resolveDefaultInstitution();
+export async function getConversation(
+  id: number,
+  code?: string
+): Promise<CanvasConversationDetail> {
+  const { institution, token, baseUrl } = resolveInbox(code);
   const response = await fetch(`${baseUrl}/api/v1/conversations/${id}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1079,9 +1105,13 @@ export async function getConversation(id: number): Promise<CanvasConversationDet
 }
 
 /** Reply to a conversation. Canvas sends the reply to all participants. */
-export async function replyToConversation(id: number, body: string): Promise<void> {
+export async function replyToConversation(
+  id: number,
+  body: string,
+  code?: string
+): Promise<void> {
   if (!body.trim()) throw new Error("A reply needs a message.");
-  const { institution, token, baseUrl } = resolveDefaultInstitution();
+  const { institution, token, baseUrl } = resolveInbox(code);
 
   const params = new URLSearchParams();
   params.append("body", body.trim());

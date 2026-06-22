@@ -771,6 +771,54 @@
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--field-background) 80%, var(--field-border) 20%);
 }
 
+/* ── Live Feed grading queue table (navy surface, white text) ─────────────── */
+
+.liveFeedTableWrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  background: var(--navy, #1a2744);
+}
+
+.liveFeedTable {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 820px;
+  color: #ffffff;
+}
+
+.liveFeedTable th,
+.liveFeedTable td {
+  padding: 11px 13px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.liveFeedTable th {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #ffffff;
+}
+
+.liveFeedTable a {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+.liveFeedTable summary {
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.liveFeedTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
 .matrix {
   width: 100%;
   border-collapse: separate;

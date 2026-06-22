@@ -103,7 +103,9 @@
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  min-width: 230px;
+  min-width: 280px;
+  max-height: 70vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -113,6 +115,101 @@
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
   z-index: 60;
+}
+
+.menuHint {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #475569);
+  line-height: 1.4;
+}
+
+.instAddRow {
+  display: flex;
+  gap: 6px;
+}
+
+.instInput {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--field-border, #cbd5e1);
+  border-radius: 8px;
+  background: var(--field-background, #ffffff);
+  color: var(--text-primary, #0f172a);
+  font: inherit;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+}
+
+.instInput:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline-offset: 1px;
+  border-color: var(--accent, #2563eb);
+}
+
+.instAddBtn {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent, #2563eb);
+  color: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.instAddBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.instList {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.instItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--card-border, rgba(15, 23, 42, 0.08));
+}
+
+.instCode {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--text-primary, #0f172a);
+}
+
+.instStatus {
+  margin-left: auto;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-secondary, #475569);
+}
+
+.instRemove {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #475569);
+  font-size: 1.05rem;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.instRemove:hover {
+  color: #dc2626;
 }
 
 .menuSection {

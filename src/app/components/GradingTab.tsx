@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchCanvasMetaAction,
   postCanvasGradesAction,
-  checkInstitutionsAction,
   listGradingQueueAction,
   type GradeActionState,
   type TestGeminiState,
@@ -15,6 +14,8 @@ import type { CanvasQueueItem } from "@/lib/canvas";
 import type { LlmProvider } from "@/lib/llm";
 import { parseGeneratedRubric } from "../utils/rubric";
 import { useLlmProvider } from "@/lib/llm-provider";
+import { useInstitutionSelection, readActiveInstitution } from "@/lib/institutions";
+import InstitutionSwitcher from "./InstitutionSwitcher";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import styles from "../page.module.css";
 
@@ -162,22 +163,6 @@ function buildCsvContent(state: GradeActionState, edits: Record<string, RowEdit>
 
 // ── Live Feed panel ─────────────────────────────────────────────────────────
 
-const INSTITUTIONS_KEY = "ta-institutions";
-
-function readInstitutions(): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const parsed = JSON.parse(localStorage.getItem(INSTITUTIONS_KEY) ?? "[]");
-    return Array.isArray(parsed)
-      ? parsed.filter((x): x is string => typeof x === "string" && x.trim().length > 0)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-type InstitutionStatus = { canvasConfigured: boolean; llmConfigured: boolean };
-
 function LiveFeedPanel({
   provider,
   pending,
@@ -187,46 +172,17 @@ function LiveFeedPanel({
   pending: boolean;
   onAutoGrade: (row: CanvasQueueItem) => void;
 }) {
-  const [institutions, setInstitutions] = useState<string[]>(() => readInstitutions());
-  const [newAcronym, setNewAcronym] = useState("");
-  const [statuses, setStatuses] = useState<Record<string, InstitutionStatus>>({});
+  const { active } = useInstitutionSelection();
   const [rows, setRows] = useState<CanvasQueueItem[]>([]);
   const [queueErrors, setQueueErrors] = useState<Array<{ acronym: string; error: string }>>([]);
   const [queueState, setQueueState] = useState<{
     status: "idle" | "loading" | "error";
     message: string;
-  }>(() => ({ status: readInstitutions().length > 0 ? "loading" : "idle", message: "" }));
+  }>(() => ({ status: readActiveInstitution() ? "loading" : "idle", message: "" }));
 
-  const persistInstitutions = (next: string[]) => {
-    setInstitutions(next);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(INSTITUTIONS_KEY, JSON.stringify(next));
-    }
-  };
-
-  const refreshStatuses = useCallback(async (codes: string[]) => {
-    if (codes.length === 0) {
-      setStatuses({});
-      return;
-    }
-    const result = await checkInstitutionsAction(codes);
-    if ("error" in result) return;
-    const map: Record<string, InstitutionStatus> = {};
-    for (const s of result.statuses) {
-      map[s.acronym] = { canvasConfigured: s.canvasConfigured, llmConfigured: s.llmConfigured };
-    }
-    setStatuses(map);
-  }, []);
-
-  const refreshQueue = useCallback(async (codes: string[]) => {
-    if (codes.length === 0) {
-      setRows([]);
-      setQueueErrors([]);
-      setQueueState({ status: "idle", message: "" });
-      return;
-    }
+  const loadQueue = useCallback(async (code: string) => {
     setQueueState({ status: "loading", message: "" });
-    const result = await listGradingQueueAction(codes);
+    const result = await listGradingQueueAction([code]);
     if ("error" in result) {
       setQueueState({ status: "error", message: result.error });
       return;
@@ -236,133 +192,52 @@ function LiveFeedPanel({
     setQueueState({ status: "idle", message: "" });
   }, []);
 
-  // Load statuses + queue for the saved institutions on mount and whenever the
-  // list changes. Guarded so the effect body performs no synchronous setState.
+  // Load the queue for the active institution on mount and whenever it changes.
+  // Await-first so the effect body performs no synchronous setState.
   useEffect(() => {
-    if (institutions.length === 0) return;
-    let active = true;
+    if (!active) return;
+    let cancelled = false;
     (async () => {
-      await refreshStatuses(institutions);
-      if (!active) return;
-      await refreshQueue(institutions);
+      const result = await listGradingQueueAction([active]);
+      if (cancelled) return;
+      if ("error" in result) {
+        setQueueState({ status: "error", message: result.error });
+        return;
+      }
+      setRows(result.rows);
+      setQueueErrors(result.errors);
+      setQueueState({ status: "idle", message: "" });
     })();
     return () => {
-      active = false;
+      cancelled = true;
     };
-  }, [institutions, refreshStatuses, refreshQueue]);
-
-  const addInstitution = () => {
-    const code = newAcronym.trim().toUpperCase();
-    if (!code || institutions.includes(code)) {
-      setNewAcronym("");
-      return;
-    }
-    persistInstitutions([...institutions, code]);
-    setNewAcronym("");
-  };
-
-  const removeInstitution = (code: string) => {
-    const next = institutions.filter((c) => c !== code);
-    persistInstitutions(next);
-    if (next.length === 0) {
-      setRows([]);
-      setStatuses({});
-      setQueueErrors([]);
-      setQueueState({ status: "idle", message: "" });
-    }
-  };
+  }, [active]);
 
   const graderLabel = provider === "other" ? "deterministic grader" : "AI grader";
 
   return (
     <div className={styles.form}>
       <div className={styles.field}>
-        <label htmlFor="institution-acronym">Institutions</label>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <input
-            id="institution-acronym"
-            type="text"
-            className={styles.textInput}
-            style={{ maxWidth: 240, textTransform: "uppercase" }}
-            placeholder="Add an acronym (e.g. MCC)"
-            value={newAcronym}
-            onChange={(e) => setNewAcronym(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addInstitution();
-              }
-            }}
-          />
+        <label>Institution</label>
+        <InstitutionSwitcher />
+      </div>
+
+      {active && (
+        <div className={styles.resultsHeader} style={{ paddingTop: 0 }}>
+          <h2>Needs grading</h2>
           <button
             type="button"
             className={styles.downloadButton}
-            onClick={addInstitution}
-            disabled={!newAcronym.trim()}
+            onClick={() => void loadQueue(active)}
+            disabled={queueState.status === "loading"}
           >
-            Add institution
+            {queueState.status === "loading" ? "Refreshing…" : "Refresh"}
           </button>
         </div>
-        <p className={styles.fieldHint}>
-          Each acronym maps to env vars: <code>&lt;ACRONYM&gt;_CANVAS_URL</code>,{" "}
-          <code>&lt;ACRONYM&gt;_CANVAS_API_TOKEN</code>, and optionally{" "}
-          <code>&lt;ACRONYM&gt;_LLM_URL</code> / <code>&lt;ACRONYM&gt;_LLM_API</code> for that
-          school&apos;s grader. Set the secrets in the environment; this list only selects which
-          schools to poll.
-        </p>
+      )}
 
-        {institutions.length > 0 && (
-          <table className={styles.generatedRubricTable} style={{ marginTop: 8 }}>
-            <thead>
-              <tr>
-                <th>Acronym</th>
-                <th>Canvas</th>
-                <th>Grader</th>
-                <th aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {institutions.map((code) => {
-                const st = statuses[code];
-                return (
-                  <tr key={code}>
-                    <td>{code}</td>
-                    <td>{st ? (st.canvasConfigured ? "Configured" : "Missing env") : "—"}</td>
-                    <td>{st ? (st.llmConfigured ? "School grader" : "Global grader") : "—"}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className={styles.clearFileButton}
-                        onClick={() => removeInstitution(code)}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className={styles.resultsHeader} style={{ paddingTop: 0 }}>
-        <h2>Needs grading</h2>
-        <button
-          type="button"
-          className={styles.downloadButton}
-          onClick={() => {
-            void refreshStatuses(institutions);
-            void refreshQueue(institutions);
-          }}
-          disabled={institutions.length === 0 || queueState.status === "loading"}
-        >
-          {queueState.status === "loading" ? "Refreshing…" : "Refresh"}
-        </button>
-      </div>
-
-      {institutions.length === 0 && (
-        <p className={styles.emptyState}>Add an institution above to load its grading queue.</p>
+      {active && queueState.status === "loading" && (
+        <p className={styles.emptyState}>Loading the grading queue…</p>
       )}
       {queueState.status === "error" && <p className={styles.error}>{queueState.message}</p>}
       {queueErrors.map((e) => (
@@ -370,16 +245,15 @@ function LiveFeedPanel({
           {e.acronym}: {e.error}
         </p>
       ))}
-      {queueState.status === "idle" && institutions.length > 0 && rows.length === 0 && (
+      {active && queueState.status === "idle" && rows.length === 0 && (
         <p className={styles.emptyState}>Nothing is waiting to be graded right now.</p>
       )}
 
       {rows.length > 0 && (
-        <div className={styles.matrixWrap}>
-          <table className={styles.generatedRubricTable} style={{ minWidth: 900 }}>
+        <div className={styles.liveFeedTableWrap}>
+          <table className={styles.liveFeedTable}>
             <thead>
               <tr>
-                <th>Institution</th>
                 <th>Course</th>
                 <th>Assignment / Discussion</th>
                 <th>Description</th>
@@ -390,14 +264,13 @@ function LiveFeedPanel({
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={`${row.institution}-${row.kind}-${row.id}`}>
-                  <td>{row.institution}</td>
+                <tr key={`${row.kind}-${row.id}`}>
                   <td>{row.courseName}</td>
                   <td>
                     <a href={row.htmlUrl} target="_blank" rel="noopener noreferrer">
                       {row.title}
                     </a>
-                    <div className={styles.fieldHint}>{row.kind}</div>
+                    <div style={{ fontSize: "0.78rem", opacity: 0.8 }}>{row.kind}</div>
                   </td>
                   <td style={{ maxWidth: 320 }}>
                     {row.description ? (
@@ -440,7 +313,8 @@ function LiveFeedPanel({
 
       <p className={styles.fieldHint}>
         Auto Grade runs the same workflow as a single Canvas URL, using the {graderLabel}. Results
-        appear below, where you can edit and post them back to Canvas.
+        appear below, where you can edit and post them back to Canvas. Institutions are managed in
+        Settings (top right).
       </p>
     </div>
   );

@@ -5,7 +5,109 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ProviderToggle from "./ProviderToggle";
 import { useSupabase } from "@/context/SupabaseProvider";
+import { useInstitutions, writeInstitutions } from "@/lib/institutions";
+import { checkInstitutionsAction } from "../actions";
 import styles from "./TopBar.module.css";
+
+type InstitutionStatus = { canvasConfigured: boolean; llmConfigured: boolean };
+
+function InstitutionsSection({ open }: { open: boolean }) {
+  const institutions = useInstitutions();
+  const [newAcronym, setNewAcronym] = useState("");
+  const [statuses, setStatuses] = useState<Record<string, InstitutionStatus>>({});
+
+  // Check env configuration when the menu is open (await-first: no sync setState).
+  useEffect(() => {
+    if (!open || institutions.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const result = await checkInstitutionsAction(institutions);
+      if (cancelled || "error" in result) return;
+      const map: Record<string, InstitutionStatus> = {};
+      for (const s of result.statuses) {
+        map[s.acronym] = { canvasConfigured: s.canvasConfigured, llmConfigured: s.llmConfigured };
+      }
+      setStatuses(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, institutions]);
+
+  const addInstitution = () => {
+    const code = newAcronym.trim().toUpperCase();
+    if (!code || institutions.includes(code)) {
+      setNewAcronym("");
+      return;
+    }
+    writeInstitutions([...institutions, code]);
+    setNewAcronym("");
+  };
+
+  return (
+    <div className={styles.menuSection}>
+      <span className={styles.menuLabel}>Institutions</span>
+      <div className={styles.instAddRow}>
+        <input
+          type="text"
+          className={styles.instInput}
+          placeholder="Add acronym (e.g. MCC)"
+          value={newAcronym}
+          onChange={(e) => setNewAcronym(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addInstitution();
+            }
+          }}
+        />
+        <button
+          type="button"
+          className={styles.instAddBtn}
+          onClick={addInstitution}
+          disabled={!newAcronym.trim()}
+        >
+          Add
+        </button>
+      </div>
+      {institutions.length === 0 ? (
+        <span className={styles.menuHint}>
+          None yet. Add a school acronym to use the Live Feed and Communications tabs.
+        </span>
+      ) : (
+        <ul className={styles.instList}>
+          {institutions.map((code) => {
+            const st = statuses[code];
+            return (
+              <li key={code} className={styles.instItem}>
+                <span className={styles.instCode}>{code}</span>
+                <span
+                  className={styles.instStatus}
+                  title={
+                    st
+                      ? `Canvas ${st.canvasConfigured ? "configured" : "missing env"} · Grader ${st.llmConfigured ? "school" : "global"}`
+                      : ""
+                  }
+                >
+                  {st ? (st.canvasConfigured ? "Ready" : "Set env") : "…"}
+                </span>
+                <button
+                  type="button"
+                  className={styles.instRemove}
+                  aria-label={`Remove ${code}`}
+                  title="Remove"
+                  onClick={() => writeInstitutions(institutions.filter((c) => c !== code))}
+                >
+                  ×
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function LogoMark() {
   return (
@@ -91,6 +193,7 @@ function SettingsMenu() {
             <span className={styles.menuLabel}>LLM provider</span>
             <ProviderToggle />
           </div>
+          <InstitutionsSection open={open} />
           <Link
             href="/account/security"
             className={styles.menuItem}

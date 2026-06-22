@@ -116,32 +116,38 @@ MCC is preconfigured, so set `MCC_CANVAS_API_TOKEN`. To add another school: add 
 entry to the `CANVAS_INSTITUTIONS` list (code, name, host) and set its
 `<CODE>_CANVAS_API_TOKEN`.
 
-### Grading: Live Feed & institutions
+### Institutions registry
 
-The Grading tab's **Live Feed** sub-tab is a cross-school dashboard of everything
-waiting to be graded. At the top you register schools by **acronym** (MCC, MPCC,
-…); the list is stored in the browser and drives env-var lookups — set the
-secrets in the environment, the UI just selects which schools to poll. Per
-acronym:
+Schools are registered by **acronym** (MCC, MPCC, …) in the **Settings** dropdown
+(top right). The list is stored in the browser and drives env-var lookups — set
+the secrets in the environment; the UI just selects which schools to use and shows
+whether each one's env is configured. Per acronym:
 
-- `<ACRONYM>_CANVAS_URL` — Canvas base URL (e.g. `https://canvas.mccneb.edu`). Required.
+- `<ACRONYM>_CANVAS_URL` — Canvas base URL (e.g. `https://canvas.mccneb.edu`). Required (a preconfigured school in `CANVAS_INSTITUTIONS` can fall back to its hard-coded host).
 - `<ACRONYM>_CANVAS_API_TOKEN` — instructor token. Required.
 - `<ACRONYM>_LLM_URL` / `<ACRONYM>_LLM_API` — that school's grading-service URL +
   key for the deterministic ("Other API") grader. Optional; falls back to the
   global `GRADING_ENGINE_URL` / `GRADING_API_KEY`.
 
-On open (and via **Refresh**) the Live Feed scans each school's **active teacher
-courses** for assignments and graded discussions with `needs_grading_count > 0`,
-showing one row per assignment/discussion with its description and rubric. The
-**Auto Grade** button runs the exact same pipeline as the Single Assignment flow
-(grade → review matrix → post back to Canvas), routed to that school's grader.
-The acronym table flags whether each school's Canvas / grader env vars are set.
-All polling and grading is owner-gated (owner allowlist + MFA).
+The **Live Feed** and **Communications** tabs share a single active-institution
+switcher (pick a school on one tab and the other follows).
+
+### Grading: Live Feed
+
+The Grading tab's **Live Feed** sub-tab is a per-school dashboard of everything
+waiting to be graded. Pick a school in the switcher; on open (and via **Refresh**)
+it scans that school's **active teacher courses** for assignments and graded
+discussions with `needs_grading_count > 0`, showing one row per
+assignment/discussion with its description and rubric. The **Auto Grade** button
+runs the exact same pipeline as the Single Assignment flow (grade → review matrix
+→ post back to Canvas), routed to that school's grader. All polling and grading is
+owner-gated (owner allowlist + MFA).
 
 ### Canvas announcements & inbox
 
 The **Communications** tab posts course announcements and replies to Canvas inbox
-messages, reusing the same per-institution token as grading (no new env vars).
+messages, scoped to the institution chosen in the switcher (the same one the Live
+Feed uses). No new env vars beyond the per-acronym Canvas credentials above.
 
 - **Announcements**: paste any link from the course (a course home,
   `.../announcements`, or assignment URL — only the `.../courses/123` segment is

@@ -4,8 +4,10 @@
   justify-content: space-between;
   gap: 16px;
   padding: 12px 24px;
-  background: #ffffff;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background: var(--card-background, rgba(255, 255, 255, 0.92));
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--card-border, rgba(15, 23, 42, 0.08));
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
   position: sticky;
   top: 0;
@@ -38,7 +40,7 @@
 .name {
   font-weight: 700;
   font-size: 1rem;
-  color: #1a2744;
+  color: var(--text-primary, #0f172a);
   letter-spacing: -0.01em;
 }
 
@@ -51,19 +53,20 @@
 .link {
   font-size: 0.9rem;
   font-weight: 600;
-  color: #2563eb;
+  color: var(--accent, #2563eb);
 }
 
 .link:hover {
+  color: var(--accent-hover, #1d4ed8);
   text-decoration: underline;
 }
 
 .signout {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #475569;
-  background: transparent;
-  border: 1px solid #d1d5db;
+  color: var(--text-secondary, #475569);
+  background: var(--field-background, #ffffff);
+  border: 1px solid var(--field-border, #cbd5e1);
   border-radius: 8px;
   padding: 6px 13px;
   cursor: pointer;
@@ -71,6 +74,6 @@
 }
 
 .signout:hover {
-  border-color: #94a3b8;
-  color: #0f172a;
+  border-color: var(--accent, #2563eb);
+  color: var(--text-primary, #0f172a);
 }

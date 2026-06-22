@@ -1,6 +1,18 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Shared UI theme tokens (also used inside page.module.css). Defined here so
+     app-wide chrome like the top bar matches even when rendered outside .page. */
+  --page-background: linear-gradient(180deg, #f4f7fb 0%, #e8eef7 100%);
+  --card-background: rgba(255, 255, 255, 0.92);
+  --card-border: rgba(15, 23, 42, 0.08);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --field-border: #cbd5e1;
+  --field-background: #ffffff;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -24,8 +36,8 @@ body {
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  color: var(--foreground);
-  background: var(--background);
+  color: var(--text-primary);
+  background: var(--page-background);
   font-family: Arial, Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

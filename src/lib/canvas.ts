@@ -436,6 +436,81 @@ export async function fetchCanvasMeta(
 }
 
 /**
+ * Post grades + comments back to Canvas, one PUT per student. Resolves the
+ * assignment from the URL (assignment URLs directly; graded discussions via their
+ * linked assignment) and continues past individual failures, reporting them.
+ */
+export async function postCanvasGrades(
+  url: string,
+  grades: Array<{ userId: number; grade?: string; comment?: string }>
+): Promise<{ posted: number; failures: Array<{ userId: number; error: string }> }> {
+  const parsed = parseCanvasUrl(url);
+  if (!parsed) {
+    throw new Error(
+      "Could not read a discussion or assignment from that URL. Expected .../courses/123/discussion_topics/456 or .../courses/123/assignments/456."
+    );
+  }
+
+  const { institution, token, baseUrl } = resolveInstitution(url);
+
+  let assignmentId = parsed.kind === "assignment" ? parsed.id : "";
+  if (parsed.kind === "discussion") {
+    const response = await fetch(
+      `${baseUrl}/api/v1/courses/${parsed.courseId}/discussion_topics/${parsed.id}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!response.ok) {
+      throw canvasError(response.status, institution);
+    }
+    const topic = (await response.json()) as CanvasDiscussionTopicObject;
+    if (!topic.assignment_id) {
+      throw new Error(
+        "That discussion is not graded (no linked assignment), so grades cannot be posted to Canvas."
+      );
+    }
+    assignmentId = String(topic.assignment_id);
+  }
+
+  let posted = 0;
+  const failures: Array<{ userId: number; error: string }> = [];
+
+  for (const { userId, grade, comment } of grades) {
+    const params = new URLSearchParams();
+    if (grade && grade.trim()) params.append("submission[posted_grade]", grade.trim());
+    if (comment && comment.trim()) params.append("comment[text_comment]", comment.trim());
+    if ([...params.keys()].length === 0) {
+      continue; // nothing to post for this student
+    }
+
+    try {
+      const response = await fetch(
+        `${baseUrl}/api/v1/courses/${parsed.courseId}/assignments/${assignmentId}/submissions/${userId}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: params.toString(),
+        }
+      );
+      if (!response.ok) {
+        failures.push({ userId, error: canvasError(response.status, institution).message });
+        continue;
+      }
+      posted += 1;
+    } catch (err) {
+      failures.push({
+        userId,
+        error: err instanceof Error ? err.message : "Request failed.",
+      });
+    }
+  }
+
+  return { posted, failures };
+}
+
+/**
  * Pack Canvas work into a base64 zip that mirrors a Canvas "Download
  * Submissions" archive: flat files named `<lastfirst>_<userId>_<seq>_<name>`,
  * grouped by the leading student prefix. This lets the deterministic grading

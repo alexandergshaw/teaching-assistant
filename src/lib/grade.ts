@@ -56,6 +56,8 @@ export interface GradeResult {
   feedback: string;
   mergedFileCount: number;
   submittedFiles: SubmittedFileInfo[];
+  // Canvas user id, present when graded from a Canvas URL; enables write-back.
+  userId?: number;
 }
 
 export interface GradingRun {
@@ -1102,6 +1104,8 @@ export interface StudentSubmissionEntry {
   content: string;
   mergedFileCount: number;
   submittedFiles: SubmittedFileInfo[];
+  // Canvas user id, set on the Canvas path so grades can be posted back.
+  userId?: number;
 }
 
 /**
@@ -1123,7 +1127,7 @@ async function gradeStudentEntries(
   const results: GradeResult[] = [];
 
   for (let i = 0; i < limitedEntries.length; i += 1) {
-    const { student, content, mergedFileCount, submittedFiles } = limitedEntries[i];
+    const { student, content, mergedFileCount, submittedFiles, userId } = limitedEntries[i];
     const truncated = truncateSubmission(content, maxCharsPerSubmission);
 
     const imageFiles = submittedFiles
@@ -1134,7 +1138,7 @@ async function gradeStudentEntries(
 
     try {
       const result = await gradeSubmission(systemPrompt, student, truncated, provider, imageFiles);
-      results.push({ ...result, mergedFileCount, submittedFiles });
+      results.push({ ...result, mergedFileCount, submittedFiles, userId });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "An unexpected grading error occurred.";
@@ -1155,6 +1159,7 @@ async function gradeStudentEntries(
         mergedFileCount,
         submittedFiles,
         feedback: formatFeedback(overallComment, fallbackRubricAreas, ""),
+        userId,
       });
     }
 
@@ -1255,6 +1260,7 @@ async function canvasWorkToEntry(work: CanvasStudentWork): Promise<StudentSubmis
     content: contentParts.join("\n\n---\n\n"),
     mergedFileCount: Math.max(1, work.files.length + (work.text ? 1 : 0)),
     submittedFiles,
+    userId: work.userId,
   };
 }
 

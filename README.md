@@ -63,6 +63,11 @@ assignment instructions; the rubric is synthesized if not provided), while
 **Other API** sends the fetched work to the deterministic grading service as a
 synthesized Canvas-style zip (needs a check-based CSV/JSON rubric).
 
+After grading a Canvas URL you can **review and post grades back to Canvas**: edit
+each student's points and comment, then post. Grades write to the assignment's
+gradebook column and comments are added to each submission (assignment URLs, and
+graded discussions via their linked assignment). The token needs grading access.
+
 Institutions are registered by hostname in `src/lib/canvas.ts` (e.g. MCC ->
 `canvas.mccneb.edu`). Each registered institution reads its own credentials from
 env vars prefixed with its code:

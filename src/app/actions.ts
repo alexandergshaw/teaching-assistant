@@ -9,7 +9,7 @@ import {
   type GradingRun,
 } from "@/lib/grade";
 import { extractTextFromBuffer } from "@/lib/office-extract";
-import { fetchCanvasWork, canvasWorkToZipBase64, fetchCanvasMeta } from "@/lib/canvas";
+import { fetchCanvasWork, canvasWorkToZipBase64, fetchCanvasMeta, postCanvasGrades } from "@/lib/canvas";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -1123,6 +1123,20 @@ export async function fetchCanvasMetaAction(
     return { description: meta.description, rubricText, rubricSynthesized };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load Canvas details." };
+  }
+}
+
+/** Post reviewed grades + comments back to Canvas (one PUT per student). */
+export async function postCanvasGradesAction(
+  url: string,
+  grades: Array<{ userId: number; grade?: string; comment?: string }>
+): Promise<
+  { posted: number; failures: Array<{ userId: number; error: string }> } | { error: string }
+> {
+  try {
+    return await postCanvasGrades(url, grades);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not post grades to Canvas." };
   }
 }
 

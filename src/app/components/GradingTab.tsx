@@ -2,7 +2,12 @@
 
 import type { ChangeEvent } from "react";
 import { useMemo, useRef, useState } from "react";
-import { fetchCanvasMetaAction, type GradeActionState, type TestGeminiState } from "../actions";
+import {
+  fetchCanvasMetaAction,
+  postCanvasGradesAction,
+  type GradeActionState,
+  type TestGeminiState,
+} from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
 import { parseGeneratedRubric } from "../utils/rubric";
 import { useLlmProvider } from "@/lib/llm-provider";
@@ -60,6 +65,38 @@ function sortColumnKey(column: SortColumn): string {
 
 function compareText(a: string, b: string): number {
   return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+}
+
+// Pull the earned points out of a score string ("8/10" -> "8", "85%" -> "85").
+function parseEarnedPoints(total: string): string {
+  const fraction = total.match(/(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/);
+  if (fraction) return fraction[1];
+  const num = total.match(/-?\d+(?:\.\d+)?/);
+  return num ? num[0] : "";
+}
+
+// Editable per-student grade/comment for Canvas write-back, keyed by user id.
+type PostRow = {
+  student: string;
+  grade: string;
+  comment: string;
+  status: "idle" | "posting" | "posted" | "error";
+  message?: string;
+};
+
+function seedPostRows(run: GradeActionState["run"]): Record<number, PostRow> {
+  const seeded: Record<number, PostRow> = {};
+  if (!run) return seeded;
+  for (const result of run.results) {
+    if (typeof result.userId !== "number") continue;
+    seeded[result.userId] = {
+      student: result.student,
+      grade: parseEarnedPoints(result.totalScore),
+      comment: result.feedback || result.overallComment || "",
+      status: "idle",
+    };
+  }
+  return seeded;
 }
 
 function parseScoreValue(value: string): number | null {
@@ -196,6 +233,80 @@ export default function GradingTab({
   };
 
   const run = state.run;
+
+  const [postRows, setPostRows] = useState<Record<number, PostRow>>(() => seedPostRows(run));
+  const [prevRun, setPrevRun] = useState(run);
+  const [postSummary, setPostSummary] = useState("");
+  const [posting, setPosting] = useState(false);
+
+  // Re-seed the editable post rows when a new run arrives (adjust-state-on-prop-
+  // change pattern, so edits stay local between runs).
+  if (run !== prevRun) {
+    setPrevRun(run);
+    setPostRows(seedPostRows(run));
+    setPostSummary("");
+  }
+
+  const canvasGradable =
+    source === "canvas" &&
+    !!run &&
+    run.results.some((r) => typeof r.userId === "number");
+
+  const handlePostGrades = async () => {
+    const rows = Object.entries(postRows).map(([userId, row]) => ({
+      userId: Number(userId),
+      grade: row.grade,
+      comment: row.comment,
+    }));
+    if (rows.length === 0) return;
+    if (
+      !window.confirm(
+        `Post ${rows.length} grade(s) to Canvas? This writes to the live gradebook.`
+      )
+    ) {
+      return;
+    }
+
+    setPosting(true);
+    setPostSummary("");
+    setPostRows((prev) => {
+      const next = { ...prev };
+      for (const id of Object.keys(next)) {
+        next[Number(id)] = { ...next[Number(id)], status: "posting", message: undefined };
+      }
+      return next;
+    });
+
+    const result = await postCanvasGradesAction(canvasUrl, rows);
+    setPosting(false);
+
+    if ("error" in result) {
+      setPostSummary(result.error);
+      setPostRows((prev) => {
+        const next = { ...prev };
+        for (const id of Object.keys(next)) {
+          next[Number(id)] = { ...next[Number(id)], status: "error", message: result.error };
+        }
+        return next;
+      });
+      return;
+    }
+
+    const failed = new Map(result.failures.map((f) => [f.userId, f.error]));
+    setPostRows((prev) => {
+      const next = { ...prev };
+      for (const id of Object.keys(next)) {
+        const numId = Number(id);
+        next[numId] = failed.has(numId)
+          ? { ...next[numId], status: "error", message: failed.get(numId) }
+          : { ...next[numId], status: "posted", message: undefined };
+      }
+      return next;
+    });
+    setPostSummary(
+      `Posted ${result.posted}${result.failures.length ? `, ${result.failures.length} failed` : ""}.`
+    );
+  };
 
   const sortedResults = useMemo(() => {
     if (!run) return [];
@@ -728,6 +839,85 @@ export default function GradingTab({
               </tbody>
             </table>
           </div>
+        </section>
+      )}
+
+      {canvasGradable && (
+        <section className={styles.results}>
+          <div className={styles.resultsHeader}>
+            <h2>Review &amp; Post to Canvas</h2>
+            <button
+              type="button"
+              className={styles.submitButton}
+              onClick={handlePostGrades}
+              disabled={posting}
+            >
+              {posting
+                ? "Posting…"
+                : `Post ${Object.keys(postRows).length} grade(s) to Canvas`}
+            </button>
+          </div>
+          <p className={styles.fieldHint}>
+            Edit grades and comments, then post. Grades write to the
+            assignment&apos;s gradebook column; comments are added to each
+            submission.
+          </p>
+          {postSummary && <p className={styles.fieldHint}>{postSummary}</p>}
+          <ul className={styles.lessonSlideList}>
+            {(run?.results ?? [])
+              .filter((r) => typeof r.userId === "number")
+              .map((r) => {
+                const id = r.userId as number;
+                const row = postRows[id];
+                if (!row) return null;
+                return (
+                  <li key={id} className={styles.lessonSlideCard}>
+                    <div className={styles.fieldLabelRow}>
+                      <span className={styles.lessonSlideTitle}>{row.student}</span>
+                      {row.status !== "idle" && (
+                        <span className={styles.fieldHint}>
+                          {row.status === "posted"
+                            ? "Posted"
+                            : row.status === "posting"
+                              ? "Posting…"
+                              : `Failed: ${row.message ?? ""}`}
+                        </span>
+                      )}
+                    </div>
+                    <div className={styles.field}>
+                      <label htmlFor={`post-grade-${id}`}>Grade (points)</label>
+                      <input
+                        id={`post-grade-${id}`}
+                        type="text"
+                        className={styles.textInput}
+                        value={row.grade}
+                        onChange={(e) =>
+                          setPostRows((prev) => ({
+                            ...prev,
+                            [id]: { ...prev[id], grade: e.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className={styles.field}>
+                      <label htmlFor={`post-comment-${id}`}>Comment</label>
+                      <textarea
+                        id={`post-comment-${id}`}
+                        rows={4}
+                        style={{ minHeight: "90px" }}
+                        value={row.comment}
+                        onChange={(e) =>
+                          setPostRows((prev) => ({
+                            ...prev,
+                            [id]: { ...prev[id], comment: e.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                  </li>
+                );
+              })}
+          </ul>
         </section>
       )}
     </section>

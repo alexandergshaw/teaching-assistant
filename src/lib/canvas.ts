@@ -9,14 +9,40 @@
  * exposes it to the client.
  */
 
-const DEFAULT_CANVAS_URL = "https://canvas.mccneb.edu";
-
-export function getCanvasUrl(): string {
-  return (process.env.CANVAS_URL ?? DEFAULT_CANVAS_URL).replace(/\/+$/, "");
+/**
+ * Registered Canvas institutions, keyed by hostname. The discussion URL's host
+ * selects the institution; its credentials come from per-institution env vars:
+ *   <CODE>_CANVAS_API_TOKEN  (required) — instructor access token
+ *   <CODE>_CANVAS_URL        (optional) — base URL override (defaults to https://<host>)
+ * To add a school: add an entry here and set its env vars. No other code changes.
+ */
+interface CanvasInstitution {
+  code: string;
+  name: string;
+  host: string;
 }
 
-export function getCanvasApiToken(): string | undefined {
-  return process.env.CANVAS_API_TOKEN || undefined;
+const CANVAS_INSTITUTIONS: CanvasInstitution[] = [
+  { code: "MCC", name: "Metropolitan Community College", host: "canvas.mccneb.edu" },
+];
+
+/** Match a discussion URL to a registered institution by its hostname. */
+function institutionForUrl(url: string): CanvasInstitution | null {
+  let host: string;
+  try {
+    host = new URL(url).host.toLowerCase();
+  } catch {
+    return null;
+  }
+  return CANVAS_INSTITUTIONS.find((inst) => inst.host.toLowerCase() === host) ?? null;
+}
+
+function institutionBaseUrl(inst: CanvasInstitution): string {
+  return (process.env[`${inst.code}_CANVAS_URL`] ?? `https://${inst.host}`).replace(/\/+$/, "");
+}
+
+function institutionToken(inst: CanvasInstitution): string | undefined {
+  return process.env[`${inst.code}_CANVAS_API_TOKEN`] || undefined;
 }
 
 /** One student's flattened contribution to a discussion. */
@@ -68,12 +94,12 @@ interface CanvasViewResponse {
   view?: CanvasViewEntry[];
 }
 
-function canvasError(status: number): Error {
+function canvasError(status: number, inst: CanvasInstitution): Error {
   switch (status) {
     case 401:
     case 403:
       return new Error(
-        "Canvas rejected the request: the API token is missing, invalid, or lacks access to this course (CANVAS_API_TOKEN)."
+        `Canvas rejected the request: the API token is missing, invalid, or lacks access to this course (${inst.code}_CANVAS_API_TOKEN).`
       );
     case 404:
       return new Error(
@@ -91,13 +117,6 @@ function canvasError(status: number): Error {
 export async function fetchCanvasDiscussion(
   url: string
 ): Promise<CanvasDiscussionStudent[]> {
-  const token = getCanvasApiToken();
-  if (!token) {
-    throw new Error(
-      "Canvas API token is not configured. Set CANVAS_API_TOKEN in the environment."
-    );
-  }
-
   const ids = parseCanvasDiscussionUrl(url);
   if (!ids) {
     throw new Error(
@@ -105,13 +124,28 @@ export async function fetchCanvasDiscussion(
     );
   }
 
-  const endpoint = `${getCanvasUrl()}/api/v1/courses/${ids.courseId}/discussion_topics/${ids.topicId}/view`;
+  const institution = institutionForUrl(url);
+  if (!institution) {
+    const supported = CANVAS_INSTITUTIONS.map((inst) => inst.host).join(", ");
+    throw new Error(
+      `That Canvas host is not configured. Supported institutions: ${supported || "none"}.`
+    );
+  }
+
+  const token = institutionToken(institution);
+  if (!token) {
+    throw new Error(
+      `Canvas API token is not configured for ${institution.name}. Set ${institution.code}_CANVAS_API_TOKEN in the environment.`
+    );
+  }
+
+  const endpoint = `${institutionBaseUrl(institution)}/api/v1/courses/${ids.courseId}/discussion_topics/${ids.topicId}/view`;
   const response = await fetch(endpoint, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
   if (!response.ok) {
-    throw canvasError(response.status);
+    throw canvasError(response.status, institution);
   }
 
   const data = (await response.json()) as CanvasViewResponse;

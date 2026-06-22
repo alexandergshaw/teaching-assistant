@@ -52,11 +52,20 @@ materials `rubric.csv`) via that service instead of Gemini:
 
 The Grading tab can grade a Canvas discussion board directly (Canvas has no UI
 export for discussions, but its API does). Choose **Canvas Discussion** as the
-source and paste the discussion link; each student's posts and replies are pulled
-via the Canvas API and graded with the AI grader against the rubric.
+source and paste the discussion link; the institution is selected automatically
+from the link's hostname, then each student's posts and replies are pulled via
+the Canvas API and graded with the AI grader against the rubric.
 
-- `CANVAS_URL` (optional, default: `https://canvas.mccneb.edu`) — your Canvas base URL.
-- `CANVAS_API_TOKEN` (required for discussion grading) — an instructor personal access token (Canvas: Account → Settings → New Access Token). Sent as `Authorization: Bearer`, server-side only, never exposed to the client.
+Institutions are registered by hostname in `src/lib/canvas.ts` (e.g. MCC ->
+`canvas.mccneb.edu`). Each registered institution reads its own credentials from
+env vars prefixed with its code:
+
+- `<CODE>_CANVAS_API_TOKEN` (required for that institution) — an instructor personal access token (Canvas: Account → Settings → New Access Token). Sent as `Authorization: Bearer`, server-side only, never exposed to the client.
+- `<CODE>_CANVAS_URL` (optional) — base URL override; defaults to `https://<host>`.
+
+MCC is preconfigured, so set `MCC_CANVAS_API_TOKEN`. To add another school: add an
+entry to the `CANVAS_INSTITUTIONS` list (code, name, host) and set its
+`<CODE>_CANVAS_API_TOKEN`.
 
 ## Course Engine: Lecture Deck (`/api/v1/lecture`)
 

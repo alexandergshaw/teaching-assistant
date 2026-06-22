@@ -4,7 +4,8 @@
   justify-content: center;
   align-items: flex-start;
   padding: 40px 24px 56px;
-  background: linear-gradient(180deg, #f4f7fb 0%, #e8eef7 100%);
+  /* Brand navy chrome, matching the top bar. The white card keeps the form readable. */
+  background: var(--navy, #1a2744);
 }
 
 .card {

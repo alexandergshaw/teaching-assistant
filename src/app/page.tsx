@@ -555,6 +555,10 @@ export default function Home() {
           value={activeTab}
           onChange={(_, v: ActiveTab) => setActiveTab(v)}
           sx={{
+            position: "sticky",
+            top: "var(--topbar-height)",
+            zIndex: 40,
+            backgroundColor: "var(--card-background)",
             borderBottom: "1px solid var(--field-border)",
             marginBottom: "0",
             "& .MuiTabs-indicator": { backgroundColor: "var(--accent)" },
@@ -577,7 +581,7 @@ export default function Home() {
           <Tab label="New Build Courses" value="course-planning" disableRipple />
           <Tab label="Pre Built Courses" value="lesson-planning" disableRipple />
           <Tab label="Grading" value="grading" disableRipple />
-          <Tab label="Canvas" value="canvas" disableRipple />
+          <Tab label="Communications" value="canvas" disableRipple />
         </Tabs>
 
         {activeTab === "grading" && (

@@ -13,6 +13,9 @@
   --field-background: #ffffff;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
+  /* Brand navy (matches the logo mark) used for app chrome: top bar + auth pages. */
+  --navy: #1a2744;
+  --topbar-height: 58px;
 }
 
 @media (prefers-color-scheme: dark) {

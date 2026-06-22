@@ -20,6 +20,28 @@ import { useLlmProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
 
 const COURSE_URL_KEY = "ta-canvas-course-url";
+const VIEW_KEY = "ta-canvas-view";
+const SAVED_COURSES_KEY = "ta-canvas-saved-courses";
+
+/** A Canvas course the user pinned so they can jump back into it. */
+interface SavedCourse {
+  id: string;
+  url: string;
+  name: string;
+}
+
+function readSavedCourses(): SavedCourse[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SAVED_COURSES_KEY) ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((c): c is SavedCourse => !!c && typeof c.id === "string" && typeof c.url === "string")
+      .map((c) => ({ id: c.id, url: c.url, name: typeof c.name === "string" && c.name ? c.name : `Course ${c.id}` }));
+  } catch {
+    return [];
+  }
+}
 
 // Format a Canvas ISO timestamp for display; blank when absent.
 function formatWhen(iso: string | null): string {
@@ -51,6 +73,8 @@ function AnnouncementsPanel() {
     message: "",
   });
 
+  const [savedCourses, setSavedCourses] = useState<SavedCourse[]>(() => readSavedCourses());
+
   const [draftPrompt, setDraftPrompt] = useState("");
   const [drafting, setDrafting] = useState(false);
   const [title, setTitle] = useState("");
@@ -59,12 +83,21 @@ function AnnouncementsPanel() {
   const [postNote, setPostNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
   const courseId = parseCanvasCourseId(courseUrl);
+  const isSaved = !!courseId && savedCourses.some((c) => c.id === courseId);
 
-  const handleLoad = async () => {
-    if (!courseId) return;
-    localStorage.setItem(COURSE_URL_KEY, courseUrl.trim());
+  const persistSavedCourses = (next: SavedCourse[]) => {
+    setSavedCourses(next);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(SAVED_COURSES_KEY, JSON.stringify(next));
+    }
+  };
+
+  const loadAnnouncements = async (url: string) => {
+    const id = parseCanvasCourseId(url);
+    if (!id) return;
+    localStorage.setItem(COURSE_URL_KEY, url);
     setLoadState({ status: "loading", message: "" });
-    const result = await listAnnouncementsAction(courseUrl.trim());
+    const result = await listAnnouncementsAction(url);
     if ("error" in result) {
       setAnnouncements([]);
       setCourseName("");
@@ -74,6 +107,30 @@ function AnnouncementsPanel() {
     setCourseName(result.courseName);
     setAnnouncements(result.announcements);
     setLoadState({ status: "idle", message: "" });
+    // Keep a saved course's label fresh once we know its real name.
+    if (savedCourses.some((c) => c.id === id)) {
+      persistSavedCourses(
+        savedCourses.map((c) => (c.id === id ? { ...c, name: result.courseName, url } : c))
+      );
+    }
+  };
+
+  const saveCurrentCourse = () => {
+    if (!courseId || isSaved) return;
+    persistSavedCourses([
+      ...savedCourses,
+      { id: courseId, url: courseUrl.trim(), name: courseName || `Course ${courseId}` },
+    ]);
+  };
+
+  const openSavedCourse = (course: SavedCourse) => {
+    setCourseUrl(course.url);
+    setLoadState({ status: "idle", message: "" });
+    void loadAnnouncements(course.url);
+  };
+
+  const removeSavedCourse = (id: string) => {
+    persistSavedCourses(savedCourses.filter((c) => c.id !== id));
   };
 
   const handleDraft = async () => {
@@ -122,24 +179,92 @@ function AnnouncementsPanel() {
             setLoadState({ status: "idle", message: "" });
           }}
         />
-        <button
-          type="button"
-          className={styles.downloadButton}
-          onClick={handleLoad}
-          disabled={loadState.status === "loading" || !courseId}
-          style={{ alignSelf: "flex-start" }}
-        >
-          {loadState.status === "loading" ? "Loading…" : "Load announcements"}
-        </button>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className={styles.downloadButton}
+            onClick={() => void loadAnnouncements(courseUrl.trim())}
+            disabled={loadState.status === "loading" || !courseId}
+          >
+            {loadState.status === "loading" ? "Loading…" : "Load announcements"}
+          </button>
+          <button
+            type="button"
+            className={styles.downloadButton}
+            onClick={saveCurrentCourse}
+            disabled={!courseId || isSaved}
+          >
+            {isSaved ? "Saved" : "Save course"}
+          </button>
+        </div>
         <p className={styles.fieldHint}>
           {courseId
-            ? `Detected course ${courseId}. Load its recent announcements, or post a new one below.`
+            ? `Detected course ${courseId}. Load its recent announcements, save it for quick access, or post a new one below.`
             : courseUrl.trim()
               ? "Unrecognized URL. Expecting a link like .../courses/123."
               : "Paste any link from the course (a course home, announcements, or assignment URL works)."}
         </p>
         {loadState.status === "error" && <p className={styles.error}>{loadState.message}</p>}
       </div>
+
+      {savedCourses.length > 0 && (
+        <div className={styles.field}>
+          <label>Saved courses</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {savedCourses.map((c) => (
+              <span
+                key={c.id}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  borderRadius: 999,
+                  border: "1px solid var(--field-border)",
+                  background: "var(--field-background)",
+                  paddingLeft: 4,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => openSavedCourse(c)}
+                  style={{
+                    font: "inherit",
+                    fontSize: "0.85rem",
+                    fontWeight: 600,
+                    color: "var(--text-primary)",
+                    background: "transparent",
+                    border: "none",
+                    borderRadius: 999,
+                    padding: "5px 8px",
+                    cursor: "pointer",
+                  }}
+                >
+                  {c.name}
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Remove ${c.name}`}
+                  title="Remove"
+                  onClick={() => removeSavedCourse(c.id)}
+                  style={{
+                    font: "inherit",
+                    fontSize: "1rem",
+                    lineHeight: 1,
+                    color: "var(--text-secondary)",
+                    background: "transparent",
+                    border: "none",
+                    borderRadius: 999,
+                    padding: "4px 9px 4px 2px",
+                    cursor: "pointer",
+                  }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className={styles.field}>
         <label htmlFor="canvas-ann-draft">Draft with AI (optional)</label>
@@ -486,12 +611,21 @@ function InboxPanel() {
 type CanvasView = "announcements" | "inbox";
 
 export default function CanvasTab() {
-  const [view, setView] = useState<CanvasView>("announcements");
+  // Remember which sub-tab was last open across reloads.
+  const [view, setViewState] = useState<CanvasView>(() =>
+    typeof window !== "undefined" && localStorage.getItem(VIEW_KEY) === "inbox"
+      ? "inbox"
+      : "announcements"
+  );
+  const setView = (next: CanvasView) => {
+    setViewState(next);
+    if (typeof window !== "undefined") localStorage.setItem(VIEW_KEY, next);
+  };
 
   return (
     <div className={styles.card}>
       <header className={styles.header}>
-        <span className={styles.eyebrow}>Canvas</span>
+        <span className={styles.eyebrow}>Communications</span>
         <h1>Announcements & Inbox</h1>
         <p>
           Post course announcements and reply to Canvas messages without leaving the teaching

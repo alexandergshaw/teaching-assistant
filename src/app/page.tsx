@@ -8,7 +8,7 @@ import GradingTab from "./components/GradingTab";
 import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
 import LessonPlanningForm from "./components/LessonPlanningForm";
-import ProviderToggle from "./components/ProviderToggle";
+import TopBar from "./components/TopBar";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildSlidesPptx } from "@/lib/pptx";
 import styles from "./page.module.css";
@@ -546,14 +546,10 @@ export default function Home() {
   };
 
   return (
-    <main className={styles.page}>
+    <>
+      <TopBar />
+      <main className={styles.page}>
       <div className={styles.tabContainer}>
-        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 16, padding: "8px 4px 0" }}>
-          <a href="/account/security" style={{ fontSize: "0.85rem", color: "var(--accent, #2563eb)", fontWeight: 600 }}>
-            Security
-          </a>
-          <ProviderToggle />
-        </div>
         <Tabs
           value={activeTab}
           onChange={(_, v: ActiveTab) => setActiveTab(v)}
@@ -646,6 +642,7 @@ export default function Home() {
           onClose={handleClosePreview}
         />
       )}
-    </main>
+      </main>
+    </>
   );
 }

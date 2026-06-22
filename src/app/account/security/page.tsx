@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useSupabase } from "@/context/SupabaseProvider";
-import styles from "../../page.module.css";
+import TopBar from "../../components/TopBar";
+import styles from "./security.module.css";
 
 type Factor = {
   id: string;
@@ -108,120 +109,115 @@ export default function SecurityPage() {
     await loadFactors();
   };
 
-  const verified = factors.filter((f) => f.status === "verified");
+  const verifiedCount = factors.filter((f) => f.status === "verified").length;
 
   return (
-    <main>
-      <section className={styles.card} style={{ maxWidth: 560, margin: "6vh auto" }}>
-        <div className={styles.header}>
-          <h1>Security</h1>
-          <p>Manage two-factor authentication (TOTP) for your account.</p>
-        </div>
-
-        {error && <p role="alert" className={styles.error}>{error}</p>}
-        {notice && <p className={styles.fieldHint} style={{ color: "#15803d" }}>{notice}</p>}
-
-        {verified.length > 0 && verified.length < 2 && (
-          <p className={styles.fieldHint}>
-            Tip: add a second authenticator as a backup. If you lose your only device
-            you would otherwise have to remove the factor from the Supabase dashboard
-            to get back in.
+    <>
+      <TopBar />
+      <main className={styles.page}>
+        <section className={styles.card}>
+          <h1 className={styles.title}>Two-factor authentication</h1>
+          <p className={styles.subtitle}>
+            Add an authenticator app to require a 6-digit code at sign-in.
           </p>
-        )}
 
-        <div className={styles.field}>
-          <label>Authenticators</label>
-          {loading ? (
-            <p className={styles.fieldHint}>Loading…</p>
-          ) : factors.length === 0 ? (
-            <p className={styles.fieldHint}>
-              No authenticators yet. Add one to require a 6-digit code at sign-in.
-            </p>
-          ) : (
-            <ul className={styles.matrixFileList}>
-              {factors.map((f) => (
-                <li key={f.id} className={styles.savedFileNote}>
-                  <span>
-                    <strong>{f.friendly_name || "Authenticator"}</strong> ({f.status})
-                  </span>
-                  <button
-                    type="button"
-                    className={styles.clearFileButton}
-                    onClick={() => remove(f.id)}
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+          {error && <p role="alert" className={styles.error}>{error}</p>}
+          {notice && <p className={styles.notice}>{notice}</p>}
 
-        {!enrolling ? (
-          <div className={styles.field}>
-            <label htmlFor="factor-name">New authenticator name (optional)</label>
-            <input
-              id="factor-name"
-              type="text"
-              className={styles.textInput}
-              placeholder="e.g. Phone, 1Password"
-              value={friendlyName}
-              onChange={(e) => setFriendlyName(e.target.value)}
-            />
-            <button
-              type="button"
-              className={styles.submitButton}
-              onClick={startEnroll}
-              disabled={busy}
-            >
-              {busy ? "Starting…" : "Add an authenticator"}
-            </button>
+          <div className={styles.section}>
+            <p className={styles.sectionTitle}>Your authenticators</p>
+            {loading ? (
+              <p className={styles.empty}>Loading…</p>
+            ) : factors.length === 0 ? (
+              <p className={styles.empty}>
+                None yet. Add one below to turn on two-factor authentication.
+              </p>
+            ) : (
+              <ul className={styles.factorList}>
+                {factors.map((f) => (
+                  <li key={f.id} className={styles.factor}>
+                    <span className={styles.factorName}>
+                      {f.friendly_name || "Authenticator"}
+                      <span
+                        className={`${styles.pill}${f.status !== "verified" ? ` ${styles.pillPending}` : ""}`}
+                      >
+                        {f.status === "verified" ? "Active" : f.status}
+                      </span>
+                    </span>
+                    <button type="button" className={styles.remove} onClick={() => remove(f.id)}>
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-        ) : (
-          <div className={styles.field}>
-            <label>Scan this QR code in your authenticator app</label>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={enrolling.qrCode}
-              alt="TOTP QR code"
-              style={{ width: 200, height: 200, background: "#fff", borderRadius: 8 }}
-            />
-            <p className={styles.fieldHint}>
-              Or enter this secret manually: <code>{enrolling.secret}</code>
-            </p>
-            <label htmlFor="activate-code">Enter the 6-digit code to activate</label>
-            <input
-              id="activate-code"
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
-              className={styles.textInput}
-              placeholder="123456"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-            />
-            <div className={styles.fieldEditActions}>
-              <button
-                type="button"
-                className={styles.submitButton}
-                onClick={activate}
-                disabled={busy}
-              >
-                {busy ? "Activating…" : "Activate"}
-              </button>
-              <button
-                type="button"
-                className={styles.clearFileButton}
-                onClick={cancelEnroll}
-                disabled={busy}
-              >
-                Cancel
-              </button>
+
+          {!enrolling ? (
+            <div className={styles.section}>
+              <p className={styles.sectionTitle}>Add an authenticator</p>
+              <label className={styles.label} htmlFor="factor-name">
+                Name (optional)
+              </label>
+              <input
+                id="factor-name"
+                type="text"
+                className={styles.input}
+                placeholder="e.g. Phone, 1Password"
+                value={friendlyName}
+                onChange={(e) => setFriendlyName(e.target.value)}
+              />
+              <div className={styles.row}>
+                <button type="button" className={styles.primary} onClick={startEnroll} disabled={busy}>
+                  {busy ? "Starting…" : "Add authenticator"}
+                </button>
+              </div>
             </div>
-          </div>
-        )}
-      </section>
-    </main>
+          ) : (
+            <div className={styles.section}>
+              <p className={styles.sectionTitle}>Scan and verify</p>
+              <p className={styles.help}>Scan this QR code in your authenticator app.</p>
+              <div className={styles.qrFrame}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className={styles.qr} src={enrolling.qrCode} alt="TOTP QR code" />
+              </div>
+              <p className={styles.help}>
+                Or enter this key manually: <span className={styles.secret}>{enrolling.secret}</span>
+              </p>
+              <label className={styles.label} htmlFor="activate-code">
+                Enter the 6-digit code
+              </label>
+              <input
+                id="activate-code"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                className={styles.input}
+                placeholder="123456"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+              />
+              <div className={styles.row}>
+                <button type="button" className={styles.primary} onClick={activate} disabled={busy}>
+                  {busy ? "Activating…" : "Activate"}
+                </button>
+                <button type="button" className={styles.secondary} onClick={cancelEnroll} disabled={busy}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {verifiedCount > 0 && verifiedCount < 2 && (
+            <p className={styles.tip}>
+              Add a second authenticator as a backup. If you lose your only device,
+              you would have to remove the factor from the Supabase dashboard to get
+              back in.
+            </p>
+          )}
+        </section>
+      </main>
+    </>
   );
 }

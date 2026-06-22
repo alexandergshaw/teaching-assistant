@@ -152,6 +152,10 @@ export default function GradingTab({
   const [sortState, setSortState] = useState(DEFAULT_SORT);
 
   const canvasUrlKind = detectCanvasUrlKind(canvasUrl);
+  const graderLabel =
+    selectedProvider === "other"
+      ? "deterministic grader (against your CSV/JSON rubric)"
+      : "AI grader";
 
   const run = state.run;
 
@@ -329,12 +333,12 @@ export default function GradingTab({
             />
             <p className={styles.fieldHint}>
               {canvasUrlKind === "discussion"
-                ? "Detected: discussion board. Each student's posts and replies are pulled via the Canvas API and graded against the rubric."
+                ? `Detected: discussion board. Each student's posts and replies are pulled via the Canvas API and graded with the ${graderLabel}.`
                 : canvasUrlKind === "assignment"
-                  ? "Detected: assignment. Each student's submission text and uploaded files are pulled via the Canvas API and graded against the rubric."
+                  ? `Detected: assignment. Each student's submission text and uploaded files are pulled via the Canvas API and graded with the ${graderLabel}.`
                   : canvasUrl.trim()
                     ? "Unrecognized Canvas URL. Expecting a link like .../courses/123/discussion_topics/456 or .../courses/123/assignments/456."
-                    : "Paste a Canvas discussion or assignment link. The type is detected automatically and graded with the AI grader."}
+                    : `Paste a Canvas discussion or assignment link. The type is detected automatically and graded with the ${graderLabel}.`}
             </p>
           </div>
         )}
@@ -363,7 +367,7 @@ export default function GradingTab({
           />
         </div>
 
-        {source === "zip" && selectedProvider === "other" && (
+        {selectedProvider === "other" && (
           <div className={styles.field}>
             <label htmlFor="rubric-file">Rubric file (CSV/JSON)</label>
             <input

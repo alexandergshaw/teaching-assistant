@@ -9,6 +9,7 @@ import {
   type GradingRun,
 } from "@/lib/grade";
 import { extractTextFromBuffer } from "@/lib/office-extract";
+import { fetchCanvasWork, canvasWorkToZipBase64 } from "@/lib/canvas";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -1097,6 +1098,41 @@ function gradingApiToRun(resp: GradingApiResponse): GradingRun {
   };
 }
 
+// Grade a submissions zip with the deterministic ("Other") grading service.
+// Shared by the uploaded-zip path and the Canvas path (which synthesizes a zip).
+async function gradeZipViaEngine(
+  zipBase64: string,
+  rubric: string,
+  rubricFile: File | null
+): Promise<GradeActionState> {
+  let rubricText = "";
+  let rubricName: string | undefined;
+  if (rubricFile && rubricFile.size > 0) {
+    rubricText = await rubricFile.text();
+    rubricName = rubricFile.name;
+  } else if (rubric.trim()) {
+    rubricText = rubric;
+  }
+  if (!rubricText.trim()) {
+    return {
+      run: null,
+      error:
+        "Provide a rubric (upload a CSV/JSON file or paste one) to grade with the deterministic grader.",
+    };
+  }
+  const resp = await gradeViaGradingEngine(
+    zipBase64,
+    detectRubricSource(rubricText, rubricName)
+  );
+  const warnings = [
+    ...resp.warnings,
+    ...(resp.unmapped_criteria?.length
+      ? [`Excluded (unmapped): ${resp.unmapped_criteria.join(", ")}`]
+      : []),
+  ];
+  return { run: gradingApiToRun(resp), error: null, warnings };
+}
+
 export async function gradeAction(
   _prev: GradeActionState,
   formData: FormData
@@ -1111,9 +1147,15 @@ export async function gradeAction(
 
   try {
     // Canvas source: grade each student's discussion posts or assignment
-    // submission (kind auto-detected from the URL). LLM-based, since the content
-    // is free-form. Mirrors the Gemini zip path below.
+    // submission (kind auto-detected from the URL). Routes by provider — the
+    // deterministic grader gets a synthesized zip; Gemini grades the text/files.
     if (canvasUrl) {
+      if (provider === "other") {
+        const { students } = await fetchCanvasWork(canvasUrl);
+        const zipBase64 = await canvasWorkToZipBase64(students);
+        return gradeZipViaEngine(zipBase64, rubric, rubricFile);
+      }
+
       if (!assignmentInstructions.trim()) {
         return { run: null, error: "Please provide assignment instructions." };
       }
@@ -1134,33 +1176,8 @@ export async function gradeAction(
 
     // Deterministic Grading API path (provider toggle = "other").
     if (provider === "other") {
-      let rubricText = "";
-      let rubricName: string | undefined;
-      if (rubricFile && rubricFile.size > 0) {
-        rubricText = await rubricFile.text();
-        rubricName = rubricFile.name;
-      } else if (rubric.trim()) {
-        rubricText = rubric;
-      }
-      if (!rubricText.trim()) {
-        return {
-          run: null,
-          error:
-            "Provide a rubric (upload a CSV/JSON file or paste one) to grade with the deterministic grader.",
-        };
-      }
       const zipBase64 = Buffer.from(await file.arrayBuffer()).toString("base64");
-      const resp = await gradeViaGradingEngine(
-        zipBase64,
-        detectRubricSource(rubricText, rubricName)
-      );
-      const warnings = [
-        ...resp.warnings,
-        ...(resp.unmapped_criteria?.length
-          ? [`Excluded (unmapped): ${resp.unmapped_criteria.join(", ")}`]
-          : []),
-      ];
-      return { run: gradingApiToRun(resp), error: null, warnings };
+      return gradeZipViaEngine(zipBase64, rubric, rubricFile);
     }
 
     // Gemini path.

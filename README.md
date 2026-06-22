@@ -56,7 +56,12 @@ and paste either a discussion link (`.../discussion_topics/…`) or an assignmen
 link (`.../assignments/…`) — the type is auto-detected from the URL. The
 institution is selected automatically from the link's hostname, then each
 student's work (discussion posts/replies, or assignment text + uploaded files) is
-pulled via the Canvas API and graded with the AI grader against the rubric.
+pulled via the Canvas API and graded against the rubric.
+
+Canvas grading respects the provider toggle: **Gemini** uses the AI grader (needs
+assignment instructions; the rubric is synthesized if not provided), while
+**Other API** sends the fetched work to the deterministic grading service as a
+synthesized Canvas-style zip (needs a check-based CSV/JSON rubric).
 
 Institutions are registered by hostname in `src/lib/canvas.ts` (e.g. MCC ->
 `canvas.mccneb.edu`). Each registered institution reads its own credentials from

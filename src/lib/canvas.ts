@@ -10,6 +10,7 @@
  * exposes it to the client.
  */
 
+import JSZip from "jszip";
 import { parseCanvasUrl } from "./canvas-url";
 
 /**
@@ -307,4 +308,35 @@ async function fetchAssignment(
 
   students.sort((a, b) => a.student.localeCompare(b.student));
   return students;
+}
+
+/**
+ * Pack Canvas work into a base64 zip that mirrors a Canvas "Download
+ * Submissions" archive: flat files named `<lastfirst>_<userId>_<seq>_<name>`,
+ * grouped by the leading student prefix. This lets the deterministic grading
+ * service ingest Canvas-fetched posts/assignments the same way it ingests a real
+ * Canvas zip.
+ */
+export async function canvasWorkToZipBase64(
+  students: CanvasStudentWork[]
+): Promise<string> {
+  const zip = new JSZip();
+
+  for (const work of students) {
+    const sanitized = work.student.toLowerCase().replace(/[^a-z0-9]/g, "") || "student";
+    const prefix = `${sanitized}_${work.userId}`;
+    let seq = 0;
+
+    if (work.text) {
+      zip.file(`${prefix}_${seq}_post.txt`, work.text);
+      seq += 1;
+    }
+
+    for (const file of work.files) {
+      zip.file(`${prefix}_${seq}_${file.name}`, Buffer.from(file.base64, "base64"));
+      seq += 1;
+    }
+  }
+
+  return zip.generateAsync({ type: "base64" });
 }

@@ -6,6 +6,7 @@ import type { GradeActionState, TestGeminiState } from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
 import { parseGeneratedRubric } from "../utils/rubric";
 import { useLlmProvider } from "@/lib/llm-provider";
+import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import styles from "../page.module.css";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -145,9 +146,12 @@ export default function GradingTab({
 }: GradingTabProps) {
   const [selectedProvider] = useLlmProvider();
   const [source, setSource] = useState<"zip" | "canvas">("zip");
+  const [canvasUrl, setCanvasUrl] = useState("");
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [rubric, setRubric] = useState("");
   const [sortState, setSortState] = useState(DEFAULT_SORT);
+
+  const canvasUrlKind = detectCanvasUrlKind(canvasUrl);
 
   const run = state.run;
 
@@ -293,7 +297,7 @@ export default function GradingTab({
             className={`${styles.lessonInnerTab}${source === "canvas" ? ` ${styles.lessonInnerTabActive}` : ""}`}
             onClick={() => setSource("canvas")}
           >
-            Canvas Discussion
+            Canvas
           </button>
         </div>
 
@@ -312,19 +316,25 @@ export default function GradingTab({
           </div>
         ) : (
           <div className={styles.field}>
-            <label htmlFor="discussion-url">Canvas Discussion URL</label>
+            <label htmlFor="canvas-url">Canvas URL</label>
             <input
-              id="discussion-url"
-              name="discussionUrl"
+              id="canvas-url"
+              name="canvasUrl"
               type="url"
               required
               className={styles.textInput}
-              placeholder="https://canvas.mccneb.edu/courses/123/discussion_topics/456"
+              placeholder="Paste a discussion or assignment link (.../discussion_topics/… or .../assignments/…)"
+              value={canvasUrl}
+              onChange={(e) => setCanvasUrl(e.target.value)}
             />
             <p className={styles.fieldHint}>
-              Paste the discussion link. Each student&apos;s posts and replies are
-              pulled via the Canvas API and graded against the rubric. Uses the AI
-              grader.
+              {canvasUrlKind === "discussion"
+                ? "Detected: discussion board. Each student's posts and replies are pulled via the Canvas API and graded against the rubric."
+                : canvasUrlKind === "assignment"
+                  ? "Detected: assignment. Each student's submission text and uploaded files are pulled via the Canvas API and graded against the rubric."
+                  : canvasUrl.trim()
+                    ? "Unrecognized Canvas URL. Expecting a link like .../courses/123/discussion_topics/456 or .../courses/123/assignments/456."
+                    : "Paste a Canvas discussion or assignment link. The type is detected automatically and graded with the AI grader."}
             </p>
           </div>
         )}

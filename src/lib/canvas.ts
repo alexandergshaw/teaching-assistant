@@ -1,17 +1,20 @@
 /**
  * Client for the Canvas LMS REST API.
  *
- * Canvas has no UI export for discussion boards, but its API exposes the full
- * threaded discussion in one call. We use that to pull every student's posts and
- * replies so they can be fed into the existing grading pipeline.
+ * Canvas has no UI export for discussion boards or assignment submissions, but
+ * its API exposes both. We pull every student's work — discussion posts/replies,
+ * or an assignment's text body plus uploaded files — so it can be fed into the
+ * existing grading pipeline. The kind is detected from the URL.
  *
  * Server-only: reads the instructor API token from the environment and never
  * exposes it to the client.
  */
 
+import { parseCanvasUrl } from "./canvas-url";
+
 /**
- * Registered Canvas institutions, keyed by hostname. The discussion URL's host
- * selects the institution; its credentials come from per-institution env vars:
+ * Registered Canvas institutions, keyed by hostname. The URL's host selects the
+ * institution; its credentials come from per-institution env vars:
  *   <CODE>_CANVAS_API_TOKEN  (required) — instructor access token
  *   <CODE>_CANVAS_URL        (optional) — base URL override (defaults to https://<host>)
  * To add a school: add an entry here and set its env vars. No other code changes.
@@ -26,7 +29,10 @@ const CANVAS_INSTITUTIONS: CanvasInstitution[] = [
   { code: "MCC", name: "Metropolitan Community College", host: "canvas.mccneb.edu" },
 ];
 
-/** Match a discussion URL to a registered institution by its hostname. */
+// Skip attachments larger than this to bound memory/latency.
+const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+
+/** Match a Canvas URL to a registered institution by its hostname. */
 function institutionForUrl(url: string): CanvasInstitution | null {
   let host: string;
   try {
@@ -45,25 +51,19 @@ function institutionToken(inst: CanvasInstitution): string | undefined {
   return process.env[`${inst.code}_CANVAS_API_TOKEN`] || undefined;
 }
 
-/** One student's flattened contribution to a discussion. */
-export interface CanvasDiscussionStudent {
+/** One student's work pulled from Canvas, ready to feed into grading. */
+export interface CanvasStudentWork {
   student: string;
   userId: number;
-  /** All of the student's posts/replies, HTML-stripped and joined. */
+  /** Text content: discussion posts/replies, or an assignment's text body. */
   text: string;
-  /** Number of separate posts/replies the student made. */
+  /** Uploaded files (assignment submissions). Empty for discussions. */
+  files: Array<{ name: string; base64: string; mimeType: string }>;
+  /** Posts/replies for discussions; 1 for an assignment submission. */
   contributionCount: number;
 }
 
-/** Pull course + topic ids out of a Canvas discussion URL. */
-export function parseCanvasDiscussionUrl(
-  url: string
-): { courseId: string; topicId: string } | null {
-  const match = url.match(/\/courses\/(\d+)\/discussion_topics\/(\d+)/);
-  return match ? { courseId: match[1], topicId: match[2] } : null;
-}
-
-// Minimal HTML-to-text for Canvas message bodies (which are stored as HTML).
+// Minimal HTML-to-text for Canvas message/body bodies (stored as HTML).
 function htmlToText(html: string): string {
   return html
     .replace(/<\s*br\s*\/?>/gi, "\n")
@@ -94,6 +94,23 @@ interface CanvasViewResponse {
   view?: CanvasViewEntry[];
 }
 
+interface CanvasAttachment {
+  id?: number;
+  filename?: string;
+  display_name?: string;
+  url?: string;
+  "content-type"?: string;
+  size?: number;
+}
+
+interface CanvasSubmission {
+  user_id?: number;
+  workflow_state?: string;
+  body?: string | null;
+  attachments?: CanvasAttachment[];
+  user?: { name?: string; sortable_name?: string };
+}
+
 function canvasError(status: number, inst: CanvasInstitution): Error {
   switch (status) {
     case 401:
@@ -103,27 +120,19 @@ function canvasError(status: number, inst: CanvasInstitution): Error {
       );
     case 404:
       return new Error(
-        "Canvas could not find that discussion. Check the course/discussion URL and that the token's account can see it."
+        "Canvas could not find that discussion or assignment. Check the URL and that the token's account can see it."
       );
     default:
       return new Error(`Canvas request failed (HTTP ${status}).`);
   }
 }
 
-/**
- * Fetch a discussion's full threaded view and flatten it into one entry per
- * student (their posts + replies, HTML-stripped). Sorted by student name.
- */
-export async function fetchCanvasDiscussion(
-  url: string
-): Promise<CanvasDiscussionStudent[]> {
-  const ids = parseCanvasDiscussionUrl(url);
-  if (!ids) {
-    throw new Error(
-      "Could not read the course and discussion ids from that URL. Expected a link like .../courses/123/discussion_topics/456."
-    );
-  }
-
+/** Resolve the institution + credentials for a URL, or throw a clear error. */
+function resolveInstitution(url: string): {
+  institution: CanvasInstitution;
+  token: string;
+  baseUrl: string;
+} {
   const institution = institutionForUrl(url);
   if (!institution) {
     const supported = CANVAS_INSTITUTIONS.map((inst) => inst.host).join(", ");
@@ -131,19 +140,60 @@ export async function fetchCanvasDiscussion(
       `That Canvas host is not configured. Supported institutions: ${supported || "none"}.`
     );
   }
-
   const token = institutionToken(institution);
   if (!token) {
     throw new Error(
       `Canvas API token is not configured for ${institution.name}. Set ${institution.code}_CANVAS_API_TOKEN in the environment.`
     );
   }
+  return { institution, token, baseUrl: institutionBaseUrl(institution) };
+}
 
-  const endpoint = `${institutionBaseUrl(institution)}/api/v1/courses/${ids.courseId}/discussion_topics/${ids.topicId}/view`;
+/** Follow the RFC-5988 Link header to the next page, if any. */
+function parseNextLink(linkHeader: string | null): string | null {
+  if (!linkHeader) return null;
+  for (const part of linkHeader.split(",")) {
+    const match = part.match(/<([^>]+)>\s*;\s*rel="next"/);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+/**
+ * Fetch a Canvas discussion or assignment (auto-detected from the URL) and
+ * return one work item per student. The host selects the institution/token.
+ */
+export async function fetchCanvasWork(
+  url: string
+): Promise<{ kind: "discussion" | "assignment"; students: CanvasStudentWork[] }> {
+  const parsed = parseCanvasUrl(url);
+  if (!parsed) {
+    throw new Error(
+      "Could not read a discussion or assignment from that URL. Expected .../courses/123/discussion_topics/456 or .../courses/123/assignments/456."
+    );
+  }
+
+  const { institution, token, baseUrl } = resolveInstitution(url);
+
+  const students =
+    parsed.kind === "discussion"
+      ? await fetchDiscussion(baseUrl, token, institution, parsed.courseId, parsed.id)
+      : await fetchAssignment(baseUrl, token, institution, parsed.courseId, parsed.id);
+
+  return { kind: parsed.kind, students };
+}
+
+async function fetchDiscussion(
+  baseUrl: string,
+  token: string,
+  institution: CanvasInstitution,
+  courseId: string,
+  topicId: string
+): Promise<CanvasStudentWork[]> {
+  const endpoint = `${baseUrl}/api/v1/courses/${courseId}/discussion_topics/${topicId}/view`;
   const response = await fetch(endpoint, {
     headers: { Authorization: `Bearer ${token}` },
   });
-
   if (!response.ok) {
     throw canvasError(response.status, institution);
   }
@@ -157,7 +207,6 @@ export async function fetchCanvasDiscussion(
     }
   }
 
-  // Walk the (recursively nested) entry tree, collecting each student's text.
   const byUser = new Map<number, string[]>();
   const walk = (entries: CanvasViewEntry[] | undefined, depth: number) => {
     for (const entry of entries ?? []) {
@@ -177,15 +226,85 @@ export async function fetchCanvasDiscussion(
   };
   walk(data.view, 0);
 
-  const students: CanvasDiscussionStudent[] = [];
+  const students: CanvasStudentWork[] = [];
   for (const [userId, texts] of byUser) {
     students.push({
       student: names.get(userId) ?? `User ${userId}`,
       userId,
       text: texts.join("\n\n---\n\n"),
+      files: [],
       contributionCount: texts.length,
     });
   }
+  students.sort((a, b) => a.student.localeCompare(b.student));
+  return students;
+}
+
+async function fetchAssignment(
+  baseUrl: string,
+  token: string,
+  institution: CanvasInstitution,
+  courseId: string,
+  assignmentId: string
+): Promise<CanvasStudentWork[]> {
+  let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions?per_page=100&include[]=user`;
+  const submissions: CanvasSubmission[] = [];
+
+  while (next) {
+    const response = await fetch(next, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      throw canvasError(response.status, institution);
+    }
+    const page = (await response.json()) as CanvasSubmission[];
+    submissions.push(...page);
+    next = parseNextLink(response.headers.get("link"));
+  }
+
+  const students: CanvasStudentWork[] = [];
+  for (const submission of submissions) {
+    if (!submission || submission.workflow_state === "unsubmitted") {
+      continue;
+    }
+
+    const userId = typeof submission.user_id === "number" ? submission.user_id : -1;
+    const student =
+      submission.user?.sortable_name?.trim() ||
+      submission.user?.name?.trim() ||
+      (userId >= 0 ? `User ${userId}` : "Unknown student");
+    const text = submission.body ? htmlToText(submission.body) : "";
+
+    const files: CanvasStudentWork["files"] = [];
+    for (const attachment of submission.attachments ?? []) {
+      if (!attachment.url) continue;
+      if (typeof attachment.size === "number" && attachment.size > MAX_ATTACHMENT_BYTES) {
+        continue;
+      }
+      try {
+        const fileRes = await fetch(attachment.url, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!fileRes.ok) continue;
+        const buffer = await fileRes.arrayBuffer();
+        if (buffer.byteLength > MAX_ATTACHMENT_BYTES) continue;
+        files.push({
+          name: attachment.filename || attachment.display_name || `attachment-${attachment.id ?? files.length}`,
+          base64: Buffer.from(buffer).toString("base64"),
+          mimeType: attachment["content-type"] || "application/octet-stream",
+        });
+      } catch {
+        // Skip an attachment that cannot be downloaded rather than failing.
+      }
+    }
+
+    if (!text && files.length === 0) {
+      continue;
+    }
+
+    students.push({ student, userId, text, files, contributionCount: 1 });
+  }
+
   students.sort((a, b) => a.student.localeCompare(b.student));
   return students;
 }

@@ -2,7 +2,7 @@
 
 import {
   gradeSubmissions,
-  gradeCanvasDiscussion,
+  gradeCanvasUrl,
   synthesizeFullCreditChecklist,
   extractSubmissions,
   generateRubric,
@@ -1102,7 +1102,7 @@ export async function gradeAction(
   formData: FormData
 ): Promise<GradeActionState> {
   const file = formData.get("studentSubmissions") as File | null;
-  const discussionUrl = ((formData.get("discussionUrl") as string | null) ?? "").trim();
+  const canvasUrl = ((formData.get("canvasUrl") as string | null) ?? "").trim();
   const assignmentInstructions =
     (formData.get("assignmentInstructions") as string | null) ?? "";
   const rubric = (formData.get("rubric") as string | null) ?? "";
@@ -1110,9 +1110,10 @@ export async function gradeAction(
   const rubricFile = formData.get("rubricFile") as File | null;
 
   try {
-    // Canvas discussion source: grade each student's posts (LLM-based, since
-    // discussion text is free-form). Mirrors the Gemini zip path below.
-    if (discussionUrl) {
+    // Canvas source: grade each student's discussion posts or assignment
+    // submission (kind auto-detected from the URL). LLM-based, since the content
+    // is free-form. Mirrors the Gemini zip path below.
+    if (canvasUrl) {
       if (!assignmentInstructions.trim()) {
         return { run: null, error: "Please provide assignment instructions." };
       }
@@ -1121,7 +1122,7 @@ export async function gradeAction(
         : await generateRubric(assignmentInstructions, provider);
       const generatedRubric = rubric.trim() ? undefined : effectiveRubric;
       const [run, fullCreditChecklist] = await Promise.all([
-        gradeCanvasDiscussion(discussionUrl, assignmentInstructions, effectiveRubric, provider),
+        gradeCanvasUrl(canvasUrl, assignmentInstructions, effectiveRubric, provider),
         synthesizeFullCreditChecklist(assignmentInstructions, effectiveRubric, provider),
       ]);
       return { run: { ...run, fullCreditChecklist }, error: null, generatedRubric };

@@ -12,7 +12,7 @@ import {
   extractTextFromBuffer,
   getFileExtension,
 } from "./office-extract";
-import { fetchCanvasDiscussion } from "./canvas";
+import { fetchCanvasWork, type CanvasStudentWork } from "./canvas";
 
 const MAX_NESTED_ZIP_DEPTH = 3;
 
@@ -1182,39 +1182,102 @@ async function gradeStudentEntries(
   };
 }
 
+// Turn one student's Canvas work (discussion text and/or uploaded files) into a
+// gradable entry: text and extracted file text go into `content`; image files
+// are attached with rawBase64 so the vision grader sees them (the same image
+// handling the zip path uses).
+async function canvasWorkToEntry(work: CanvasStudentWork): Promise<StudentSubmissionEntry> {
+  const contentParts: string[] = [];
+  const submittedFiles: SubmittedFileInfo[] = [];
+
+  if (work.text) {
+    contentParts.push(work.text);
+    const preview = toPreviewContent(work.text);
+    submittedFiles.push({
+      name: work.files.length === 0 ? "Discussion post" : "Submission text",
+      extension: "txt",
+      previewContent: preview.text,
+      previewTruncated: preview.truncated,
+      mimeType: "text/plain",
+    });
+  }
+
+  for (const file of work.files) {
+    const extension = getFileExtension(file.name);
+
+    if (IMAGE_EXTENSIONS.has(extension)) {
+      const mimeType = GEMINI_IMAGE_MIME_TYPES.has(file.mimeType)
+        ? file.mimeType
+        : getMimeType(extension);
+      submittedFiles.push({
+        name: file.name,
+        extension,
+        previewContent: `[Image file: ${file.name}]`,
+        previewTruncated: false,
+        rawBase64: file.base64,
+        mimeType,
+      });
+      continue;
+    }
+
+    let extracted: string | null = null;
+    try {
+      extracted = await extractTextFromBuffer(file.name, Buffer.from(file.base64, "base64"));
+    } catch {
+      extracted = null;
+    }
+
+    if (extracted && extracted.trim()) {
+      contentParts.push(`File: ${file.name}\n\n${extracted}`);
+      const preview = toPreviewContent(extracted);
+      submittedFiles.push({
+        name: file.name,
+        extension,
+        previewContent: preview.text,
+        previewTruncated: preview.truncated,
+        rawBase64: file.base64,
+        mimeType: file.mimeType,
+      });
+    } else {
+      submittedFiles.push({
+        name: file.name,
+        extension,
+        previewContent: "No extractable text available for this file.",
+        previewTruncated: false,
+        rawBase64: file.base64,
+        mimeType: file.mimeType,
+      });
+    }
+  }
+
+  return {
+    student: work.student,
+    content: contentParts.join("\n\n---\n\n"),
+    mergedFileCount: Math.max(1, work.files.length + (work.text ? 1 : 0)),
+    submittedFiles,
+  };
+}
+
 /**
- * Grade a Canvas discussion board, one student per participant, reusing the same
- * grading core as the zip path. Canvas gives us exact student names, so no
- * filename-convention inference is needed.
+ * Grade a Canvas discussion or assignment from its URL (auto-detected), one
+ * student per participant/submission, reusing the same grading core as the zip
+ * path. Canvas gives exact student names, so no filename inference is needed.
  */
-export async function gradeCanvasDiscussion(
-  discussionUrl: string,
+export async function gradeCanvasUrl(
+  url: string,
   assignmentInstructions: string,
   rubric: string,
   provider: LlmProvider = "gemini"
 ): Promise<GradingRun> {
-  const students = await fetchCanvasDiscussion(discussionUrl);
+  const { students } = await fetchCanvasWork(url);
 
-  const entries: StudentSubmissionEntry[] = students.map((s) => {
-    const preview = toPreviewContent(s.text);
-    return {
-      student: s.student,
-      content: s.text,
-      mergedFileCount: s.contributionCount,
-      submittedFiles: [
-        {
-          name: "Discussion post",
-          extension: "txt",
-          previewContent: preview.text,
-          previewTruncated: preview.truncated,
-          mimeType: "text/plain",
-        },
-      ],
-    };
-  });
-
-  if (entries.length === 0) {
+  if (students.length === 0) {
     return { results: [], rubricAreaNames: [], fullCreditChecklist: [] };
+  }
+
+  const entries: StudentSubmissionEntry[] = [];
+  for (const work of students) {
+    entries.push(await canvasWorkToEntry(work));
   }
 
   return gradeStudentEntries(entries, assignmentInstructions, rubric, provider);

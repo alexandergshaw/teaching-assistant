@@ -48,13 +48,15 @@ materials `rubric.csv`) via that service instead of Gemini:
 - `GRADING_ENGINE_URL` (required to use the deterministic grader) — base URL of the grading service.
 - `GRADING_API_KEY` (optional) — only required if the grading service enforces a key; sent as `X-API-Key`. Never exposed to the client.
 
-### Canvas discussion grading
+### Canvas grading
 
-The Grading tab can grade a Canvas discussion board directly (Canvas has no UI
-export for discussions, but its API does). Choose **Canvas Discussion** as the
-source and paste the discussion link; the institution is selected automatically
-from the link's hostname, then each student's posts and replies are pulled via
-the Canvas API and graded with the AI grader against the rubric.
+The Grading tab can grade Canvas **discussions and assignments** directly from a
+URL (Canvas has no UI export, but its API does). Choose **Canvas** as the source
+and paste either a discussion link (`.../discussion_topics/…`) or an assignment
+link (`.../assignments/…`) — the type is auto-detected from the URL. The
+institution is selected automatically from the link's hostname, then each
+student's work (discussion posts/replies, or assignment text + uploaded files) is
+pulled via the Canvas API and graded with the AI grader against the rubric.
 
 Institutions are registered by hostname in `src/lib/canvas.ts` (e.g. MCC ->
 `canvas.mccneb.edu`). Each registered institution reads its own credentials from

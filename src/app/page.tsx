@@ -548,7 +548,10 @@ export default function Home() {
   return (
     <main className={styles.page}>
       <div className={styles.tabContainer}>
-        <div style={{ display: "flex", justifyContent: "flex-end", padding: "8px 4px 0" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 16, padding: "8px 4px 0" }}>
+          <a href="/account/security" style={{ fontSize: "0.85rem", color: "var(--accent, #2563eb)", fontWeight: 600 }}>
+            Security
+          </a>
           <ProviderToggle />
         </div>
         <Tabs

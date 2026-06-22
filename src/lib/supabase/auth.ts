@@ -15,14 +15,25 @@ export async function getCurrentUser() {
 
 /**
  * Authorize a server action for the app owner only. Throws when the caller is
- * not signed in as an allowlisted owner (see OWNER_EMAILS). Call this at the top
- * of any action that uses privileged credentials (e.g. the Canvas API token).
+ * not signed in as an allowlisted owner (see OWNER_EMAILS), or when they have MFA
+ * enrolled but haven't completed it this session (AAL2). Call this at the top of
+ * any action that uses privileged credentials (e.g. the Canvas API token).
  */
 export async function requireOwner() {
-  const user = await getCurrentUser();
-  if (!isOwnerEmail(user?.email)) {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  if (error || !isOwnerEmail(user?.email)) {
     throw new Error("Not authorized. Sign in with an approved account.");
   }
+
+  const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (aal && aal.nextLevel === "aal2" && aal.currentLevel !== "aal2") {
+    throw new Error("Multi-factor authentication required. Finish the second step at sign-in.");
+  }
+
   return user;
 }
 

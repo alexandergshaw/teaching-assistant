@@ -48,6 +48,23 @@ can authenticate). Middleware redirects any non-owner to `/login`, and the
 privileged grading/Canvas server actions additionally verify the owner before
 running.
 
+#### Two-factor authentication (TOTP)
+
+MFA is supported and enforced once enrolled — it does not lock you out before
+setup (enforcement only triggers when a verified factor exists):
+
+1. Enable TOTP in the Supabase dashboard (Authentication -> MFA).
+2. Sign in, then visit **`/account/security`** (there's a "Security" link in the
+   app header) and add an authenticator: scan the QR in your app and enter the
+   6-digit code to activate. Add a **second** authenticator as a backup.
+3. From then on, sign-in requires the password plus a 6-digit code, and both the
+   middleware and the privileged server actions require the elevated (AAL2)
+   session.
+
+Recovery: if you lose all authenticators, remove the factor from the Supabase
+dashboard (Authentication -> Users -> the user -> Factors) to regain access; this
+is why enrolling a backup factor is recommended.
+
 ### Course Engine API (the "Other API" provider)
 
 When the in-app provider toggle is set to **Other API**, the matched features (course

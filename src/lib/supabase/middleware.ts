@@ -41,11 +41,25 @@ export async function updateSession(request: NextRequest) {
   // owner allowlist. Static assets are already excluded by the matcher.
   const { pathname } = request.nextUrl;
   const isPublic = pathname.startsWith("/login") || pathname.startsWith("/auth");
-  if (!isPublic && !isOwnerEmail(user?.email)) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.search = "";
-    return NextResponse.redirect(url);
+
+  if (!isPublic) {
+    if (!isOwnerEmail(user?.email)) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
+
+    // Owner has MFA enrolled but hasn't completed it this session: send them back
+    // to /login to finish the second step. (No factor enrolled -> nextLevel is
+    // aal1 and this never triggers, so it can't lock anyone out before setup.)
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aal && aal.nextLevel === "aal2" && aal.currentLevel !== "aal2") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
   }
 
   return response;

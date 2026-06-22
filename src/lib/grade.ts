@@ -5,7 +5,7 @@ import {
   getGeminiMaxOutputTokens,
   getGeminiMaxSubmissions,
 } from "./gemini";
-import { callLlm, type LlmProvider } from "./llm";
+import { callLlm, type LlmPart, type LlmProvider } from "./llm";
 import {
   DOCUMENT_EXTENSIONS,
   TEXT_EXTENSIONS,
@@ -100,7 +100,39 @@ const MIME_TYPES: Record<string, string> = {
   java: "text/x-java-source",
   ipynb: "application/json",
   zip: "application/zip",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  heic: "image/heic",
+  heif: "image/heif",
 };
+
+// Image formats recognized in submissions so their presence is never missed
+// (e.g. required screenshots). They cannot be text-extracted, so they are
+// recorded and sent to the vision-capable grader instead.
+const IMAGE_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "heic",
+  "heif",
+]);
+
+// Image MIME types Gemini can read as inline data. Other recognized images
+// still count toward "presence" but are not sent to the model.
+const GEMINI_IMAGE_MIME_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+]);
 
 function getMimeType(extension: string): string {
   return MIME_TYPES[extension.toLowerCase()] ?? "application/octet-stream";
@@ -145,7 +177,20 @@ export async function extractSubmissions(
           return;
         }
 
-        if (!isSupportedFile) {
+        const isImage = IMAGE_EXTENSIONS.has(extension);
+
+        if (!isSupportedFile && !isImage) {
+          return;
+        }
+
+        if (isImage) {
+          // Images carry no extractable text, but their presence matters (e.g.
+          // required screenshots). Record a placeholder so the file is grouped
+          // per student and surfaced in the file list, and keep the raw bytes so
+          // the vision-capable grader can actually see it.
+          const baseName = name.split("/").pop() ?? name;
+          submissions[fullName] = `[Image file: ${baseName}]`;
+          rawData[fullName] = await file.async("base64");
           return;
         }
 
@@ -955,20 +1000,30 @@ async function gradeSubmission(
   systemPrompt: string,
   studentName: string,
   content: string,
-  provider: LlmProvider
+  provider: LlmProvider,
+  imageFiles: Array<{ name: string; base64: string; mimeType: string }> = []
 ): Promise<GradeResult> {
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
+  const imageNote =
+    imageFiles.length > 0
+      ? `\n\nThe student also submitted ${imageFiles.length} image file(s) (e.g. required screenshots), attached below: ${imageFiles
+          .map((f) => f.name)
+          .join(", ")}. Treat them as part of the submission and evaluate them against the rubric.`
+      : "";
+
+  const parts: LlmPart[] = [
+    {
+      text: `${systemPrompt}\n\nStudent: ${studentName}\n\nSubmission:\n${content}${imageNote}`,
+    },
+    ...imageFiles.map((f) => ({
+      inlineData: { mimeType: f.mimeType, data: f.base64 },
+    })),
+  ];
+
   const result = await callLlm(
     {
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { text: `${systemPrompt}\n\nStudent: ${studentName}\n\nSubmission:\n${content}` },
-          ],
-        },
-      ],
+      contents: [{ role: "user", parts }],
       generationConfig: { temperature: 0.2, maxOutputTokens },
     },
     provider
@@ -1044,8 +1099,14 @@ export async function gradeSubmissions(
     const { student, content, mergedFileCount, submittedFiles } = limitedEntries[i];
     const truncated = truncateSubmission(content, maxCharsPerSubmission);
 
+    const imageFiles = submittedFiles
+      .filter(
+        (f) => f.rawBase64 && f.mimeType && GEMINI_IMAGE_MIME_TYPES.has(f.mimeType)
+      )
+      .map((f) => ({ name: f.name, base64: f.rawBase64!, mimeType: f.mimeType! }));
+
     try {
-      const result = await gradeSubmission(systemPrompt, student, truncated, provider);
+      const result = await gradeSubmission(systemPrompt, student, truncated, provider, imageFiles);
       results.push({ ...result, mergedFileCount, submittedFiles });
     } catch (error) {
       const message =

@@ -19,6 +19,7 @@ import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import InstitutionSwitcher from "./InstitutionSwitcher";
+import { useInstitutionCounts } from "./InstitutionCounts";
 import styles from "../page.module.css";
 
 const COURSE_URL_KEY = "ta-canvas-course-url";
@@ -84,6 +85,18 @@ function AnnouncementsPanel() {
   const [message, setMessage] = useState("");
   const [posting, setPosting] = useState(false);
   const [postNote, setPostNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  // Clear loaded announcements when the institution changes — they belonged to
+  // the previous school. Announcements are course-URL-driven, so nothing
+  // auto-fetches here; the user reloads via the button for the new school.
+  const [prevInstitution, setPrevInstitution] = useState(activeInstitution);
+  if (activeInstitution !== prevInstitution) {
+    setPrevInstitution(activeInstitution);
+    setAnnouncements([]);
+    setCourseName("");
+    setLoadState({ status: "idle", message: "" });
+    setPostNote(null);
+  }
 
   const courseId = parseCanvasCourseId(courseUrl);
   const isSaved = !!courseId && savedCourses.some((c) => c.id === courseId);
@@ -370,6 +383,7 @@ function AnnouncementsPanel() {
 function InboxPanel() {
   const [provider] = useLlmProvider();
   const { active: activeInstitution } = useInstitutionSelection();
+  const { refresh: refreshCounts } = useInstitutionCounts();
 
   const [conversations, setConversations] = useState<CanvasConversationSummary[]>([]);
   const [inboxState, setInboxState] = useState<{ status: "loading" | "idle" | "error"; message: string }>({
@@ -389,6 +403,17 @@ function InboxPanel() {
   const [drafting, setDrafting] = useState(false);
   const [sending, setSending] = useState(false);
   const [replyNote, setReplyNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  // Show the loading screen the instant the institution changes (before the
+  // effect refetches), clearing the previous school's inbox + open thread.
+  const [prevInstitution, setPrevInstitution] = useState(activeInstitution);
+  if (activeInstitution !== prevInstitution) {
+    setPrevInstitution(activeInstitution);
+    setInboxState({ status: "loading", message: "" });
+    setConversations([]);
+    setSelectedId(null);
+    setConversation(null);
+  }
 
   const loadInbox = useCallback(async () => {
     setInboxState({ status: "loading", message: "" });
@@ -475,8 +500,9 @@ function InboxPanel() {
     setReplyBody("");
     setReplyInstr("");
     setReplyNote({ kind: "success", text: "Reply sent." });
-    // Reflect the new last message in the list.
+    // Reflect the new last message in the list and refresh the unread badge.
     void loadInbox();
+    refreshCounts();
   };
 
   return (
@@ -488,13 +514,24 @@ function InboxPanel() {
           <button
             type="button"
             className={styles.downloadButton}
-            onClick={() => void loadInbox()}
+            onClick={() => {
+              void loadInbox();
+              refreshCounts();
+            }}
             disabled={inboxState.status === "loading"}
           >
             {inboxState.status === "loading" ? "Refreshing…" : "Refresh"}
           </button>
         </div>
 
+        {inboxState.status === "loading" && (
+          <div className={styles.loadingState} role="status" aria-live="polite">
+            <span className={styles.spinner} aria-hidden="true" />
+            <div>
+              <p className={styles.loadingTitle}>Loading inbox…</p>
+            </div>
+          </div>
+        )}
         {inboxState.status === "error" && <p className={styles.error}>{inboxState.message}</p>}
         {inboxState.status === "idle" && conversations.length === 0 && (
           <p className={styles.emptyState}>No conversations in the inbox.</p>
@@ -651,7 +688,7 @@ export default function CanvasTab() {
 
       <div className={styles.field}>
         <label>Institution</label>
-        <InstitutionSwitcher />
+        <InstitutionSwitcher metric="unread" />
       </div>
 
       <div className={styles.lessonInnerTabs}>

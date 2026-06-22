@@ -21,6 +21,8 @@ import {
   getConversation,
   replyToConversation,
   listGradingQueue,
+  getNeedsGradingCount,
+  getUnreadCount,
   type CanvasAnnouncement,
   type CanvasConversationSummary,
   type CanvasConversationDetail,
@@ -1408,6 +1410,35 @@ export async function listGradingQueueAction(
     return { rows, errors };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load the grading queue." };
+  }
+}
+
+/**
+ * Per-institution notification counts for the tab + switcher badges: submissions
+ * needing grading and unread inbox messages. Per-institution failures degrade to
+ * 0 so one misconfigured school doesn't blank every badge.
+ */
+export async function getInstitutionCountsAction(
+  acronyms: string[]
+): Promise<
+  { counts: Array<{ acronym: string; needsGrading: number; unread: number }> } | { error: string }
+> {
+  try {
+    await requireOwner();
+    const counts = await Promise.all(
+      acronyms.map(async (raw) => {
+        const code = raw.trim().toUpperCase();
+        if (!code) return { acronym: code, needsGrading: 0, unread: 0 };
+        const [needsGrading, unread] = await Promise.all([
+          getNeedsGradingCount(code).catch(() => 0),
+          getUnreadCount(code).catch(() => 0),
+        ]);
+        return { acronym: code, needsGrading, unread };
+      })
+    );
+    return { counts };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load notification counts." };
   }
 }
 

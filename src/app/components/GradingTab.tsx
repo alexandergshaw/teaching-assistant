@@ -16,6 +16,7 @@ import { parseGeneratedRubric } from "../utils/rubric";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection, readActiveInstitution } from "@/lib/institutions";
 import InstitutionSwitcher from "./InstitutionSwitcher";
+import { useInstitutionCounts } from "./InstitutionCounts";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import styles from "../page.module.css";
 
@@ -173,12 +174,24 @@ function LiveFeedPanel({
   onAutoGrade: (row: CanvasQueueItem) => void;
 }) {
   const { active } = useInstitutionSelection();
+  const { refresh: refreshCounts } = useInstitutionCounts();
   const [rows, setRows] = useState<CanvasQueueItem[]>([]);
   const [queueErrors, setQueueErrors] = useState<Array<{ acronym: string; error: string }>>([]);
   const [queueState, setQueueState] = useState<{
     status: "idle" | "loading" | "error";
     message: string;
   }>(() => ({ status: readActiveInstitution() ? "loading" : "idle", message: "" }));
+
+  // Show the loading screen the instant the institution changes (before the
+  // effect's fetch starts), clearing the previous school's rows. This is the
+  // React "adjust state during render" pattern, not an effect.
+  const [prevActive, setPrevActive] = useState(active);
+  if (active !== prevActive) {
+    setPrevActive(active);
+    setRows([]);
+    setQueueErrors([]);
+    setQueueState({ status: active ? "loading" : "idle", message: "" });
+  }
 
   const loadQueue = useCallback(async (code: string) => {
     setQueueState({ status: "loading", message: "" });
@@ -219,7 +232,7 @@ function LiveFeedPanel({
     <div className={styles.form}>
       <div className={styles.field}>
         <label>Institution</label>
-        <InstitutionSwitcher />
+        <InstitutionSwitcher metric="grading" />
       </div>
 
       {active && (
@@ -228,7 +241,10 @@ function LiveFeedPanel({
           <button
             type="button"
             className={styles.downloadButton}
-            onClick={() => void loadQueue(active)}
+            onClick={() => {
+              void loadQueue(active);
+              refreshCounts();
+            }}
             disabled={queueState.status === "loading"}
           >
             {queueState.status === "loading" ? "Refreshing…" : "Refresh"}
@@ -237,7 +253,13 @@ function LiveFeedPanel({
       )}
 
       {active && queueState.status === "loading" && (
-        <p className={styles.emptyState}>Loading the grading queue…</p>
+        <div className={styles.loadingState} role="status" aria-live="polite">
+          <span className={styles.spinner} aria-hidden="true" />
+          <div>
+            <p className={styles.loadingTitle}>Loading {active}…</p>
+            <p className={styles.loadingText}>Fetching everything that needs grading.</p>
+          </div>
+        </div>
       )}
       {queueState.status === "error" && <p className={styles.error}>{queueState.message}</p>}
       {queueErrors.map((e) => (
@@ -342,6 +364,7 @@ export default function GradingTab({
   onOpenPreview,
 }: GradingTabProps) {
   const [selectedProvider] = useLlmProvider();
+  const { refresh: refreshCounts } = useInstitutionCounts();
   const [source, setSource] = useState<GradingMode>(() => {
     if (typeof window === "undefined") return "zip";
     const saved = localStorage.getItem("ta-grading-source");
@@ -519,6 +542,8 @@ export default function GradingTab({
     setPostSummary(
       `Posted ${result.posted}${result.failures.length ? `, ${result.failures.length} failed` : ""}.`
     );
+    // Posting grades clears submissions from the queue — update the badge.
+    refreshCounts();
   };
 
   const sortedResults = useMemo(() => {

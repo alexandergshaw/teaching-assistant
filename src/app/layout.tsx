@@ -3,6 +3,7 @@ import "./globals.css";
 import SelectionChatWidget from "./components/SelectionChatWidget";
 import AiChatFab from "./components/AiChatFab";
 import ContextMenu from "./components/ContextMenu";
+import { InstitutionCountsProvider } from "./components/InstitutionCounts";
 import { SupabaseProvider } from "@/context/SupabaseProvider";
 
 export const metadata: Metadata = {
@@ -19,7 +20,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <SupabaseProvider>
-          {children}
+          <InstitutionCountsProvider>{children}</InstitutionCountsProvider>
           <SelectionChatWidget />
           <AiChatFab />
           <ContextMenu />

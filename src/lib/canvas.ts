@@ -620,8 +620,16 @@ async function listActiveTeacherCourses(ctx: {
  * Description and rubric come straight from the assignment list response, so the
  * scan costs one courses call plus one assignments call per course.
  */
-export async function listGradingQueue(code: string): Promise<CanvasQueueItem[]> {
-  const ctx = resolveInstitutionByCode(code);
+/**
+ * Raw needs-grading rows (no description/rubric yet) across an institution's
+ * active teacher courses. Shared by the full queue and the badge count so the
+ * count doesn't pay for the per-row description/rubric fetches.
+ */
+async function scanNeedsGrading(ctx: {
+  institution: CanvasInstitution;
+  token: string;
+  baseUrl: string;
+}): Promise<CanvasQueueItem[]> {
   const { institution, token, baseUrl } = ctx;
   const courses = await listActiveTeacherCourses(ctx);
 
@@ -656,18 +664,23 @@ export async function listGradingQueue(code: string): Promise<CanvasQueueItem[]>
           needsGradingCount: assignment.needs_grading_count,
           htmlUrl: assignment.html_url ?? canvasUrl,
           canvasUrl,
-          description: assignment.description ? htmlToText(assignment.description) : "",
-          rubricText: formatRubric(assignment.rubric),
+          description: "",
+          rubricText: "",
         });
       }
       next = parseNextLink(response.headers.get("link"));
     }
   }
+  return items;
+}
 
-  // The assignments list often omits the full description (and a graded
-  // discussion's prompt lives on its topic, not the assignment), so pull each
-  // row's description + rubric from the same show endpoints the single-URL flow
-  // uses. Failures keep whatever the list gave.
+export async function listGradingQueue(code: string): Promise<CanvasQueueItem[]> {
+  const ctx = resolveInstitutionByCode(code);
+  const items = await scanNeedsGrading(ctx);
+
+  // The assignments list omits the full description (and a graded discussion's
+  // prompt lives on its topic, not the assignment), so pull each row's
+  // description + rubric from the same show endpoints the single-URL flow uses.
   await Promise.all(
     items.map(async (item) => {
       try {
@@ -679,7 +692,7 @@ export async function listGradingQueue(code: string): Promise<CanvasQueueItem[]>
         item.description = meta.description;
         item.rubricText = meta.rubricText;
       } catch {
-        // Keep the list-derived fallback values.
+        // Leave description/rubric blank if a single row's meta can't be read.
       }
     })
   );
@@ -688,6 +701,27 @@ export async function listGradingQueue(code: string): Promise<CanvasQueueItem[]>
     (a, b) => a.courseName.localeCompare(b.courseName) || a.title.localeCompare(b.title)
   );
   return items;
+}
+
+/** Total submissions needing grading across active teacher courses (for badges). */
+export async function getNeedsGradingCount(code: string): Promise<number> {
+  const ctx = resolveInstitutionByCode(code);
+  const items = await scanNeedsGrading(ctx);
+  return items.reduce((sum, item) => sum + item.needsGradingCount, 0);
+}
+
+/** Unread Canvas inbox conversation count for an institution (for badges). */
+export async function getUnreadCount(code: string): Promise<number> {
+  const { institution, token, baseUrl } = resolveInbox(code);
+  const response = await fetch(`${baseUrl}/api/v1/conversations/unread_count`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+  const data = (await response.json()) as { unread_count?: string | number };
+  const raw = typeof data.unread_count === "string" ? Number.parseInt(data.unread_count, 10) : data.unread_count;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
 }
 
 /**

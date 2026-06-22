@@ -10,6 +10,7 @@ import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
 import LessonPlanningForm from "./components/LessonPlanningForm";
 import TopBar from "./components/TopBar";
+import { useInstitutionCounts } from "./components/InstitutionCounts";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildSlidesPptx } from "@/lib/pptx";
 import styles from "./page.module.css";
@@ -106,8 +107,19 @@ function PencilIcon() {
   );
 }
 
+// Tab label with an optional red notification bubble.
+function NavTabLabel({ text, count }: { text: string; count: number }) {
+  return (
+    <span className={styles.tabLabelWrap}>
+      {text}
+      {count > 0 && <span className={styles.navBadge}>{count}</span>}
+    </span>
+  );
+}
+
 export default function Home() {
   const [state, formAction, pending] = useActionState(gradeAction, initialState);
+  const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
   const [testState] = useActionState(testGeminiAction, initialTestState);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "lesson-planning";
@@ -580,8 +592,16 @@ export default function Home() {
         >
           <Tab label="New Build Courses" value="course-planning" disableRipple />
           <Tab label="Pre Built Courses" value="lesson-planning" disableRipple />
-          <Tab label="Grading" value="grading" disableRipple />
-          <Tab label="Communications" value="canvas" disableRipple />
+          <Tab
+            label={<NavTabLabel text="Grading" count={totalNeedsGrading} />}
+            value="grading"
+            disableRipple
+          />
+          <Tab
+            label={<NavTabLabel text="Communications" count={totalUnread} />}
+            value="canvas"
+            disableRipple
+          />
         </Tabs>
 
         {activeTab === "grading" && (

@@ -771,6 +771,29 @@
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--field-background) 80%, var(--field-border) 20%);
 }
 
+/* ── Notification badges (tab labels + institution chips) ─────────────────── */
+
+.tabLabelWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.navBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 /* ── Live Feed grading queue table (navy surface, white text) ─────────────── */
 
 .liveFeedTableWrap {

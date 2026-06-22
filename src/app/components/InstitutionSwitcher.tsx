@@ -1,15 +1,19 @@
 "use client";
 
 import { useInstitutionSelection } from "@/lib/institutions";
+import { useInstitutionCounts } from "./InstitutionCounts";
 import styles from "../page.module.css";
 
 /**
  * Segmented control for choosing the active institution, shared (via
- * localStorage) by the Live Feed and Communications tabs. Renders a hint when no
- * institutions are registered yet — they're added in the Settings dropdown.
+ * localStorage) by the Live Feed and Communications tabs. Each chip shows a
+ * notification bubble: needs-grading count on Grading, unread count on
+ * Communications (per `metric`). Renders a hint when none are registered yet —
+ * they're added in the Settings dropdown.
  */
-export default function InstitutionSwitcher() {
+export default function InstitutionSwitcher({ metric }: { metric: "grading" | "unread" }) {
   const { institutions, active, setActive } = useInstitutionSelection();
+  const { counts } = useInstitutionCounts();
 
   if (institutions.length === 0) {
     return (
@@ -21,18 +25,25 @@ export default function InstitutionSwitcher() {
 
   return (
     <div className={styles.lessonInnerTabs} role="radiogroup" aria-label="Institution">
-      {institutions.map((code) => (
-        <button
-          key={code}
-          type="button"
-          role="radio"
-          aria-checked={code === active}
-          className={`${styles.lessonInnerTab}${code === active ? ` ${styles.lessonInnerTabActive}` : ""}`}
-          onClick={() => setActive(code)}
-        >
-          {code}
-        </button>
-      ))}
+      {institutions.map((code) => {
+        const count =
+          metric === "grading" ? counts[code]?.needsGrading ?? 0 : counts[code]?.unread ?? 0;
+        return (
+          <button
+            key={code}
+            type="button"
+            role="radio"
+            aria-checked={code === active}
+            className={`${styles.lessonInnerTab}${code === active ? ` ${styles.lessonInnerTabActive}` : ""}`}
+            onClick={() => setActive(code)}
+          >
+            <span className={styles.tabLabelWrap}>
+              {code}
+              {count > 0 && <span className={styles.navBadge}>{count}</span>}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

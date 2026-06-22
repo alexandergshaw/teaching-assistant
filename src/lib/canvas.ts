@@ -317,10 +317,28 @@ interface CanvasRubricRating {
 }
 
 interface CanvasRubricCriterion {
+  id?: string;
   description?: string;
   long_description?: string;
   points?: number;
   ratings?: CanvasRubricRating[];
+}
+
+// Normalize a criterion/area name for matching ("Code Style (5 pts)" -> "code style").
+function normalizeCriterionName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\(\s*\d+(?:\.\d+)?\s*(?:pts?|points?|%)?\s*\)/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+// Pull earned points out of a score string ("7/10" -> "7", "85%" -> "85").
+function earnedPoints(score: string): string {
+  const fraction = score.match(/(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/);
+  if (fraction) return fraction[1];
+  const num = score.match(/-?\d+(?:\.\d+)?/);
+  return num ? num[0] : "";
 }
 
 interface CanvasAssignmentObject {
@@ -442,7 +460,12 @@ export async function fetchCanvasMeta(
  */
 export async function postCanvasGrades(
   url: string,
-  grades: Array<{ userId: number; grade?: string; comment?: string }>
+  grades: Array<{
+    userId: number;
+    grade?: string;
+    comment?: string;
+    rubricAreas?: Array<{ area: string; score: string; comment: string }>;
+  }>
 ): Promise<{ posted: number; failures: Array<{ userId: number; error: string }> }> {
   const parsed = parseCanvasUrl(url);
   if (!parsed) {
@@ -471,13 +494,46 @@ export async function postCanvasGrades(
     assignmentId = String(topic.assignment_id);
   }
 
+  // If the assignment has an attached rubric, build a normalized name -> criterion
+  // id map so per-criterion scores can populate the SpeedGrader rubric.
+  const criterionByName = new Map<string, string>();
+  try {
+    const assignment = await fetchAssignmentObject(
+      baseUrl,
+      token,
+      institution,
+      parsed.courseId,
+      assignmentId
+    );
+    for (const criterion of assignment.rubric ?? []) {
+      if (criterion.id && criterion.description) {
+        criterionByName.set(normalizeCriterionName(criterion.description), criterion.id);
+      }
+    }
+  } catch {
+    // No rubric / can't read it: fall back to overall grade + comment only.
+  }
+
   let posted = 0;
   const failures: Array<{ userId: number; error: string }> = [];
 
-  for (const { userId, grade, comment } of grades) {
+  for (const { userId, grade, comment, rubricAreas } of grades) {
     const params = new URLSearchParams();
     if (grade && grade.trim()) params.append("submission[posted_grade]", grade.trim());
     if (comment && comment.trim()) params.append("comment[text_comment]", comment.trim());
+
+    if (criterionByName.size > 0) {
+      for (const area of rubricAreas ?? []) {
+        const criterionId = criterionByName.get(normalizeCriterionName(area.area));
+        if (!criterionId) continue;
+        const points = earnedPoints(area.score);
+        if (points) params.append(`rubric_assessment[${criterionId}][points]`, points);
+        if (area.comment.trim()) {
+          params.append(`rubric_assessment[${criterionId}][comments]`, area.comment.trim());
+        }
+      }
+    }
+
     if ([...params.keys()].length === 0) {
       continue; // nothing to post for this student
     }

@@ -67,6 +67,9 @@ After grading a Canvas URL you can **review and post grades back to Canvas**: ed
 each student's points and comment, then post. Grades write to the assignment's
 gradebook column and comments are added to each submission (assignment URLs, and
 graded discussions via their linked assignment). The token needs grading access.
+When the Canvas assignment has an **attached rubric**, posting also fills the
+SpeedGrader rubric with per-criterion points and comments (matched to criteria by
+name); otherwise just the overall grade and comment are posted.
 
 Institutions are registered by hostname in `src/lib/canvas.ts` (e.g. MCC ->
 `canvas.mccneb.edu`). Each registered institution reads its own credentials from

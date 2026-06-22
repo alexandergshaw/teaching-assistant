@@ -253,10 +253,24 @@ export default function GradingTab({
     run.results.some((r) => typeof r.userId === "number");
 
   const handlePostGrades = async () => {
+    // Per-criterion scores ride along from the grading results (for assignments
+    // that have an attached Canvas rubric); overall grade/comment are the edited
+    // values.
+    const areasByUser = new Map<number, { area: string; score: string; comment: string }[]>();
+    for (const result of run?.results ?? []) {
+      if (typeof result.userId === "number") {
+        areasByUser.set(
+          result.userId,
+          result.rubricAreas.map((a) => ({ area: a.area, score: a.score, comment: a.comment }))
+        );
+      }
+    }
+
     const rows = Object.entries(postRows).map(([userId, row]) => ({
       userId: Number(userId),
       grade: row.grade,
       comment: row.comment,
+      rubricAreas: areasByUser.get(Number(userId)),
     }));
     if (rows.length === 0) return;
     if (
@@ -859,8 +873,9 @@ export default function GradingTab({
           </div>
           <p className={styles.fieldHint}>
             Edit grades and comments, then post. Grades write to the
-            assignment&apos;s gradebook column; comments are added to each
-            submission.
+            assignment&apos;s gradebook column and comments are added to each
+            submission. If the Canvas assignment has an attached rubric, the
+            per-criterion scores fill the SpeedGrader rubric too (matched by name).
           </p>
           {postSummary && <p className={styles.fieldHint}>{postSummary}</p>}
           <ul className={styles.lessonSlideList}>

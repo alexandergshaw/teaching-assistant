@@ -1129,7 +1129,12 @@ export async function fetchCanvasMetaAction(
 /** Post reviewed grades + comments back to Canvas (one PUT per student). */
 export async function postCanvasGradesAction(
   url: string,
-  grades: Array<{ userId: number; grade?: string; comment?: string }>
+  grades: Array<{
+    userId: number;
+    grade?: string;
+    comment?: string;
+    rubricAreas?: Array<{ area: string; score: string; comment: string }>;
+  }>
 ): Promise<
   { posted: number; failures: Array<{ userId: number; error: string }> } | { error: string }
 > {

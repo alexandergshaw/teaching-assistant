@@ -63,6 +63,7 @@ import {
   formatSlotsForReply,
 } from "@/lib/scheduling";
 import { humanizeAssignmentName, stripAssignmentSlugPrefix, looksLikeAssignmentSlug } from "@/lib/assignment-name";
+import type JSZip from "jszip";
 
 export interface SlideData {
   title: string;
@@ -2814,6 +2815,237 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+// ── Shared course-zip parsing ────────────────────────────────────────────────
+// The zip-based course tools (rubric, "generate all" plans, "generate one"
+// module) all locate an assignments folder, enumerate its subfolders, and pull
+// each one's lecture-relevant text the same way. These helpers are the single
+// source of truth so every path reads a codebase zip identically.
+
+const ASSIGNMENTS_FOLDER_PATTERN =
+  /^(assignments?|homeworks?|hw|labs?|projects?|exercises?|problems?)$/i;
+
+const COURSE_TEXT_EXTENSIONS = new Set([
+  ".md", ".txt", ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cpp", ".c",
+  ".h", ".cs", ".go", ".rs", ".rb", ".php", ".swift", ".kt", ".r", ".sql",
+  ".sh", ".yaml", ".yml", ".json", ".html", ".css", ".scss",
+]);
+
+const ASSIGNMENT_MAX_FILE_CHARS = 3000;
+const ASSIGNMENT_MAX_TOTAL_CHARS = 12000;
+
+interface AssignmentContentBundle {
+  name: string;
+  content: string;
+  readmeContent: string;
+}
+
+interface LectureTemplates {
+  introTemplateText: string;
+  instructionsTemplateText: string;
+  introTemplateHeadings: string[];
+  instructionsTemplateHeadings: string[];
+}
+
+/**
+ * Locate the assignments folder in a course zip: a top-level folder matching
+ * ASSIGNMENTS_FOLDER_PATTERN, or one level deep when the zip wraps the repo in a
+ * root folder. Returns the prefix (with trailing slash) or "" when none exists.
+ */
+function findAssignmentsPrefix(allPaths: string[]): string {
+  const topFolders = new Set<string>();
+  for (const path of allPaths) {
+    const m = path.match(/^([^/]+)\//);
+    if (m) topFolders.add(m[1]);
+  }
+  for (const folder of topFolders) {
+    if (ASSIGNMENTS_FOLDER_PATTERN.test(folder)) return folder + "/";
+  }
+  // Try one level deep (zip may wrap the repo in a root folder).
+  for (const path of allPaths) {
+    const m = path.match(/^[^/]+\/([^/]+)\//);
+    if (m && ASSIGNMENTS_FOLDER_PATTERN.test(m[1])) {
+      const firstSlash = path.indexOf("/");
+      const secondSlash = path.indexOf("/", firstSlash + 1);
+      if (firstSlash !== -1 && secondSlash !== -1) {
+        return path.slice(0, secondSlash + 1);
+      }
+    }
+  }
+  return "";
+}
+
+/**
+ * List the assignment subfolder slugs under `prefix`, sorted numerically so
+ * "assignment2" precedes "assignment10".
+ */
+function listAssignmentFolders(allPaths: string[], prefix: string): string[] {
+  const folders = new Set<string>();
+  for (const path of allPaths) {
+    if (path.startsWith(prefix)) {
+      const parts = path.slice(prefix.length).split("/");
+      if (parts.length >= 2 && parts[0]) folders.add(parts[0]);
+    }
+  }
+  return Array.from(folders).sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+  );
+}
+
+/**
+ * Pull the lecture-relevant text (instructions, then tests, then other source)
+ * for a single assignment folder, truncated to stay within the model's context
+ * window. Returns null when the folder holds no readable text.
+ */
+async function extractAssignmentContentBundle(
+  zip: JSZip,
+  allPaths: string[],
+  prefix: string,
+  folder: string
+): Promise<AssignmentContentBundle | null> {
+  const folderPrefix = prefix + folder + "/";
+  const folderFiles = allPaths.filter((p) => p.startsWith(folderPrefix) && !zip.files[p].dir);
+
+  const mdFiles = folderFiles.filter((p) => p.toLowerCase().endsWith(".md"));
+  const testFiles = folderFiles.filter((p) => {
+    const name = p.toLowerCase();
+    return (name.includes("test") || name.includes("spec")) && !p.toLowerCase().endsWith(".md");
+  });
+  const otherFiles = folderFiles.filter((p) => {
+    const ext = p.includes(".") ? "." + p.split(".").pop()!.toLowerCase() : "";
+    const name = p.toLowerCase();
+    return (
+      COURSE_TEXT_EXTENSIONS.has(ext) &&
+      !p.toLowerCase().endsWith(".md") &&
+      !name.includes("test") &&
+      !name.includes("spec")
+    );
+  });
+
+  const orderedFiles = [...mdFiles, ...testFiles, ...otherFiles];
+  let content = "";
+  let totalChars = 0;
+
+  for (const filePath of orderedFiles) {
+    if (totalChars >= ASSIGNMENT_MAX_TOTAL_CHARS) break;
+    const ext = filePath.includes(".") ? "." + filePath.split(".").pop()!.toLowerCase() : "";
+    if (!COURSE_TEXT_EXTENSIONS.has(ext)) continue;
+
+    try {
+      let fileContent = await zip.files[filePath].async("string");
+      const fileName = filePath.slice(folderPrefix.length);
+      if (fileContent.length > ASSIGNMENT_MAX_FILE_CHARS) {
+        fileContent = fileContent.slice(0, ASSIGNMENT_MAX_FILE_CHARS) + "\n… (truncated)";
+      }
+      content += `\n\n=== ${fileName} ===\n${fileContent}`;
+      totalChars += fileContent.length;
+    } catch {
+      // skip unreadable / binary files
+    }
+  }
+
+  if (!content.trim()) return null;
+
+  // Extract README content specifically for assignment instructions.
+  const readmeFile =
+    mdFiles.find((p) => p.slice(folderPrefix.length).toLowerCase().startsWith("readme")) ??
+    mdFiles[0];
+  let readmeContent = "";
+  if (readmeFile) {
+    try {
+      readmeContent = await zip.files[readmeFile].async("string");
+      if (readmeContent.length > ASSIGNMENT_MAX_FILE_CHARS) {
+        readmeContent = readmeContent.slice(0, ASSIGNMENT_MAX_FILE_CHARS) + "\n… (truncated)";
+      }
+    } catch {
+      // fall back to full content
+    }
+  }
+
+  return { name: folder, content, readmeContent: readmeContent || content };
+}
+
+/** Extract the strict-template text + heading lines once, for reuse per assignment. */
+async function extractLectureTemplates(
+  introTemplateBase64?: string,
+  instructionsTemplateBase64?: string
+): Promise<LectureTemplates> {
+  return {
+    introTemplateText: introTemplateBase64 ? await extractDocxTemplateText(introTemplateBase64) : "",
+    instructionsTemplateText: instructionsTemplateBase64
+      ? await extractDocxTemplateText(instructionsTemplateBase64)
+      : "",
+    // The template's real heading lines, so the downloaded document only applies
+    // heading formatting where the template itself has a heading.
+    introTemplateHeadings: introTemplateBase64 ? await extractDocxTemplateHeadings(introTemplateBase64) : [],
+    instructionsTemplateHeadings: instructionsTemplateBase64
+      ? await extractDocxTemplateHeadings(instructionsTemplateBase64)
+      : [],
+  };
+}
+
+/**
+ * Generate the full module (slides + module intro + assignment instructions) for
+ * one assignment from its extracted content. Shared by the "generate all" and
+ * "generate one" paths so output format and failure handling stay identical.
+ */
+async function buildAssignmentPlan(
+  bundle: AssignmentContentBundle,
+  index: number,
+  lectureDurationMinutes: number,
+  templates: LectureTemplates,
+  provider: LlmProvider
+): Promise<AssignmentPlan> {
+  const { name, content, readmeContent } = bundle;
+
+  // Map the folder slug to a clean human title/label. Strip a machine-slug
+  // prefix from the source H1 (e.g. "# review1: Review: Fundamentals" ->
+  // "Review: Fundamentals"); fall back to a humanized folder label. Clean the
+  // README the model sees so it can't echo the slug back as the title.
+  const sourceH1 = readmeContent.match(/^[ \t]*#[ \t]+(.+)$/m)?.[1]?.trim() ?? "";
+  const label = humanizeAssignmentName(name);
+  const strippedH1 = stripAssignmentSlugPrefix(sourceH1, name);
+  const displayTitle = strippedH1 && !looksLikeAssignmentSlug(strippedH1) ? strippedH1 : label;
+  const cleanedReadme = sourceH1
+    ? readmeContent.replace(/^[ \t]*#[ \t]+.+$/m, `# ${displayTitle}`)
+    : readmeContent;
+
+  const [slidesResult, introResult, instructionsResult] = await Promise.all([
+    generateSlidesForAssignment(name, content, lectureDurationMinutes, provider),
+    generateModuleIntroForAssignment(name, displayTitle, content, templates.introTemplateText, provider),
+    generateAssignmentInstructionsForAssignment(name, displayTitle, cleanedReadme, templates.instructionsTemplateText, provider),
+  ]);
+
+  // Never drop the whole assignment when only the slide deck fails — that
+  // silently removed an assignment from the output with no feedback. Keep the
+  // assignment (its intro/instructions are usually fine) with an empty deck so
+  // it stays visible and can be regenerated.
+  const slidesFailed = "error" in slidesResult;
+  if (slidesFailed) {
+    console.error(`Slide generation failed for "${name}": ${slidesResult.error}`);
+  }
+  const slides = slidesFailed ? [] : slidesResult.slides;
+
+  // Derive the week number from the assignment folder name (e.g. "week3",
+  // "Week 3", "assignment-03"). Fall back to the supplied position. Only used
+  // for ordering now — file names use the unique label.
+  const parsedWeek = name.match(/\d+/)?.[0];
+  const weekNumber = parsedWeek ? parseInt(parsedWeek, 10) : index + 1;
+
+  return {
+    assignmentName: name,
+    slides,
+    slidesFailed,
+    // Use the clean human title for the deck.
+    presentationTitle: displayTitle,
+    label,
+    moduleIntroduction: "error" in introResult ? "" : introResult.text,
+    assignmentInstructions: "error" in instructionsResult ? "" : instructionsResult.text,
+    weekNumber,
+    introTemplateHeadings: templates.introTemplateHeadings,
+    instructionsTemplateHeadings: templates.instructionsTemplateHeadings,
+  } satisfies AssignmentPlan;
+}
+
 export async function generateLecturePlansAction(
   zipBase64: string,
   lectureDurationMinutes: number,
@@ -2821,232 +3053,127 @@ export async function generateLecturePlansAction(
   instructionsTemplateBase64?: string,
   provider: LlmProvider = "gemini"
 ): Promise<AssignmentPlan[] | { error: string }> {
-  const TEXT_EXTENSIONS = new Set([
-    ".md", ".txt", ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cpp", ".c",
-    ".h", ".cs", ".go", ".rs", ".rb", ".php", ".swift", ".kt", ".r", ".sql",
-    ".sh", ".yaml", ".yml", ".json", ".html", ".css", ".scss",
-  ]);
-
-  const ASSIGNMENTS_PATTERN = /^(assignments?|homeworks?|hw|labs?|projects?|exercises?|problems?)$/i;
-
-  const MAX_FILE_CHARS = 3000;
-  const MAX_TOTAL_CHARS = 12000;
-
   try {
     const JSZip = (await import("jszip")).default;
-    const buffer = Buffer.from(zipBase64, "base64");
-    const zip = await JSZip.loadAsync(buffer);
-
+    const zip = await JSZip.loadAsync(Buffer.from(zipBase64, "base64"));
     const allPaths = Object.keys(zip.files);
 
-    // Collect top-level folder names
-    const topFolders = new Set<string>();
-    for (const path of allPaths) {
-      const m = path.match(/^([^/]+)\//);
-      if (m) topFolders.add(m[1]);
-    }
-
-    // Find the assignments prefix (top-level first, then one level deep)
-    let assignmentsPrefix = "";
-    for (const folder of topFolders) {
-      if (ASSIGNMENTS_PATTERN.test(folder)) {
-        assignmentsPrefix = folder + "/";
-        break;
-      }
-    }
-
-    if (!assignmentsPrefix) {
-      // Try one level deep (zip may wrap the repo in a root folder)
-      for (const path of allPaths) {
-        const m = path.match(/^[^/]+\/([^/]+)\//);
-        if (m && ASSIGNMENTS_PATTERN.test(m[1])) {
-          const firstSlash = path.indexOf("/");
-          const secondSlash = path.indexOf("/", firstSlash + 1);
-          if (firstSlash !== -1 && secondSlash !== -1) {
-            assignmentsPrefix = path.slice(0, secondSlash + 1);
-            break;
-          }
-        }
-      }
-    }
-
-    if (!assignmentsPrefix) {
+    const prefix = findAssignmentsPrefix(allPaths);
+    if (!prefix) {
       return {
         error:
           "No assignments folder found in the uploaded zip. Expected a top-level folder named 'assignments', 'homework', 'labs', or similar.",
       };
     }
 
-    // Find assignment subfolders
-    const assignmentFolders = new Set<string>();
-    for (const path of allPaths) {
-      if (path.startsWith(assignmentsPrefix)) {
-        const relative = path.slice(assignmentsPrefix.length);
-        const parts = relative.split("/");
-        if (parts.length >= 2 && parts[0]) {
-          assignmentFolders.add(parts[0]);
-        }
-      }
-    }
-
-    if (assignmentFolders.size === 0) {
+    const folders = listAssignmentFolders(allPaths, prefix);
+    if (folders.length === 0) {
       return { error: "No assignment subfolders found inside the assignments folder." };
     }
 
-    // Extract relevant text content per assignment
-    const assignmentContents: { name: string; content: string; readmeContent: string }[] = [];
-
-    for (const folder of Array.from(assignmentFolders).sort((a, b) =>
-      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
-    )) {
-      const folderPrefix = assignmentsPrefix + folder + "/";
-      const folderFiles = allPaths.filter((p) => p.startsWith(folderPrefix) && !zip.files[p].dir);
-
-      const mdFiles = folderFiles.filter((p) => p.toLowerCase().endsWith(".md"));
-      const testFiles = folderFiles.filter((p) => {
-        const name = p.toLowerCase();
-        return (name.includes("test") || name.includes("spec")) && !p.toLowerCase().endsWith(".md");
-      });
-      const otherFiles = folderFiles.filter((p) => {
-        const ext = p.includes(".") ? "." + p.split(".").pop()!.toLowerCase() : "";
-        const name = p.toLowerCase();
-        return (
-          TEXT_EXTENSIONS.has(ext) &&
-          !p.toLowerCase().endsWith(".md") &&
-          !name.includes("test") &&
-          !name.includes("spec")
-        );
-      });
-
-      const orderedFiles = [...mdFiles, ...testFiles, ...otherFiles];
-      let content = "";
-      let totalChars = 0;
-
-      for (const filePath of orderedFiles) {
-        if (totalChars >= MAX_TOTAL_CHARS) break;
-        const ext = filePath.includes(".") ? "." + filePath.split(".").pop()!.toLowerCase() : "";
-        if (!TEXT_EXTENSIONS.has(ext)) continue;
-
-        try {
-          let fileContent = await zip.files[filePath].async("string");
-          const fileName = filePath.slice(folderPrefix.length);
-          if (fileContent.length > MAX_FILE_CHARS) {
-            fileContent = fileContent.slice(0, MAX_FILE_CHARS) + "\n… (truncated)";
-          }
-          content += `\n\n=== ${fileName} ===\n${fileContent}`;
-          totalChars += fileContent.length;
-        } catch {
-          // skip unreadable / binary files
-        }
-      }
-
-      if (content.trim()) {
-        // Extract README content specifically for assignment instructions
-        const readmeFile = mdFiles.find((p) =>
-          p.slice(folderPrefix.length).toLowerCase().startsWith("readme")
-        ) ?? mdFiles[0];
-        let readmeContent = "";
-        if (readmeFile) {
-          try {
-            readmeContent = await zip.files[readmeFile].async("string");
-            if (readmeContent.length > MAX_FILE_CHARS) {
-              readmeContent = readmeContent.slice(0, MAX_FILE_CHARS) + "\n… (truncated)";
-            }
-          } catch {
-            // fall back to full content
-          }
-        }
-        assignmentContents.push({ name: folder, content, readmeContent: readmeContent || content });
-      }
+    const bundles: AssignmentContentBundle[] = [];
+    for (const folder of folders) {
+      const bundle = await extractAssignmentContentBundle(zip, allPaths, prefix, folder);
+      if (bundle) bundles.push(bundle);
     }
 
-    if (assignmentContents.length === 0) {
+    if (bundles.length === 0) {
       return { error: "No readable text content found in the assignment folders." };
     }
 
-    // Extract strict templates (if provided) once, then reuse for every assignment.
-    const introTemplateText = introTemplateBase64
-      ? await extractDocxTemplateText(introTemplateBase64)
-      : "";
-    const instructionsTemplateText = instructionsTemplateBase64
-      ? await extractDocxTemplateText(instructionsTemplateBase64)
-      : "";
+    const templates = await extractLectureTemplates(introTemplateBase64, instructionsTemplateBase64);
 
-    // Extract the template's real heading lines so the downloaded document only
-    // applies heading formatting where the template itself has a heading.
-    const introTemplateHeadings = introTemplateBase64
-      ? await extractDocxTemplateHeadings(introTemplateBase64)
-      : [];
-    const instructionsTemplateHeadings = instructionsTemplateBase64
-      ? await extractDocxTemplateHeadings(instructionsTemplateBase64)
-      : [];
-
-    // Generate slides and companion documents for each assignment. Run a bounded
-    // number of assignments at once (each makes three LLM calls) so we stay under
-    // the provider's rate limit; the transport layer additionally retries
-    // transient failures so a single hiccup never drops an assignment.
+    // Generate each assignment's module, bounding how many run at once (each
+    // makes three LLM calls) to stay under the provider's rate limit; the
+    // transport layer additionally retries transient failures.
     const LECTURE_PLAN_CONCURRENCY = 4;
-    const results = await mapWithConcurrency(
-      assignmentContents,
-      LECTURE_PLAN_CONCURRENCY,
-      async ({ name, content, readmeContent }, index) => {
-        // Map the folder slug to a clean human title/label. Strip a machine-slug
-        // prefix from the source H1 (e.g. "# review1: Review: Fundamentals" ->
-        // "Review: Fundamentals"); fall back to a humanized folder label. Clean
-        // the README the model sees so it can't echo the slug back as the title.
-        const sourceH1 = readmeContent.match(/^[ \t]*#[ \t]+(.+)$/m)?.[1]?.trim() ?? "";
-        const label = humanizeAssignmentName(name);
-        // Use the source title with its slug prefix stripped — but if that leaves
-        // nothing, or still just a bare slug ("review2"), use the humanized label.
-        const strippedH1 = stripAssignmentSlugPrefix(sourceH1, name);
-        const displayTitle =
-          strippedH1 && !looksLikeAssignmentSlug(strippedH1) ? strippedH1 : label;
-        const cleanedReadme = sourceH1
-          ? readmeContent.replace(/^[ \t]*#[ \t]+.+$/m, `# ${displayTitle}`)
-          : readmeContent;
-
-        const [slidesResult, introResult, instructionsResult] = await Promise.all([
-          generateSlidesForAssignment(name, content, lectureDurationMinutes, provider),
-          generateModuleIntroForAssignment(name, displayTitle, content, introTemplateText, provider),
-          generateAssignmentInstructionsForAssignment(name, displayTitle, cleanedReadme, instructionsTemplateText, provider),
-        ]);
-        // Never drop the whole assignment when only the slide deck fails — that
-        // silently removed an assignment from the output with no feedback. Keep
-        // the assignment (its intro/instructions are usually fine) with an empty
-        // deck so it stays visible and can be regenerated.
-        const slidesFailed = "error" in slidesResult;
-        if (slidesFailed) {
-          console.error(`Slide generation failed for "${name}": ${slidesResult.error}`);
-        }
-        const slides = slidesFailed ? [] : slidesResult.slides;
-        // Derive the week number from the assignment folder name (e.g.
-        // "week3", "Week 3", "assignment-03"). Fall back to the sorted position.
-        // Only used for ordering now — file names use the unique label.
-        const parsedWeek = name.match(/\d+/)?.[0];
-        const weekNumber = parsedWeek ? parseInt(parsedWeek, 10) : index + 1;
-        return {
-          assignmentName: name,
-          slides,
-          slidesFailed,
-          // Use the clean human title for the deck.
-          presentationTitle: displayTitle,
-          label,
-          moduleIntroduction: "error" in introResult ? "" : introResult.text,
-          assignmentInstructions: "error" in instructionsResult ? "" : instructionsResult.text,
-          weekNumber,
-          introTemplateHeadings,
-          instructionsTemplateHeadings,
-        } satisfies AssignmentPlan;
-      }
+    const plans = await mapWithConcurrency(bundles, LECTURE_PLAN_CONCURRENCY, (bundle, index) =>
+      buildAssignmentPlan(bundle, index, lectureDurationMinutes, templates, provider)
     );
-
-    const plans = results;
 
     if (plans.length === 0) {
       return { error: "No assignments could be generated from the uploaded zip." };
     }
 
     return plans;
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+/**
+ * List the assignment folders in a course zip (slug + human label) so the UI can
+ * offer a picker for single-module generation.
+ */
+export async function listAssignmentFoldersAction(
+  zipBase64: string
+): Promise<{ folders: { slug: string; label: string }[] } | { error: string }> {
+  try {
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(Buffer.from(zipBase64, "base64"));
+    const allPaths = Object.keys(zip.files);
+
+    const prefix = findAssignmentsPrefix(allPaths);
+    if (!prefix) {
+      return {
+        error:
+          "No assignments folder found in the uploaded zip. Expected a top-level folder named 'assignments', 'homework', 'labs', or similar.",
+      };
+    }
+
+    const folders = listAssignmentFolders(allPaths, prefix);
+    if (folders.length === 0) {
+      return { error: "No assignment subfolders found inside the assignments folder." };
+    }
+
+    return { folders: folders.map((slug) => ({ slug, label: humanizeAssignmentName(slug) })) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Generate the full module (slides + intro + instructions) for ONE assignment
+ * folder in the zip, identified by its slug (from listAssignmentFoldersAction).
+ * Runs the same per-assignment generation as generateLecturePlansAction.
+ */
+export async function generateLecturePlanForAssignmentAction(
+  zipBase64: string,
+  slug: string,
+  lectureDurationMinutes: number,
+  introTemplateBase64?: string,
+  instructionsTemplateBase64?: string,
+  provider: LlmProvider = "gemini"
+): Promise<AssignmentPlan | { error: string }> {
+  try {
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(Buffer.from(zipBase64, "base64"));
+    const allPaths = Object.keys(zip.files);
+
+    const prefix = findAssignmentsPrefix(allPaths);
+    if (!prefix) {
+      return {
+        error:
+          "No assignments folder found in the uploaded zip. Expected a top-level folder named 'assignments', 'homework', 'labs', or similar.",
+      };
+    }
+
+    const folders = listAssignmentFolders(allPaths, prefix);
+    const index = folders.indexOf(slug);
+    if (index === -1) {
+      return { error: `Assignment "${slug}" was not found in the uploaded zip.` };
+    }
+
+    const bundle = await extractAssignmentContentBundle(zip, allPaths, prefix, slug);
+    if (!bundle) {
+      return { error: `No readable text content found in the "${slug}" folder.` };
+    }
+
+    const templates = await extractLectureTemplates(introTemplateBase64, instructionsTemplateBase64);
+
+    // Preserve the assignment's natural ordering (its position in the sorted
+    // folder list) so a single module sorts correctly if merged into a list.
+    return await buildAssignmentPlan(bundle, index, lectureDurationMinutes, templates, provider);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }

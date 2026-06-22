@@ -51,7 +51,18 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
 import { requireOwner } from "@/lib/supabase/auth";
-import { humanizeAssignmentName, stripAssignmentSlugPrefix } from "@/lib/assignment-name";
+import {
+  getCredentials,
+  getValidAccessToken,
+  deleteCredentials,
+} from "@/lib/google-credentials";
+import { queryFreeBusy, createCalendarEvent } from "@/lib/google-calendar";
+import {
+  getSchedulingConfig,
+  computeFreeSlots,
+  formatSlotsForReply,
+} from "@/lib/scheduling";
+import { humanizeAssignmentName, stripAssignmentSlugPrefix, looksLikeAssignmentSlug } from "@/lib/assignment-name";
 
 export interface SlideData {
   title: string;
@@ -1260,6 +1271,183 @@ export async function setConversationStateAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not update the conversation." };
+  }
+}
+
+// ── Google Calendar scheduling ──────────────────────────────────────────────
+
+/** Whether the owner has connected Google Calendar (and can read free/busy). */
+export async function getGoogleCalendarStatusAction(): Promise<
+  { connected: boolean } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const creds = await getCredentials(user.id);
+    return { connected: !!creds && !!creds.refreshToken };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not check the connection." };
+  }
+}
+
+/** Forget the owner's Google connection. */
+export async function disconnectGoogleCalendarAction(): Promise<
+  { ok: true } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    await deleteCredentials(user.id);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not disconnect Google Calendar." };
+  }
+}
+
+/**
+ * Find open meeting slots from the owner's Google Calendar free/busy within the
+ * configured working hours. Returns ISO start times plus human-readable labels.
+ */
+export async function getAvailableSlotsAction(): Promise<
+  { slots: string[]; slotLabels: string[]; timeZone: string } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const token = await getValidAccessToken(user.id);
+    if (!token) {
+      return { error: "Google Calendar isn't connected. Connect it under Account > Integrations." };
+    }
+    const config = getSchedulingConfig();
+    const now = new Date();
+    const timeMax = new Date(now.getTime() + (config.lookaheadDays + 1) * 86_400_000);
+    const busy = await queryFreeBusy(token, now.toISOString(), timeMax.toISOString(), config.timeZone);
+    const slots = computeFreeSlots(busy, config, now);
+    return { slots, slotLabels: formatSlotsForReply(slots, config.timeZone), timeZone: config.timeZone };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load your availability." };
+  }
+}
+
+/**
+ * Draft a warm inbox reply that offers the given open times. Falls back to a
+ * plain template if the model call fails, so the feature still works offline.
+ */
+export async function draftMeetingReplyAction(
+  threadText: string,
+  slotsISO: string[],
+  provider: LlmProvider = "gemini"
+): Promise<{ body: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (slotsISO.length === 0) {
+      return { error: "No open times to offer." };
+    }
+    const config = getSchedulingConfig();
+    const labels = formatSlotsForReply(slotsISO, config.timeZone);
+    const bulletedTimes = labels.map((l) => `- ${l}`).join("\n");
+
+    const fallback = `Thanks for reaching out! I'd be glad to meet over a video call. Here are a few times that work on my end:\n\n${bulletedTimes}\n\nLet me know which one suits you and I'll send a Google Meet link.`;
+
+    const prompt = `You are an instructor replying to a student who asked to meet over a video call.
+
+CONVERSATION SO FAR (oldest message first):
+${threadText.trim()}
+
+AVAILABLE TIMES (offer these exact options, do not invent others):
+${bulletedTimes}
+
+Write the instructor's reply: warm and brief, confirm you're happy to meet over a video call, and list the available times as a short bulleted list exactly as given. Tell them to pick one and you'll send a Google Meet link. Output ONLY the reply text (plain text, no subject line, no salutation placeholder, no markdown headers).`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 1024 },
+      },
+      provider
+    );
+    if (!result.ok || !result.text.trim()) {
+      return { body: fallback };
+    }
+    return { body: result.text.trim() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not draft the reply." };
+  }
+}
+
+/**
+ * Book a 30-minute (config-length) Google Meet on the owner's primary calendar
+ * at the chosen slot, returning the Meet link to paste into the reply. The
+ * student is invited by email only when one is supplied (Canvas exposes names,
+ * not addresses).
+ */
+export async function createMeetingAction(
+  startISO: string,
+  studentName?: string,
+  studentEmail?: string
+): Promise<{ meetLink: string | null; htmlLink: string | null; startISO: string } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const token = await getValidAccessToken(user.id);
+    if (!token) {
+      return { error: "Google Calendar isn't connected. Connect it under Account > Integrations." };
+    }
+    const config = getSchedulingConfig();
+    const start = new Date(startISO);
+    if (Number.isNaN(start.getTime())) {
+      return { error: "That meeting time is invalid." };
+    }
+    const end = new Date(start.getTime() + config.slotMinutes * 60_000);
+    const who = studentName?.trim() ? studentName.trim() : "student";
+    const event = await createCalendarEvent(token, {
+      summary: `Video call with ${who}`,
+      description: "Scheduled from the Teaching Assistant inbox.",
+      startISO: start.toISOString(),
+      endISO: end.toISOString(),
+      timeZone: config.timeZone,
+      attendeeEmails: studentEmail?.trim() ? [studentEmail.trim()] : [],
+    });
+    return { meetLink: event.meetLink, htmlLink: event.htmlLink, startISO: start.toISOString() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the meeting." };
+  }
+}
+
+/**
+ * Classify whether the latest message in a thread is asking to schedule a live
+ * meeting / video call, so the inbox can proactively surface the scheduler.
+ * Fails closed (not a request) so a model hiccup never blocks the UI.
+ */
+export async function detectMeetingRequestAction(
+  threadText: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ isMeetingRequest: boolean; confidence: number }> {
+  try {
+    await requireOwner();
+    if (!threadText.trim()) return { isMeetingRequest: false, confidence: 0 };
+
+    const prompt = `Decide whether the MOST RECENT message in this conversation is asking the instructor to meet live (a video call, phone call, Zoom/Meet, office hours, or "can we talk"). A general question that does not ask to meet is not a meeting request.
+
+CONVERSATION (oldest first):
+${threadText.trim()}
+
+Respond with ONLY a JSON object: {"isMeetingRequest": boolean, "confidence": number between 0 and 1}.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 80, responseMimeType: "application/json" },
+      },
+      provider
+    );
+    if (!result.ok) return { isMeetingRequest: false, confidence: 0 };
+
+    const match = result.text.match(/\{[\s\S]*\}/);
+    if (!match) return { isMeetingRequest: false, confidence: 0 };
+    const parsed = JSON.parse(match[0]) as { isMeetingRequest?: unknown; confidence?: unknown };
+    return {
+      isMeetingRequest: parsed.isMeetingRequest === true,
+      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0,
+    };
+  } catch {
+    return { isMeetingRequest: false, confidence: 0 };
   }
 }
 
@@ -2775,7 +2963,11 @@ export async function generateLecturePlansAction(
         // the README the model sees so it can't echo the slug back as the title.
         const sourceH1 = readmeContent.match(/^[ \t]*#[ \t]+(.+)$/m)?.[1]?.trim() ?? "";
         const label = humanizeAssignmentName(name);
-        const displayTitle = stripAssignmentSlugPrefix(sourceH1, name) || label;
+        // Use the source title with its slug prefix stripped — but if that leaves
+        // nothing, or still just a bare slug ("review2"), use the humanized label.
+        const strippedH1 = stripAssignmentSlugPrefix(sourceH1, name);
+        const displayTitle =
+          strippedH1 && !looksLikeAssignmentSlug(strippedH1) ? strippedH1 : label;
         const cleanedReadme = sourceH1
           ? readmeContent.replace(/^[ \t]*#[ \t]+.+$/m, `# ${displayTitle}`)
           : readmeContent;

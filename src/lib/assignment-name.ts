@@ -5,7 +5,8 @@
 
 // Folder "kinds" we recognize as machine identifiers, used to detect and strip
 // slug prefixes without touching legitimate human titles.
-const KINDS = "assignment|review|exam|hw|homework|lab|project|week|midterm|final|quiz|module";
+const KINDS =
+  "assignment|assign|review|exam|test|quiz|hw|homework|lab|project|proj|week|midterm|final|capstone|milestone|module|unit|part";
 
 const ABBREVIATIONS: Record<string, string> = {
   hw: "Homework",

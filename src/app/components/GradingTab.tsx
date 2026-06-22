@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChangeEvent } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchCanvasMetaAction,
   postCanvasGradesAction,
@@ -13,6 +13,7 @@ import type { PreviewFile } from "./FilePreviewModal";
 import type { CanvasQueueItem } from "@/lib/canvas";
 import type { LlmProvider } from "@/lib/llm";
 import { parseGeneratedRubric } from "../utils/rubric";
+import { formatRelative } from "../utils/time";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection, readActiveInstitution } from "@/lib/institutions";
 import InstitutionSwitcher from "./InstitutionSwitcher";
@@ -164,14 +165,26 @@ function buildCsvContent(state: GradeActionState, edits: Record<string, RowEdit>
 
 // ── Live Feed panel ─────────────────────────────────────────────────────────
 
+const AUTO_REFRESH_KEY = "ta-livefeed-autorefresh";
+const AUTO_REFRESH_MS = 5 * 60 * 1000;
+
+type QueueSort = "course" | "count" | "due";
+type KindFilter = "all" | "assignment" | "discussion";
+
+const rowKeyOf = (row: CanvasQueueItem) => `${row.kind}-${row.id}`;
+
 function LiveFeedPanel({
   provider,
   pending,
   onAutoGrade,
+  gradingRowKey,
+  refreshSignal,
 }: {
   provider: LlmProvider;
   pending: boolean;
   onAutoGrade: (row: CanvasQueueItem) => void;
+  gradingRowKey: string | null;
+  refreshSignal: number;
 }) {
   const { active } = useInstitutionSelection();
   const { refresh: refreshCounts } = useInstitutionCounts();
@@ -181,10 +194,20 @@ function LiveFeedPanel({
     status: "idle" | "loading" | "error";
     message: string;
   }>(() => ({ status: readActiveInstitution() ? "loading" : "idle", message: "" }));
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+
+  const [search, setSearch] = useState("");
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [sort, setSort] = useState<QueueSort>("course");
+  const [groupByCourse, setGroupByCourse] = useState(true);
+  const [autoRefresh, setAutoRefresh] = useState(
+    () => typeof window !== "undefined" && localStorage.getItem(AUTO_REFRESH_KEY) === "1"
+  );
+  const [drawer, setDrawer] = useState<CanvasQueueItem | null>(null);
 
   // Show the loading screen the instant the institution changes (before the
-  // effect's fetch starts), clearing the previous school's rows. This is the
-  // React "adjust state during render" pattern, not an effect.
+  // effect's fetch starts), clearing the previous school's rows. React's
+  // "adjust state during render" pattern, not an effect.
   const [prevActive, setPrevActive] = useState(active);
   if (active !== prevActive) {
     setPrevActive(active);
@@ -203,10 +226,11 @@ function LiveFeedPanel({
     setRows(result.rows);
     setQueueErrors(result.errors);
     setQueueState({ status: "idle", message: "" });
+    setUpdatedAt(new Date().toISOString());
   }, []);
 
-  // Load the queue for the active institution on mount and whenever it changes.
-  // Await-first so the effect body performs no synchronous setState.
+  // Load on mount, on institution change, and when the parent bumps refreshSignal
+  // (after posting grades). Await-first so the effect performs no sync setState.
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
@@ -220,13 +244,107 @@ function LiveFeedPanel({
       setRows(result.rows);
       setQueueErrors(result.errors);
       setQueueState({ status: "idle", message: "" });
+      setUpdatedAt(new Date().toISOString());
     })();
     return () => {
       cancelled = true;
     };
-  }, [active]);
+  }, [active, refreshSignal]);
+
+  // Opt-in auto-refresh on an interval.
+  useEffect(() => {
+    if (!autoRefresh || !active) return;
+    const timer = setInterval(() => void loadQueue(active), AUTO_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [autoRefresh, active, loadQueue]);
+
+  const toggleAutoRefresh = () => {
+    setAutoRefresh((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") localStorage.setItem(AUTO_REFRESH_KEY, next ? "1" : "0");
+      return next;
+    });
+  };
 
   const graderLabel = provider === "other" ? "deterministic grader" : "AI grader";
+
+  const viewRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    let filtered = rows.filter((r) => kindFilter === "all" || r.kind === kindFilter);
+    if (term) {
+      filtered = filtered.filter(
+        (r) =>
+          r.title.toLowerCase().includes(term) || r.courseName.toLowerCase().includes(term)
+      );
+    }
+    const sorted = [...filtered];
+    sorted.sort((a, b) => {
+      if (sort === "count") return b.needsGradingCount - a.needsGradingCount;
+      if (sort === "due") {
+        const at = a.dueAt ? Date.parse(a.dueAt) : Number.POSITIVE_INFINITY;
+        const bt = b.dueAt ? Date.parse(b.dueAt) : Number.POSITIVE_INFINITY;
+        return at - bt;
+      }
+      return a.courseName.localeCompare(b.courseName) || a.title.localeCompare(b.title);
+    });
+    return sorted;
+  }, [rows, search, kindFilter, sort]);
+
+  // Group the rows for rendering when "group by course" is on.
+  const groups = useMemo(() => {
+    if (!groupByCourse) return [{ course: "", items: viewRows }];
+    const map = new Map<string, CanvasQueueItem[]>();
+    for (const row of viewRows) {
+      const list = map.get(row.courseName) ?? [];
+      list.push(row);
+      map.set(row.courseName, list);
+    }
+    return [...map.entries()].map(([course, items]) => ({ course, items }));
+  }, [viewRows, groupByCourse]);
+
+  const renderRow = (row: CanvasQueueItem) => {
+    const key = rowKeyOf(row);
+    const isGrading = pending && gradingRowKey === key;
+    return (
+      <tr key={key}>
+        <td>
+          <a href={row.htmlUrl} target="_blank" rel="noopener noreferrer">
+            {row.title}
+          </a>
+          <div className={styles.liveFeedSub}>
+            {row.kind}
+            {!groupByCourse && row.courseName ? ` · ${row.courseName}` : ""}
+            {" · "}
+            <a href={row.speedGraderUrl} target="_blank" rel="noopener noreferrer">
+              SpeedGrader
+            </a>
+          </div>
+        </td>
+        <td>{row.dueAt ? formatRelative(row.dueAt) : "—"}</td>
+        <td>{row.needsGradingCount}</td>
+        <td>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className={styles.liveFeedGhostButton}
+              onClick={() => setDrawer(row)}
+            >
+              Details
+            </button>
+            <button
+              type="button"
+              className={styles.submitButton}
+              style={{ minWidth: 0, padding: "8px 14px" }}
+              onClick={() => onAutoGrade(row)}
+              disabled={pending}
+            >
+              {isGrading ? "Grading…" : "Auto Grade"}
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  };
 
   return (
     <div className={styles.form}>
@@ -236,20 +354,72 @@ function LiveFeedPanel({
       </div>
 
       {active && (
-        <div className={styles.resultsHeader} style={{ paddingTop: 0 }}>
-          <h2>Needs grading</h2>
-          <button
-            type="button"
-            className={styles.downloadButton}
-            onClick={() => {
-              void loadQueue(active);
-              refreshCounts();
-            }}
-            disabled={queueState.status === "loading"}
-          >
-            {queueState.status === "loading" ? "Refreshing…" : "Refresh"}
-          </button>
-        </div>
+        <>
+          <div className={styles.resultsHeader} style={{ paddingTop: 0 }}>
+            <h2>Needs grading</h2>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              {updatedAt && <span className={styles.fieldHint}>Updated {formatRelative(updatedAt)}</span>}
+              <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                <input type="checkbox" checked={autoRefresh} onChange={toggleAutoRefresh} />
+                Auto-refresh
+              </label>
+              <button
+                type="button"
+                className={styles.downloadButton}
+                onClick={() => {
+                  void loadQueue(active);
+                  refreshCounts();
+                }}
+                disabled={queueState.status === "loading"}
+              >
+                {queueState.status === "loading" ? "Refreshing…" : "Refresh"}
+              </button>
+            </div>
+          </div>
+
+          {rows.length > 0 && (
+            <div className={styles.liveFeedToolbar}>
+              <input
+                type="search"
+                className={styles.textInput}
+                style={{ maxWidth: 260 }}
+                placeholder="Search assignment or course"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <select
+                className={styles.textInput}
+                style={{ maxWidth: 170 }}
+                value={kindFilter}
+                onChange={(e) => setKindFilter(e.target.value as KindFilter)}
+                aria-label="Filter by type"
+              >
+                <option value="all">All types</option>
+                <option value="assignment">Assignments</option>
+                <option value="discussion">Discussions</option>
+              </select>
+              <select
+                className={styles.textInput}
+                style={{ maxWidth: 190 }}
+                value={sort}
+                onChange={(e) => setSort(e.target.value as QueueSort)}
+                aria-label="Sort"
+              >
+                <option value="course">Sort: course</option>
+                <option value="count">Sort: most needing grading</option>
+                <option value="due">Sort: due soonest</option>
+              </select>
+              <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={groupByCourse}
+                  onChange={(e) => setGroupByCourse(e.target.checked)}
+                />
+                Group by course
+              </label>
+            </div>
+          )}
+        </>
       )}
 
       {active && queueState.status === "loading" && (
@@ -270,63 +440,33 @@ function LiveFeedPanel({
       {active && queueState.status === "idle" && rows.length === 0 && (
         <p className={styles.emptyState}>Nothing is waiting to be graded right now.</p>
       )}
+      {active && queueState.status === "idle" && rows.length > 0 && viewRows.length === 0 && (
+        <p className={styles.emptyState}>No rows match your search or filter.</p>
+      )}
 
-      {rows.length > 0 && (
+      {viewRows.length > 0 && (
         <div className={styles.liveFeedTableWrap}>
           <table className={styles.liveFeedTable}>
             <thead>
               <tr>
-                <th>Course</th>
                 <th>Assignment / Discussion</th>
-                <th>Description</th>
-                <th>Rubric</th>
+                <th>Due</th>
                 <th>Needs grading</th>
                 <th aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
-                <tr key={`${row.kind}-${row.id}`}>
-                  <td>{row.courseName}</td>
-                  <td>
-                    <a href={row.htmlUrl} target="_blank" rel="noopener noreferrer">
-                      {row.title}
-                    </a>
-                    <div style={{ fontSize: "0.78rem", opacity: 0.8 }}>{row.kind}</div>
-                  </td>
-                  <td style={{ maxWidth: 320 }}>
-                    {row.description ? (
-                      <details>
-                        <summary>View</summary>
-                        <div style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{row.description}</div>
-                      </details>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td style={{ maxWidth: 320 }}>
-                    {row.rubricText ? (
-                      <details>
-                        <summary>View</summary>
-                        <div style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{row.rubricText}</div>
-                      </details>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td>{row.needsGradingCount}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className={styles.submitButton}
-                      style={{ minWidth: 0, padding: "8px 14px" }}
-                      onClick={() => onAutoGrade(row)}
-                      disabled={pending}
-                    >
-                      Auto Grade
-                    </button>
-                  </td>
-                </tr>
+              {groups.map((group) => (
+                <Fragment key={group.course || "all"}>
+                  {groupByCourse && (
+                    <tr className={styles.liveFeedGroupRow}>
+                      <td colSpan={4}>
+                        {group.course} ({group.items.length})
+                      </td>
+                    </tr>
+                  )}
+                  {group.items.map(renderRow)}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -338,6 +478,31 @@ function LiveFeedPanel({
         appear below, where you can edit and post them back to Canvas. Institutions are managed in
         Settings (top right).
       </p>
+
+      {drawer && (
+        <div
+          className={styles.previewBackdrop}
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setDrawer(null)}
+        >
+          <div className={styles.previewModal} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.previewHeader}>
+              <h3>{drawer.title}</h3>
+              <button type="button" className={styles.previewCloseButton} onClick={() => setDrawer(null)}>
+                Close
+              </button>
+            </div>
+            <p className={styles.previewMeta}>{drawer.courseName}</p>
+            <div style={{ overflow: "auto" }}>
+              <p className={styles.fileMetaLabel}>Description</p>
+              <pre className={styles.previewContent}>{drawer.description || "No description in Canvas."}</pre>
+              <p className={styles.fileMetaLabel} style={{ marginTop: 12 }}>Rubric</p>
+              <pre className={styles.previewContent}>{drawer.rubricText || "No rubric in Canvas."}</pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -365,6 +530,15 @@ export default function GradingTab({
 }: GradingTabProps) {
   const [selectedProvider] = useLlmProvider();
   const { refresh: refreshCounts } = useInstitutionCounts();
+  // Grade-in-context: which Live Feed row is being graded, a signal to refetch
+  // the queue after posting, and a ref to scroll the results into view.
+  const [gradingTarget, setGradingTarget] = useState<{
+    title: string;
+    courseName: string;
+    key: string;
+  } | null>(null);
+  const [queueRefreshSignal, setQueueRefreshSignal] = useState(0);
+  const resultsRef = useRef<HTMLDivElement>(null);
   const [source, setSource] = useState<GradingMode>(() => {
     if (typeof window === "undefined") return "zip";
     const saved = localStorage.getItem("ta-grading-source");
@@ -470,6 +644,7 @@ export default function GradingTab({
   // this assignment, then dispatch the grade action with the row's context.
   const handleAutoGrade = (row: CanvasQueueItem) => {
     setCanvasUrl(row.canvasUrl);
+    setGradingTarget({ title: row.title, courseName: row.courseName, key: `${row.kind}-${row.id}` });
     const fd = new FormData();
     fd.set("canvasUrl", row.canvasUrl);
     fd.set("assignmentInstructions", row.description || row.title);
@@ -478,6 +653,14 @@ export default function GradingTab({
     fd.set("institution", row.institution);
     formAction(fd);
   };
+
+  // Scroll the results into view when a new grading run arrives (so Auto Grade
+  // from the tall queue lands you on the results instead of leaving you scrolled up).
+  useEffect(() => {
+    if (run && resultsRef.current) {
+      resultsRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [run]);
 
   const handlePostGrades = async () => {
     if (gradableResults.length === 0) return;
@@ -542,8 +725,10 @@ export default function GradingTab({
     setPostSummary(
       `Posted ${result.posted}${result.failures.length ? `, ${result.failures.length} failed` : ""}.`
     );
-    // Posting grades clears submissions from the queue — update the badge.
+    // Posting grades clears submissions from the queue — update the badge and
+    // refetch the Live Feed so the graded row drops off.
     refreshCounts();
+    setQueueRefreshSignal((n) => n + 1);
   };
 
   const sortedResults = useMemo(() => {
@@ -710,6 +895,8 @@ export default function GradingTab({
           provider={selectedProvider}
           pending={pending}
           onAutoGrade={handleAutoGrade}
+          gradingRowKey={gradingTarget?.key ?? null}
+          refreshSignal={queueRefreshSignal}
         />
       ) : (
       <form className={styles.form} action={formAction}>
@@ -908,7 +1095,13 @@ export default function GradingTab({
       )}
 
       {run && run.results.length > 0 && (
-        <section className={styles.results}>
+        <section className={styles.results} ref={resultsRef}>
+          {gradingTarget && (
+            <div className={styles.gradingBanner}>
+              Grading <strong>{gradingTarget.title}</strong>
+              {gradingTarget.courseName ? ` — ${gradingTarget.courseName}` : ""}
+            </div>
+          )}
           <div className={styles.resultsHeader}>
             <h2>Grading Results</h2>
             <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>

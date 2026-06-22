@@ -568,10 +568,20 @@ export interface CanvasQueueItem {
   assignmentId: string;
   title: string;
   needsGradingCount: number;
+  dueAt: string | null;
+  pointsPossible: number | null;
   htmlUrl: string;
   canvasUrl: string;
+  /** Direct SpeedGrader link for the assignment. */
+  speedGraderUrl: string;
   description: string;
   rubricText: string;
+}
+
+/** A course the token user teaches, for the announcements course picker. */
+export interface CanvasCourse {
+  id: string;
+  name: string;
 }
 
 interface CanvasCourseListItem {
@@ -588,6 +598,13 @@ interface CanvasAssignmentListItem {
   submission_types?: string[];
   rubric?: CanvasRubricCriterion[];
   discussion_topic?: { id?: number } | null;
+  due_at?: string | null;
+  points_possible?: number | null;
+}
+
+/** List the active courses the token user teaches (for the course picker). */
+export async function listCourses(code: string): Promise<CanvasCourse[]> {
+  return listActiveTeacherCourses(resolveInstitutionByCode(code));
 }
 
 async function listActiveTeacherCourses(ctx: {
@@ -662,8 +679,11 @@ async function scanNeedsGrading(ctx: {
           assignmentId: String(assignment.id),
           title: assignment.name?.trim() || `Assignment ${assignment.id}`,
           needsGradingCount: assignment.needs_grading_count,
+          dueAt: assignment.due_at ?? null,
+          pointsPossible: typeof assignment.points_possible === "number" ? assignment.points_possible : null,
           htmlUrl: assignment.html_url ?? canvasUrl,
           canvasUrl,
+          speedGraderUrl: `${baseUrl}/courses/${course.id}/gradebook/speed_grader?assignment_id=${assignment.id}`,
           description: "",
           rubricText: "",
         });
@@ -1023,6 +1043,7 @@ export interface CanvasConversationSummary {
 
 export interface CanvasConversationMessage {
   id: number;
+  authorId: number | null;
   author: string;
   body: string;
   createdAt: string | null;
@@ -1032,6 +1053,8 @@ export interface CanvasConversationDetail {
   id: number;
   subject: string;
   participants: string[];
+  /** The signed-in user's Canvas id, so the UI can align their messages. */
+  selfId: number | null;
   messages: CanvasConversationMessage[];
 }
 
@@ -1077,6 +1100,28 @@ function resolveInbox(code?: string): {
   return code ? resolveInstitutionByCode(code) : resolveDefaultInstitution();
 }
 
+// The signed-in user's Canvas id, cached per institution base URL (it never
+// changes for a token), so the inbox thread can tell "me" from the student.
+const selfIdCache = new Map<string, number>();
+async function getSelfId(ctx: { token: string; baseUrl: string }): Promise<number | null> {
+  const cached = selfIdCache.get(ctx.baseUrl);
+  if (typeof cached === "number") return cached;
+  try {
+    const response = await fetch(`${ctx.baseUrl}/api/v1/users/self`, {
+      headers: { Authorization: `Bearer ${ctx.token}` },
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { id?: number };
+    if (typeof data.id === "number") {
+      selfIdCache.set(ctx.baseUrl, data.id);
+      return data.id;
+    }
+  } catch {
+    // Alignment is a nicety; fall back to null if self can't be read.
+  }
+  return null;
+}
+
 export async function listConversations(code?: string): Promise<CanvasConversationSummary[]> {
   const { institution, token, baseUrl } = resolveInbox(code);
   const response = await fetch(`${baseUrl}/api/v1/conversations?per_page=50`, {
@@ -1111,7 +1156,10 @@ export async function getConversation(
   if (!response.ok) {
     throw canvasError(response.status, institution);
   }
-  const data = (await response.json()) as CanvasConversationDetailResponse;
+  const [data, selfId] = await Promise.all([
+    response.json() as Promise<CanvasConversationDetailResponse>,
+    getSelfId({ token, baseUrl }),
+  ]);
 
   const names = new Map<number, string>();
   for (const p of data.participants ?? []) {
@@ -1124,6 +1172,7 @@ export async function getConversation(
     .filter((m) => typeof m.id === "number")
     .map((m) => ({
       id: m.id!,
+      authorId: typeof m.author_id === "number" ? m.author_id : null,
       author:
         typeof m.author_id === "number"
           ? names.get(m.author_id) ?? `User ${m.author_id}`
@@ -1138,6 +1187,7 @@ export async function getConversation(
     id: data.id ?? id,
     subject: (data.subject ?? "").trim() || "(no subject)",
     participants: [...names.values()],
+    selfId,
     messages,
   };
 }
@@ -1165,6 +1215,29 @@ export async function replyToConversation(
       body: params.toString(),
     }
   );
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+}
+
+/** Mark a conversation read/unread or archive it. */
+export async function setConversationWorkflowState(
+  id: number,
+  state: "read" | "unread" | "archived",
+  code?: string
+): Promise<void> {
+  const { institution, token, baseUrl } = resolveInbox(code);
+  const params = new URLSearchParams();
+  params.append("conversation[workflow_state]", state);
+
+  const response = await fetch(`${baseUrl}/api/v1/conversations/${id}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: params.toString(),
+  });
   if (!response.ok) {
     throw canvasError(response.status, institution);
   }

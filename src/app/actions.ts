@@ -23,10 +23,13 @@ import {
   listGradingQueue,
   getNeedsGradingCount,
   getUnreadCount,
+  listCourses,
+  setConversationWorkflowState,
   type CanvasAnnouncement,
   type CanvasConversationSummary,
   type CanvasConversationDetail,
   type CanvasQueueItem,
+  type CanvasCourse,
 } from "@/lib/canvas";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
@@ -1160,6 +1163,18 @@ export async function postCanvasGradesAction(
 // returns plain serializable data or an { error } string the UI surfaces inline.
 
 /** Load a course's name + recent announcements for the announcements panel. */
+/** List the active teacher courses for an institution (announcements picker). */
+export async function listCoursesAction(
+  acronym: string
+): Promise<{ courses: CanvasCourse[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return { courses: await listCourses(acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load courses." };
+  }
+}
+
 export async function listAnnouncementsAction(
   courseUrl: string,
   acronym?: string
@@ -1229,6 +1244,21 @@ export async function replyToConversationAction(
     return { conversation: await getConversation(id, acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not send the reply." };
+  }
+}
+
+/** Mark a conversation read/unread or archive it. */
+export async function setConversationStateAction(
+  id: number,
+  state: "read" | "unread" | "archived",
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await setConversationWorkflowState(id, state, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the conversation." };
   }
 }
 
@@ -1439,6 +1469,29 @@ export async function getInstitutionCountsAction(
     return { counts };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load notification counts." };
+  }
+}
+
+/**
+ * Unread inbox counts only — cheap (one call per school), for refreshing the
+ * Communications badge after read/archive without re-running the needs-grading scan.
+ */
+export async function getUnreadCountsAction(
+  acronyms: string[]
+): Promise<{ counts: Array<{ acronym: string; unread: number }> } | { error: string }> {
+  try {
+    await requireOwner();
+    const counts = await Promise.all(
+      acronyms.map(async (raw) => {
+        const code = raw.trim().toUpperCase();
+        if (!code) return { acronym: code, unread: 0 };
+        const unread = await getUnreadCount(code).catch(() => 0);
+        return { acronym: code, unread };
+      })
+    );
+    return { counts };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load unread counts." };
   }
 }
 

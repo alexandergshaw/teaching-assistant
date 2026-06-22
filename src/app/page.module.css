@@ -842,6 +842,169 @@
   border-bottom: none;
 }
 
+.liveFeedSub {
+  font-size: 0.78rem;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+.liveFeedSub a {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+.liveFeedGroupRow td {
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 700;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.liveFeedGhostButton {
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: transparent;
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.liveFeedGhostButton:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* ── Live Feed toolbar + grading banner ───────────────────────────────────── */
+
+.liveFeedToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.gradingBanner {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--field-background) 80%, var(--accent) 20%);
+  border: 1px solid var(--accent);
+  color: var(--text-primary);
+  font-size: 0.92rem;
+}
+
+/* ── Announcement preview ─────────────────────────────────────────────────── */
+
+.announcementPreview {
+  border: 1px solid var(--field-border);
+  border-radius: 14px;
+  background: var(--field-background);
+  padding: 16px 18px;
+}
+
+/* ── Inbox list + thread ──────────────────────────────────────────────────── */
+
+.inboxItem {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--field-border);
+  border-radius: 14px;
+  background: var(--field-background);
+  overflow: hidden;
+}
+
+.inboxItemSelected {
+  border-color: var(--accent);
+}
+
+.inboxItemUnread {
+  background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
+}
+
+.inboxItemMain {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 12px 14px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-primary);
+}
+
+.inboxAvatar {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.inboxItemBody {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.inboxItemTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inboxItemSubject {
+  color: var(--text-primary);
+  font-size: 0.92rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inboxItemTime {
+  flex-shrink: 0;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
+.inboxItemMeta,
+.inboxItemPreview {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inboxItemActions {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 10px 58px;
+}
+
+.inboxReplyBox {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+  background: var(--card-background);
+  border-top: 1px solid var(--field-border);
+}
+
 .matrix {
   width: 100%;
   border-collapse: separate;

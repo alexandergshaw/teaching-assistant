@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   listAnnouncementsAction,
   createAnnouncementAction,
@@ -9,17 +9,21 @@ import {
   replyToConversationAction,
   draftAnnouncementAction,
   draftMessageReplyAction,
+  listCoursesAction,
+  setConversationStateAction,
 } from "../actions";
 import type {
   CanvasAnnouncement,
   CanvasConversationSummary,
   CanvasConversationDetail,
+  CanvasCourse,
 } from "@/lib/canvas";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import InstitutionSwitcher from "./InstitutionSwitcher";
 import { useInstitutionCounts } from "./InstitutionCounts";
+import { formatRelative } from "../utils/time";
 import styles from "../page.module.css";
 
 const COURSE_URL_KEY = "ta-canvas-course-url";
@@ -60,6 +64,14 @@ function formatWhen(iso: string | null): string {
   });
 }
 
+// Up to two initials from a display name, for inbox avatars.
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 // ── Announcements ───────────────────────────────────────────────────────────
 
 function AnnouncementsPanel() {
@@ -78,6 +90,10 @@ function AnnouncementsPanel() {
   });
 
   const [savedCourses, setSavedCourses] = useState<SavedCourse[]>(() => readSavedCourses());
+  const [courses, setCourses] = useState<CanvasCourse[]>([]);
+  const [coursesState, setCoursesState] = useState<"idle" | "loading" | "error">(
+    activeInstitution ? "loading" : "idle"
+  );
 
   const [draftPrompt, setDraftPrompt] = useState("");
   const [drafting, setDrafting] = useState(false);
@@ -85,18 +101,42 @@ function AnnouncementsPanel() {
   const [message, setMessage] = useState("");
   const [posting, setPosting] = useState(false);
   const [postNote, setPostNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [lastPosted, setLastPosted] = useState<CanvasAnnouncement | null>(null);
 
-  // Clear loaded announcements when the institution changes — they belonged to
-  // the previous school. Announcements are course-URL-driven, so nothing
-  // auto-fetches here; the user reloads via the button for the new school.
+  // Clear loaded announcements + course list when the institution changes — they
+  // belonged to the previous school.
   const [prevInstitution, setPrevInstitution] = useState(activeInstitution);
   if (activeInstitution !== prevInstitution) {
     setPrevInstitution(activeInstitution);
     setAnnouncements([]);
     setCourseName("");
+    setCourseUrl("");
+    setCourses([]);
+    setCoursesState(activeInstitution ? "loading" : "idle");
     setLoadState({ status: "idle", message: "" });
     setPostNote(null);
+    setLastPosted(null);
   }
+
+  // Load the institution's courses for the picker (await-first, no sync setState).
+  useEffect(() => {
+    if (!activeInstitution) return;
+    let cancelled = false;
+    (async () => {
+      const result = await listCoursesAction(activeInstitution);
+      if (cancelled) return;
+      if ("error" in result) {
+        setCourses([]);
+        setCoursesState("error");
+        return;
+      }
+      setCourses(result.courses);
+      setCoursesState("idle");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeInstitution]);
 
   const courseId = parseCanvasCourseId(courseUrl);
   const isSaved = !!courseId && savedCourses.some((c) => c.id === courseId);
@@ -179,6 +219,7 @@ function AnnouncementsPanel() {
       return;
     }
     setPostNote({ kind: "success", text: "Announcement posted to Canvas." });
+    setLastPosted(result.announcement);
     setTitle("");
     setMessage("");
     setDraftPrompt("");
@@ -188,43 +229,76 @@ function AnnouncementsPanel() {
   return (
     <div className={styles.form}>
       <div className={styles.field}>
-        <label htmlFor="canvas-course-url">Canvas course URL</label>
-        <input
-          id="canvas-course-url"
-          type="url"
+        <label htmlFor="canvas-course-picker">Course</label>
+        <select
+          id="canvas-course-picker"
           className={styles.textInput}
-          placeholder="Paste a course link (.../courses/123)"
-          value={courseUrl}
+          value={courseId ?? ""}
+          disabled={coursesState === "loading" || courses.length === 0}
           onChange={(e) => {
-            setCourseUrl(e.target.value);
+            const id = e.target.value;
+            if (!id) return;
+            const url = `/courses/${id}`;
+            setCourseUrl(url);
             setLoadState({ status: "idle", message: "" });
+            void loadAnnouncements(url);
           }}
-        />
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className={styles.downloadButton}
-            onClick={() => void loadAnnouncements(courseUrl.trim())}
-            disabled={loadState.status === "loading" || !courseId}
-          >
-            {loadState.status === "loading" ? "Loading…" : "Load announcements"}
-          </button>
-          <button
-            type="button"
-            className={styles.downloadButton}
-            onClick={saveCurrentCourse}
-            disabled={!courseId || isSaved}
-          >
-            {isSaved ? "Saved" : "Save course"}
-          </button>
-        </div>
-        <p className={styles.fieldHint}>
-          {courseId
-            ? `Detected course ${courseId}. Load its recent announcements, save it for quick access, or post a new one below.`
-            : courseUrl.trim()
-              ? "Unrecognized URL. Expecting a link like .../courses/123."
-              : "Paste any link from the course (a course home, announcements, or assignment URL works)."}
-        </p>
+        >
+          <option value="">
+            {coursesState === "loading"
+              ? "Loading courses…"
+              : courses.length === 0
+                ? "No courses found"
+                : "Select a course…"}
+          </option>
+          {courses.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        {coursesState === "error" && (
+          <p className={styles.fieldHint}>
+            Could not list courses for this school; paste a course URL below instead.
+          </p>
+        )}
+
+        <details className={styles.generatedRubricCard} style={{ marginTop: 4 }}>
+          <summary>Or paste a course URL</summary>
+          <input
+            id="canvas-course-url"
+            type="url"
+            className={styles.textInput}
+            style={{ marginTop: 10 }}
+            placeholder="Paste a course link (.../courses/123)"
+            value={courseUrl}
+            onChange={(e) => {
+              setCourseUrl(e.target.value);
+              setLoadState({ status: "idle", message: "" });
+            }}
+          />
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+            <button
+              type="button"
+              className={styles.downloadButton}
+              onClick={() => void loadAnnouncements(courseUrl.trim())}
+              disabled={loadState.status === "loading" || !courseId}
+            >
+              {loadState.status === "loading" ? "Loading…" : "Load announcements"}
+            </button>
+            <button
+              type="button"
+              className={styles.downloadButton}
+              onClick={saveCurrentCourse}
+              disabled={!courseId || isSaved}
+            >
+              {isSaved ? "Saved" : "Save course"}
+            </button>
+          </div>
+        </details>
+        {loadState.status === "loading" && (
+          <p className={styles.fieldHint}>Loading announcements…</p>
+        )}
         {loadState.status === "error" && <p className={styles.error}>{loadState.message}</p>}
       </div>
 
@@ -333,6 +407,16 @@ function AnnouncementsPanel() {
         />
       </div>
 
+      {(title.trim() || message.trim()) && (
+        <div className={styles.field}>
+          <label>Preview</label>
+          <div className={styles.announcementPreview}>
+            {title.trim() && <h3 className={styles.lessonSlideTitle}>{title}</h3>}
+            <p className={styles.syllabusSectionContent}>{message}</p>
+          </div>
+        </div>
+      )}
+
       <button
         type="button"
         className={styles.submitButton}
@@ -343,7 +427,17 @@ function AnnouncementsPanel() {
       </button>
 
       {postNote && (
-        <p className={postNote.kind === "error" ? styles.error : styles.fieldHint}>{postNote.text}</p>
+        <p className={postNote.kind === "error" ? styles.error : styles.fieldHint}>
+          {postNote.text}
+          {postNote.kind === "success" && lastPosted?.htmlUrl && (
+            <>
+              {" "}
+              <a href={lastPosted.htmlUrl} target="_blank" rel="noopener noreferrer">
+                View in Canvas
+              </a>
+            </>
+          )}
+        </p>
       )}
 
       {announcements.length > 0 && (
@@ -383,13 +477,15 @@ function AnnouncementsPanel() {
 function InboxPanel() {
   const [provider] = useLlmProvider();
   const { active: activeInstitution } = useInstitutionSelection();
-  const { refresh: refreshCounts } = useInstitutionCounts();
+  const { refreshUnread } = useInstitutionCounts();
 
   const [conversations, setConversations] = useState<CanvasConversationSummary[]>([]);
   const [inboxState, setInboxState] = useState<{ status: "loading" | "idle" | "error"; message: string }>({
     status: "loading",
     message: "",
   });
+  const [search, setSearch] = useState("");
+  const [readFilter, setReadFilter] = useState<"all" | "unread" | "read">("all");
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [conversation, setConversation] = useState<CanvasConversationDetail | null>(null);
@@ -426,10 +522,8 @@ function InboxPanel() {
     setInboxState({ status: "idle", message: "" });
   }, [activeInstitution]);
 
-  // Load the inbox on mount and whenever the active institution changes. The
-  // fetch is started without a synchronous setState (await-first) so this stays
-  // a pure external-system sync; selection is cleared since it belonged to the
-  // previous school.
+  // Load the inbox on mount and whenever the active institution changes
+  // (await-first so the effect performs no synchronous setState).
   useEffect(() => {
     let active = true;
     (async () => {
@@ -463,6 +557,26 @@ function InboxPanel() {
     }
     setConversation(result.conversation);
     setThreadState({ status: "idle", message: "" });
+    // Opening marks it read in Canvas; reflect that locally + in the badge.
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, workflowState: "read" } : c))
+    );
+    refreshUnread();
+  };
+
+  const changeState = async (id: number, state: "read" | "unread" | "archived") => {
+    const result = await setConversationStateAction(id, state, activeInstitution || undefined);
+    if ("error" in result) return;
+    setConversations((prev) =>
+      state === "archived"
+        ? prev.filter((c) => c.id !== id)
+        : prev.map((c) => (c.id === id ? { ...c, workflowState: state } : c))
+    );
+    if (state === "archived" && selectedId === id) {
+      setSelectedId(null);
+      setConversation(null);
+    }
+    refreshUnread();
   };
 
   const threadText = conversation
@@ -500,15 +614,28 @@ function InboxPanel() {
     setReplyBody("");
     setReplyInstr("");
     setReplyNote({ kind: "success", text: "Reply sent." });
-    // Reflect the new last message in the list and refresh the unread badge.
     void loadInbox();
-    refreshCounts();
+    refreshUnread();
   };
+
+  const visibleConversations = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return conversations.filter((c) => {
+      if (readFilter === "unread" && c.workflowState !== "unread") return false;
+      if (readFilter === "read" && c.workflowState === "unread") return false;
+      if (!term) return true;
+      return (
+        c.subject.toLowerCase().includes(term) ||
+        c.participants.join(" ").toLowerCase().includes(term) ||
+        c.lastMessage.toLowerCase().includes(term)
+      );
+    });
+  }, [conversations, search, readFilter]);
 
   return (
     <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
       {/* Conversation list */}
-      <div style={{ flex: "1 1 280px", minWidth: 260, maxWidth: 440, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ flex: "1 1 300px", minWidth: 260, maxWidth: 460, display: "flex", flexDirection: "column", gap: 10 }}>
         <div className={styles.resultsHeader} style={{ paddingTop: 0 }}>
           <h2>Inbox</h2>
           <button
@@ -516,12 +643,34 @@ function InboxPanel() {
             className={styles.downloadButton}
             onClick={() => {
               void loadInbox();
-              refreshCounts();
+              refreshUnread();
             }}
             disabled={inboxState.status === "loading"}
           >
             {inboxState.status === "loading" ? "Refreshing…" : "Refresh"}
           </button>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input
+            type="search"
+            className={styles.textInput}
+            style={{ flex: "1 1 160px", minWidth: 0 }}
+            placeholder="Search messages"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <select
+            className={styles.textInput}
+            style={{ maxWidth: 130 }}
+            value={readFilter}
+            onChange={(e) => setReadFilter(e.target.value as "all" | "unread" | "read")}
+            aria-label="Filter by read state"
+          >
+            <option value="all">All</option>
+            <option value="unread">Unread</option>
+            <option value="read">Read</option>
+          </select>
         </div>
 
         {inboxState.status === "loading" && (
@@ -536,46 +685,51 @@ function InboxPanel() {
         {inboxState.status === "idle" && conversations.length === 0 && (
           <p className={styles.emptyState}>No conversations in the inbox.</p>
         )}
+        {inboxState.status === "idle" && conversations.length > 0 && visibleConversations.length === 0 && (
+          <p className={styles.emptyState}>No conversations match.</p>
+        )}
 
-        {conversations.map((c) => {
+        {visibleConversations.map((c) => {
           const selected = c.id === selectedId;
           const unread = c.workflowState === "unread";
+          const who = c.participants[0] ?? c.subject;
           return (
-            <button
+            <div
               key={c.id}
-              type="button"
-              onClick={() => void openConversation(c.id)}
-              className={styles.syllabusSectionCard}
-              style={{
-                textAlign: "left",
-                cursor: "pointer",
-                gap: 4,
-                borderColor: selected ? "var(--accent)" : undefined,
-                background: selected
-                  ? "color-mix(in srgb, var(--field-background) 86%, var(--accent) 14%)"
-                  : undefined,
-              }}
+              className={`${styles.inboxItem}${selected ? ` ${styles.inboxItemSelected}` : ""}${unread ? ` ${styles.inboxItemUnread}` : ""}`}
             >
-              <span
-                className={styles.deadlineItemTitle}
-                style={{ fontWeight: unread ? 800 : 600 }}
-              >
-                {unread ? "• " : ""}
-                {c.subject}
-              </span>
-              {c.participants.length > 0 && (
-                <span className={styles.fieldHint}>{c.participants.join(", ")}</span>
-              )}
-              {c.lastMessage && (
-                <span
-                  className={styles.fieldHint}
-                  style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                >
-                  {c.lastMessage}
+              <button type="button" className={styles.inboxItemMain} onClick={() => void openConversation(c.id)}>
+                <span className={styles.inboxAvatar} aria-hidden="true">{initials(who)}</span>
+                <span className={styles.inboxItemBody}>
+                  <span className={styles.inboxItemTop}>
+                    <span className={styles.inboxItemSubject} style={{ fontWeight: unread ? 800 : 600 }}>
+                      {c.subject}
+                    </span>
+                    <span className={styles.inboxItemTime}>{formatRelative(c.lastMessageAt)}</span>
+                  </span>
+                  {c.participants.length > 0 && (
+                    <span className={styles.inboxItemMeta}>{c.participants.join(", ")}</span>
+                  )}
+                  {c.lastMessage && <span className={styles.inboxItemPreview}>{c.lastMessage}</span>}
                 </span>
-              )}
-              <span className={styles.fieldHint}>{formatWhen(c.lastMessageAt)}</span>
-            </button>
+              </button>
+              <div className={styles.inboxItemActions}>
+                <button
+                  type="button"
+                  className={styles.clearFileButton}
+                  onClick={() => void changeState(c.id, unread ? "read" : "unread")}
+                >
+                  {unread ? "Mark read" : "Mark unread"}
+                </button>
+                <button
+                  type="button"
+                  className={styles.clearFileButton}
+                  onClick={() => void changeState(c.id, "archived")}
+                >
+                  Archive
+                </button>
+              </div>
+            </div>
           );
         })}
       </div>
@@ -596,62 +750,79 @@ function InboxPanel() {
         ) : conversation ? (
           <>
             <h2 className={styles.lessonSlideTitle}>{conversation.subject}</h2>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {conversation.messages.map((m) => (
-                <div key={m.id} className={styles.syllabusSectionCard} style={{ gap: 6 }}>
-                  <p className={styles.fieldHint}>
-                    {[m.author, formatWhen(m.createdAt)].filter(Boolean).join(" · ")}
-                  </p>
-                  <p className={styles.syllabusSectionContent}>{m.body}</p>
-                </div>
-              ))}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {conversation.messages.map((m) => {
+                const mine = conversation.selfId != null && m.authorId === conversation.selfId;
+                return (
+                  <div
+                    key={m.id}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: mine ? "flex-end" : "flex-start",
+                      gap: 3,
+                    }}
+                  >
+                    <span className={styles.fieldHint}>
+                      {[mine ? "You" : m.author, formatRelative(m.createdAt)].filter(Boolean).join(" · ")}
+                    </span>
+                    <div className={mine ? styles.selectionChatUserMsg : styles.selectionChatAiMsg}>
+                      {m.body}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
-            <div className={styles.field}>
-              <label htmlFor="canvas-reply-draft">Draft reply with AI (optional)</label>
-              <input
-                id="canvas-reply-draft"
-                type="text"
-                className={styles.textInput}
-                placeholder="Optional steer, e.g. be encouraging and point them to office hours"
-                value={replyInstr}
-                onChange={(e) => setReplyInstr(e.target.value)}
-              />
+            <div className={styles.inboxReplyBox}>
+              <div className={styles.field}>
+                <label htmlFor="canvas-reply-draft">Draft reply with AI (optional)</label>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <input
+                    id="canvas-reply-draft"
+                    type="text"
+                    className={styles.textInput}
+                    style={{ flex: "1 1 200px", minWidth: 0 }}
+                    placeholder="Optional steer, e.g. be encouraging and point them to office hours"
+                    value={replyInstr}
+                    onChange={(e) => setReplyInstr(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className={styles.downloadButton}
+                    onClick={handleDraftReply}
+                    disabled={drafting}
+                  >
+                    {drafting ? "Drafting…" : "Draft with AI"}
+                  </button>
+                </div>
+              </div>
+
+              <div className={styles.field}>
+                <label htmlFor="canvas-reply-body">Your reply</label>
+                <textarea
+                  id="canvas-reply-body"
+                  placeholder="Write your reply."
+                  value={replyBody}
+                  onChange={(e) => setReplyBody(e.target.value)}
+                />
+              </div>
+
               <button
                 type="button"
-                className={styles.downloadButton}
-                onClick={handleDraftReply}
-                disabled={drafting}
-                style={{ alignSelf: "flex-start" }}
+                className={styles.submitButton}
+                onClick={handleSendReply}
+                disabled={sending || !replyBody.trim()}
               >
-                {drafting ? "Drafting…" : "Draft reply with AI"}
+                {sending ? "Sending…" : "Send reply"}
               </button>
+
+              {replyNote && (
+                <p className={replyNote.kind === "error" ? styles.error : styles.fieldHint}>
+                  {replyNote.text}
+                </p>
+              )}
             </div>
-
-            <div className={styles.field}>
-              <label htmlFor="canvas-reply-body">Your reply</label>
-              <textarea
-                id="canvas-reply-body"
-                placeholder="Write your reply."
-                value={replyBody}
-                onChange={(e) => setReplyBody(e.target.value)}
-              />
-            </div>
-
-            <button
-              type="button"
-              className={styles.submitButton}
-              onClick={handleSendReply}
-              disabled={sending || !replyBody.trim()}
-            >
-              {sending ? "Sending…" : "Send reply"}
-            </button>
-
-            {replyNote && (
-              <p className={replyNote.kind === "error" ? styles.error : styles.fieldHint}>
-                {replyNote.text}
-              </p>
-            )}
           </>
         ) : null}
       </div>

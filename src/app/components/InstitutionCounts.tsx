@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { getInstitutionCountsAction } from "../actions";
+import { getInstitutionCountsAction, getUnreadCountsAction } from "../actions";
 import { useInstitutions } from "@/lib/institutions";
 
 type Counts = Record<string, { needsGrading: number; unread: number }>;
@@ -10,7 +10,10 @@ type CountsContextValue = {
   counts: Counts;
   totalNeedsGrading: number;
   totalUnread: number;
+  /** Refetch both needs-grading and unread (the full, heavier scan). */
   refresh: () => void;
+  /** Refetch only unread inbox counts (cheap; for read/archive/reply). */
+  refreshUnread: () => void;
 };
 
 const InstitutionCountsContext = createContext<CountsContextValue | null>(null);
@@ -33,6 +36,19 @@ export function InstitutionCountsProvider({ children }: { children: React.ReactN
       next[c.acronym] = { needsGrading: c.needsGrading, unread: c.unread };
     }
     setCounts(next);
+  }, []);
+
+  // Cheap: refresh only the unread tallies, preserving needs-grading counts.
+  const fetchUnread = useCallback(async (codes: string[]) => {
+    const result = await getUnreadCountsAction(codes);
+    if ("error" in result) return;
+    setCounts((prev) => {
+      const next = { ...prev };
+      for (const c of result.counts) {
+        next[c.acronym] = { needsGrading: prev[c.acronym]?.needsGrading ?? 0, unread: c.unread };
+      }
+      return next;
+    });
   }, []);
 
   // Load on mount and whenever the registry changes. Await-first (the guard skips
@@ -69,8 +85,11 @@ export function InstitutionCountsProvider({ children }: { children: React.ReactN
         if (institutions.length > 0) void fetchCounts(institutions);
         else setCounts({});
       },
+      refreshUnread: () => {
+        if (institutions.length > 0) void fetchUnread(institutions);
+      },
     };
-  }, [counts, institutions, fetchCounts]);
+  }, [counts, institutions, fetchCounts, fetchUnread]);
 
   return (
     <InstitutionCountsContext.Provider value={value}>{children}</InstitutionCountsContext.Provider>
@@ -85,6 +104,7 @@ export function useInstitutionCounts(): CountsContextValue {
       totalNeedsGrading: 0,
       totalUnread: 0,
       refresh: () => {},
+      refreshUnread: () => {},
     }
   );
 }

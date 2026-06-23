@@ -589,6 +589,7 @@ function InboxPanel() {
 
   const [replyBody, setReplyBody] = useState("");
   const [replyInstr, setReplyInstr] = useState("");
+  const [showSteer, setShowSteer] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const [sending, setSending] = useState(false);
   const [replyNote, setReplyNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
@@ -664,6 +665,7 @@ function InboxPanel() {
     setConversation(null);
     setReplyBody("");
     setReplyInstr("");
+    setShowSteer(false);
     setReplyNote(null);
     setPlanner(null);
     setPlannerOpen(false);
@@ -761,6 +763,8 @@ function InboxPanel() {
     planner && selectedSlot
       ? planner.slotLabels[planner.slots.indexOf(selectedSlot)] ?? selectedSlot
       : null;
+  // Readable name for the offer/booking copy ("student" is the fallback).
+  const offerTarget = studentName && studentName !== "student" ? studentName : "the student";
 
   // Old flow: draft a reply offering all the open times for the student to pick.
   const handleOfferAll = async () => {
@@ -846,26 +850,17 @@ function InboxPanel() {
       <div style={{ flex: "1 1 300px", minWidth: 260, maxWidth: 460, display: "flex", flexDirection: "column", gap: 10 }}>
         <div className={styles.resultsHeader} style={{ paddingTop: 0 }}>
           <h2>Inbox</h2>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={() => setShowCalendar(true)}
-            >
-              Calendar
-            </button>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={() => {
-                void loadInbox();
-                refreshUnread();
-              }}
-              disabled={inboxState.status === "loading"}
-            >
-              {inboxState.status === "loading" ? "Refreshing…" : "Refresh"}
-            </button>
-          </div>
+          <button
+            type="button"
+            className={styles.downloadButton}
+            onClick={() => {
+              void loadInbox();
+              refreshUnread();
+            }}
+            disabled={inboxState.status === "loading"}
+          >
+            {inboxState.status === "loading" ? "Refreshing…" : "Refresh"}
+          </button>
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -992,24 +987,48 @@ function InboxPanel() {
             </div>
 
             <div className={styles.inboxReplyBox}>
-              {meetingHint && !plannerOpen && (
-                <p className={styles.fieldHint} style={{ fontWeight: 600 }}>
-                  This looks like a request to meet. Try &ldquo;Suggest meeting times&rdquo;.
-                </p>
+              <div className={styles.field}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                  <label htmlFor="canvas-reply-body" style={{ margin: 0 }}>Your reply</label>
+                  {meetingHint && !plannerOpen && (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        background: "#eff4ff",
+                        color: "#2563eb",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        padding: "3px 9px",
+                        borderRadius: 999,
+                      }}
+                    >
+                      Looks like a meeting request
+                    </span>
+                  )}
+                </div>
+                <textarea
+                  id="canvas-reply-body"
+                  placeholder="Write your reply, or use an assist below."
+                  value={replyBody}
+                  onChange={(e) => setReplyBody(e.target.value)}
+                />
+              </div>
+
+              {(showSteer || replyInstr) && (
+                <input
+                  type="text"
+                  className={styles.textInput}
+                  style={{ marginBottom: 8 }}
+                  placeholder="Guidance for the draft, e.g. be encouraging and point them to office hours"
+                  value={replyInstr}
+                  onChange={(e) => setReplyInstr(e.target.value)}
+                />
               )}
 
-              <div className={styles.field}>
-                <label htmlFor="canvas-reply-draft">Draft reply with AI (optional)</label>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <input
-                    id="canvas-reply-draft"
-                    type="text"
-                    className={styles.textInput}
-                    style={{ flex: "1 1 200px", minWidth: 0 }}
-                    placeholder="Optional steer, e.g. be encouraging and point them to office hours"
-                    value={replyInstr}
-                    onChange={(e) => setReplyInstr(e.target.value)}
-                  />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <button
                     type="button"
                     className={styles.downloadButton}
@@ -1018,35 +1037,34 @@ function InboxPanel() {
                   >
                     {drafting ? "Drafting…" : "Draft with AI"}
                   </button>
+                  {!showSteer && !replyInstr && (
+                    <button
+                      type="button"
+                      className={styles.clearFileButton}
+                      onClick={() => setShowSteer(true)}
+                    >
+                      Add guidance
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={styles.downloadButton}
                     onClick={handleSuggestTimes}
                     disabled={suggesting}
+                    style={meetingHint ? { borderColor: "#2563eb", color: "#2563eb" } : undefined}
                   >
-                    {suggesting ? "Finding times…" : "Suggest meeting times"}
+                    {suggesting ? "Finding times…" : "Schedule a call"}
                   </button>
                 </div>
+                <button
+                  type="button"
+                  className={styles.submitButton}
+                  onClick={handleSendReply}
+                  disabled={sending || !replyBody.trim()}
+                >
+                  {sending ? "Sending…" : "Send reply"}
+                </button>
               </div>
-
-              <div className={styles.field}>
-                <label htmlFor="canvas-reply-body">Your reply</label>
-                <textarea
-                  id="canvas-reply-body"
-                  placeholder="Write your reply."
-                  value={replyBody}
-                  onChange={(e) => setReplyBody(e.target.value)}
-                />
-              </div>
-
-              <button
-                type="button"
-                className={styles.submitButton}
-                onClick={handleSendReply}
-                disabled={sending || !replyBody.trim()}
-              >
-                {sending ? "Sending…" : "Send reply"}
-              </button>
 
               {replyNote && (
                 <p className={replyNote.kind === "error" ? styles.error : styles.fieldHint}>
@@ -1071,15 +1089,29 @@ function InboxPanel() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className={styles.previewHeader}>
-              <h3>Meeting times</h3>
-              <button
-                type="button"
-                className={styles.previewCloseButton}
-                onClick={() => setPlannerOpen(false)}
-              >
-                Close
-              </button>
+              <h3>{studentName && studentName !== "student" ? `Schedule a call with ${studentName}` : "Schedule a call"}</h3>
+              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                <button
+                  type="button"
+                  className={styles.clearFileButton}
+                  onClick={() => setShowCalendar(true)}
+                >
+                  Open full calendar
+                </button>
+                <button
+                  type="button"
+                  className={styles.previewCloseButton}
+                  onClick={() => setPlannerOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
             </div>
+
+            <p className={styles.fieldHint} style={{ marginTop: 0, marginBottom: 10 }}>
+              Highlighted times are open. Offer them all for {offerTarget} to choose from, or click one
+              to book it directly.
+            </p>
 
             <WeekCalendar
               timeZone={planner.timeZone}
@@ -1092,41 +1124,53 @@ function InboxPanel() {
               onSelect={setSelectedSlot}
             />
 
-            <p className={styles.fieldHint} style={{ marginTop: 10 }}>
-              Highlighted times are the open slots. Offer all of them for the student to choose from,
-              or click one to book it directly.
-            </p>
+            {selectedSlot && (
+              <div className={styles.field} style={{ marginTop: 12 }}>
+                <label htmlFor="canvas-student-email">Student email to invite (optional)</label>
+                <input
+                  id="canvas-student-email"
+                  type="email"
+                  className={styles.textInput}
+                  placeholder="name@example.com"
+                  value={studentEmail}
+                  onChange={(e) => setStudentEmail(e.target.value)}
+                />
+              </div>
+            )}
 
-            <div className={styles.field} style={{ marginTop: 8 }}>
-              <label htmlFor="canvas-student-email">Student email to invite (optional, for booking)</label>
-              <input
-                id="canvas-student-email"
-                type="email"
-                className={styles.textInput}
-                placeholder="name@example.com"
-                value={studentEmail}
-                onChange={(e) => setStudentEmail(e.target.value)}
-              />
-            </div>
-
-            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                marginTop: 14,
+                paddingTop: 14,
+                borderTop: "1px solid #e5e7eb",
+                flexWrap: "wrap",
+              }}
+            >
               <button
                 type="button"
                 className={styles.submitButton}
                 onClick={handleOfferAll}
                 disabled={offering || booking}
               >
-                {offering ? "Drafting…" : "Offer all times to the student"}
+                {offering ? "Drafting…" : `Offer these times to ${offerTarget}`}
               </button>
-              <button
-                type="button"
-                className={styles.downloadButton}
-                onClick={handleBookSelected}
-                disabled={!selectedSlot || booking || offering}
-              >
-                {booking ? "Booking…" : selectedLabel ? `Book ${selectedLabel}` : "Book selected time"}
-              </button>
-              <button type="button" className={styles.downloadButton} onClick={() => setPlannerOpen(false)}>
+              {selectedSlot ? (
+                <button
+                  type="button"
+                  className={styles.downloadButton}
+                  onClick={handleBookSelected}
+                  disabled={booking || offering}
+                  style={{ borderColor: "#2563eb", color: "#2563eb" }}
+                >
+                  {booking ? "Booking…" : `Book ${selectedLabel}`}
+                </button>
+              ) : (
+                <span className={styles.fieldHint}>or click a highlighted time to book it directly</span>
+              )}
+              <button type="button" className={styles.clearFileButton} onClick={() => setPlannerOpen(false)}>
                 Cancel
               </button>
             </div>

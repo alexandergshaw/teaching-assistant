@@ -229,17 +229,75 @@ export async function extractSubmissions(
 }
 
 /** Build a system prompt for the grader. */
+/** One canonical rubric criterion, parsed from the rubric text. */
+interface RubricCriterion {
+  name: string;
+  /** Points the criterion is scored out of, when the rubric states them. */
+  points: number | null;
+}
+
+/**
+ * Pull the ordered criterion names (and points, when present) out of a rubric.
+ * Handles the Canvas rubric format ("Name (10 pts): ...") and the synthesized
+ * format ("Name (25%): ..."), reading only top-level lines so indented rating /
+ * subcategory lines are ignored. Returns [] when nothing parses (e.g. a free-form
+ * pasted rubric), in which case grading keeps its previous unpinned behavior.
+ */
+function extractRubricCriteria(rubric: string): RubricCriterion[] {
+  const out: RubricCriterion[] = [];
+  const seen = new Set<string>();
+  for (const raw of rubric.split(/\r?\n/)) {
+    if (/^\s/.test(raw)) continue; // indented = rating/subcategory line, not a criterion
+    const line = raw.trim();
+    if (!line) continue;
+    const match = line.match(/^(.+?)\s*\(\s*(\d+(?:\.\d+)?)\s*(pts?|points?|%)?\s*\)\s*:/i);
+    if (!match) continue;
+    const name = match[1].trim();
+    if (!name) continue;
+    const key = normalizeAreaName(name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const unit = (match[3] ?? "").toLowerCase();
+    const value = Number(match[2]);
+    out.push({ name, points: unit.startsWith("p") && Number.isFinite(value) ? value : null });
+  }
+  return out;
+}
+
+/** Normalize a criterion name for matching ("Code Style (5 pts)" -> "code style"). */
+function normalizeAreaName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\(\s*[\d.]+\s*(?:pts?|points?|%)?\s*\)/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function buildSystemPrompt(
   assignmentInstructions: string,
-  rubric: string
+  rubric: string,
+  criteria: RubricCriterion[] = []
 ): string {
+  const pinned =
+    criteria.length > 0
+      ? `
+
+REQUIRED RUBRIC AREAS (use these EXACTLY, one rubricResults item each, in this order):
+${criteria.map((c) => `- ${c.name}${c.points != null ? ` (out of ${c.points})` : ""}`).join("\n")}
+
+You MUST return exactly one rubricResults item for each required area listed above, using the area name VERBATIM (identical spelling, capitalization, and punctuation). Do not rename, merge, split, reorder, add, or omit areas.${
+          criteria.some((c) => c.points != null)
+            ? " Score each area out of the points shown for it, formatted earned/possible."
+            : ""
+        }`
+      : "";
   return `You are a teaching assistant helping to grade student submissions.
 
 ASSIGNMENT INSTRUCTIONS:
 ${assignmentInstructions}
 
 RUBRIC:
-${rubric}
+${rubric}${pinned}
 
 Grade each student submission against the rubric and respond ONLY in JSON using this shape:
 {
@@ -1172,7 +1230,11 @@ async function gradeStudentEntries(
   const interRequestDelayMs = getGeminiInterRequestDelayMs();
 
   const limitedEntries = studentSubmissions.slice(0, maxSubmissions);
-  const systemPrompt = buildSystemPrompt(assignmentInstructions, rubric);
+  // Pin the rubric's criteria so every student is graded on the same areas with
+  // the same names (otherwise the per-student LLM calls drift, and the results
+  // table shows mismatched, half-filled columns).
+  const criteria = extractRubricCriteria(rubric);
+  const systemPrompt = buildSystemPrompt(assignmentInstructions, rubric, criteria);
   const results: GradeResult[] = [];
 
   for (let i = 0; i < limitedEntries.length; i += 1) {
@@ -1221,6 +1283,35 @@ async function gradeStudentEntries(
 
     if (interRequestDelayMs > 0 && i < limitedEntries.length - 1) {
       await sleep(interRequestDelayMs);
+    }
+  }
+
+  // Safety net for prompt drift: reconcile every student's areas to the pinned
+  // criteria so the columns line up even if the model renamed, dropped, or
+  // reordered some. A fuzzy (normalized) match is renamed to the canonical name;
+  // a missing criterion is filled blank; any extra area the model invented is
+  // kept at the end so no feedback is lost.
+  if (criteria.length > 0) {
+    const canonical = criteria.map((c) => c.name);
+    for (const result of results) {
+      const byNorm = new Map<string, RubricAreaResult>();
+      for (const area of result.rubricAreas) {
+        const key = normalizeAreaName(area.area);
+        if (key && !byNorm.has(key)) byNorm.set(key, area);
+      }
+      const reconciled: RubricAreaResult[] = [];
+      for (const name of canonical) {
+        const key = normalizeAreaName(name);
+        const match = byNorm.get(key);
+        if (match) {
+          reconciled.push({ ...match, area: name });
+          byNorm.delete(key);
+        } else {
+          reconciled.push({ area: name, score: "", comment: "" });
+        }
+      }
+      for (const leftover of byNorm.values()) reconciled.push(leftover);
+      result.rubricAreas = reconciled;
     }
   }
 

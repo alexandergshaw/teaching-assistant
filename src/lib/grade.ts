@@ -1286,13 +1286,25 @@ async function gradeStudentEntries(
     }
   }
 
-  // Safety net for prompt drift: reconcile every student's areas to the pinned
-  // criteria so the columns line up even if the model renamed, dropped, or
-  // reordered some. A fuzzy (normalized) match is renamed to the canonical name;
-  // a missing criterion is filled blank; any extra area the model invented is
-  // kept at the end so no feedback is lost.
-  if (criteria.length > 0) {
-    const canonical = criteria.map((c) => c.name);
+  // Pin every student to ONE shared set of criteria so the results table never
+  // splits. Canonical = the rubric's parsed criteria; if the rubric had none to
+  // parse, fall back to the student the model gave the most areas (so independent
+  // per-student calls still line up on a common set).
+  let canonical = criteria.map((c) => c.name);
+  if (canonical.length === 0) {
+    let richest: RubricAreaResult[] = [];
+    for (const result of results) {
+      const real = result.rubricAreas.filter((a) => a.area && a.area !== "Overall");
+      if (real.length > richest.length) richest = real;
+    }
+    canonical = richest.map((a) => a.area);
+  }
+
+  if (canonical.length > 0) {
+    // Force each student's areas onto the canonical columns: rename a normalized
+    // match to the canonical name, fill a missing criterion blank, and fold any
+    // unmatched area the model invented into the overall comment so the columns
+    // stay aligned without dropping feedback.
     for (const result of results) {
       const byNorm = new Map<string, RubricAreaResult>();
       for (const area of result.rubricAreas) {
@@ -1310,19 +1322,29 @@ async function gradeStudentEntries(
           reconciled.push({ area: name, score: "", comment: "" });
         }
       }
-      for (const leftover of byNorm.values()) reconciled.push(leftover);
+      const strays = [...byNorm.values()].filter((a) => a.comment.trim());
+      if (strays.length > 0) {
+        const extra = strays.map((a) => `${a.area}: ${a.comment.trim()}`).join(" ");
+        result.overallComment = result.overallComment ? `${result.overallComment} ${extra}` : extra;
+      }
       result.rubricAreas = reconciled;
     }
   }
 
-  const rubricAreaNames: string[] = [];
-  const seenAreas = new Set<string>();
-
-  for (const result of results) {
-    for (const area of result.rubricAreas) {
-      if (!seenAreas.has(area.area)) {
-        seenAreas.add(area.area);
-        rubricAreaNames.push(area.area);
+  // Columns are the canonical set when we have one; otherwise the union of
+  // whatever areas came back (last resort when nothing parsed and no results).
+  let rubricAreaNames: string[];
+  if (canonical.length > 0) {
+    rubricAreaNames = canonical;
+  } else {
+    rubricAreaNames = [];
+    const seenAreas = new Set<string>();
+    for (const result of results) {
+      for (const area of result.rubricAreas) {
+        if (!seenAreas.has(area.area)) {
+          seenAreas.add(area.area);
+          rubricAreaNames.push(area.area);
+        }
       }
     }
   }

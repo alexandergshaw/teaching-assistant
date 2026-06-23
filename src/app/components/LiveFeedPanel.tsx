@@ -458,13 +458,13 @@ export default function LiveFeedPanel({
             <div className={styles.lfRailHeader}>
               <h2>Needs grading</h2>
               <div className={styles.lfRailHeaderActions}>
-                <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                <label className={styles.lfRailHint}>
                   <input type="checkbox" checked={autoRefresh} onChange={toggleAutoRefresh} />
                   Auto-refresh
                 </label>
                 <button
                   type="button"
-                  className={styles.downloadButton}
+                  className={styles.lfGhostBtn}
                   onClick={() => {
                     void loadQueue(active);
                     refreshCounts();
@@ -504,7 +504,7 @@ export default function LiveFeedPanel({
               <>
                 <input
                   type="search"
-                  className={styles.textInput}
+                  className={styles.lfSearch}
                   placeholder="Search assignment or course"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -532,7 +532,7 @@ export default function LiveFeedPanel({
                     Discussions
                   </Chip>
                   <select
-                    className={`${styles.textInput} ${styles.lfSort}`}
+                    className={styles.lfSort}
                     value={sort}
                     onChange={(e) => setSort(e.target.value as QueueSort)}
                     aria-label="Sort"
@@ -556,35 +556,32 @@ export default function LiveFeedPanel({
                 <button type="button" className={styles.lfGradeBtn} onClick={startSequence}>
                   Grade in sequence
                 </button>
-                <button type="button" className={styles.clearFileButton} onClick={() => void bulkMarkSeen()}>
+                <button type="button" className={styles.lfGhostBtn} onClick={() => void bulkMarkSeen()}>
                   Mark seen
                 </button>
-                <button type="button" className={styles.clearFileButton} onClick={() => setBulk(new Set())}>
+                <button type="button" className={styles.lfGhostBtn} onClick={() => setBulk(new Set())}>
                   Clear
                 </button>
               </div>
             )}
 
             {queueState.status === "loading" && (
-              <div className={styles.loadingState} role="status" aria-live="polite">
+              <div className={styles.lfRailLoading} role="status" aria-live="polite">
                 <span className={styles.spinner} aria-hidden="true" />
-                <div>
-                  <p className={styles.loadingTitle}>Loading {active}…</p>
-                  <p className={styles.loadingText}>Fetching everything that needs grading.</p>
-                </div>
+                <span>Loading {active}…</span>
               </div>
             )}
-            {queueState.status === "error" && <p className={styles.error}>{queueState.message}</p>}
+            {queueState.status === "error" && <p className={styles.lfRailError}>{queueState.message}</p>}
             {queueErrors.map((e) => (
-              <p key={e.acronym} className={styles.error}>
+              <p key={e.acronym} className={styles.lfRailError}>
                 {e.acronym}: {e.error}
               </p>
             ))}
             {queueState.status === "idle" && rows.length === 0 && (
-              <p className={styles.emptyState}>Nothing is waiting to be graded right now.</p>
+              <p className={styles.lfRailEmpty}>Nothing is waiting to be graded right now.</p>
             )}
             {queueState.status === "idle" && rows.length > 0 && viewRows.length === 0 && (
-              <p className={styles.emptyState}>No items match your search or filters.</p>
+              <p className={styles.lfRailEmpty}>No items match your search or filters.</p>
             )}
 
             {viewRows.length > 0 && (
@@ -663,7 +660,7 @@ export default function LiveFeedPanel({
             ) : (
               <div className={styles.lfDetailEmpty}>
                 <EmptyQueueIcon />
-                <p style={{ margin: 0, fontWeight: 700, color: "var(--text-primary)" }}>Select an item to grade</p>
+                <p style={{ margin: 0, fontWeight: 700, color: "#fff" }}>Select an item to grade</p>
                 <p style={{ margin: 0, maxWidth: 320 }}>
                   Pick an assignment or discussion from the queue to review and grade it here.
                 </p>

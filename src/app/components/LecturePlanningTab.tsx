@@ -339,7 +339,7 @@ export default function LecturePlanningTab() {
           outputZip.file(`${fileLabel} Introduction.docx`, await buildDocxFromPlainText(plan.moduleIntroduction, plan.introTemplateHeadings, author));
         }
         if (plan.assignmentInstructions) {
-          outputZip.file(`${fileLabel} Assignment Instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions, plan.instructionsTemplateHeadings, author));
+          outputZip.file(`${fileLabel} Instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions, plan.instructionsTemplateHeadings, author));
         }
       }
 
@@ -413,7 +413,7 @@ export default function LecturePlanningTab() {
     }
     const text = kind === "intro" ? plan.moduleIntroduction : plan.assignmentInstructions;
     const headings = kind === "intro" ? plan.introTemplateHeadings : plan.instructionsTemplateHeadings;
-    const name = kind === "intro" ? "Introduction" : "Assignment Instructions";
+    const name = kind === "intro" ? "Introduction" : "Instructions";
     const docx = await buildDocxFromPlainText(text, headings, author);
     downloadBlob(
       docx,

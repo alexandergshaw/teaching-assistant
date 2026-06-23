@@ -23,6 +23,9 @@ create table if not exists public.ai_chat_messages (
 alter table public.ai_chat_messages enable row level security;
 
 -- Authenticated users may only read their own messages.
+-- Idempotent so `supabase db push` can re-run this migration safely against a
+-- database where the table/policy was already created by hand.
+drop policy if exists "ai_chat_messages_select_own" on public.ai_chat_messages;
 create policy "ai_chat_messages_select_own"
   on public.ai_chat_messages for select
   using (auth.uid() = user_id);

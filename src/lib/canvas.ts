@@ -767,11 +767,22 @@ export async function listGradingQueue(code: string): Promise<CanvasQueueItem[]>
   return items;
 }
 
-/** Total submissions needing grading across active teacher courses (for badges). */
-export async function getNeedsGradingCount(code: string): Promise<number> {
+/**
+ * Total submissions needing grading across active teacher courses (for badges).
+ * `exclude` drops assignments the user marked "seen" and courses they stopped
+ * watching, so the badge matches what they actually see in the Live Feed.
+ */
+export async function getNeedsGradingCount(
+  code: string,
+  exclude?: { courses?: Set<string>; assignments?: Set<string> }
+): Promise<number> {
   const ctx = resolveInstitutionByCode(code);
   const items = await scanNeedsGrading(ctx);
-  return items.reduce((sum, item) => sum + item.needsGradingCount, 0);
+  return items.reduce((sum, item) => {
+    if (exclude?.courses?.has(item.courseId)) return sum;
+    if (exclude?.assignments?.has(item.assignmentId)) return sum;
+    return sum + item.needsGradingCount;
+  }, 0);
 }
 
 /** Unread Canvas inbox conversation count for an institution (for badges). */

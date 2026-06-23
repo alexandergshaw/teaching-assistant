@@ -1,0 +1,8 @@
+# Supabase CLI project config. The GitHub Actions migration workflow links by
+# --project-ref (from the SUPABASE_PROJECT_ID secret), so for CI only project_id
+# is used here. The local-dev sections produced by `supabase init` are omitted.
+#
+# Replace the value below with your project's Reference ID
+# (Dashboard > Project Settings > General > Reference ID) - the same string you
+# put in the SUPABASE_PROJECT_ID repository secret.
+project_id = "your-project-ref"

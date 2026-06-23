@@ -12,6 +12,29 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      grading_dismissals: {
+        Row: {
+          user_id: string;
+          scope: "assignment" | "course";
+          institution: string;
+          ref_id: string;
+          created_at: string;
+        };
+        Insert: {
+          user_id: string;
+          scope: "assignment" | "course";
+          institution: string;
+          ref_id: string;
+          created_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          scope?: "assignment" | "course";
+          institution?: string;
+          ref_id?: string;
+          created_at?: string;
+        };
+      };
       google_credentials: {
         Row: {
           user_id: string;

@@ -25,6 +25,7 @@ import type {
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
+import { useSupabase } from "@/context/SupabaseProvider";
 import InstitutionSwitcher from "./InstitutionSwitcher";
 import { useInstitutionCounts } from "./InstitutionCounts";
 import { formatRelative } from "../utils/time";
@@ -557,6 +558,18 @@ function InboxPanel() {
   const [provider] = useLlmProvider();
   const { active: activeInstitution } = useInstitutionSelection();
   const { refreshUnread } = useInstitutionCounts();
+  const { user } = useSupabase();
+  const [showCalendar, setShowCalendar] = useState(false);
+
+  // Embed the owner's own Google Calendar. src defaults to the signed-in email
+  // (their primary calendar); override with NEXT_PUBLIC_GOOGLE_CALENDAR_EMBED_SRC
+  // if their Google calendar address differs from their login.
+  const calendarSrc = process.env.NEXT_PUBLIC_GOOGLE_CALENDAR_EMBED_SRC || user?.email || "";
+  const calendarTimeZone =
+    typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "America/Chicago";
+  const calendarEmbedUrl = calendarSrc
+    ? `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(calendarSrc)}&ctz=${encodeURIComponent(calendarTimeZone)}&mode=WEEK`
+    : "";
 
   const [conversations, setConversations] = useState<CanvasConversationSummary[]>([]);
   const [inboxState, setInboxState] = useState<{ status: "loading" | "idle" | "error"; message: string }>({
@@ -798,17 +811,26 @@ function InboxPanel() {
       <div style={{ flex: "1 1 300px", minWidth: 260, maxWidth: 460, display: "flex", flexDirection: "column", gap: 10 }}>
         <div className={styles.resultsHeader} style={{ paddingTop: 0 }}>
           <h2>Inbox</h2>
-          <button
-            type="button"
-            className={styles.downloadButton}
-            onClick={() => {
-              void loadInbox();
-              refreshUnread();
-            }}
-            disabled={inboxState.status === "loading"}
-          >
-            {inboxState.status === "loading" ? "Refreshing…" : "Refresh"}
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className={styles.downloadButton}
+              onClick={() => setShowCalendar(true)}
+            >
+              Calendar
+            </button>
+            <button
+              type="button"
+              className={styles.downloadButton}
+              onClick={() => {
+                void loadInbox();
+                refreshUnread();
+              }}
+              disabled={inboxState.status === "loading"}
+            >
+              {inboxState.status === "loading" ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1037,6 +1059,47 @@ function InboxPanel() {
           </>
         ) : null}
       </div>
+
+      {showCalendar && (
+        <div
+          className={styles.previewBackdrop}
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setShowCalendar(false)}
+        >
+          <div
+            className={styles.previewModal}
+            style={{ width: "min(1000px, 92vw)", maxWidth: "none" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.previewHeader}>
+              <h3>Your calendar</h3>
+              <button
+                type="button"
+                className={styles.previewCloseButton}
+                onClick={() => setShowCalendar(false)}
+              >
+                Close
+              </button>
+            </div>
+            {calendarEmbedUrl ? (
+              <iframe
+                title="Google Calendar"
+                src={calendarEmbedUrl}
+                style={{ width: "100%", height: "70vh", border: 0 }}
+              />
+            ) : (
+              <p className={styles.fieldHint}>
+                No calendar address found. Sign in with the Google account whose calendar you want to
+                see, or set NEXT_PUBLIC_GOOGLE_CALENDAR_EMBED_SRC.
+              </p>
+            )}
+            <p className={styles.fieldHint} style={{ marginTop: 8 }}>
+              Shows your Google Calendar when you are signed into Google in this browser.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

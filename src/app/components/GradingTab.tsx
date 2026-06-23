@@ -6,6 +6,9 @@ import {
   fetchCanvasMetaAction,
   postCanvasGradesAction,
   listGradingQueueAction,
+  listGradingDismissalsAction,
+  setAssignmentSeenAction,
+  setCourseWatchedAction,
   type GradeActionState,
   type TestGeminiState,
 } from "../actions";
@@ -205,6 +208,64 @@ function LiveFeedPanel({
   );
   const [drawer, setDrawer] = useState<CanvasQueueItem | null>(null);
 
+  // Seen assignments + unwatched courses for the active institution (kept in
+  // Supabase). Membership tested by id; "Show hidden" reveals them with undo.
+  const [seen, setSeen] = useState<Set<string>>(new Set());
+  const [unwatched, setUnwatched] = useState<Set<string>>(new Set());
+  const [showHidden, setShowHidden] = useState(false);
+
+  const loadDismissals = useCallback(async (code: string) => {
+    const result = await listGradingDismissalsAction();
+    if ("error" in result) return;
+    setSeen(new Set(result.assignments.filter((d) => d.institution === code).map((d) => d.refId)));
+    setUnwatched(new Set(result.courses.filter((d) => d.institution === code).map((d) => d.refId)));
+  }, []);
+
+  // Await-first so the effect performs no synchronous setState.
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    (async () => {
+      const result = await listGradingDismissalsAction();
+      if (cancelled || "error" in result) return;
+      setSeen(new Set(result.assignments.filter((d) => d.institution === active).map((d) => d.refId)));
+      setUnwatched(new Set(result.courses.filter((d) => d.institution === active).map((d) => d.refId)));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active]);
+
+  const markSeen = async (row: CanvasQueueItem, value: boolean) => {
+    setSeen((prev) => {
+      const next = new Set(prev);
+      if (value) next.add(row.assignmentId);
+      else next.delete(row.assignmentId);
+      return next;
+    });
+    const result = await setAssignmentSeenAction(active, row.assignmentId, value);
+    if ("error" in result) {
+      void loadDismissals(active); // revert to server truth
+      return;
+    }
+    refreshCounts();
+  };
+
+  const setWatched = async (courseId: string, value: boolean) => {
+    setUnwatched((prev) => {
+      const next = new Set(prev);
+      if (value) next.delete(courseId);
+      else next.add(courseId);
+      return next;
+    });
+    const result = await setCourseWatchedAction(active, courseId, value);
+    if ("error" in result) {
+      void loadDismissals(active);
+      return;
+    }
+    refreshCounts();
+  };
+
   // Show the loading screen the instant the institution changes (before the
   // effect's fetch starts), clearing the previous school's rows. React's
   // "adjust state during render" pattern, not an effect.
@@ -270,7 +331,12 @@ function LiveFeedPanel({
 
   const viewRows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    let filtered = rows.filter((r) => kindFilter === "all" || r.kind === kindFilter);
+    let filtered = rows.filter((r) => {
+      if (kindFilter !== "all" && r.kind !== kindFilter) return false;
+      // Hide seen assignments and unwatched courses unless "Show hidden" is on.
+      if (!showHidden && (unwatched.has(r.courseId) || seen.has(r.assignmentId))) return false;
+      return true;
+    });
     if (term) {
       filtered = filtered.filter(
         (r) =>
@@ -288,7 +354,13 @@ function LiveFeedPanel({
       return a.courseName.localeCompare(b.courseName) || a.title.localeCompare(b.title);
     });
     return sorted;
-  }, [rows, search, kindFilter, sort]);
+  }, [rows, search, kindFilter, sort, showHidden, seen, unwatched]);
+
+  // Count of currently-hidden rows, to label the "Show hidden" toggle.
+  const hiddenCount = useMemo(
+    () => rows.filter((r) => unwatched.has(r.courseId) || seen.has(r.assignmentId)).length,
+    [rows, seen, unwatched]
+  );
 
   // Group the rows for rendering when "group by course" is on.
   const groups = useMemo(() => {
@@ -330,6 +402,14 @@ function LiveFeedPanel({
               onClick={() => setDrawer(row)}
             >
               Details
+            </button>
+            <button
+              type="button"
+              className={styles.liveFeedGhostButton}
+              onClick={() => markSeen(row, !seen.has(row.assignmentId))}
+              title="Hide this assignment from the feed and the badge"
+            >
+              {seen.has(row.assignmentId) ? "Unmark seen" : "Mark seen"}
             </button>
             <button
               type="button"
@@ -417,6 +497,16 @@ function LiveFeedPanel({
                 />
                 Group by course
               </label>
+              {hiddenCount > 0 && (
+                <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={showHidden}
+                    onChange={(e) => setShowHidden(e.target.checked)}
+                  />
+                  Show hidden ({hiddenCount})
+                </label>
+              )}
             </div>
           )}
         </>
@@ -458,13 +548,32 @@ function LiveFeedPanel({
             <tbody>
               {groups.map((group) => (
                 <Fragment key={group.course || "all"}>
-                  {groupByCourse && (
-                    <tr className={styles.liveFeedGroupRow}>
-                      <td colSpan={4}>
-                        {group.course} ({group.items.length})
-                      </td>
-                    </tr>
-                  )}
+                  {groupByCourse && (() => {
+                    const courseId = group.items[0]?.courseId;
+                    const isUnwatched = courseId ? unwatched.has(courseId) : false;
+                    return (
+                      <tr className={styles.liveFeedGroupRow}>
+                        <td colSpan={4}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <span>
+                              {group.course} ({group.items.length})
+                              {isUnwatched ? " · not watching" : ""}
+                            </span>
+                            {courseId && (
+                              <button
+                                type="button"
+                                className={styles.liveFeedGhostButton}
+                                onClick={() => setWatched(courseId, isUnwatched)}
+                                title="Stop receiving notifications for this course"
+                              >
+                                {isUnwatched ? "Resume watching" : "Stop watching"}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })()}
                   {group.items.map(renderRow)}
                 </Fragment>
               ))}

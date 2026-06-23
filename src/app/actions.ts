@@ -64,6 +64,11 @@ import {
   computeFreeSlots,
   formatSlotsForReply,
 } from "@/lib/scheduling";
+import {
+  listDismissals,
+  addDismissal,
+  removeDismissal,
+} from "@/lib/grading-dismissals";
 import { humanizeAssignmentName, stripAssignmentSlugPrefix, looksLikeAssignmentSlug } from "@/lib/assignment-name";
 import type JSZip from "jszip";
 
@@ -1341,6 +1346,15 @@ export async function getAvailableSlotsAction(): Promise<
 }
 
 /**
+ * Remove long dashes from a generated inbox message. The account owner never
+ * wants em or en dashes in a drafted reply: a dash between spaces becomes a
+ * comma, and any remaining (e.g. a number range) becomes a plain hyphen.
+ */
+function stripLongDashes(text: string): string {
+  return text.replace(/\s+[—–]\s+/g, ", ").replace(/[—–]/g, "-");
+}
+
+/**
  * Draft a warm inbox reply that offers the given open times. Falls back to a
  * plain template if the model call fails, so the feature still works offline.
  */
@@ -1368,7 +1382,7 @@ ${threadText.trim()}
 AVAILABLE TIMES (offer these exact options, do not invent others):
 ${bulletedTimes}
 
-Write the instructor's reply: warm and brief, confirm you're happy to meet over a video call, and list the available times as a short bulleted list exactly as given. Tell them to pick one and you'll send a Google Meet link. Output ONLY the reply text (plain text, no subject line, no salutation placeholder, no markdown headers).`;
+Write the instructor's reply: warm and brief, confirm you're happy to meet over a video call, and list the available times as a short bulleted list exactly as given. Tell them to pick one and you'll send a Google Meet link. Output ONLY the reply text (plain text, no subject line, no salutation placeholder, no markdown headers). Never use em dashes or en dashes (the long dashes); use commas or hyphens instead.`;
 
     const result = await callLlm(
       {
@@ -1378,9 +1392,9 @@ Write the instructor's reply: warm and brief, confirm you're happy to meet over 
       provider
     );
     if (!result.ok || !result.text.trim()) {
-      return { body: fallback };
+      return { body: stripLongDashes(fallback) };
     }
-    return { body: result.text.trim() };
+    return { body: stripLongDashes(result.text.trim()) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not draft the reply." };
   }
@@ -1552,7 +1566,7 @@ export async function draftMessageReplyAction(
 CONVERSATION SO FAR (oldest message first):
 ${threadText.trim()}${steer}
 
-Write the instructor's reply. Respond directly to the most recent message, in a warm, helpful, professional tone. Output ONLY the reply text itself — plain text, no subject line, no salutation placeholder like "[Name]", no markdown. Do not invent facts, dates, grades, or links that are not present in the thread.`;
+Write the instructor's reply. Respond directly to the most recent message, in a warm, helpful, professional tone. Output ONLY the reply text itself: plain text, no subject line, no salutation placeholder like "[Name]", no markdown. Do not invent facts, dates, grades, or links that are not present in the thread. Never use em dashes or en dashes (the long dashes); use commas or hyphens instead.`;
 
     const result = await callLlm(
       {
@@ -1566,7 +1580,7 @@ Write the instructor's reply. Respond directly to the most recent message, in a 
       return { error: `Draft failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const body = result.text.trim();
+    const body = stripLongDashes(result.text.trim());
     if (!body) {
       return { error: "The model returned an empty reply." };
     }
@@ -1651,19 +1665,93 @@ export async function listGradingQueueAction(
  * needing grading and unread inbox messages. Per-institution failures degrade to
  * 0 so one misconfigured school doesn't blank every badge.
  */
+/** The user's seen assignments and unwatched courses, for filtering the feed. */
+export async function listGradingDismissalsAction(): Promise<
+  | {
+      assignments: Array<{ institution: string; refId: string }>;
+      courses: Array<{ institution: string; refId: string }>;
+    }
+  | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const all = await listDismissals(user.id);
+    return {
+      assignments: all
+        .filter((d) => d.scope === "assignment")
+        .map((d) => ({ institution: d.institution, refId: d.refId })),
+      courses: all
+        .filter((d) => d.scope === "course")
+        .map((d) => ({ institution: d.institution, refId: d.refId })),
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load your grading preferences." };
+  }
+}
+
+/** Mark an assignment seen (hide it from the feed/badge), or undo that. */
+export async function setAssignmentSeenAction(
+  institution: string,
+  assignmentId: string,
+  seen: boolean
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const code = institution.trim().toUpperCase();
+    if (seen) await addDismissal(user.id, "assignment", code, assignmentId);
+    else await removeDismissal(user.id, "assignment", code, assignmentId);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the assignment." };
+  }
+}
+
+/** Stop watching a course (no more notifications for it), or resume watching. */
+export async function setCourseWatchedAction(
+  institution: string,
+  courseId: string,
+  watched: boolean
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const code = institution.trim().toUpperCase();
+    // "not watched" is stored as a 'course' dismissal.
+    if (!watched) await addDismissal(user.id, "course", code, courseId);
+    else await removeDismissal(user.id, "course", code, courseId);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the course." };
+  }
+}
+
 export async function getInstitutionCountsAction(
   acronyms: string[]
 ): Promise<
   { counts: Array<{ acronym: string; needsGrading: number; unread: number }> } | { error: string }
 > {
   try {
-    await requireOwner();
+    const user = await requireOwner();
+    // Exclude assignments marked "seen" and courses the user stopped watching so
+    // the badge matches the filtered Live Feed.
+    const dismissals = await listDismissals(user.id);
+    const assignmentsByCode = new Map<string, Set<string>>();
+    const coursesByCode = new Map<string, Set<string>>();
+    for (const d of dismissals) {
+      const map = d.scope === "assignment" ? assignmentsByCode : coursesByCode;
+      const set = map.get(d.institution) ?? new Set<string>();
+      set.add(d.refId);
+      map.set(d.institution, set);
+    }
     const counts = await Promise.all(
       acronyms.map(async (raw) => {
         const code = raw.trim().toUpperCase();
         if (!code) return { acronym: code, needsGrading: 0, unread: 0 };
+        const exclude = {
+          courses: coursesByCode.get(code),
+          assignments: assignmentsByCode.get(code),
+        };
         const [needsGrading, unread] = await Promise.all([
-          getNeedsGradingCount(code).catch(() => 0),
+          getNeedsGradingCount(code, exclude).catch(() => 0),
           getUnreadCount(code).catch(() => 0),
         ]);
         return { acronym: code, needsGrading, unread };

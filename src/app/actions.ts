@@ -33,6 +33,24 @@ import {
   type CanvasQueueItem,
   type CanvasCourse,
 } from "@/lib/canvas";
+import {
+  listModules,
+  createModule,
+  updateModule,
+  deleteModule,
+  createModuleItem,
+  updateModuleItem,
+  deleteModuleItem,
+  listPages,
+  getPage,
+  updatePage,
+  createPage,
+  deletePage,
+  type CanvasModule,
+  type CanvasPageSummary,
+  type CanvasPage,
+  type NewModuleItem,
+} from "@/lib/canvas-modules";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -1295,6 +1313,240 @@ export async function setConversationStateAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not update the conversation." };
+  }
+}
+
+// ── Course Content (modules & pages) ─────────────────────────────────────────
+//
+// Owner-gated wrappers over the Canvas Modules/Pages API. Reads power the Course
+// Content tab; writes mutate live course content, so the UI keeps every write
+// explicit (staged locally, saved on an explicit click) and these actions simply
+// pass the author's confirmed changes through.
+
+/** Load a course's name, modules (with items), and wiki page list in one call. */
+export async function listCourseContentAction(
+  courseUrl: string,
+  acronym?: string
+): Promise<{ courseName: string; modules: CanvasModule[]; pages: CanvasPageSummary[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const [courseName, modules, pages] = await Promise.all([
+      getCourseName(courseUrl, acronym),
+      listModules(courseUrl, acronym),
+      listPages(courseUrl, acronym),
+    ]);
+    return { courseName, modules, pages };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load course content." };
+  }
+}
+
+/** Fetch a single page's HTML body for editing. */
+export async function getPageAction(
+  courseUrl: string,
+  pageUrl: string,
+  acronym?: string
+): Promise<{ page: CanvasPage } | { error: string }> {
+  try {
+    await requireOwner();
+    return { page: await getPage(courseUrl, pageUrl, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the page." };
+  }
+}
+
+/** Save edits to a page (title / HTML body / publish state). */
+export async function updatePageAction(
+  courseUrl: string,
+  pageUrl: string,
+  fields: { title?: string; body?: string; published?: boolean },
+  acronym?: string
+): Promise<{ page: CanvasPage } | { error: string }> {
+  try {
+    await requireOwner();
+    return { page: await updatePage(courseUrl, pageUrl, fields, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the page." };
+  }
+}
+
+/** Create a new wiki page. */
+export async function createPageAction(
+  courseUrl: string,
+  fields: { title: string; body?: string; published?: boolean },
+  acronym?: string
+): Promise<{ page: CanvasPage } | { error: string }> {
+  try {
+    await requireOwner();
+    return { page: await createPage(courseUrl, fields, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the page." };
+  }
+}
+
+/** Delete a wiki page. */
+export async function deletePageAction(
+  courseUrl: string,
+  pageUrl: string,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await deletePage(courseUrl, pageUrl, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not delete the page." };
+  }
+}
+
+/** Create a new (empty) module. */
+export async function createModuleAction(
+  courseUrl: string,
+  name: string,
+  position?: number,
+  acronym?: string
+): Promise<{ module: CanvasModule } | { error: string }> {
+  try {
+    await requireOwner();
+    return { module: await createModule(courseUrl, name, position, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the module." };
+  }
+}
+
+/** Update a module's name / publish state / position. */
+export async function updateModuleAction(
+  courseUrl: string,
+  moduleId: number,
+  fields: { name?: string; published?: boolean; position?: number },
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await updateModule(courseUrl, moduleId, fields, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the module." };
+  }
+}
+
+/** Delete a module. */
+export async function deleteModuleAction(
+  courseUrl: string,
+  moduleId: number,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await deleteModule(courseUrl, moduleId, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not delete the module." };
+  }
+}
+
+/** Add an item to a module. */
+export async function createModuleItemAction(
+  courseUrl: string,
+  moduleId: number,
+  item: NewModuleItem,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await createModuleItem(courseUrl, moduleId, item, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not add the item." };
+  }
+}
+
+/** Update a module item's title / indent / publish state / position / module. */
+export async function updateModuleItemAction(
+  courseUrl: string,
+  moduleId: number,
+  itemId: number,
+  fields: { title?: string; indent?: number; published?: boolean; position?: number; targetModuleId?: number },
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await updateModuleItem(courseUrl, moduleId, itemId, fields, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the item." };
+  }
+}
+
+/** Remove an item from a module. */
+export async function deleteModuleItemAction(
+  courseUrl: string,
+  moduleId: number,
+  itemId: number,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await deleteModuleItem(courseUrl, moduleId, itemId, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not remove the item." };
+  }
+}
+
+/**
+ * Revise a page's HTML body from a short instruction. Returns revised HTML the
+ * author reviews/previews before saving — nothing is written to Canvas here.
+ */
+export async function revisePageWithAiAction(
+  html: string,
+  instruction: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ html: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!instruction.trim()) {
+      return { error: "Describe what to change first." };
+    }
+
+    const prompt = `You are editing the HTML body of a course page in a learning management system (Canvas).
+
+CURRENT PAGE HTML:
+${html}
+
+EDIT INSTRUCTION:
+${instruction.trim()}
+
+Apply the instruction and return the full, updated page as HTML.
+
+Requirements:
+- Return ONLY the HTML for the page body. No markdown fences, no commentary, no <html>/<head>/<body> wrapper.
+- Preserve the existing structure, links, images, and formatting except where the instruction calls for a change.
+- Use simple, valid HTML (p, h2, h3, ul, ol, li, a, strong, em, table). Do not add inline styles or scripts.
+- Do not invent facts, dates, or links that were not present or provided.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { error: `Revision failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+
+    // Strip a stray ```html ... ``` fence if the model wraps the output.
+    let revised = result.text.trim();
+    const fenced = revised.match(/```(?:html)?\s*([\s\S]*?)```/i);
+    if (fenced) revised = fenced[1].trim();
+    if (!revised) {
+      return { error: "The model returned an empty revision." };
+    }
+    return { html: revised };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
 }
 

@@ -5,6 +5,7 @@ import { Tab, Tabs } from "@mui/material";
 import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, generateLectureDeckAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData } from "./actions";
 import CoursePlanningTab from "./components/CoursePlanningTab";
 import CanvasTab from "./components/CanvasTab";
+import ContentTab from "./components/ContentTab";
 import GradingTab from "./components/GradingTab";
 import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
@@ -24,7 +25,7 @@ import { parseGeneratedRubric } from "./utils/rubric";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "grading" | "lesson-planning" | "course-planning" | "canvas";
+type ActiveTab = "grading" | "lesson-planning" | "course-planning" | "canvas" | "content";
 
 // The hosted Course Engine runs on Vercel, which caps the request body at
 // ~4.5 MB. Reject larger uploads client-side with a clear message rather than
@@ -128,7 +129,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "lesson-planning";
     const saved = localStorage.getItem("ta-active-tab");
-    return saved === "grading" || saved === "lesson-planning" || saved === "course-planning" || saved === "canvas" ? saved : "lesson-planning";
+    return saved === "grading" || saved === "lesson-planning" || saved === "course-planning" || saved === "canvas" || saved === "content" ? saved : "lesson-planning";
   });
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
@@ -613,6 +614,7 @@ export default function Home() {
             value="canvas"
             disableRipple
           />
+          <Tab label="Course Content" value="content" disableRipple />
         </Tabs>
 
         {activeTab === "grading" && (
@@ -636,6 +638,8 @@ export default function Home() {
         )}
 
         {activeTab === "canvas" && <CanvasTab />}
+
+        {activeTab === "content" && <ContentTab />}
 
         {activeTab === "lesson-planning" && (
           <LessonPlanningForm

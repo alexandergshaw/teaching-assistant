@@ -8,10 +8,11 @@ import styles from "../page.module.css";
  * Segmented control for choosing the active institution, shared (via
  * localStorage) by the Live Feed and Communications tabs. Each chip shows a
  * notification bubble: needs-grading count on Grading, unread count on
- * Communications (per `metric`). Renders a hint when none are registered yet —
- * they're added in the Settings dropdown.
+ * Communications (per `metric`). Omit `metric` for no badge (e.g. Course
+ * Content). Renders a hint when none are registered yet — they're added in the
+ * Settings dropdown.
  */
-export default function InstitutionSwitcher({ metric }: { metric: "grading" | "unread" }) {
+export default function InstitutionSwitcher({ metric }: { metric?: "grading" | "unread" }) {
   const { institutions, active, setActive } = useInstitutionSelection();
   const { counts } = useInstitutionCounts();
 
@@ -26,8 +27,11 @@ export default function InstitutionSwitcher({ metric }: { metric: "grading" | "u
   return (
     <div className={styles.lessonInnerTabs} role="radiogroup" aria-label="Institution">
       {institutions.map((code) => {
-        const count =
-          metric === "grading" ? counts[code]?.needsGrading ?? 0 : counts[code]?.unread ?? 0;
+        const count = !metric
+          ? 0
+          : metric === "grading"
+            ? counts[code]?.needsGrading ?? 0
+            : counts[code]?.unread ?? 0;
         return (
           <button
             key={code}

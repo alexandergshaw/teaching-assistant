@@ -9,7 +9,6 @@ import {
   replyToConversationAction,
   draftAnnouncementAction,
   draftMessageReplyAction,
-  listCoursesAction,
   setConversationStateAction,
   getAvailableSlotsAction,
   draftMeetingReplyAction,
@@ -17,11 +16,11 @@ import {
   detectMeetingRequestAction,
 } from "../actions";
 import WeekCalendar, { type CalendarEventBlock } from "./WeekCalendar";
+import CoursePicker from "./CoursePicker";
 import type {
   CanvasAnnouncement,
   CanvasConversationSummary,
   CanvasConversationDetail,
-  CanvasCourse,
 } from "@/lib/canvas";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
@@ -34,27 +33,6 @@ import styles from "../page.module.css";
 
 const COURSE_URL_KEY = "ta-canvas-course-url";
 const VIEW_KEY = "ta-canvas-view";
-const SAVED_COURSES_KEY = "ta-canvas-saved-courses";
-
-/** A Canvas course the user pinned so they can jump back into it. */
-interface SavedCourse {
-  id: string;
-  url: string;
-  name: string;
-}
-
-function readSavedCourses(): SavedCourse[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SAVED_COURSES_KEY) ?? "[]");
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((c): c is SavedCourse => !!c && typeof c.id === "string" && typeof c.url === "string")
-      .map((c) => ({ id: c.id, url: c.url, name: typeof c.name === "string" && c.name ? c.name : `Course ${c.id}` }));
-  } catch {
-    return [];
-  }
-}
 
 // Format a Canvas ISO timestamp for display; blank when absent.
 function formatWhen(iso: string | null): string {
@@ -116,12 +94,6 @@ function AnnouncementsPanel() {
     message: "",
   });
 
-  const [savedCourses, setSavedCourses] = useState<SavedCourse[]>(() => readSavedCourses());
-  const [courses, setCourses] = useState<CanvasCourse[]>([]);
-  const [coursesState, setCoursesState] = useState<"idle" | "loading" | "error">(
-    activeInstitution ? "loading" : "idle"
-  );
-
   const [draftPrompt, setDraftPrompt] = useState("");
   const [drafting, setDrafting] = useState(false);
   const [title, setTitle] = useState("");
@@ -140,42 +112,12 @@ function AnnouncementsPanel() {
     setAnnouncements([]);
     setCourseName("");
     setCourseUrl("");
-    setCourses([]);
-    setCoursesState(activeInstitution ? "loading" : "idle");
     setLoadState({ status: "idle", message: "" });
     setPostNote(null);
     setLastPosted(null);
   }
 
-  // Load the institution's courses for the picker (await-first, no sync setState).
-  useEffect(() => {
-    if (!activeInstitution) return;
-    let cancelled = false;
-    (async () => {
-      const result = await listCoursesAction(activeInstitution);
-      if (cancelled) return;
-      if ("error" in result) {
-        setCourses([]);
-        setCoursesState("error");
-        return;
-      }
-      setCourses(result.courses);
-      setCoursesState("idle");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeInstitution]);
-
   const courseId = parseCanvasCourseId(courseUrl);
-  const isSaved = !!courseId && savedCourses.some((c) => c.id === courseId);
-
-  const persistSavedCourses = (next: SavedCourse[]) => {
-    setSavedCourses(next);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(SAVED_COURSES_KEY, JSON.stringify(next));
-    }
-  };
 
   const loadAnnouncements = async (url: string) => {
     const id = parseCanvasCourseId(url);
@@ -192,30 +134,13 @@ function AnnouncementsPanel() {
     setCourseName(result.courseName);
     setAnnouncements(result.announcements);
     setLoadState({ status: "idle", message: "" });
-    // Keep a saved course's label fresh once we know its real name.
-    if (savedCourses.some((c) => c.id === id)) {
-      persistSavedCourses(
-        savedCourses.map((c) => (c.id === id ? { ...c, name: result.courseName, url } : c))
-      );
-    }
   };
 
-  const saveCurrentCourse = () => {
-    if (!courseId || isSaved) return;
-    persistSavedCourses([
-      ...savedCourses,
-      { id: courseId, url: courseUrl.trim(), name: courseName || `Course ${courseId}` },
-    ]);
-  };
-
-  const openSavedCourse = (course: SavedCourse) => {
-    setCourseUrl(course.url);
+  // Pick a course from the shared picker: remember it and load its announcements.
+  const handleSelectCourse = (url: string) => {
+    setCourseUrl(url);
     setLoadState({ status: "idle", message: "" });
-    void loadAnnouncements(course.url);
-  };
-
-  const removeSavedCourse = (id: string) => {
-    persistSavedCourses(savedCourses.filter((c) => c.id !== id));
+    void loadAnnouncements(url);
   };
 
   const handleDraft = async () => {
@@ -285,137 +210,21 @@ function AnnouncementsPanel() {
 
   return (
     <div className={styles.form}>
-      <div className={styles.field}>
-        <label htmlFor="canvas-course-picker">Course</label>
-        <select
-          id="canvas-course-picker"
-          className={styles.textInput}
-          value={courseId ?? ""}
-          disabled={coursesState === "loading" || courses.length === 0}
-          onChange={(e) => {
-            const id = e.target.value;
-            if (!id) return;
-            const url = `/courses/${id}`;
-            setCourseUrl(url);
-            setLoadState({ status: "idle", message: "" });
-            void loadAnnouncements(url);
-          }}
-        >
-          <option value="">
-            {coursesState === "loading"
-              ? "Loading courses…"
-              : courses.length === 0
-                ? "No courses found"
-                : "Select a course…"}
-          </option>
-          {courses.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        {coursesState === "error" && (
-          <p className={styles.fieldHint}>
-            Could not list courses for this school; paste a course URL below instead.
-          </p>
-        )}
-
-        <details className={styles.generatedRubricCard} style={{ marginTop: 4 }}>
-          <summary>Or paste a course URL</summary>
-          <input
-            id="canvas-course-url"
-            type="url"
-            className={styles.textInput}
-            style={{ marginTop: 10 }}
-            placeholder="Paste a course link (.../courses/123)"
-            value={courseUrl}
-            onChange={(e) => {
-              setCourseUrl(e.target.value);
-              setLoadState({ status: "idle", message: "" });
-            }}
-          />
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={() => void loadAnnouncements(courseUrl.trim())}
-              disabled={loadState.status === "loading" || !courseId}
-            >
-              {loadState.status === "loading" ? "Loading…" : "Load announcements"}
-            </button>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={saveCurrentCourse}
-              disabled={!courseId || isSaved}
-            >
-              {isSaved ? "Saved" : "Save course"}
-            </button>
-          </div>
-        </details>
-        {loadState.status === "loading" && (
-          <p className={styles.fieldHint}>Loading announcements…</p>
-        )}
-        {loadState.status === "error" && <p className={styles.error}>{loadState.message}</p>}
-      </div>
-
-      {savedCourses.length > 0 && (
-        <div className={styles.field}>
-          <label>Saved courses</label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {savedCourses.map((c) => (
-              <span
-                key={c.id}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  borderRadius: 999,
-                  border: "1px solid var(--field-border)",
-                  background: "var(--field-background)",
-                  paddingLeft: 4,
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => openSavedCourse(c)}
-                  style={{
-                    font: "inherit",
-                    fontSize: "0.85rem",
-                    fontWeight: 600,
-                    color: "var(--text-primary)",
-                    background: "transparent",
-                    border: "none",
-                    borderRadius: 999,
-                    padding: "5px 8px",
-                    cursor: "pointer",
-                  }}
-                >
-                  {c.name}
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Remove ${c.name}`}
-                  title="Remove"
-                  onClick={() => removeSavedCourse(c.id)}
-                  style={{
-                    font: "inherit",
-                    fontSize: "1rem",
-                    lineHeight: 1,
-                    color: "var(--text-secondary)",
-                    background: "transparent",
-                    border: "none",
-                    borderRadius: 999,
-                    padding: "4px 9px 4px 2px",
-                    cursor: "pointer",
-                  }}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        </div>
+      <CoursePicker
+        activeInstitution={activeInstitution}
+        courseUrl={courseUrl}
+        onCourseUrlChange={(url) => {
+          setCourseUrl(url);
+          setLoadState({ status: "idle", message: "" });
+        }}
+        onSelect={handleSelectCourse}
+        loading={loadState.status === "loading"}
+        loadLabel="Load announcements"
+        loadError={loadState.status === "error" ? loadState.message : null}
+        courseName={courseName}
+      />
+      {loadState.status === "loading" && (
+        <p className={styles.fieldHint}>Loading announcements…</p>
       )}
 
       <div className={styles.field}>

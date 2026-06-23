@@ -157,29 +157,27 @@ export function computeFreeSlots(
 }
 
 /**
- * Render slot start times for a human-readable reply, e.g.
- * "Tuesday, June 24 at 9:00 AM CDT".
+ * Render slots for a human-readable reply with both start and end times, e.g.
+ * "Tuesday, June 24, 9:00 AM to 9:30 AM CDT". Uses "to" rather than a dash so the
+ * generated message never contains a long dash.
  */
-export function formatSlotsForReply(slotsISO: string[], timeZone: string): string[] {
-  const formatter = new Intl.DateTimeFormat("en-US", {
+export function formatSlotsForReply(
+  slotsISO: string[],
+  timeZone: string,
+  slotMinutes: number
+): string[] {
+  const dateFmt = new Intl.DateTimeFormat("en-US", {
     timeZone,
     weekday: "long",
     month: "long",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
   });
+  const timeFmt = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" });
+  const zoneFmt = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" });
   return slotsISO.map((iso) => {
-    const parts = formatter.formatToParts(new Date(iso));
-    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-    const weekday = get("weekday");
-    const month = get("month");
-    const day = get("day");
-    const hour = get("hour");
-    const minute = get("minute");
-    const dayPeriod = get("dayPeriod");
-    const zone = get("timeZoneName");
-    return `${weekday}, ${month} ${day} at ${hour}:${minute} ${dayPeriod} ${zone}`;
+    const start = new Date(iso);
+    const end = new Date(start.getTime() + slotMinutes * 60_000);
+    const zone = zoneFmt.formatToParts(start).find((p) => p.type === "timeZoneName")?.value ?? "";
+    return `${dateFmt.format(start)}, ${timeFmt.format(start)} to ${timeFmt.format(end)} ${zone}`;
   });
 }

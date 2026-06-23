@@ -65,6 +65,17 @@ function minuteLabel(totalMinutes: number): string {
   return `${h12}:${String(min).padStart(2, "0")} ${period}`;
 }
 
+// Compact start-to-end label for a slot cell, e.g. "9:00-9:30 AM" (shared AM/PM
+// shown once) or "11:30 AM-12:00 PM" when they straddle noon. Plain hyphen, no
+// long dash.
+function slotRangeLabel(startMin: number, endMin: number): string {
+  const start = minuteLabel(startMin);
+  const end = minuteLabel(endMin);
+  const startPeriod = start.slice(-2);
+  const endPeriod = end.slice(-2);
+  return startPeriod === endPeriod ? `${start.slice(0, -3)}-${end}` : `${start}-${end}`;
+}
+
 export default function WeekCalendar({
   timeZone,
   workStartHour,
@@ -174,6 +185,7 @@ export default function WeekCalendar({
                         <button
                           type="button"
                           onClick={() => onSelect(iso)}
+                          title={`${slotRangeLabel(m, m + slotMinutes)}${isSelected ? " (selected)" : ""}`}
                           style={{
                             width: "100%",
                             height: 26,
@@ -182,11 +194,15 @@ export default function WeekCalendar({
                             borderRadius: 6,
                             background: isSelected ? ACCENT : ACCENT_BG,
                             color: isSelected ? "#fff" : ACCENT,
-                            fontSize: 12,
+                            fontSize: 10,
                             fontWeight: 600,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            padding: "0 2px",
                           }}
                         >
-                          {isSelected ? "Selected" : "Open"}
+                          {slotRangeLabel(m, m + slotMinutes)}
                         </button>
                       </td>
                     );

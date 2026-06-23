@@ -77,6 +77,20 @@ function toDatetimeLocalValue(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// Curated time zones for the optional scheduling override. "" means the
+// account's configured zone (the default — no override is applied).
+const SCHEDULING_TIME_ZONES: Array<{ value: string; label: string }> = [
+  { value: "", label: "Account default" },
+  { value: "America/New_York", label: "Eastern (New York)" },
+  { value: "America/Chicago", label: "Central (Chicago)" },
+  { value: "America/Denver", label: "Mountain (Denver)" },
+  { value: "America/Phoenix", label: "Arizona (Phoenix)" },
+  { value: "America/Los_Angeles", label: "Pacific (Los Angeles)" },
+  { value: "America/Anchorage", label: "Alaska (Anchorage)" },
+  { value: "Pacific/Honolulu", label: "Hawaii (Honolulu)" },
+  { value: "UTC", label: "UTC" },
+];
+
 // Up to two initials from a display name, for inbox avatars.
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -612,6 +626,8 @@ function InboxPanel() {
   >(null);
   const [plannerOpen, setPlannerOpen] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  // Optional time-zone override for slots ("" = the account's configured zone).
+  const [scheduleTz, setScheduleTz] = useState("");
   const [booking, setBooking] = useState(false);
   const [offering, setOffering] = useState(false);
   const [studentEmail, setStudentEmail] = useState("");
@@ -735,12 +751,13 @@ function InboxPanel() {
     setReplyBody(result.body);
   };
 
-  // Load the week-view planner (open slots + busy events) and open it.
-  const handleSuggestTimes = async () => {
+  // Load the week-view planner (open slots + busy events) in the given zone and
+  // open it. Shared by the "Suggest times" button and the in-modal zone switcher.
+  const loadPlanner = async (tz: string) => {
     if (!threadText) return;
     setSuggesting(true);
     setReplyNote(null);
-    const result = await getAvailableSlotsAction();
+    const result = await getAvailableSlotsAction(tz || undefined);
     setSuggesting(false);
     if ("error" in result) {
       setReplyNote({ kind: "error", text: result.error });
@@ -758,6 +775,14 @@ function InboxPanel() {
     setPlannerOpen(true);
   };
 
+  const handleSuggestTimes = () => loadPlanner(scheduleTz);
+
+  // Switch the slot time zone from inside the planner and reload in that zone.
+  const handleTzChange = (tz: string) => {
+    setScheduleTz(tz);
+    void loadPlanner(tz);
+  };
+
   // Label for the slot the user picked (for the confirmation + reply line).
   const selectedLabel =
     planner && selectedSlot
@@ -771,7 +796,7 @@ function InboxPanel() {
     if (!planner) return;
     setOffering(true);
     setReplyNote(null);
-    const result = await draftMeetingReplyAction(threadText, planner.slots, provider);
+    const result = await draftMeetingReplyAction(threadText, planner.slots, provider, scheduleTz || undefined);
     setOffering(false);
     if ("error" in result) {
       setReplyNote({ kind: "error", text: result.error });
@@ -787,7 +812,12 @@ function InboxPanel() {
     if (!selectedSlot) return;
     setBooking(true);
     setReplyNote(null);
-    const result = await createMeetingAction(selectedSlot, studentName, studentEmail.trim() || undefined);
+    const result = await createMeetingAction(
+      selectedSlot,
+      studentName,
+      studentEmail.trim() || undefined,
+      scheduleTz || undefined
+    );
     setBooking(false);
     if ("error" in result) {
       setReplyNote({ kind: "error", text: result.error });
@@ -1085,7 +1115,7 @@ function InboxPanel() {
         >
           <div
             className={styles.previewModal}
-            style={{ width: "min(900px, 94vw)", maxWidth: "none" }}
+            style={{ width: "min(640px, 92vw)", maxWidth: "none" }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className={styles.previewHeader}>
@@ -1112,6 +1142,23 @@ function InboxPanel() {
               Highlighted times are open. Offer them all for {offerTarget} to choose from, or click one
               to book it directly.
             </p>
+
+            <div className={styles.field} style={{ marginBottom: 10, maxWidth: 280 }}>
+              <label htmlFor="canvas-schedule-tz">Time zone</label>
+              <select
+                id="canvas-schedule-tz"
+                className={styles.textInput}
+                value={scheduleTz}
+                disabled={suggesting}
+                onChange={(e) => handleTzChange(e.target.value)}
+              >
+                {SCHEDULING_TIME_ZONES.map((tz) => (
+                  <option key={tz.value || "default"} value={tz.value}>
+                    {tz.label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             <WeekCalendar
               timeZone={planner.timeZone}

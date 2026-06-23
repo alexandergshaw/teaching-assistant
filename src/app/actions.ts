@@ -1332,7 +1332,11 @@ export async function disconnectGoogleCalendarAction(): Promise<
  * the grid config, so the inbox can render a week-view picker that shades busy
  * time and highlights the open slots.
  */
-export async function getAvailableSlotsAction(): Promise<
+export async function getAvailableSlotsAction(
+  // Optional IANA time zone to reckon and display slots in. Omit to use the
+  // account's configured zone (the default — no per-request override).
+  timeZoneOverride?: string
+): Promise<
   | {
       slots: string[];
       slotLabels: string[];
@@ -1350,7 +1354,9 @@ export async function getAvailableSlotsAction(): Promise<
     if (!token) {
       return { error: "Google Calendar isn't connected. Connect it under Account > Integrations." };
     }
-    const config = getSchedulingConfig();
+    const baseConfig = getSchedulingConfig();
+    const timeZone = timeZoneOverride?.trim() || baseConfig.timeZone;
+    const config = { ...baseConfig, timeZone };
     const now = new Date();
     const timeMin = now.toISOString();
     const timeMax = new Date(now.getTime() + (config.lookaheadDays + 1) * 86_400_000).toISOString();
@@ -1363,7 +1369,7 @@ export async function getAvailableSlotsAction(): Promise<
     const slots = computeFreeSlots(busy, config, now);
     return {
       slots,
-      slotLabels: formatSlotsForReply(slots, config.timeZone),
+      slotLabels: formatSlotsForReply(slots, config.timeZone, config.slotMinutes),
       events,
       timeZone: config.timeZone,
       workStartHour: config.workStartHour,
@@ -1391,7 +1397,9 @@ function stripLongDashes(text: string): string {
 export async function draftMeetingReplyAction(
   threadText: string,
   slotsISO: string[],
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  // Optional IANA zone to label the offered times in; defaults to the configured zone.
+  timeZoneOverride?: string
 ): Promise<{ body: string } | { error: string }> {
   try {
     await requireOwner();
@@ -1399,7 +1407,8 @@ export async function draftMeetingReplyAction(
       return { error: "No open times to offer." };
     }
     const config = getSchedulingConfig();
-    const labels = formatSlotsForReply(slotsISO, config.timeZone);
+    const timeZone = timeZoneOverride?.trim() || config.timeZone;
+    const labels = formatSlotsForReply(slotsISO, timeZone, config.slotMinutes);
     const bulletedTimes = labels.map((l) => `- ${l}`).join("\n");
 
     const fallback = `Thanks for reaching out! I'd be glad to meet over a video call. Here are a few times that work on my end:\n\n${bulletedTimes}\n\nLet me know which one suits you and I'll send a Google Meet link.`;
@@ -1439,7 +1448,9 @@ Write the instructor's reply: warm and brief, confirm you're happy to meet over 
 export async function createMeetingAction(
   startISO: string,
   studentName?: string,
-  studentEmail?: string
+  studentEmail?: string,
+  // Optional IANA zone for the event; defaults to the configured zone.
+  timeZoneOverride?: string
 ): Promise<{ meetLink: string | null; htmlLink: string | null; startISO: string } | { error: string }> {
   try {
     const user = await requireOwner();
@@ -1448,6 +1459,7 @@ export async function createMeetingAction(
       return { error: "Google Calendar isn't connected. Connect it under Account > Integrations." };
     }
     const config = getSchedulingConfig();
+    const timeZone = timeZoneOverride?.trim() || config.timeZone;
     const start = new Date(startISO);
     if (Number.isNaN(start.getTime())) {
       return { error: "That meeting time is invalid." };
@@ -1459,7 +1471,7 @@ export async function createMeetingAction(
       description: "Scheduled from the Teaching Assistant inbox.",
       startISO: start.toISOString(),
       endISO: end.toISOString(),
-      timeZone: config.timeZone,
+      timeZone,
       attendeeEmails: studentEmail?.trim() ? [studentEmail.trim()] : [],
     });
     return { meetLink: event.meetLink, htmlLink: event.htmlLink, startISO: start.toISOString() };

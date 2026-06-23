@@ -39,28 +39,14 @@ function urgencyOf(dueAt: string | null): Urgency {
   return "later";
 }
 
-function urgencyBadge(u: Urgency): { label: string; bg: string; color: string } | null {
-  if (u === "overdue") return { label: "Overdue", bg: "#fee2e2", color: "#b91c1c" };
-  if (u === "soon") return { label: "Due soon", bg: "#fef3c7", color: "#92400e" };
+function urgencyBadge(u: Urgency): { label: string; cls: string } | null {
+  if (u === "overdue") return { label: "Overdue", cls: styles.lfBadgeOverdue };
+  if (u === "soon") return { label: "Due soon", cls: styles.lfBadgeSoon };
   return null;
 }
 
-function Badge({ label, bg, color }: { label: string; bg: string; color: string }) {
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        fontSize: 11,
-        fontWeight: 700,
-        padding: "1px 7px",
-        borderRadius: 999,
-        background: bg,
-        color,
-      }}
-    >
-      {label}
-    </span>
-  );
+function Dot() {
+  return <span className={styles.lfDot} aria-hidden="true" />;
 }
 
 function Chip({
@@ -76,20 +62,20 @@ function Chip({
     <button
       type="button"
       onClick={onClick}
-      style={{
-        font: "inherit",
-        fontSize: "0.8rem",
-        fontWeight: 600,
-        padding: "4px 11px",
-        borderRadius: 999,
-        cursor: "pointer",
-        border: `1px solid ${active ? "var(--accent)" : "var(--field-border)"}`,
-        background: active ? "var(--accent)" : "var(--field-background)",
-        color: active ? "#fff" : "var(--text-secondary)",
-      }}
+      className={`${styles.lfChip}${active ? ` ${styles.lfChipActive}` : ""}`}
     >
       {children}
     </button>
+  );
+}
+
+function EmptyQueueIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+      <path d="M9 4h6a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v0a2 2 0 0 1 2-2Z" />
+      <path d="M7 6H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2" />
+      <path d="M8 13l2.5 2.5L16 10" />
+    </svg>
   );
 }
 
@@ -296,7 +282,6 @@ export default function LiveFeedPanel({
     [rows, seen, unwatched]
   );
 
-  // Triage summary across the currently-visible rows.
   const summary = useMemo(() => {
     const total = viewRows.reduce((s, r) => s + r.needsGradingCount, 0);
     const overdue = viewRows.filter((r) => urgencyOf(r.dueAt) === "overdue").length;
@@ -365,43 +350,28 @@ export default function LiveFeedPanel({
     const badge = urgencyBadge(urgencyOf(row.dueAt));
     const isUnwatched = unwatched.has(row.courseId);
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <h2 className={styles.lessonSlideTitle} style={{ margin: 0 }}>
-              {row.title}
-            </h2>
-            {badge && <Badge {...badge} />}
-            <Badge label={row.kind} bg="var(--field-background)" color="var(--text-secondary)" />
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className={styles.lfDetailHead}>
+          <div className={styles.lfDetailTitleRow}>
+            <h2 className={styles.lfDetailTitle}>{row.title}</h2>
+            {badge && <span className={`${styles.lfBadge} ${badge.cls}`}>{badge.label}</span>}
+            <span className={`${styles.lfBadge} ${styles.lfBadgeKind}`}>{row.kind}</span>
           </div>
-          <p className={styles.fieldHint} style={{ marginTop: 4 }}>
-            {[
-              row.courseName,
-              row.dueAt ? `Due ${formatRelative(row.dueAt)}` : "No due date",
-              `${row.needsGradingCount} needs grading`,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
+          <p className={styles.lfDetailMeta}>
+            {row.courseName} <Dot /> {row.dueAt ? `Due ${formatRelative(row.dueAt)}` : "No due date"} <Dot />{" "}
+            {row.needsGradingCount} needs grading
           </p>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 4 }}>
-            <a href={row.htmlUrl} target="_blank" rel="noopener noreferrer" className={styles.fieldHint}>
+          <div className={styles.lfDetailLinks}>
+            <a href={row.htmlUrl} target="_blank" rel="noopener noreferrer" className={styles.lfLink}>
               Open in Canvas
             </a>
-            <a href={row.speedGraderUrl} target="_blank" rel="noopener noreferrer" className={styles.fieldHint}>
+            <a href={row.speedGraderUrl} target="_blank" rel="noopener noreferrer" className={styles.lfLink}>
               SpeedGrader
             </a>
-            <button
-              type="button"
-              className={styles.clearFileButton}
-              onClick={() => markSeen(row, !seen.has(row.assignmentId))}
-            >
+            <button type="button" className={styles.lfLink} onClick={() => markSeen(row, !seen.has(row.assignmentId))}>
               {seen.has(row.assignmentId) ? "Unmark seen" : "Mark seen"}
             </button>
-            <button
-              type="button"
-              className={styles.clearFileButton}
-              onClick={() => setWatched(row.courseId, isUnwatched)}
-            >
+            <button type="button" className={styles.lfLink} onClick={() => setWatched(row.courseId, isUnwatched)}>
               {isUnwatched ? "Resume watching course" : "Stop watching course"}
             </button>
           </div>
@@ -436,16 +406,7 @@ export default function LiveFeedPanel({
               onOpenPreview={onOpenPreview}
               onPosted={onPosted}
             />
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                flexWrap: "wrap",
-                alignItems: "center",
-                paddingTop: 12,
-                borderTop: "1px solid var(--field-border)",
-              }}
-            >
+            <div className={styles.lfFooter}>
               <button type="button" className={styles.submitButton} onClick={handlePostAndNext}>
                 Post &amp; next
               </button>
@@ -453,32 +414,29 @@ export default function LiveFeedPanel({
                 {inSequence ? "Skip to next" : "Next item"}
               </button>
               {inSequence && (
-                <span className={styles.fieldHint} style={{ margin: 0 }}>
+                <span className={styles.lfSeq}>
                   Sequence: {(sequence?.indexOf(selectedKey ?? "") ?? 0) + 1} of {sequence?.length}
                 </span>
               )}
             </div>
           </>
         ) : activeRun && activeRun.results.length === 0 ? (
-          <div>
-            <p className={styles.emptyState}>No submissions were found to grade for this item.</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-start" }}>
+            <p className={styles.emptyState} style={{ margin: 0 }}>
+              No submissions were found to grade for this item.
+            </p>
             <button type="button" className={styles.downloadButton} onClick={() => advance(inSequence)}>
               {inSequence ? "Skip to next" : "Next item"}
             </button>
           </div>
         ) : (
-          <div>
-            <button
-              type="button"
-              className={styles.submitButton}
-              onClick={() => onAutoGrade(row)}
-              disabled={pending}
-            >
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>
+            <button type="button" className={styles.submitButton} onClick={() => onAutoGrade(row)} disabled={pending}>
               {pending ? "Grading…" : "Auto Grade"}
             </button>
-            <p className={styles.fieldHint} style={{ marginTop: 8 }}>
-              Runs the {graderLabel} on every submission, then shows the editable results here to post
-              back to Canvas.
+            <p className={styles.fieldHint} style={{ margin: 0 }}>
+              Runs the {graderLabel} on every submission, then shows the editable results here to post back
+              to Canvas.
             </p>
           </div>
         )}
@@ -493,13 +451,13 @@ export default function LiveFeedPanel({
         <InstitutionSwitcher metric="grading" />
       </div>
 
-      {!active ? null : (
-        <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
+      {active && (
+        <div className={styles.lfLayout}>
           {/* Queue rail */}
-          <div style={{ flex: "1 1 360px", minWidth: 300, maxWidth: 540, display: "flex", flexDirection: "column", gap: 10 }}>
-            <div className={styles.resultsHeader} style={{ paddingTop: 0 }}>
+          <div className={styles.lfRail}>
+            <div className={styles.lfRailHeader}>
               <h2>Needs grading</h2>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <div className={styles.lfRailHeaderActions}>
                 <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
                   <input type="checkbox" checked={autoRefresh} onChange={toggleAutoRefresh} />
                   Auto-refresh
@@ -519,10 +477,26 @@ export default function LiveFeedPanel({
             </div>
 
             {queueState.status === "idle" && rows.length > 0 && (
-              <p className={styles.fieldHint} style={{ margin: 0 }}>
-                {summary.total} to grade across {summary.courses} course{summary.courses === 1 ? "" : "s"}
-                {summary.overdue > 0 ? ` · ${summary.overdue} overdue` : ""}
-                {updatedAt ? ` · updated ${formatRelative(updatedAt)}` : ""}
+              <p className={styles.lfSummary}>
+                <span>
+                  <b>{summary.total}</b> to grade
+                </span>
+                <Dot />
+                <span>
+                  <b>{summary.courses}</b> course{summary.courses === 1 ? "" : "s"}
+                </span>
+                {summary.overdue > 0 && (
+                  <>
+                    <Dot />
+                    <span className={styles.lfSummaryOverdue}>{summary.overdue} overdue</span>
+                  </>
+                )}
+                {updatedAt && (
+                  <>
+                    <Dot />
+                    <span>updated {formatRelative(updatedAt)}</span>
+                  </>
+                )}
               </p>
             )}
 
@@ -535,8 +509,14 @@ export default function LiveFeedPanel({
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <Chip active={urgencyFilter === "all" && kindFilter === "all"} onClick={() => { setUrgencyFilter("all"); setKindFilter("all"); }}>
+                <div className={styles.lfChips}>
+                  <Chip
+                    active={urgencyFilter === "all" && kindFilter === "all"}
+                    onClick={() => {
+                      setUrgencyFilter("all");
+                      setKindFilter("all");
+                    }}
+                  >
                     All
                   </Chip>
                   <Chip active={urgencyFilter === "overdue"} onClick={() => setUrgencyFilter(urgencyFilter === "overdue" ? "all" : "overdue")}>
@@ -552,8 +532,7 @@ export default function LiveFeedPanel({
                     Discussions
                   </Chip>
                   <select
-                    className={styles.textInput}
-                    style={{ maxWidth: 170, padding: "4px 8px" }}
+                    className={`${styles.textInput} ${styles.lfSort}`}
                     value={sort}
                     onChange={(e) => setSort(e.target.value as QueueSort)}
                     aria-label="Sort"
@@ -572,25 +551,12 @@ export default function LiveFeedPanel({
             )}
 
             {bulk.size > 0 && (
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  padding: "8px 10px",
-                  borderRadius: 8,
-                  background: "var(--field-background)",
-                  border: "1px solid var(--field-border)",
-                }}
-              >
-                <span className={styles.fieldHint} style={{ margin: 0, fontWeight: 600 }}>
-                  {bulk.size} selected
-                </span>
-                <button type="button" className={styles.submitButton} style={{ padding: "6px 12px" }} onClick={startSequence}>
+              <div className={styles.lfBulkBar}>
+                <span className={styles.lfBulkCount}>{bulk.size} selected</span>
+                <button type="button" className={styles.lfGradeBtn} onClick={startSequence}>
                   Grade in sequence
                 </button>
-                <button type="button" className={styles.downloadButton} onClick={() => void bulkMarkSeen()}>
+                <button type="button" className={styles.clearFileButton} onClick={() => void bulkMarkSeen()}>
                   Mark seen
                 </button>
                 <button type="button" className={styles.clearFileButton} onClick={() => setBulk(new Set())}>
@@ -621,89 +587,87 @@ export default function LiveFeedPanel({
               <p className={styles.emptyState}>No items match your search or filters.</p>
             )}
 
-            {viewRows.map((row) => {
-              const key = rowKeyOf(row);
-              const badge = urgencyBadge(urgencyOf(row.dueAt));
-              const selected = key === selectedKey;
-              const isRowGrading = pending && gradingRowKey === key;
-              return (
-                <div
-                  key={key}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => selectRow(key)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      selectRow(key);
-                    }
-                  }}
-                  style={{
-                    display: "flex",
-                    gap: 10,
-                    alignItems: "flex-start",
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    cursor: "pointer",
-                    border: `1px solid ${selected ? "var(--accent)" : "var(--field-border)"}`,
-                    background: selected ? "var(--field-background)" : "var(--card-background)",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={bulk.has(key)}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={() => toggleBulk(key)}
-                    aria-label={`Select ${row.title}`}
-                    style={{ marginTop: 3 }}
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                      <span style={{ fontWeight: 600 }}>{row.title}</span>
-                      {badge && <Badge {...badge} />}
+            {viewRows.length > 0 && (
+              <div className={styles.lfCardList}>
+                {viewRows.map((row) => {
+                  const key = rowKeyOf(row);
+                  const badge = urgencyBadge(urgencyOf(row.dueAt));
+                  const selected = key === selectedKey;
+                  const isRowGrading = pending && gradingRowKey === key;
+                  return (
+                    <div
+                      key={key}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => selectRow(key)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          selectRow(key);
+                        }
+                      }}
+                      className={`${styles.lfCard}${selected ? ` ${styles.lfCardSelected}` : ""}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className={styles.lfCheckbox}
+                        checked={bulk.has(key)}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleBulk(key)}
+                        aria-label={`Select ${row.title}`}
+                      />
+                      <div className={styles.lfCardBody}>
+                        <div className={styles.lfCardTitleRow}>
+                          <span className={styles.lfCardTitle}>{row.title}</span>
+                          {badge && <span className={`${styles.lfBadge} ${badge.cls}`}>{badge.label}</span>}
+                        </div>
+                        <div className={styles.lfCardMeta}>
+                          <span>{row.courseName}</span>
+                          <Dot />
+                          <span>{row.kind}</span>
+                          <Dot />
+                          <span>{row.dueAt ? formatRelative(row.dueAt) : "no due date"}</span>
+                          <Dot />
+                          <span>{row.needsGradingCount} to grade</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className={styles.lfGradeBtn}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          selectRow(key);
+                          onAutoGrade(row);
+                        }}
+                        disabled={pending}
+                      >
+                        {isRowGrading ? "Grading…" : "Grade"}
+                      </button>
                     </div>
-                    <div className={styles.fieldHint} style={{ marginTop: 2 }}>
-                      {[
-                        row.courseName,
-                        row.kind,
-                        row.dueAt ? formatRelative(row.dueAt) : "no due date",
-                        `${row.needsGradingCount} to grade`,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className={styles.submitButton}
-                    style={{ minWidth: 0, padding: "6px 12px" }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      selectRow(key);
-                      onAutoGrade(row);
-                    }}
-                    disabled={pending}
-                  >
-                    {isRowGrading ? "Grading…" : "Grade"}
-                  </button>
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Detail / grading pane */}
-          <div style={{ flex: "2 1 420px", minWidth: 320 }}>
+          <div>
             {selectedRow ? (
-              renderDetail(selectedRow)
+              <div className={styles.lfDetail}>{renderDetail(selectedRow)}</div>
             ) : selectedKey ? (
-              <p className={styles.emptyState}>
-                This item is no longer in the queue. Pick another from the list.
-              </p>
+              <div className={styles.lfDetail}>
+                <p className={styles.emptyState} style={{ margin: 0 }}>
+                  This item is no longer in the queue. Pick another from the list.
+                </p>
+              </div>
             ) : (
-              <p className={styles.emptyState}>
-                Select an assignment or discussion to review and grade it here. Institutions are managed
-                in Settings (top right).
-              </p>
+              <div className={styles.lfDetailEmpty}>
+                <EmptyQueueIcon />
+                <p style={{ margin: 0, fontWeight: 700, color: "var(--text-primary)" }}>Select an item to grade</p>
+                <p style={{ margin: 0, maxWidth: 320 }}>
+                  Pick an assignment or discussion from the queue to review and grade it here.
+                </p>
+              </div>
             )}
           </div>
         </div>

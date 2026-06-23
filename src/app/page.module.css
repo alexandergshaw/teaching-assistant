@@ -1085,6 +1085,368 @@
   font-size: 0.92rem;
 }
 
+/* ── Live Feed (master-detail triage) ─────────────────────────────────────── */
+
+.lfLayout {
+  display: grid;
+  grid-template-columns: minmax(300px, 410px) minmax(320px, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+@media (max-width: 880px) {
+  .lfLayout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.lfRail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.lfRailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.lfRailHeader h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.lfRailHeaderActions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.lfSummary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.lfSummary b {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.lfSummaryOverdue {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.lfDot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.45;
+}
+
+.lfChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+}
+
+.lfChip {
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 5px 13px;
+  border-radius: 999px;
+  cursor: pointer;
+  border: 1px solid var(--field-border);
+  background: #fff;
+  color: var(--text-secondary);
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.lfChip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.lfChipActive,
+.lfChipActive:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.lfSort {
+  max-width: 190px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
+.lfBulkBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 7%, #fff);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--field-border));
+}
+
+.lfBulkCount {
+  margin-right: auto;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.lfCardList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lfCard {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 13px 15px;
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.lfCard:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--field-border));
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+}
+
+.lfCardSelected,
+.lfCardSelected:hover {
+  border-color: var(--accent);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.16);
+}
+
+.lfCardSelected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 11px;
+  bottom: 11px;
+  width: 3px;
+  border-radius: 0 999px 999px 0;
+  background: var(--accent);
+}
+
+.lfCheckbox {
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.lfCardBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.lfCardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.lfCardTitle {
+  font-weight: 650;
+  font-size: 0.92rem;
+  color: var(--text-primary);
+}
+
+.lfCardMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.lfGradeBtn {
+  flex-shrink: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 650;
+  padding: 7px 15px;
+  border-radius: 999px;
+  border: 0;
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  transition: background 0.15s ease;
+}
+
+.lfGradeBtn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.lfGradeBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.lfBadge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  line-height: 1.6;
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+
+.lfBadgeOverdue {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.lfBadgeSoon {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.lfBadgeKind {
+  background: var(--field-background);
+  color: var(--text-secondary);
+  border: 1px solid var(--field-border);
+  text-transform: capitalize;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+.lfDetail {
+  border: 1px solid var(--card-border);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+  padding: 22px 24px;
+  min-width: 0;
+}
+
+.lfDetailHead {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.lfDetailTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.lfDetailTitle {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+
+.lfDetailMeta {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.lfDetailLinks {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.lfLink {
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--field-border);
+  background: #fff;
+  color: var(--text-secondary);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.lfLink:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.lfFooter {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-top: 16px;
+  margin-top: 4px;
+  border-top: 1px solid var(--card-border);
+}
+
+.lfSeq {
+  margin-left: auto;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.lfDetailEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  min-height: 280px;
+  padding: 32px;
+  color: var(--text-secondary);
+}
+
+.lfDetailEmpty svg {
+  width: 38px;
+  height: 38px;
+  opacity: 0.3;
+}
+
 /* ── Announcement preview ─────────────────────────────────────────────────── */
 
 .announcementPreview {

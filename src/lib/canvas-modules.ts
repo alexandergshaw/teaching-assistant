@@ -37,6 +37,8 @@ export interface CanvasModuleItem {
   pageUrl: string | null;
   /** Underlying content id for Assignment/Quiz/Discussion/File items. */
   contentId: number | null;
+  /** Current due date (ISO 8601) for gradable items, when Canvas reports one. */
+  dueAt: string | null;
   htmlUrl: string | null;
   externalUrl: string | null;
 }
@@ -109,6 +111,7 @@ interface RawModuleItem {
   content_id?: number | null;
   html_url?: string | null;
   external_url?: string | null;
+  content_details?: { due_at?: string | null; points_possible?: number | null } | null;
 }
 
 interface RawPage {
@@ -197,6 +200,7 @@ function mapModuleItem(raw: RawModuleItem, fallbackModuleId: number): CanvasModu
     published: raw.published ?? false,
     pageUrl: raw.page_url ?? null,
     contentId: typeof raw.content_id === "number" ? raw.content_id : null,
+    dueAt: raw.content_details?.due_at ?? null,
     htmlUrl: raw.html_url ?? null,
     externalUrl: raw.external_url ?? null,
   };
@@ -247,7 +251,7 @@ export async function listModules(
       .map(async (m) => {
         const moduleId = m.id!;
         const rawItems = await fetchAll<RawModuleItem>(
-          `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/modules/${moduleId}/items?per_page=100`,
+          `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/modules/${moduleId}/items?per_page=100&include[]=content_details`,
           ctx
         );
         const items = rawItems
@@ -572,4 +576,85 @@ export async function listAddableContent(
       .filter((f) => typeof f.id === "number")
       .map((f) => ({ id: f.id!, title: (f.display_name ?? f.filename ?? "").trim() || `File ${f.id}` })),
   };
+}
+
+// ── Due dates ─────────────────────────────────────────────────────────────────
+
+/** A single due-date change: the item's type, its content id, and the new date. */
+export interface DueDateUpdate {
+  /** Assignment, Quiz, or Discussion (graded). */
+  type: string;
+  contentId: number;
+  /** ISO 8601 due date, or null/empty to clear it. */
+  dueAt: string | null;
+}
+
+/** Set one item's due date, routing by type (Canvas has no single endpoint). */
+async function setOneDueDate(
+  ctx: CourseContext,
+  type: string,
+  contentId: number,
+  dueAt: string | null
+): Promise<void> {
+  const value = dueAt ?? ""; // empty string clears the due date in Canvas
+  if (type === "Assignment") {
+    const params = new URLSearchParams();
+    params.append("assignment[due_at]", value);
+    await writeJson(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/assignments/${contentId}`, "PUT", ctx, params);
+    return;
+  }
+  if (type === "Quiz") {
+    const params = new URLSearchParams();
+    params.append("quiz[due_at]", value);
+    await writeJson(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/quizzes/${contentId}`, "PUT", ctx, params);
+    return;
+  }
+  if (type === "Discussion") {
+    // A discussion's due date lives on its linked assignment; resolve it first.
+    const response = await fetch(
+      `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/discussion_topics/${contentId}`,
+      { headers: { Authorization: `Bearer ${ctx.token}` } }
+    );
+    if (!response.ok) throw canvasError(response.status, ctx.institution);
+    const topic = (await response.json()) as { assignment_id?: number | null };
+    if (!topic.assignment_id) {
+      throw new Error("This discussion is not graded, so it has no due date.");
+    }
+    const params = new URLSearchParams();
+    params.append("assignment[due_at]", value);
+    await writeJson(
+      `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/assignments/${topic.assignment_id}`,
+      "PUT",
+      ctx,
+      params
+    );
+    return;
+  }
+  throw new Error(`Cannot set a due date for a ${type || "non-gradable"} item.`);
+}
+
+/**
+ * Apply a batch of due-date changes, one request per item. Continues past
+ * individual failures and reports them, so one bad item never blocks the rest.
+ */
+export async function setDueDates(
+  courseUrl: string,
+  updates: DueDateUpdate[],
+  code?: string
+): Promise<{ updated: number; failures: Array<{ contentId: number; error: string }> }> {
+  const ctx = resolveCourse(courseUrl, code);
+  let updated = 0;
+  const failures: Array<{ contentId: number; error: string }> = [];
+  for (const update of updates) {
+    try {
+      await setOneDueDate(ctx, update.type, update.contentId, update.dueAt);
+      updated += 1;
+    } catch (err) {
+      failures.push({
+        contentId: update.contentId,
+        error: err instanceof Error ? err.message : "Could not set the due date.",
+      });
+    }
+  }
+  return { updated, failures };
 }

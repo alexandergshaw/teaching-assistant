@@ -48,11 +48,13 @@ import {
   createPage,
   deletePage,
   listAddableContent,
+  setDueDates,
   type CanvasModule,
   type CanvasPageSummary,
   type CanvasPage,
   type CanvasAddableContent,
   type NewModuleItem,
+  type DueDateUpdate,
 } from "@/lib/canvas-modules";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
@@ -1341,6 +1343,20 @@ export async function listCourseContentAction(
     return { courseName, modules, pages };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load course content." };
+  }
+}
+
+/** Apply a batch of due-date changes to module items (the cascade scheduler). */
+export async function setModuleDueDatesAction(
+  courseUrl: string,
+  updates: DueDateUpdate[],
+  acronym?: string
+): Promise<{ updated: number; failures: Array<{ contentId: number; error: string }> } | { error: string }> {
+  try {
+    await requireOwner();
+    return await setDueDates(courseUrl, updates, acronym);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update due dates." };
   }
 }
 

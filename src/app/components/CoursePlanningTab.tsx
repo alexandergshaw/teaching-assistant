@@ -61,26 +61,6 @@ function replaceSectionsInDocx(
 
   const getText = (p: string) => p.replace(/<[^>]+>/g, "").trim();
 
-  const getPPr = (p: string): string => {
-    const r = p.match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
-    return r ? r[0] : "";
-  };
-
-  // Extract run properties from the first run in a paragraph — this carries
-  // font name, font size, bold, italic, color, spacing, etc.
-  const getRPr = (p: string): string => {
-    const runMatch = p.match(/<w:r[ >][\s\S]*?<\/w:r>/);
-    if (!runMatch) return "";
-    const rPrMatch = runMatch[0].match(/<w:rPr>[\s\S]*?<\/w:rPr>/);
-    return rPrMatch ? rPrMatch[0] : "";
-  };
-
-  const hasNumPr = (p: string) => /<w:numPr>/.test(p);
-
-  // Build a body paragraph using the template's exact paragraph and run properties.
-  const makePara = (pPr: string, rPr: string, text: string): string =>
-    `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
-
   // Map each section heading to the paragraph index that contains it
   const headingIndices = sections.map((s) => {
     const target = s.heading.trim().toLowerCase();
@@ -212,6 +192,26 @@ async function downloadDocxSyllabus(
   triggerFileDownload(blob, `${baseName}_syllabus.docx`);
 }
 
+// Local storage keys for the course-planning form fields. Module-level so the
+// hydration/persistence effects can reference them without them counting as
+// reactive dependencies.
+const LS_KEYS = {
+  courseTitle: "syllabus_courseTitle",
+  courseCode: "syllabus_courseCode",
+  classTimes: "syllabus_classTimes",
+  semester: "syllabus_semester",
+  officeHours: "syllabus_officeHours",
+  coursePlanningContext: "syllabus_coursePlanningContext",
+  latePolicy: "syllabus_latePolicy",
+  attendancePolicy: "syllabus_attendancePolicy",
+  planningMode: "coursePlanning_planningMode",
+  courseDescription: "schedule_courseDescription",
+  scheduleTerm: "schedule_scheduleTerm",
+  scheduleStartDate: "schedule_scheduleStartDate",
+  scheduleWeeks: "schedule_scheduleWeeks",
+  scheduleTests: "schedule_scheduleTests",
+};
+
 export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePlanningTabProps) {
   const syllabusFileRef = useRef<HTMLInputElement>(null);
   const [courseTitle, setCourseTitle] = useState("");
@@ -245,23 +245,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [projectPrompt, setProjectPrompt] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
 
-  // Local storage keys
-  const LS_KEYS = {
-    courseTitle: "syllabus_courseTitle",
-    courseCode: "syllabus_courseCode",
-    classTimes: "syllabus_classTimes",
-    semester: "syllabus_semester",
-    officeHours: "syllabus_officeHours",
-    coursePlanningContext: "syllabus_coursePlanningContext",
-    latePolicy: "syllabus_latePolicy",
-    attendancePolicy: "syllabus_attendancePolicy",
-    planningMode: "coursePlanning_planningMode",
-    courseDescription: "schedule_courseDescription",
-    scheduleTerm: "schedule_scheduleTerm",
-    scheduleStartDate: "schedule_scheduleStartDate",
-    scheduleWeeks: "schedule_scheduleWeeks",
-    scheduleTests: "schedule_scheduleTests",
-  };
 
   useEffect(() => {
     // One-time hydration of editable form fields from localStorage. This must

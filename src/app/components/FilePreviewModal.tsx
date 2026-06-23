@@ -54,6 +54,9 @@ export default function FilePreviewModal({
           />
         ) : previewBlobUrl && selectedPreview.mimeType?.startsWith("image/") ? (
           <div className={styles.previewImageWrap}>
+            {/* Plain img: the source is a client-side blob/object URL, which
+                next/image cannot fetch or optimize. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={previewBlobUrl}
               alt={`Preview of ${selectedPreview.name}`}

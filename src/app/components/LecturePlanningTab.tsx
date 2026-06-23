@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { generateLecturePlansAction, generateCourseRubricFromZipAction, generateCourseMaterialsAction, type AssignmentPlan } from "../actions";
+import {
+  generateLecturePlansAction,
+  generateLecturePlanForAssignmentAction,
+  listAssignmentFoldersAction,
+  generateCourseRubricFromZipAction,
+  generateCourseMaterialsAction,
+  type AssignmentPlan,
+} from "../actions";
 import { parseGeneratedRubric } from "../utils/rubric";
 import { saveFile, loadFile, deleteFile } from "../../lib/file-persistence";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
@@ -15,6 +22,20 @@ import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 const ZIP_FILE_KEY = "lecture-planning-zip";
 const INTRO_TEMPLATE_KEY = "lecture-planning-intro-template";
 const INSTRUCTIONS_TEMPLATE_KEY = "lecture-planning-instructions-template";
+
+// Read a File as a base64 string (without the data: URL prefix). Module-scoped
+// so it is stable for use in effect dependency lists.
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(",")[1] ?? "");
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 // Decode a base64 payload (e.g. the Course Engine materials zip) and download it.
 function downloadBase64File(base64: string, fileName: string, mimeType: string) {
@@ -44,6 +65,14 @@ export default function LecturePlanningTab() {
   const [originalPlans, setOriginalPlans] = useState<AssignmentPlan[]>([]);
   const [isDownloading, setIsDownloading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  // Scope of generation: every assignment in the zip, or a single chosen one.
+  const [scope, setScope] = useState<"all" | "single">("all");
+  const [folders, setFolders] = useState<{ slug: string; label: string }[]>([]);
+  const [selectedSlug, setSelectedSlug] = useState("");
+  const [foldersLoading, setFoldersLoading] = useState(false);
+  const [foldersError, setFoldersError] = useState<string | null>(null);
+  // Index of the card currently being regenerated in place (null when none).
+  const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
   const [rubricStatus, setRubricStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [rubricError, setRubricError] = useState<string | null>(null);
   const [generatedRubric, setGeneratedRubric] = useState<string | null>(null);
@@ -79,6 +108,39 @@ export default function LecturePlanningTab() {
     };
   }, []);
 
+  // When generating a single module, read the assignment folders out of the zip
+  // so the picker can offer them. Re-runs if the zip changes while in single mode.
+  // (The picker only renders in single mode, so stale state outside it is unused.)
+  useEffect(() => {
+    if (scope !== "single" || !zipFile) return;
+    let cancelled = false;
+    (async () => {
+      setFoldersLoading(true);
+      setFoldersError(null);
+      try {
+        const base64 = await readFileAsBase64(zipFile);
+        const result = await listAssignmentFoldersAction(base64);
+        if (cancelled) return;
+        if ("error" in result) {
+          setFoldersError(result.error);
+          setFolders([]);
+          return;
+        }
+        setFolders(result.folders);
+        setSelectedSlug((prev) =>
+          result.folders.some((f) => f.slug === prev) ? prev : result.folders[0]?.slug ?? ""
+        );
+      } catch {
+        if (!cancelled) setFoldersError("Could not read the assignment list from the zip.");
+      } finally {
+        if (!cancelled) setFoldersLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scope, zipFile]);
+
   const handleFileChange = (
     file: File | null,
     key: string,
@@ -102,16 +164,27 @@ export default function LecturePlanningTab() {
     deleteFile(key).catch(() => {});
   };
 
-  const readFileAsBase64 = (file: File) =>
-    new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        resolve(result.split(",")[1] ?? "");
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+  // Read the zip + optional templates and generate the module for one assignment.
+  // Shared by single-scope generation and per-card regeneration.
+  const callSingleAction = async (
+    slug: string,
+    minutes: number
+  ): Promise<AssignmentPlan | { error: string }> => {
+    if (!zipFile) return { error: "Please select a zip file of your course repository." };
+    const base64 = await readFileAsBase64(zipFile);
+    const introTemplateBase64 = introTemplateFile ? await readFileAsBase64(introTemplateFile) : undefined;
+    const instructionsTemplateBase64 = instructionsTemplateFile
+      ? await readFileAsBase64(instructionsTemplateFile)
+      : undefined;
+    return generateLecturePlanForAssignmentAction(
+      base64,
+      slug,
+      minutes,
+      introTemplateBase64,
+      instructionsTemplateBase64,
+      getStoredProvider()
+    );
+  };
 
   const handleGenerate = async () => {
     const file = zipFile;
@@ -123,6 +196,34 @@ export default function LecturePlanningTab() {
     const minutes = parseInt(lectureDuration, 10);
     if (isNaN(minutes) || minutes < 1) {
       setError("Please enter a valid lecture duration in minutes.");
+      return;
+    }
+
+    // Single-module path: generate just the chosen assignment and show it as one
+    // card. Runs the Gemini preview flow regardless of provider (the Course
+    // Engine "other" path only produces a whole-course package).
+    if (scope === "single") {
+      if (!selectedSlug) {
+        setError("Choose an assignment to generate a module for.");
+        return;
+      }
+      setStatus("loading");
+      setError(null);
+      setPlans([]);
+      try {
+        const result = await callSingleAction(selectedSlug, minutes);
+        if ("error" in result) {
+          setError(result.error);
+          setStatus("error");
+          return;
+        }
+        setPlans([result]);
+        setOriginalPlans(JSON.parse(JSON.stringify([result])) as AssignmentPlan[]);
+        setStatus("done");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Generation failed. Please try again.");
+        setStatus("error");
+      }
       return;
     }
 
@@ -181,6 +282,35 @@ export default function LecturePlanningTab() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed. Please try again.");
       setStatus("error");
+    }
+  };
+
+  // Regenerate a single card in place (e.g. one whose slides failed), reusing the
+  // same zip and templates. Replaces both the plan and its reset-snapshot.
+  const regenerateModule = async (index: number) => {
+    const plan = plans[index];
+    if (!plan) return;
+    const minutes = parseInt(lectureDuration, 10);
+    if (isNaN(minutes) || minutes < 1) {
+      setError("Please enter a valid lecture duration in minutes.");
+      return;
+    }
+    setRegeneratingIndex(index);
+    setError(null);
+    try {
+      const result = await callSingleAction(plan.assignmentName, minutes);
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+      setPlans((prev) => prev.map((p, i) => (i === index ? result : p)));
+      setOriginalPlans((prev) =>
+        prev.map((p, i) => (i === index ? (JSON.parse(JSON.stringify(result)) as AssignmentPlan) : p))
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Regeneration failed. Please try again.");
+    } finally {
+      setRegeneratingIndex(null);
     }
   };
 
@@ -487,15 +617,73 @@ export default function LecturePlanningTab() {
         </div>
       </div>
 
+      <div className={styles.field}>
+        <label>Scope</label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {(["all", "single"] as const).map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => setScope(opt)}
+              style={{
+                padding: "8px 16px",
+                borderRadius: 8,
+                border: scope === opt ? "1px solid var(--accent)" : "1px solid var(--field-border)",
+                background:
+                  scope === opt
+                    ? "color-mix(in srgb, var(--accent) 14%, transparent 86%)"
+                    : "var(--field-background)",
+                color: scope === opt ? "var(--accent)" : "var(--text-secondary)",
+                fontWeight: 600,
+                fontSize: "0.9rem",
+                cursor: "pointer",
+              }}
+            >
+              {opt === "all" ? "All assignments" : "Single assignment"}
+            </button>
+          ))}
+        </div>
+        {scope === "single" && (
+          <div style={{ marginTop: 10 }}>
+            {!zipFile ? (
+              <p>Select a course zip above to choose an assignment.</p>
+            ) : foldersLoading ? (
+              <p>Reading assignments…</p>
+            ) : foldersError ? (
+              <p className={styles.error}>{foldersError}</p>
+            ) : folders.length > 0 ? (
+              <select
+                aria-label="Assignment to generate"
+                value={selectedSlug}
+                onChange={(e) => setSelectedSlug(e.target.value)}
+                style={{ maxWidth: 360 }}
+              >
+                {folders.map((f) => (
+                  <option key={f.slug} value={f.slug}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p>No assignments found in the zip.</p>
+            )}
+          </div>
+        )}
+      </div>
+
       {error && <p className={styles.error}>{error}</p>}
 
       <button
         type="button"
         className={styles.submitButton}
         onClick={handleGenerate}
-        disabled={status === "loading"}
+        disabled={status === "loading" || (scope === "single" && !selectedSlug)}
       >
-        {status === "loading" ? "Generating…" : "Generate Lecture Plans"}
+        {status === "loading"
+          ? "Generating…"
+          : scope === "single"
+            ? "Generate Module"
+            : "Generate Lecture Plans"}
       </button>
 
       {status === "done" && plans.length > 0 && (
@@ -533,9 +721,9 @@ export default function LecturePlanningTab() {
               >
                 <strong>Slides could not be generated for {failed.length} assignment{failed.length !== 1 ? "s" : ""}:</strong>{" "}
                 {failed.map((p) => p.label).join(", ")}. The model failed even after retries, so{" "}
-                {failed.length !== 1 ? "their decks are empty placeholders" : "its deck is an empty placeholder"}. Re-run generation to try
-                again (transient model errors usually clear on a retry), or open {failed.length !== 1 ? "an assignment" : "it"} and use
-                Revise slides to build the deck.
+                {failed.length !== 1 ? "their decks are empty placeholders" : "its deck is an empty placeholder"}. Use{" "}
+                <strong>Regenerate</strong> on {failed.length !== 1 ? "each" : "the"} affected card to try again — transient model errors
+                usually clear on a retry.
               </div>
             );
           })()}
@@ -609,6 +797,31 @@ export default function LecturePlanningTab() {
                       </span>
                     ))}
                   </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      regenerateModule(i);
+                    }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    disabled={regeneratingIndex !== null}
+                    title="Regenerate this module from the uploaded zip"
+                    style={{
+                      alignSelf: "flex-start",
+                      marginTop: 4,
+                      padding: "6px 14px",
+                      borderRadius: 8,
+                      border: "1px solid var(--field-border)",
+                      background: "var(--background)",
+                      color: "var(--text-primary)",
+                      fontWeight: 600,
+                      fontSize: "0.8rem",
+                      cursor: regeneratingIndex !== null ? "default" : "pointer",
+                      opacity: regeneratingIndex !== null && regeneratingIndex !== i ? 0.5 : 1,
+                    }}
+                  >
+                    {regeneratingIndex === i ? "Regenerating…" : "Regenerate"}
+                  </button>
                 </li>
               );
             })}

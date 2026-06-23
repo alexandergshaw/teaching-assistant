@@ -31,7 +31,13 @@ export async function getCredentials(userId: string): Promise<StoredGoogleTokens
     .select("access_token, refresh_token, expiry, scope")
     .eq("user_id", userId)
     .maybeSingle();
-  if (error || !data) return null;
+  // A read error (e.g. the table does not exist because the migration has not
+  // been run) is logged rather than swallowed, then treated as "not connected".
+  if (error) {
+    console.error("[google-credentials] Could not read credentials:", error.message);
+    return null;
+  }
+  if (!data) return null;
   const row = data as CredentialsTable["Row"];
   return {
     accessToken: row.access_token ? decryptSecret(row.access_token) : "",
@@ -56,7 +62,12 @@ export async function saveCredentials(
     updated_at: new Date().toISOString(),
     ...(tokens.refreshToken ? { refresh_token: encryptSecret(tokens.refreshToken) } : {}),
   };
-  await table().upsert(row, { onConflict: "user_id" });
+  // Surface a failed write (e.g. missing table / RLS) instead of letting the
+  // connect flow report success when nothing was actually stored.
+  const { error } = await table().upsert(row, { onConflict: "user_id" });
+  if (error) {
+    throw new Error(`Could not save Google credentials: ${error.message}`);
+  }
 }
 
 /** Update just the access token + expiry after a refresh (keeps refresh token). */

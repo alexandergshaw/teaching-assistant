@@ -633,6 +633,286 @@ async function setOneDueDate(
   throw new Error(`Cannot set a due date for a ${type || "non-gradable"} item.`);
 }
 
+// ── File upload ───────────────────────────────────────────────────────────────
+
+/** A pre-signed Canvas upload ticket; the browser POSTs the file to uploadUrl. */
+export interface FileUploadTicket {
+  uploadUrl: string;
+  uploadParams: Record<string, string>;
+}
+
+/**
+ * Step 1 of the Canvas file upload: tell Canvas about the incoming file and get
+ * back a pre-signed upload URL + params. The browser then POSTs the file bytes
+ * straight to that URL (step 2), so large files never pass through our server
+ * and the API token is never exposed to the client.
+ */
+export async function requestFileUpload(
+  courseUrl: string,
+  file: { name: string; size: number; contentType?: string; folderPath?: string },
+  code?: string
+): Promise<FileUploadTicket> {
+  const ctx = resolveCourse(courseUrl, code);
+  const params = new URLSearchParams();
+  params.append("name", file.name);
+  params.append("size", String(file.size));
+  if (file.contentType) params.append("content_type", file.contentType);
+  params.append("parent_folder_path", file.folderPath?.trim() || "uploads");
+  // Keep both copies rather than clobbering an existing file with the same name.
+  params.append("on_duplicate", "rename");
+
+  const response = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/files`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${ctx.token}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: params.toString(),
+  });
+  if (!response.ok) {
+    throw canvasError(response.status, ctx.institution);
+  }
+  const data = (await response.json()) as {
+    upload_url?: string;
+    upload_params?: Record<string, string>;
+  };
+  if (!data.upload_url || !data.upload_params) {
+    throw new Error("Canvas did not return an upload URL.");
+  }
+  return { uploadUrl: data.upload_url, uploadParams: data.upload_params };
+}
+
+// ── Bulk edit ─────────────────────────────────────────────────────────────────
+
+/** Kinds the bulk editor can list and update. */
+export type BulkKind = "Assignment" | "Quiz" | "Discussion" | "Page";
+
+/** A normalized item for the bulk editor (id is a slug for pages, else numeric). */
+export interface BulkItem {
+  id: string;
+  title: string;
+  published: boolean;
+  dueAt: string | null;
+  pointsPossible: number | null;
+}
+
+interface RawBulkAssignment {
+  id?: number;
+  name?: string;
+  published?: boolean;
+  due_at?: string | null;
+  points_possible?: number | null;
+}
+
+interface RawBulkQuiz {
+  id?: number;
+  title?: string;
+  published?: boolean;
+  due_at?: string | null;
+  points_possible?: number | null;
+}
+
+interface RawBulkDiscussion {
+  id?: number;
+  title?: string;
+  published?: boolean;
+  is_announcement?: boolean;
+  assignment?: { due_at?: string | null; points_possible?: number | null } | null;
+}
+
+/** List items of one kind with the fields the bulk editor shows and edits. */
+export async function listBulkItems(
+  courseUrl: string,
+  kind: BulkKind,
+  code?: string
+): Promise<BulkItem[]> {
+  const ctx = resolveCourse(courseUrl, code);
+  const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
+
+  if (kind === "Page") {
+    const raw = await fetchAll<RawPage>(`${base}/pages?per_page=100&sort=title`, ctx);
+    return raw
+      .filter((p) => typeof p.url === "string" && p.url.length > 0)
+      .map((p) => ({
+        id: p.url!,
+        title: (p.title ?? "").trim() || "(untitled)",
+        published: p.published ?? false,
+        dueAt: null,
+        pointsPossible: null,
+      }));
+  }
+  if (kind === "Assignment") {
+    const raw = await fetchAll<RawBulkAssignment>(`${base}/assignments?per_page=100`, ctx);
+    return raw
+      .filter((a) => typeof a.id === "number")
+      .map((a) => ({
+        id: String(a.id),
+        title: (a.name ?? "").trim() || `Assignment ${a.id}`,
+        published: a.published ?? false,
+        dueAt: a.due_at ?? null,
+        pointsPossible: typeof a.points_possible === "number" ? a.points_possible : null,
+      }));
+  }
+  if (kind === "Quiz") {
+    const raw = await fetchAll<RawBulkQuiz>(`${base}/quizzes?per_page=100`, ctx);
+    return raw
+      .filter((q) => typeof q.id === "number")
+      .map((q) => ({
+        id: String(q.id),
+        title: (q.title ?? "").trim() || `Quiz ${q.id}`,
+        published: q.published ?? false,
+        dueAt: q.due_at ?? null,
+        pointsPossible: typeof q.points_possible === "number" ? q.points_possible : null,
+      }));
+  }
+  // Discussion
+  const raw = await fetchAll<RawBulkDiscussion>(`${base}/discussion_topics?per_page=100`, ctx);
+  return raw
+    .filter((d) => typeof d.id === "number" && !d.is_announcement)
+    .map((d) => ({
+      id: String(d.id),
+      title: (d.title ?? "").trim() || `Discussion ${d.id}`,
+      published: d.published ?? false,
+      dueAt: d.assignment?.due_at ?? null,
+      pointsPossible:
+        typeof d.assignment?.points_possible === "number" ? d.assignment.points_possible : null,
+    }));
+}
+
+type BulkResult = { updated: number; failures: Array<{ id: string; error: string }> };
+
+/** Build the update URL + form params for one item of a given kind. */
+function bulkUpdateRequest(
+  base: string,
+  kind: BulkKind,
+  id: string,
+  fields: { published?: boolean; pointsPossible?: number }
+): { url: string; params: URLSearchParams } {
+  const params = new URLSearchParams();
+  if (kind === "Assignment") {
+    if (fields.published !== undefined) params.append("assignment[published]", String(fields.published));
+    if (fields.pointsPossible !== undefined) {
+      params.append("assignment[points_possible]", String(fields.pointsPossible));
+    }
+    return { url: `${base}/assignments/${id}`, params };
+  }
+  if (kind === "Quiz") {
+    if (fields.published !== undefined) params.append("quiz[published]", String(fields.published));
+    if (fields.pointsPossible !== undefined) {
+      params.append("quiz[points_possible]", String(fields.pointsPossible));
+    }
+    return { url: `${base}/quizzes/${id}`, params };
+  }
+  if (kind === "Discussion") {
+    if (fields.published !== undefined) params.append("published", String(fields.published));
+    return { url: `${base}/discussion_topics/${id}`, params };
+  }
+  // Page (published only)
+  if (fields.published !== undefined) params.append("wiki_page[published]", String(fields.published));
+  return { url: `${base}/pages/${encodeURIComponent(id)}`, params };
+}
+
+/** Apply published and/or points-possible changes to many items of one kind. */
+export async function bulkUpdate(
+  courseUrl: string,
+  kind: BulkKind,
+  ids: string[],
+  fields: { published?: boolean; pointsPossible?: number },
+  code?: string
+): Promise<BulkResult> {
+  const ctx = resolveCourse(courseUrl, code);
+  const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
+  let updated = 0;
+  const failures: Array<{ id: string; error: string }> = [];
+  for (const id of ids) {
+    try {
+      const { url, params } = bulkUpdateRequest(base, kind, id, fields);
+      if ([...params.keys()].length === 0) continue;
+      await writeJson(url, "PUT", ctx, params);
+      updated += 1;
+    } catch (err) {
+      failures.push({ id, error: err instanceof Error ? err.message : "Update failed." });
+    }
+  }
+  return { updated, failures };
+}
+
+/** Delete many items of one kind. */
+export async function bulkDelete(
+  courseUrl: string,
+  kind: BulkKind,
+  ids: string[],
+  code?: string
+): Promise<BulkResult> {
+  const ctx = resolveCourse(courseUrl, code);
+  const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
+  const path =
+    kind === "Assignment"
+      ? "assignments"
+      : kind === "Quiz"
+        ? "quizzes"
+        : kind === "Discussion"
+          ? "discussion_topics"
+          : "pages";
+  let updated = 0;
+  const failures: Array<{ id: string; error: string }> = [];
+  for (const id of ids) {
+    try {
+      const ref = kind === "Page" ? encodeURIComponent(id) : id;
+      await writeJson(`${base}/${path}/${ref}`, "DELETE", ctx);
+      updated += 1;
+    } catch (err) {
+      failures.push({ id, error: err instanceof Error ? err.message : "Delete failed." });
+    }
+  }
+  return { updated, failures };
+}
+
+/** A grading rubric defined in the course (for bulk association). */
+export interface CanvasRubric {
+  id: number;
+  title: string;
+}
+
+/** List the course's grading rubrics. */
+export async function listRubrics(courseUrl: string, code?: string): Promise<CanvasRubric[]> {
+  const ctx = resolveCourse(courseUrl, code);
+  const raw = await safeFetchAll<{ id?: number; title?: string }>(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/rubrics?per_page=100`,
+    ctx
+  );
+  return raw
+    .filter((r) => typeof r.id === "number")
+    .map((r) => ({ id: r.id!, title: (r.title ?? "").trim() || `Rubric ${r.id}` }));
+}
+
+/** Attach a rubric to many assignments (one rubric_association per assignment). */
+export async function bulkAssociateRubric(
+  courseUrl: string,
+  rubricId: number,
+  assignmentIds: string[],
+  code?: string
+): Promise<BulkResult> {
+  const ctx = resolveCourse(courseUrl, code);
+  let updated = 0;
+  const failures: Array<{ id: string; error: string }> = [];
+  for (const id of assignmentIds) {
+    try {
+      const params = new URLSearchParams();
+      params.append("rubric_association[rubric_id]", String(rubricId));
+      params.append("rubric_association[association_type]", "Assignment");
+      params.append("rubric_association[association_id]", id);
+      params.append("rubric_association[purpose]", "grading");
+      params.append("rubric_association[use_for_grading]", "true");
+      await writeJson(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/rubric_associations`, "POST", ctx, params);
+      updated += 1;
+    } catch (err) {
+      failures.push({ id, error: err instanceof Error ? err.message : "Could not associate the rubric." });
+    }
+  }
+  return { updated, failures };
+}
+
 /**
  * Apply a batch of due-date changes, one request per item. Continues past
  * individual failures and reports them, so one bad item never blocks the rest.

@@ -49,12 +49,22 @@ import {
   deletePage,
   listAddableContent,
   setDueDates,
+  requestFileUpload,
+  listBulkItems,
+  bulkUpdate,
+  bulkDelete,
+  listRubrics,
+  bulkAssociateRubric,
   type CanvasModule,
   type CanvasPageSummary,
   type CanvasPage,
   type CanvasAddableContent,
   type NewModuleItem,
   type DueDateUpdate,
+  type FileUploadTicket,
+  type BulkItem,
+  type BulkKind,
+  type CanvasRubric,
 } from "@/lib/canvas-modules";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
@@ -1343,6 +1353,113 @@ export async function listCourseContentAction(
     return { courseName, modules, pages };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load course content." };
+  }
+}
+
+// ── File upload + bulk edit ──────────────────────────────────────────────────
+
+type BulkActionResult = { updated: number; failures: Array<{ id: string; error: string }> };
+
+/** Step 1 of a Canvas file upload: get a pre-signed upload ticket for the browser. */
+export async function requestFileUploadAction(
+  courseUrl: string,
+  file: { name: string; size: number; contentType?: string; folderPath?: string },
+  acronym?: string
+): Promise<{ ticket: FileUploadTicket } | { error: string }> {
+  try {
+    await requireOwner();
+    return { ticket: await requestFileUpload(courseUrl, file, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not start the upload." };
+  }
+}
+
+/** Attach an already-uploaded Canvas file to a module as a File item. */
+export async function addFileToModuleAction(
+  courseUrl: string,
+  moduleId: number,
+  fileId: number,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await createModuleItem(courseUrl, moduleId, { type: "File", contentId: fileId }, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not add the file to the module." };
+  }
+}
+
+/** List items of one kind (with published/due/points) for the bulk editor. */
+export async function listBulkItemsAction(
+  courseUrl: string,
+  kind: BulkKind,
+  acronym?: string
+): Promise<{ items: BulkItem[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return { items: await listBulkItems(courseUrl, kind, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load items." };
+  }
+}
+
+/** Bulk-set published and/or points possible on selected items of one kind. */
+export async function bulkUpdateAction(
+  courseUrl: string,
+  kind: BulkKind,
+  ids: string[],
+  fields: { published?: boolean; pointsPossible?: number },
+  acronym?: string
+): Promise<BulkActionResult | { error: string }> {
+  try {
+    await requireOwner();
+    return await bulkUpdate(courseUrl, kind, ids, fields, acronym);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the items." };
+  }
+}
+
+/** Bulk-delete selected items of one kind. */
+export async function bulkDeleteAction(
+  courseUrl: string,
+  kind: BulkKind,
+  ids: string[],
+  acronym?: string
+): Promise<BulkActionResult | { error: string }> {
+  try {
+    await requireOwner();
+    return await bulkDelete(courseUrl, kind, ids, acronym);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not delete the items." };
+  }
+}
+
+/** List the course's grading rubrics (for bulk association). */
+export async function listRubricsAction(
+  courseUrl: string,
+  acronym?: string
+): Promise<{ rubrics: CanvasRubric[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return { rubrics: await listRubrics(courseUrl, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load rubrics." };
+  }
+}
+
+/** Attach a rubric to many assignments. */
+export async function bulkAssociateRubricAction(
+  courseUrl: string,
+  rubricId: number,
+  assignmentIds: string[],
+  acronym?: string
+): Promise<BulkActionResult | { error: string }> {
+  try {
+    await requireOwner();
+    return await bulkAssociateRubric(courseUrl, rubricId, assignmentIds, acronym);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not associate the rubric." };
   }
 }
 

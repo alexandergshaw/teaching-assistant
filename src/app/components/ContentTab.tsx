@@ -15,6 +15,13 @@ import {
   deleteModuleItemAction,
   listAddableContentAction,
   setModuleDueDatesAction,
+  requestFileUploadAction,
+  addFileToModuleAction,
+  listBulkItemsAction,
+  bulkUpdateAction,
+  bulkDeleteAction,
+  listRubricsAction,
+  bulkAssociateRubricAction,
   revisePageWithAiAction,
 } from "../actions";
 import CoursePicker from "./CoursePicker";
@@ -26,6 +33,10 @@ import type {
   CanvasAddableContent,
   NewModuleItem,
   DueDateUpdate,
+  FileUploadTicket,
+  BulkItem,
+  BulkKind,
+  CanvasRubric,
 } from "@/lib/canvas-modules";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
@@ -62,6 +73,65 @@ function previewDoc(html: string): string {
     td, th { border: 1px solid #d2d6dc; padding: 4px 8px; }
     a { color: #2563eb; }
   </style></head><body>${html}</body></html>`;
+}
+
+// ── File upload helpers (browser side of the Canvas upload) ───────────────────
+
+/** Step 2 of the Canvas upload: POST the file bytes to the pre-signed URL. */
+async function uploadFileToCanvas(ticket: FileUploadTicket, file: File): Promise<number> {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(ticket.uploadParams)) form.append(key, value);
+  form.append("file", file);
+  const response = await fetch(ticket.uploadUrl, { method: "POST", body: form });
+  if (!response.ok) throw new Error(`Upload failed (HTTP ${response.status}).`);
+  const data = (await response.json()) as { id?: number };
+  if (typeof data.id !== "number") throw new Error("Upload did not return a file id.");
+  return data.id;
+}
+
+/** Full pipeline for one file: pre-sign (server), upload (browser), attach (server). */
+async function uploadFileToModule(
+  courseUrl: string,
+  acronym: string | undefined,
+  moduleId: number,
+  file: File
+): Promise<void> {
+  const ticket = await requestFileUploadAction(
+    courseUrl,
+    { name: file.name, size: file.size, contentType: file.type || undefined },
+    acronym
+  );
+  if ("error" in ticket) throw new Error(ticket.error);
+  const fileId = await uploadFileToCanvas(ticket.ticket, file);
+  const attached = await addFileToModuleAction(courseUrl, moduleId, fileId, acronym);
+  if ("error" in attached) throw new Error(attached.error);
+}
+
+// Tokenize a name for matching: drop the extension, lowercase, split on non-alphanumerics.
+function matchTokens(s: string): string[] {
+  return s
+    .toLowerCase()
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/** Best-matching module for a filename by shared tokens (numbers weighted), or "". */
+function bestModuleIdFor(fileName: string, modules: CanvasModule[]): number | "" {
+  const fileTokens = matchTokens(fileName);
+  const fileNums = fileTokens.filter((t) => /^\d+$/.test(t));
+  let best: { id: number; score: number } | null = null;
+  for (const m of modules) {
+    const modTokens = matchTokens(m.name);
+    const modNums = modTokens.filter((t) => /^\d+$/.test(t));
+    let score = 0;
+    for (const t of fileTokens) if (t.length > 2 && modTokens.includes(t)) score += 1;
+    for (const n of fileNums) if (modNums.includes(n)) score += 2;
+    if (score > 0 && (!best || score > best.score)) best = { id: m.id, score };
+  }
+  return best ? best.id : "";
 }
 
 // A subtle pill that shows (and toggles) the published state of a module or item.
@@ -589,6 +659,192 @@ function SchedulerModal({
   );
 }
 
+// ── Bulk upload (match files to modules) ──────────────────────────────────────
+
+function BulkUploadModal({
+  courseUrl,
+  acronym,
+  modules,
+  onClose,
+  onDone,
+}: {
+  courseUrl: string;
+  acronym?: string;
+  modules: CanvasModule[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [assign, setAssign] = useState<Array<number | "">>([]);
+  const [status, setStatus] = useState<Array<"pending" | "uploading" | "done" | "error">>([]);
+  const [uploading, setUploading] = useState(false);
+  const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+
+  const onSelect = (list: FileList | File[]) => {
+    const arr = Array.from(list);
+    if (arr.length === 0) return;
+    setFiles(arr);
+    setAssign(arr.map((f) => bestModuleIdFor(f.name, modules)));
+    setStatus(arr.map(() => "pending"));
+    setNote(null);
+  };
+
+  const matchedCount = assign.filter((a) => a !== "").length;
+
+  const handleApply = async () => {
+    const targets = files.map((f, i) => ({ f, i })).filter((t) => assign[t.i] !== "");
+    if (targets.length === 0) {
+      setNote({ kind: "error", text: "Assign at least one file to a module." });
+      return;
+    }
+    setUploading(true);
+    setNote(null);
+    let done = 0;
+    for (const t of targets) {
+      setStatus((s) => s.map((v, idx) => (idx === t.i ? "uploading" : v)));
+      try {
+        await uploadFileToModule(courseUrl, acronym, assign[t.i] as number, t.f);
+        setStatus((s) => s.map((v, idx) => (idx === t.i ? "done" : v)));
+        done += 1;
+      } catch {
+        setStatus((s) => s.map((v, idx) => (idx === t.i ? "error" : v)));
+      }
+    }
+    setUploading(false);
+    setNote({
+      kind: done === targets.length ? "success" : "error",
+      text: `Uploaded ${done} of ${targets.length} file${targets.length === 1 ? "" : "s"}.`,
+    });
+    onDone();
+  };
+
+  return (
+    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
+      <div
+        className={styles.previewModal}
+        style={{ width: "min(760px, 95vw)", maxWidth: "none" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={styles.previewHeader}>
+          <h3>Bulk upload &amp; match to modules</h3>
+          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <p className={styles.fieldHint} style={{ marginTop: 0 }}>
+          Pick files; each is matched to the closest module by name. Adjust any match (or skip), then
+          upload. Files go to Canvas and are added to their module.
+        </p>
+
+        <div
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            onSelect(e.dataTransfer.files);
+          }}
+          style={{ border: "1px dashed var(--field-border)", borderRadius: 10, padding: 14, textAlign: "center" }}
+        >
+          <label className={styles.downloadButton} style={{ cursor: "pointer" }}>
+            Choose files
+            <input
+              type="file"
+              multiple
+              style={{ display: "none" }}
+              onChange={(e) => {
+                if (e.target.files) onSelect(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <span className={styles.fieldHint} style={{ marginLeft: 8 }}>
+            or drop them here
+          </span>
+        </div>
+
+        {files.length > 0 && (
+          <div className={styles.field}>
+            <label>
+              {files.length} file{files.length === 1 ? "" : "s"} · {matchedCount} matched
+            </label>
+            <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, overflow: "hidden" }}>
+              {files.map((f, i) => (
+                <div
+                  key={`${f.name}-${i}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "8px 12px",
+                    borderTop: i === 0 ? "none" : "1px solid var(--field-border)",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      flex: "1 1 200px",
+                      minWidth: 0,
+                      fontWeight: 600,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {f.name}
+                  </span>
+                  <select
+                    className={styles.textInput}
+                    style={{ flex: "0 0 220px", maxWidth: 220 }}
+                    value={assign[i]}
+                    disabled={uploading}
+                    onChange={(e) =>
+                      setAssign((a) =>
+                        a.map((v, idx) => (idx === i ? (e.target.value === "" ? "" : Number(e.target.value)) : v))
+                      )
+                    }
+                  >
+                    <option value="">Skip</option>
+                    {modules.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span
+                    className={styles.fieldHint}
+                    style={{ margin: 0, minWidth: 70, color: status[i] === "error" ? "var(--error, #b91c1c)" : undefined }}
+                  >
+                    {status[i] === "uploading"
+                      ? "uploading…"
+                      : status[i] === "done"
+                        ? "added"
+                        : status[i] === "error"
+                          ? "failed"
+                          : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className={styles.submitButton}
+            onClick={handleApply}
+            disabled={uploading || matchedCount === 0}
+          >
+            {uploading ? "Uploading…" : `Upload ${matchedCount} file${matchedCount === 1 ? "" : "s"}`}
+          </button>
+        </div>
+
+        {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
+      </div>
+    </div>
+  );
+}
+
 // ── Module tree ────────────────────────────────────────────────────────────---
 
 function ModulesView({
@@ -628,6 +884,10 @@ function ModulesView({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
+  const [uploads, setUploads] = useState<
+    Record<number, Array<{ name: string; status: "uploading" | "done" | "error"; error?: string }>>
+  >({});
   // Per-module "add item" controls: chosen type, the selected content (page slug
   // or content id), and the external-url / header-text inputs.
   const [addType, setAddType] = useState<Record<number, string>>({});
@@ -822,6 +1082,31 @@ function ModulesView({
     reload();
   };
 
+  // Upload dropped/picked files straight into a module, tracking each file's
+  // status, then refresh so the new File items appear.
+  const handleModuleFiles = async (m: CanvasModule, list: FileList | File[]) => {
+    const arr = Array.from(list);
+    if (arr.length === 0) return;
+    setUploads((u) => ({ ...u, [m.id]: arr.map((f) => ({ name: f.name, status: "uploading" as const })) }));
+    for (let i = 0; i < arr.length; i++) {
+      try {
+        await uploadFileToModule(courseUrl, acronym, m.id, arr[i]);
+        setUploads((u) => ({
+          ...u,
+          [m.id]: (u[m.id] ?? []).map((row, idx) => (idx === i ? { ...row, status: "done" } : row)),
+        }));
+      } catch (err) {
+        setUploads((u) => ({
+          ...u,
+          [m.id]: (u[m.id] ?? []).map((row, idx) =>
+            idx === i ? { ...row, status: "error", error: err instanceof Error ? err.message : "Failed" } : row
+          ),
+        }));
+      }
+    }
+    reload();
+  };
+
   const arrowBtn = (label: string, onClick: () => void, disabled: boolean) => (
     <button
       type="button"
@@ -838,7 +1123,15 @@ function ModulesView({
 
   return (
     <div className={styles.form}>
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button
+          type="button"
+          className={styles.downloadButton}
+          onClick={() => setBulkUploadOpen(true)}
+          disabled={busy || modules.length === 0}
+        >
+          Bulk upload
+        </button>
         <button
           type="button"
           className={styles.downloadButton}
@@ -1096,6 +1389,58 @@ function ModulesView({
                     Add
                   </button>
                 </div>
+
+                <div
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    void handleModuleFiles(m, e.dataTransfer.files);
+                  }}
+                  style={{
+                    marginTop: 8,
+                    border: "1px dashed var(--field-border)",
+                    borderRadius: 10,
+                    padding: "10px 12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span className={styles.fieldHint} style={{ margin: 0 }}>
+                    Drop files to add to this module, or
+                  </span>
+                  <label className={styles.downloadButton} style={{ cursor: "pointer" }}>
+                    choose files
+                    <input
+                      type="file"
+                      multiple
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        if (e.target.files) void handleModuleFiles(m, e.target.files);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+                {(uploads[m.id] ?? []).length > 0 && (
+                  <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 2 }}>
+                    {(uploads[m.id] ?? []).map((row, idx) => (
+                      <span
+                        key={`${m.id}-up-${idx}`}
+                        className={styles.fieldHint}
+                        style={{ margin: 0, color: row.status === "error" ? "var(--error, #b91c1c)" : undefined }}
+                      >
+                        {row.name}:{" "}
+                        {row.status === "uploading"
+                          ? "uploading…"
+                          : row.status === "done"
+                            ? "added"
+                            : `failed (${row.error})`}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1112,6 +1457,16 @@ function ModulesView({
             setScheduleOpen(false);
             setNote({ kind: "success", text: message });
           }}
+        />
+      )}
+
+      {bulkUploadOpen && (
+        <BulkUploadModal
+          courseUrl={courseUrl}
+          acronym={acronym}
+          modules={modules}
+          onClose={() => setBulkUploadOpen(false)}
+          onDone={reload}
         />
       )}
     </div>
@@ -1161,9 +1516,392 @@ function PagesView({
   );
 }
 
+// ── Bulk edit ─────────────────────────────────────────────────────────────────
+
+function BulkEditView({ courseUrl, acronym }: { courseUrl: string; acronym?: string }) {
+  const [kind, setKind] = useState<BulkKind>("Assignment");
+  const [items, setItems] = useState<BulkItem[]>([]);
+  const [loadState, setLoadState] = useState<{ status: "idle" | "loading" | "error"; message: string }>({
+    status: "loading",
+    message: "",
+  });
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+  const [rubrics, setRubrics] = useState<CanvasRubric[]>([]);
+  const [dueDate, setDueDate] = useState("");
+  const [shiftDays, setShiftDays] = useState(7);
+  const [points, setPoints] = useState("");
+  const [rubricId, setRubricId] = useState<number | "">("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Reset to a loading state during render when the kind changes (no effect setState).
+  const [prevKind, setPrevKind] = useState(kind);
+  if (kind !== prevKind) {
+    setPrevKind(kind);
+    setItems([]);
+    setSelected(new Set());
+    setLoadState({ status: "loading", message: "" });
+    setConfirmDelete(false);
+  }
+
+  // Load items for the current kind (await-first so no synchronous setState).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await listBulkItemsAction(courseUrl, kind, acronym);
+      if (cancelled) return;
+      if ("error" in result) {
+        setLoadState({ status: "error", message: result.error });
+        return;
+      }
+      setItems(result.items);
+      setLoadState({ status: "idle", message: "" });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [kind, courseUrl, acronym]);
+
+  // Load the course's rubrics once (for the assignment rubric association).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await listRubricsAction(courseUrl, acronym);
+      if (cancelled || "error" in result) return;
+      setRubrics(result.rubrics);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [courseUrl, acronym]);
+
+  const visible = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return term ? items.filter((it) => it.title.toLowerCase().includes(term)) : items;
+  }, [items, search]);
+
+  const allSelected = visible.length > 0 && visible.every((it) => selected.has(it.id));
+  const toggleAll = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) for (const it of visible) next.delete(it.id);
+      else for (const it of visible) next.add(it.id);
+      return next;
+    });
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const reloadItems = async () => {
+    setLoadState({ status: "loading", message: "" });
+    const result = await listBulkItemsAction(courseUrl, kind, acronym);
+    if ("error" in result) {
+      setLoadState({ status: "error", message: result.error });
+      return;
+    }
+    setItems(result.items);
+    setSelected(new Set());
+    setLoadState({ status: "idle", message: "" });
+  };
+
+  const ids = () => [...selected];
+
+  const runOp = async (
+    fn: () => Promise<{ updated: number; failures: unknown[] } | { error: string }>,
+    label: string
+  ) => {
+    if (selected.size === 0) return;
+    setBusy(true);
+    setNote(null);
+    const result = await fn();
+    setBusy(false);
+    if ("error" in result) {
+      setNote({ kind: "error", text: result.error });
+      return;
+    }
+    setNote({
+      kind: result.failures.length ? "error" : "success",
+      text: `${label}: ${result.updated} updated${result.failures.length ? `, ${result.failures.length} failed` : ""}.`,
+    });
+    await reloadItems();
+  };
+
+  const setDue = () => {
+    if (!dueDate || Number.isNaN(new Date(dueDate).getTime())) {
+      setNote({ kind: "error", text: "Pick a valid due date first." });
+      return;
+    }
+    const iso = new Date(dueDate).toISOString();
+    void runOp(
+      () => setModuleDueDatesAction(courseUrl, ids().map((id) => ({ type: kind, contentId: Number(id), dueAt: iso })), acronym),
+      "Due date set"
+    );
+  };
+
+  const shiftDue = () => {
+    const updates = items
+      .filter((it) => selected.has(it.id) && it.dueAt)
+      .map((it) => {
+        const d = new Date(it.dueAt!);
+        d.setDate(d.getDate() + shiftDays);
+        return { type: kind, contentId: Number(it.id), dueAt: d.toISOString() };
+      });
+    if (updates.length === 0) {
+      setNote({ kind: "error", text: "No selected items have a due date to shift." });
+      return;
+    }
+    void runOp(() => setModuleDueDatesAction(courseUrl, updates, acronym), "Due dates shifted");
+  };
+
+  const setPts = () => {
+    const p = Number(points);
+    if (points.trim() === "" || !Number.isFinite(p)) {
+      setNote({ kind: "error", text: "Enter a points value." });
+      return;
+    }
+    void runOp(() => bulkUpdateAction(courseUrl, kind, ids(), { pointsPossible: p }, acronym), "Points set");
+  };
+
+  const associate = () => {
+    if (rubricId === "") {
+      setNote({ kind: "error", text: "Pick a rubric first." });
+      return;
+    }
+    void runOp(() => bulkAssociateRubricAction(courseUrl, Number(rubricId), ids(), acronym), "Rubric associated");
+  };
+
+  const remove = () => {
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    setConfirmDelete(false);
+    void runOp(() => bulkDeleteAction(courseUrl, kind, ids(), acronym), "Deleted");
+  };
+
+  const showDue = kind !== "Page";
+  const showPoints = kind === "Assignment" || kind === "Quiz";
+  const showRubric = kind === "Assignment";
+
+  return (
+    <div className={styles.form}>
+      <div className={styles.field}>
+        <label htmlFor="bulk-kind">Edit which items</label>
+        <select
+          id="bulk-kind"
+          className={styles.textInput}
+          style={{ maxWidth: 240 }}
+          value={kind}
+          onChange={(e) => setKind(e.target.value as BulkKind)}
+        >
+          <option value="Assignment">Assignments</option>
+          <option value="Quiz">Quizzes</option>
+          <option value="Discussion">Discussions</option>
+          <option value="Page">Pages</option>
+        </select>
+      </div>
+
+      <input
+        type="search"
+        className={styles.textInput}
+        placeholder="Search by title"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
+
+      {loadState.status === "loading" && (
+        <div className={styles.loadingState} role="status" aria-live="polite">
+          <span className={styles.spinner} aria-hidden="true" />
+          <div>
+            <p className={styles.loadingTitle}>Loading…</p>
+          </div>
+        </div>
+      )}
+      {loadState.status === "error" && <p className={styles.error}>{loadState.message}</p>}
+      {loadState.status === "idle" && visible.length === 0 && (
+        <p className={styles.emptyState}>No items found.</p>
+      )}
+
+      {loadState.status === "idle" && visible.length > 0 && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0 }}>
+              <input type="checkbox" checked={allSelected} onChange={toggleAll} /> Select all ({visible.length})
+            </label>
+            <span className={styles.fieldHint} style={{ margin: 0 }}>
+              {selected.size} selected
+            </span>
+          </div>
+
+          <div
+            style={{
+              border: "1px solid var(--field-border)",
+              borderRadius: 10,
+              overflow: "hidden",
+              maxHeight: "44vh",
+              overflowY: "auto",
+            }}
+          >
+            {visible.map((it, i) => (
+              <label
+                key={it.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 12px",
+                  borderTop: i === 0 ? "none" : "1px solid var(--field-border)",
+                  cursor: "pointer",
+                }}
+              >
+                <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggle(it.id)} />
+                <span style={{ flex: 1, minWidth: 0, fontWeight: 600 }}>{it.title}</span>
+                <span
+                  className={styles.fieldHint}
+                  style={{ margin: 0, color: it.published ? "#15803d" : "#92400e" }}
+                >
+                  {it.published ? "Published" : "Unpublished"}
+                </span>
+                {it.dueAt && (
+                  <span className={styles.fieldHint} style={{ margin: 0 }}>
+                    {formatWhen(it.dueAt)}
+                  </span>
+                )}
+                {it.pointsPossible != null && (
+                  <span className={styles.fieldHint} style={{ margin: 0 }}>
+                    {it.pointsPossible} pts
+                  </span>
+                )}
+              </label>
+            ))}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+              alignItems: "center",
+              paddingTop: 12,
+              borderTop: "1px solid var(--field-border)",
+            }}
+          >
+            <button
+              type="button"
+              className={styles.downloadButton}
+              disabled={busy || selected.size === 0}
+              onClick={() => void runOp(() => bulkUpdateAction(courseUrl, kind, ids(), { published: true }, acronym), "Published")}
+            >
+              Publish
+            </button>
+            <button
+              type="button"
+              className={styles.downloadButton}
+              disabled={busy || selected.size === 0}
+              onClick={() => void runOp(() => bulkUpdateAction(courseUrl, kind, ids(), { published: false }, acronym), "Unpublished")}
+            >
+              Unpublish
+            </button>
+
+            {showDue && (
+              <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                <input
+                  type="datetime-local"
+                  className={styles.textInput}
+                  style={{ width: 200 }}
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                />
+                <button type="button" className={styles.downloadButton} disabled={busy || selected.size === 0} onClick={setDue}>
+                  Set due
+                </button>
+              </span>
+            )}
+            {showDue && (
+              <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                <input
+                  type="number"
+                  className={styles.textInput}
+                  style={{ width: 76 }}
+                  value={shiftDays}
+                  onChange={(e) => setShiftDays(Number(e.target.value))}
+                  aria-label="Days to shift"
+                />
+                <button type="button" className={styles.downloadButton} disabled={busy || selected.size === 0} onClick={shiftDue}>
+                  Shift days
+                </button>
+              </span>
+            )}
+            {showPoints && (
+              <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                <input
+                  type="number"
+                  className={styles.textInput}
+                  style={{ width: 90 }}
+                  placeholder="points"
+                  value={points}
+                  onChange={(e) => setPoints(e.target.value)}
+                  aria-label="Points possible"
+                />
+                <button type="button" className={styles.downloadButton} disabled={busy || selected.size === 0} onClick={setPts}>
+                  Set points
+                </button>
+              </span>
+            )}
+            {showRubric && (
+              <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                <select
+                  className={styles.textInput}
+                  style={{ maxWidth: 200 }}
+                  value={rubricId}
+                  disabled={rubrics.length === 0}
+                  onChange={(e) => setRubricId(e.target.value === "" ? "" : Number(e.target.value))}
+                  aria-label="Rubric"
+                >
+                  <option value="">{rubrics.length === 0 ? "No rubrics" : "Rubric…"}</option>
+                  {rubrics.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.title}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className={styles.downloadButton}
+                  disabled={busy || selected.size === 0 || rubricId === ""}
+                  onClick={associate}
+                >
+                  Associate
+                </button>
+              </span>
+            )}
+            <button
+              type="button"
+              className={styles.clearFileButton}
+              disabled={busy || selected.size === 0}
+              onClick={remove}
+              style={{ color: "#b91c1c", borderColor: "#fecaca" }}
+            >
+              {confirmDelete ? "Confirm delete" : "Delete"}
+            </button>
+          </div>
+
+          {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Tab shell ───────────────────────────────────────────────────────────────-
 
-type ContentView = "modules" | "pages";
+type ContentView = "modules" | "pages" | "bulk";
 
 export default function ContentTab() {
   const { active: activeInstitution } = useInstitutionSelection();
@@ -1187,9 +1925,11 @@ export default function ContentTab() {
   const [note, setNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const [view, setViewState] = useState<ContentView>(() =>
-    typeof window !== "undefined" && localStorage.getItem(VIEW_KEY) === "pages" ? "pages" : "modules"
-  );
+  const [view, setViewState] = useState<ContentView>(() => {
+    if (typeof window === "undefined") return "modules";
+    const saved = localStorage.getItem(VIEW_KEY);
+    return saved === "pages" || saved === "bulk" ? saved : "modules";
+  });
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorPageUrl, setEditorPageUrl] = useState<string | null>(null);
 
@@ -1372,6 +2112,13 @@ export default function ContentTab() {
             >
               Pages
             </button>
+            <button
+              type="button"
+              className={`${styles.lessonInnerTab} ${view === "bulk" ? styles.lessonInnerTabActive : ""}`}
+              onClick={() => setView("bulk")}
+            >
+              Bulk edit
+            </button>
           </div>
 
           {view === "modules" ? (
@@ -1392,8 +2139,10 @@ export default function ContentTab() {
               setNote={setNote}
               setBusy={setBusy}
             />
-          ) : (
+          ) : view === "pages" ? (
             <PagesView pages={pages} onNewPage={() => openEditor(null)} onEditPage={(pageUrl) => openEditor(pageUrl)} />
+          ) : (
+            <BulkEditView courseUrl={courseUrl} acronym={activeInstitution || undefined} />
           )}
         </>
       )}

@@ -35,8 +35,13 @@ export async function GET(request: NextRequest) {
         scope: tokens.scope,
       });
       dest.searchParams.set("connected", "1");
-    } catch {
+    } catch (err) {
+      // Surface Google's actual reason (invalid_client, redirect_uri_mismatch,
+      // invalid_grant, ...) to the server log and the integrations page so the
+      // failure is diagnosable instead of a generic "rejected".
+      console.error("[google-oauth] Token exchange failed:", err);
       dest.searchParams.set("error", "exchange_failed");
+      if (err instanceof Error) dest.searchParams.set("detail", err.message.slice(0, 300));
     }
   }
 

@@ -26,19 +26,21 @@ export interface GoogleTokens {
 function getClientId(): string {
   const id = process.env.GOOGLE_OAUTH_CLIENT_ID;
   if (!id) throw new Error("Missing environment variable: GOOGLE_OAUTH_CLIENT_ID");
-  return id;
+  // Trim: a stray newline/space pasted into the env value makes Google reject
+  // the credential (invalid_client) or mismatch the redirect URI.
+  return id.trim();
 }
 
 function getClientSecret(): string {
   const secret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
   if (!secret) throw new Error("Missing environment variable: GOOGLE_OAUTH_CLIENT_SECRET");
-  return secret;
+  return secret.trim();
 }
 
 function getRedirectUri(): string {
   const uri = process.env.GOOGLE_OAUTH_REDIRECT_URI;
   if (!uri) throw new Error("Missing environment variable: GOOGLE_OAUTH_REDIRECT_URI");
-  return uri;
+  return uri.trim();
 }
 
 /** Build the Google consent URL to redirect the user to. */

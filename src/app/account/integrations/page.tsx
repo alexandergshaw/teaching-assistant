@@ -36,7 +36,11 @@ export default function IntegrationsPage() {
       const params = new URLSearchParams(window.location.search);
       if (params.get("connected") === "1") setNotice("Google Calendar connected.");
       const err = params.get("error");
-      if (err) setError(ERROR_MESSAGES[err] ?? "Could not connect Google Calendar.");
+      if (err) {
+        const base = ERROR_MESSAGES[err] ?? "Could not connect Google Calendar.";
+        const detail = params.get("detail");
+        setError(detail ? `${base} — ${detail}` : base);
+      }
       if (params.get("connected") || err) {
         window.history.replaceState(null, "", window.location.pathname);
       }

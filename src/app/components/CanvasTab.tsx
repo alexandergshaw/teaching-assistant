@@ -16,6 +16,7 @@ import {
   createMeetingAction,
   detectMeetingRequestAction,
 } from "../actions";
+import WeekCalendar, { type CalendarEventBlock } from "./WeekCalendar";
 import type {
   CanvasAnnouncement,
   CanvasConversationSummary,
@@ -592,12 +593,26 @@ function InboxPanel() {
   const [sending, setSending] = useState(false);
   const [replyNote, setReplyNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
-  // Google Calendar scheduling: open slots offered for the current thread, the
-  // slot currently being booked, an optional student email to invite, and
-  // whether the thread looks like a request to meet.
+  // Google Calendar scheduling: the week-view planner (open slots + busy events),
+  // the slot the user picked, the booking-in-progress flag, an optional student
+  // email to invite, and whether the thread looks like a request to meet.
   const [suggesting, setSuggesting] = useState(false);
-  const [meetingSlots, setMeetingSlots] = useState<{ iso: string; label: string }[]>([]);
-  const [bookingIso, setBookingIso] = useState<string | null>(null);
+  const [planner, setPlanner] = useState<
+    | {
+        slots: string[];
+        slotLabels: string[];
+        events: CalendarEventBlock[];
+        timeZone: string;
+        workStartHour: number;
+        workEndHour: number;
+        slotMinutes: number;
+      }
+    | null
+  >(null);
+  const [plannerOpen, setPlannerOpen] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [booking, setBooking] = useState(false);
+  const [offering, setOffering] = useState(false);
   const [studentEmail, setStudentEmail] = useState("");
   const [meetingHint, setMeetingHint] = useState(false);
 
@@ -650,7 +665,9 @@ function InboxPanel() {
     setReplyBody("");
     setReplyInstr("");
     setReplyNote(null);
-    setMeetingSlots([]);
+    setPlanner(null);
+    setPlannerOpen(false);
+    setSelectedSlot(null);
     setStudentEmail("");
     setMeetingHint(false);
     setThreadState({ status: "loading", message: "" });
@@ -716,48 +733,64 @@ function InboxPanel() {
     setReplyBody(result.body);
   };
 
-  // Pull open times from Google Calendar and drop a drafted reply offering them.
+  // Load the week-view planner (open slots + busy events) and open it.
   const handleSuggestTimes = async () => {
     if (!threadText) return;
     setSuggesting(true);
     setReplyNote(null);
-    const slotsRes = await getAvailableSlotsAction();
-    if ("error" in slotsRes) {
-      setSuggesting(false);
-      setMeetingSlots([]);
-      setReplyNote({ kind: "error", text: slotsRes.error });
+    const result = await getAvailableSlotsAction();
+    setSuggesting(false);
+    if ("error" in result) {
+      setReplyNote({ kind: "error", text: result.error });
       return;
     }
-    if (slotsRes.slots.length === 0) {
-      setSuggesting(false);
-      setMeetingSlots([]);
+    if (result.slots.length === 0) {
       setReplyNote({
         kind: "error",
         text: "No open times in your working hours over the next couple of weeks.",
       });
       return;
     }
-    setMeetingSlots(slotsRes.slots.map((iso, i) => ({ iso, label: slotsRes.slotLabels[i] ?? iso })));
-    const draft = await draftMeetingReplyAction(threadText, slotsRes.slots, provider);
-    setSuggesting(false);
-    if ("error" in draft) {
-      setReplyNote({ kind: "error", text: draft.error });
-      return;
-    }
-    setReplyBody(draft.body);
+    setPlanner(result);
+    setSelectedSlot(null);
+    setPlannerOpen(true);
   };
 
-  // Book the chosen slot as a Google Meet and append the join link to the reply.
-  const handleBookSlot = async (iso: string, label: string) => {
-    setBookingIso(iso);
+  // Label for the slot the user picked (for the confirmation + reply line).
+  const selectedLabel =
+    planner && selectedSlot
+      ? planner.slotLabels[planner.slots.indexOf(selectedSlot)] ?? selectedSlot
+      : null;
+
+  // Old flow: draft a reply offering all the open times for the student to pick.
+  const handleOfferAll = async () => {
+    if (!planner) return;
+    setOffering(true);
     setReplyNote(null);
-    const result = await createMeetingAction(iso, studentName, studentEmail.trim() || undefined);
-    setBookingIso(null);
+    const result = await draftMeetingReplyAction(threadText, planner.slots, provider);
+    setOffering(false);
+    if ("error" in result) {
+      setReplyNote({ kind: "error", text: result.error });
+      return;
+    }
+    setReplyBody(result.body);
+    setReplyNote({ kind: "success", text: "Drafted a reply offering these times. Edit and send when ready." });
+    setPlannerOpen(false);
+  };
+
+  // Book the picked slot as a Google Meet and append the join link to the reply.
+  const handleBookSelected = async () => {
+    if (!selectedSlot) return;
+    setBooking(true);
+    setReplyNote(null);
+    const result = await createMeetingAction(selectedSlot, studentName, studentEmail.trim() || undefined);
+    setBooking(false);
     if ("error" in result) {
       setReplyNote({ kind: "error", text: result.error });
       return;
     }
     if (result.meetLink) {
+      const label = selectedLabel ?? "the scheduled time";
       setReplyBody((prev) => {
         const base = prev.trim();
         return `${base}${base ? "\n\n" : ""}I've set us up for ${label}. Join here: ${result.meetLink}`;
@@ -766,7 +799,9 @@ function InboxPanel() {
     } else {
       setReplyNote({ kind: "success", text: "Meeting booked, but no Meet link was returned." });
     }
-    setMeetingSlots([]);
+    setPlannerOpen(false);
+    setPlanner(null);
+    setSelectedSlot(null);
   };
 
   const handleSendReply = async () => {
@@ -957,9 +992,9 @@ function InboxPanel() {
             </div>
 
             <div className={styles.inboxReplyBox}>
-              {meetingHint && meetingSlots.length === 0 && (
+              {meetingHint && !plannerOpen && (
                 <p className={styles.fieldHint} style={{ fontWeight: 600 }}>
-                  This looks like a request to meet — try &ldquo;Suggest meeting times&rdquo;.
+                  This looks like a request to meet. Try &ldquo;Suggest meeting times&rdquo;.
                 </p>
               )}
 
@@ -994,43 +1029,6 @@ function InboxPanel() {
                 </div>
               </div>
 
-              {meetingSlots.length > 0 && (
-                <div className={styles.field}>
-                  <label htmlFor="canvas-student-email">
-                    Book a Google Meet (optional — adds the link to your reply)
-                  </label>
-                  <input
-                    id="canvas-student-email"
-                    type="email"
-                    className={styles.textInput}
-                    style={{ marginBottom: 8 }}
-                    placeholder="Student email to invite (optional)"
-                    value={studentEmail}
-                    onChange={(e) => setStudentEmail(e.target.value)}
-                  />
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {meetingSlots.map((slot) => (
-                      <div
-                        key={slot.iso}
-                        style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
-                      >
-                        <span className={styles.fieldHint} style={{ flex: "1 1 200px" }}>
-                          {slot.label}
-                        </span>
-                        <button
-                          type="button"
-                          className={styles.downloadButton}
-                          onClick={() => handleBookSlot(slot.iso, slot.label)}
-                          disabled={bookingIso !== null}
-                        >
-                          {bookingIso === slot.iso ? "Booking…" : "Book + add link"}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               <div className={styles.field}>
                 <label htmlFor="canvas-reply-body">Your reply</label>
                 <textarea
@@ -1059,6 +1057,82 @@ function InboxPanel() {
           </>
         ) : null}
       </div>
+
+      {plannerOpen && planner && (
+        <div
+          className={styles.previewBackdrop}
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setPlannerOpen(false)}
+        >
+          <div
+            className={styles.previewModal}
+            style={{ width: "min(900px, 94vw)", maxWidth: "none" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.previewHeader}>
+              <h3>Meeting times</h3>
+              <button
+                type="button"
+                className={styles.previewCloseButton}
+                onClick={() => setPlannerOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <WeekCalendar
+              timeZone={planner.timeZone}
+              workStartHour={planner.workStartHour}
+              workEndHour={planner.workEndHour}
+              slotMinutes={planner.slotMinutes}
+              slots={planner.slots}
+              events={planner.events}
+              selectedSlot={selectedSlot}
+              onSelect={setSelectedSlot}
+            />
+
+            <p className={styles.fieldHint} style={{ marginTop: 10 }}>
+              Highlighted times are the open slots. Offer all of them for the student to choose from,
+              or click one to book it directly.
+            </p>
+
+            <div className={styles.field} style={{ marginTop: 8 }}>
+              <label htmlFor="canvas-student-email">Student email to invite (optional, for booking)</label>
+              <input
+                id="canvas-student-email"
+                type="email"
+                className={styles.textInput}
+                placeholder="name@example.com"
+                value={studentEmail}
+                onChange={(e) => setStudentEmail(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleOfferAll}
+                disabled={offering || booking}
+              >
+                {offering ? "Drafting…" : "Offer all times to the student"}
+              </button>
+              <button
+                type="button"
+                className={styles.downloadButton}
+                onClick={handleBookSelected}
+                disabled={!selectedSlot || booking || offering}
+              >
+                {booking ? "Booking…" : selectedLabel ? `Book ${selectedLabel}` : "Book selected time"}
+              </button>
+              <button type="button" className={styles.downloadButton} onClick={() => setPlannerOpen(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showCalendar && (
         <div

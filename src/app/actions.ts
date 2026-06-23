@@ -58,7 +58,12 @@ import {
   getValidAccessToken,
   deleteCredentials,
 } from "@/lib/google-credentials";
-import { queryFreeBusy, createCalendarEvent } from "@/lib/google-calendar";
+import {
+  queryFreeBusy,
+  createCalendarEvent,
+  listCalendarEvents,
+  type CalendarEventBlock,
+} from "@/lib/google-calendar";
 import {
   getSchedulingConfig,
   computeFreeSlots,
@@ -1323,10 +1328,21 @@ export async function disconnectGoogleCalendarAction(): Promise<
 
 /**
  * Find open meeting slots from the owner's Google Calendar free/busy within the
- * configured working hours. Returns ISO start times plus human-readable labels.
+ * configured working hours, plus the real events (with titles) in that window and
+ * the grid config, so the inbox can render a week-view picker that shades busy
+ * time and highlights the open slots.
  */
 export async function getAvailableSlotsAction(): Promise<
-  { slots: string[]; slotLabels: string[]; timeZone: string } | { error: string }
+  | {
+      slots: string[];
+      slotLabels: string[];
+      events: CalendarEventBlock[];
+      timeZone: string;
+      workStartHour: number;
+      workEndHour: number;
+      slotMinutes: number;
+    }
+  | { error: string }
 > {
   try {
     const user = await requireOwner();
@@ -1336,10 +1352,24 @@ export async function getAvailableSlotsAction(): Promise<
     }
     const config = getSchedulingConfig();
     const now = new Date();
-    const timeMax = new Date(now.getTime() + (config.lookaheadDays + 1) * 86_400_000);
-    const busy = await queryFreeBusy(token, now.toISOString(), timeMax.toISOString(), config.timeZone);
+    const timeMin = now.toISOString();
+    const timeMax = new Date(now.getTime() + (config.lookaheadDays + 1) * 86_400_000).toISOString();
+    // Free/busy drives the open-slot math; the events list (best-effort) only
+    // supplies titles for the busy blocks, so a failure there still lets you pick.
+    const [busy, events] = await Promise.all([
+      queryFreeBusy(token, timeMin, timeMax, config.timeZone),
+      listCalendarEvents(token, timeMin, timeMax, config.timeZone).catch(() => [] as CalendarEventBlock[]),
+    ]);
     const slots = computeFreeSlots(busy, config, now);
-    return { slots, slotLabels: formatSlotsForReply(slots, config.timeZone), timeZone: config.timeZone };
+    return {
+      slots,
+      slotLabels: formatSlotsForReply(slots, config.timeZone),
+      events,
+      timeZone: config.timeZone,
+      workStartHour: config.workStartHour,
+      workEndHour: config.workEndHour,
+      slotMinutes: config.slotMinutes,
+    };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load your availability." };
   }

@@ -45,6 +45,64 @@ export async function queryFreeBusy(
   return busy.map((b) => ({ start: new Date(b.start), end: new Date(b.end) }));
 }
 
+export interface CalendarEventBlock {
+  startISO: string;
+  endISO: string;
+  title: string;
+}
+
+/**
+ * List the owner's timed events on their primary calendar in a window, so the
+ * meeting planner can draw real busy blocks (with titles) behind the open slots.
+ * All-day events (no dateTime) and events the owner has marked "free" are skipped
+ * so the grid only shows genuine conflicts.
+ */
+export async function listCalendarEvents(
+  accessToken: string,
+  timeMinISO: string,
+  timeMaxISO: string,
+  timeZone: string
+): Promise<CalendarEventBlock[]> {
+  const params = new URLSearchParams({
+    timeMin: timeMinISO,
+    timeMax: timeMaxISO,
+    singleEvents: "true",
+    orderBy: "startTime",
+    maxResults: "250",
+    timeZone,
+  });
+  const response = await fetch(`${CALENDAR_API}/calendars/primary/events?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Google events list failed (HTTP ${response.status}): ${body.slice(0, 200)}`);
+  }
+  const data = (await response.json()) as {
+    items?: Array<{
+      summary?: string;
+      status?: string;
+      transparency?: string;
+      start?: { dateTime?: string };
+      end?: { dateTime?: string };
+    }>;
+  };
+  const blocks: CalendarEventBlock[] = [];
+  for (const item of data.items ?? []) {
+    if (item.status === "cancelled") continue;
+    if (item.transparency === "transparent") continue; // shown as "free" on the calendar
+    const start = item.start?.dateTime;
+    const end = item.end?.dateTime;
+    if (!start || !end) continue; // skip all-day (date-only) events
+    blocks.push({
+      startISO: new Date(start).toISOString(),
+      endISO: new Date(end).toISOString(),
+      title: item.summary?.trim() || "Busy",
+    });
+  }
+  return blocks;
+}
+
 export interface CreateEventInput {
   summary: string;
   description?: string;

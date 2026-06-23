@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import type { LlmProvider } from "./llm";
 
 /**
@@ -22,24 +22,26 @@ export function getStoredProvider(): LlmProvider {
   return coerce(window.localStorage.getItem(STORAGE_KEY));
 }
 
+// Subscribe to provider changes (cross-tab native storage events, and same-tab
+// synthetic ones dispatched by setProvider below).
+function subscribe(onChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("storage", onChange);
+  return () => window.removeEventListener("storage", onChange);
+}
+
+const getServerSnapshot = (): LlmProvider => DEFAULT_PROVIDER;
+
 /** React hook exposing the active provider and a setter that persists + broadcasts. */
 export function useLlmProvider(): [LlmProvider, (next: LlmProvider) => void] {
-  const [provider, setProviderState] = useState<LlmProvider>(DEFAULT_PROVIDER);
-
-  useEffect(() => {
-    setProviderState(getStoredProvider());
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY) setProviderState(coerce(e.newValue));
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  // useSyncExternalStore reads localStorage as the store: the default on the
+  // server, the stored value on the client (no mount-time setState needed).
+  const provider = useSyncExternalStore(subscribe, getStoredProvider, getServerSnapshot);
 
   const setProvider = (next: LlmProvider) => {
-    setProviderState(next);
     if (typeof window !== "undefined") {
       window.localStorage.setItem(STORAGE_KEY, next);
-      // Notify other components in this tab (storage events only fire cross-tab).
+      // Notify components in this tab (native storage events only fire cross-tab).
       window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY, newValue: next }));
     }
   };

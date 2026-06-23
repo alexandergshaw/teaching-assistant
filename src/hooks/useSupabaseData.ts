@@ -26,7 +26,8 @@ export function useSupabaseData<T>(query: Query<T>, deps: unknown[] = []) {
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    // `loading` is seeded true by useState, so the only state transition needed
+    // is to false once the query resolves (inside the async callback below).
 
     Promise.resolve(query(supabase)).then((result) => {
       if (!active) return;

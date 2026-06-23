@@ -115,7 +115,7 @@ function replaceSectionsInDocx(
         if (j < lines.length) {
           // Replace only the first <w:t> in the paragraph, keep all formatting/structure
           const text = escapeXml(lines[j]);
-          let replaced = p.replace(/<w:t[\s\S]*?<\/w:t>/, `<w:t xml:space=\"preserve\">${text}</w:t>`);
+          const replaced = p.replace(/<w:t[\s\S]*?<\/w:t>/, `<w:t xml:space=\"preserve\">${text}</w:t>`);
           out.push(replaced);
         } else {
           // No more content lines, keep template paragraph as-is
@@ -264,6 +264,11 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   };
 
   useEffect(() => {
+    // One-time hydration of editable form fields from localStorage. This must
+    // run client-only (in an effect) so the server-rendered defaults match the
+    // first client render; a lazy useState initializer would read localStorage
+    // during hydration and cause an SSR mismatch. Hence the rule is suppressed.
+    /* eslint-disable react-hooks/set-state-in-effect */
     setCourseTitle(localStorage.getItem(LS_KEYS.courseTitle) || "");
     setCourseCode(localStorage.getItem(LS_KEYS.courseCode) || "");
     setClassTimes(localStorage.getItem(LS_KEYS.classTimes) || "");
@@ -281,6 +286,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setScheduleStartDate(localStorage.getItem(LS_KEYS.scheduleStartDate) || "");
     setScheduleWeeks(localStorage.getItem(LS_KEYS.scheduleWeeks) || "");
     setScheduleTests(localStorage.getItem(LS_KEYS.scheduleTests) || "");
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
   const [coursePlanningContextFiles, setCoursePlanningContextFiles] = useState<
     Array<{ name: string; base64: string; mimeType: string }>

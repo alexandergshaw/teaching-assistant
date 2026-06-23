@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { selectionChatAction } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
@@ -17,7 +17,14 @@ interface SelectionPos {
 interface Pos { x: number; y: number }
 
 export default function SelectionChatWidget() {
-  const [mounted, setMounted] = useState(false);
+  // Render nothing until mounted on the client (the widget is portal/selection
+  // based). useSyncExternalStore returns false on the server and true on the
+  // client without a mount-time setState.
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
   const [icon, setIcon] = useState<{ x: number; y: number } | null>(null);
   const [pendingText, setPendingText] = useState("");
   const [chat, setChat] = useState<SelectionPos | null>(null);
@@ -38,8 +45,6 @@ export default function SelectionChatWidget() {
   const sessionIdRef = useRef<string>(crypto.randomUUID());
 
   const widgetRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => setMounted(true), []);
 
   const handleMouseUp = useCallback((e: MouseEvent) => {
     if (widgetRef.current?.contains(e.target as Node)) return;

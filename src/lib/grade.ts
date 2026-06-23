@@ -64,6 +64,9 @@ export interface GradingRun {
   results: GradeResult[];
   rubricAreaNames: string[];
   fullCreditChecklist: string[];
+  // SpeedGrader base URL for the graded Canvas assignment (no student id), when
+  // graded from a Canvas source. Per-row links append `&student_id=<userId>`.
+  speedGraderUrl?: string | null;
 }
 
 interface InferredFileNameParts {

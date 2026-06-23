@@ -15,6 +15,7 @@ import {
   canvasWorkToZipBase64,
   fetchCanvasMeta,
   fetchAssignmentPointsPossible,
+  getSpeedGraderUrl,
   postCanvasGrades,
   getCourseName,
   listAnnouncements,
@@ -2156,13 +2157,18 @@ export async function gradeAction(
     // submission (kind auto-detected from the URL). Routes by provider — the
     // deterministic grader gets a synthesized zip; Gemini grades the text/files.
     if (canvasUrl) {
+      // SpeedGrader base URL for per-student deep links in the results table.
+      // Best-effort: a failure here must not block grading.
+      const speedGraderUrl = await getSpeedGraderUrl(canvasUrl).catch(() => null);
+
       if (provider === "other") {
         const [{ students }, pointsPossible] = await Promise.all([
           fetchCanvasWork(canvasUrl),
           fetchAssignmentPointsPossible(canvasUrl),
         ]);
         const zipBase64 = await canvasWorkToZipBase64(students);
-        return gradeZipViaEngine(zipBase64, rubric, rubricFile, institution, pointsPossible);
+        const state = await gradeZipViaEngine(zipBase64, rubric, rubricFile, institution, pointsPossible);
+        return state.run ? { ...state, run: { ...state.run, speedGraderUrl } } : state;
       }
 
       if (!assignmentInstructions.trim()) {
@@ -2174,7 +2180,7 @@ export async function gradeAction(
         gradeCanvasUrl(canvasUrl, assignmentInstructions, rubric, provider),
         synthesizeFullCreditChecklist(assignmentInstructions, rubric, provider),
       ]);
-      return { run: { ...run, fullCreditChecklist }, error: null };
+      return { run: { ...run, fullCreditChecklist, speedGraderUrl }, error: null };
     }
 
     if (!file || file.size === 0) {

@@ -118,6 +118,53 @@ function seedEdits(run: GradeActionState["run"]): Record<string, RowEdit> {
 
 type PostState = { status: "idle" | "posting" | "posted" | "error"; message?: string };
 
+// One graded student row (mirrors GradeResult without importing server code).
+type GradeRow = NonNullable<GradeActionState["run"]>["results"][number];
+
+// The denominator of a "X/Y" score, or null when there is no "/Y" part.
+function parseDenominator(value: string): number | null {
+  const match = value.match(/\/\s*(-?\d+(?:\.\d+)?)/);
+  return match ? Number(match[1]) : null;
+}
+
+// Format a points number without trailing-zero noise (8 -> "8", 7.5 -> "7.5").
+function formatPoints(n: number): string {
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+}
+
+// Recompute a student's total as the sum of their per-criterion earned points.
+// Keeps the existing total's denominator when it has one (e.g. "17/20"); else
+// uses the summed criterion denominators when every criterion supplies one.
+// Returns the current total unchanged when no criterion has a numeric score.
+function recomputeTotal(
+  areas: Record<string, AreaEdit>,
+  areaNames: string[],
+  currentTotal: string
+): string {
+  let earned = 0;
+  let sawNumber = false;
+  let denomSum = 0;
+  let everyHasDenom = true;
+  for (const name of areaNames) {
+    const score = areas[name]?.score ?? "";
+    if (!score.trim()) {
+      everyHasDenom = false;
+      continue;
+    }
+    const e = parseScoreValue(score);
+    if (e !== null) {
+      earned += e;
+      sawNumber = true;
+    }
+    const d = parseDenominator(score);
+    if (d !== null) denomSum += d;
+    else everyHasDenom = false;
+  }
+  if (!sawNumber) return currentTotal;
+  const denom = parseDenominator(currentTotal) ?? (everyHasDenom ? denomSum : null);
+  return denom !== null ? `${formatPoints(earned)}/${formatPoints(denom)}` : formatPoints(earned);
+}
+
 // ── Grading utilities ──────────────────────────────────────────────────────
 
 function formatFeedback(text: string): string {
@@ -734,10 +781,13 @@ export default function GradingTab({
     setEdits((prev) => {
       const row = prev[student] ?? { total: "", overall: "", areas: {} };
       const area = row.areas[areaName] ?? { score: "", comment: "" };
-      return {
-        ...prev,
-        [student]: { ...row, areas: { ...row.areas, [areaName]: { ...area, ...patch } } },
-      };
+      const areas = { ...row.areas, [areaName]: { ...area, ...patch } };
+      // Editing a criterion's points re-totals the student automatically.
+      const total =
+        patch.score !== undefined && run
+          ? recomputeTotal(areas, run.rubricAreaNames, row.total)
+          : row.total;
+      return { ...prev, [student]: { ...row, areas, total } };
     });
 
   const gradableResults = useMemo(
@@ -839,6 +889,45 @@ export default function GradingTab({
     refreshCounts();
     setQueueRefreshSignal((n) => n + 1);
   };
+
+  // Post a single student's grade, leaving the rest untouched. Same payload
+  // shape as the bulk post, with a one-element array.
+  const handlePostOne = async (row: GradeRow) => {
+    if (typeof row.userId !== "number") return;
+    const edit = edits[row.student] ?? { total: row.totalScore, overall: row.overallComment, areas: {} };
+    const payload = [
+      {
+        userId: row.userId,
+        grade: parseEarnedPoints(edit.total),
+        comment: edit.overall,
+        rubricAreas: row.rubricAreas.map((a) => {
+          const ae = edit.areas[a.area] ?? { score: a.score, comment: a.comment };
+          return { area: a.area, score: ae.score, comment: ae.comment };
+        }),
+      },
+    ];
+
+    setPostStatus((prev) => ({ ...prev, [row.student]: { status: "posting" } }));
+    const res = await postCanvasGradesAction(canvasUrl, payload);
+    if ("error" in res) {
+      setPostStatus((prev) => ({ ...prev, [row.student]: { status: "error", message: res.error } }));
+      return;
+    }
+    const failure = res.failures.find((f) => f.userId === row.userId);
+    setPostStatus((prev) => ({
+      ...prev,
+      [row.student]: failure ? { status: "error", message: failure.error } : { status: "posted" },
+    }));
+    refreshCounts();
+    setQueueRefreshSignal((n) => n + 1);
+  };
+
+  // Deep link to a single student's submission in SpeedGrader, when the run came
+  // from a Canvas source (so we have the assignment's SpeedGrader base + userId).
+  const speedGraderHref = (userId: number | undefined): string | null =>
+    run?.speedGraderUrl && typeof userId === "number"
+      ? `${run.speedGraderUrl}&student_id=${userId}`
+      : null;
 
   const sortedResults = useMemo(() => {
     if (!run) return [];
@@ -1240,6 +1329,8 @@ export default function GradingTab({
               assignment&apos;s gradebook column and comments are added to each
               submission. If the Canvas assignment has an attached rubric, the
               per-criterion scores fill the SpeedGrader rubric too (matched by name).
+              Use a row&apos;s Post to Canvas button to post just that student, or Open in
+              SpeedGrader to jump straight to their submission.
               {postSummary ? ` ${postSummary}` : ""}
             </p>
           )}
@@ -1308,11 +1399,38 @@ export default function GradingTab({
                     areas: {},
                   };
                   const status = postStatus[result.student];
+                  const sgHref = speedGraderHref(result.userId);
+                  const canPostRow = canvasGradable && typeof result.userId === "number";
+                  const rowPosting = posting || status?.status === "posting";
 
                   return (
                     <tr key={`${result.student}-matrix`}>
                       <td>
-                        {result.student}
+                        <div style={{ fontWeight: 600 }}>{result.student}</div>
+                        {sgHref && (
+                          <a
+                            href={sgHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={styles.fieldHint}
+                            style={{ display: "inline-block", marginTop: 2 }}
+                          >
+                            Open in SpeedGrader
+                          </a>
+                        )}
+                        {canPostRow && (
+                          <div style={{ marginTop: 6 }}>
+                            <button
+                              type="button"
+                              className={styles.downloadButton}
+                              style={{ padding: "4px 10px" }}
+                              onClick={() => handlePostOne(result)}
+                              disabled={rowPosting}
+                            >
+                              {status?.status === "posted" ? "Re-post" : "Post to Canvas"}
+                            </button>
+                          </div>
+                        )}
                         {status && status.status !== "idle" && (
                           <div
                             className={styles.fieldHint}

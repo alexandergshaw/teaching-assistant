@@ -417,6 +417,44 @@ export async function fetchAssignmentPointsPossible(url: string): Promise<number
   }
 }
 
+/**
+ * Build the SpeedGrader URL for a Canvas assignment/discussion URL, without a
+ * student id. Resolves a graded discussion to its linked assignment. Returns
+ * null when the URL is not gradable or has no linked assignment. Append
+ * `&student_id=<userId>` to deep-link to one student's submission.
+ */
+export async function getSpeedGraderUrl(url: string): Promise<string | null> {
+  const parsed = parseCanvasUrl(url);
+  if (!parsed) return null;
+
+  let ctx: { institution: CanvasInstitution; token: string; baseUrl: string };
+  try {
+    ctx = resolveInstitution(url);
+  } catch {
+    return null;
+  }
+  const { token, baseUrl } = ctx;
+
+  let assignmentId = parsed.kind === "assignment" ? parsed.id : "";
+  if (parsed.kind === "discussion") {
+    try {
+      const response = await fetch(
+        `${baseUrl}/api/v1/courses/${parsed.courseId}/discussion_topics/${parsed.id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!response.ok) return null;
+      const topic = (await response.json()) as CanvasDiscussionTopicObject;
+      if (!topic.assignment_id) return null;
+      assignmentId = String(topic.assignment_id);
+    } catch {
+      return null;
+    }
+  }
+  if (!assignmentId) return null;
+
+  return `${baseUrl}/courses/${parsed.courseId}/gradebook/speed_grader?assignment_id=${assignmentId}`;
+}
+
 // ── Grading queue (Live Feed) ───────────────────────────────────────────────
 //
 // Across an institution's active teacher courses, surface every assignment and

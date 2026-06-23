@@ -11,6 +11,10 @@ import {
   draftMessageReplyAction,
   listCoursesAction,
   setConversationStateAction,
+  getAvailableSlotsAction,
+  draftMeetingReplyAction,
+  createMeetingAction,
+  detectMeetingRequestAction,
 } from "../actions";
 import type {
   CanvasAnnouncement,
@@ -575,6 +579,15 @@ function InboxPanel() {
   const [sending, setSending] = useState(false);
   const [replyNote, setReplyNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
+  // Google Calendar scheduling: open slots offered for the current thread, the
+  // slot currently being booked, an optional student email to invite, and
+  // whether the thread looks like a request to meet.
+  const [suggesting, setSuggesting] = useState(false);
+  const [meetingSlots, setMeetingSlots] = useState<{ iso: string; label: string }[]>([]);
+  const [bookingIso, setBookingIso] = useState<string | null>(null);
+  const [studentEmail, setStudentEmail] = useState("");
+  const [meetingHint, setMeetingHint] = useState(false);
+
   // Show the loading screen the instant the institution changes (before the
   // effect refetches), clearing the previous school's inbox + open thread.
   const [prevInstitution, setPrevInstitution] = useState(activeInstitution);
@@ -624,6 +637,9 @@ function InboxPanel() {
     setReplyBody("");
     setReplyInstr("");
     setReplyNote(null);
+    setMeetingSlots([]);
+    setStudentEmail("");
+    setMeetingHint(false);
     setThreadState({ status: "loading", message: "" });
     const result = await getConversationAction(id, activeInstitution || undefined);
     if ("error" in result) {
@@ -632,6 +648,12 @@ function InboxPanel() {
     }
     setConversation(result.conversation);
     setThreadState({ status: "idle", message: "" });
+    // Proactively flag whether the student is asking to meet, so the scheduler
+    // can be highlighted. Fire-and-forget; a model hiccup just leaves it unset.
+    const text = result.conversation.messages.map((m) => `${m.author}: ${m.body}`).join("\n\n");
+    detectMeetingRequestAction(text, provider)
+      .then((r) => setMeetingHint(r.isMeetingRequest))
+      .catch(() => {});
     // Opening marks it read in Canvas; reflect that locally + in the badge.
     setConversations((prev) =>
       prev.map((c) => (c.id === id ? { ...c, workflowState: "read" } : c))
@@ -658,6 +680,16 @@ function InboxPanel() {
     ? conversation.messages.map((m) => `${m.author}: ${m.body}`).join("\n\n")
     : "";
 
+  // Best-effort student name: the most recent message not written by me, else
+  // the first listed participant. Used to title the calendar event.
+  const studentName = conversation
+    ? [...conversation.messages]
+        .reverse()
+        .find((m) => conversation.selfId == null || m.authorId !== conversation.selfId)?.author
+      ?? conversation.participants.find(Boolean)
+      ?? "student"
+    : "student";
+
   const handleDraftReply = async () => {
     if (!threadText) return;
     setDrafting(true);
@@ -669,6 +701,59 @@ function InboxPanel() {
       return;
     }
     setReplyBody(result.body);
+  };
+
+  // Pull open times from Google Calendar and drop a drafted reply offering them.
+  const handleSuggestTimes = async () => {
+    if (!threadText) return;
+    setSuggesting(true);
+    setReplyNote(null);
+    const slotsRes = await getAvailableSlotsAction();
+    if ("error" in slotsRes) {
+      setSuggesting(false);
+      setMeetingSlots([]);
+      setReplyNote({ kind: "error", text: slotsRes.error });
+      return;
+    }
+    if (slotsRes.slots.length === 0) {
+      setSuggesting(false);
+      setMeetingSlots([]);
+      setReplyNote({
+        kind: "error",
+        text: "No open times in your working hours over the next couple of weeks.",
+      });
+      return;
+    }
+    setMeetingSlots(slotsRes.slots.map((iso, i) => ({ iso, label: slotsRes.slotLabels[i] ?? iso })));
+    const draft = await draftMeetingReplyAction(threadText, slotsRes.slots, provider);
+    setSuggesting(false);
+    if ("error" in draft) {
+      setReplyNote({ kind: "error", text: draft.error });
+      return;
+    }
+    setReplyBody(draft.body);
+  };
+
+  // Book the chosen slot as a Google Meet and append the join link to the reply.
+  const handleBookSlot = async (iso: string, label: string) => {
+    setBookingIso(iso);
+    setReplyNote(null);
+    const result = await createMeetingAction(iso, studentName, studentEmail.trim() || undefined);
+    setBookingIso(null);
+    if ("error" in result) {
+      setReplyNote({ kind: "error", text: result.error });
+      return;
+    }
+    if (result.meetLink) {
+      setReplyBody((prev) => {
+        const base = prev.trim();
+        return `${base}${base ? "\n\n" : ""}I've set us up for ${label}. Join here: ${result.meetLink}`;
+      });
+      setReplyNote({ kind: "success", text: "Meeting booked. Google Meet link added to your reply." });
+    } else {
+      setReplyNote({ kind: "success", text: "Meeting booked, but no Meet link was returned." });
+    }
+    setMeetingSlots([]);
   };
 
   const handleSendReply = async () => {
@@ -850,6 +935,12 @@ function InboxPanel() {
             </div>
 
             <div className={styles.inboxReplyBox}>
+              {meetingHint && meetingSlots.length === 0 && (
+                <p className={styles.fieldHint} style={{ fontWeight: 600 }}>
+                  This looks like a request to meet — try &ldquo;Suggest meeting times&rdquo;.
+                </p>
+              )}
+
               <div className={styles.field}>
                 <label htmlFor="canvas-reply-draft">Draft reply with AI (optional)</label>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -870,8 +961,53 @@ function InboxPanel() {
                   >
                     {drafting ? "Drafting…" : "Draft with AI"}
                   </button>
+                  <button
+                    type="button"
+                    className={styles.downloadButton}
+                    onClick={handleSuggestTimes}
+                    disabled={suggesting}
+                  >
+                    {suggesting ? "Finding times…" : "Suggest meeting times"}
+                  </button>
                 </div>
               </div>
+
+              {meetingSlots.length > 0 && (
+                <div className={styles.field}>
+                  <label htmlFor="canvas-student-email">
+                    Book a Google Meet (optional — adds the link to your reply)
+                  </label>
+                  <input
+                    id="canvas-student-email"
+                    type="email"
+                    className={styles.textInput}
+                    style={{ marginBottom: 8 }}
+                    placeholder="Student email to invite (optional)"
+                    value={studentEmail}
+                    onChange={(e) => setStudentEmail(e.target.value)}
+                  />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {meetingSlots.map((slot) => (
+                      <div
+                        key={slot.iso}
+                        style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
+                      >
+                        <span className={styles.fieldHint} style={{ flex: "1 1 200px" }}>
+                          {slot.label}
+                        </span>
+                        <button
+                          type="button"
+                          className={styles.downloadButton}
+                          onClick={() => handleBookSlot(slot.iso, slot.label)}
+                          disabled={bookingIso !== null}
+                        >
+                          {bookingIso === slot.iso ? "Booking…" : "Book + add link"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className={styles.field}>
                 <label htmlFor="canvas-reply-body">Your reply</label>

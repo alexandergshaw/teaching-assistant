@@ -12,6 +12,32 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      google_credentials: {
+        Row: {
+          user_id: string;
+          access_token: string | null;
+          refresh_token: string | null;
+          expiry: string | null;
+          scope: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          access_token?: string | null;
+          refresh_token?: string | null;
+          expiry?: string | null;
+          scope?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          access_token?: string | null;
+          refresh_token?: string | null;
+          expiry?: string | null;
+          scope?: string | null;
+          updated_at?: string;
+        };
+      };
       ai_chat_messages: {
         Row: {
           id: string;

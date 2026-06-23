@@ -25,7 +25,7 @@ export async function requireOwner() {
     data: { user },
     error,
   } = await supabase.auth.getUser();
-  if (error || !isOwnerEmail(user?.email)) {
+  if (error || !user || !isOwnerEmail(user.email)) {
     throw new Error("Not authorized. Sign in with an approved account.");
   }
 

@@ -12,7 +12,7 @@ import {
   extractTextFromBuffer,
   getFileExtension,
 } from "./office-extract";
-import { fetchCanvasWork, type CanvasStudentWork } from "./canvas";
+import { fetchCanvasWork, fetchAssignmentPointsPossible, type CanvasStudentWork } from "./canvas";
 
 const MAX_NESTED_ZIP_DEPTH = 3;
 
@@ -763,6 +763,44 @@ function deriveTotalScore(
   return `${formatScoreNumber(earnedTotal)}/${formatScoreNumber(possibleTotal)}`;
 }
 
+/**
+ * Re-base a graded result onto the assignment's real points_possible so the tool
+ * grades out of the same total Canvas shows. The model scores each area against
+ * whatever the rubric implied (often /10 each when Canvas has no rubric), so the
+ * derived total can be out of, say, 40 when the assignment is worth 20. When a
+ * Canvas points_possible is known and differs, scale every area and the total by
+ * the same factor; otherwise leave the result untouched (e.g. the zip-upload
+ * path, where there is no Canvas total to match).
+ */
+function scaleResultToPoints(
+  rubricAreas: RubricAreaResult[],
+  totalScore: string,
+  pointsPossible: number | null | undefined
+): { rubricAreas: RubricAreaResult[]; totalScore: string } {
+  if (pointsPossible == null || pointsPossible <= 0) {
+    return { rubricAreas, totalScore };
+  }
+  const parsedTotal = parseEarnedPossibleScore(totalScore);
+  if (!parsedTotal || parsedTotal.possible === pointsPossible) {
+    return { rubricAreas, totalScore };
+  }
+
+  const factor = pointsPossible / parsedTotal.possible;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+
+  const scaledAreas = rubricAreas.map((area) => {
+    const parsed = parseEarnedPossibleScore(area.score);
+    if (!parsed) return area;
+    return {
+      ...area,
+      score: `${formatScoreNumber(round2(parsed.earned * factor))}/${formatScoreNumber(round2(parsed.possible * factor))}`,
+    };
+  });
+
+  const scaledTotal = `${formatScoreNumber(round2(parsedTotal.earned * factor))}/${formatScoreNumber(pointsPossible)}`;
+  return { rubricAreas: scaledAreas, totalScore: scaledTotal };
+}
+
 function formatFeedback(
   overallComment: string,
   rubricAreas: RubricAreaResult[],
@@ -1005,7 +1043,10 @@ async function gradeSubmission(
   studentName: string,
   content: string,
   provider: LlmProvider,
-  imageFiles: Array<{ name: string; base64: string; mimeType: string }> = []
+  imageFiles: Array<{ name: string; base64: string; mimeType: string }> = [],
+  // When set (the Canvas path), re-base the total onto the assignment's real
+  // points so the tool grades out of the same total Canvas shows.
+  pointsPossible: number | null = null
 ): Promise<GradeResult> {
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
@@ -1040,20 +1081,21 @@ async function gradeSubmission(
 
   const feedback = result.text.trim() || "No feedback generated.";
   const parsed = parseRubricResponse(feedback);
-  const totalScore = deriveTotalScore(parsed.totalScore, parsed.rubricAreas);
+  const derivedTotal = deriveTotalScore(parsed.totalScore, parsed.rubricAreas);
+  const { rubricAreas, totalScore } = scaleResultToPoints(
+    parsed.rubricAreas,
+    derivedTotal,
+    pointsPossible
+  );
 
   return {
     student: studentName,
     overallComment: parsed.overallComment,
-    rubricAreas: parsed.rubricAreas,
+    rubricAreas,
     totalScore,
     mergedFileCount: 1,
     submittedFiles: [],
-    feedback: formatFeedback(
-      parsed.overallComment,
-      parsed.rubricAreas,
-      totalScore
-    ),
+    feedback: formatFeedback(parsed.overallComment, rubricAreas, totalScore),
   };
 }
 
@@ -1117,7 +1159,10 @@ async function gradeStudentEntries(
   studentSubmissions: StudentSubmissionEntry[],
   assignmentInstructions: string,
   rubric: string,
-  provider: LlmProvider
+  provider: LlmProvider,
+  // Canvas points_possible, when grading from a Canvas URL — anchors each
+  // student's total to the assignment's real scale. Null for zip uploads.
+  pointsPossible: number | null = null
 ): Promise<GradingRun> {
   const maxSubmissions = getGeminiMaxSubmissions();
   const maxCharsPerSubmission = getGeminiMaxCharsPerSubmission();
@@ -1138,7 +1183,14 @@ async function gradeStudentEntries(
       .map((f) => ({ name: f.name, base64: f.rawBase64!, mimeType: f.mimeType! }));
 
     try {
-      const result = await gradeSubmission(systemPrompt, student, truncated, provider, imageFiles);
+      const result = await gradeSubmission(
+        systemPrompt,
+        student,
+        truncated,
+        provider,
+        imageFiles,
+        pointsPossible
+      );
       results.push({ ...result, mergedFileCount, submittedFiles, userId });
     } catch (error) {
       const message =
@@ -1276,7 +1328,10 @@ export async function gradeCanvasUrl(
   rubric: string,
   provider: LlmProvider = "gemini"
 ): Promise<GradingRun> {
-  const { students } = await fetchCanvasWork(url);
+  const [{ students }, pointsPossible] = await Promise.all([
+    fetchCanvasWork(url),
+    fetchAssignmentPointsPossible(url),
+  ]);
 
   if (students.length === 0) {
     return { results: [], rubricAreaNames: [], fullCreditChecklist: [] };
@@ -1287,5 +1342,5 @@ export async function gradeCanvasUrl(
     entries.push(await canvasWorkToEntry(work));
   }
 
-  return gradeStudentEntries(entries, assignmentInstructions, rubric, provider);
+  return gradeStudentEntries(entries, assignmentInstructions, rubric, provider, pointsPossible);
 }

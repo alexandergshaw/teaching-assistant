@@ -428,6 +428,7 @@ function earnedPoints(score: string): string {
 interface CanvasAssignmentObject {
   description?: string | null;
   rubric?: CanvasRubricCriterion[];
+  points_possible?: number | null;
 }
 
 interface CanvasDiscussionTopicObject {
@@ -546,6 +547,49 @@ async function fetchCanvasMetaWith(
   }
 
   return { description, rubricText };
+}
+
+/**
+ * Fetch the assignment's points_possible for a Canvas URL (resolving a graded
+ * discussion to its linked assignment). Returns null when unknown or the item is
+ * not points-graded. Used to anchor auto-grade totals to the scale Canvas shows,
+ * so the tool never grades out of a different total than the gradebook.
+ */
+export async function fetchAssignmentPointsPossible(url: string): Promise<number | null> {
+  const parsed = parseCanvasUrl(url);
+  if (!parsed) return null;
+
+  const { institution, token, baseUrl } = resolveInstitution(url);
+
+  try {
+    let assignmentId = parsed.kind === "assignment" ? parsed.id : "";
+
+    if (parsed.kind === "discussion") {
+      const response = await fetch(
+        `${baseUrl}/api/v1/courses/${parsed.courseId}/discussion_topics/${parsed.id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!response.ok) return null;
+      const topic = (await response.json()) as CanvasDiscussionTopicObject;
+      if (typeof topic.assignment?.points_possible === "number") {
+        return topic.assignment.points_possible;
+      }
+      if (!topic.assignment_id) return null;
+      assignmentId = String(topic.assignment_id);
+    }
+
+    const assignment = await fetchAssignmentObject(
+      baseUrl,
+      token,
+      institution,
+      parsed.courseId,
+      assignmentId
+    );
+    return typeof assignment.points_possible === "number" ? assignment.points_possible : null;
+  } catch {
+    // Points are best-effort; fall back to the rubric-derived total when unknown.
+    return null;
+  }
 }
 
 // ── Grading queue (Live Feed) ───────────────────────────────────────────────

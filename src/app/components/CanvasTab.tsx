@@ -64,6 +64,13 @@ function formatWhen(iso: string | null): string {
   });
 }
 
+// Format a Date as the local wall-clock value a datetime-local input expects
+// ("YYYY-MM-DDTHH:mm"). Used for the scheduled-announcement field's min/value.
+function toDatetimeLocalValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // Up to two initials from a display name, for inbox avatars.
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -99,6 +106,8 @@ function AnnouncementsPanel() {
   const [drafting, setDrafting] = useState(false);
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
+  // Optional scheduled visibility (datetime-local string); blank = post now.
+  const [visibleAt, setVisibleAt] = useState("");
   const [posting, setPosting] = useState(false);
   const [postNote, setPostNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [lastPosted, setLastPosted] = useState<CanvasAnnouncement | null>(null);
@@ -205,26 +214,54 @@ function AnnouncementsPanel() {
 
   const handlePost = async () => {
     if (!courseId || !title.trim() || !message.trim()) return;
+
+    // A future visibility time schedules the announcement; a blank or past time
+    // posts immediately.
+    let delayedPostAt: string | undefined;
+    let scheduledLabel = "";
+    if (visibleAt) {
+      const when = new Date(visibleAt);
+      if (Number.isNaN(when.getTime())) {
+        setPostNote({ kind: "error", text: "Enter a valid date and time for when students can see this." });
+        return;
+      }
+      if (when.getTime() > Date.now()) {
+        delayedPostAt = when.toISOString();
+        scheduledLabel = when.toLocaleString();
+      }
+    }
+
     setPosting(true);
     setPostNote(null);
     const result = await createAnnouncementAction(
       courseUrl.trim(),
       title.trim(),
       message.trim(),
-      activeInstitution || undefined
+      activeInstitution || undefined,
+      delayedPostAt
     );
     setPosting(false);
     if ("error" in result) {
       setPostNote({ kind: "error", text: result.error });
       return;
     }
-    setPostNote({ kind: "success", text: "Announcement posted to Canvas." });
+    setPostNote({
+      kind: "success",
+      text: scheduledLabel
+        ? `Announcement scheduled. Students will see it ${scheduledLabel}.`
+        : "Announcement posted to Canvas.",
+    });
     setLastPosted(result.announcement);
     setTitle("");
     setMessage("");
+    setVisibleAt("");
     setDraftPrompt("");
     setAnnouncements((prev) => [result.announcement, ...prev]);
   };
+
+  // Any chosen visibility time means "schedule" for the button label; the input's
+  // min blocks past times, and handlePost re-checks against the actual clock.
+  const willSchedule = visibleAt.trim().length > 0;
 
   return (
     <div className={styles.form}>
@@ -407,6 +444,29 @@ function AnnouncementsPanel() {
         />
       </div>
 
+      <div className={styles.field}>
+        <label htmlFor="canvas-ann-visible">Visible to students (optional)</label>
+        <input
+          id="canvas-ann-visible"
+          type="datetime-local"
+          className={styles.textInput}
+          value={visibleAt}
+          min={toDatetimeLocalValue(new Date())}
+          onChange={(e) => setVisibleAt(e.target.value)}
+        />
+        <p className={styles.fieldHint}>
+          Leave blank to post immediately. Pick a future date and time to schedule when students can see it.
+          {visibleAt && (
+            <>
+              {" "}
+              <button type="button" className={styles.clearFileButton} onClick={() => setVisibleAt("")}>
+                Clear
+              </button>
+            </>
+          )}
+        </p>
+      </div>
+
       {(title.trim() || message.trim()) && (
         <div className={styles.field}>
           <label>Preview</label>
@@ -423,7 +483,13 @@ function AnnouncementsPanel() {
         onClick={handlePost}
         disabled={posting || !courseId || !title.trim() || !message.trim()}
       >
-        {posting ? "Posting…" : "Post announcement"}
+        {posting
+          ? willSchedule
+            ? "Scheduling…"
+            : "Posting…"
+          : willSchedule
+            ? "Schedule announcement"
+            : "Post announcement"}
       </button>
 
       {postNote && (
@@ -461,7 +527,16 @@ function AnnouncementsPanel() {
                 )}
               </div>
               <p className={styles.fieldHint}>
-                {[a.author, formatWhen(a.postedAt)].filter(Boolean).join(" · ")}
+                {[
+                  a.author,
+                  a.postedAt
+                    ? formatWhen(a.postedAt)
+                    : a.delayedPostAt
+                      ? `Scheduled for ${formatWhen(a.delayedPostAt)}`
+                      : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </p>
               {a.message && <p className={styles.syllabusSectionContent}>{a.message}</p>}
             </div>

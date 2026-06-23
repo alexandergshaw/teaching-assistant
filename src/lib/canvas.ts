@@ -950,6 +950,9 @@ export interface CanvasAnnouncement {
   title: string;
   message: string;
   postedAt: string | null;
+  // When set and in the future, the announcement is scheduled: students cannot
+  // see it until this time (Canvas delayed_post_at). Null for immediate posts.
+  delayedPostAt: string | null;
   author: string;
   htmlUrl: string;
 }
@@ -959,6 +962,7 @@ interface CanvasDiscussionTopicListItem {
   title?: string;
   message?: string | null;
   posted_at?: string | null;
+  delayed_post_at?: string | null;
   html_url?: string;
   author?: { display_name?: string } | null;
   user_name?: string;
@@ -975,6 +979,7 @@ function toAnnouncement(
       ? htmlToText(topic.message)
       : (fallback?.message ?? "").trim(),
     postedAt: topic.posted_at ?? null,
+    delayedPostAt: topic.delayed_post_at ?? null,
     author: topic.author?.display_name?.trim() || topic.user_name?.trim() || "",
     htmlUrl: topic.html_url ?? "",
   };
@@ -1035,12 +1040,17 @@ export async function listAnnouncements(
     .sort((a, b) => (b.postedAt ?? "").localeCompare(a.postedAt ?? ""));
 }
 
-/** Post a new announcement to the course. Returns the created announcement. */
+/**
+ * Post a new announcement to the course. When `delayedPostAt` is set to a future
+ * time, Canvas schedules it: students cannot see it until then. Returns the
+ * created announcement.
+ */
 export async function createAnnouncement(
   courseUrl: string,
   title: string,
   message: string,
-  code?: string
+  code?: string,
+  delayedPostAt?: string | null
 ): Promise<CanvasAnnouncement> {
   if (!title.trim()) throw new Error("An announcement needs a title.");
   if (!message.trim()) throw new Error("An announcement needs a message.");
@@ -1050,6 +1060,14 @@ export async function createAnnouncement(
   params.append("title", title.trim());
   params.append("message", textToHtml(message.trim()));
   params.append("is_announcement", "true");
+  if (delayedPostAt && delayedPostAt.trim()) {
+    const when = new Date(delayedPostAt.trim());
+    if (Number.isNaN(when.getTime())) {
+      throw new Error("Could not read the scheduled visibility time.");
+    }
+    // Canvas hides the announcement from students until this time (ISO 8601).
+    params.append("delayed_post_at", when.toISOString());
+  }
 
   const response = await fetch(
     `${baseUrl}/api/v1/courses/${courseId}/discussion_topics`,

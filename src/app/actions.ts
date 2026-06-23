@@ -1220,11 +1220,13 @@ export async function createAnnouncementAction(
   courseUrl: string,
   title: string,
   message: string,
-  acronym?: string
+  acronym?: string,
+  // ISO 8601 time to schedule visibility; omit/empty to post immediately.
+  delayedPostAt?: string
 ): Promise<{ announcement: CanvasAnnouncement } | { error: string }> {
   try {
     await requireOwner();
-    const announcement = await createAnnouncement(courseUrl, title, message, acronym);
+    const announcement = await createAnnouncement(courseUrl, title, message, acronym, delayedPostAt);
     return { announcement };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post the announcement." };

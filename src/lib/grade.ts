@@ -772,7 +772,7 @@ function deriveTotalScore(
  * the same factor; otherwise leave the result untouched (e.g. the zip-upload
  * path, where there is no Canvas total to match).
  */
-function scaleResultToPoints(
+export function scaleResultToPoints(
   rubricAreas: RubricAreaResult[],
   totalScore: string,
   pointsPossible: number | null | undefined

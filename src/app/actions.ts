@@ -6,6 +6,7 @@ import {
   synthesizeFullCreditChecklist,
   extractSubmissions,
   generateRubric,
+  scaleResultToPoints,
   type GradingRun,
 } from "@/lib/grade";
 import { extractTextFromBuffer } from "@/lib/office-extract";
@@ -13,6 +14,7 @@ import {
   fetchCanvasWork,
   canvasWorkToZipBase64,
   fetchCanvasMeta,
+  fetchAssignmentPointsPossible,
   postCanvasGrades,
   getCourseName,
   listAnnouncements,
@@ -1110,24 +1112,33 @@ export interface GradeActionState {
 // existing results matrix in GradingTab renders it unchanged. The grader returns
 // no per-student files and no full-credit checklist, so those degrade to "-" /
 // hidden in the UI.
-function gradingApiToRun(resp: GradingApiResponse): GradingRun {
+//
+// When grading from a Canvas URL, pointsPossible re-bases the engine's rubric
+// total onto the assignment's real scale (same anchoring as the AI path), so the
+// tool never grades out of a different total than Canvas.
+function gradingApiToRun(
+  resp: GradingApiResponse,
+  pointsPossible: number | null = null
+): GradingRun {
   return {
     rubricAreaNames: resp.criteria,
     fullCreditChecklist: [],
     results: resp.students.map((s) => {
       const passedCount = s.criteria.filter((c) => c.passed).length;
+      const rawAreas = s.criteria.map((c) => ({
+        area: c.criterion,
+        score: `${c.points_earned}/${c.points_possible}`,
+        comment: c.detail,
+      }));
+      const scaled = scaleResultToPoints(rawAreas, `${s.total}/${s.possible}`, pointsPossible);
       return {
         student: s.student,
-        totalScore: `${s.total}/${s.possible}`,
+        totalScore: scaled.totalScore,
         overallComment: `${passedCount}/${s.criteria.length} checks passed`,
         feedback: "",
         mergedFileCount: 0,
         submittedFiles: [],
-        rubricAreas: s.criteria.map((c) => ({
-          area: c.criterion,
-          score: `${c.points_earned}/${c.points_possible}`,
-          comment: c.detail,
-        })),
+        rubricAreas: scaled.rubricAreas,
       };
     }),
   };
@@ -1691,7 +1702,9 @@ async function gradeZipViaEngine(
   zipBase64: string,
   rubric: string,
   rubricFile: File | null,
-  institutionCode?: string
+  institutionCode?: string,
+  // Canvas points_possible when grading from a Canvas URL; null for zip uploads.
+  pointsPossible: number | null = null
 ): Promise<GradeActionState> {
   let rubricText = "";
   let rubricName: string | undefined;
@@ -1719,7 +1732,7 @@ async function gradeZipViaEngine(
       ? [`Excluded (unmapped): ${resp.unmapped_criteria.join(", ")}`]
       : []),
   ];
-  return { run: gradingApiToRun(resp), error: null, warnings };
+  return { run: gradingApiToRun(resp, pointsPossible), error: null, warnings };
 }
 
 export async function gradeAction(
@@ -1745,9 +1758,12 @@ export async function gradeAction(
     // deterministic grader gets a synthesized zip; Gemini grades the text/files.
     if (canvasUrl) {
       if (provider === "other") {
-        const { students } = await fetchCanvasWork(canvasUrl);
+        const [{ students }, pointsPossible] = await Promise.all([
+          fetchCanvasWork(canvasUrl),
+          fetchAssignmentPointsPossible(canvasUrl),
+        ]);
         const zipBase64 = await canvasWorkToZipBase64(students);
-        return gradeZipViaEngine(zipBase64, rubric, rubricFile, institution);
+        return gradeZipViaEngine(zipBase64, rubric, rubricFile, institution, pointsPossible);
       }
 
       if (!assignmentInstructions.trim()) {

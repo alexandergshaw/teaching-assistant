@@ -73,6 +73,20 @@ export interface CanvasPage {
   updatedAt: string | null;
 }
 
+/** A piece of course content that can be added to a module, keyed by content id. */
+export interface CanvasContentItem {
+  id: number;
+  title: string;
+}
+
+/** The content types (besides pages) that can be added as module items. */
+export interface CanvasAddableContent {
+  assignments: CanvasContentItem[];
+  quizzes: CanvasContentItem[];
+  discussions: CanvasContentItem[];
+  files: CanvasContentItem[];
+}
+
 // ── Raw Canvas response shapes ────────────────────────────────────────────────
 
 interface RawModule {
@@ -135,6 +149,20 @@ async function fetchAll<T>(
     next = parseNextLink(response.headers.get("link"));
   }
   return all;
+}
+
+/**
+ * Like fetchAll but returns an empty list instead of throwing — used for the
+ * "addable content" pickers, where a course may have a feature disabled (e.g.
+ * quizzes) or the token may lack access to one content type. A failure for one
+ * type should not blank out the others.
+ */
+async function safeFetchAll<T>(startUrl: string, ctx: CourseContext): Promise<T[]> {
+  try {
+    return await fetchAll<T>(startUrl, ctx);
+  } catch {
+    return [];
+  }
 }
 
 /** Issue a write (POST/PUT/DELETE) with a form body, returning the parsed JSON. */
@@ -484,4 +512,64 @@ export async function deletePage(
     "DELETE",
     ctx
   );
+}
+
+// ── Addable content (for the module-item picker) ──────────────────────────────
+
+interface RawAssignment {
+  id?: number;
+  name?: string;
+}
+
+interface RawQuiz {
+  id?: number;
+  title?: string;
+}
+
+interface RawDiscussionTopic {
+  id?: number;
+  title?: string;
+  is_announcement?: boolean;
+}
+
+interface RawFile {
+  id?: number;
+  display_name?: string;
+  filename?: string;
+}
+
+/**
+ * List the assignments, quizzes, discussions, and files a module item can point
+ * at, so the picker can offer them by name. Pages are listed separately
+ * (listPages) because module items reference them by slug, not content id. Each
+ * list is best-effort: a type the course/token can't read comes back empty
+ * rather than failing the whole call.
+ */
+export async function listAddableContent(
+  courseUrl: string,
+  code?: string
+): Promise<CanvasAddableContent> {
+  const ctx = resolveCourse(courseUrl, code);
+  const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
+  const [assignments, quizzes, discussions, files] = await Promise.all([
+    safeFetchAll<RawAssignment>(`${base}/assignments?per_page=100`, ctx),
+    safeFetchAll<RawQuiz>(`${base}/quizzes?per_page=100`, ctx),
+    safeFetchAll<RawDiscussionTopic>(`${base}/discussion_topics?per_page=100`, ctx),
+    safeFetchAll<RawFile>(`${base}/files?per_page=100`, ctx),
+  ]);
+  return {
+    assignments: assignments
+      .filter((a) => typeof a.id === "number")
+      .map((a) => ({ id: a.id!, title: (a.name ?? "").trim() || `Assignment ${a.id}` })),
+    quizzes: quizzes
+      .filter((q) => typeof q.id === "number")
+      .map((q) => ({ id: q.id!, title: (q.title ?? "").trim() || `Quiz ${q.id}` })),
+    // /discussion_topics returns announcements too; keep only real discussions.
+    discussions: discussions
+      .filter((d) => typeof d.id === "number" && !d.is_announcement)
+      .map((d) => ({ id: d.id!, title: (d.title ?? "").trim() || `Discussion ${d.id}` })),
+    files: files
+      .filter((f) => typeof f.id === "number")
+      .map((f) => ({ id: f.id!, title: (f.display_name ?? f.filename ?? "").trim() || `File ${f.id}` })),
+  };
 }

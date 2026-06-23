@@ -13,11 +13,18 @@ import {
   createModuleItemAction,
   updateModuleItemAction,
   deleteModuleItemAction,
+  listAddableContentAction,
   revisePageWithAiAction,
 } from "../actions";
 import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
-import type { CanvasModule, CanvasModuleItem, CanvasPageSummary } from "@/lib/canvas-modules";
+import type {
+  CanvasModule,
+  CanvasModuleItem,
+  CanvasPageSummary,
+  CanvasAddableContent,
+  NewModuleItem,
+} from "@/lib/canvas-modules";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
@@ -353,6 +360,9 @@ function ModulesView({
   acronym,
   modules,
   pages,
+  targets,
+  targetsState,
+  ensureTargets,
   busy,
   expanded,
   onToggleExpand,
@@ -366,6 +376,9 @@ function ModulesView({
   acronym?: string;
   modules: CanvasModule[];
   pages: CanvasPageSummary[];
+  targets: CanvasAddableContent | null;
+  targetsState: "idle" | "loading" | "error";
+  ensureTargets: () => void;
   busy: boolean;
   expanded: Set<number>;
   onToggleExpand: (id: number) => void;
@@ -378,9 +391,12 @@ function ModulesView({
   const [newModuleName, setNewModuleName] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [confirmId, setConfirmId] = useState<string | null>(null);
-  // Per-module "add page" selection and "add header" text.
-  const [addPageSel, setAddPageSel] = useState<Record<number, string>>({});
-  const [addHeader, setAddHeader] = useState<Record<number, string>>({});
+  // Per-module "add item" controls: chosen type, the selected content (page slug
+  // or content id), and the external-url / header-text inputs.
+  const [addType, setAddType] = useState<Record<number, string>>({});
+  const [addValue, setAddValue] = useState<Record<number, string>>({});
+  const [addUrl, setAddUrl] = useState<Record<number, string>>({});
+  const [addTitle, setAddTitle] = useState<Record<number, string>>({});
 
   const patchModule = (id: number, patch: Partial<CanvasModule>) =>
     setModules((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
@@ -515,25 +531,57 @@ function ModulesView({
     );
   };
 
-  const addPage = async (m: CanvasModule) => {
-    const pageUrl = addPageSel[m.id];
-    if (!pageUrl) return;
-    setAddPageSel((prev) => ({ ...prev, [m.id]: "" }));
-    await run(
-      () => createModuleItemAction(courseUrl, m.id, { type: "Page", pageUrl }, acronym),
-      "Could not add the page."
-    );
-    reload();
+  // Item types whose target is picked from a dropdown of existing course content.
+  const CONTENT_TYPES = ["Page", "Assignment", "Quiz", "Discussion", "File"];
+  // Of those, the ones sourced from the lazily-loaded addable content.
+  const TARGET_TYPES = ["Assignment", "Quiz", "Discussion", "File"];
+
+  const optionsFor = (type: string): Array<{ value: string; label: string }> => {
+    if (type === "Page") return pages.map((p) => ({ value: p.url, label: p.title }));
+    if (!targets) return [];
+    if (type === "Assignment") return targets.assignments.map((a) => ({ value: String(a.id), label: a.title }));
+    if (type === "Quiz") return targets.quizzes.map((q) => ({ value: String(q.id), label: q.title }));
+    if (type === "Discussion") return targets.discussions.map((d) => ({ value: String(d.id), label: d.title }));
+    if (type === "File") return targets.files.map((f) => ({ value: String(f.id), label: f.title }));
+    return [];
   };
 
-  const addHeaderItem = async (m: CanvasModule) => {
-    const title = (addHeader[m.id] ?? "").trim();
-    if (!title) return;
-    setAddHeader((prev) => ({ ...prev, [m.id]: "" }));
-    await run(
-      () => createModuleItemAction(courseUrl, m.id, { type: "SubHeader", title }, acronym),
-      "Could not add the header."
-    );
+  const contentPlaceholder = (type: string): string => {
+    if (TARGET_TYPES.includes(type) && targetsState === "loading") return "Loading…";
+    if (TARGET_TYPES.includes(type) && targetsState === "error") return "Could not load";
+    return optionsFor(type).length === 0 ? `No ${type.toLowerCase()}s to add` : `Choose a ${type.toLowerCase()}…`;
+  };
+
+  const canAdd = (m: CanvasModule): boolean => {
+    const type = addType[m.id] ?? "Page";
+    if (type === "ExternalUrl") return !!(addUrl[m.id] ?? "").trim();
+    if (type === "SubHeader") return !!(addTitle[m.id] ?? "").trim();
+    return !!addValue[m.id];
+  };
+
+  const addItem = async (m: CanvasModule) => {
+    const type = addType[m.id] ?? "Page";
+    let item: NewModuleItem | null = null;
+    if (type === "Page") {
+      const pageUrl = addValue[m.id];
+      if (pageUrl) item = { type: "Page", pageUrl };
+    } else if (type === "ExternalUrl") {
+      const externalUrl = (addUrl[m.id] ?? "").trim();
+      const title = (addTitle[m.id] ?? "").trim();
+      if (externalUrl) item = { type: "ExternalUrl", externalUrl, title: title || externalUrl };
+    } else if (type === "SubHeader") {
+      const title = (addTitle[m.id] ?? "").trim();
+      if (title) item = { type: "SubHeader", title };
+    } else {
+      const id = addValue[m.id];
+      if (id) item = { type, contentId: Number(id) };
+    }
+    if (!item) return;
+    const newItem = item;
+    setAddValue((p) => ({ ...p, [m.id]: "" }));
+    setAddUrl((p) => ({ ...p, [m.id]: "" }));
+    setAddTitle((p) => ({ ...p, [m.id]: "" }));
+    await run(() => createModuleItemAction(courseUrl, m.id, newItem, acronym), "Could not add the item.");
     reload();
   };
 
@@ -710,48 +758,94 @@ function ModulesView({
                     display: "flex",
                     gap: 8,
                     flexWrap: "wrap",
+                    alignItems: "center",
                     marginTop: 8,
                     paddingTop: 8,
                     borderTop: "1px solid var(--field-border)",
                   }}
                 >
+                  <span className={styles.fieldHint} style={{ margin: 0 }}>
+                    Add item:
+                  </span>
                   <select
                     className={styles.textInput}
-                    style={{ flex: "1 1 200px", maxWidth: 280 }}
-                    value={addPageSel[m.id] ?? ""}
-                    onChange={(e) => setAddPageSel((p) => ({ ...p, [m.id]: e.target.value }))}
-                    disabled={busy || pages.length === 0}
+                    style={{ maxWidth: 150 }}
+                    value={addType[m.id] ?? "Page"}
+                    onChange={(e) => {
+                      const t = e.target.value;
+                      setAddType((p) => ({ ...p, [m.id]: t }));
+                      setAddValue((p) => ({ ...p, [m.id]: "" }));
+                      if (TARGET_TYPES.includes(t)) ensureTargets();
+                    }}
+                    disabled={busy}
+                    aria-label="Item type"
                   >
-                    <option value="">{pages.length === 0 ? "No pages to add" : "Add a page…"}</option>
-                    {pages.map((p) => (
-                      <option key={p.url} value={p.url}>
-                        {p.title}
-                      </option>
-                    ))}
+                    <option value="Page">Page</option>
+                    <option value="Assignment">Assignment</option>
+                    <option value="Quiz">Quiz</option>
+                    <option value="Discussion">Discussion</option>
+                    <option value="File">File</option>
+                    <option value="ExternalUrl">External URL</option>
+                    <option value="SubHeader">Text header</option>
                   </select>
+
+                  {CONTENT_TYPES.includes(addType[m.id] ?? "Page") && (
+                    <select
+                      className={styles.textInput}
+                      style={{ flex: "1 1 200px", maxWidth: 320 }}
+                      value={addValue[m.id] ?? ""}
+                      onChange={(e) => setAddValue((p) => ({ ...p, [m.id]: e.target.value }))}
+                      disabled={busy || optionsFor(addType[m.id] ?? "Page").length === 0}
+                      aria-label="Content to add"
+                    >
+                      <option value="">{contentPlaceholder(addType[m.id] ?? "Page")}</option>
+                      {optionsFor(addType[m.id] ?? "Page").map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  {addType[m.id] === "ExternalUrl" && (
+                    <>
+                      <input
+                        type="url"
+                        className={styles.textInput}
+                        style={{ flex: "1 1 200px", maxWidth: 280 }}
+                        placeholder="https://example.com"
+                        value={addUrl[m.id] ?? ""}
+                        onChange={(e) => setAddUrl((p) => ({ ...p, [m.id]: e.target.value }))}
+                      />
+                      <input
+                        type="text"
+                        className={styles.textInput}
+                        style={{ flex: "1 1 140px", maxWidth: 200 }}
+                        placeholder="Link text (optional)"
+                        value={addTitle[m.id] ?? ""}
+                        onChange={(e) => setAddTitle((p) => ({ ...p, [m.id]: e.target.value }))}
+                      />
+                    </>
+                  )}
+
+                  {addType[m.id] === "SubHeader" && (
+                    <input
+                      type="text"
+                      className={styles.textInput}
+                      style={{ flex: "1 1 200px", maxWidth: 280 }}
+                      placeholder="Header text"
+                      value={addTitle[m.id] ?? ""}
+                      onChange={(e) => setAddTitle((p) => ({ ...p, [m.id]: e.target.value }))}
+                    />
+                  )}
+
                   <button
                     type="button"
                     className={styles.downloadButton}
-                    onClick={() => void addPage(m)}
-                    disabled={busy || !addPageSel[m.id]}
+                    onClick={() => void addItem(m)}
+                    disabled={busy || !canAdd(m)}
                   >
-                    Add page
-                  </button>
-                  <input
-                    type="text"
-                    className={styles.textInput}
-                    style={{ flex: "1 1 160px", maxWidth: 220 }}
-                    placeholder="Text header…"
-                    value={addHeader[m.id] ?? ""}
-                    onChange={(e) => setAddHeader((p) => ({ ...p, [m.id]: e.target.value }))}
-                  />
-                  <button
-                    type="button"
-                    className={styles.downloadButton}
-                    onClick={() => void addHeaderItem(m)}
-                    disabled={busy || !(addHeader[m.id] ?? "").trim()}
-                  >
-                    Add header
+                    Add
                   </button>
                 </div>
               </div>
@@ -820,6 +914,10 @@ export default function ContentTab() {
   const [courseName, setCourseName] = useState("");
   const [modules, setModules] = useState<CanvasModule[]>([]);
   const [pages, setPages] = useState<CanvasPageSummary[]>([]);
+  // Addable content (assignments/quizzes/discussions/files) for the item picker,
+  // loaded lazily the first time the user adds a non-page item.
+  const [targets, setTargets] = useState<CanvasAddableContent | null>(null);
+  const [targetsState, setTargetsState] = useState<"idle" | "loading" | "error">("idle");
   const [loadState, setLoadState] = useState<LoadState>(() => {
     if (typeof window === "undefined") return { status: "idle", message: "" };
     const url = localStorage.getItem(CONTENT_URL_KEY) ?? "";
@@ -846,6 +944,8 @@ export default function ContentTab() {
     setPrevInstitution(activeInstitution);
     setModules([]);
     setPages([]);
+    setTargets(null);
+    setTargetsState("idle");
     setCourseName("");
     setCourseUrl("");
     setExpanded(new Set());
@@ -860,6 +960,9 @@ export default function ContentTab() {
     if (typeof window !== "undefined") localStorage.setItem(CONTENT_URL_KEY, url);
     setLoadState({ status: "loading", message: "" });
     setNote(null);
+    // Addable content belongs to this course; clear it so it reloads on demand.
+    setTargets(null);
+    setTargetsState("idle");
     const result = await listCourseContentAction(url, activeInstitution || undefined);
     if ("error" in result) {
       setModules([]);
@@ -906,6 +1009,20 @@ export default function ContentTab() {
 
   const reload = () => {
     if (courseUrl) void loadContent(courseUrl);
+  };
+
+  // Lazily fetch the assignments/quizzes/discussions/files for the item picker
+  // the first time they're needed (or after a failed attempt is retried).
+  const ensureTargets = async () => {
+    if (targets || targetsState === "loading") return;
+    setTargetsState("loading");
+    const result = await listAddableContentAction(courseUrl, activeInstitution || undefined);
+    if ("error" in result) {
+      setTargetsState("error");
+      return;
+    }
+    setTargets(result.content);
+    setTargetsState("idle");
   };
 
   const toggleExpand = (id: number) =>
@@ -1002,6 +1119,9 @@ export default function ContentTab() {
               acronym={activeInstitution || undefined}
               modules={modules}
               pages={pages}
+              targets={targets}
+              targetsState={targetsState}
+              ensureTargets={() => void ensureTargets()}
               busy={busy}
               expanded={expanded}
               onToggleExpand={toggleExpand}

@@ -46,9 +46,11 @@ import {
   updatePage,
   createPage,
   deletePage,
+  listAddableContent,
   type CanvasModule,
   type CanvasPageSummary,
   type CanvasPage,
+  type CanvasAddableContent,
   type NewModuleItem,
 } from "@/lib/canvas-modules";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
@@ -1338,6 +1340,19 @@ export async function listCourseContentAction(
     return { courseName, modules, pages };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load course content." };
+  }
+}
+
+/** List the assignments/quizzes/discussions/files that can be added as items. */
+export async function listAddableContentAction(
+  courseUrl: string,
+  acronym?: string
+): Promise<{ content: CanvasAddableContent } | { error: string }> {
+  try {
+    await requireOwner();
+    return { content: await listAddableContent(courseUrl, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load course content options." };
   }
 }
 

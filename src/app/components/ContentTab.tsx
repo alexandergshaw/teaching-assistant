@@ -2487,6 +2487,11 @@ function ModulesView({
   reload,
   setNote,
   setBusy,
+  courseName,
+  onExport,
+  onImport,
+  refreshing,
+  canCopy,
 }: {
   courseUrl: string;
   acronym?: string;
@@ -2503,6 +2508,12 @@ function ModulesView({
   reload: () => void;
   setNote: (n: { kind: "success" | "error"; text: string } | null) => void;
   setBusy: (b: boolean) => void;
+  /** Course title + copy/import/refresh controls hosted in the sticky header. */
+  courseName?: string;
+  onExport: () => void;
+  onImport: () => void;
+  refreshing: boolean;
+  canCopy: boolean;
 }) {
   const [newModuleName, setNewModuleName] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -3938,13 +3949,48 @@ function ModulesView({
 
   return (
     <div className={styles.form}>
-      <input
-        type="search"
-        className={styles.textInput}
-        placeholder="Search modules and their items by name…"
-        value={moduleSearch}
-        onChange={(e) => setModuleSearch(e.target.value)}
-      />
+      <div className={styles.ccStickyHeader}>
+        <div className={styles.ccHeaderTop}>
+          <h2 className={styles.ccCourseTitle}>{courseName || "Course content"}</h2>
+          <div className={styles.ccBarGroup}>
+            <span className={styles.ccBarLabel}>Course copy</span>
+            <button
+              type="button"
+              className={styles.ccBarBtn}
+              onClick={onExport}
+              disabled={!canCopy}
+              title="Copy this course's content into other courses"
+            >
+              Copy to…
+            </button>
+            <button
+              type="button"
+              className={styles.ccBarBtn}
+              onClick={onImport}
+              disabled={!canCopy}
+              title="Import another course's content into this one"
+            >
+              Import from…
+            </button>
+            <span className={styles.ccBarDivider} aria-hidden="true" />
+            <button
+              type="button"
+              className={styles.ccBarBtn}
+              onClick={reload}
+              disabled={busy || refreshing}
+              title="Reload this course's content"
+            >
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+        </div>
+        <input
+          type="search"
+          className={styles.textInput}
+          placeholder="Search modules and their items by name…"
+          value={moduleSearch}
+          onChange={(e) => setModuleSearch(e.target.value)}
+        />
       <div className={styles.ccBar}>
         <div className={styles.ccBarGroup}>
           <span className={styles.ccBarLabel}>Select</span>
@@ -4457,6 +4503,7 @@ function ModulesView({
           )}
         </div>
       )}
+      </div>
 
       <div className={styles.field}>
         <label htmlFor="content-new-module">Add a module</label>
@@ -6679,19 +6726,13 @@ export default function ContentTab({
             <CoursePicker
               activeInstitution={activeInstitution}
               courseUrl={courseUrl}
-              onCourseUrlChange={(url) => {
-                setCourseUrl(url);
-                setLoadState({ status: "idle", message: "" });
-              }}
               onSelect={handleSelectCourse}
-              loading={loadState.status === "loading"}
-              loadLabel="Load content"
               loadError={loadState.status === "error" ? loadState.message : null}
               courseName={courseName}
             />
           )}
 
-          {courseTab && loaded && (
+          {courseTab && view !== "modules" && loaded && (
             <div className={styles.resultsHeader}>
               <h2>{courseName || "Course content"}</h2>
               <div className={styles.ccBar} style={{ padding: 0 }}>
@@ -6784,6 +6825,11 @@ export default function ContentTab({
               reload={reload}
               setNote={setNote}
               setBusy={setBusy}
+              courseName={courseName}
+              onExport={() => setCopyMode("export")}
+              onImport={() => setCopyMode("import")}
+              refreshing={loadState.status === "loading"}
+              canCopy={!!courseId}
             />
           ) : view === "pages" ? (
             <PagesView pages={pages} onNewPage={() => openEditor(null)} onEditPage={(pageUrl) => openEditor(pageUrl)} />

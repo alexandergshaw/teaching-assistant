@@ -211,13 +211,7 @@ function AnnouncementsPanel() {
       <CoursePicker
         activeInstitution={activeInstitution}
         courseUrl={courseUrl}
-        onCourseUrlChange={(url) => {
-          setCourseUrl(url);
-          setLoadState({ status: "idle", message: "" });
-        }}
         onSelect={handleSelectCourse}
-        loading={loadState.status === "loading"}
-        loadLabel="Load announcements"
         loadError={loadState.status === "error" ? loadState.message : null}
         courseName={courseName}
       />

@@ -33,14 +33,8 @@ interface CoursePickerProps {
   activeInstitution: string;
   /** Current course URL (controlled by the parent). */
   courseUrl: string;
-  /** The user typed in the paste-URL fallback. */
-  onCourseUrlChange: (url: string) => void;
-  /** The user chose a course (dropdown, saved pill, or Load button). */
+  /** The user chose a course (dropdown or saved pill). */
   onSelect: (url: string) => void;
-  /** Parent's load is in progress (drives the Load button state). */
-  loading: boolean;
-  /** Label for the Load button, e.g. "Load content". */
-  loadLabel: string;
   /** Load error to surface under the picker. */
   loadError?: string | null;
   /** The loaded course's real name, used to keep a saved pill's label fresh. */
@@ -49,17 +43,14 @@ interface CoursePickerProps {
 
 /**
  * Course chooser shared by the Communications and Course Content tabs: a
- * dropdown of the institution's teacher courses, pinned-course pills (shared
- * across tabs via localStorage), and a paste-a-URL fallback. It only emits the
- * chosen course URL; the parent owns loading and what to do with it.
+ * dropdown of the institution's teacher courses and pinned-course pills (shared
+ * across tabs via localStorage). It only emits the chosen course URL; the parent
+ * owns loading and what to do with it.
  */
 export default function CoursePicker({
   activeInstitution,
   courseUrl,
-  onCourseUrlChange,
   onSelect,
-  loading,
-  loadLabel,
   loadError,
   courseName,
 }: CoursePickerProps) {
@@ -139,66 +130,44 @@ export default function CoursePicker({
     <>
       <div className={styles.field}>
         <label htmlFor="course-picker">Course</label>
-        <select
-          id="course-picker"
-          className={styles.textInput}
-          value={courseId ?? ""}
-          disabled={coursesState === "loading" || courses.length === 0}
-          onChange={(e) => {
-            const id = e.target.value;
-            if (!id) return;
-            onSelect(`/courses/${id}`);
-          }}
-        >
-          <option value="">
-            {coursesState === "loading"
-              ? "Loading courses…"
-              : courses.length === 0
-                ? "No courses found"
-                : "Select a course…"}
-          </option>
-          {courses.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        {coursesState === "error" && (
-          <p className={styles.fieldHint}>
-            Could not list courses for this school; paste a course URL below instead.
-          </p>
-        )}
-
-        <details className={styles.generatedRubricCard} style={{ marginTop: 4 }}>
-          <summary>Or paste a course URL</summary>
-          <input
-            id="course-url"
-            type="url"
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <select
+            id="course-picker"
             className={styles.textInput}
-            style={{ marginTop: 10 }}
-            placeholder="Paste a course link (.../courses/123)"
-            value={courseUrl}
-            onChange={(e) => onCourseUrlChange(e.target.value)}
-          />
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={() => onSelect(courseUrl.trim())}
-              disabled={loading || !courseId}
-            >
-              {loading ? "Loading…" : loadLabel}
-            </button>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={saveCurrentCourse}
-              disabled={!courseId || isSaved}
-            >
-              {isSaved ? "Saved" : "Save course"}
-            </button>
-          </div>
-        </details>
+            style={{ flex: "1 1 260px" }}
+            value={courseId ?? ""}
+            disabled={coursesState === "loading" || courses.length === 0}
+            onChange={(e) => {
+              const id = e.target.value;
+              if (!id) return;
+              onSelect(`/courses/${id}`);
+            }}
+          >
+            <option value="">
+              {coursesState === "loading"
+                ? "Loading courses…"
+                : courses.length === 0
+                  ? "No courses found"
+                  : "Select a course…"}
+            </option>
+            {courses.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className={styles.downloadButton}
+            onClick={saveCurrentCourse}
+            disabled={!courseId || isSaved}
+          >
+            {isSaved ? "Saved" : "Save course"}
+          </button>
+        </div>
+        {coursesState === "error" && (
+          <p className={styles.fieldHint}>Could not list courses for this school.</p>
+        )}
         {loadError && <p className={styles.error}>{loadError}</p>}
       </div>
 

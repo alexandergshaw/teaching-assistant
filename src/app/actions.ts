@@ -59,6 +59,8 @@ import {
   updateGradable,
   createGradable,
   getFilePreview,
+  getOfficeEditable,
+  saveOfficeEdits,
   type CanvasModule,
   type CanvasPageSummary,
   type CanvasPage,
@@ -73,6 +75,7 @@ import {
   type GradableDetail,
   type FilePreview,
 } from "@/lib/canvas-modules";
+import type { OfficeKind, OfficeParagraph } from "@/lib/office-edit";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -1513,6 +1516,36 @@ export async function updateGradableAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the item." };
+  }
+}
+
+/** Load a docx/pptx file's editable paragraphs from a module File item. */
+export async function getOfficeEditableAction(
+  courseUrl: string,
+  fileId: number,
+  acronym?: string
+): Promise<{ name: string; kind: OfficeKind; paragraphs: OfficeParagraph[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return await getOfficeEditable(courseUrl, fileId, acronym);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not open the file for editing." };
+  }
+}
+
+/** Apply paragraph edits to a docx/pptx file and overwrite it in Canvas. */
+export async function saveOfficeEditsAction(
+  courseUrl: string,
+  fileId: number,
+  edits: Record<string, string>,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await saveOfficeEdits(courseUrl, fileId, edits, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the file to Canvas." };
   }
 }
 

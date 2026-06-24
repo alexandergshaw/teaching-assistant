@@ -20,6 +20,7 @@ import {
   type CanvasInstitution,
 } from "./canvas-core";
 import { extractTextFromBuffer } from "./office-extract";
+import { parseOfficeParagraphs, applyOfficeEdits, type OfficeKind, type OfficeParagraph } from "./office-edit";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1134,4 +1135,123 @@ export async function getFilePreview(
     truncated = true;
   }
   return { name, mimeType, base64: "", text, truncated };
+}
+
+// ── Editing Office files (.docx / .pptx) in place ─────────────────────────────
+
+interface CanvasFileMeta {
+  name: string;
+  filename: string;
+  url: string;
+  contentType: string;
+  folderId: number | null;
+  kind: OfficeKind | null;
+}
+
+/** Fetch a Canvas file's metadata + bytes, classifying it as docx/pptx if it is. */
+async function fetchCanvasFile(
+  ctx: { baseUrl: string; token: string; institution: CanvasInstitution },
+  fileId: number
+): Promise<{ meta: CanvasFileMeta; buffer: Buffer }> {
+  const metaResponse = await fetch(`${ctx.baseUrl}/api/v1/files/${fileId}`, {
+    headers: { Authorization: `Bearer ${ctx.token}` },
+  });
+  if (!metaResponse.ok) {
+    throw canvasError(metaResponse.status, ctx.institution);
+  }
+  const raw = (await metaResponse.json()) as {
+    display_name?: string;
+    filename?: string;
+    url?: string;
+    "content-type"?: string;
+    folder_id?: number | null;
+    size?: number;
+  };
+  const name = (raw.display_name ?? raw.filename ?? `File ${fileId}`).trim() || `File ${fileId}`;
+  const filename = (raw.filename ?? raw.display_name ?? name).trim();
+  const lower = (raw.filename ?? raw.display_name ?? "").toLowerCase();
+  const kind: OfficeKind | null = lower.endsWith(".docx") ? "docx" : lower.endsWith(".pptx") ? "pptx" : null;
+  if (!raw.url) throw new Error("Canvas did not return a download URL for this file.");
+  if (typeof raw.size === "number" && raw.size > PREVIEW_MAX_BYTES) {
+    throw new Error("This file is too large to edit here.");
+  }
+
+  const fileResponse = await fetch(raw.url, { headers: { Authorization: `Bearer ${ctx.token}` } });
+  if (!fileResponse.ok) {
+    throw canvasError(fileResponse.status, ctx.institution);
+  }
+  const buffer = Buffer.from(await fileResponse.arrayBuffer());
+  if (buffer.byteLength > PREVIEW_MAX_BYTES) {
+    throw new Error("This file is too large to edit here.");
+  }
+  return {
+    meta: { name, filename, url: raw.url, contentType: raw["content-type"] ?? "application/octet-stream", folderId: raw.folder_id ?? null, kind },
+    buffer,
+  };
+}
+
+/** Load a docx/pptx file's editable paragraphs. */
+export async function getOfficeEditable(
+  courseUrl: string,
+  fileId: number,
+  code?: string
+): Promise<{ name: string; kind: OfficeKind; paragraphs: OfficeParagraph[] }> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
+  if (!meta.kind) {
+    throw new Error("Only Word (.docx) and PowerPoint (.pptx) files can be edited here.");
+  }
+  const paragraphs = await parseOfficeParagraphs(meta.kind, buffer);
+  return { name: meta.name, kind: meta.kind, paragraphs };
+}
+
+/** Re-upload a file's bytes to its folder, overwriting the existing file by name. */
+async function overwriteCanvasFile(
+  ctx: { baseUrl: string; token: string; institution: CanvasInstitution; courseId: string },
+  meta: CanvasFileMeta,
+  buffer: Buffer
+): Promise<void> {
+  const params = new URLSearchParams();
+  params.append("name", meta.filename);
+  if (meta.folderId != null) params.append("parent_folder_id", String(meta.folderId));
+  params.append("content_type", meta.contentType);
+  params.append("on_duplicate", "overwrite");
+  params.append("size", String(buffer.byteLength));
+
+  const presign = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/files`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${ctx.token}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+  if (!presign.ok) {
+    throw canvasError(presign.status, ctx.institution);
+  }
+  const ticket = (await presign.json()) as { upload_url?: string; upload_params?: Record<string, string> };
+  if (!ticket.upload_url || !ticket.upload_params) {
+    throw new Error("Canvas did not return an upload URL.");
+  }
+
+  const form = new FormData();
+  for (const [key, value] of Object.entries(ticket.upload_params)) form.append(key, value);
+  form.append("file", new Blob([new Uint8Array(buffer)], { type: meta.contentType }), meta.filename);
+  const upload = await fetch(ticket.upload_url, { method: "POST", body: form });
+  if (!upload.ok) {
+    throw new Error(`Saving to Canvas failed (HTTP ${upload.status}).`);
+  }
+}
+
+/** Apply paragraph edits to a docx/pptx file and overwrite it in Canvas. */
+export async function saveOfficeEdits(
+  courseUrl: string,
+  fileId: number,
+  edits: Record<string, string>,
+  code?: string
+): Promise<void> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
+  if (!meta.kind) {
+    throw new Error("Only Word (.docx) and PowerPoint (.pptx) files can be edited here.");
+  }
+  const edited = await applyOfficeEdits(meta.kind, buffer, edits);
+  await overwriteCanvasFile({ ...ctx, courseId: ctx.courseId }, meta, edited);
 }

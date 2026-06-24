@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   listCourseContentAction,
   getPageAction,
@@ -26,11 +26,14 @@ import {
   updateGradableAction,
   createGradableAction,
   previewFileAction,
+  getOfficeEditableAction,
+  saveOfficeEditsAction,
   revisePageWithAiAction,
 } from "../actions";
 import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
 import FilePreviewModal, { type PreviewFile } from "./FilePreviewModal";
+import type { OfficeParagraph } from "@/lib/office-edit";
 import type {
   CanvasModule,
   CanvasModuleItem,
@@ -1298,6 +1301,168 @@ function GradableEditorModal({
   );
 }
 
+// ── Office file editor (.docx / .pptx, in place) ──────────────────────────────
+
+function OfficeEditorModal({
+  courseUrl,
+  acronym,
+  item,
+  onClose,
+  onSaved,
+}: {
+  courseUrl: string;
+  acronym?: string;
+  item: CanvasModuleItem;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [loading, setLoading] = useState(item.contentId != null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [name, setName] = useState(item.title);
+  const [paragraphs, setParagraphs] = useState<OfficeParagraph[]>([]);
+  const [original, setOriginal] = useState<Record<string, string>>({});
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+
+  useEffect(() => {
+    if (item.contentId == null) return;
+    let cancelled = false;
+    (async () => {
+      const result = await getOfficeEditableAction(courseUrl, item.contentId as number, acronym);
+      if (cancelled) return;
+      if ("error" in result) {
+        setLoadError(result.error);
+        setLoading(false);
+        return;
+      }
+      setName(result.name);
+      setParagraphs(result.paragraphs);
+      const seed = Object.fromEntries(result.paragraphs.map((p) => [p.id, p.text]));
+      setOriginal(seed);
+      setDraft(seed);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [courseUrl, item.contentId, acronym]);
+
+  const changedCount = paragraphs.filter((p) => (draft[p.id] ?? "") !== (original[p.id] ?? "")).length;
+
+  const handleSave = async () => {
+    if (item.contentId == null) return;
+    const edits: Record<string, string> = {};
+    for (const p of paragraphs) {
+      if ((draft[p.id] ?? "") !== (original[p.id] ?? "")) edits[p.id] = draft[p.id] ?? "";
+    }
+    if (Object.keys(edits).length === 0) {
+      setNote({ kind: "error", text: "No changes to save." });
+      return;
+    }
+    setSaving(true);
+    setNote(null);
+    const result = await saveOfficeEditsAction(courseUrl, item.contentId, edits, acronym);
+    setSaving(false);
+    if ("error" in result) {
+      setNote({ kind: "error", text: result.error });
+      return;
+    }
+    onSaved();
+    onClose();
+  };
+
+  return (
+    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
+      <div
+        className={styles.previewModal}
+        style={{ width: "min(860px, 95vw)", maxWidth: "none" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={styles.previewHeader}>
+          <h3>Edit {name}</h3>
+          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        {loading ? (
+          <div className={styles.loadingState} role="status" aria-live="polite">
+            <span className={styles.spinner} aria-hidden="true" />
+            <div>
+              <p className={styles.loadingTitle}>Loading…</p>
+            </div>
+          </div>
+        ) : loadError ? (
+          <p className={styles.error}>{loadError}</p>
+        ) : paragraphs.length === 0 ? (
+          <p className={styles.emptyState}>No editable text was found in this file.</p>
+        ) : (
+          <>
+            <p className={styles.fieldHint} style={{ marginTop: 0 }}>
+              Edit the text below. Formatting, images, and layout are kept; saving overwrites the file in
+              Canvas.
+            </p>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                maxHeight: "52vh",
+                overflowY: "auto",
+                paddingRight: 4,
+              }}
+            >
+              {paragraphs.map((p, i) => {
+                const showSlide = p.slide != null && (i === 0 || paragraphs[i - 1].slide !== p.slide);
+                return (
+                  <Fragment key={p.id}>
+                    {showSlide && (
+                      <p className={styles.fileMetaLabel} style={{ marginTop: i === 0 ? 0 : 8 }}>
+                        Slide {p.slide}
+                      </p>
+                    )}
+                    <textarea
+                      value={draft[p.id] ?? ""}
+                      onChange={(e) => setDraft((d) => ({ ...d, [p.id]: e.target.value }))}
+                      rows={Math.min(6, Math.max(1, (draft[p.id] ?? "").split("\n").length))}
+                      style={{
+                        width: "100%",
+                        resize: "vertical",
+                        padding: "8px 10px",
+                        fontFamily: "inherit",
+                        border: "1px solid var(--field-border)",
+                        borderRadius: 8,
+                        lineHeight: 1.4,
+                        minHeight: 0,
+                      }}
+                    />
+                  </Fragment>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleSave}
+                disabled={saving || changedCount === 0}
+              >
+                {saving
+                  ? "Saving…"
+                  : changedCount > 0
+                    ? `Save ${changedCount} change${changedCount === 1 ? "" : "s"} to Canvas`
+                    : "Save to Canvas"}
+              </button>
+            </div>
+            {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Module tree ────────────────────────────────────────────────────────────---
 
 function ModulesView({
@@ -1362,6 +1527,7 @@ function ModulesView({
   const [renameOpen, setRenameOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<CanvasModuleItem | null>(null);
   const [filePreview, setFilePreview] = useState<{ file: PreviewFile; blobUrl: string | null } | null>(null);
+  const [editingFile, setEditingFile] = useState<CanvasModuleItem | null>(null);
   const [drag, setDrag] = useState<{ moduleId: number; itemId: number } | null>(null);
   const [dragOverItem, setDragOverItem] = useState<number | null>(null);
   const [dragOverModule, setDragOverModule] = useState<number | null>(null);
@@ -2498,6 +2664,16 @@ function ModulesView({
                         Preview
                       </button>
                     )}
+                    {it.type === "File" && it.contentId != null && /\.(docx|pptx)$/i.test(it.title) && (
+                      <button
+                        type="button"
+                        className={styles.downloadButton}
+                        onClick={() => setEditingFile(it)}
+                        style={{ padding: "2px 10px" }}
+                      >
+                        Edit
+                      </button>
+                    )}
                     <button
                       type="button"
                       className={styles.clearFileButton}
@@ -2745,6 +2921,16 @@ function ModulesView({
           selectedPreview={filePreview.file}
           previewBlobUrl={filePreview.blobUrl}
           onClose={closeFilePreview}
+        />
+      )}
+
+      {editingFile && (
+        <OfficeEditorModal
+          courseUrl={courseUrl}
+          acronym={acronym}
+          item={editingFile}
+          onClose={() => setEditingFile(null)}
+          onSaved={() => setNote({ kind: "success", text: "Saved to Canvas." })}
         />
       )}
     </div>

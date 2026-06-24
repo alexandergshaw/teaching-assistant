@@ -5426,11 +5426,11 @@ export default function ContentTab({
   return (
     <div className={styles.card}>
       <header className={styles.header}>
-        <span className={styles.eyebrow}>Course Content</span>
-        <h1>Modules & Pages</h1>
+        <span className={styles.eyebrow}>LMS Integration</span>
+        <h1>Course content, grading &amp; communications</h1>
         <p>
-          Edit a Canvas course&apos;s module structure and page content without leaving the teaching
-          assistant. Changes are staged here and only written to Canvas when you save.
+          Manage a Canvas course&apos;s modules, pages, and files, grade submissions, and handle
+          announcements and messages — all in one place. Changes are written to Canvas when you save.
         </p>
       </header>
 

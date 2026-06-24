@@ -39,7 +39,7 @@ export default function GradingTab({
   onOpenPreview,
 }: GradingTabProps) {
   const [selectedProvider] = useLlmProvider();
-  const { refresh: refreshCounts } = useInstitutionCounts();
+  const { refresh: refreshCounts, totalNeedsGrading } = useInstitutionCounts();
   // Grade-in-context: which Live Feed row is being graded, a signal to refetch
   // the queue after posting, and a ref to scroll the results into view.
   const [gradingTarget, setGradingTarget] = useState<{
@@ -170,7 +170,10 @@ export default function GradingTab({
           className={`${styles.lessonInnerTab}${source === "livefeed" ? ` ${styles.lessonInnerTabActive}` : ""}`}
           onClick={() => selectSource("livefeed")}
         >
-          Live Feed
+          <span className={styles.tabLabelWrap}>
+            Live Feed
+            {totalNeedsGrading > 0 && <span className={styles.navBadge}>{totalNeedsGrading}</span>}
+          </span>
         </button>
       </div>
 

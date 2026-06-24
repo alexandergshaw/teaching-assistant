@@ -13,7 +13,6 @@ import type { LlmProvider } from "@/lib/llm";
 import type { PreviewFile } from "./FilePreviewModal";
 import { formatRelative } from "../utils/time";
 import { useInstitutionSelection, readActiveInstitution } from "@/lib/institutions";
-import InstitutionSwitcher from "./InstitutionSwitcher";
 import { useInstitutionCounts } from "./InstitutionCounts";
 import GradingResults, { type GradingResultsHandle } from "./GradingResults";
 import styles from "../page.module.css";
@@ -446,11 +445,6 @@ export default function LiveFeedPanel({
 
   return (
     <div className={styles.form}>
-      <div className={styles.field}>
-        <label>Institution</label>
-        <InstitutionSwitcher metric="grading" />
-      </div>
-
       {active && (
         <div className={styles.lfLayout}>
           {/* Queue rail */}

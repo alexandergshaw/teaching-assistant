@@ -26,7 +26,6 @@ import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { useSupabase } from "@/context/SupabaseProvider";
-import InstitutionSwitcher from "./InstitutionSwitcher";
 import { useInstitutionCounts } from "./InstitutionCounts";
 import { formatRelative } from "../utils/time";
 import styles from "../page.module.css";
@@ -1104,11 +1103,6 @@ export default function CanvasTab() {
           assistant. Drafting is optional — nothing is sent to Canvas until you post.
         </p>
       </header>
-
-      <div className={styles.field}>
-        <label>Institution</label>
-        <InstitutionSwitcher metric="unread" />
-      </div>
 
       <div className={styles.lessonInnerTabs}>
         <button

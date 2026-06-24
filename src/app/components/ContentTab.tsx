@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   listCourseContentAction,
   getPageAction,
@@ -5216,9 +5216,15 @@ function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym
   );
 }
 
-type ContentView = "modules" | "pages" | "bulk" | "files";
+type ContentView = "modules" | "pages" | "files" | "grading" | "communications";
 
-export default function ContentTab() {
+export default function ContentTab({
+  grading,
+  communications,
+}: {
+  grading?: ReactNode;
+  communications?: ReactNode;
+}) {
   const { active: activeInstitution } = useInstitutionSelection();
   const [provider] = useLlmProvider();
 
@@ -5243,7 +5249,7 @@ export default function ContentTab() {
   const [view, setViewState] = useState<ContentView>(() => {
     if (typeof window === "undefined") return "modules";
     const saved = localStorage.getItem(VIEW_KEY);
-    return saved === "pages" || saved === "bulk" || saved === "files" ? saved : "modules";
+    return saved === "pages" || saved === "files" || saved === "grading" || saved === "communications" ? saved : "modules";
   });
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorPageUrl, setEditorPageUrl] = useState<string | null>(null);
@@ -5465,18 +5471,29 @@ export default function ContentTab() {
             </button>
             <button
               type="button"
-              className={`${styles.lessonInnerTab} ${view === "bulk" ? styles.lessonInnerTabActive : ""}`}
-              onClick={() => setView("bulk")}
-            >
-              Bulk edit
-            </button>
-            <button
-              type="button"
               className={`${styles.lessonInnerTab} ${view === "files" ? styles.lessonInnerTabActive : ""}`}
               onClick={() => setView("files")}
             >
               Files
             </button>
+            {grading && (
+              <button
+                type="button"
+                className={`${styles.lessonInnerTab} ${view === "grading" ? styles.lessonInnerTabActive : ""}`}
+                onClick={() => setView("grading")}
+              >
+                Grading
+              </button>
+            )}
+            {communications && (
+              <button
+                type="button"
+                className={`${styles.lessonInnerTab} ${view === "communications" ? styles.lessonInnerTabActive : ""}`}
+                onClick={() => setView("communications")}
+              >
+                Communications
+              </button>
+            )}
           </div>
 
           {view === "modules" ? (
@@ -5499,10 +5516,12 @@ export default function ContentTab() {
             />
           ) : view === "pages" ? (
             <PagesView pages={pages} onNewPage={() => openEditor(null)} onEditPage={(pageUrl) => openEditor(pageUrl)} />
-          ) : view === "bulk" ? (
-            <BulkEditView courseUrl={courseUrl} acronym={activeInstitution || undefined} />
-          ) : (
+          ) : view === "files" ? (
             <FilesView courseUrl={courseUrl} acronym={activeInstitution || undefined} modules={modules} />
+          ) : view === "grading" ? (
+            grading
+          ) : (
+            communications
           )}
         </>
       )}

@@ -25,7 +25,7 @@ import { parseGeneratedRubric } from "./utils/rubric";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "grading" | "lesson-planning" | "course-planning" | "canvas" | "content";
+type ActiveTab = "lesson-planning" | "course-planning" | "content";
 
 // The hosted Course Engine runs on Vercel, which caps the request body at
 // ~4.5 MB. Reject larger uploads client-side with a clear message rather than
@@ -129,7 +129,9 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "lesson-planning";
     const saved = localStorage.getItem("ta-active-tab");
-    return saved === "grading" || saved === "lesson-planning" || saved === "course-planning" || saved === "canvas" || saved === "content" ? saved : "lesson-planning";
+    // Grading and Communications are now subtabs of LMS Integration ("content").
+    if (saved === "grading" || saved === "canvas") return "content";
+    return saved === "lesson-planning" || saved === "course-planning" || saved === "content" ? saved : "lesson-planning";
   });
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
@@ -604,30 +606,8 @@ export default function Home() {
         >
           <Tab label="New Build Courses" value="course-planning" disableRipple />
           <Tab label="Pre Built Courses" value="lesson-planning" disableRipple />
-          <Tab
-            label={<NavTabLabel text="Grading" count={totalNeedsGrading} />}
-            value="grading"
-            disableRipple
-          />
-          <Tab
-            label={<NavTabLabel text="Communications" count={totalUnread} />}
-            value="canvas"
-            disableRipple
-          />
-          <Tab label="Course Content" value="content" disableRipple />
+          <Tab label="LMS Integration" value="content" disableRipple />
         </Tabs>
-
-        {activeTab === "grading" && (
-          <GradingTab
-            formAction={formAction}
-            pending={pending}
-            state={state}
-            testState={testState}
-            copiedKey={copiedKey}
-            onCopy={handleCopy}
-            onOpenPreview={handleOpenPreview}
-          />
-        )}
 
         {activeTab === "course-planning" && (
           <CoursePlanningTab
@@ -637,9 +617,22 @@ export default function Home() {
           />
         )}
 
-        {activeTab === "canvas" && <CanvasTab />}
-
-        {activeTab === "content" && <ContentTab />}
+        {activeTab === "content" && (
+          <ContentTab
+            grading={
+              <GradingTab
+                formAction={formAction}
+                pending={pending}
+                state={state}
+                testState={testState}
+                copiedKey={copiedKey}
+                onCopy={handleCopy}
+                onOpenPreview={handleOpenPreview}
+              />
+            }
+            communications={<CanvasTab />}
+          />
+        )}
 
         {activeTab === "lesson-planning" && (
           <LessonPlanningForm

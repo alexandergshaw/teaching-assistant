@@ -5628,6 +5628,10 @@ export default function ContentTab({
 
   const courseId = parseCanvasCourseId(courseUrl);
   const loaded = useMemo(() => loadState.status === "idle" && !!courseId, [loadState.status, courseId]);
+  // Subtabs that act on the course loaded here. The rest (Grading, Announcements,
+  // Inbox) carry their own course picker / are institution-scoped, so they work
+  // without loading a course in this tab.
+  const courseTab = view === "modules" || view === "pages" || view === "files";
 
   return (
     <div className={styles.card}>
@@ -5645,79 +5649,8 @@ export default function ContentTab({
         <InstitutionSwitcher metric="both" />
       </div>
 
-      <CoursePicker
-        activeInstitution={activeInstitution}
-        courseUrl={courseUrl}
-        onCourseUrlChange={(url) => {
-          setCourseUrl(url);
-          setLoadState({ status: "idle", message: "" });
-        }}
-        onSelect={handleSelectCourse}
-        loading={loadState.status === "loading"}
-        loadLabel="Load content"
-        loadError={loadState.status === "error" ? loadState.message : null}
-        courseName={courseName}
-      />
-
-      {loadState.status === "loading" && (
-        <div className={styles.loadingState} role="status" aria-live="polite">
-          <span className={styles.spinner} aria-hidden="true" />
-          <div>
-            <p className={styles.loadingTitle}>Loading course content…</p>
-          </div>
-        </div>
-      )}
-
-      {loaded && (
+      {activeInstitution && (
         <>
-          <div className={styles.resultsHeader}>
-            <h2>{courseName || "Course content"}</h2>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className={styles.downloadButton}
-                onClick={() => setCopyMode("export")}
-                disabled={!courseId}
-                title="Copy this course's content into another course"
-              >
-                Copy to course
-              </button>
-              <button
-                type="button"
-                className={styles.downloadButton}
-                onClick={() => setCopyMode("import")}
-                disabled={!courseId}
-                title="Import another course's content into this one"
-              >
-                Import from course
-              </button>
-              <button
-                type="button"
-                className={styles.downloadButton}
-                onClick={reload}
-                disabled={busy || loadState.status === "loading"}
-              >
-                Refresh
-              </button>
-            </div>
-          </div>
-
-          {copyMode && courseId && (
-            <CourseCopyModal
-              mode={copyMode}
-              courseUrl={courseUrl}
-              currentCourseId={courseId}
-              acronym={activeInstitution || undefined}
-              onClose={() => setCopyMode(null)}
-              onDone={() => {
-                setCopyMode(null);
-                if (copyMode === "import") reload();
-              }}
-            />
-          )}
-
-          {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
-
           <div className={styles.lessonInnerTabs}>
             <button
               type="button"
@@ -5775,7 +5708,92 @@ export default function ContentTab({
             )}
           </div>
 
-          {view === "modules" ? (
+          {courseTab && (
+            <CoursePicker
+              activeInstitution={activeInstitution}
+              courseUrl={courseUrl}
+              onCourseUrlChange={(url) => {
+                setCourseUrl(url);
+                setLoadState({ status: "idle", message: "" });
+              }}
+              onSelect={handleSelectCourse}
+              loading={loadState.status === "loading"}
+              loadLabel="Load content"
+              loadError={loadState.status === "error" ? loadState.message : null}
+              courseName={courseName}
+            />
+          )}
+
+          {courseTab && loaded && (
+            <div className={styles.resultsHeader}>
+              <h2>{courseName || "Course content"}</h2>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className={styles.downloadButton}
+                  onClick={() => setCopyMode("export")}
+                  disabled={!courseId}
+                  title="Copy this course's content into another course"
+                >
+                  Copy to course
+                </button>
+                <button
+                  type="button"
+                  className={styles.downloadButton}
+                  onClick={() => setCopyMode("import")}
+                  disabled={!courseId}
+                  title="Import another course's content into this one"
+                >
+                  Import from course
+                </button>
+                <button
+                  type="button"
+                  className={styles.downloadButton}
+                  onClick={reload}
+                  disabled={busy || loadState.status === "loading"}
+                >
+                  Refresh
+                </button>
+              </div>
+            </div>
+          )}
+
+          {courseTab && copyMode && courseId && (
+            <CourseCopyModal
+              mode={copyMode}
+              courseUrl={courseUrl}
+              currentCourseId={courseId}
+              acronym={activeInstitution || undefined}
+              onClose={() => setCopyMode(null)}
+              onDone={() => {
+                setCopyMode(null);
+                if (copyMode === "import") reload();
+              }}
+            />
+          )}
+
+          {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
+
+          {courseTab && loadState.status === "loading" && (
+            <div className={styles.loadingState} role="status" aria-live="polite">
+              <span className={styles.spinner} aria-hidden="true" />
+              <div>
+                <p className={styles.loadingTitle}>Loading course content…</p>
+              </div>
+            </div>
+          )}
+
+          {courseTab && !loaded && loadState.status !== "loading" && (
+            <p className={styles.emptyState}>Load a course above to work with its {view}.</p>
+          )}
+
+          {view === "grading" ? (
+            grading
+          ) : view === "announcements" ? (
+            announcements
+          ) : view === "inbox" ? (
+            inbox
+          ) : !loaded ? null : view === "modules" ? (
             <ModulesView
               courseUrl={courseUrl}
               acronym={activeInstitution || undefined}
@@ -5797,13 +5815,7 @@ export default function ContentTab({
             <PagesView pages={pages} onNewPage={() => openEditor(null)} onEditPage={(pageUrl) => openEditor(pageUrl)} />
           ) : view === "files" ? (
             <FilesView courseUrl={courseUrl} acronym={activeInstitution || undefined} modules={modules} />
-          ) : view === "grading" ? (
-            grading
-          ) : view === "announcements" ? (
-            announcements
-          ) : (
-            inbox
-          )}
+          ) : null}
         </>
       )}
 

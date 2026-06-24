@@ -1359,6 +1359,7 @@ function ModulesView({
   const [filePreview, setFilePreview] = useState<{ file: PreviewFile; blobUrl: string | null } | null>(null);
   const [drag, setDrag] = useState<{ moduleId: number; itemId: number } | null>(null);
   const [dragOverItem, setDragOverItem] = useState<number | null>(null);
+  const [dragOverModule, setDragOverModule] = useState<number | null>(null);
 
   // Move the dragged item before `beforeItemId` (or to the end when null) in the
   // target module: reorder locally for instant feedback, then persist position
@@ -1368,6 +1369,7 @@ function ModulesView({
     const { moduleId: srcModuleId, itemId } = drag;
     setDrag(null);
     setDragOverItem(null);
+    setDragOverModule(null);
     if (beforeItemId === itemId) return; // dropped on itself
 
     const next = modules.map((mod) => ({ ...mod, items: [...mod.items] }));
@@ -2290,6 +2292,7 @@ function ModulesView({
                       onDragEnd={() => {
                         setDrag(null);
                         setDragOverItem(null);
+                        setDragOverModule(null);
                       }}
                       title="Drag to reorder or move between modules"
                       aria-label="Drag to reorder"
@@ -2385,6 +2388,35 @@ function ModulesView({
                     </button>
                   </div>
                 ))}
+
+                {drag && (
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      setDragOverModule(m.id);
+                    }}
+                    onDragLeave={() => setDragOverModule((cur) => (cur === m.id ? null : cur))}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      performMove(m.id, null);
+                    }}
+                    style={{
+                      marginTop: 4,
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: `1px dashed ${dragOverModule === m.id ? "var(--accent)" : "var(--field-border)"}`,
+                      background:
+                        dragOverModule === m.id ? "color-mix(in srgb, var(--accent) 10%, #fff)" : "transparent",
+                      color: dragOverModule === m.id ? "var(--accent)" : "var(--text-secondary)",
+                      fontSize: "0.8rem",
+                      textAlign: "center",
+                    }}
+                  >
+                    Drop here to move to the end of this module
+                  </div>
+                )}
 
                 <div
                   style={{

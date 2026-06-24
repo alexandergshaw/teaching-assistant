@@ -1533,6 +1533,11 @@ function ModulesView({
   const [drag, setDrag] = useState<{ moduleId: number; itemId: number } | null>(null);
   const [dragOverItem, setDragOverItem] = useState<number | null>(null);
   const [dragOverModule, setDragOverModule] = useState<number | null>(null);
+  // Dragging a whole module to reorder it: the grabbed module's id, and the
+  // module card currently hovered as a drop target. Kept separate from the item
+  // drag state above so an item drag and a module drag never trip each other.
+  const [moduleDrag, setModuleDrag] = useState<number | null>(null);
+  const [dragOverModuleRow, setDragOverModuleRow] = useState<number | null>(null);
 
   // FLIP animation for reorders: remember each item row's DOM node and its
   // position just before a move, then slide every moved row from its old spot to
@@ -1540,25 +1545,38 @@ function ModulesView({
   // fights React's own style updates mid-animation.
   const itemNodes = useRef(new Map<number, HTMLElement | null>());
   const flipPrev = useRef<Map<number, DOMRect> | null>(null);
+  // Same FLIP machinery for whole-module cards, keyed by module id.
+  const moduleNodes = useRef(new Map<number, HTMLElement | null>());
+  const flipPrevModules = useRef<Map<number, DOMRect> | null>(null);
   const [flipTick, setFlipTick] = useState(0);
 
   useLayoutEffect(() => {
-    const prev = flipPrev.current;
-    if (!prev) return;
-    flipPrev.current = null;
-    itemNodes.current.forEach((el, id) => {
-      if (!el) return;
-      const before = prev.get(id);
-      if (!before) return;
-      const after = el.getBoundingClientRect();
-      const dx = before.left - after.left;
-      const dy = before.top - after.top;
-      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
-      el.animate(
-        [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0px, 0px)" }],
-        { duration: 230, easing: "cubic-bezier(0.2, 0, 0, 1)" }
-      );
-    });
+    // Slide moved DOM nodes from their pre-move position to their new one. Run
+    // for items and modules independently: a reorder bumps flipTick and stashes
+    // a rect map for whichever kind moved.
+    const animate = (
+      pending: React.MutableRefObject<Map<number, DOMRect> | null>,
+      nodes: React.MutableRefObject<Map<number, HTMLElement | null>>
+    ) => {
+      const prev = pending.current;
+      if (!prev) return;
+      pending.current = null;
+      nodes.current.forEach((el, id) => {
+        if (!el) return;
+        const before = prev.get(id);
+        if (!before) return;
+        const after = el.getBoundingClientRect();
+        const dx = before.left - after.left;
+        const dy = before.top - after.top;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+        el.animate(
+          [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0px, 0px)" }],
+          { duration: 230, easing: "cubic-bezier(0.2, 0, 0, 1)" }
+        );
+      });
+    };
+    animate(flipPrev, itemNodes);
+    animate(flipPrevModules, moduleNodes);
   }, [flipTick]);
 
   // Whether an item is part of the current drag (the grabbed item, plus the rest
@@ -2130,6 +2148,42 @@ function ModulesView({
     );
   };
 
+  // Drop the dragged module onto another module's card: drag down lands it just
+  // after the target, drag up lands it just before, so either end is reachable.
+  // Reorder locally with a FLIP for instant feedback, then persist the new
+  // 1-based position (Canvas shifts the rest).
+  const performModuleMove = (targetId: number) => {
+    if (moduleDrag === null) return;
+    const srcId = moduleDrag;
+    setModuleDrag(null);
+    setDragOverModuleRow(null);
+    if (srcId === targetId) return;
+
+    const srcIdx = modules.findIndex((m) => m.id === srcId);
+    const tgtIdx = modules.findIndex((m) => m.id === targetId);
+    if (srcIdx < 0 || tgtIdx < 0) return;
+
+    const prevRects = new Map<number, DOMRect>();
+    moduleNodes.current.forEach((el, id) => {
+      if (el) prevRects.set(id, el.getBoundingClientRect());
+    });
+
+    const dragged = modules[srcIdx];
+    const reordered = modules.filter((m) => m.id !== srcId);
+    const newTgtIdx = reordered.findIndex((m) => m.id === targetId);
+    const insertAt = srcIdx < tgtIdx ? newTgtIdx + 1 : newTgtIdx;
+    reordered.splice(insertAt, 0, dragged);
+
+    setModules(reordered);
+    flipPrevModules.current = prevRects;
+    setFlipTick((t) => t + 1);
+
+    void run(
+      () => updateModuleAction(courseUrl, dragged.id, { position: insertAt + 1 }, acronym),
+      "Could not reorder the module."
+    );
+  };
+
   const removeModule = async (m: CanvasModule) => {
     if (confirmId !== `m${m.id}`) {
       setConfirmId(`m${m.id}`);
@@ -2532,7 +2586,37 @@ function ModulesView({
       {modules.map((m, mi) => {
         const open = expanded.has(m.id);
         return (
-          <div key={m.id} className={styles.syllabusSectionCard}>
+          <div
+            key={m.id}
+            ref={(el) => {
+              if (el) moduleNodes.current.set(m.id, el);
+              else moduleNodes.current.delete(m.id);
+            }}
+            className={styles.syllabusSectionCard}
+            onDragOver={(e) => {
+              if (moduleDrag !== null) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setDragOverModuleRow(m.id);
+              }
+            }}
+            onDragLeave={() => setDragOverModuleRow((cur) => (cur === m.id ? null : cur))}
+            onDrop={(e) => {
+              if (moduleDrag !== null) {
+                e.preventDefault();
+                performModuleMove(m.id);
+              }
+            }}
+            style={{
+              opacity: moduleDrag === m.id ? 0.55 : 1,
+              boxShadow: moduleDrag === m.id ? "0 6px 16px rgba(15, 23, 42, 0.14)" : undefined,
+              outline:
+                dragOverModuleRow === m.id && moduleDrag !== null && moduleDrag !== m.id
+                  ? "2px solid var(--accent)"
+                  : undefined,
+              transition: "opacity 0.15s ease, box-shadow 0.15s ease",
+            }}
+          >
             <div
               style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
               onDragOver={(e) => {
@@ -2545,6 +2629,31 @@ function ModulesView({
                 }
               }}
             >
+              <span
+                draggable
+                onDragStart={(e) => {
+                  setModuleDrag(m.id);
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", `module-${m.id}`);
+                }}
+                onDragEnd={() => {
+                  setModuleDrag(null);
+                  setDragOverModuleRow(null);
+                }}
+                title="Drag to reorder modules"
+                aria-label="Drag to reorder module"
+                style={{
+                  cursor: moduleDrag === m.id ? "grabbing" : "grab",
+                  color: moduleDrag === m.id ? "var(--accent)" : "var(--text-secondary)",
+                  userSelect: "none",
+                  padding: "0 2px",
+                  flexShrink: 0,
+                  fontSize: "1.1em",
+                  transition: "color 0.15s ease",
+                }}
+              >
+                ⠿
+              </span>
               <input
                 type="checkbox"
                 checked={selectedModules.has(m.id)}

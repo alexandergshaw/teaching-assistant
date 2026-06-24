@@ -56,6 +56,9 @@ import {
   createCourseCopy,
   getMigrationState,
   selectCopyTypes,
+  getSelectiveData,
+  submitSelectiveImport,
+  type SelectiveNode,
   listBulkItems,
   bulkUpdate,
   bulkDelete,
@@ -1485,6 +1488,38 @@ export async function selectCopyTypesAction(
   try {
     await requireOwner();
     await selectCopyTypes(contextCourseUrl, destCourseId, migrationId, types, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not submit the selection." };
+  }
+}
+
+/** Fetch the selectable-content tree for per-item copy. */
+export async function getSelectiveDataAction(
+  contextCourseUrl: string,
+  destCourseId: string,
+  migrationId: number,
+  acronym?: string
+): Promise<{ nodes: SelectiveNode[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return { nodes: await getSelectiveData(contextCourseUrl, destCourseId, migrationId, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the items to copy." };
+  }
+}
+
+/** Submit the chosen individual items to a migration waiting for selection. */
+export async function submitSelectiveImportAction(
+  contextCourseUrl: string,
+  destCourseId: string,
+  migrationId: number,
+  properties: string[],
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await submitSelectiveImport(contextCourseUrl, destCourseId, migrationId, properties, acronym);
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not submit the selection." };

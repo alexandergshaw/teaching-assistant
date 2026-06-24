@@ -835,6 +835,71 @@ export async function getMigrationState(
   return data.workflow_state ?? "";
 }
 
+/** A node in a migration's selectable-content tree (a type or an item). */
+export interface SelectiveNode {
+  /** The Canvas key to submit to include this node, e.g. copy[assignments][i_abc]. */
+  property: string;
+  title: string;
+  type?: string;
+  count?: number;
+  subItems: SelectiveNode[];
+}
+
+interface RawSelective {
+  property?: string;
+  title?: string;
+  type?: string;
+  count?: number;
+  sub_items?: RawSelective[];
+}
+
+function mapSelective(r: RawSelective): SelectiveNode {
+  return {
+    property: r.property ?? "",
+    title: (r.title ?? "").trim() || (r.type ?? "Item"),
+    type: r.type,
+    count: typeof r.count === "number" ? r.count : undefined,
+    subItems: (r.sub_items ?? []).map(mapSelective),
+  };
+}
+
+/** Fetch the selectable-content tree for a migration waiting for selection. */
+export async function getSelectiveData(
+  contextCourseUrl: string,
+  destCourseId: string,
+  migrationId: number,
+  code?: string
+): Promise<SelectiveNode[]> {
+  const ctx = resolveCourse(contextCourseUrl, code);
+  const response = await fetch(
+    `${ctx.baseUrl}/api/v1/courses/${destCourseId}/content_migrations/${migrationId}/selective_data`,
+    { headers: { Authorization: `Bearer ${ctx.token}` } }
+  );
+  if (!response.ok) throw canvasError(response.status, ctx.institution);
+  const data = (await response.json()) as RawSelective[];
+  return (data ?? []).filter((n) => n.property).map(mapSelective);
+}
+
+/** Submit a per-item selection (the chosen `property` keys) to a waiting migration. */
+export async function submitSelectiveImport(
+  contextCourseUrl: string,
+  destCourseId: string,
+  migrationId: number,
+  properties: string[],
+  code?: string
+): Promise<void> {
+  if (properties.length === 0) throw new Error("Select at least one item to copy.");
+  const ctx = resolveCourse(contextCourseUrl, code);
+  const params = new URLSearchParams();
+  for (const p of properties) params.append(p, "1");
+  await writeJson(
+    `${ctx.baseUrl}/api/v1/courses/${destCourseId}/content_migrations/${migrationId}`,
+    "PUT",
+    ctx,
+    params
+  );
+}
+
 /** Submit type-level selections to a migration waiting at "waiting_for_select". */
 export async function selectCopyTypes(
   contextCourseUrl: string,

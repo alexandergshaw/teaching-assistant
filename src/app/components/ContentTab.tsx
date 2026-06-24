@@ -40,6 +40,9 @@ import {
   createCourseCopyAction,
   getMigrationStateAction,
   selectCopyTypesAction,
+  getSelectiveDataAction,
+  submitSelectiveImportAction,
+  listCoursesAction,
 } from "../actions";
 import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
@@ -61,6 +64,7 @@ import type {
   QuizQuestionInput,
   QuizQuestionType,
   RubricCriterionInput,
+  SelectiveNode,
 } from "@/lib/canvas-modules";
 import { COURSE_COPY_TYPES } from "@/lib/canvas-modules";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
@@ -4741,96 +4745,185 @@ function CourseCopyModal({
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [other, setOther] = useState("");
-  const [allContent, setAllContent] = useState(true);
+  const isExport = mode === "export";
+  const [courses, setCourses] = useState<Array<{ id: string; name: string }>>([]);
+  const [coursesState, setCoursesState] = useState<"loading" | "ready" | "error">(acronym ? "loading" : "ready");
+  const [courseId, setCourseId] = useState("");
+  const [granularity, setGranularity] = useState<"all" | "types" | "items">("all");
   const [types, setTypes] = useState<Set<string>>(() => new Set(COURSE_COPY_TYPES.map((t) => t.key)));
-  const [status, setStatus] = useState<"idle" | "running" | "done">("idle");
+  const [phase, setPhase] = useState<"setup" | "selecting" | "done">("setup");
+  const [running, setRunning] = useState(false);
   const [statusText, setStatusText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [nodes, setNodes] = useState<SelectiveNode[]>([]);
+  const [props, setProps] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [migration, setMigration] = useState<{ id: number; destId: string } | null>(null);
 
-  const isExport = mode === "export";
-  const toggleType = (key: string) =>
-    setTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+  useEffect(() => {
+    if (!acronym) return;
+    let cancelled = false;
+    (async () => {
+      const r = await listCoursesAction(acronym);
+      if (cancelled) return;
+      if ("error" in r) {
+        setError(r.error);
+        setCoursesState("error");
+        return;
+      }
+      setCourses(r.courses.filter((c) => c.id !== currentCourseId));
+      setCoursesState("ready");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [acronym, currentCourseId]);
 
-  const parseOtherId = (raw: string): string | null => {
-    const t = raw.trim();
-    if (/^\d+$/.test(t)) return t;
-    return parseCanvasCourseId(t);
+  const toggleIn = (set: Set<string>, key: string) => {
+    const n = new Set(set);
+    if (n.has(key)) n.delete(key);
+    else n.add(key);
+    return n;
+  };
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  // Create the migration; for selective copies, poll until Canvas is ready to
+  // accept a selection. Returns the migration id + destination, or null on error.
+  const startMigration = async (selective: boolean): Promise<{ id: number; destId: string } | null> => {
+    const destId = isExport ? courseId : currentCourseId;
+    const sourceId = isExport ? currentCourseId : courseId;
+    setStatusText("Starting the copy in Canvas…");
+    const created = await createCourseCopyAction(courseUrl, destId, sourceId, selective, acronym);
+    if ("error" in created) {
+      setError(created.error);
+      return null;
+    }
+    if (!selective) return { id: created.migrationId, destId };
+    setStatusText("Preparing the content selection…");
+    for (let i = 0; i < 25; i++) {
+      await sleep(1500);
+      const st = await getMigrationStateAction(courseUrl, destId, created.migrationId, acronym);
+      if ("error" in st) {
+        setError(st.error);
+        return null;
+      }
+      if (st.state === "waiting_for_select") return { id: created.migrationId, destId };
+      if (st.state === "failed") {
+        setError("Canvas could not prepare the copy.");
+        return null;
+      }
+    }
+    setError("Timed out preparing the copy. It may still be working in Canvas — try again shortly.");
+    return null;
   };
 
-  const run = async () => {
-    const otherId = parseOtherId(other);
-    if (!otherId) {
-      setError("Enter the other course's Canvas URL or id.");
+  const start = async () => {
+    if (!courseId) {
+      setError("Choose a course.");
       return;
     }
-    if (otherId === currentCourseId) {
-      setError("Pick a different course than this one.");
-      return;
-    }
-    const chosen = [...types];
-    if (!allContent && chosen.length === 0) {
-      setError("Choose at least one content type, or select All content.");
-      return;
-    }
-    const destId = isExport ? otherId : currentCourseId;
-    const sourceId = isExport ? currentCourseId : otherId;
-
-    setStatus("running");
+    setRunning(true);
     setError(null);
-    setStatusText("Starting the copy in Canvas…");
-    const created = await createCourseCopyAction(courseUrl, destId, sourceId, !allContent, acronym);
-    if ("error" in created) {
-      setStatus("idle");
-      setError(created.error);
-      return;
-    }
-    if (allContent) {
-      setStatus("done");
+
+    if (granularity === "all") {
+      const m = await startMigration(false);
+      setRunning(false);
+      if (!m) return;
+      setPhase("done");
       setStatusText("Copy started. Canvas is importing everything in the background.");
       return;
     }
-    setStatusText("Preparing the content selection…");
-    let ready = false;
-    for (let i = 0; i < 20 && !ready; i++) {
-      await new Promise((r) => setTimeout(r, 1500));
-      const st = await getMigrationStateAction(courseUrl, destId, created.migrationId, acronym);
-      if ("error" in st) {
-        setStatus("idle");
-        setError(st.error);
+
+    if (granularity === "types") {
+      const chosen = [...types];
+      if (chosen.length === 0) {
+        setRunning(false);
+        setError("Choose at least one content type.");
         return;
       }
-      if (st.state === "waiting_for_select") ready = true;
-      else if (st.state === "failed") {
-        setStatus("idle");
-        setError("Canvas could not prepare the copy.");
+      const m = await startMigration(true);
+      if (!m) {
+        setRunning(false);
         return;
       }
-    }
-    if (!ready) {
-      setStatus("idle");
-      setError("Timed out preparing the copy. It may still be working in Canvas — try again shortly.");
+      setStatusText("Submitting your selection…");
+      const sel = await selectCopyTypesAction(courseUrl, m.destId, m.id, chosen, acronym);
+      setRunning(false);
+      if ("error" in sel) {
+        setError(sel.error);
+        return;
+      }
+      setPhase("done");
+      setStatusText("Copy started. Canvas is importing the selected types in the background.");
       return;
     }
+
+    // granularity === "items": prepare, then show the selectable tree.
+    const m = await startMigration(true);
+    if (!m) {
+      setRunning(false);
+      return;
+    }
+    setStatusText("Loading items…");
+    const data = await getSelectiveDataAction(courseUrl, m.destId, m.id, acronym);
+    setRunning(false);
+    if ("error" in data) {
+      setError(data.error);
+      return;
+    }
+    setNodes(data.nodes);
+    setMigration(m);
+    setPhase("selecting");
+    setStatusText("");
+  };
+
+  const submitItems = async () => {
+    if (!migration) return;
+    const chosen = [...props];
+    if (chosen.length === 0) {
+      setError("Select at least one item.");
+      return;
+    }
+    setRunning(true);
+    setError(null);
     setStatusText("Submitting your selection…");
-    const sel = await selectCopyTypesAction(courseUrl, destId, created.migrationId, chosen, acronym);
+    const sel = await submitSelectiveImportAction(courseUrl, migration.destId, migration.id, chosen, acronym);
+    setRunning(false);
     if ("error" in sel) {
-      setStatus("idle");
       setError(sel.error);
       return;
     }
-    setStatus("done");
-    setStatusText("Copy started. Canvas is importing the selected content in the background.");
+    setPhase("done");
+    setStatusText("Copy started. Canvas is importing the selected items in the background.");
+  };
+
+  const renderNode = (node: SelectiveNode, depth: number) => {
+    const hasChildren = node.subItems.length > 0;
+    const open = expanded.has(node.property);
+    return (
+      <div key={node.property} style={{ marginLeft: depth * 16 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "2px 0" }}>
+          {hasChildren ? (
+            <button type="button" className={styles.ccIconBtn} onClick={() => setExpanded((s) => toggleIn(s, node.property))} aria-label={open ? "Collapse" : "Expand"}>
+              {open ? "▾" : "▸"}
+            </button>
+          ) : (
+            <span style={{ width: 28, flexShrink: 0 }} />
+          )}
+          <label style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}>
+            <input type="checkbox" checked={props.has(node.property)} onChange={() => setProps((s) => toggleIn(s, node.property))} />
+            {node.title}
+            {typeof node.count === "number" && node.count > 0 && <span className={styles.ccCount}>({node.count})</span>}
+          </label>
+        </div>
+        {open && hasChildren && node.subItems.map((c) => renderNode(c, depth + 1))}
+      </div>
+    );
   };
 
   return (
     <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
-      <div className={styles.previewModal} style={{ width: "min(620px, 94vw)", maxWidth: "none" }} onClick={(e) => e.stopPropagation()}>
+      <div className={styles.previewModal} style={{ width: "min(640px, 94vw)", maxWidth: "none" }} onClick={(e) => e.stopPropagation()}>
         <div className={styles.previewHeader}>
           <h3>{isExport ? "Copy this course to another" : "Import another course"}</h3>
           <button type="button" className={styles.previewCloseButton} onClick={onClose}>
@@ -4839,53 +4932,93 @@ function CourseCopyModal({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "68vh", overflowY: "auto" }}>
-          <div className={styles.field}>
-            <label htmlFor="copy-other">{isExport ? "Destination course (URL or id)" : "Source course (URL or id)"}</label>
-            <input
-              id="copy-other"
-              type="text"
-              className={styles.textInput}
-              placeholder="https://…/courses/123  or  123"
-              value={other}
-              onChange={(e) => setOther(e.target.value)}
-              disabled={status === "running"}
-            />
-            <p className={styles.fieldHint} style={{ margin: 0 }}>
-              {isExport
-                ? "Content from this course is copied into the destination course. You must teach the destination course on the same Canvas."
-                : "Content from the source course is copied into this course. You must teach the source course on the same Canvas."}
-            </p>
-          </div>
-
-          <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 8, alignItems: "center", margin: 0, fontWeight: 600 }}>
-            <input type="checkbox" checked={allContent} onChange={(e) => setAllContent(e.target.checked)} disabled={status === "running"} />
-            All content
-          </label>
-
-          {!allContent && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-              {COURSE_COPY_TYPES.map((t) => (
-                <label key={t.key} className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0, flex: "0 0 140px" }}>
-                  <input type="checkbox" checked={types.has(t.key)} onChange={() => toggleType(t.key)} disabled={status === "running"} />
-                  {t.label}
-                </label>
-              ))}
-            </div>
-          )}
-
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
-            {status === "done" ? (
-              <button type="button" className={styles.submitButton} onClick={onDone}>
+          {phase === "done" ? (
+            <>
+              <p className={styles.fieldHint}>{statusText}</p>
+              <button type="button" className={styles.submitButton} style={{ alignSelf: "flex-start" }} onClick={onDone}>
                 Done
               </button>
-            ) : (
-              <button type="button" className={styles.submitButton} onClick={() => void run()} disabled={status === "running" || !other.trim()}>
-                {status === "running" ? "Working…" : isExport ? "Copy to course" : "Import to this course"}
-              </button>
-            )}
-            {status !== "idle" && <span className={styles.fieldHint} style={{ margin: 0 }}>{statusText}</span>}
-          </div>
-          {error && <p className={styles.error}>{error}</p>}
+            </>
+          ) : phase === "selecting" ? (
+            <>
+              <p className={styles.fieldHint} style={{ margin: 0 }}>Choose the individual items to copy.</p>
+              <div style={{ border: "1px solid var(--card-border)", borderRadius: 10, padding: 10, maxHeight: "44vh", overflowY: "auto" }}>
+                {nodes.length === 0 ? <p className={styles.fieldHint}>Canvas returned no selectable items.</p> : nodes.map((n) => renderNode(n, 0))}
+              </div>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
+                <button type="button" className={styles.submitButton} onClick={() => void submitItems()} disabled={running || props.size === 0}>
+                  {running ? "Working…" : `Copy ${props.size} selected`}
+                </button>
+                {statusText && <span className={styles.fieldHint} style={{ margin: 0 }}>{statusText}</span>}
+              </div>
+              {error && <p className={styles.error}>{error}</p>}
+            </>
+          ) : (
+            <>
+              <div className={styles.field}>
+                <label htmlFor="copy-course">{isExport ? "Destination course" : "Source course"}</label>
+                {coursesState === "loading" ? (
+                  <p className={styles.fieldHint}>Loading courses…</p>
+                ) : coursesState === "error" ? (
+                  <p className={styles.error}>{error}</p>
+                ) : (
+                  <select id="copy-course" className={styles.textInput} value={courseId} onChange={(e) => setCourseId(e.target.value)} disabled={running}>
+                    <option value="">{courses.length === 0 ? "No other courses" : "Choose a course…"}</option>
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <p className={styles.fieldHint} style={{ margin: 0 }}>
+                  {isExport
+                    ? "This course's content is copied into the chosen course."
+                    : "The chosen course's content is copied into this course."}
+                </p>
+              </div>
+
+              <div className={styles.field}>
+                <label htmlFor="copy-granularity">What to copy</label>
+                <select
+                  id="copy-granularity"
+                  className={styles.textInput}
+                  value={granularity}
+                  onChange={(e) => setGranularity(e.target.value as "all" | "types" | "items")}
+                  disabled={running}
+                >
+                  <option value="all">All content</option>
+                  <option value="types">Specific content types</option>
+                  <option value="items">Specific items</option>
+                </select>
+              </div>
+
+              {granularity === "types" && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  {COURSE_COPY_TYPES.map((t) => (
+                    <label key={t.key} className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0, flex: "0 0 140px" }}>
+                      <input type="checkbox" checked={types.has(t.key)} onChange={() => setTypes((s) => toggleIn(s, t.key))} disabled={running} />
+                      {t.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {granularity === "items" && (
+                <p className={styles.fieldHint} style={{ margin: 0 }}>
+                  Canvas prepares the course first; you&apos;ll then pick the individual items.
+                </p>
+              )}
+
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
+                <button type="button" className={styles.submitButton} onClick={() => void start()} disabled={running || !courseId}>
+                  {running ? "Working…" : granularity === "items" ? "Continue" : isExport ? "Copy to course" : "Import to this course"}
+                </button>
+                {running && statusText && <span className={styles.fieldHint} style={{ margin: 0 }}>{statusText}</span>}
+              </div>
+              {error && coursesState !== "error" && <p className={styles.error}>{error}</p>}
+            </>
+          )}
         </div>
       </div>
     </div>

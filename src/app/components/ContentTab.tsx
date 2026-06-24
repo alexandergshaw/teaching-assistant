@@ -1922,6 +1922,10 @@ function ModulesView({
             borderRadius: 12,
             background: "color-mix(in srgb, var(--accent) 7%, #fff)",
             border: "1px solid color-mix(in srgb, var(--accent) 28%, var(--field-border))",
+            position: "sticky",
+            top: "calc(var(--topbar-height) + 44px)",
+            zIndex: 20,
+            boxShadow: "0 6px 16px rgba(15, 23, 42, 0.1)",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>

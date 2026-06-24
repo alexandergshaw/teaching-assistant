@@ -53,6 +53,9 @@ import {
   listCourseFiles,
   renameCourseFile,
   deleteCourseFile,
+  createCourseCopy,
+  getMigrationState,
+  selectCopyTypes,
   listBulkItems,
   bulkUpdate,
   bulkDelete,
@@ -1437,6 +1440,54 @@ export async function deleteCourseFileAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not delete the file." };
+  }
+}
+
+/** Start a course-copy migration (export to / import from another course). */
+export async function createCourseCopyAction(
+  contextCourseUrl: string,
+  destCourseId: string,
+  sourceCourseId: string,
+  selective: boolean,
+  acronym?: string
+): Promise<{ migrationId: number; state: string } | { error: string }> {
+  try {
+    await requireOwner();
+    return await createCourseCopy(contextCourseUrl, destCourseId, sourceCourseId, selective, acronym);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not start the copy." };
+  }
+}
+
+/** Poll a content migration's workflow state. */
+export async function getMigrationStateAction(
+  contextCourseUrl: string,
+  destCourseId: string,
+  migrationId: number,
+  acronym?: string
+): Promise<{ state: string } | { error: string }> {
+  try {
+    await requireOwner();
+    return { state: await getMigrationState(contextCourseUrl, destCourseId, migrationId, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not check the copy status." };
+  }
+}
+
+/** Submit the chosen content types to a migration waiting for selection. */
+export async function selectCopyTypesAction(
+  contextCourseUrl: string,
+  destCourseId: string,
+  migrationId: number,
+  types: string[],
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await selectCopyTypes(contextCourseUrl, destCourseId, migrationId, types, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not submit the selection." };
   }
 }
 

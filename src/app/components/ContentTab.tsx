@@ -37,6 +37,9 @@ import {
   listCourseFilesAction,
   renameCourseFileAction,
   deleteCourseFileAction,
+  createCourseCopyAction,
+  getMigrationStateAction,
+  selectCopyTypesAction,
 } from "../actions";
 import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
@@ -59,6 +62,7 @@ import type {
   QuizQuestionType,
   RubricCriterionInput,
 } from "@/lib/canvas-modules";
+import { COURSE_COPY_TYPES } from "@/lib/canvas-modules";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
@@ -4644,6 +4648,174 @@ function BulkEditView({ courseUrl, acronym }: { courseUrl: string; acronym?: str
 
 // ── Tab shell ───────────────────────────────────────────────────────────────-
 
+// ── Course copy / import ──────────────────────────────────────────────────────
+
+function CourseCopyModal({
+  mode,
+  courseUrl,
+  currentCourseId,
+  acronym,
+  onClose,
+  onDone,
+}: {
+  mode: "export" | "import";
+  courseUrl: string;
+  currentCourseId: string;
+  acronym?: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [other, setOther] = useState("");
+  const [allContent, setAllContent] = useState(true);
+  const [types, setTypes] = useState<Set<string>>(() => new Set(COURSE_COPY_TYPES.map((t) => t.key)));
+  const [status, setStatus] = useState<"idle" | "running" | "done">("idle");
+  const [statusText, setStatusText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const isExport = mode === "export";
+  const toggleType = (key: string) =>
+    setTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const parseOtherId = (raw: string): string | null => {
+    const t = raw.trim();
+    if (/^\d+$/.test(t)) return t;
+    return parseCanvasCourseId(t);
+  };
+
+  const run = async () => {
+    const otherId = parseOtherId(other);
+    if (!otherId) {
+      setError("Enter the other course's Canvas URL or id.");
+      return;
+    }
+    if (otherId === currentCourseId) {
+      setError("Pick a different course than this one.");
+      return;
+    }
+    const chosen = [...types];
+    if (!allContent && chosen.length === 0) {
+      setError("Choose at least one content type, or select All content.");
+      return;
+    }
+    const destId = isExport ? otherId : currentCourseId;
+    const sourceId = isExport ? currentCourseId : otherId;
+
+    setStatus("running");
+    setError(null);
+    setStatusText("Starting the copy in Canvas…");
+    const created = await createCourseCopyAction(courseUrl, destId, sourceId, !allContent, acronym);
+    if ("error" in created) {
+      setStatus("idle");
+      setError(created.error);
+      return;
+    }
+    if (allContent) {
+      setStatus("done");
+      setStatusText("Copy started. Canvas is importing everything in the background.");
+      return;
+    }
+    setStatusText("Preparing the content selection…");
+    let ready = false;
+    for (let i = 0; i < 20 && !ready; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const st = await getMigrationStateAction(courseUrl, destId, created.migrationId, acronym);
+      if ("error" in st) {
+        setStatus("idle");
+        setError(st.error);
+        return;
+      }
+      if (st.state === "waiting_for_select") ready = true;
+      else if (st.state === "failed") {
+        setStatus("idle");
+        setError("Canvas could not prepare the copy.");
+        return;
+      }
+    }
+    if (!ready) {
+      setStatus("idle");
+      setError("Timed out preparing the copy. It may still be working in Canvas — try again shortly.");
+      return;
+    }
+    setStatusText("Submitting your selection…");
+    const sel = await selectCopyTypesAction(courseUrl, destId, created.migrationId, chosen, acronym);
+    if ("error" in sel) {
+      setStatus("idle");
+      setError(sel.error);
+      return;
+    }
+    setStatus("done");
+    setStatusText("Copy started. Canvas is importing the selected content in the background.");
+  };
+
+  return (
+    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
+      <div className={styles.previewModal} style={{ width: "min(620px, 94vw)", maxWidth: "none" }} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.previewHeader}>
+          <h3>{isExport ? "Copy this course to another" : "Import another course"}</h3>
+          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "68vh", overflowY: "auto" }}>
+          <div className={styles.field}>
+            <label htmlFor="copy-other">{isExport ? "Destination course (URL or id)" : "Source course (URL or id)"}</label>
+            <input
+              id="copy-other"
+              type="text"
+              className={styles.textInput}
+              placeholder="https://…/courses/123  or  123"
+              value={other}
+              onChange={(e) => setOther(e.target.value)}
+              disabled={status === "running"}
+            />
+            <p className={styles.fieldHint} style={{ margin: 0 }}>
+              {isExport
+                ? "Content from this course is copied into the destination course. You must teach the destination course on the same Canvas."
+                : "Content from the source course is copied into this course. You must teach the source course on the same Canvas."}
+            </p>
+          </div>
+
+          <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 8, alignItems: "center", margin: 0, fontWeight: 600 }}>
+            <input type="checkbox" checked={allContent} onChange={(e) => setAllContent(e.target.checked)} disabled={status === "running"} />
+            All content
+          </label>
+
+          {!allContent && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+              {COURSE_COPY_TYPES.map((t) => (
+                <label key={t.key} className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0, flex: "0 0 140px" }}>
+                  <input type="checkbox" checked={types.has(t.key)} onChange={() => toggleType(t.key)} disabled={status === "running"} />
+                  {t.label}
+                </label>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
+            {status === "done" ? (
+              <button type="button" className={styles.submitButton} onClick={onDone}>
+                Done
+              </button>
+            ) : (
+              <button type="button" className={styles.submitButton} onClick={() => void run()} disabled={status === "running" || !other.trim()}>
+                {status === "running" ? "Working…" : isExport ? "Copy to course" : "Import to this course"}
+              </button>
+            )}
+            {status !== "idle" && <span className={styles.fieldHint} style={{ margin: 0 }}>{statusText}</span>}
+          </div>
+          {error && <p className={styles.error}>{error}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Files (CRUD on the course's Files area) ───────────────────────────────────
 
 function FilesView({ courseUrl, acronym }: { courseUrl: string; acronym?: string }) {
@@ -4900,6 +5072,8 @@ export default function ContentTab() {
   });
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorPageUrl, setEditorPageUrl] = useState<string | null>(null);
+  // Course copy/import tool: "export" copies this course out, "import" pulls in.
+  const [copyMode, setCopyMode] = useState<"export" | "import" | null>(null);
 
   const setView = (next: ContentView) => {
     setViewState(next);
@@ -5053,15 +5227,49 @@ export default function ContentTab() {
         <>
           <div className={styles.resultsHeader}>
             <h2>{courseName || "Course content"}</h2>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={reload}
-              disabled={busy || loadState.status === "loading"}
-            >
-              Refresh
-            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className={styles.downloadButton}
+                onClick={() => setCopyMode("export")}
+                disabled={!courseId}
+                title="Copy this course's content into another course"
+              >
+                Copy to course
+              </button>
+              <button
+                type="button"
+                className={styles.downloadButton}
+                onClick={() => setCopyMode("import")}
+                disabled={!courseId}
+                title="Import another course's content into this one"
+              >
+                Import from course
+              </button>
+              <button
+                type="button"
+                className={styles.downloadButton}
+                onClick={reload}
+                disabled={busy || loadState.status === "loading"}
+              >
+                Refresh
+              </button>
+            </div>
           </div>
+
+          {copyMode && courseId && (
+            <CourseCopyModal
+              mode={copyMode}
+              courseUrl={courseUrl}
+              currentCourseId={courseId}
+              acronym={activeInstitution || undefined}
+              onClose={() => setCopyMode(null)}
+              onDone={() => {
+                setCopyMode(null);
+                if (copyMode === "import") reload();
+              }}
+            />
+          )}
 
           {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
 

@@ -112,6 +112,16 @@ function itemKey(moduleId: number, itemId: number): string {
   return `${moduleId}:${itemId}`;
 }
 
+// Elements that own their click (so a click on blank row space can fall through
+// to toggling the row's selection checkbox instead of hitting one of these).
+const ROW_INTERACTIVE = "button, a, input, select, textarea, label, [role='button'], [contenteditable='true']";
+
+// Run `toggle` when a row click landed on blank space, not on one of its controls.
+function rowBlankClick(e: React.MouseEvent, toggle: () => void) {
+  if ((e.target as HTMLElement).closest(ROW_INTERACTIVE)) return;
+  toggle();
+}
+
 // Item types that carry a due date / points (graded). Decide which rows show them.
 const DATED_TYPES = ["Assignment", "Quiz", "Discussion"];
 // Of those, the ones whose points can be edited through the gradable API here.
@@ -1406,6 +1416,30 @@ function defaultQuizAnswers(type: QuizQuestionType): Array<{ text: string; corre
   return [];
 }
 
+// An editable draft question reduced to the shape Canvas accepts.
+function quizQuestionToInput(q: EditableQuestion): QuizQuestionInput {
+  return {
+    name: q.name,
+    text: q.text,
+    type: q.type,
+    points: Number.isFinite(q.points) ? q.points : 0,
+    answers: q.answers,
+  };
+}
+
+// A blank question to seed the editors with.
+function newDraftQuestion(): EditableQuestion {
+  return {
+    key: nextQuizKey(),
+    id: 0,
+    name: "",
+    text: "",
+    type: "multiple_choice_question",
+    points: 1,
+    answers: defaultQuizAnswers("multiple_choice_question"),
+  };
+}
+
 function QuizQuestionsEditor({
   courseUrl,
   acronym,
@@ -1474,19 +1508,9 @@ function QuizQuestionsEditor({
   const removeAnswer = (key: string, idx: number) =>
     setQuestions((qs) => qs.map((q) => (q.key === key ? { ...q, answers: q.answers.filter((_, i) => i !== idx) } : q)));
 
-  const addQuestion = () =>
-    setQuestions((qs) => [
-      ...qs,
-      { key: nextQuizKey(), id: 0, name: "", text: "", type: "multiple_choice_question", points: 1, answers: defaultQuizAnswers("multiple_choice_question") },
-    ]);
+  const addQuestion = () => setQuestions((qs) => [...qs, newDraftQuestion()]);
 
-  const toInput = (q: EditableQuestion): QuizQuestionInput => ({
-    name: q.name,
-    text: q.text,
-    type: q.type,
-    points: Number.isFinite(q.points) ? q.points : 0,
-    answers: q.answers,
-  });
+  const toInput = quizQuestionToInput;
 
   const saveQuestion = async (q: EditableQuestion) => {
     setBusyKey(q.key);
@@ -1644,6 +1668,197 @@ function QuizQuestionsEditor({
             {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Draft quiz questions (composed before the quiz exists) ────────────────────
+// The same editing UI as QuizQuestionsEditor, but purely local: it edits an
+// array of draft questions held by the parent and never talks to Canvas. Used to
+// pre-compose the questions that "Add to each" writes into every new quiz.
+
+function DraftQuizQuestions({
+  questions,
+  setQuestions,
+}: {
+  questions: EditableQuestion[];
+  setQuestions: React.Dispatch<React.SetStateAction<EditableQuestion[]>>;
+}) {
+  const patch = (key: string, p: Partial<EditableQuestion>) =>
+    setQuestions((qs) => qs.map((q) => (q.key === key ? { ...q, ...p } : q)));
+
+  const changeType = (key: string, type: QuizQuestionType) =>
+    setQuestions((qs) =>
+      qs.map((q) => {
+        if (q.key !== key) return q;
+        const keep = (type === "multiple_choice_question" || type === "short_answer_question") && q.answers.length > 0;
+        return { ...q, type, answers: keep ? q.answers : defaultQuizAnswers(type) };
+      })
+    );
+
+  const setAnswer = (key: string, idx: number, p: Partial<{ text: string; correct: boolean }>, single: boolean) =>
+    setQuestions((qs) =>
+      qs.map((q) => {
+        if (q.key !== key) return q;
+        const answers = q.answers.map((a, i) => {
+          if (i === idx) return { ...a, ...p };
+          if (single && p.correct === true) return { ...a, correct: false };
+          return a;
+        });
+        return { ...q, answers };
+      })
+    );
+
+  const addAnswer = (key: string) =>
+    setQuestions((qs) => qs.map((q) => (q.key === key ? { ...q, answers: [...q.answers, { text: "", correct: false }] } : q)));
+  const removeAnswer = (key: string, idx: number) =>
+    setQuestions((qs) => qs.map((q) => (q.key === key ? { ...q, answers: q.answers.filter((_, i) => i !== idx) } : q)));
+
+  const addQuestion = () => setQuestions((qs) => [...qs, newDraftQuestion()]);
+  const removeQuestion = (key: string) => setQuestions((qs) => qs.filter((q) => q.key !== key));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {questions.length === 0 && <p className={styles.fieldHint}>No questions yet. Add one below.</p>}
+      {questions.map((q, qi) => {
+        const single = q.type === "multiple_choice_question" || q.type === "true_false_question";
+        const showAnswers = q.type !== "essay_question";
+        const editableAnswers = q.type === "multiple_choice_question" || q.type === "short_answer_question";
+        return (
+          <div key={q.key} style={{ border: "1px solid var(--card-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span className={styles.ccCount}>Q{qi + 1}</span>
+              <select
+                className={styles.bulkSelect}
+                value={q.type}
+                onChange={(e) => changeType(q.key, e.target.value as QuizQuestionType)}
+                aria-label="Question type"
+              >
+                {QUIZ_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {QUIZ_TYPE_LABELS[t]}
+                  </option>
+                ))}
+              </select>
+              <span className={styles.bulkField}>
+                <input
+                  type="number"
+                  className={styles.bulkInput}
+                  style={{ width: 64 }}
+                  value={q.points}
+                  onChange={(e) => patch(q.key, { points: Number(e.target.value) })}
+                  aria-label="Points"
+                />
+                <span className={styles.ccCount}>pts</span>
+              </span>
+              <span style={{ flex: 1 }} />
+              <button type="button" className={`${styles.ccBtn} ${styles.ccBtnDanger}`} onClick={() => removeQuestion(q.key)}>
+                Delete
+              </button>
+            </div>
+            <input
+              type="text"
+              className={styles.textInput}
+              placeholder="Question title (optional)"
+              value={q.name}
+              onChange={(e) => patch(q.key, { name: e.target.value })}
+            />
+            <textarea
+              value={q.text}
+              onChange={(e) => patch(q.key, { text: e.target.value })}
+              placeholder="Question text"
+              spellCheck
+              style={{ minHeight: 70, width: "100%" }}
+            />
+            {showAnswers && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span className={styles.ccCount}>{q.type === "short_answer_question" ? "Accepted answers" : "Answers"}</span>
+                {q.answers.map((a, ai) => (
+                  <div key={ai} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    {q.type !== "short_answer_question" && (
+                      <input
+                        type={single ? "radio" : "checkbox"}
+                        name={`${q.key}-correct`}
+                        checked={a.correct}
+                        onChange={(e) => setAnswer(q.key, ai, { correct: e.target.checked }, single)}
+                        aria-label="Correct answer"
+                        title="Mark correct"
+                      />
+                    )}
+                    <input
+                      type="text"
+                      className={styles.bulkInput}
+                      style={{ flex: "1 1 220px", minWidth: 160 }}
+                      value={a.text}
+                      disabled={q.type === "true_false_question"}
+                      placeholder={q.type === "short_answer_question" ? "An accepted answer" : "Answer choice"}
+                      onChange={(e) => setAnswer(q.key, ai, { text: e.target.value }, single)}
+                    />
+                    {editableAnswers && q.answers.length > 1 && (
+                      <button type="button" className={styles.ccIconBtn} title="Remove answer" aria-label="Remove answer" onClick={() => removeAnswer(q.key, ai)}>
+                        &times;
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {editableAnswers && (
+                  <button type="button" className={styles.ccBtn} style={{ alignSelf: "flex-start" }} onClick={() => addAnswer(q.key)}>
+                    Add answer
+                  </button>
+                )}
+              </div>
+            )}
+            {q.type === "essay_question" && (
+              <p className={styles.fieldHint} style={{ margin: 0 }}>
+                Students write a free-form response; there is no answer key.
+              </p>
+            )}
+          </div>
+        );
+      })}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <button type="button" className={styles.submitButton} onClick={addQuestion}>
+          Add question
+        </button>
+        <span className={styles.fieldHint} style={{ margin: 0 }}>
+          Question text is plain text.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// Modal that hosts the draft question editor for "Add to each".
+function BulkQuestionsModal({
+  questions,
+  setQuestions,
+  onClose,
+}: {
+  questions: EditableQuestion[];
+  setQuestions: React.Dispatch<React.SetStateAction<EditableQuestion[]>>;
+  onClose: () => void;
+}) {
+  return (
+    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
+      <div
+        className={styles.previewModal}
+        style={{ width: "min(760px, 95vw)", maxWidth: "none" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={styles.previewHeader}>
+          <h3>Questions for new quizzes</h3>
+          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+            Done
+          </button>
+        </div>
+        <p className={styles.fieldHint} style={{ marginTop: 0 }}>
+          These questions are written into every quiz created by &quot;Add to each&quot;. They are not saved
+          until you run Add.
+        </p>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+          <DraftQuizQuestions questions={questions} setQuestions={setQuestions} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -2340,6 +2555,11 @@ function ModulesView({
   const [bulkAddStaggerUnit, setBulkAddStaggerUnit] = useState<"weeks" | "days">("weeks");
   const [bulkAddPoints, setBulkAddPoints] = useState("");
   const [bulkAddRubricId, setBulkAddRubricId] = useState<number | "">("");
+  // Description / page body and (for quizzes) the questions written into each
+  // item that "Add to each" creates. Questions are composed in a modal.
+  const [bulkAddDescription, setBulkAddDescription] = useState("");
+  const [bulkAddQuestions, setBulkAddQuestions] = useState<EditableQuestion[]>([]);
+  const [bulkQuestionsOpen, setBulkQuestionsOpen] = useState(false);
   const [bulkPoints, setBulkPoints] = useState("");
   const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
   // Top-toolbar rubric picker for editing a rubric without selecting items.
@@ -2738,7 +2958,13 @@ function ModulesView({
     type: string,
     moduleId: number,
     name: string,
-    opts?: { dueAt?: string | null; points?: number; rubricId?: number }
+    opts?: {
+      dueAt?: string | null;
+      points?: number;
+      rubricId?: number;
+      description?: string;
+      questions?: EditableQuestion[];
+    }
   ): Promise<boolean> => {
     try {
       if (type === "SubHeader") {
@@ -2746,14 +2972,19 @@ function ModulesView({
         return !("error" in r);
       }
       if (type === "Page") {
-        const created = await createPageAction(courseUrl, { title: name }, acronym);
+        const created = await createPageAction(
+          courseUrl,
+          { title: name, body: opts?.description || undefined },
+          acronym
+        );
         if ("error" in created) return false;
         const linked = await createModuleItemAction(courseUrl, moduleId, { type: "Page", pageUrl: created.page.url }, acronym);
         return !("error" in linked);
       }
-      // Assignment / Quiz / Discussion: create with the optional due date / points,
-      // link it, then attach a rubric (assignments only) once the item exists.
-      const fields: { title: string; pointsPossible?: number; dueAt?: string | null } = { title: name };
+      // Assignment / Quiz / Discussion: create with the optional details, link it,
+      // then attach a rubric (assignments) and questions (quizzes) once it exists.
+      const fields: { title: string; description?: string; pointsPossible?: number; dueAt?: string | null } = { title: name };
+      if (opts?.description) fields.description = opts.description;
       if (opts?.points != null && Number.isFinite(opts.points)) fields.pointsPossible = opts.points;
       if (opts?.dueAt) fields.dueAt = opts.dueAt;
       const created = await createGradableAction(courseUrl, type as GradableKind, fields, acronym);
@@ -2762,6 +2993,11 @@ function ModulesView({
       if ("error" in linked) return false;
       if (opts?.rubricId != null && type === "Assignment") {
         await bulkAssociateRubricAction(courseUrl, opts.rubricId, [String(created.id)], acronym);
+      }
+      if (type === "Quiz" && opts?.questions && opts.questions.length > 0) {
+        for (const q of opts.questions) {
+          await createQuizQuestionAction(courseUrl, created.id, quizQuestionToInput(q), acronym);
+        }
       }
       return true;
     } catch {
@@ -2790,6 +3026,12 @@ function ModulesView({
     const baseDue =
       isGradable && bulkAddDue && !Number.isNaN(new Date(bulkAddDue).getTime()) ? new Date(bulkAddDue) : null;
     const stepDays = Math.max(0, Math.trunc(bulkAddStaggerOffset || 0)) * (bulkAddStaggerUnit === "weeks" ? 7 : 1);
+    // Description applies to pages (as the body) and gradables; questions only to quizzes.
+    const description =
+      ["Assignment", "Quiz", "Discussion", "Page"].includes(type) && bulkAddDescription.trim() !== ""
+        ? bulkAddDescription
+        : undefined;
+    const questions = type === "Quiz" && bulkAddQuestions.length > 0 ? bulkAddQuestions : undefined;
     void (async () => {
       setOpBusy(true);
       setNote(null);
@@ -2810,6 +3052,8 @@ function ModulesView({
           dueAt,
           points,
           rubricId,
+          description,
+          questions,
         });
         if (ok) added += 1;
         else failed += 1;
@@ -3813,6 +4057,50 @@ function ModulesView({
                   </span>
                 </div>
               )}
+              {["Assignment", "Quiz", "Discussion", "Page"].includes(bulkAddType) && (
+                <div className={styles.bulkRow}>
+                  <span className={styles.bulkLabel}>{bulkAddType === "Page" ? "Body" : "Description"}</span>
+                  <textarea
+                    value={bulkAddDescription}
+                    onChange={(e) => setBulkAddDescription(e.target.value)}
+                    placeholder={
+                      bulkAddType === "Page"
+                        ? "Page body (HTML allowed) — written to every new page"
+                        : "Description (HTML allowed) — written to every new item"
+                    }
+                    spellCheck
+                    aria-label="Description for the new items"
+                    style={{
+                      flexBasis: "100%",
+                      width: "100%",
+                      minHeight: 72,
+                      padding: "8px 10px",
+                      border: "1px solid var(--field-border)",
+                      borderRadius: 8,
+                      background: "var(--field-background)",
+                      color: "var(--text-primary)",
+                      font: "inherit",
+                      fontSize: "0.83rem",
+                    }}
+                  />
+                </div>
+              )}
+              {bulkAddType === "Quiz" && (
+                <div className={styles.bulkRow}>
+                  <span className={styles.bulkLabel}>Questions</span>
+                  <button type="button" className={styles.bulkBtn} onClick={() => setBulkQuestionsOpen(true)}>
+                    Edit questions{bulkAddQuestions.length > 0 ? ` (${bulkAddQuestions.length})` : ""}
+                  </button>
+                  {bulkAddQuestions.length > 0 && (
+                    <button type="button" className={styles.bulkBtn} onClick={() => setBulkAddQuestions([])}>
+                      Clear
+                    </button>
+                  )}
+                  <span className={styles.bulkHint}>
+                    Composed once here and created in every new quiz.
+                  </span>
+                </div>
+              )}
             </>
           )}
 
@@ -4049,6 +4337,8 @@ function ModulesView({
           >
             <div
               className={styles.ccHead}
+              style={{ cursor: "pointer" }}
+              onClick={(e) => rowBlankClick(e, () => toggleModuleSelected(m.id))}
               onDragOver={(e) => {
                 if (drag) e.preventDefault();
               }}
@@ -4145,6 +4435,7 @@ function ModulesView({
                       else itemNodes.current.delete(it.id);
                     }}
                     className={styles.ccItem}
+                    onClick={(e) => rowBlankClick(e, () => toggleItemSelected(m.id, it.id))}
                     onDragOver={(e) => {
                       if (drag) {
                         e.preventDefault();
@@ -4161,6 +4452,7 @@ function ModulesView({
                       }
                     }}
                     style={{
+                      cursor: "pointer",
                       marginLeft: it.indent * 18,
                       boxShadow:
                         dragOverItem === it.id
@@ -4558,6 +4850,14 @@ function ModulesView({
             setNote({ kind: "success", text: message });
             reload();
           }}
+        />
+      )}
+
+      {bulkQuestionsOpen && (
+        <BulkQuestionsModal
+          questions={bulkAddQuestions}
+          setQuestions={setBulkAddQuestions}
+          onClose={() => setBulkQuestionsOpen(false)}
         />
       )}
 

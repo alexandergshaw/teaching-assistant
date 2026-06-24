@@ -3779,7 +3779,9 @@
    header that stays pinned below the topbar while the module list scrolls. */
 .ccStickyHeader {
   position: sticky;
-  top: var(--topbar-height);
+  /* Sit below BOTH the app top bar and the main nav tabs (a 44px sticky bar that
+     also pins at --topbar-height), so the header's top isn't hidden behind them. */
+  top: calc(var(--topbar-height) + 44px);
   z-index: 30;
   display: flex;
   flex-direction: column;

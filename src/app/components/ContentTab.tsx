@@ -2517,6 +2517,8 @@ function ModulesView({
   // The modules currently shown (after the search filter). Select-all and
   // select-by-type act on these so a filtered list only selects what's visible.
   const visibleModules = modules.filter(moduleMatches);
+  // The course's base URL (".../courses/123"), used to build "Open on Canvas" links.
+  const courseBase = courseUrl.replace(/(\/courses\/\d+).*$/, "$1");
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const [uploads, setUploads] = useState<
@@ -2564,6 +2566,8 @@ function ModulesView({
   const [bulkItemsDescription, setBulkItemsDescription] = useState("");
   const [bulkItemsQuestions, setBulkItemsQuestions] = useState<EditableQuestion[]>([]);
   const [bulkItemsQuestionsOpen, setBulkItemsQuestionsOpen] = useState(false);
+  // Whether the selected gradables share a description (loaded into the field).
+  const [descSharedState, setDescSharedState] = useState<"idle" | "loading" | "same" | "mixed">("idle");
   const [bulkPoints, setBulkPoints] = useState("");
   const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
   // Top-toolbar rubric picker for editing a rubric without selecting items.
@@ -2802,6 +2806,58 @@ function ModulesView({
       cancelled = true;
     };
   }, [courseUrl, acronym]);
+
+  // Stable signature of the selected gradables (sorted "kind:id"), so the effect
+  // below only re-fetches when that set actually changes.
+  const gradableSelSig = (() => {
+    const arr: string[] = [];
+    for (const mod of modules) {
+      for (const it of mod.items) {
+        if (
+          selected.has(itemKey(mod.id, it.id)) &&
+          ["Assignment", "Quiz", "Discussion"].includes(it.type) &&
+          typeof it.contentId === "number"
+        ) {
+          arr.push(`${it.type}:${it.contentId}`);
+        }
+      }
+    }
+    return arr.sort().join("|");
+  })();
+
+  // When the selected gradables all share one description, load it into the bulk
+  // "Content" field so the user can edit the common text. Fetches run in parallel
+  // and only when the selection signature changes.
+  useEffect(() => {
+    if (!gradableSelSig) {
+      setDescSharedState("idle");
+      return;
+    }
+    const pairs = gradableSelSig.split("|").map((s) => {
+      const [kind, id] = s.split(":");
+      return { kind: kind as GradableKind, id: Number(id) };
+    });
+    let cancelled = false;
+    setDescSharedState("loading");
+    (async () => {
+      const results = await Promise.all(pairs.map((p) => getGradableAction(courseUrl, p.kind, p.id, acronym)));
+      if (cancelled) return;
+      const descs = results.filter((r) => !("error" in r)).map((r) => (r as { detail: { description: string } }).detail.description);
+      if (descs.length === 0) {
+        setDescSharedState("idle");
+        return;
+      }
+      if (descs.every((d) => d === descs[0])) {
+        setBulkItemsDescription(descs[0]);
+        setDescSharedState("same");
+      } else {
+        setDescSharedState("mixed");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [gradableSelSig, courseUrl, acronym]);
 
   const selectedItems = (): Array<{ item: CanvasModuleItem; moduleId: number }> => {
     const out: Array<{ item: CanvasModuleItem; moduleId: number }> = [];
@@ -4177,6 +4233,15 @@ function ModulesView({
               </div>
               <div className={styles.bulkRow}>
                 <span className={styles.bulkLabel}>Content</span>
+                {descSharedState === "loading" && (
+                  <span className={styles.bulkFieldLabel}>Checking descriptions…</span>
+                )}
+                {descSharedState === "same" && (
+                  <span className={styles.bulkFieldLabel}>Loaded the shared description — edits apply to all.</span>
+                )}
+                {descSharedState === "mixed" && (
+                  <span className={styles.bulkFieldLabel}>Selected items have different descriptions; typing replaces them all.</span>
+                )}
                 <textarea
                   value={bulkItemsDescription}
                   onChange={(e) => setBulkItemsDescription(e.target.value)}
@@ -4512,6 +4577,16 @@ function ModulesView({
               {arrowBtn("Move up", () => moveModule(mi, -1), busy || mi === 0)}
               {arrowBtn("Move down", () => moveModule(mi, 1), busy || mi === modules.length - 1)}
               <PublishToggle published={m.published} disabled={busy} onClick={() => toggleModule(m)} />
+              <a
+                href={`${courseBase}/modules#context_module_${m.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={styles.ccIconBtn}
+                title="Open on Canvas"
+                aria-label="Open module on Canvas"
+              >
+                ↗
+              </a>
               <button
                 type="button"
                 className={`${styles.ccBtn} ${styles.ccBtnDanger}`}
@@ -4710,62 +4785,77 @@ function ModulesView({
                           </button>
                         ))}
                     </span>
-                    {arrowBtn("Move up", () => moveItem(m, ii, -1), busy || ii === 0)}
-                    {arrowBtn("Move down", () => moveItem(m, ii, 1), busy || ii === m.items.length - 1)}
-                    <button
-                      type="button"
-                      className={styles.ccIconBtn}
-                      onClick={() => indentItem(m, it, -1)}
-                      disabled={busy || it.indent === 0}
-                      title="Outdent"
-                      aria-label="Outdent"
-                    >
-                      &lt;
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.ccIconBtn}
-                      onClick={() => indentItem(m, it, 1)}
-                      disabled={busy || it.indent >= MAX_INDENT}
-                      title="Indent"
-                      aria-label="Indent"
-                    >
-                      &gt;
-                    </button>
-                    <PublishToggle published={it.published} disabled={busy} onClick={() => toggleItem(m, it)} />
-                    {it.type === "Page" && it.pageUrl && (
-                      <button type="button" className={styles.ccBtn} onClick={() => onEditPage(it.pageUrl!)}>
-                        Edit page
+                    <div className={styles.ccItemActions}>
+                      {arrowBtn("Move up", () => moveItem(m, ii, -1), busy || ii === 0)}
+                      {arrowBtn("Move down", () => moveItem(m, ii, 1), busy || ii === m.items.length - 1)}
+                      <button
+                        type="button"
+                        className={styles.ccIconBtn}
+                        onClick={() => indentItem(m, it, -1)}
+                        disabled={busy || it.indent === 0}
+                        title="Outdent"
+                        aria-label="Outdent"
+                      >
+                        &lt;
                       </button>
-                    )}
-                    {it.type === "Assignment" && it.contentId != null && (
-                      <button type="button" className={styles.ccBtn} onClick={() => setPreviewAssignment(it)}>
-                        Preview
+                      <button
+                        type="button"
+                        className={styles.ccIconBtn}
+                        onClick={() => indentItem(m, it, 1)}
+                        disabled={busy || it.indent >= MAX_INDENT}
+                        title="Indent"
+                        aria-label="Indent"
+                      >
+                        &gt;
                       </button>
-                    )}
-                    {["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null && (
-                      <button type="button" className={styles.ccBtn} onClick={() => setEditingItem(it)}>
-                        Edit
+                      <span className={styles.ccActionsSep} aria-hidden="true" />
+                      <PublishToggle published={it.published} disabled={busy} onClick={() => toggleItem(m, it)} />
+                      {it.type === "Page" && it.pageUrl && (
+                        <button type="button" className={styles.ccBtn} onClick={() => onEditPage(it.pageUrl!)}>
+                          Edit page
+                        </button>
+                      )}
+                      {it.type === "Assignment" && it.contentId != null && (
+                        <button type="button" className={styles.ccBtn} onClick={() => setPreviewAssignment(it)}>
+                          Preview
+                        </button>
+                      )}
+                      {["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null && (
+                        <button type="button" className={styles.ccBtn} onClick={() => setEditingItem(it)}>
+                          Edit
+                        </button>
+                      )}
+                      {it.type === "File" && it.contentId != null && (
+                        <button type="button" className={styles.ccBtn} onClick={() => void openFilePreview(it)}>
+                          Preview
+                        </button>
+                      )}
+                      {it.type === "File" && it.contentId != null && /\.(docx|pptx)$/i.test(it.title) && (
+                        <button type="button" className={styles.ccBtn} onClick={() => setEditingFile(it)}>
+                          Edit
+                        </button>
+                      )}
+                      {(it.htmlUrl || it.externalUrl) && (
+                        <a
+                          href={(it.htmlUrl || it.externalUrl) as string}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={styles.ccIconBtn}
+                          title="Open on Canvas"
+                          aria-label="Open on Canvas"
+                        >
+                          ↗
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        className={`${styles.ccBtn} ${styles.ccBtnDanger}`}
+                        onClick={() => void removeItem(m, it)}
+                        disabled={busy}
+                      >
+                        {confirmId === `i${it.id}` ? "Confirm" : "Remove"}
                       </button>
-                    )}
-                    {it.type === "File" && it.contentId != null && (
-                      <button type="button" className={styles.ccBtn} onClick={() => void openFilePreview(it)}>
-                        Preview
-                      </button>
-                    )}
-                    {it.type === "File" && it.contentId != null && /\.(docx|pptx)$/i.test(it.title) && (
-                      <button type="button" className={styles.ccBtn} onClick={() => setEditingFile(it)}>
-                        Edit
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className={`${styles.ccBtn} ${styles.ccBtnDanger}`}
-                      onClick={() => void removeItem(m, it)}
-                      disabled={busy}
-                    >
-                      {confirmId === `i${it.id}` ? "Confirm" : "Remove"}
-                    </button>
+                    </div>
                   </div>
                 ))}
 

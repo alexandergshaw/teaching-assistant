@@ -18,6 +18,9 @@
   /* Table row highlight: the header navy, a touch lighter than the darkest navy.
      Dark, so highlighted rows use light text. */
   --navy-soft: #243450;
+  /* Type / due chip fill: the colour a type chip shows on a highlighted row,
+     flattened to a solid so chips look the same hovered or not. */
+  --navy-chip: color-mix(in srgb, #fff 18%, var(--navy-soft));
   /* Lighter shades of navy for hover/selection highlights and drag emphasis.
      Kept clearly in the navy hue (not a near-white wash) so highlights read as
      "lighter navy" rather than gray. */

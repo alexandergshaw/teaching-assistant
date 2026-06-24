@@ -1617,7 +1617,7 @@ function QuizQuestionsEditor({
 // ── Rubric builder ────────────────────────────────────────────────────────────
 
 type EditRating = { key: string; description: string; points: number };
-type EditCriterion = { key: string; description: string; ratings: EditRating[] };
+type EditCriterion = { key: string; description: string; points: number; ratings: EditRating[] };
 
 let rubricKeySeq = 0;
 const nextRubricKey = () => `rb${++rubricKeySeq}`;
@@ -1626,6 +1626,7 @@ function defaultCriterion(): EditCriterion {
   return {
     key: nextRubricKey(),
     description: "",
+    points: 5,
     ratings: [
       { key: nextRubricKey(), description: "Full marks", points: 5 },
       { key: nextRubricKey(), description: "Partial", points: 3 },
@@ -1663,8 +1664,7 @@ function RubricBuilderModal({
   const removeRating = (ck: string, rk: string) =>
     setCriteria((cs) => cs.map((c) => (c.key !== ck ? c : { ...c, ratings: c.ratings.length > 1 ? c.ratings.filter((r) => r.key !== rk) : c.ratings })));
 
-  const criterionPoints = (c: EditCriterion) => c.ratings.reduce((m, r) => Math.max(m, Number.isFinite(r.points) ? r.points : 0), 0);
-  const total = criteria.reduce((s, c) => s + criterionPoints(c), 0);
+  const total = criteria.reduce((s, c) => s + (Number.isFinite(c.points) ? c.points : 0), 0);
 
   const handleCreate = async () => {
     if (!title.trim()) {
@@ -1673,7 +1673,7 @@ function RubricBuilderModal({
     }
     const crit: RubricCriterionInput[] = criteria.map((c) => ({
       description: c.description.trim() || "Criterion",
-      points: criterionPoints(c),
+      points: Number.isFinite(c.points) ? c.points : 0,
       ratings: c.ratings.map((r) => ({ description: r.description.trim() || `${r.points} pts`, points: Number.isFinite(r.points) ? r.points : 0 })),
     }));
     setSaving(true);
@@ -1725,7 +1725,17 @@ function RubricBuilderModal({
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <span className={styles.ccCount}>Criterion {ci + 1}</span>
                 <span style={{ flex: 1 }} />
-                <span className={styles.ccCount}>{criterionPoints(c)} pts</span>
+                <span className={styles.bulkField}>
+                  <input
+                    type="number"
+                    className={styles.bulkInput}
+                    style={{ width: 72 }}
+                    value={c.points}
+                    onChange={(e) => patchCrit(c.key, { points: Number(e.target.value) })}
+                    aria-label={`Criterion ${ci + 1} points`}
+                  />
+                  <span className={styles.ccCount}>pts</span>
+                </span>
                 {criteria.length > 1 && (
                   <button type="button" className={`${styles.ccBtn} ${styles.ccBtnDanger}`} onClick={() => removeCriterion(c.key)}>
                     Remove
@@ -1779,7 +1789,7 @@ function RubricBuilderModal({
               Add criterion
             </button>
             <span className={styles.fieldHint} style={{ margin: 0 }}>
-              Total: {total} pts
+              Overall rubric: {total} pts (sum of criteria)
             </span>
           </div>
 
@@ -2129,6 +2139,8 @@ function ModulesView({
   const [pointsEdit, setPointsEdit] = useState<{ id: number; value: string } | null>(null);
   // The assignment being previewed in a read-only modal.
   const [previewAssignment, setPreviewAssignment] = useState<CanvasModuleItem | null>(null);
+  // The item whose type is being changed inline (via its type chip).
+  const [typeEdit, setTypeEdit] = useState<number | null>(null);
 
   // FLIP animation for reorders: remember each item row's DOM node and its
   // position just before a move, then slide every moved row from its old spot to
@@ -3066,6 +3078,46 @@ function ModulesView({
     })();
   };
 
+  // Change a gradable item's type from its row: recreate it as the target kind
+  // (carrying title, description, points, due date), drop it into the same slot,
+  // and delete the original. Submissions/grades do not carry over.
+  const changeItemType = (m: CanvasModule, it: CanvasModuleItem, target: GradableKind) => {
+    setTypeEdit(null);
+    if (it.contentId == null || target === it.type) return;
+    const contentId = it.contentId;
+    void (async () => {
+      setBusy(true);
+      setNote(null);
+      try {
+        let description = "";
+        const detail = await getGradableAction(courseUrl, it.type as GradableKind, contentId, acronym);
+        if (!("error" in detail)) description = detail.detail.description;
+        const created = await createGradableAction(
+          courseUrl,
+          target,
+          { title: it.title, description, pointsPossible: it.pointsPossible ?? undefined, dueAt: it.dueAt },
+          acronym
+        );
+        if ("error" in created) throw new Error(created.error);
+        const added = await createModuleItemAction(
+          courseUrl,
+          m.id,
+          { type: target, contentId: created.id, position: it.position, indent: it.indent },
+          acronym
+        );
+        if ("error" in added) throw new Error(added.error);
+        const removed = await bulkDeleteAction(courseUrl, it.type as BulkKind, [String(contentId)], acronym);
+        if ("error" in removed) throw new Error(removed.error);
+        setNote({ kind: "success", text: `Changed to ${target.toLowerCase()}.` });
+      } catch (err) {
+        setNote({ kind: "error", text: err instanceof Error ? err.message : "Could not change the type." });
+      } finally {
+        setBusy(false);
+        reload();
+      }
+    })();
+  };
+
   const toggleItem = (m: CanvasModule, it: CanvasModuleItem) => {
     const published = !it.published;
     patchItems(m.id, m.items.map((x) => (x.id === it.id ? { ...x, published } : x)));
@@ -3627,6 +3679,7 @@ function ModulesView({
               <input
                 type="text"
                 className={styles.ccName}
+                title={m.name}
                 value={drafts[`m${m.id}`] ?? m.name}
                 onChange={(e) => setDrafts((p) => ({ ...p, [`m${m.id}`]: e.target.value }))}
                 onBlur={() => void saveModuleName(m)}
@@ -3723,10 +3776,40 @@ function ModulesView({
                       onChange={() => toggleItemSelected(m.id, it.id)}
                       aria-label={`Select ${it.title}`}
                     />
-                    <span className={styles.ccType}>{it.type || "Item"}</span>
+                    {["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null ? (
+                      typeEdit === it.id ? (
+                        <select
+                          className={styles.ccType}
+                          autoFocus
+                          style={{ cursor: "pointer", fontFamily: "inherit" }}
+                          value={it.type}
+                          onChange={(e) => changeItemType(m, it, e.target.value as GradableKind)}
+                          onBlur={() => setTypeEdit(null)}
+                          aria-label="Change item type"
+                        >
+                          <option value="Assignment">ASSIGNMENT</option>
+                          <option value="Quiz">QUIZ</option>
+                          <option value="Discussion">DISCUSSION</option>
+                        </select>
+                      ) : (
+                        <button
+                          type="button"
+                          className={styles.ccType}
+                          style={{ cursor: "pointer", border: 0, fontFamily: "inherit" }}
+                          onClick={() => setTypeEdit(it.id)}
+                          disabled={busy}
+                          title="Click to change type"
+                        >
+                          {it.type}
+                        </button>
+                      )
+                    ) : (
+                      <span className={styles.ccType}>{it.type || "Item"}</span>
+                    )}
                     <input
                       type="text"
                       className={styles.ccItemName}
+                      title={it.title}
                       value={drafts[`i${it.id}`] ?? it.title}
                       onChange={(e) => setDrafts((p) => ({ ...p, [`i${it.id}`]: e.target.value }))}
                       onBlur={() => void saveItemTitle(m, it)}

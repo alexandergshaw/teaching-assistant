@@ -3832,8 +3832,13 @@
 .ccPublish {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   height: 28px;
+  /* Fixed width so "Published" and "Unpublished" occupy the same space and never
+     shift the surrounding columns. */
+  min-width: 112px;
+  flex-shrink: 0;
   padding: 0 11px;
   border: 1px solid var(--field-border);
   border-radius: 999px;
@@ -4069,4 +4074,31 @@
 .ccDueSlot .ccDueInput,
 .ccPointsSlot .ccDueInput {
   width: 100%;
+}
+
+/* Narrow screens: shrink the fixed columns and controls so the row needs less
+   horizontal scrolling while every column stays aligned. */
+@media (max-width: 760px) {
+  .ccType {
+    width: 74px;
+    font-size: 0.56rem;
+  }
+  .ccDueSlot {
+    width: 132px;
+  }
+  .ccPointsSlot {
+    width: 70px;
+  }
+  .ccPublish {
+    min-width: 94px;
+    padding: 0 8px;
+    font-size: 0.7rem;
+  }
+  .ccBtn {
+    padding: 0 8px;
+    font-size: 0.74rem;
+  }
+  .ccHead {
+    gap: 6px;
+  }
 }

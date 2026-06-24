@@ -1524,6 +1524,10 @@ function ModulesView({
   const [bulkModuleShift, setBulkModuleShift] = useState(1);
   // The module selected items are moved into by the "Move to module" control.
   const [bulkTargetModule, setBulkTargetModule] = useState<number | "">("");
+  // "Add to selected modules": the content type to create in each module, and
+  // the naming pattern (supports {module} and {n}) used to title each new item.
+  const [bulkAddType, setBulkAddType] = useState("Assignment");
+  const [bulkAddPattern, setBulkAddPattern] = useState("");
   const [bulkPoints, setBulkPoints] = useState("");
   const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
   const [confirmDeleteContent, setConfirmDeleteContent] = useState(false);
@@ -1839,6 +1843,69 @@ function ModulesView({
         text: `Deleted modules: ${updated} done${failed ? `, ${failed} failed` : ""}.`,
       });
       setSelectedModules(new Set());
+      reload();
+    })();
+  };
+
+  // Fill a naming pattern for one module: {module} -> module name, {n} -> the
+  // 1-based index of the module within the selection. Falls back to a generic
+  // name if the pattern resolves to empty.
+  const fillNamePattern = (pattern: string, moduleName: string, n: number): string =>
+    pattern.replace(/\{module\}/g, moduleName).replace(/\{n\}/g, String(n)).trim() || `Item ${n}`;
+
+  // Create one new item of `type` named `name` and add it to `moduleId`. Pages
+  // and gradables are created first (to get a slug / content id) and then linked;
+  // a SubHeader is just a titled module item with no underlying content.
+  const addContentToModule = async (type: string, moduleId: number, name: string): Promise<boolean> => {
+    try {
+      if (type === "SubHeader") {
+        const r = await createModuleItemAction(courseUrl, moduleId, { type: "SubHeader", title: name }, acronym);
+        return !("error" in r);
+      }
+      if (type === "Page") {
+        const created = await createPageAction(courseUrl, { title: name }, acronym);
+        if ("error" in created) return false;
+        const linked = await createModuleItemAction(courseUrl, moduleId, { type: "Page", pageUrl: created.page.url }, acronym);
+        return !("error" in linked);
+      }
+      // Assignment / Quiz / Discussion
+      const created = await createGradableAction(courseUrl, type as GradableKind, { title: name }, acronym);
+      if ("error" in created) return false;
+      const linked = await createModuleItemAction(courseUrl, moduleId, { type, contentId: created.id }, acronym);
+      return !("error" in linked);
+    } catch {
+      return false;
+    }
+  };
+
+  // Add one new item (named via the pattern) of the chosen type to every
+  // selected module, in module order. New content is unpublished by default.
+  const bulkAddToModules = () => {
+    const targets = modules.filter((mod) => selectedModules.has(mod.id));
+    if (targets.length === 0) return;
+    const pattern = bulkAddPattern.trim();
+    if (!pattern) {
+      setNote({ kind: "error", text: "Enter a name pattern for the new items." });
+      return;
+    }
+    const type = bulkAddType;
+    void (async () => {
+      setOpBusy(true);
+      setNote(null);
+      let added = 0;
+      let failed = 0;
+      let n = 0;
+      for (const mod of targets) {
+        n += 1;
+        const ok = await addContentToModule(type, mod.id, fillNamePattern(pattern, mod.name, n));
+        if (ok) added += 1;
+        else failed += 1;
+      }
+      setOpBusy(false);
+      setNote({
+        kind: failed ? "error" : "success",
+        text: `Added to modules: ${added} done${failed ? `, ${failed} failed` : ""}.`,
+      });
       reload();
     })();
   };
@@ -2486,26 +2553,66 @@ function ModulesView({
           </div>
 
           {selectedModules.size > 0 && (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <span className={styles.fieldHint} style={{ margin: 0, fontWeight: 600 }}>
-                Modules:
-              </span>
-              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkPublishModules(true)}>
-                Publish
-              </button>
-              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkPublishModules(false)}>
-                Unpublish
-              </button>
-              <button
-                type="button"
-                className={styles.clearFileButton}
-                disabled={opBusy}
-                onClick={bulkDeleteModules}
-                style={{ color: "#b91c1c", borderColor: "#fecaca" }}
-              >
-                {confirmDeleteModules ? "Confirm delete modules" : "Delete modules"}
-              </button>
-            </div>
+            <>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <span className={styles.fieldHint} style={{ margin: 0, fontWeight: 600 }}>
+                  Modules:
+                </span>
+                <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkPublishModules(true)}>
+                  Publish
+                </button>
+                <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkPublishModules(false)}>
+                  Unpublish
+                </button>
+                <button
+                  type="button"
+                  className={styles.clearFileButton}
+                  disabled={opBusy}
+                  onClick={bulkDeleteModules}
+                  style={{ color: "#b91c1c", borderColor: "#fecaca" }}
+                >
+                  {confirmDeleteModules ? "Confirm delete modules" : "Delete modules"}
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <span className={styles.fieldHint} style={{ margin: 0, fontWeight: 600 }}>
+                  Add to each:
+                </span>
+                <select
+                  className={styles.textInput}
+                  style={{ maxWidth: 150 }}
+                  value={bulkAddType}
+                  onChange={(e) => setBulkAddType(e.target.value)}
+                  aria-label="Type of item to add to each selected module"
+                >
+                  <option value="Assignment">Assignment</option>
+                  <option value="Quiz">Quiz</option>
+                  <option value="Discussion">Discussion</option>
+                  <option value="Page">Page</option>
+                  <option value="SubHeader">Text header</option>
+                </select>
+                <input
+                  type="text"
+                  className={styles.textInput}
+                  style={{ flex: "1 1 220px", minWidth: 180 }}
+                  placeholder="Name pattern, e.g. {module} - Homework"
+                  value={bulkAddPattern}
+                  onChange={(e) => setBulkAddPattern(e.target.value)}
+                  aria-label="Name pattern for the new items"
+                />
+                <button
+                  type="button"
+                  className={styles.downloadButton}
+                  disabled={opBusy || !bulkAddPattern.trim()}
+                  onClick={bulkAddToModules}
+                >
+                  Add to modules
+                </button>
+                <span className={styles.fieldHint} style={{ margin: 0, flexBasis: "100%" }}>
+                  Use {"{module}"} for the module name and {"{n}"} for a number (1, 2, 3…). New items are created unpublished.
+                </span>
+              </div>
+            </>
           )}
 
           {selected.size > 0 && (

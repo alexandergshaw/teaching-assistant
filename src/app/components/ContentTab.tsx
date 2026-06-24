@@ -2164,6 +2164,13 @@ function ModulesView({
   const [newModuleName, setNewModuleName] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  // Filter modules by name or by a contained item's title.
+  const [moduleSearch, setModuleSearch] = useState("");
+  const moduleSearchLc = moduleSearch.trim().toLowerCase();
+  const moduleMatches = (m: CanvasModule) =>
+    !moduleSearchLc ||
+    m.name.toLowerCase().includes(moduleSearchLc) ||
+    m.items.some((it) => it.title.toLowerCase().includes(moduleSearchLc));
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const [uploads, setUploads] = useState<
@@ -3339,6 +3346,13 @@ function ModulesView({
 
   return (
     <div className={styles.form}>
+      <input
+        type="search"
+        className={styles.textInput}
+        placeholder="Search modules and their items by name…"
+        value={moduleSearch}
+        onChange={(e) => setModuleSearch(e.target.value)}
+      />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
           <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}>
@@ -3667,7 +3681,12 @@ function ModulesView({
 
       {modules.length === 0 && <p className={styles.emptyState}>This course has no modules yet.</p>}
 
+      {moduleSearchLc && modules.length > 0 && !modules.some(moduleMatches) && (
+        <p className={styles.emptyState}>No modules or items match &quot;{moduleSearch.trim()}&quot;.</p>
+      )}
+
       {modules.map((m, mi) => {
+        if (!moduleMatches(m)) return null;
         const open = expanded.has(m.id);
         const moduleItemsSelected = m.items.length > 0 && m.items.every((it) => selected.has(itemKey(m.id, it.id)));
         return (
@@ -3999,14 +4018,14 @@ function ModulesView({
                         Edit page
                       </button>
                     )}
-                    {["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null && (
-                      <button type="button" className={styles.ccBtn} onClick={() => setEditingItem(it)}>
-                        Edit
-                      </button>
-                    )}
                     {it.type === "Assignment" && it.contentId != null && (
                       <button type="button" className={styles.ccBtn} onClick={() => setPreviewAssignment(it)}>
                         Preview
+                      </button>
+                    )}
+                    {["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null && (
+                      <button type="button" className={styles.ccBtn} onClick={() => setEditingItem(it)}>
+                        Edit
                       </button>
                     )}
                     {it.type === "File" && it.contentId != null && (
@@ -4898,6 +4917,9 @@ function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym
     });
   const allShownSelected = shown.length > 0 && shown.every((f) => selected.has(f.id));
   const toggleSelectAll = () => setSelected(allShownSelected ? new Set() : new Set(shown.map((f) => f.id)));
+  // Modules whose items reference this file (as a File module item).
+  const fileModules = (fileId: number) =>
+    modules.filter((m) => m.items.some((it) => it.type === "File" && it.contentId === fileId)).map((m) => m.name);
 
   const bulkAddToModule = async () => {
     if (bulkModule === "" || selected.size === 0) return;
@@ -5191,6 +5213,18 @@ function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym
                     if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                   }}
                 />
+                {(() => {
+                  const mods = fileModules(f.id);
+                  return (
+                    <span
+                      className={styles.ccCount}
+                      title={mods.length ? `In: ${mods.join(", ")}` : "Not in any module"}
+                      style={{ width: 150, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    >
+                      {mods.length === 0 ? "—" : mods.length === 1 ? mods[0] : `${mods[0]} +${mods.length - 1}`}
+                    </span>
+                  );
+                })()}
                 <span className={styles.ccCount} style={{ width: 78, textAlign: "right", flexShrink: 0 }}>
                   {formatBytes(f.size)}
                 </span>

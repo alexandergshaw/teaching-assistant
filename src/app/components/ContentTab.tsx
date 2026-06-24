@@ -1520,6 +1520,8 @@ function ModulesView({
   const [opBusy, setOpBusy] = useState(false);
   const [bulkDue, setBulkDue] = useState("");
   const [bulkShift, setBulkShift] = useState(7);
+  // How many modules a "Shift up/down" moves the selected items by.
+  const [bulkModuleShift, setBulkModuleShift] = useState(1);
   const [bulkPoints, setBulkPoints] = useState("");
   const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
   const [confirmDeleteContent, setConfirmDeleteContent] = useState(false);
@@ -1910,6 +1912,69 @@ function ModulesView({
       return;
     }
     void runBulkSummary(() => setModuleDueDatesAction(courseUrl, updates, acronym), "Due dates shifted");
+  };
+
+  // Move every selected item `dir * bulkModuleShift` modules along the module
+  // list (negative = toward the top). Each item's target is clamped to the first
+  // and last module, so items already at the edge in that direction stay put.
+  // Items land at the end of their target module; when several move into the same
+  // module their selection order is preserved.
+  const bulkShiftModules = (dir: -1 | 1) => {
+    const items = selectedItems();
+    if (items.length === 0) return;
+    const steps = Math.abs(Math.trunc(bulkModuleShift || 0));
+    if (steps === 0) {
+      setNote({ kind: "error", text: "Enter how many modules to shift by." });
+      return;
+    }
+    if (modules.length < 2) {
+      setNote({ kind: "error", text: "There is only one module to move items between." });
+      return;
+    }
+    const delta = dir * steps;
+
+    const moduleIndex = new Map<number, number>();
+    modules.forEach((mod, idx) => moduleIndex.set(mod.id, idx));
+
+    // Plan each move: source module + target module + the 1-based position the
+    // item should take at the end of that target (accounting for others moving
+    // into the same module ahead of it in this batch).
+    const appended = new Map<number, number>();
+    const plan = new Map<number, { srcModuleId: number; targetModuleId: number; position: number }>();
+    for (const { item, moduleId } of items) {
+      const srcIdx = moduleIndex.get(moduleId);
+      if (srcIdx === undefined) continue;
+      const targetIdx = Math.min(modules.length - 1, Math.max(0, srcIdx + delta));
+      if (targetIdx === srcIdx) continue; // already at the top/bottom in this direction
+      const target = modules[targetIdx];
+      const n = appended.get(target.id) ?? 0;
+      plan.set(item.id, { srcModuleId: moduleId, targetModuleId: target.id, position: target.items.length + n + 1 });
+      appended.set(target.id, n + 1);
+    }
+
+    const moveItems = items.filter(({ item }) => plan.has(item.id));
+    if (moveItems.length === 0) {
+      setNote({ kind: "error", text: `Selected items are already at the ${dir < 0 ? "top" : "bottom"} module.` });
+      return;
+    }
+
+    void (async () => {
+      await runPerItem(
+        moveItems,
+        (it, moduleId) => {
+          const p = plan.get(it.id)!;
+          return updateModuleItemAction(
+            courseUrl,
+            moduleId,
+            it.id,
+            { targetModuleId: p.targetModuleId, position: p.position },
+            acronym
+          );
+        },
+        dir < 0 ? "Shifted up" : "Shifted down"
+      );
+      clearSelection();
+    })();
   };
 
   const bulkSetPoints = () => {
@@ -2400,6 +2465,23 @@ function ModulesView({
                 onClick={bulkRubric}
               >
                 Associate
+              </button>
+            </span>
+            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="number"
+                min={1}
+                className={styles.textInput}
+                style={{ width: 76 }}
+                value={bulkModuleShift}
+                onChange={(e) => setBulkModuleShift(Number(e.target.value))}
+                aria-label="Modules to shift by"
+              />
+              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkShiftModules(-1)}>
+                Shift up
+              </button>
+              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkShiftModules(1)}>
+                Shift down
               </button>
             </span>
             <button type="button" className={styles.clearFileButton} disabled={opBusy} onClick={bulkRemoveFromModule}>

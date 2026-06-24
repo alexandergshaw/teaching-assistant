@@ -4400,6 +4400,11 @@ function ModulesView({
         if (!moduleMatches(m)) return null;
         const open = expanded.has(m.id);
         const moduleItemsSelected = m.items.length > 0 && m.items.every((it) => selected.has(itemKey(m.id, it.id)));
+        // While searching, hide item rows that don't match the term — unless the
+        // module name itself matched, in which case the whole module is shown.
+        const moduleNameMatched = !moduleSearchLc || m.name.toLowerCase().includes(moduleSearchLc);
+        const itemHiddenBySearch = (it: CanvasModuleItem) =>
+          !!moduleSearchLc && !moduleNameMatched && !it.title.toLowerCase().includes(moduleSearchLc);
         return (
           <div
             key={m.id}
@@ -4524,7 +4529,7 @@ function ModulesView({
                     No items in this module.
                   </p>
                 )}
-                {m.items.map((it, ii) => (
+                {m.items.map((it, ii) => itemHiddenBySearch(it) ? null : (
                   <div
                     key={it.id}
                     ref={(el) => {

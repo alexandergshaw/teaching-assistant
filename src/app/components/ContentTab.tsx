@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   listCourseContentAction,
   getPageAction,
@@ -1361,6 +1361,33 @@ function ModulesView({
   const [dragOverItem, setDragOverItem] = useState<number | null>(null);
   const [dragOverModule, setDragOverModule] = useState<number | null>(null);
 
+  // FLIP animation for reorders: remember each item row's DOM node and its
+  // position just before a move, then slide every moved row from its old spot to
+  // its new one. Web Animations API is used (not inline styles) so it never
+  // fights React's own style updates mid-animation.
+  const itemNodes = useRef(new Map<number, HTMLElement | null>());
+  const flipPrev = useRef<Map<number, DOMRect> | null>(null);
+  const [flipTick, setFlipTick] = useState(0);
+
+  useLayoutEffect(() => {
+    const prev = flipPrev.current;
+    if (!prev) return;
+    flipPrev.current = null;
+    itemNodes.current.forEach((el, id) => {
+      if (!el) return;
+      const before = prev.get(id);
+      if (!before) return;
+      const after = el.getBoundingClientRect();
+      const dx = before.left - after.left;
+      const dy = before.top - after.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      el.animate(
+        [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0px, 0px)" }],
+        { duration: 230, easing: "cubic-bezier(0.2, 0, 0, 1)" }
+      );
+    });
+  }, [flipTick]);
+
   // Move the dragged item before `beforeItemId` (or to the end when null) in the
   // target module: reorder locally for instant feedback, then persist position
   // (and target module, for a cross-module move) to Canvas.
@@ -1371,6 +1398,12 @@ function ModulesView({
     setDragOverItem(null);
     setDragOverModule(null);
     if (beforeItemId === itemId) return; // dropped on itself
+
+    // Snapshot current row positions for the FLIP before the list reorders.
+    const prevRects = new Map<number, DOMRect>();
+    itemNodes.current.forEach((el, id) => {
+      if (el) prevRects.set(id, el.getBoundingClientRect());
+    });
 
     const next = modules.map((mod) => ({ ...mod, items: [...mod.items] }));
     const srcModule = next.find((mod) => mod.id === srcModuleId);
@@ -1391,6 +1424,8 @@ function ModulesView({
 
     targetModule.items.splice(insertIdx, 0, { ...moved, moduleId: targetModuleId });
     setModules(next);
+    flipPrev.current = prevRects;
+    setFlipTick((t) => t + 1);
 
     const sameModule = srcModuleId === targetModuleId;
     void (async () => {
@@ -2252,6 +2287,10 @@ function ModulesView({
                 {m.items.map((it, ii) => (
                   <div
                     key={it.id}
+                    ref={(el) => {
+                      if (el) itemNodes.current.set(it.id, el);
+                      else itemNodes.current.delete(it.id);
+                    }}
                     onDragOver={(e) => {
                       if (drag) {
                         e.preventDefault();
@@ -2273,13 +2312,23 @@ function ModulesView({
                       gap: 6,
                       flexWrap: "wrap",
                       marginLeft: it.indent * 18,
-                      padding: "4px 0",
+                      padding: "4px 4px",
+                      borderRadius: 6,
                       borderTop:
                         dragOverItem === it.id
                           ? "2px solid var(--accent)"
                           : ii === 0
                             ? "none"
                             : "1px solid var(--field-border)",
+                      background:
+                        dragOverItem === it.id
+                          ? "color-mix(in srgb, var(--accent) 9%, transparent)"
+                          : drag?.itemId === it.id
+                            ? "color-mix(in srgb, var(--accent) 6%, transparent)"
+                            : "transparent",
+                      boxShadow: drag?.itemId === it.id ? "0 4px 12px rgba(15, 23, 42, 0.12)" : "none",
+                      opacity: drag?.itemId === it.id ? 0.55 : 1,
+                      transition: "opacity 0.15s ease, background 0.15s ease, box-shadow 0.15s ease",
                     }}
                   >
                     <span
@@ -2296,7 +2345,14 @@ function ModulesView({
                       }}
                       title="Drag to reorder or move between modules"
                       aria-label="Drag to reorder"
-                      style={{ cursor: "grab", color: "var(--text-secondary)", userSelect: "none", padding: "0 2px", flexShrink: 0 }}
+                      style={{
+                        cursor: drag?.itemId === it.id ? "grabbing" : "grab",
+                        color: drag?.itemId === it.id ? "var(--accent)" : "var(--text-secondary)",
+                        userSelect: "none",
+                        padding: "0 2px",
+                        flexShrink: 0,
+                        transition: "color 0.15s ease",
+                      }}
                     >
                       ⠿
                     </span>
@@ -2404,7 +2460,7 @@ function ModulesView({
                     }}
                     style={{
                       marginTop: 4,
-                      padding: "8px 12px",
+                      padding: dragOverModule === m.id ? "14px 12px" : "8px 12px",
                       borderRadius: 8,
                       border: `1px dashed ${dragOverModule === m.id ? "var(--accent)" : "var(--field-border)"}`,
                       background:
@@ -2412,6 +2468,7 @@ function ModulesView({
                       color: dragOverModule === m.id ? "var(--accent)" : "var(--text-secondary)",
                       fontSize: "0.8rem",
                       textAlign: "center",
+                      transition: "padding 0.15s ease, border-color 0.15s ease, background 0.15s ease, color 0.15s ease",
                     }}
                   >
                     Drop here to move to the end of this module

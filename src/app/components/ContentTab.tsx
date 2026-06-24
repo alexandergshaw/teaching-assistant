@@ -4748,7 +4748,7 @@ function CourseCopyModal({
   const isExport = mode === "export";
   const [courses, setCourses] = useState<Array<{ id: string; name: string }>>([]);
   const [coursesState, setCoursesState] = useState<"loading" | "ready" | "error">(acronym ? "loading" : "ready");
-  const [courseId, setCourseId] = useState("");
+  const [selectedCourses, setSelectedCourses] = useState<Set<string>>(new Set());
   const [granularity, setGranularity] = useState<"all" | "types" | "items">("all");
   const [types, setTypes] = useState<Set<string>>(() => new Set(COURSE_COPY_TYPES.map((t) => t.key)));
   const [phase, setPhase] = useState<"setup" | "selecting" | "done">("setup");
@@ -4789,9 +4789,9 @@ function CourseCopyModal({
 
   // Create the migration; for selective copies, poll until Canvas is ready to
   // accept a selection. Returns the migration id + destination, or null on error.
-  const startMigration = async (selective: boolean): Promise<{ id: number; destId: string } | null> => {
-    const destId = isExport ? courseId : currentCourseId;
-    const sourceId = isExport ? currentCourseId : courseId;
+  const startMigration = async (selective: boolean, otherCourseId: string): Promise<{ id: number; destId: string } | null> => {
+    const destId = isExport ? otherCourseId : currentCourseId;
+    const sourceId = isExport ? currentCourseId : otherCourseId;
     setStatusText("Starting the copy in Canvas…");
     const created = await createCourseCopyAction(courseUrl, destId, sourceId, selective, acronym);
     if ("error" in created) {
@@ -4818,63 +4818,75 @@ function CourseCopyModal({
   };
 
   const start = async () => {
-    if (!courseId) {
-      setError("Choose a course.");
-      return;
-    }
-    setRunning(true);
-    setError(null);
-
-    if (granularity === "all") {
-      const m = await startMigration(false);
-      setRunning(false);
-      if (!m) return;
-      setPhase("done");
-      setStatusText("Copy started. Canvas is importing everything in the background.");
+    const ids = [...selectedCourses];
+    if (ids.length === 0) {
+      setError("Choose at least one course.");
       return;
     }
 
-    if (granularity === "types") {
-      const chosen = [...types];
-      if (chosen.length === 0) {
-        setRunning(false);
-        setError("Choose at least one content type.");
+    // Per-item selection is interactive and tied to one migration, so it only
+    // works for a single course.
+    if (granularity === "items") {
+      if (ids.length > 1) {
+        setError("Pick a single course to copy specific items.");
         return;
       }
-      const m = await startMigration(true);
+      setRunning(true);
+      setError(null);
+      const m = await startMigration(true, ids[0]);
       if (!m) {
         setRunning(false);
         return;
       }
-      setStatusText("Submitting your selection…");
-      const sel = await selectCopyTypesAction(courseUrl, m.destId, m.id, chosen, acronym);
+      setStatusText("Loading items…");
+      const data = await getSelectiveDataAction(courseUrl, m.destId, m.id, acronym);
       setRunning(false);
-      if ("error" in sel) {
-        setError(sel.error);
+      if ("error" in data) {
+        setError(data.error);
         return;
       }
-      setPhase("done");
-      setStatusText("Copy started. Canvas is importing the selected types in the background.");
+      setNodes(data.nodes);
+      setMigration(m);
+      setPhase("selecting");
+      setStatusText("");
       return;
     }
 
-    // granularity === "items": prepare, then show the selectable tree.
-    const m = await startMigration(true);
-    if (!m) {
-      setRunning(false);
+    const chosen = [...types];
+    if (granularity === "types" && chosen.length === 0) {
+      setError("Choose at least one content type.");
       return;
     }
-    setStatusText("Loading items…");
-    const data = await getSelectiveDataAction(courseUrl, m.destId, m.id, acronym);
+
+    setRunning(true);
+    setError(null);
+    let ok = 0;
+    const failed: string[] = [];
+    for (let i = 0; i < ids.length; i++) {
+      const cid = ids[i];
+      const name = courses.find((c) => c.id === cid)?.name ?? cid;
+      setStatusText(ids.length > 1 ? `Course ${i + 1} of ${ids.length}: ${name}…` : "Working…");
+      const m = await startMigration(granularity === "types", cid);
+      if (!m) {
+        failed.push(name);
+        continue;
+      }
+      if (granularity === "types") {
+        const sel = await selectCopyTypesAction(courseUrl, m.destId, m.id, chosen, acronym);
+        if ("error" in sel) {
+          failed.push(name);
+          continue;
+        }
+      }
+      ok += 1;
+    }
     setRunning(false);
-    if ("error" in data) {
-      setError(data.error);
-      return;
-    }
-    setNodes(data.nodes);
-    setMigration(m);
-    setPhase("selecting");
-    setStatusText("");
+    setPhase("done");
+    setStatusText(
+      failed.length === 0
+        ? `Started ${ok} cop${ok === 1 ? "y" : "ies"}. Canvas is importing in the background.`
+        : `Started ${ok}; failed for ${failed.length} (${failed.join(", ")}).`
+    );
   };
 
   const submitItems = async () => {
@@ -4956,25 +4968,31 @@ function CourseCopyModal({
           ) : (
             <>
               <div className={styles.field}>
-                <label htmlFor="copy-course">{isExport ? "Destination course" : "Source course"}</label>
+                <label>{isExport ? "Copy to these courses" : "Import from these courses"}</label>
                 {coursesState === "loading" ? (
                   <p className={styles.fieldHint}>Loading courses…</p>
                 ) : coursesState === "error" ? (
                   <p className={styles.error}>{error}</p>
+                ) : courses.length === 0 ? (
+                  <p className={styles.fieldHint}>No other courses on this institution.</p>
                 ) : (
-                  <select id="copy-course" className={styles.textInput} value={courseId} onChange={(e) => setCourseId(e.target.value)} disabled={running}>
-                    <option value="">{courses.length === 0 ? "No other courses" : "Choose a course…"}</option>
+                  <div style={{ maxHeight: 180, overflowY: "auto", border: "1px solid var(--field-border)", borderRadius: 10, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
                     {courses.map((c) => (
-                      <option key={c.id} value={c.id}>
+                      <label key={c.id} style={{ display: "inline-flex", gap: 8, alignItems: "center", margin: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedCourses.has(c.id)}
+                          onChange={() => setSelectedCourses((s) => toggleIn(s, c.id))}
+                          disabled={running}
+                        />
                         {c.name}
-                      </option>
+                      </label>
                     ))}
-                  </select>
+                  </div>
                 )}
                 <p className={styles.fieldHint} style={{ margin: 0 }}>
-                  {isExport
-                    ? "This course's content is copied into the chosen course."
-                    : "The chosen course's content is copied into this course."}
+                  {selectedCourses.size} selected.{" "}
+                  {isExport ? "This course's content is copied into each." : "Each course's content is copied into this one."}
                 </p>
               </div>
 
@@ -4989,7 +5007,9 @@ function CourseCopyModal({
                 >
                   <option value="all">All content</option>
                   <option value="types">Specific content types</option>
-                  <option value="items">Specific items</option>
+                  <option value="items" disabled={selectedCourses.size > 1}>
+                    Specific items{selectedCourses.size > 1 ? " (one course only)" : ""}
+                  </option>
                 </select>
               </div>
 
@@ -5011,8 +5031,14 @@ function CourseCopyModal({
               )}
 
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
-                <button type="button" className={styles.submitButton} onClick={() => void start()} disabled={running || !courseId}>
-                  {running ? "Working…" : granularity === "items" ? "Continue" : isExport ? "Copy to course" : "Import to this course"}
+                <button type="button" className={styles.submitButton} onClick={() => void start()} disabled={running || selectedCourses.size === 0}>
+                  {running
+                    ? "Working…"
+                    : granularity === "items"
+                      ? "Continue"
+                      : isExport
+                        ? `Copy to ${selectedCourses.size} course${selectedCourses.size === 1 ? "" : "s"}`
+                        : "Import to this course"}
                 </button>
                 {running && statusText && <span className={styles.fieldHint} style={{ margin: 0 }}>{statusText}</span>}
               </div>
@@ -5473,17 +5499,25 @@ export default function ContentTab({
     setEditorOpen(false);
   }
 
-  const loadContent = async (url: string) => {
+  // `silent` re-fetches without swapping the content for the loading spinner, so
+  // a reload keeps the page mounted (scroll position, open accordions, and the
+  // selected subtab are all preserved as the modules/pages update in place).
+  const loadContent = async (url: string, silent = false) => {
     const id = parseCanvasCourseId(url);
     if (!id) return;
     if (typeof window !== "undefined") localStorage.setItem(CONTENT_URL_KEY, url);
-    setLoadState({ status: "loading", message: "" });
+    if (!silent) setLoadState({ status: "loading", message: "" });
     setNote(null);
     // Addable content belongs to this course; clear it so it reloads on demand.
     setTargets(null);
     setTargetsState("idle");
     const result = await listCourseContentAction(url, activeInstitution || undefined);
     if ("error" in result) {
+      if (silent) {
+        // Keep the current content rather than blanking it on a background refresh.
+        setNote({ kind: "error", text: result.error });
+        return;
+      }
       setModules([]);
       setPages([]);
       setCourseName("");
@@ -5493,7 +5527,7 @@ export default function ContentTab({
     setCourseName(result.courseName);
     setModules(result.modules);
     setPages(result.pages);
-    setLoadState({ status: "idle", message: "" });
+    if (!silent) setLoadState({ status: "idle", message: "" });
   };
 
   // Auto-load the remembered course on mount (await-first so no sync setState).
@@ -5527,7 +5561,7 @@ export default function ContentTab({
   };
 
   const reload = () => {
-    if (courseUrl) void loadContent(courseUrl);
+    if (courseUrl) void loadContent(courseUrl, true);
   };
 
   // Lazily fetch the assignments/quizzes/discussions/files for the item picker

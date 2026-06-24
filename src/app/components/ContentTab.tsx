@@ -1558,6 +1558,8 @@ function ModulesView({
   // drag state above so an item drag and a module drag never trip each other.
   const [moduleDrag, setModuleDrag] = useState<number | null>(null);
   const [dragOverModuleRow, setDragOverModuleRow] = useState<number | null>(null);
+  // The item whose due date is being edited inline, plus its datetime-local draft.
+  const [dueEdit, setDueEdit] = useState<{ id: number; value: string } | null>(null);
 
   // FLIP animation for reorders: remember each item row's DOM node and its
   // position just before a move, then slide every moved row from its old spot to
@@ -2387,6 +2389,45 @@ function ModulesView({
     );
   };
 
+  // Persist an inline due-date edit for one gradable item. Empty clears the date.
+  // Skips the write when the field is unchanged; optimistic, then reconciles.
+  const saveDueEdit = (m: CanvasModule, it: CanvasModuleItem) => {
+    if (!dueEdit || dueEdit.id !== it.id) return;
+    if (dueEdit.value === toLocalInput(it.dueAt) || it.contentId == null) {
+      setDueEdit(null);
+      return;
+    }
+    const raw = dueEdit.value.trim();
+    if (raw && Number.isNaN(new Date(raw).getTime())) {
+      setNote({ kind: "error", text: "Could not read that due date." });
+      setDueEdit(null);
+      return;
+    }
+    const iso = raw ? new Date(raw).toISOString() : null;
+    const contentId = it.contentId;
+    setDueEdit(null);
+    patchItems(m.id, m.items.map((x) => (x.id === it.id ? { ...x, dueAt: iso } : x)));
+    void (async () => {
+      setBusy(true);
+      setNote(null);
+      const result = await setModuleDueDatesAction(
+        courseUrl,
+        [{ type: it.type, contentId, dueAt: iso }],
+        acronym
+      );
+      setBusy(false);
+      if ("error" in result) {
+        setNote({ kind: "error", text: result.error });
+        reload();
+      } else if (result.failures.length > 0) {
+        setNote({ kind: "error", text: "Could not update the due date in Canvas." });
+        reload();
+      } else {
+        setNote({ kind: "success", text: iso ? "Due date updated." : "Due date cleared." });
+      }
+    })();
+  };
+
   const toggleItem = (m: CanvasModule, it: CanvasModuleItem) => {
     const published = !it.published;
     patchItems(m.id, m.items.map((x) => (x.id === it.id ? { ...x, published } : x)));
@@ -3030,15 +3071,40 @@ function ModulesView({
                       }}
                     />
                     {DATED_TYPES.includes(it.type) &&
-                      (it.dueAt ? (
-                        <span
+                      (dueEdit?.id === it.id ? (
+                        <input
+                          type="datetime-local"
+                          className={styles.ccDueInput}
+                          autoFocus
+                          value={dueEdit.value}
+                          onChange={(e) => setDueEdit({ id: it.id, value: e.target.value })}
+                          onBlur={() => saveDueEdit(m, it)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                            if (e.key === "Escape") setDueEdit(null);
+                          }}
+                          aria-label="Due date"
+                        />
+                      ) : it.dueAt ? (
+                        <button
+                          type="button"
                           className={`${styles.ccDue} ${new Date(it.dueAt).getTime() < Date.now() ? styles.ccDueOverdue : ""}`}
-                          title={`Due ${new Date(it.dueAt).toLocaleString()}`}
+                          onClick={() => setDueEdit({ id: it.id, value: toLocalInput(it.dueAt) })}
+                          disabled={busy || it.contentId == null}
+                          title={`Due ${new Date(it.dueAt).toLocaleString()} — click to edit`}
                         >
                           Due {formatDueDate(it.dueAt)}
-                        </span>
+                        </button>
                       ) : (
-                        <span className={`${styles.ccDue} ${styles.ccDueEmpty}`}>No due date</span>
+                        <button
+                          type="button"
+                          className={`${styles.ccDue} ${styles.ccDueEmpty}`}
+                          onClick={() => setDueEdit({ id: it.id, value: "" })}
+                          disabled={busy || it.contentId == null}
+                          title="Click to set a due date"
+                        >
+                          No due date
+                        </button>
                       ))}
                     {arrowBtn("Move up", () => moveItem(m, ii, -1), busy || ii === 0)}
                     {arrowBtn("Move down", () => moveItem(m, ii, 1), busy || ii === m.items.length - 1)}

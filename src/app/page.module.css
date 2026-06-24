@@ -3978,8 +3978,9 @@
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
-  height: 24px;
+  height: 26px;
   padding: 0 9px;
+  border: 1px solid transparent;
   border-radius: 6px;
   background: var(--navy-highlight);
   color: var(--navy);
@@ -3987,6 +3988,16 @@
   font-weight: 600;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.ccDue:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--navy) 45%, transparent);
+}
+
+.ccDue:disabled {
+  cursor: default;
 }
 
 .ccDueEmpty {
@@ -3999,4 +4010,21 @@
 .ccDueOverdue {
   background: color-mix(in srgb, #a8403d 12%, #fff);
   color: #a8403d;
+}
+
+.ccDueInput {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--navy);
+  border-radius: 6px;
+  background: var(--field-background);
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+}
+
+.ccDueInput:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--navy) 14%, transparent);
 }

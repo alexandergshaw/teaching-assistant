@@ -2899,7 +2899,7 @@ function ModulesView({
               boxShadow: moduleDrag === m.id ? "0 8px 20px rgba(15, 23, 42, 0.16)" : undefined,
               outline:
                 dragOverModuleRow === m.id && moduleDrag !== null && moduleDrag !== m.id
-                  ? "2px solid var(--navy)"
+                  ? "2px solid var(--accent)"
                   : undefined,
               outlineOffset: -1,
             }}
@@ -2930,7 +2930,7 @@ function ModulesView({
                 className={styles.ccGrip}
                 title="Drag to reorder modules"
                 aria-label="Drag to reorder module"
-                style={moduleDrag === m.id ? { cursor: "grabbing", color: "var(--navy)" } : undefined}
+                style={moduleDrag === m.id ? { cursor: "grabbing", color: "var(--accent)" } : undefined}
               >
                 ⠿
               </span>
@@ -3020,15 +3020,15 @@ function ModulesView({
                       marginLeft: it.indent * 18,
                       boxShadow:
                         dragOverItem === it.id
-                          ? "inset 0 2px 0 var(--navy)"
+                          ? "inset 0 2px 0 var(--accent)"
                           : isDraggingItem(m.id, it.id)
                             ? "0 4px 12px rgba(15, 23, 42, 0.12)"
                             : undefined,
                       background:
                         dragOverItem === it.id
-                          ? "var(--navy-highlight-strong)"
+                          ? "var(--accent-soft-strong)"
                           : isDraggingItem(m.id, it.id)
-                            ? "var(--navy-highlight)"
+                            ? "var(--accent-soft)"
                             : undefined,
                       opacity: isDraggingItem(m.id, it.id) ? 0.55 : 1,
                     }}
@@ -3048,7 +3048,7 @@ function ModulesView({
                       className={styles.ccGrip}
                       title="Drag to reorder or move between modules"
                       aria-label="Drag to reorder"
-                      style={isDraggingItem(m.id, it.id) ? { cursor: "grabbing", color: "var(--navy)" } : undefined}
+                      style={isDraggingItem(m.id, it.id) ? { cursor: "grabbing", color: "var(--accent)" } : undefined}
                     >
                       ⠿
                     </span>

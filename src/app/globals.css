@@ -15,9 +15,15 @@
   --accent-hover: #1d4ed8;
   /* Brand navy (matches the logo mark) used for app chrome: top bar + auth pages. */
   --navy: #1a2744;
-  /* Lighter shades of navy for hover/selection highlights and drag emphasis. */
-  --navy-highlight: #e4eaf6;
-  --navy-highlight-strong: #d3ddf1;
+  /* Lighter shades of navy for hover/selection highlights and drag emphasis.
+     Kept clearly in the navy hue (not a near-white wash) so highlights read as
+     "lighter navy" rather than gray. */
+  --navy-highlight: #c3cee9;
+  --navy-highlight-strong: #a7b9e0;
+  /* Hover/selection highlight that mirrors the tab's buttons (accent border +
+     soft accent fill); the accent blue reads as the lighter navy they use. */
+  --accent-soft: color-mix(in srgb, var(--field-background) 88%, var(--accent) 12%);
+  --accent-soft-strong: color-mix(in srgb, var(--field-background) 80%, var(--accent) 20%);
   --topbar-height: 58px;
 }
 

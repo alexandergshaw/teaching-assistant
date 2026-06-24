@@ -3624,8 +3624,8 @@
 }
 
 .bulkBtn:hover:not(:disabled) {
-  border-color: var(--navy);
-  background: var(--navy-highlight);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .bulkBtnPrimary {
@@ -3743,8 +3743,9 @@
 }
 
 .ccIconBtn:hover:not(:disabled) {
-  background: var(--navy-highlight);
-  color: var(--navy);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .ccIconBtn:disabled {
@@ -3767,7 +3768,8 @@
 }
 
 .ccName:hover {
-  background: var(--navy-highlight);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .ccName:focus {
@@ -3801,8 +3803,8 @@
 }
 
 .ccBtn:hover:not(:disabled) {
-  border-color: var(--navy);
-  background: var(--navy-highlight);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .ccBtn:disabled {
@@ -3818,8 +3820,8 @@
 
 .ccBtnGhost:hover:not(:disabled) {
   border-color: transparent;
-  background: var(--navy-highlight);
-  color: var(--navy);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .ccBtnDanger {
@@ -3886,7 +3888,7 @@
 }
 
 .ccItem:hover {
-  background: var(--navy-highlight);
+  background: var(--accent-soft);
 }
 
 .ccType {
@@ -3917,7 +3919,8 @@
 }
 
 .ccItemName:hover {
-  background: var(--navy-highlight);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .ccItemName:focus {
@@ -3963,9 +3966,9 @@
 
 .ccDropEndActive {
   padding: 14px 12px;
-  border-color: var(--navy);
-  background: var(--navy-highlight-strong);
-  color: var(--navy);
+  border-color: var(--accent);
+  background: var(--accent-soft-strong);
+  color: var(--accent);
 }
 
 .ccHint {
@@ -3993,7 +3996,7 @@
 }
 
 .ccDue:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--navy) 45%, transparent);
+  border-color: var(--accent);
 }
 
 .ccDue:disabled {

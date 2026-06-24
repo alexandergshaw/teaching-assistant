@@ -1522,6 +1522,8 @@ function ModulesView({
   const [bulkShift, setBulkShift] = useState(7);
   // How many modules a "Shift up/down" moves the selected items by.
   const [bulkModuleShift, setBulkModuleShift] = useState(1);
+  // The module selected items are moved into by the "Move to module" control.
+  const [bulkTargetModule, setBulkTargetModule] = useState<number | "">("");
   const [bulkPoints, setBulkPoints] = useState("");
   const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
   const [confirmDeleteContent, setConfirmDeleteContent] = useState(false);
@@ -1990,6 +1992,52 @@ function ModulesView({
           );
         },
         dir < 0 ? "Shifted up" : "Shifted down"
+      );
+      clearSelection();
+    })();
+  };
+
+  // Move every selected item into one chosen module, appended to its end in
+  // selection order. Items already in that module are left alone.
+  const bulkMoveToModule = () => {
+    if (bulkTargetModule === "") {
+      setNote({ kind: "error", text: "Pick a module to move the items into." });
+      return;
+    }
+    const targetId = bulkTargetModule;
+    const target = modules.find((mod) => mod.id === targetId);
+    if (!target) return;
+    const items = selectedItems();
+    if (items.length === 0) return;
+
+    // Position each moved item at the end of the target, after any already there
+    // plus the others moving in ahead of it in this batch.
+    let appended = 0;
+    const plan = new Map<number, number>();
+    for (const { item, moduleId } of items) {
+      if (moduleId === targetId) continue; // already in the target module
+      plan.set(item.id, target.items.length + appended + 1);
+      appended += 1;
+    }
+
+    const moveItems = items.filter(({ item }) => plan.has(item.id));
+    if (moveItems.length === 0) {
+      setNote({ kind: "error", text: `Selected items are already in "${target.name}".` });
+      return;
+    }
+
+    void (async () => {
+      await runPerItem(
+        moveItems,
+        (it, moduleId) =>
+          updateModuleItemAction(
+            courseUrl,
+            moduleId,
+            it.id,
+            { targetModuleId: targetId, position: plan.get(it.id)! },
+            acronym
+          ),
+        `Moved to "${target.name}"`
       );
       clearSelection();
     })();
@@ -2536,6 +2584,31 @@ function ModulesView({
               </button>
               <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkShiftModules(1)}>
                 Shift down
+              </button>
+            </span>
+            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+              <select
+                className={styles.textInput}
+                style={{ maxWidth: 200 }}
+                value={bulkTargetModule}
+                disabled={modules.length === 0}
+                onChange={(e) => setBulkTargetModule(e.target.value === "" ? "" : Number(e.target.value))}
+                aria-label="Module to move items into"
+              >
+                <option value="">{modules.length === 0 ? "No modules" : "Move to module…"}</option>
+                {modules.map((mod) => (
+                  <option key={mod.id} value={mod.id}>
+                    {mod.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className={styles.downloadButton}
+                disabled={opBusy || bulkTargetModule === ""}
+                onClick={bulkMoveToModule}
+              >
+                Move here
               </button>
             </span>
             <button type="button" className={styles.clearFileButton} disabled={opBusy} onClick={bulkRemoveFromModule}>

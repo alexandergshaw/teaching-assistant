@@ -58,6 +58,7 @@ import {
   getGradable,
   updateGradable,
   createGradable,
+  getFilePreview,
   type CanvasModule,
   type CanvasPageSummary,
   type CanvasPage,
@@ -70,6 +71,7 @@ import {
   type CanvasRubric,
   type GradableKind,
   type GradableDetail,
+  type FilePreview,
 } from "@/lib/canvas-modules";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
@@ -1511,6 +1513,20 @@ export async function updateGradableAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the item." };
+  }
+}
+
+/** Fetch a Canvas file's previewable contents (base64 for image/PDF, else text). */
+export async function previewFileAction(
+  courseUrl: string,
+  fileId: number,
+  acronym?: string
+): Promise<{ preview: FilePreview } | { error: string }> {
+  try {
+    await requireOwner();
+    return { preview: await getFilePreview(courseUrl, fileId, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the file." };
   }
 }
 

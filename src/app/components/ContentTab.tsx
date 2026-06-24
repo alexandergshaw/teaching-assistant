@@ -25,10 +25,12 @@ import {
   getGradableAction,
   updateGradableAction,
   createGradableAction,
+  previewFileAction,
   revisePageWithAiAction,
 } from "../actions";
 import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
+import FilePreviewModal, { type PreviewFile } from "./FilePreviewModal";
 import type {
   CanvasModule,
   CanvasModuleItem,
@@ -86,6 +88,14 @@ function toLocalInput(iso: string | null): string {
   if (Number.isNaN(d.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Turn a base64 payload into an object URL for previewing (images / PDFs).
+function base64ToBlobUrl(base64: string, mimeType: string): string {
+  const bytes = atob(base64);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  return URL.createObjectURL(new Blob([arr], { type: mimeType }));
 }
 
 // ── File upload helpers (browser side of the Canvas upload) ───────────────────
@@ -1346,6 +1356,87 @@ function ModulesView({
   const [confirmDeleteModules, setConfirmDeleteModules] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<CanvasModuleItem | null>(null);
+  const [filePreview, setFilePreview] = useState<{ file: PreviewFile; blobUrl: string | null } | null>(null);
+  const [drag, setDrag] = useState<{ moduleId: number; itemId: number } | null>(null);
+  const [dragOverItem, setDragOverItem] = useState<number | null>(null);
+
+  // Move the dragged item before `beforeItemId` (or to the end when null) in the
+  // target module: reorder locally for instant feedback, then persist position
+  // (and target module, for a cross-module move) to Canvas.
+  const performMove = (targetModuleId: number, beforeItemId: number | null) => {
+    if (!drag) return;
+    const { moduleId: srcModuleId, itemId } = drag;
+    setDrag(null);
+    setDragOverItem(null);
+    if (beforeItemId === itemId) return; // dropped on itself
+
+    const next = modules.map((mod) => ({ ...mod, items: [...mod.items] }));
+    const srcModule = next.find((mod) => mod.id === srcModuleId);
+    if (!srcModule) return;
+    const srcIdx = srcModule.items.findIndex((it) => it.id === itemId);
+    if (srcIdx < 0) return;
+    const [moved] = srcModule.items.splice(srcIdx, 1);
+    const targetModule = next.find((mod) => mod.id === targetModuleId);
+    if (!targetModule) return;
+    const insertIdx =
+      beforeItemId == null
+        ? targetModule.items.length
+        : (() => {
+            const bi = targetModule.items.findIndex((it) => it.id === beforeItemId);
+            return bi < 0 ? targetModule.items.length : bi;
+          })();
+    if (srcModuleId === targetModuleId && insertIdx === srcIdx) return; // dropped in place
+
+    targetModule.items.splice(insertIdx, 0, { ...moved, moduleId: targetModuleId });
+    setModules(next);
+
+    const sameModule = srcModuleId === targetModuleId;
+    void (async () => {
+      setBusy(true);
+      const result = await updateModuleItemAction(
+        courseUrl,
+        srcModuleId,
+        itemId,
+        { position: insertIdx + 1, ...(sameModule ? {} : { targetModuleId }) },
+        acronym
+      );
+      setBusy(false);
+      if ("error" in result) {
+        setNote({ kind: "error", text: result.error });
+        reload();
+      }
+    })();
+  };
+
+  const openFilePreview = async (it: CanvasModuleItem) => {
+    if (it.contentId == null) return;
+    setFilePreview({ file: { student: "", name: it.title, extension: "", content: "Loading…", truncated: false }, blobUrl: null });
+    const result = await previewFileAction(courseUrl, it.contentId, acronym);
+    if ("error" in result) {
+      setFilePreview({ file: { student: "", name: it.title, extension: "", content: result.error, truncated: false }, blobUrl: null });
+      return;
+    }
+    const p = result.preview;
+    const blobUrl = p.base64 ? base64ToBlobUrl(p.base64, p.mimeType) : null;
+    setFilePreview({
+      file: {
+        student: "",
+        name: p.name,
+        extension: "",
+        content: p.text,
+        truncated: p.truncated,
+        rawBase64: p.base64 || undefined,
+        mimeType: p.mimeType,
+      },
+      blobUrl,
+    });
+  };
+
+  const closeFilePreview = () =>
+    setFilePreview((prev) => {
+      if (prev?.blobUrl) URL.revokeObjectURL(prev.blobUrl);
+      return null;
+    });
 
   // Load the course's rubrics once for the bulk rubric-association control.
   useEffect(() => {
@@ -2092,7 +2183,18 @@ function ModulesView({
         const open = expanded.has(m.id);
         return (
           <div key={m.id} className={styles.syllabusSectionCard}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div
+              style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+              onDragOver={(e) => {
+                if (drag) e.preventDefault();
+              }}
+              onDrop={(e) => {
+                if (drag) {
+                  e.preventDefault();
+                  performMove(m.id, null);
+                }
+              }}
+            >
               <input
                 type="checkbox"
                 checked={selectedModules.has(m.id)}
@@ -2148,6 +2250,21 @@ function ModulesView({
                 {m.items.map((it, ii) => (
                   <div
                     key={it.id}
+                    onDragOver={(e) => {
+                      if (drag) {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        setDragOverItem(it.id);
+                      }
+                    }}
+                    onDragLeave={() => setDragOverItem((cur) => (cur === it.id ? null : cur))}
+                    onDrop={(e) => {
+                      if (drag) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        performMove(m.id, it.id);
+                      }
+                    }}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -2155,9 +2272,31 @@ function ModulesView({
                       flexWrap: "wrap",
                       marginLeft: it.indent * 18,
                       padding: "4px 0",
-                      borderTop: ii === 0 ? "none" : "1px solid var(--field-border)",
+                      borderTop:
+                        dragOverItem === it.id
+                          ? "2px solid var(--accent)"
+                          : ii === 0
+                            ? "none"
+                            : "1px solid var(--field-border)",
                     }}
                   >
+                    <span
+                      draggable
+                      onDragStart={(e) => {
+                        setDrag({ moduleId: m.id, itemId: it.id });
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", String(it.id));
+                      }}
+                      onDragEnd={() => {
+                        setDrag(null);
+                        setDragOverItem(null);
+                      }}
+                      title="Drag to reorder or move between modules"
+                      aria-label="Drag to reorder"
+                      style={{ cursor: "grab", color: "var(--text-secondary)", userSelect: "none", padding: "0 2px", flexShrink: 0 }}
+                    >
+                      ⠿
+                    </span>
                     <input
                       type="checkbox"
                       checked={selected.has(itemKey(m.id, it.id))}
@@ -2223,6 +2362,16 @@ function ModulesView({
                         style={{ padding: "2px 10px" }}
                       >
                         Edit
+                      </button>
+                    )}
+                    {it.type === "File" && it.contentId != null && (
+                      <button
+                        type="button"
+                        className={styles.downloadButton}
+                        onClick={() => void openFilePreview(it)}
+                        style={{ padding: "2px 10px" }}
+                      >
+                        Preview
                       </button>
                     )}
                     <button
@@ -2434,6 +2583,14 @@ function ModulesView({
           item={editingItem}
           onClose={() => setEditingItem(null)}
           onSaved={reload}
+        />
+      )}
+
+      {filePreview && (
+        <FilePreviewModal
+          selectedPreview={filePreview.file}
+          previewBlobUrl={filePreview.blobUrl}
+          onClose={closeFilePreview}
         />
       )}
     </div>

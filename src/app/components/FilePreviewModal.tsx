@@ -34,9 +34,13 @@ export default function FilePreviewModal({
       >
         <div className={styles.previewHeader}>
           <div>
-            <p className={styles.previewMeta}>Student: {selectedPreview.student}</p>
+            {selectedPreview.student && (
+              <p className={styles.previewMeta}>Student: {selectedPreview.student}</p>
+            )}
             <h3>{selectedPreview.name}</h3>
-            <p className={styles.previewMeta}>Type: {selectedPreview.extension}</p>
+            {selectedPreview.extension && (
+              <p className={styles.previewMeta}>Type: {selectedPreview.extension}</p>
+            )}
           </div>
           <button
             type="button"

@@ -1665,20 +1665,24 @@ function defaultCriterion(): EditCriterion {
 function RubricBuilderModal({
   courseUrl,
   acronym,
-  assignmentIds,
+  assignments,
   onClose,
   onCreated,
 }: {
   courseUrl: string;
   acronym?: string;
-  assignmentIds: string[];
+  assignments: Array<{ id: string; title: string; points: number | null }>;
   onClose: () => void;
   onCreated: (title: string, associated: number) => void;
 }) {
   const [title, setTitle] = useState("");
+  // Percentage mode (default): criteria sum to 100% and are scaled to each
+  // assignment's point total on apply. Point mode: criteria are raw points.
+  const [mode, setMode] = useState<"percent" | "points">("percent");
   const [criteria, setCriteria] = useState<EditCriterion[]>(() => [defaultCriterion()]);
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+  const unit = mode === "percent" ? "%" : "pts";
 
   const patchCrit = (key: string, p: Partial<EditCriterion>) =>
     setCriteria((cs) => cs.map((c) => (c.key === key ? { ...c, ...p } : c)));
@@ -1693,27 +1697,62 @@ function RubricBuilderModal({
 
   const total = criteria.reduce((s, c) => s + (Number.isFinite(c.points) ? c.points : 0), 0);
 
+  // Build criteria with the given numbers as points (rounded). `scale` converts a
+  // percentage value to points for a specific assignment.
+  const buildCriteria = (scale: (v: number) => number): RubricCriterionInput[] =>
+    criteria.map((c) => ({
+      description: c.description.trim() || "Criterion",
+      points: scale(Number.isFinite(c.points) ? c.points : 0),
+      ratings: c.ratings.map((r) => ({
+        description: r.description.trim() || `${r.points}${unit}`,
+        points: scale(Number.isFinite(r.points) ? r.points : 0),
+      })),
+    }));
+
   const handleCreate = async () => {
     if (!title.trim()) {
       setNote({ kind: "error", text: "Give the rubric a title." });
       return;
     }
-    const crit: RubricCriterionInput[] = criteria.map((c) => ({
-      description: c.description.trim() || "Criterion",
-      points: Number.isFinite(c.points) ? c.points : 0,
-      ratings: c.ratings.map((r) => ({ description: r.description.trim() || `${r.points} pts`, points: Number.isFinite(r.points) ? r.points : 0 })),
-    }));
     setSaving(true);
     setNote(null);
-    const result = await createRubricAction(courseUrl, { title: title.trim(), criteria: crit }, acronym);
+
+    // Percentage mode with assignments: a per-assignment rubric scaled to that
+    // assignment's point total, so different totals each get a correct rubric.
+    if (mode === "percent" && assignments.length > 0) {
+      let associated = 0;
+      const failed: string[] = [];
+      for (const a of assignments) {
+        const total = a.points != null && a.points > 0 ? a.points : 100;
+        const scaled = buildCriteria((pct) => Math.round((pct / 100) * total));
+        const result = await createRubricAction(
+          courseUrl,
+          { title: title.trim(), criteria: scaled, associateAssignmentId: Number(a.id), useForGrading: true },
+          acronym
+        );
+        if ("error" in result) failed.push(a.title);
+        else associated += 1;
+      }
+      setSaving(false);
+      if (associated === 0) {
+        setNote({ kind: "error", text: `Could not create the rubric${failed.length ? `: ${failed[0]}` : "."}` });
+        return;
+      }
+      onCreated(title.trim(), associated);
+      return;
+    }
+
+    // Point mode, or percentage mode with no assignments: one rubric using the
+    // entered numbers as points (percentages become an out-of-100 rubric).
+    const result = await createRubricAction(courseUrl, { title: title.trim(), criteria: buildCriteria((v) => v) }, acronym);
     if ("error" in result) {
       setSaving(false);
       setNote({ kind: "error", text: result.error });
       return;
     }
     let associated = 0;
-    if (assignmentIds.length > 0) {
-      const assoc = await bulkAssociateRubricAction(courseUrl, result.rubric.id, assignmentIds, acronym);
+    if (assignments.length > 0) {
+      const assoc = await bulkAssociateRubricAction(courseUrl, result.rubric.id, assignments.map((a) => a.id), acronym);
       if ("error" in assoc) {
         setSaving(false);
         setNote({ kind: "error", text: `Rubric created, but could not associate it: ${assoc.error}` });
@@ -1741,10 +1780,24 @@ function RubricBuilderModal({
             <input id="rubric-title" type="text" className={styles.textInput} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Essay rubric" />
           </div>
 
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span className={styles.bulkLabel} style={{ flex: "0 0 auto" }}>Mode</span>
+            <button type="button" className={mode === "percent" ? styles.bulkBtnPrimary : styles.bulkBtn} onClick={() => setMode("percent")}>
+              Percentage
+            </button>
+            <button type="button" className={mode === "points" ? styles.bulkBtnPrimary : styles.bulkBtn} onClick={() => setMode("points")}>
+              Points
+            </button>
+          </div>
+
           <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {assignmentIds.length > 0
-              ? `Will be associated with ${assignmentIds.length} selected assignment${assignmentIds.length === 1 ? "" : "s"} and used for grading.`
-              : "No assignments selected — the rubric will be created and available to associate later."}
+            {assignments.length > 0
+              ? mode === "percent"
+                ? `Criteria are percentages; on apply they are scaled to each of the ${assignments.length} selected assignment${assignments.length === 1 ? "'s" : "s'"} point total (one scaled rubric per assignment, so different totals are handled).`
+                : `Will be associated with ${assignments.length} selected assignment${assignments.length === 1 ? "" : "s"} and used for grading.`
+              : mode === "percent"
+                ? "No assignments selected — a single out-of-100 rubric will be created to associate later."
+                : "No assignments selected — the rubric will be created and available to associate later."}
           </p>
 
           {criteria.map((c, ci) => (
@@ -1759,9 +1812,9 @@ function RubricBuilderModal({
                     style={{ width: 72 }}
                     value={c.points}
                     onChange={(e) => patchCrit(c.key, { points: Number(e.target.value) })}
-                    aria-label={`Criterion ${ci + 1} points`}
+                    aria-label={`Criterion ${ci + 1} ${mode === "percent" ? "percent" : "points"}`}
                   />
-                  <span className={styles.ccCount}>pts</span>
+                  <span className={styles.ccCount}>{unit}</span>
                 </span>
                 {criteria.length > 1 && (
                   <button type="button" className={`${styles.ccBtn} ${styles.ccBtnDanger}`} onClick={() => removeCriterion(c.key)}>
@@ -1794,9 +1847,9 @@ function RubricBuilderModal({
                       style={{ width: 70 }}
                       value={r.points}
                       onChange={(e) => patchRating(c.key, r.key, { points: Number(e.target.value) })}
-                      aria-label="Tier points"
+                      aria-label="Tier value"
                     />
-                    <span className={styles.ccCount}>pts</span>
+                    <span className={styles.ccCount}>{unit}</span>
                   </span>
                   {c.ratings.length > 1 && (
                     <button type="button" className={styles.ccIconBtn} title="Remove tier" aria-label="Remove tier" onClick={() => removeRating(c.key, r.key)}>
@@ -1816,13 +1869,13 @@ function RubricBuilderModal({
               Add criterion
             </button>
             <span className={styles.fieldHint} style={{ margin: 0 }}>
-              Overall rubric: {total} pts (sum of criteria)
+              Overall rubric: {total}{unit}{mode === "percent" ? " (aim for 100%)" : " (sum of criteria)"}
             </span>
           </div>
 
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
             <button type="button" className={styles.submitButton} onClick={() => void handleCreate()} disabled={saving || !title.trim()}>
-              {saving ? "Creating…" : assignmentIds.length > 0 ? "Create & associate" : "Create rubric"}
+              {saving ? "Creating…" : assignments.length > 0 ? "Create & associate" : "Create rubric"}
             </button>
           </div>
           {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
@@ -2151,7 +2204,9 @@ function ModulesView({
   const [filePreview, setFilePreview] = useState<{ file: PreviewFile; blobUrl: string | null } | null>(null);
   const [editingFile, setEditingFile] = useState<CanvasModuleItem | null>(null);
   // The rubric builder's target assignments (null when closed).
-  const [rubricBuilder, setRubricBuilder] = useState<{ assignmentIds: string[] } | null>(null);
+  const [rubricBuilder, setRubricBuilder] = useState<{
+    assignments: Array<{ id: string; title: string; points: number | null }>;
+  } | null>(null);
   const [drag, setDrag] = useState<{ moduleId: number; itemId: number } | null>(null);
   const [dragOverItem, setDragOverItem] = useState<number | null>(null);
   const [dragOverModule, setDragOverModule] = useState<number | null>(null);
@@ -2862,10 +2917,10 @@ function ModulesView({
 
   // Open the rubric builder, pre-targeting the selected assignments to associate.
   const openRubricBuilder = () => {
-    const ids = selectedItems()
+    const assignments = selectedItems()
       .filter(({ item }) => item.type === "Assignment" && typeof item.contentId === "number")
-      .map(({ item }) => String(item.contentId));
-    setRubricBuilder({ assignmentIds: ids });
+      .map(({ item }) => ({ id: String(item.contentId), title: item.title, points: item.pointsPossible }));
+    setRubricBuilder({ assignments });
   };
 
   const bulkRemoveFromModule = () => {
@@ -3344,7 +3399,7 @@ function ModulesView({
           <button
             type="button"
             className={styles.downloadButton}
-            onClick={() => setRubricBuilder({ assignmentIds: [] })}
+            onClick={() => setRubricBuilder({ assignments: [] })}
           >
             New rubric
           </button>
@@ -4193,7 +4248,7 @@ function ModulesView({
         <RubricBuilderModal
           courseUrl={courseUrl}
           acronym={acronym}
-          assignmentIds={rubricBuilder.assignmentIds}
+          assignments={rubricBuilder.assignments}
           onClose={() => setRubricBuilder(null)}
           onCreated={(title, associated) => {
             setRubricBuilder(null);
@@ -4818,7 +4873,7 @@ function CourseCopyModal({
 
 // ── Files (CRUD on the course's Files area) ───────────────────────────────────
 
-function FilesView({ courseUrl, acronym }: { courseUrl: string; acronym?: string }) {
+function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym?: string; modules: CanvasModule[] }) {
   const [files, setFiles] = useState<CourseFile[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
@@ -4828,6 +4883,63 @@ function FilesView({ courseUrl, acronym }: { courseUrl: string; acronym?: string
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [preview, setPreview] = useState<{ file: PreviewFile; blobUrl: string | null } | null>(null);
   const [uploads, setUploads] = useState<Array<{ name: string; status: "uploading" | "done" | "error"; error?: string }>>([]);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkModule, setBulkModule] = useState<number | "">("");
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+
+  const shown = files.filter((f) => f.displayName.toLowerCase().includes(search.trim().toLowerCase()));
+  const toggleSelected = (id: number) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const allShownSelected = shown.length > 0 && shown.every((f) => selected.has(f.id));
+  const toggleSelectAll = () => setSelected(allShownSelected ? new Set() : new Set(shown.map((f) => f.id)));
+
+  const bulkAddToModule = async () => {
+    if (bulkModule === "" || selected.size === 0) return;
+    const ids = [...selected];
+    setBusy(true);
+    setNote(null);
+    let added = 0;
+    let failed = 0;
+    for (const fileId of ids) {
+      const result = await createModuleItemAction(courseUrl, bulkModule, { type: "File", contentId: fileId }, acronym);
+      if ("error" in result) failed += 1;
+      else added += 1;
+    }
+    setBusy(false);
+    setNote({ kind: failed ? "error" : "success", text: `Added to module: ${added} done${failed ? `, ${failed} failed` : ""}.` });
+    setSelected(new Set());
+  };
+
+  const bulkDelete = async () => {
+    if (selected.size === 0) return;
+    if (!confirmBulkDelete) {
+      setConfirmBulkDelete(true);
+      return;
+    }
+    setConfirmBulkDelete(false);
+    const ids = [...selected];
+    setSelected(new Set());
+    setFiles((fs) => fs.filter((x) => !ids.includes(x.id)));
+    setBusy(true);
+    setNote(null);
+    let failed = 0;
+    for (const fileId of ids) {
+      const result = await deleteCourseFileAction(courseUrl, fileId, acronym);
+      if ("error" in result) failed += 1;
+    }
+    setBusy(false);
+    setNote({ kind: failed ? "error" : "success", text: `Deleted ${ids.length - failed} file${ids.length - failed === 1 ? "" : "s"}${failed ? `, ${failed} failed` : ""}.` });
+    if (failed) {
+      const r = await listCourseFilesAction(courseUrl, acronym);
+      if (!("error" in r)) setFiles(r.files);
+    }
+  };
 
   const reload = async () => {
     const result = await listCourseFilesAction(courseUrl, acronym);
@@ -4965,8 +5077,16 @@ function FilesView({ courseUrl, acronym }: { courseUrl: string; acronym?: string
         <button type="button" className={styles.downloadButton} onClick={() => void reload()} disabled={busy}>
           Refresh
         </button>
+        <input
+          type="search"
+          className={styles.textInput}
+          style={{ flex: "1 1 200px", maxWidth: 300 }}
+          placeholder="Search files by name…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
         <span className={styles.fieldHint} style={{ margin: 0 }}>
-          {files.length} file{files.length === 1 ? "" : "s"}
+          {search.trim() ? `${shown.length} of ${files.length}` : files.length} file{files.length === 1 ? "" : "s"}
         </span>
       </div>
 
@@ -4981,6 +5101,45 @@ function FilesView({ courseUrl, acronym }: { courseUrl: string; acronym?: string
               {row.name}: {row.status === "uploading" ? "uploading…" : row.status === "done" ? "uploaded" : `failed (${row.error})`}
             </span>
           ))}
+        </div>
+      )}
+
+      {selected.size > 0 && (
+        <div className={styles.bulkBar}>
+          <div className={styles.bulkBarHead}>
+            <span className={styles.bulkCount}>
+              {selected.size} file{selected.size === 1 ? "" : "s"} selected
+            </span>
+            <button type="button" className={styles.bulkClear} onClick={() => setSelected(new Set())}>
+              Clear
+            </button>
+          </div>
+          <div className={styles.bulkRow}>
+            <span className={styles.bulkLabel}>Files</span>
+            <span className={styles.bulkField}>
+              <select
+                className={styles.bulkSelect}
+                style={{ maxWidth: 200 }}
+                value={bulkModule}
+                disabled={modules.length === 0}
+                onChange={(e) => setBulkModule(e.target.value === "" ? "" : Number(e.target.value))}
+                aria-label="Module to add the files to"
+              >
+                <option value="">{modules.length === 0 ? "No modules" : "Add to module…"}</option>
+                {modules.map((mod) => (
+                  <option key={mod.id} value={mod.id}>
+                    {mod.name}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className={styles.bulkBtn} disabled={busy || bulkModule === ""} onClick={() => void bulkAddToModule()}>
+                Add
+              </button>
+            </span>
+            <button type="button" className={styles.bulkBtnDanger} disabled={busy} onClick={() => void bulkDelete()}>
+              {confirmBulkDelete ? "Confirm delete" : "Delete"}
+            </button>
+          </div>
         </div>
       )}
 
@@ -4999,9 +5158,25 @@ function FilesView({ courseUrl, acronym }: { courseUrl: string; acronym?: string
         <p className={styles.emptyState}>This course has no files yet.</p>
       ) : (
         <div className={styles.ccModule}>
-          <div className={styles.ccItems} style={{ borderTop: "none" }}>
-            {files.map((f) => (
+          <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0, padding: "8px 12px" }}>
+            <input type="checkbox" checked={allShownSelected} onChange={toggleSelectAll} disabled={shown.length === 0} />
+            Select all
+          </label>
+          <div className={styles.ccItems} style={{ borderTop: "1px solid var(--card-border)" }}>
+            {shown.length === 0 && (
+              <p className={styles.ccHint} style={{ padding: "4px 6px" }}>
+                No files match your search.
+              </p>
+            )}
+            {shown.map((f) => (
               <div key={f.id} className={styles.ccItem}>
+                <input
+                  type="checkbox"
+                  className={styles.ccCheckbox}
+                  checked={selected.has(f.id)}
+                  onChange={() => toggleSelected(f.id)}
+                  aria-label={`Select ${f.displayName}`}
+                />
                 <span className={styles.ccType} title={f.contentType}>
                   {fileKindLabel(f.contentType, f.fileName)}
                 </span>
@@ -5327,7 +5502,7 @@ export default function ContentTab() {
           ) : view === "bulk" ? (
             <BulkEditView courseUrl={courseUrl} acronym={activeInstitution || undefined} />
           ) : (
-            <FilesView courseUrl={courseUrl} acronym={activeInstitution || undefined} />
+            <FilesView courseUrl={courseUrl} acronym={activeInstitution || undefined} modules={modules} />
           )}
         </>
       )}

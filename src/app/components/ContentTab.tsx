@@ -1766,6 +1766,20 @@ function ModulesView({
       else next.add(k);
       return next;
     });
+  // Select (or, when all are already selected, deselect) every item in one module.
+  const toggleModuleItems = (m: CanvasModule) => {
+    const keys = m.items.map((it) => itemKey(m.id, it.id));
+    if (keys.length === 0) return;
+    const allOn = keys.every((k) => selected.has(k));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const k of keys) {
+        if (allOn) next.delete(k);
+        else next.add(k);
+      }
+      return next;
+    });
+  };
 
   // Module-level selection (for deleting / publishing whole modules).
   const allModuleIds = modules.map((mod) => mod.id);
@@ -2658,6 +2672,7 @@ function ModulesView({
 
       {modules.map((m, mi) => {
         const open = expanded.has(m.id);
+        const moduleItemsSelected = m.items.length > 0 && m.items.every((it) => selected.has(itemKey(m.id, it.id)));
         return (
           <div
             key={m.id}
@@ -2758,6 +2773,16 @@ function ModulesView({
               <span className={styles.fieldHint} style={{ margin: 0 }}>
                 {m.items.length} item{m.items.length === 1 ? "" : "s"}
               </span>
+              <button
+                type="button"
+                className={styles.clearFileButton}
+                onClick={() => toggleModuleItems(m)}
+                disabled={m.items.length === 0}
+                title={moduleItemsSelected ? "Deselect every item in this module" : "Select every item in this module"}
+                style={{ padding: "2px 8px" }}
+              >
+                {moduleItemsSelected ? "Deselect items" : "Select items"}
+              </button>
               {arrowBtn("Move up", () => moveModule(mi, -1), busy || mi === 0)}
               {arrowBtn("Move down", () => moveModule(mi, 1), busy || mi === modules.length - 1)}
               <PublishToggle published={m.published} disabled={busy} onClick={() => toggleModule(m)} />

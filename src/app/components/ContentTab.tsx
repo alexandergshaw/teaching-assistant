@@ -1848,10 +1848,17 @@ function ModulesView({
   };
 
   // Fill a naming pattern for one module: {module} -> module name, {n} -> the
-  // 1-based index of the module within the selection. Falls back to a generic
-  // name if the pattern resolves to empty.
-  const fillNamePattern = (pattern: string, moduleName: string, n: number): string =>
-    pattern.replace(/\{module\}/g, moduleName).replace(/\{n\}/g, String(n)).trim() || `Item ${n}`;
+  // week/module number read from the module's title (e.g. "Week 5" -> 5, "Unit
+  // 12: Foo" -> 12). Prefers a number that follows a week/module-ish word so a
+  // leading year like "2024 Fall Week 3" still resolves to 3; otherwise uses the
+  // first number in the title, and finally the 1-based selection index when the
+  // title has no number at all.
+  const fillNamePattern = (pattern: string, moduleName: string, fallbackN: number): string => {
+    const labeled = moduleName.match(/(?:week|module|unit|chapter|wk|mod)\s*#?\s*(\d+)/i);
+    const anyNumber = moduleName.match(/\d+/);
+    const n = labeled ? labeled[1] : anyNumber ? anyNumber[0] : String(fallbackN);
+    return pattern.replace(/\{module\}/g, moduleName).replace(/\{n\}/g, n).trim() || `Item ${n}`;
+  };
 
   // Create one new item of `type` named `name` and add it to `moduleId`. Pages
   // and gradables are created first (to get a slug / content id) and then linked;
@@ -2609,7 +2616,7 @@ function ModulesView({
                   Add to modules
                 </button>
                 <span className={styles.fieldHint} style={{ margin: 0, flexBasis: "100%" }}>
-                  Use {"{module}"} for the module name and {"{n}"} for a number (1, 2, 3…). New items are created unpublished.
+                  Use {"{module}"} for the module name and {"{n}"} for the week/module number in its title (e.g. &quot;Week 5&quot; -&gt; 5). New items are created unpublished.
                 </span>
               </div>
             </>

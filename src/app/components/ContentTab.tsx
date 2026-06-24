@@ -1970,19 +1970,21 @@ function AssignmentPreviewModal({
 function OfficeEditorModal({
   courseUrl,
   acronym,
-  item,
+  fileId,
+  fileName,
   onClose,
   onSaved,
 }: {
   courseUrl: string;
   acronym?: string;
-  item: CanvasModuleItem;
+  fileId: number;
+  fileName: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [loading, setLoading] = useState(item.contentId != null);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [name, setName] = useState(item.title);
+  const [name, setName] = useState(fileName);
   const [paragraphs, setParagraphs] = useState<OfficeParagraph[]>([]);
   const [original, setOriginal] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -1990,10 +1992,9 @@ function OfficeEditorModal({
   const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
 
   useEffect(() => {
-    if (item.contentId == null) return;
     let cancelled = false;
     (async () => {
-      const result = await getOfficeEditableAction(courseUrl, item.contentId as number, acronym);
+      const result = await getOfficeEditableAction(courseUrl, fileId, acronym);
       if (cancelled) return;
       if ("error" in result) {
         setLoadError(result.error);
@@ -2010,12 +2011,11 @@ function OfficeEditorModal({
     return () => {
       cancelled = true;
     };
-  }, [courseUrl, item.contentId, acronym]);
+  }, [courseUrl, fileId, acronym]);
 
   const changedCount = paragraphs.filter((p) => (draft[p.id] ?? "") !== (original[p.id] ?? "")).length;
 
   const handleSave = async () => {
-    if (item.contentId == null) return;
     const edits: Record<string, string> = {};
     for (const p of paragraphs) {
       if ((draft[p.id] ?? "") !== (original[p.id] ?? "")) edits[p.id] = draft[p.id] ?? "";
@@ -2026,7 +2026,7 @@ function OfficeEditorModal({
     }
     setSaving(true);
     setNote(null);
-    const result = await saveOfficeEditsAction(courseUrl, item.contentId, edits, acronym);
+    const result = await saveOfficeEditsAction(courseUrl, fileId, edits, acronym);
     setSaving(false);
     if ("error" in result) {
       setNote({ kind: "error", text: result.error });
@@ -4254,11 +4254,12 @@ function ModulesView({
         />
       )}
 
-      {editingFile && (
+      {editingFile && editingFile.contentId != null && (
         <OfficeEditorModal
           courseUrl={courseUrl}
           acronym={acronym}
-          item={editingFile}
+          fileId={editingFile.contentId}
+          fileName={editingFile.title}
           onClose={() => setEditingFile(null)}
           onSaved={() => setNote({ kind: "success", text: "Saved to Canvas." })}
         />
@@ -4907,6 +4908,7 @@ function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkModule, setBulkModule] = useState<number | "">("");
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [editFile, setEditFile] = useState<CourseFile | null>(null);
 
   const shown = files.filter((f) => f.displayName.toLowerCase().includes(search.trim().toLowerCase()));
   const toggleSelected = (id: number) =>
@@ -5237,6 +5239,11 @@ function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym
                     Download
                   </a>
                 )}
+                {/\.(docx|pptx)$/i.test(f.fileName || f.displayName) && (
+                  <button type="button" className={styles.ccBtn} onClick={() => setEditFile(f)}>
+                    Edit
+                  </button>
+                )}
                 <button type="button" className={`${styles.ccBtn} ${styles.ccBtnDanger}`} onClick={() => void removeFile(f)} disabled={busy}>
                   {confirmDelete === f.id ? "Confirm" : "Delete"}
                 </button>
@@ -5247,6 +5254,21 @@ function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym
       )}
 
       {preview && <FilePreviewModal selectedPreview={preview.file} previewBlobUrl={preview.blobUrl} onClose={closePreview} />}
+
+      {editFile && (
+        <OfficeEditorModal
+          courseUrl={courseUrl}
+          acronym={acronym}
+          fileId={editFile.id}
+          fileName={editFile.displayName}
+          onClose={() => setEditFile(null)}
+          onSaved={() => {
+            setEditFile(null);
+            setNote({ kind: "success", text: "Saved to Canvas." });
+            void reload();
+          }}
+        />
+      )}
     </div>
   );
 }

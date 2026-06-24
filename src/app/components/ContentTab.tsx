@@ -3517,27 +3517,47 @@ function ModulesView({
       return;
     }
     setConfirmDeleteContent(false);
+    const items = selectedItems();
+    // Assignments/quizzes/discussions/pages go through the per-kind bulk endpoint;
+    // files have their own delete; text headers and external URLs only exist as
+    // module items, so removing the item is the only "delete" there is.
     const byKind = idsByKind(["Assignment", "Quiz", "Discussion", "Page"], true);
     const kinds = Object.keys(byKind);
-    if (kinds.length === 0) {
+    const fileIds = items
+      .filter(({ item }) => item.type === "File" && typeof item.contentId === "number")
+      .map(({ item }) => item.contentId as number);
+    const moduleOnly = items.filter(({ item }) =>
+      ["SubHeader", "ExternalUrl", "ExternalTool"].includes(item.type)
+    );
+    if (kinds.length === 0 && fileIds.length === 0 && moduleOnly.length === 0) {
       setNote({ kind: "error", text: "No selected items can be deleted from Canvas (try Remove from module)." });
       return;
     }
     void (async () => {
       setOpBusy(true);
       setNote(null);
-      let updated = 0;
+      let deleted = 0;
       let failed = 0;
       for (const k of kinds) {
         const result = await bulkDeleteAction(courseUrl, k as BulkKind, byKind[k], acronym);
         if ("error" in result) failed += byKind[k].length;
         else {
-          updated += result.updated;
+          deleted += result.updated;
           failed += result.failures.length;
         }
       }
+      for (const fileId of fileIds) {
+        const result = await deleteCourseFileAction(courseUrl, fileId, acronym);
+        if ("error" in result) failed += 1;
+        else deleted += 1;
+      }
+      for (const { item, moduleId } of moduleOnly) {
+        const result = await deleteModuleItemAction(courseUrl, moduleId, item.id, acronym);
+        if ("error" in result) failed += 1;
+        else deleted += 1;
+      }
       setOpBusy(false);
-      setNote({ kind: failed ? "error" : "success", text: `Deleted from Canvas: ${updated} done${failed ? `, ${failed} failed` : ""}.` });
+      setNote({ kind: failed ? "error" : "success", text: `Deleted from Canvas: ${deleted} done${failed ? `, ${failed} failed` : ""}.` });
       clearSelection();
       reload();
     })();

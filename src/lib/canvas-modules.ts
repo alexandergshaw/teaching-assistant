@@ -39,6 +39,8 @@ export interface CanvasModuleItem {
   contentId: number | null;
   /** Current due date (ISO 8601) for gradable items, when Canvas reports one. */
   dueAt: string | null;
+  /** Points possible for gradable items, when Canvas reports one. */
+  pointsPossible: number | null;
   htmlUrl: string | null;
   externalUrl: string | null;
 }
@@ -201,6 +203,8 @@ function mapModuleItem(raw: RawModuleItem, fallbackModuleId: number): CanvasModu
     pageUrl: raw.page_url ?? null,
     contentId: typeof raw.content_id === "number" ? raw.content_id : null,
     dueAt: raw.content_details?.due_at ?? null,
+    pointsPossible:
+      typeof raw.content_details?.points_possible === "number" ? raw.content_details.points_possible : null,
     htmlUrl: raw.html_url ?? null,
     externalUrl: raw.external_url ?? null,
   };

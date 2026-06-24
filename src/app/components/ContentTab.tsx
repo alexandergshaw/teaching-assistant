@@ -895,6 +895,254 @@ function ModulesView({
   const [addUrl, setAddUrl] = useState<Record<number, string>>({});
   const [addTitle, setAddTitle] = useState<Record<number, string>>({});
 
+  // ── Bulk selection across the module tree ──────────────────────────────────
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [rubrics, setRubrics] = useState<CanvasRubric[]>([]);
+  const [opBusy, setOpBusy] = useState(false);
+  const [bulkDue, setBulkDue] = useState("");
+  const [bulkShift, setBulkShift] = useState(7);
+  const [bulkPoints, setBulkPoints] = useState("");
+  const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
+  const [confirmDeleteContent, setConfirmDeleteContent] = useState(false);
+
+  // Load the course's rubrics once for the bulk rubric-association control.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await listRubricsAction(courseUrl, acronym);
+      if (cancelled || "error" in result) return;
+      setRubrics(result.rubrics);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [courseUrl, acronym]);
+
+  const itemKey = (moduleId: number, itemId: number) => `${moduleId}:${itemId}`;
+  const selectedItems = (): Array<{ item: CanvasModuleItem; moduleId: number }> => {
+    const out: Array<{ item: CanvasModuleItem; moduleId: number }> = [];
+    for (const mod of modules) {
+      for (const it of mod.items) {
+        if (selected.has(itemKey(mod.id, it.id))) out.push({ item: it, moduleId: mod.id });
+      }
+    }
+    return out;
+  };
+  const allKeys = modules.flatMap((mod) => mod.items.map((it) => itemKey(mod.id, it.id)));
+  const allSelected = allKeys.length > 0 && allKeys.every((k) => selected.has(k));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(allKeys));
+  const clearSelection = () => setSelected(new Set());
+  const toggleItemSelected = (moduleId: number, itemId: number) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const k = itemKey(moduleId, itemId);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  const moduleAllChecked = (mod: CanvasModule) =>
+    mod.items.length > 0 && mod.items.every((it) => selected.has(itemKey(mod.id, it.id)));
+  const toggleModuleAll = (mod: CanvasModule) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const keys = mod.items.map((it) => itemKey(mod.id, it.id));
+      const all = keys.length > 0 && keys.every((k) => next.has(k));
+      keys.forEach((k) => (all ? next.delete(k) : next.add(k)));
+      return next;
+    });
+
+  // Run a bulk op that returns an {updated, failures} summary; report + refresh.
+  const runBulkSummary = async (
+    fn: () => Promise<{ updated: number; failures: unknown[] } | { error: string }>,
+    label: string
+  ) => {
+    setOpBusy(true);
+    setNote(null);
+    const result = await fn();
+    setOpBusy(false);
+    if ("error" in result) {
+      setNote({ kind: "error", text: result.error });
+      return;
+    }
+    setNote({
+      kind: result.failures.length ? "error" : "success",
+      text: `${label}: ${result.updated} done${result.failures.length ? `, ${result.failures.length} failed` : ""}.`,
+    });
+    reload();
+  };
+
+  // Run a per-item op (publish, remove) over the current selection.
+  const runPerItem = async (
+    items: Array<{ item: CanvasModuleItem; moduleId: number }>,
+    fn: (item: CanvasModuleItem, moduleId: number) => Promise<{ ok: true } | { error: string }>,
+    label: string
+  ) => {
+    setOpBusy(true);
+    setNote(null);
+    let updated = 0;
+    let failed = 0;
+    for (const { item, moduleId } of items) {
+      const result = await fn(item, moduleId);
+      if ("error" in result) failed += 1;
+      else updated += 1;
+    }
+    setOpBusy(false);
+    setNote({
+      kind: failed ? "error" : "success",
+      text: `${label}: ${updated} done${failed ? `, ${failed} failed` : ""}.`,
+    });
+    reload();
+  };
+
+  // Group selected items' ids by kind for the per-kind bulk endpoints.
+  const idsByKind = (kinds: BulkKind[], usePageSlug = false): Record<string, string[]> => {
+    const map: Record<string, string[]> = {};
+    for (const { item } of selectedItems()) {
+      if (!kinds.includes(item.type as BulkKind)) continue;
+      const id =
+        item.type === "Page"
+          ? usePageSlug
+            ? item.pageUrl
+            : null
+          : item.contentId != null
+            ? String(item.contentId)
+            : null;
+      if (id) (map[item.type] ??= []).push(id);
+    }
+    return map;
+  };
+
+  const bulkPublish = (published: boolean) => {
+    const items = selectedItems();
+    if (items.length === 0) return;
+    void runPerItem(
+      items,
+      (it, moduleId) => updateModuleItemAction(courseUrl, moduleId, it.id, { published }, acronym),
+      published ? "Published" : "Unpublished"
+    );
+  };
+
+  const bulkSetDue = () => {
+    if (!bulkDue || Number.isNaN(new Date(bulkDue).getTime())) {
+      setNote({ kind: "error", text: "Pick a valid due date first." });
+      return;
+    }
+    const iso = new Date(bulkDue).toISOString();
+    const updates = selectedItems()
+      .filter(({ item }) => ["Assignment", "Quiz", "Discussion"].includes(item.type) && typeof item.contentId === "number")
+      .map(({ item }) => ({ type: item.type, contentId: item.contentId as number, dueAt: iso }));
+    if (updates.length === 0) {
+      setNote({ kind: "error", text: "No selected items can take a due date." });
+      return;
+    }
+    void runBulkSummary(() => setModuleDueDatesAction(courseUrl, updates, acronym), "Due date set");
+  };
+
+  const bulkShiftDue = () => {
+    const updates = selectedItems()
+      .filter(
+        ({ item }) =>
+          ["Assignment", "Quiz", "Discussion"].includes(item.type) && typeof item.contentId === "number" && item.dueAt
+      )
+      .map(({ item }) => {
+        const d = new Date(item.dueAt!);
+        d.setDate(d.getDate() + bulkShift);
+        return { type: item.type, contentId: item.contentId as number, dueAt: d.toISOString() };
+      });
+    if (updates.length === 0) {
+      setNote({ kind: "error", text: "No selected items have a due date to shift." });
+      return;
+    }
+    void runBulkSummary(() => setModuleDueDatesAction(courseUrl, updates, acronym), "Due dates shifted");
+  };
+
+  const bulkSetPoints = () => {
+    const p = Number(bulkPoints);
+    if (bulkPoints.trim() === "" || !Number.isFinite(p)) {
+      setNote({ kind: "error", text: "Enter a points value." });
+      return;
+    }
+    const byKind = idsByKind(["Assignment", "Quiz"]);
+    const kinds = Object.keys(byKind);
+    if (kinds.length === 0) {
+      setNote({ kind: "error", text: "No selected assignments or quizzes." });
+      return;
+    }
+    void (async () => {
+      setOpBusy(true);
+      setNote(null);
+      let updated = 0;
+      let failed = 0;
+      for (const k of kinds) {
+        const result = await bulkUpdateAction(courseUrl, k as BulkKind, byKind[k], { pointsPossible: p }, acronym);
+        if ("error" in result) failed += byKind[k].length;
+        else {
+          updated += result.updated;
+          failed += result.failures.length;
+        }
+      }
+      setOpBusy(false);
+      setNote({ kind: failed ? "error" : "success", text: `Points set: ${updated} done${failed ? `, ${failed} failed` : ""}.` });
+      reload();
+    })();
+  };
+
+  const bulkRubric = () => {
+    if (bulkRubricId === "") {
+      setNote({ kind: "error", text: "Pick a rubric first." });
+      return;
+    }
+    const ids = selectedItems()
+      .filter(({ item }) => item.type === "Assignment" && typeof item.contentId === "number")
+      .map(({ item }) => String(item.contentId));
+    if (ids.length === 0) {
+      setNote({ kind: "error", text: "No selected assignments." });
+      return;
+    }
+    void runBulkSummary(() => bulkAssociateRubricAction(courseUrl, Number(bulkRubricId), ids, acronym), "Rubric associated");
+  };
+
+  const bulkRemoveFromModule = () => {
+    const items = selectedItems();
+    if (items.length === 0) return;
+    void (async () => {
+      await runPerItem(items, (it, moduleId) => deleteModuleItemAction(courseUrl, moduleId, it.id, acronym), "Removed from module");
+      clearSelection();
+    })();
+  };
+
+  const bulkDeleteContent = () => {
+    if (!confirmDeleteContent) {
+      setConfirmDeleteContent(true);
+      return;
+    }
+    setConfirmDeleteContent(false);
+    const byKind = idsByKind(["Assignment", "Quiz", "Discussion", "Page"], true);
+    const kinds = Object.keys(byKind);
+    if (kinds.length === 0) {
+      setNote({ kind: "error", text: "No selected items can be deleted from Canvas (try Remove from module)." });
+      return;
+    }
+    void (async () => {
+      setOpBusy(true);
+      setNote(null);
+      let updated = 0;
+      let failed = 0;
+      for (const k of kinds) {
+        const result = await bulkDeleteAction(courseUrl, k as BulkKind, byKind[k], acronym);
+        if ("error" in result) failed += byKind[k].length;
+        else {
+          updated += result.updated;
+          failed += result.failures.length;
+        }
+      }
+      setOpBusy(false);
+      setNote({ kind: failed ? "error" : "success", text: `Deleted from Canvas: ${updated} done${failed ? `, ${failed} failed` : ""}.` });
+      clearSelection();
+      reload();
+    })();
+  };
+
   const patchModule = (id: number, patch: Partial<CanvasModule>) =>
     setModules((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
 
@@ -1123,24 +1371,135 @@ function ModulesView({
 
   return (
     <div className={styles.form}>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button
-          type="button"
-          className={styles.downloadButton}
-          onClick={() => setBulkUploadOpen(true)}
-          disabled={busy || modules.length === 0}
-        >
-          Bulk upload
-        </button>
-        <button
-          type="button"
-          className={styles.downloadButton}
-          onClick={() => setScheduleOpen(true)}
-          disabled={busy || modules.length === 0}
-        >
-          Schedule due dates
-        </button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}>
+          <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={allKeys.length === 0} />
+          Select all items
+        </label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className={styles.downloadButton}
+            onClick={() => setBulkUploadOpen(true)}
+            disabled={busy || modules.length === 0}
+          >
+            Bulk upload
+          </button>
+          <button
+            type="button"
+            className={styles.downloadButton}
+            onClick={() => setScheduleOpen(true)}
+            disabled={busy || modules.length === 0}
+          >
+            Schedule due dates
+          </button>
+        </div>
       </div>
+
+      {selected.size > 0 && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            padding: "12px 14px",
+            borderRadius: 12,
+            background: "color-mix(in srgb, var(--accent) 7%, #fff)",
+            border: "1px solid color-mix(in srgb, var(--accent) 28%, var(--field-border))",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 700 }}>{selected.size} selected</span>
+            <button type="button" className={styles.clearFileButton} onClick={clearSelection}>
+              Clear
+            </button>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkPublish(true)}>
+              Publish
+            </button>
+            <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkPublish(false)}>
+              Unpublish
+            </button>
+            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="datetime-local"
+                className={styles.textInput}
+                style={{ width: 200 }}
+                value={bulkDue}
+                onChange={(e) => setBulkDue(e.target.value)}
+              />
+              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={bulkSetDue}>
+                Set due
+              </button>
+            </span>
+            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="number"
+                className={styles.textInput}
+                style={{ width: 76 }}
+                value={bulkShift}
+                onChange={(e) => setBulkShift(Number(e.target.value))}
+                aria-label="Days to shift"
+              />
+              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={bulkShiftDue}>
+                Shift days
+              </button>
+            </span>
+            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="number"
+                className={styles.textInput}
+                style={{ width: 90 }}
+                placeholder="points"
+                value={bulkPoints}
+                onChange={(e) => setBulkPoints(e.target.value)}
+                aria-label="Points"
+              />
+              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={bulkSetPoints}>
+                Set points
+              </button>
+            </span>
+            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+              <select
+                className={styles.textInput}
+                style={{ maxWidth: 180 }}
+                value={bulkRubricId}
+                disabled={rubrics.length === 0}
+                onChange={(e) => setBulkRubricId(e.target.value === "" ? "" : Number(e.target.value))}
+                aria-label="Rubric"
+              >
+                <option value="">{rubrics.length === 0 ? "No rubrics" : "Rubric…"}</option>
+                {rubrics.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.title}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className={styles.downloadButton}
+                disabled={opBusy || bulkRubricId === ""}
+                onClick={bulkRubric}
+              >
+                Associate
+              </button>
+            </span>
+            <button type="button" className={styles.clearFileButton} disabled={opBusy} onClick={bulkRemoveFromModule}>
+              Remove from module
+            </button>
+            <button
+              type="button"
+              className={styles.clearFileButton}
+              disabled={opBusy}
+              onClick={bulkDeleteContent}
+              style={{ color: "#b91c1c", borderColor: "#fecaca" }}
+            >
+              {confirmDeleteContent ? "Confirm delete from Canvas" : "Delete from Canvas"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className={styles.field}>
         <label htmlFor="content-new-module">Add a module</label>
@@ -1175,6 +1534,15 @@ function ModulesView({
         return (
           <div key={m.id} className={styles.syllabusSectionCard}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <input
+                type="checkbox"
+                checked={moduleAllChecked(m)}
+                onChange={() => toggleModuleAll(m)}
+                disabled={m.items.length === 0}
+                aria-label={`Select all items in ${m.name}`}
+                title="Select all items in this module"
+                style={{ flexShrink: 0 }}
+              />
               <button
                 type="button"
                 className={styles.clearFileButton}
@@ -1232,6 +1600,13 @@ function ModulesView({
                       borderTop: ii === 0 ? "none" : "1px solid var(--field-border)",
                     }}
                   >
+                    <input
+                      type="checkbox"
+                      checked={selected.has(itemKey(m.id, it.id))}
+                      onChange={() => toggleItemSelected(m.id, it.id)}
+                      aria-label={`Select ${it.title}`}
+                      style={{ flexShrink: 0 }}
+                    />
                     <span
                       className={styles.fieldHint}
                       style={{ margin: 0, minWidth: 74, fontWeight: 600 }}

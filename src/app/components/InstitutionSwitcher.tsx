@@ -12,7 +12,7 @@ import styles from "../page.module.css";
  * Content). Renders a hint when none are registered yet — they're added in the
  * Settings dropdown.
  */
-export default function InstitutionSwitcher({ metric }: { metric?: "grading" | "unread" }) {
+export default function InstitutionSwitcher({ metric }: { metric?: "grading" | "unread" | "both" }) {
   const { institutions, active, setActive } = useInstitutionSelection();
   const { counts } = useInstitutionCounts();
 
@@ -27,11 +27,15 @@ export default function InstitutionSwitcher({ metric }: { metric?: "grading" | "
   return (
     <div className={styles.lessonInnerTabs} role="radiogroup" aria-label="Institution">
       {institutions.map((code) => {
+        const needsGrading = counts[code]?.needsGrading ?? 0;
+        const unread = counts[code]?.unread ?? 0;
         const count = !metric
           ? 0
           : metric === "grading"
-            ? counts[code]?.needsGrading ?? 0
-            : counts[code]?.unread ?? 0;
+            ? needsGrading
+            : metric === "unread"
+              ? unread
+              : needsGrading + unread;
         return (
           <button
             key={code}

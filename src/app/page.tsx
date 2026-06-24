@@ -606,7 +606,11 @@ export default function Home() {
         >
           <Tab label="New Build Courses" value="course-planning" disableRipple />
           <Tab label="Pre Built Courses" value="lesson-planning" disableRipple />
-          <Tab label="LMS Integration" value="content" disableRipple />
+          <Tab
+            label={<NavTabLabel text="LMS Integration" count={totalNeedsGrading + totalUnread} />}
+            value="content"
+            disableRipple
+          />
         </Tabs>
 
         {activeTab === "course-planning" && (

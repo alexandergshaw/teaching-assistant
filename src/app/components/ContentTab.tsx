@@ -66,6 +66,7 @@ import { COURSE_COPY_TYPES } from "@/lib/canvas-modules";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
+import { useInstitutionCounts } from "./InstitutionCounts";
 import type { LlmProvider } from "@/lib/llm";
 import styles from "../page.module.css";
 
@@ -5260,6 +5261,7 @@ export default function ContentTab({
   communications?: ReactNode;
 }) {
   const { active: activeInstitution } = useInstitutionSelection();
+  const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
   const [provider] = useLlmProvider();
 
   const [courseUrl, setCourseUrl] = useState<string>(() =>
@@ -5412,7 +5414,7 @@ export default function ContentTab({
 
       <div className={styles.field}>
         <label>Institution</label>
-        <InstitutionSwitcher />
+        <InstitutionSwitcher metric="both" />
       </div>
 
       <CoursePicker
@@ -5516,7 +5518,10 @@ export default function ContentTab({
                 className={`${styles.lessonInnerTab} ${view === "grading" ? styles.lessonInnerTabActive : ""}`}
                 onClick={() => setView("grading")}
               >
-                Grading
+                <span className={styles.tabLabelWrap}>
+                  Grading
+                  {totalNeedsGrading > 0 && <span className={styles.navBadge}>{totalNeedsGrading}</span>}
+                </span>
               </button>
             )}
             {communications && (
@@ -5525,7 +5530,10 @@ export default function ContentTab({
                 className={`${styles.lessonInnerTab} ${view === "communications" ? styles.lessonInnerTabActive : ""}`}
                 onClick={() => setView("communications")}
               >
-                Communications
+                <span className={styles.tabLabelWrap}>
+                  Communications
+                  {totalUnread > 0 && <span className={styles.navBadge}>{totalUnread}</span>}
+                </span>
               </button>
             )}
           </div>

@@ -1068,6 +1068,7 @@ function GradableEditorModal({
 }) {
   const kind = item.type as GradableKind;
   const showPoints = kind === "Assignment" || kind === "Quiz";
+  const isQuiz = kind === "Quiz";
 
   const [loading, setLoading] = useState(item.contentId != null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1076,7 +1077,16 @@ function GradableEditorModal({
   const [due, setDue] = useState(toLocalInput(item.dueAt));
   const [points, setPoints] = useState(item.pointsPossible != null ? String(item.pointsPossible) : "");
   const [saving, setSaving] = useState(false);
+  // Set when a quiz question is saved/deleted, so closing reloads the module list.
+  const [questionsChanged, setQuestionsChanged] = useState(false);
   const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+
+  // Close, reloading the list first if quiz questions changed (the quiz's point
+  // total may have moved). Used by the header Close button and the backdrop.
+  const closeModal = () => {
+    if (questionsChanged) onSaved();
+    onClose();
+  };
   const [targetKind, setTargetKind] = useState<GradableKind | "">("");
   const [confirmChange, setConfirmChange] = useState(false);
   const [changing, setChanging] = useState(false);
@@ -1182,19 +1192,20 @@ function GradableEditorModal({
   const busy = saving || changing;
 
   return (
-    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
+    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={closeModal}>
       <div
         className={styles.previewModal}
-        style={{ width: "min(820px, 95vw)", maxWidth: "none" }}
+        style={{ width: "min(560px, 94vw)", maxWidth: "none" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className={styles.previewHeader}>
           <h3>Edit {kind.toLowerCase()}</h3>
-          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+          <button type="button" className={styles.previewCloseButton} onClick={closeModal}>
             Close
           </button>
         </div>
 
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
         {loading ? (
           <div className={styles.loadingState} role="status" aria-live="polite">
             <span className={styles.spinner} aria-hidden="true" />
@@ -1254,9 +1265,18 @@ function GradableEditorModal({
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 spellCheck={false}
-                style={{ minHeight: 240, width: "100%", fontFamily: "var(--font-mono, monospace)" }}
+                style={{ minHeight: isQuiz ? 120 : 200, width: "100%", fontFamily: "var(--font-mono, monospace)" }}
               />
             </div>
+
+            {isQuiz && item.contentId != null && (
+              <QuizQuestionsEditor
+                courseUrl={courseUrl}
+                acronym={acronym}
+                quizId={item.contentId}
+                onChanged={() => setQuestionsChanged(true)}
+              />
+            )}
 
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <button type="button" className={styles.submitButton} onClick={handleSave} disabled={busy || !title.trim()}>
@@ -1314,6 +1334,7 @@ function GradableEditorModal({
             {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
           </>
         )}
+        </div>
       </div>
     </div>
   );
@@ -1349,26 +1370,22 @@ function defaultQuizAnswers(type: QuizQuestionType): Array<{ text: string; corre
   return [];
 }
 
-function QuizQuestionsModal({
+function QuizQuestionsEditor({
   courseUrl,
   acronym,
-  item,
-  onClose,
-  onSaved,
+  quizId,
+  onChanged,
 }: {
   courseUrl: string;
   acronym?: string;
-  item: CanvasModuleItem;
-  onClose: () => void;
-  onSaved: () => void;
+  quizId: number;
+  onChanged: () => void;
 }) {
-  const quizId = item.contentId as number;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [questions, setQuestions] = useState<EditableQuestion[]>([]);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
-  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1448,7 +1465,7 @@ function QuizQuestionsModal({
       setBusyKey(null);
       if ("error" in result) return setNote({ kind: "error", text: result.error });
     }
-    setDirty(true);
+    onChanged();
     setNote({ kind: "success", text: "Question saved." });
   };
 
@@ -1463,36 +1480,24 @@ function QuizQuestionsModal({
     setBusyKey(null);
     if ("error" in result) return setNote({ kind: "error", text: result.error });
     setQuestions((qs) => qs.filter((x) => x.key !== q.key));
-    setDirty(true);
-  };
-
-  const close = () => {
-    if (dirty) onSaved();
-    onClose();
+    onChanged();
   };
 
   return (
-    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={close}>
-      <div className={styles.previewModal} style={{ width: "min(820px, 95vw)", maxWidth: "none" }} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.previewHeader}>
-          <h3>Edit questions — {item.title}</h3>
-          <button type="button" className={styles.previewCloseButton} onClick={close}>
-            Close
-          </button>
-        </div>
-
-        {loading ? (
-          <div className={styles.loadingState} role="status" aria-live="polite">
-            <span className={styles.spinner} aria-hidden="true" />
-            <div>
-              <p className={styles.loadingTitle}>Loading questions…</p>
-            </div>
+    <div className={styles.field} style={{ gap: 8 }}>
+      <label>Questions</label>
+      {loading ? (
+        <div className={styles.loadingState} role="status" aria-live="polite">
+          <span className={styles.spinner} aria-hidden="true" />
+          <div>
+            <p className={styles.loadingTitle}>Loading questions…</p>
           </div>
-        ) : loadError ? (
-          <p className={styles.error}>{loadError}</p>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "68vh", overflowY: "auto" }}>
-            {questions.length === 0 && <p className={styles.fieldHint}>This quiz has no questions yet.</p>}
+        </div>
+      ) : loadError ? (
+        <p className={styles.error}>{loadError}</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {questions.length === 0 && <p className={styles.fieldHint}>This quiz has no questions yet.</p>}
             {questions.map((q, qi) => {
               const single = q.type === "multiple_choice_question" || q.type === "true_false_question";
               const showAnswers = q.type !== "essay_question";
@@ -1601,9 +1606,8 @@ function QuizQuestionsModal({
               </span>
             </div>
             {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2028,8 +2032,7 @@ function ModulesView({
   const [editingItem, setEditingItem] = useState<CanvasModuleItem | null>(null);
   const [filePreview, setFilePreview] = useState<{ file: PreviewFile; blobUrl: string | null } | null>(null);
   const [editingFile, setEditingFile] = useState<CanvasModuleItem | null>(null);
-  // The quiz whose questions are being edited, and the rubric builder's target.
-  const [editingQuiz, setEditingQuiz] = useState<CanvasModuleItem | null>(null);
+  // The rubric builder's target assignments (null when closed).
   const [rubricBuilder, setRubricBuilder] = useState<{ assignmentIds: string[] } | null>(null);
   const [drag, setDrag] = useState<{ moduleId: number; itemId: number } | null>(null);
   const [dragOverItem, setDragOverItem] = useState<number | null>(null);
@@ -3675,11 +3678,6 @@ function ModulesView({
                         Edit
                       </button>
                     )}
-                    {it.type === "Quiz" && it.contentId != null && (
-                      <button type="button" className={styles.ccBtn} onClick={() => setEditingQuiz(it)}>
-                        Questions
-                      </button>
-                    )}
                     {it.type === "File" && it.contentId != null && (
                       <button type="button" className={styles.ccBtn} onClick={() => void openFilePreview(it)}>
                         Preview
@@ -3912,16 +3910,6 @@ function ModulesView({
           item={editingFile}
           onClose={() => setEditingFile(null)}
           onSaved={() => setNote({ kind: "success", text: "Saved to Canvas." })}
-        />
-      )}
-
-      {editingQuiz && (
-        <QuizQuestionsModal
-          courseUrl={courseUrl}
-          acronym={acronym}
-          item={editingQuiz}
-          onClose={() => setEditingQuiz(null)}
-          onSaved={reload}
         />
       )}
 

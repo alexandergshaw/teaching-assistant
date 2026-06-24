@@ -15,6 +15,9 @@
   --accent-hover: #1d4ed8;
   /* Brand navy (matches the logo mark) used for app chrome: top bar + auth pages. */
   --navy: #1a2744;
+  /* Table row highlight: the header navy, a touch lighter than the darkest navy.
+     Dark, so highlighted rows use light text. */
+  --navy-soft: #243450;
   /* Lighter shades of navy for hover/selection highlights and drag emphasis.
      Kept clearly in the navy hue (not a near-white wash) so highlights read as
      "lighter navy" rather than gray. */

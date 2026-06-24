@@ -3513,3 +3513,151 @@
     background: #334155;
   }
 }
+
+/* ── Bulk edit bar (Course Content selection toolbar) ──────────────────────────
+   A compact, navy-accented action bar. Controls are intentionally small and
+   uniform so a dense set of bulk actions still reads as calm and minimal. */
+.bulkBar {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  background: var(--card-background);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.1);
+  position: sticky;
+  top: calc(var(--topbar-height) + 44px);
+  z-index: 20;
+  overflow: hidden;
+}
+
+.bulkBarHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
+  background: var(--navy);
+  color: #fff;
+}
+
+.bulkCount {
+  font-size: 0.8rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.bulkClear {
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: transparent;
+  color: #fff;
+  border-radius: 999px;
+  padding: 3px 13px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.bulkClear:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.bulkRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+}
+
+.bulkRow + .bulkRow {
+  border-top: 1px solid var(--card-border);
+}
+
+.bulkLabel {
+  flex: 0 0 76px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.bulkField {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bulkInput,
+.bulkSelect {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  background: var(--field-background);
+  font: inherit;
+  font-size: 0.83rem;
+  color: var(--text-primary);
+}
+
+.bulkInput:focus,
+.bulkSelect:focus {
+  outline: none;
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--navy) 14%, transparent);
+}
+
+.bulkBtn {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.bulkBtn:hover:not(:disabled) {
+  border-color: var(--navy);
+  background: color-mix(in srgb, var(--navy) 6%, #fff);
+}
+
+.bulkBtnPrimary {
+  border-color: var(--navy);
+  background: var(--navy);
+  color: #fff;
+}
+
+.bulkBtnPrimary:hover:not(:disabled) {
+  background: #243450;
+  border-color: #243450;
+}
+
+.bulkBtnDanger {
+  border-color: #e3c7c7;
+  background: transparent;
+  color: #a8403d;
+}
+
+.bulkBtnDanger:hover:not(:disabled) {
+  border-color: #a8403d;
+  background: color-mix(in srgb, #a8403d 6%, #fff);
+}
+
+.bulkBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.bulkHint {
+  flex-basis: 100%;
+  margin: 1px 0 0;
+  font-size: 0.73rem;
+  color: var(--text-secondary);
+}

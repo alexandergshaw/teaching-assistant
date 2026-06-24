@@ -1520,6 +1520,10 @@ function ModulesView({
   const [opBusy, setOpBusy] = useState(false);
   const [bulkDue, setBulkDue] = useState("");
   const [bulkShift, setBulkShift] = useState(7);
+  // Staggered due dates: the earliest selected module gets the base date above,
+  // and each later module's items are pushed out by this interval per step.
+  const [bulkStaggerOffset, setBulkStaggerOffset] = useState(1);
+  const [bulkStaggerUnit, setBulkStaggerUnit] = useState<"weeks" | "days">("weeks");
   // How many modules a "Shift up/down" moves the selected items by.
   const [bulkModuleShift, setBulkModuleShift] = useState(1);
   // The module selected items are moved into by the "Move to module" control.
@@ -2020,6 +2024,37 @@ function ModulesView({
       return;
     }
     void runBulkSummary(() => setModuleDueDatesAction(courseUrl, updates, acronym), "Due dates shifted");
+  };
+
+  // Stagger due dates by module: the earliest selected module's gradables get the
+  // base date, the next module's get base + 1 interval, the next base + 2, and so
+  // on. Rank is by module list order over only the modules that have a selected
+  // gradable, so gaps in the selection don't create gaps in the schedule. Items
+  // in the same module share a due date.
+  const bulkStaggerDue = () => {
+    if (!bulkDue || Number.isNaN(new Date(bulkDue).getTime())) {
+      setNote({ kind: "error", text: "Pick a base due date first." });
+      return;
+    }
+    const items = selectedItems().filter(
+      ({ item }) => ["Assignment", "Quiz", "Discussion"].includes(item.type) && typeof item.contentId === "number"
+    );
+    if (items.length === 0) {
+      setNote({ kind: "error", text: "No selected items can take a due date." });
+      return;
+    }
+    const perStepDays = Math.trunc(bulkStaggerOffset || 0) * (bulkStaggerUnit === "weeks" ? 7 : 1);
+    const rank = new Map<number, number>();
+    modules
+      .filter((mod) => items.some(({ moduleId }) => moduleId === mod.id))
+      .forEach((mod, idx) => rank.set(mod.id, idx));
+    const base = new Date(bulkDue);
+    const updates = items.map(({ item, moduleId }) => {
+      const d = new Date(base);
+      d.setDate(d.getDate() + (rank.get(moduleId) ?? 0) * perStepDays);
+      return { type: item.type, contentId: item.contentId as number, dueAt: d.toISOString() };
+    });
+    void runBulkSummary(() => setModuleDueDatesAction(courseUrl, updates, acronym), "Due dates staggered");
   };
 
   // Move every selected item `dir * bulkModuleShift` modules along the module
@@ -2527,23 +2562,9 @@ function ModulesView({
       </div>
 
       {(selected.size > 0 || selectedModules.size > 0) && (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-            padding: "12px 14px",
-            borderRadius: 12,
-            background: "color-mix(in srgb, var(--accent) 7%, #fff)",
-            border: "1px solid color-mix(in srgb, var(--accent) 28%, var(--field-border))",
-            position: "sticky",
-            top: "calc(var(--topbar-height) + 44px)",
-            zIndex: 20,
-            boxShadow: "0 6px 16px rgba(15, 23, 42, 0.1)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <span style={{ fontWeight: 700 }}>
+        <div className={styles.bulkBar}>
+          <div className={styles.bulkBarHead}>
+            <span className={styles.bulkCount}>
               {[
                 selectedModules.size > 0
                   ? `${selectedModules.size} module${selectedModules.size === 1 ? "" : "s"}`
@@ -2554,40 +2575,35 @@ function ModulesView({
                 .join(", ")}{" "}
               selected
             </span>
-            <button type="button" className={styles.clearFileButton} onClick={clearSelection}>
+            <button type="button" className={styles.bulkClear} onClick={clearSelection}>
               Clear
             </button>
           </div>
 
           {selectedModules.size > 0 && (
             <>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                <span className={styles.fieldHint} style={{ margin: 0, fontWeight: 600 }}>
-                  Modules:
-                </span>
-                <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkPublishModules(true)}>
+              <div className={styles.bulkRow}>
+                <span className={styles.bulkLabel}>Modules</span>
+                <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={() => bulkPublishModules(true)}>
                   Publish
                 </button>
-                <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkPublishModules(false)}>
+                <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={() => bulkPublishModules(false)}>
                   Unpublish
                 </button>
                 <button
                   type="button"
-                  className={styles.clearFileButton}
+                  className={styles.bulkBtnDanger}
                   disabled={opBusy}
                   onClick={bulkDeleteModules}
-                  style={{ color: "#b91c1c", borderColor: "#fecaca" }}
+                  title="Delete the selected modules"
                 >
-                  {confirmDeleteModules ? "Confirm delete modules" : "Delete modules"}
+                  {confirmDeleteModules ? "Confirm delete" : "Delete"}
                 </button>
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                <span className={styles.fieldHint} style={{ margin: 0, fontWeight: 600 }}>
-                  Add to each:
-                </span>
+              <div className={styles.bulkRow}>
+                <span className={styles.bulkLabel}>Add to each</span>
                 <select
-                  className={styles.textInput}
-                  style={{ maxWidth: 150 }}
+                  className={styles.bulkSelect}
                   value={bulkAddType}
                   onChange={(e) => setBulkAddType(e.target.value)}
                   aria-label="Type of item to add to each selected module"
@@ -2600,8 +2616,8 @@ function ModulesView({
                 </select>
                 <input
                   type="text"
-                  className={styles.textInput}
-                  style={{ flex: "1 1 220px", minWidth: 180 }}
+                  className={styles.bulkInput}
+                  style={{ flex: "1 1 200px", minWidth: 170 }}
                   placeholder="Name pattern, e.g. {module} - Homework"
                   value={bulkAddPattern}
                   onChange={(e) => setBulkAddPattern(e.target.value)}
@@ -2609,149 +2625,168 @@ function ModulesView({
                 />
                 <button
                   type="button"
-                  className={styles.downloadButton}
+                  className={styles.bulkBtnPrimary}
                   disabled={opBusy || !bulkAddPattern.trim()}
                   onClick={bulkAddToModules}
+                  title="Add one new item to each selected module"
                 >
-                  Add to modules
+                  Add
                 </button>
-                <span className={styles.fieldHint} style={{ margin: 0, flexBasis: "100%" }}>
-                  Use {"{module}"} for the module name and {"{n}"} for the week/module number in its title (e.g. &quot;Week 5&quot; -&gt; 5). New items are created unpublished.
+                <span className={styles.bulkHint}>
+                  {"{module}"} = module name, {"{n}"} = week/module number from the title (e.g. &quot;Week 5&quot; -&gt; 5). New items are unpublished.
                 </span>
               </div>
             </>
           )}
 
           {selected.size > 0 && (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <span className={styles.fieldHint} style={{ margin: 0, fontWeight: 600 }}>
-              Items:
-            </span>
-            <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkPublish(true)}>
-              Publish
-            </button>
-            <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkPublish(false)}>
-              Unpublish
-            </button>
-            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="datetime-local"
-                className={styles.textInput}
-                style={{ width: 200 }}
-                value={bulkDue}
-                onChange={(e) => setBulkDue(e.target.value)}
-              />
-              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={bulkSetDue}>
-                Set due
-              </button>
-            </span>
-            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="number"
-                className={styles.textInput}
-                style={{ width: 76 }}
-                value={bulkShift}
-                onChange={(e) => setBulkShift(Number(e.target.value))}
-                aria-label="Days to shift"
-              />
-              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={bulkShiftDue}>
-                Shift days
-              </button>
-            </span>
-            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="number"
-                className={styles.textInput}
-                style={{ width: 90 }}
-                placeholder="points"
-                value={bulkPoints}
-                onChange={(e) => setBulkPoints(e.target.value)}
-                aria-label="Points"
-              />
-              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={bulkSetPoints}>
-                Set points
-              </button>
-            </span>
-            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-              <select
-                className={styles.textInput}
-                style={{ maxWidth: 180 }}
-                value={bulkRubricId}
-                disabled={rubrics.length === 0}
-                onChange={(e) => setBulkRubricId(e.target.value === "" ? "" : Number(e.target.value))}
-                aria-label="Rubric"
-              >
-                <option value="">{rubrics.length === 0 ? "No rubrics" : "Rubric…"}</option>
-                {rubrics.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.title}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className={styles.downloadButton}
-                disabled={opBusy || bulkRubricId === ""}
-                onClick={bulkRubric}
-              >
-                Associate
-              </button>
-            </span>
-            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="number"
-                min={1}
-                className={styles.textInput}
-                style={{ width: 76 }}
-                value={bulkModuleShift}
-                onChange={(e) => setBulkModuleShift(Number(e.target.value))}
-                aria-label="Modules to shift by"
-              />
-              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkShiftModules(-1)}>
-                Shift up
-              </button>
-              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkShiftModules(1)}>
-                Shift down
-              </button>
-            </span>
-            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-              <select
-                className={styles.textInput}
-                style={{ maxWidth: 200 }}
-                value={bulkTargetModule}
-                disabled={modules.length === 0}
-                onChange={(e) => setBulkTargetModule(e.target.value === "" ? "" : Number(e.target.value))}
-                aria-label="Module to move items into"
-              >
-                <option value="">{modules.length === 0 ? "No modules" : "Move to module…"}</option>
-                {modules.map((mod) => (
-                  <option key={mod.id} value={mod.id}>
-                    {mod.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className={styles.downloadButton}
-                disabled={opBusy || bulkTargetModule === ""}
-                onClick={bulkMoveToModule}
-              >
-                Move here
-              </button>
-            </span>
-            <button type="button" className={styles.clearFileButton} disabled={opBusy} onClick={bulkRemoveFromModule}>
-              Remove from module
-            </button>
-            <button
-              type="button"
-              className={styles.clearFileButton}
-              disabled={opBusy}
-              onClick={bulkDeleteContent}
-              style={{ color: "#b91c1c", borderColor: "#fecaca" }}
-            >
-              {confirmDeleteContent ? "Confirm delete from Canvas" : "Delete from Canvas"}
-            </button>
-          </div>
+            <>
+              <div className={styles.bulkRow}>
+                <span className={styles.bulkLabel}>Items</span>
+                <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={() => bulkPublish(true)}>
+                  Publish
+                </button>
+                <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={() => bulkPublish(false)}>
+                  Unpublish
+                </button>
+              </div>
+              <div className={styles.bulkRow}>
+                <span className={styles.bulkLabel}>Due dates</span>
+                <input
+                  type="datetime-local"
+                  className={styles.bulkInput}
+                  style={{ width: 188 }}
+                  value={bulkDue}
+                  onChange={(e) => setBulkDue(e.target.value)}
+                  aria-label="Due date"
+                />
+                <button type="button" className={styles.bulkBtnPrimary} disabled={opBusy} onClick={bulkSetDue} title="Set this due date on all selected gradables">
+                  Set
+                </button>
+                <span className={styles.bulkField}>
+                  <input
+                    type="number"
+                    className={styles.bulkInput}
+                    style={{ width: 56 }}
+                    value={bulkShift}
+                    onChange={(e) => setBulkShift(Number(e.target.value))}
+                    aria-label="Days to shift"
+                  />
+                  <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={bulkShiftDue}>
+                    Shift days
+                  </button>
+                </span>
+                <span className={styles.bulkField}>
+                  <input
+                    type="number"
+                    min={0}
+                    className={styles.bulkInput}
+                    style={{ width: 52 }}
+                    value={bulkStaggerOffset}
+                    onChange={(e) => setBulkStaggerOffset(Number(e.target.value))}
+                    aria-label="Stagger interval"
+                  />
+                  <select
+                    className={styles.bulkSelect}
+                    value={bulkStaggerUnit}
+                    onChange={(e) => setBulkStaggerUnit(e.target.value === "days" ? "days" : "weeks")}
+                    aria-label="Stagger interval unit"
+                  >
+                    <option value="weeks">weeks</option>
+                    <option value="days">days</option>
+                  </select>
+                  <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={bulkStaggerDue}>
+                    Stagger
+                  </button>
+                </span>
+                <span className={styles.bulkHint}>
+                  Stagger gives the earliest selected module the date above, then adds the interval for each later module.
+                </span>
+              </div>
+              <div className={styles.bulkRow}>
+                <span className={styles.bulkLabel}>Grading</span>
+                <span className={styles.bulkField}>
+                  <input
+                    type="number"
+                    className={styles.bulkInput}
+                    style={{ width: 74 }}
+                    placeholder="points"
+                    value={bulkPoints}
+                    onChange={(e) => setBulkPoints(e.target.value)}
+                    aria-label="Points"
+                  />
+                  <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={bulkSetPoints}>
+                    Set points
+                  </button>
+                </span>
+                <span className={styles.bulkField}>
+                  <select
+                    className={styles.bulkSelect}
+                    style={{ maxWidth: 170 }}
+                    value={bulkRubricId}
+                    disabled={rubrics.length === 0}
+                    onChange={(e) => setBulkRubricId(e.target.value === "" ? "" : Number(e.target.value))}
+                    aria-label="Rubric"
+                  >
+                    <option value="">{rubrics.length === 0 ? "No rubrics" : "Rubric…"}</option>
+                    {rubrics.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.title}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className={styles.bulkBtn} disabled={opBusy || bulkRubricId === ""} onClick={bulkRubric}>
+                    Associate
+                  </button>
+                </span>
+              </div>
+              <div className={styles.bulkRow}>
+                <span className={styles.bulkLabel}>Move</span>
+                <span className={styles.bulkField}>
+                  <input
+                    type="number"
+                    min={1}
+                    className={styles.bulkInput}
+                    style={{ width: 56 }}
+                    value={bulkModuleShift}
+                    onChange={(e) => setBulkModuleShift(Number(e.target.value))}
+                    aria-label="Modules to shift by"
+                  />
+                  <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={() => bulkShiftModules(-1)}>
+                    Shift up
+                  </button>
+                  <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={() => bulkShiftModules(1)}>
+                    Shift down
+                  </button>
+                </span>
+                <span className={styles.bulkField}>
+                  <select
+                    className={styles.bulkSelect}
+                    style={{ maxWidth: 190 }}
+                    value={bulkTargetModule}
+                    disabled={modules.length === 0}
+                    onChange={(e) => setBulkTargetModule(e.target.value === "" ? "" : Number(e.target.value))}
+                    aria-label="Module to move items into"
+                  >
+                    <option value="">{modules.length === 0 ? "No modules" : "Move to module…"}</option>
+                    {modules.map((mod) => (
+                      <option key={mod.id} value={mod.id}>
+                        {mod.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className={styles.bulkBtn} disabled={opBusy || bulkTargetModule === ""} onClick={bulkMoveToModule} title="Move selected items into this module">
+                    Move
+                  </button>
+                </span>
+                <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={bulkRemoveFromModule} title="Remove selected items from their module">
+                  Remove
+                </button>
+                <button type="button" className={styles.bulkBtnDanger} disabled={opBusy} onClick={bulkDeleteContent}>
+                  {confirmDeleteContent ? "Confirm delete" : "Delete from Canvas"}
+                </button>
+              </div>
+            </>
           )}
         </div>
       )}

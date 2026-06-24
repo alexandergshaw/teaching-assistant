@@ -1132,6 +1132,89 @@ export interface RubricCriterionInput {
   ratings: Array<{ description: string; longDescription?: string; points: number }>;
 }
 
+/** Append rubric[title] + rubric[criteria][...] form fields (shared by create/update). */
+function appendRubricFields(params: URLSearchParams, title: string, criteria: RubricCriterionInput[]): void {
+  params.append("rubric[title]", title.trim());
+  params.append("rubric[free_form_criterion_comments]", "false");
+  criteria.forEach((c, i) => {
+    params.append(`rubric[criteria][${i}][description]`, c.description.trim() || `Criterion ${i + 1}`);
+    if (c.longDescription?.trim()) {
+      params.append(`rubric[criteria][${i}][long_description]`, c.longDescription.trim());
+    }
+    params.append(`rubric[criteria][${i}][points]`, String(c.points));
+    c.ratings.forEach((r, j) => {
+      params.append(`rubric[criteria][${i}][ratings][${j}][description]`, r.description.trim() || `${r.points} pts`);
+      if (r.longDescription?.trim()) {
+        params.append(`rubric[criteria][${i}][ratings][${j}][long_description]`, r.longDescription.trim());
+      }
+      params.append(`rubric[criteria][${i}][ratings][${j}][points]`, String(r.points));
+    });
+  });
+}
+
+/** A rubric loaded for editing: its title plus criteria/tiers with descriptions. */
+export interface RubricDetail {
+  id: number;
+  title: string;
+  criteria: Array<{
+    description: string;
+    longDescription?: string;
+    points: number;
+    ratings: Array<{ description: string; longDescription?: string; points: number }>;
+  }>;
+}
+
+interface RawRubricRating {
+  description?: string;
+  long_description?: string | null;
+  points?: number;
+}
+interface RawRubricCriterion {
+  description?: string;
+  long_description?: string | null;
+  points?: number;
+  ratings?: RawRubricRating[];
+}
+
+/** Fetch one rubric with its criteria + rating tiers, for the editor. */
+export async function getRubric(courseUrl: string, rubricId: number, code?: string): Promise<RubricDetail> {
+  const ctx = resolveCourse(courseUrl, code);
+  const response = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/rubrics/${rubricId}`, {
+    headers: { Authorization: `Bearer ${ctx.token}` },
+  });
+  if (!response.ok) throw canvasError(response.status, ctx.institution);
+  const data = (await response.json()) as { id?: number; title?: string; data?: RawRubricCriterion[] };
+  return {
+    id: data.id ?? rubricId,
+    title: (data.title ?? "").trim(),
+    criteria: (data.data ?? []).map((c) => ({
+      description: (c.description ?? "").trim(),
+      longDescription: c.long_description?.trim() || undefined,
+      points: typeof c.points === "number" ? c.points : 0,
+      ratings: (c.ratings ?? []).map((r) => ({
+        description: (r.description ?? "").trim(),
+        longDescription: r.long_description?.trim() || undefined,
+        points: typeof r.points === "number" ? r.points : 0,
+      })),
+    })),
+  };
+}
+
+/** Update an existing rubric's title + criteria/tiers in place. */
+export async function updateRubric(
+  courseUrl: string,
+  rubricId: number,
+  input: { title: string; criteria: RubricCriterionInput[] },
+  code?: string
+): Promise<void> {
+  if (!input.title.trim()) throw new Error("A rubric needs a title.");
+  if (input.criteria.length === 0) throw new Error("A rubric needs at least one criterion.");
+  const ctx = resolveCourse(courseUrl, code);
+  const params = new URLSearchParams();
+  appendRubricFields(params, input.title, input.criteria);
+  await writeJson(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/rubrics/${rubricId}`, "PUT", ctx, params);
+}
+
 /**
  * Create a new course rubric from criteria + point-tier ratings. When
  * `associateAssignmentId` is given, the rubric is attached to that assignment in
@@ -1152,22 +1235,7 @@ export async function createRubric(
   const ctx = resolveCourse(courseUrl, code);
 
   const params = new URLSearchParams();
-  params.append("rubric[title]", input.title.trim());
-  params.append("rubric[free_form_criterion_comments]", "false");
-  input.criteria.forEach((c, i) => {
-    params.append(`rubric[criteria][${i}][description]`, c.description.trim() || `Criterion ${i + 1}`);
-    if (c.longDescription?.trim()) {
-      params.append(`rubric[criteria][${i}][long_description]`, c.longDescription.trim());
-    }
-    params.append(`rubric[criteria][${i}][points]`, String(c.points));
-    c.ratings.forEach((r, j) => {
-      params.append(`rubric[criteria][${i}][ratings][${j}][description]`, r.description.trim() || `${r.points} pts`);
-      if (r.longDescription?.trim()) {
-        params.append(`rubric[criteria][${i}][ratings][${j}][long_description]`, r.longDescription.trim());
-      }
-      params.append(`rubric[criteria][${i}][ratings][${j}][points]`, String(r.points));
-    });
-  });
+  appendRubricFields(params, input.title, input.criteria);
   if (typeof input.associateAssignmentId === "number") {
     params.append("rubric_association[association_type]", "Assignment");
     params.append("rubric_association[association_id]", String(input.associateAssignmentId));

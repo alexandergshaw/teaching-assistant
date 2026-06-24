@@ -23,6 +23,8 @@ import {
   listRubricsAction,
   bulkAssociateRubricAction,
   createRubricAction,
+  getRubricAction,
+  updateRubricAction,
   getGradableAction,
   updateGradableAction,
   createGradableAction,
@@ -1671,23 +1673,59 @@ function RubricBuilderModal({
   courseUrl,
   acronym,
   assignments,
+  rubricId,
   onClose,
   onCreated,
 }: {
   courseUrl: string;
   acronym?: string;
   assignments: Array<{ id: string; title: string; points: number | null }>;
+  rubricId?: number;
   onClose: () => void;
   onCreated: (title: string, associated: number) => void;
 }) {
+  const editing = rubricId != null;
   const [title, setTitle] = useState("");
-  // Percentage mode (default): criteria sum to 100% and are scaled to each
-  // assignment's point total on apply. Point mode: criteria are raw points.
-  const [mode, setMode] = useState<"percent" | "points">("percent");
-  const [criteria, setCriteria] = useState<EditCriterion[]>(() => [defaultCriterion()]);
+  // Percentage mode (default for new rubrics): criteria sum to 100% and are
+  // scaled to each assignment's point total on apply. Editing loads raw points.
+  const [mode, setMode] = useState<"percent" | "points">(editing ? "points" : "percent");
+  const [criteria, setCriteria] = useState<EditCriterion[]>(() => (editing ? [] : [defaultCriterion()]));
+  const [loading, setLoading] = useState(editing);
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
   const unit = mode === "percent" ? "%" : "pts";
+
+  useEffect(() => {
+    if (!editing || rubricId == null) return;
+    let cancelled = false;
+    (async () => {
+      const result = await getRubricAction(courseUrl, rubricId, acronym);
+      if (cancelled) return;
+      if ("error" in result) {
+        setNote({ kind: "error", text: result.error });
+        setLoading(false);
+        return;
+      }
+      setTitle(result.rubric.title);
+      setCriteria(
+        result.rubric.criteria.map((c) => ({
+          key: nextRubricKey(),
+          description: c.description,
+          points: c.points,
+          ratings: c.ratings.map((r) => ({
+            key: nextRubricKey(),
+            description: r.description,
+            longDescription: r.longDescription ?? "",
+            points: r.points,
+          })),
+        }))
+      );
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [editing, rubricId, courseUrl, acronym]);
 
   const patchCrit = (key: string, p: Partial<EditCriterion>) =>
     setCriteria((cs) => cs.map((c) => (c.key === key ? { ...c, ...p } : c)));
@@ -1755,6 +1793,18 @@ function RubricBuilderModal({
     setSaving(true);
     setNote(null);
 
+    // Editing: update the rubric's criteria/tiers in place (points as entered).
+    if (editing && rubricId != null) {
+      const result = await updateRubricAction(courseUrl, rubricId, { title: title.trim(), criteria: buildCriteria((v) => v) }, acronym);
+      setSaving(false);
+      if ("error" in result) {
+        setNote({ kind: "error", text: result.error });
+        return;
+      }
+      onCreated(title.trim(), 0);
+      return;
+    }
+
     // Percentage mode with assignments: a per-assignment rubric scaled to that
     // assignment's point total, so different totals each get a correct rubric.
     if (mode === "percent" && assignments.length > 0) {
@@ -1806,7 +1856,7 @@ function RubricBuilderModal({
     <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
       <div className={styles.previewModal} style={{ width: "min(760px, 95vw)", maxWidth: "none" }} onClick={(e) => e.stopPropagation()}>
         <div className={styles.previewHeader}>
-          <h3>New rubric</h3>
+          <h3>{editing ? "Edit rubric" : "New rubric"}</h3>
           <button type="button" className={styles.previewCloseButton} onClick={onClose}>
             Close
           </button>
@@ -1818,25 +1868,31 @@ function RubricBuilderModal({
             <input id="rubric-title" type="text" className={styles.textInput} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Essay rubric" />
           </div>
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <span className={styles.bulkLabel} style={{ flex: "0 0 auto" }}>Mode</span>
-            <button type="button" className={mode === "percent" ? styles.bulkBtnPrimary : styles.bulkBtn} onClick={() => setMode("percent")}>
-              Percentage
-            </button>
-            <button type="button" className={mode === "points" ? styles.bulkBtnPrimary : styles.bulkBtn} onClick={() => setMode("points")}>
-              Points
-            </button>
-          </div>
+          {loading && <p className={styles.fieldHint} style={{ margin: 0 }}>Loading rubric…</p>}
 
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {assignments.length > 0
-              ? mode === "percent"
-                ? `Criteria are percentages; on apply they are scaled to each of the ${assignments.length} selected assignment${assignments.length === 1 ? "'s" : "s'"} point total (one scaled rubric per assignment, so different totals are handled).`
-                : `Will be associated with ${assignments.length} selected assignment${assignments.length === 1 ? "" : "s"} and used for grading.`
-              : mode === "percent"
-                ? "No assignments selected — a single out-of-100 rubric will be created to associate later."
-                : "No assignments selected — the rubric will be created and available to associate later."}
-          </p>
+          {!editing && (
+            <>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span className={styles.bulkLabel} style={{ flex: "0 0 auto" }}>Mode</span>
+                <button type="button" className={mode === "percent" ? styles.bulkBtnPrimary : styles.bulkBtn} onClick={() => setMode("percent")}>
+                  Percentage
+                </button>
+                <button type="button" className={mode === "points" ? styles.bulkBtnPrimary : styles.bulkBtn} onClick={() => setMode("points")}>
+                  Points
+                </button>
+              </div>
+
+              <p className={styles.fieldHint} style={{ margin: 0 }}>
+                {assignments.length > 0
+                  ? mode === "percent"
+                    ? `Criteria are percentages; on apply they are scaled to each of the ${assignments.length} selected assignment${assignments.length === 1 ? "'s" : "s'"} point total (one scaled rubric per assignment, so different totals are handled).`
+                    : `Will be associated with ${assignments.length} selected assignment${assignments.length === 1 ? "" : "s"} and used for grading.`
+                  : mode === "percent"
+                    ? "No assignments selected — a single out-of-100 rubric will be created to associate later."
+                    : "No assignments selected — the rubric will be created and available to associate later."}
+              </p>
+            </>
+          )}
 
           {criteria.map((c, ci) => (
             <div key={c.key} style={{ border: "1px solid var(--card-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1925,8 +1981,14 @@ function RubricBuilderModal({
           </div>
 
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
-            <button type="button" className={styles.submitButton} onClick={() => void handleCreate()} disabled={saving || !title.trim()}>
-              {saving ? "Creating…" : assignments.length > 0 ? "Create & associate" : "Create rubric"}
+            <button type="button" className={styles.submitButton} onClick={() => void handleCreate()} disabled={saving || loading || !title.trim()}>
+              {saving
+                ? "Saving…"
+                : editing
+                  ? "Save changes"
+                  : assignments.length > 0
+                    ? "Create & associate"
+                    : "Create rubric"}
             </button>
           </div>
           {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
@@ -2264,6 +2326,7 @@ function ModulesView({
   // The rubric builder's target assignments (null when closed).
   const [rubricBuilder, setRubricBuilder] = useState<{
     assignments: Array<{ id: string; title: string; points: number | null }>;
+    editRubricId?: number;
   } | null>(null);
   const [drag, setDrag] = useState<{ moduleId: number; itemId: number } | null>(null);
   const [dragOverItem, setDragOverItem] = useState<number | null>(null);
@@ -3648,6 +3711,14 @@ function ModulesView({
                   <button type="button" className={styles.bulkBtn} disabled={opBusy || bulkRubricId === ""} onClick={bulkRubric}>
                     Associate
                   </button>
+                  <button
+                    type="button"
+                    className={styles.bulkBtn}
+                    disabled={opBusy || bulkRubricId === ""}
+                    onClick={() => bulkRubricId !== "" && setRubricBuilder({ assignments: [], editRubricId: Number(bulkRubricId) })}
+                  >
+                    Edit
+                  </button>
                 </span>
                 <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={openRubricBuilder}>
                   New rubric
@@ -4320,15 +4391,19 @@ function ModulesView({
           courseUrl={courseUrl}
           acronym={acronym}
           assignments={rubricBuilder.assignments}
+          rubricId={rubricBuilder.editRubricId}
           onClose={() => setRubricBuilder(null)}
           onCreated={(title, associated) => {
+            const editing = rubricBuilder.editRubricId != null;
             setRubricBuilder(null);
             void refreshRubrics();
             setNote({
               kind: "success",
-              text: associated > 0
-                ? `Created "${title}" and associated it with ${associated} assignment${associated === 1 ? "" : "s"}.`
-                : `Created rubric "${title}".`,
+              text: editing
+                ? `Updated rubric "${title}".`
+                : associated > 0
+                  ? `Created "${title}" and associated it with ${associated} assignment${associated === 1 ? "" : "s"}.`
+                  : `Created rubric "${title}".`,
             });
           }}
         />

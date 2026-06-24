@@ -65,6 +65,9 @@ import {
   listRubrics,
   bulkAssociateRubric,
   createRubric,
+  getRubric,
+  updateRubric,
+  type RubricDetail,
   getGradable,
   updateGradable,
   createGradable,
@@ -1631,6 +1634,36 @@ export async function createRubricAction(
     return { rubric: await createRubric(courseUrl, input, acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not create the rubric." };
+  }
+}
+
+/** Fetch one rubric (criteria + tiers) for editing. */
+export async function getRubricAction(
+  courseUrl: string,
+  rubricId: number,
+  acronym?: string
+): Promise<{ rubric: RubricDetail } | { error: string }> {
+  try {
+    await requireOwner();
+    return { rubric: await getRubric(courseUrl, rubricId, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the rubric." };
+  }
+}
+
+/** Update an existing rubric in place. */
+export async function updateRubricAction(
+  courseUrl: string,
+  rubricId: number,
+  input: { title: string; criteria: RubricCriterionInput[] },
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await updateRubric(courseUrl, rubricId, input, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the rubric." };
   }
 }
 

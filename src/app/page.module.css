@@ -3688,6 +3688,48 @@
   color: var(--text-secondary);
 }
 
+/* Small inline caption inside a bulk field (e.g. "Due", "then every"). */
+.bulkFieldLabel {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* ── Course-content toolbar (grouped actions above the module list) ───────────
+   The controls above the modules are clustered into small labeled cards so the
+   row reads as Select / Files / Modules / Rubrics instead of one flat strip. */
+.ccToolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.ccToolGroup {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: var(--card-background);
+}
+
+.ccToolGroupLabel {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.ccToolGroupRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* ── Module list (Course Content) ─────────────────────────────────────────────
    Quiet cards with edit-in-place name fields and small, low-contrast controls,
    so a dense list of modules and items still feels calm. Navy is the only accent. */

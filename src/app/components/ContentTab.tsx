@@ -2299,6 +2299,9 @@ function ModulesView({
     !moduleSearchLc ||
     m.name.toLowerCase().includes(moduleSearchLc) ||
     m.items.some((it) => it.title.toLowerCase().includes(moduleSearchLc));
+  // The modules currently shown (after the search filter). Select-all and
+  // select-by-type act on these so a filtered list only selects what's visible.
+  const visibleModules = modules.filter(moduleMatches);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const [uploads, setUploads] = useState<
@@ -2330,6 +2333,13 @@ function ModulesView({
   // the naming pattern (supports {module} and {n}) used to title each new item.
   const [bulkAddType, setBulkAddType] = useState("Assignment");
   const [bulkAddPattern, setBulkAddPattern] = useState("");
+  // Optional details applied to each item created by "Add to each": a first due
+  // date (staggered per module by the interval below), points, and a rubric.
+  const [bulkAddDue, setBulkAddDue] = useState("");
+  const [bulkAddStaggerOffset, setBulkAddStaggerOffset] = useState(1);
+  const [bulkAddStaggerUnit, setBulkAddStaggerUnit] = useState<"weeks" | "days">("weeks");
+  const [bulkAddPoints, setBulkAddPoints] = useState("");
+  const [bulkAddRubricId, setBulkAddRubricId] = useState<number | "">("");
   const [bulkPoints, setBulkPoints] = useState("");
   const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
   // Top-toolbar rubric picker for editing a rubric without selecting items.
@@ -2578,9 +2588,18 @@ function ModulesView({
     }
     return out;
   };
-  const allKeys = modules.flatMap((mod) => mod.items.map((it) => itemKey(mod.id, it.id)));
+  // Only the visible (filtered) items, so "Select all items" tracks the filter.
+  // Toggling merges/unmerges rather than replacing, leaving any hidden selection
+  // untouched.
+  const allKeys = visibleModules.flatMap((mod) => mod.items.map((it) => itemKey(mod.id, it.id)));
   const allSelected = allKeys.length > 0 && allKeys.every((k) => selected.has(k));
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(allKeys));
+  const toggleAll = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) for (const k of allKeys) next.delete(k);
+      else for (const k of allKeys) next.add(k);
+      return next;
+    });
   const clearSelection = () => {
     setSelected(new Set());
     setSelectedModules(new Set());
@@ -2599,7 +2618,7 @@ function ModulesView({
     if (!kind) return;
     const matches = (it: CanvasModuleItem) => (kind === "Graded" ? DATED_TYPES.includes(it.type) : it.type === kind);
     const keys: string[] = [];
-    for (const mod of modules) {
+    for (const mod of visibleModules) {
       for (const it of mod.items) {
         if (matches(it)) keys.push(itemKey(mod.id, it.id));
       }
@@ -2630,10 +2649,17 @@ function ModulesView({
     });
   };
 
-  // Module-level selection (for deleting / publishing whole modules).
-  const allModuleIds = modules.map((mod) => mod.id);
+  // Module-level selection (for deleting / publishing whole modules). Scoped to
+  // the visible modules so a filtered list only selects what's on screen.
+  const allModuleIds = visibleModules.map((mod) => mod.id);
   const allModulesSelected = allModuleIds.length > 0 && allModuleIds.every((id) => selectedModules.has(id));
-  const toggleAllModules = () => setSelectedModules(allModulesSelected ? new Set() : new Set(allModuleIds));
+  const toggleAllModules = () =>
+    setSelectedModules((prev) => {
+      const next = new Set(prev);
+      if (allModulesSelected) for (const id of allModuleIds) next.delete(id);
+      else for (const id of allModuleIds) next.add(id);
+      return next;
+    });
   const toggleModuleSelected = (id: number) =>
     setSelectedModules((prev) => {
       const next = new Set(prev);
@@ -2708,7 +2734,12 @@ function ModulesView({
   // Create one new item of `type` named `name` and add it to `moduleId`. Pages
   // and gradables are created first (to get a slug / content id) and then linked;
   // a SubHeader is just a titled module item with no underlying content.
-  const addContentToModule = async (type: string, moduleId: number, name: string): Promise<boolean> => {
+  const addContentToModule = async (
+    type: string,
+    moduleId: number,
+    name: string,
+    opts?: { dueAt?: string | null; points?: number; rubricId?: number }
+  ): Promise<boolean> => {
     try {
       if (type === "SubHeader") {
         const r = await createModuleItemAction(courseUrl, moduleId, { type: "SubHeader", title: name }, acronym);
@@ -2720,11 +2751,19 @@ function ModulesView({
         const linked = await createModuleItemAction(courseUrl, moduleId, { type: "Page", pageUrl: created.page.url }, acronym);
         return !("error" in linked);
       }
-      // Assignment / Quiz / Discussion
-      const created = await createGradableAction(courseUrl, type as GradableKind, { title: name }, acronym);
+      // Assignment / Quiz / Discussion: create with the optional due date / points,
+      // link it, then attach a rubric (assignments only) once the item exists.
+      const fields: { title: string; pointsPossible?: number; dueAt?: string | null } = { title: name };
+      if (opts?.points != null && Number.isFinite(opts.points)) fields.pointsPossible = opts.points;
+      if (opts?.dueAt) fields.dueAt = opts.dueAt;
+      const created = await createGradableAction(courseUrl, type as GradableKind, fields, acronym);
       if ("error" in created) return false;
       const linked = await createModuleItemAction(courseUrl, moduleId, { type, contentId: created.id }, acronym);
-      return !("error" in linked);
+      if ("error" in linked) return false;
+      if (opts?.rubricId != null && type === "Assignment") {
+        await bulkAssociateRubricAction(courseUrl, opts.rubricId, [String(created.id)], acronym);
+      }
+      return true;
     } catch {
       return false;
     }
@@ -2741,6 +2780,16 @@ function ModulesView({
       return;
     }
     const type = bulkAddType;
+    const isGradable = ["Assignment", "Quiz", "Discussion"].includes(type);
+    // Gather the optional details; each only applies to the types that support it.
+    const points =
+      ["Assignment", "Quiz"].includes(type) && bulkAddPoints.trim() !== "" && Number.isFinite(Number(bulkAddPoints))
+        ? Number(bulkAddPoints)
+        : undefined;
+    const rubricId = type === "Assignment" && bulkAddRubricId !== "" ? Number(bulkAddRubricId) : undefined;
+    const baseDue =
+      isGradable && bulkAddDue && !Number.isNaN(new Date(bulkAddDue).getTime()) ? new Date(bulkAddDue) : null;
+    const stepDays = Math.max(0, Math.trunc(bulkAddStaggerOffset || 0)) * (bulkAddStaggerUnit === "weeks" ? 7 : 1);
     void (async () => {
       setOpBusy(true);
       setNote(null);
@@ -2749,7 +2798,19 @@ function ModulesView({
       let n = 0;
       for (const mod of targets) {
         n += 1;
-        const ok = await addContentToModule(type, mod.id, fillNamePattern(pattern, mod.name, n));
+        // The first selected module gets the base due date; each later one is
+        // pushed out by the stagger interval (0 = same date for all).
+        let dueAt: string | null = null;
+        if (baseDue) {
+          const d = new Date(baseDue);
+          d.setDate(d.getDate() + (n - 1) * stepDays);
+          dueAt = d.toISOString();
+        }
+        const ok = await addContentToModule(type, mod.id, fillNamePattern(pattern, mod.name, n), {
+          dueAt,
+          points,
+          rubricId,
+        });
         if (ok) added += 1;
         else failed += 1;
       }
@@ -3484,71 +3545,88 @@ function ModulesView({
         value={moduleSearch}
         onChange={(e) => setModuleSearch(e.target.value)}
       />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-          <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}>
-            <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={allKeys.length === 0} />
-            Select all items
-          </label>
-          <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}>
-            <input
-              type="checkbox"
-              checked={allModulesSelected}
-              onChange={toggleAllModules}
-              disabled={modules.length === 0}
-            />
-            Select all modules
-          </label>
-          <select
-            className={styles.bulkSelect}
-            style={{ maxWidth: 170 }}
-            value=""
-            disabled={modules.length === 0}
-            onChange={(e) => selectByKind(e.target.value)}
-            aria-label="Select all items of a type"
-          >
-            <option value="">Select by type…</option>
-            <option value="Graded">Graded items</option>
-            <option value="Assignment">Assignments</option>
-            <option value="Quiz">Quizzes</option>
-            <option value="Discussion">Discussions</option>
-            <option value="Page">Pages</option>
-            <option value="File">Files</option>
-          </select>
+      <div className={styles.ccToolbar}>
+        <div className={styles.ccToolGroup}>
+          <span className={styles.ccToolGroupLabel}>Select</span>
+          <div className={styles.ccToolGroupRow}>
+            <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}>
+              <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={allKeys.length === 0} />
+              All items
+            </label>
+            <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}>
+              <input
+                type="checkbox"
+                checked={allModulesSelected}
+                onChange={toggleAllModules}
+                disabled={visibleModules.length === 0}
+              />
+              All modules
+            </label>
+            <select
+              className={styles.bulkSelect}
+              style={{ maxWidth: 150 }}
+              value=""
+              disabled={visibleModules.length === 0}
+              onChange={(e) => selectByKind(e.target.value)}
+              aria-label="Select all items of a type"
+            >
+              <option value="">By type…</option>
+              <option value="Graded">Graded items</option>
+              <option value="Assignment">Assignments</option>
+              <option value="Quiz">Quizzes</option>
+              <option value="Discussion">Discussions</option>
+              <option value="Page">Pages</option>
+              <option value="File">Files</option>
+            </select>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className={styles.downloadButton}
-            onClick={() => setBulkUploadOpen(true)}
-            disabled={busy || modules.length === 0}
-          >
-            Bulk upload
-          </button>
-          <button
-            type="button"
-            className={styles.downloadButton}
-            onClick={() => setRenameOpen(true)}
-            disabled={busy || modules.length === 0}
-          >
-            Rename modules
-          </button>
-          <button
-            type="button"
-            className={styles.downloadButton}
-            onClick={() => setScheduleOpen(true)}
-            disabled={busy || modules.length === 0}
-          >
-            Schedule due dates
-          </button>
-          <button
-            type="button"
-            className={styles.downloadButton}
-            onClick={() => setRubricBuilder({ assignments: [] })}
-          >
-            New rubric
-          </button>
-          <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+
+        <div className={styles.ccToolGroup}>
+          <span className={styles.ccToolGroupLabel}>Files</span>
+          <div className={styles.ccToolGroupRow}>
+            <button
+              type="button"
+              className={styles.downloadButton}
+              onClick={() => setBulkUploadOpen(true)}
+              disabled={busy || modules.length === 0}
+            >
+              Bulk upload
+            </button>
+          </div>
+        </div>
+
+        <div className={styles.ccToolGroup}>
+          <span className={styles.ccToolGroupLabel}>Modules</span>
+          <div className={styles.ccToolGroupRow}>
+            <button
+              type="button"
+              className={styles.downloadButton}
+              onClick={() => setRenameOpen(true)}
+              disabled={busy || modules.length === 0}
+            >
+              Rename modules
+            </button>
+            <button
+              type="button"
+              className={styles.downloadButton}
+              onClick={() => setScheduleOpen(true)}
+              disabled={busy || modules.length === 0}
+            >
+              Schedule due dates
+            </button>
+          </div>
+        </div>
+
+        <div className={styles.ccToolGroup}>
+          <span className={styles.ccToolGroupLabel}>Rubrics</span>
+          <div className={styles.ccToolGroupRow}>
+            <button
+              type="button"
+              className={styles.downloadButton}
+              onClick={() => setRubricBuilder({ assignments: [] })}
+            >
+              New rubric
+            </button>
             <select
               value={editRubricId}
               disabled={rubrics.length === 0}
@@ -3583,7 +3661,7 @@ function ModulesView({
             >
               Edit
             </button>
-          </span>
+          </div>
         </div>
       </div>
 
@@ -3662,6 +3740,79 @@ function ModulesView({
                   {"{module}"} = module name, {"{n}"} = week/module number from the title (e.g. &quot;Week 5&quot; -&gt; 5). New items are unpublished.
                 </span>
               </div>
+              {["Assignment", "Quiz", "Discussion"].includes(bulkAddType) && (
+                <div className={styles.bulkRow}>
+                  <span className={styles.bulkLabel}>Details</span>
+                  <span className={styles.bulkField}>
+                    <span className={styles.bulkFieldLabel}>Due</span>
+                    <input
+                      type="datetime-local"
+                      className={styles.bulkInput}
+                      style={{ width: 188 }}
+                      value={bulkAddDue}
+                      onChange={(e) => setBulkAddDue(e.target.value)}
+                      aria-label="First due date for the new items"
+                    />
+                  </span>
+                  <span className={styles.bulkField}>
+                    <span className={styles.bulkFieldLabel}>then every</span>
+                    <input
+                      type="number"
+                      min={0}
+                      className={styles.bulkInput}
+                      style={{ width: 52 }}
+                      value={bulkAddStaggerOffset}
+                      onChange={(e) => setBulkAddStaggerOffset(Number(e.target.value))}
+                      aria-label="Stagger interval between modules"
+                    />
+                    <select
+                      className={styles.bulkSelect}
+                      value={bulkAddStaggerUnit}
+                      onChange={(e) => setBulkAddStaggerUnit(e.target.value === "days" ? "days" : "weeks")}
+                      aria-label="Stagger interval unit"
+                    >
+                      <option value="weeks">weeks</option>
+                      <option value="days">days</option>
+                    </select>
+                  </span>
+                  {["Assignment", "Quiz"].includes(bulkAddType) && (
+                    <span className={styles.bulkField}>
+                      <input
+                        type="number"
+                        className={styles.bulkInput}
+                        style={{ width: 74 }}
+                        placeholder="points"
+                        value={bulkAddPoints}
+                        onChange={(e) => setBulkAddPoints(e.target.value)}
+                        aria-label="Points for the new items"
+                      />
+                    </span>
+                  )}
+                  {bulkAddType === "Assignment" && (
+                    <span className={styles.bulkField}>
+                      <select
+                        className={styles.bulkSelect}
+                        style={{ maxWidth: 170 }}
+                        value={bulkAddRubricId}
+                        disabled={rubrics.length === 0}
+                        onChange={(e) => setBulkAddRubricId(e.target.value === "" ? "" : Number(e.target.value))}
+                        aria-label="Rubric for the new items"
+                      >
+                        <option value="">{rubrics.length === 0 ? "No rubrics" : "Rubric…"}</option>
+                        {rubrics.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.title}
+                          </option>
+                        ))}
+                      </select>
+                    </span>
+                  )}
+                  <span className={styles.bulkHint}>
+                    Optional. Due date, points, and rubric are written to every item created above; the
+                    stagger pushes each later module&apos;s due date out by the interval (0 = same date).
+                  </span>
+                </div>
+              )}
             </>
           )}
 

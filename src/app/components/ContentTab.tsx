@@ -1656,7 +1656,22 @@ type EditCriterion = { key: string; description: string; points: number; ratings
 let rubricKeySeq = 0;
 const nextRubricKey = () => `rb${++rubricKeySeq}`;
 
-function defaultCriterion(): EditCriterion {
+function defaultCriterion(mode: "percent" | "points"): EditCriterion {
+  if (mode === "percent") {
+    // Five tiers at 100/75/50/25/0% of the criterion's percentage weight.
+    const base = 20;
+    return {
+      key: nextRubricKey(),
+      description: "",
+      points: base,
+      ratings: [100, 75, 50, 25, 0].map((pct) => ({
+        key: nextRubricKey(),
+        description: `${pct}%`,
+        longDescription: "",
+        points: Math.round((base * pct) / 100),
+      })),
+    };
+  }
   return {
     key: nextRubricKey(),
     description: "",
@@ -1689,7 +1704,7 @@ function RubricBuilderModal({
   // Percentage mode (default for new rubrics): criteria sum to 100% and are
   // scaled to each assignment's point total on apply. Editing loads raw points.
   const [mode, setMode] = useState<"percent" | "points">(editing ? "points" : "percent");
-  const [criteria, setCriteria] = useState<EditCriterion[]>(() => (editing ? [] : [defaultCriterion()]));
+  const [criteria, setCriteria] = useState<EditCriterion[]>(() => (editing ? [] : [defaultCriterion(mode)]));
   const [loading, setLoading] = useState(editing);
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
@@ -1731,7 +1746,7 @@ function RubricBuilderModal({
     setCriteria((cs) => cs.map((c) => (c.key === key ? { ...c, ...p } : c)));
   const patchRating = (ck: string, rk: string, p: Partial<EditRating>) =>
     setCriteria((cs) => cs.map((c) => (c.key !== ck ? c : { ...c, ratings: c.ratings.map((r) => (r.key === rk ? { ...r, ...p } : r)) })));
-  const addCriterion = () => setCriteria((cs) => [...cs, defaultCriterion()]);
+  const addCriterion = () => setCriteria((cs) => [...cs, defaultCriterion(mode)]);
   const removeCriterion = (key: string) => setCriteria((cs) => (cs.length > 1 ? cs.filter((c) => c.key !== key) : cs));
   const addRating = (ck: string) =>
     setCriteria((cs) => cs.map((c) => (c.key === ck ? { ...c, ratings: [...c.ratings, { key: nextRubricKey(), description: "", longDescription: "", points: 0 }] } : c)));
@@ -2317,6 +2332,8 @@ function ModulesView({
   const [bulkAddPattern, setBulkAddPattern] = useState("");
   const [bulkPoints, setBulkPoints] = useState("");
   const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
+  // Top-toolbar rubric picker for editing a rubric without selecting items.
+  const [editRubricId, setEditRubricId] = useState<number | "">("");
   const [confirmDeleteContent, setConfirmDeleteContent] = useState(false);
   const [confirmDeleteModules, setConfirmDeleteModules] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
@@ -3531,6 +3548,42 @@ function ModulesView({
           >
             New rubric
           </button>
+          <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+            <select
+              value={editRubricId}
+              disabled={rubrics.length === 0}
+              onChange={(e) => setEditRubricId(e.target.value === "" ? "" : Number(e.target.value))}
+              aria-label="Rubric to edit"
+              style={{
+                height: 38,
+                maxWidth: 200,
+                borderRadius: 999,
+                border: "1px solid var(--field-border)",
+                background: "var(--field-background)",
+                color: "var(--text-primary)",
+                padding: "0 14px",
+                font: "inherit",
+                fontSize: "0.88rem",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              <option value="">{rubrics.length === 0 ? "No rubrics" : "Edit rubric…"}</option>
+              {rubrics.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.title}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={styles.downloadButton}
+              disabled={editRubricId === ""}
+              onClick={() => editRubricId !== "" && setRubricBuilder({ assignments: [], editRubricId: Number(editRubricId) })}
+            >
+              Edit
+            </button>
+          </span>
         </div>
       </div>
 

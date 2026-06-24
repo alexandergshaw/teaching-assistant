@@ -57,6 +57,7 @@ import {
   bulkAssociateRubric,
   getGradable,
   updateGradable,
+  createGradable,
   type CanvasModule,
   type CanvasPageSummary,
   type CanvasPage,
@@ -1510,6 +1511,21 @@ export async function updateGradableAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the item." };
+  }
+}
+
+/** Create a new assignment/quiz/discussion (the target of a change-type). */
+export async function createGradableAction(
+  courseUrl: string,
+  kind: GradableKind,
+  fields: { title: string; description?: string; pointsPossible?: number; dueAt?: string | null },
+  acronym?: string
+): Promise<{ id: number } | { error: string }> {
+  try {
+    await requireOwner();
+    return await createGradable(courseUrl, kind, fields, acronym);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the item." };
   }
 }
 

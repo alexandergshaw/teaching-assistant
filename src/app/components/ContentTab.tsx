@@ -24,6 +24,7 @@ import {
   bulkAssociateRubricAction,
   getGradableAction,
   updateGradableAction,
+  createGradableAction,
   revisePageWithAiAction,
 } from "../actions";
 import CoursePicker from "./CoursePicker";
@@ -1040,6 +1041,11 @@ function GradableEditorModal({
   const [points, setPoints] = useState(item.pointsPossible != null ? String(item.pointsPossible) : "");
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+  const [targetKind, setTargetKind] = useState<GradableKind | "">("");
+  const [confirmChange, setConfirmChange] = useState(false);
+  const [changing, setChanging] = useState(false);
+
+  const otherKinds = (["Assignment", "Quiz", "Discussion"] as GradableKind[]).filter((k) => k !== kind);
 
   // Load the item's title + description (await-first so no synchronous setState).
   useEffect(() => {
@@ -1098,6 +1104,46 @@ function GradableEditorModal({
     onSaved();
     onClose();
   };
+
+  // Recreate this item as the target type (copying the current fields), drop the
+  // new object into the same module slot, and delete the original.
+  const handleChangeType = async () => {
+    if (targetKind === "" || item.contentId == null) return;
+    if (!confirmChange) {
+      setConfirmChange(true);
+      return;
+    }
+    setConfirmChange(false);
+    setChanging(true);
+    setNote(null);
+    try {
+      const pts = points.trim() !== "" && Number.isFinite(Number(points)) ? Number(points) : undefined;
+      const iso = due ? new Date(due).toISOString() : null;
+      const created = await createGradableAction(
+        courseUrl,
+        targetKind,
+        { title: title.trim() || item.title, description, pointsPossible: pts, dueAt: iso },
+        acronym
+      );
+      if ("error" in created) throw new Error(created.error);
+      const added = await createModuleItemAction(
+        courseUrl,
+        item.moduleId,
+        { type: targetKind, contentId: created.id, position: item.position, indent: item.indent },
+        acronym
+      );
+      if ("error" in added) throw new Error(added.error);
+      const removed = await bulkDeleteAction(courseUrl, kind as BulkKind, [String(item.contentId)], acronym);
+      if ("error" in removed) throw new Error(removed.error);
+      onSaved();
+      onClose();
+    } catch (err) {
+      setChanging(false);
+      setNote({ kind: "error", text: err instanceof Error ? err.message : "Could not change the type." });
+    }
+  };
+
+  const busy = saving || changing;
 
   return (
     <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
@@ -1177,10 +1223,57 @@ function GradableEditorModal({
             </div>
 
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <button type="button" className={styles.submitButton} onClick={handleSave} disabled={saving || !title.trim()}>
+              <button type="button" className={styles.submitButton} onClick={handleSave} disabled={busy || !title.trim()}>
                 {saving ? "Saving…" : "Save to Canvas"}
               </button>
             </div>
+
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                flexWrap: "wrap",
+                paddingTop: 12,
+                marginTop: 4,
+                borderTop: "1px solid var(--field-border)",
+              }}
+            >
+              <span className={styles.fieldHint} style={{ margin: 0 }}>
+                Change type to:
+              </span>
+              <select
+                className={styles.textInput}
+                style={{ maxWidth: 160 }}
+                value={targetKind}
+                disabled={busy}
+                onChange={(e) => {
+                  setTargetKind(e.target.value === "" ? "" : (e.target.value as GradableKind));
+                  setConfirmChange(false);
+                }}
+                aria-label="Change type"
+              >
+                <option value="">Choose…</option>
+                {otherKinds.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className={styles.clearFileButton}
+                onClick={handleChangeType}
+                disabled={busy || targetKind === ""}
+                style={{ color: "#b91c1c", borderColor: "#fecaca" }}
+              >
+                {changing ? "Changing…" : confirmChange ? "Confirm: recreate & delete original" : "Change type"}
+              </button>
+            </div>
+            <p className={styles.fieldHint} style={{ margin: 0 }}>
+              Recreates this as the new type with these fields and deletes the original. Submissions and
+              grades do not carry over.
+            </p>
 
             {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
           </>

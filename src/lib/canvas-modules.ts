@@ -1015,3 +1015,51 @@ export async function updateGradable(
   if (fields.description !== undefined) params.append("message", fields.description);
   if ([...params.keys()].length > 0) await writeJson(`${base}/discussion_topics/${contentId}`, "PUT", ctx, params);
 }
+
+/**
+ * Create a new assignment/quiz/discussion (the target of a "change type"). Made
+ * unpublished by default. Returns the new content id. Quizzes ignore points
+ * (Canvas computes a classic quiz's total from its questions).
+ */
+export async function createGradable(
+  courseUrl: string,
+  kind: GradableKind,
+  fields: { title: string; description?: string; pointsPossible?: number; dueAt?: string | null },
+  code?: string
+): Promise<{ id: number }> {
+  const ctx = resolveCourse(courseUrl, code);
+  const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
+  const params = new URLSearchParams();
+  const due = fields.dueAt ?? "";
+
+  if (kind === "Assignment") {
+    params.append("assignment[name]", fields.title);
+    if (fields.description !== undefined) params.append("assignment[description]", fields.description);
+    if (fields.pointsPossible !== undefined) params.append("assignment[points_possible]", String(fields.pointsPossible));
+    if (due) params.append("assignment[due_at]", due);
+    params.append("assignment[submission_types][]", "online_text_entry");
+    params.append("assignment[published]", "false");
+    const data = await writeJson<{ id?: number }>(`${base}/assignments`, "POST", ctx, params);
+    if (typeof data.id !== "number") throw new Error("Canvas did not return the new assignment id.");
+    return { id: data.id };
+  }
+  if (kind === "Quiz") {
+    params.append("quiz[title]", fields.title);
+    if (fields.description !== undefined) params.append("quiz[description]", fields.description);
+    if (due) params.append("quiz[due_at]", due);
+    params.append("quiz[quiz_type]", "assignment");
+    params.append("quiz[published]", "false");
+    const data = await writeJson<{ id?: number }>(`${base}/quizzes`, "POST", ctx, params);
+    if (typeof data.id !== "number") throw new Error("Canvas did not return the new quiz id.");
+    return { id: data.id };
+  }
+  // Discussion (graded so it shares the assignment fields)
+  params.append("title", fields.title);
+  if (fields.description !== undefined) params.append("message", fields.description);
+  params.append("published", "false");
+  if (fields.pointsPossible !== undefined) params.append("assignment[points_possible]", String(fields.pointsPossible));
+  if (due) params.append("assignment[due_at]", due);
+  const data = await writeJson<{ id?: number }>(`${base}/discussion_topics`, "POST", ctx, params);
+  if (typeof data.id !== "number") throw new Error("Canvas did not return the new discussion id.");
+  return { id: data.id };
+}

@@ -1700,6 +1700,38 @@ function RubricBuilderModal({
   const removeRating = (ck: string, rk: string) =>
     setCriteria((cs) => cs.map((c) => (c.key !== ck ? c : { ...c, ratings: c.ratings.length > 1 ? c.ratings.filter((r) => r.key !== rk) : c.ratings })));
 
+  // Rescale a criterion's rating tiers so its top tier equals `newPts` (others
+  // scale proportionally; if all tiers are 0, the first tier takes the value).
+  const scaleTiers = (c: EditCriterion, newPts: number): EditCriterion => {
+    const oldMax = c.ratings.reduce((m, r) => Math.max(m, Number.isFinite(r.points) ? r.points : 0), 0);
+    const ratings =
+      oldMax > 0
+        ? c.ratings.map((r) => ({ ...r, points: Math.round(((Number.isFinite(r.points) ? r.points : 0) * newPts) / oldMax) }))
+        : c.ratings.map((r, i) => ({ ...r, points: i === 0 ? newPts : 0 }));
+    return { ...c, points: newPts, ratings };
+  };
+
+  // Percentage mode: after a criterion's % is edited, scale its tiers to that %
+  // and rebalance the other criteria proportionally so the rubric stays at 100%.
+  const rebalanceCriterion = (key: string) =>
+    setCriteria((cs) => {
+      const target = cs.find((c) => c.key === key);
+      if (!target) return cs;
+      const clamped = Math.max(0, Math.min(100, Number.isFinite(target.points) ? target.points : 0));
+      const others = cs.filter((c) => c.key !== key);
+      const othersSum = others.reduce((s, c) => s + (Number.isFinite(c.points) ? c.points : 0), 0);
+      const remaining = 100 - clamped;
+      return cs.map((c) => {
+        if (c.key === key) return scaleTiers(c, clamped);
+        if (others.length === 0) return c;
+        const share =
+          othersSum > 0
+            ? Math.round(((Number.isFinite(c.points) ? c.points : 0) * remaining) / othersSum)
+            : Math.round(remaining / others.length);
+        return scaleTiers(c, Math.max(0, share));
+      });
+    });
+
   const total = criteria.reduce((s, c) => s + (Number.isFinite(c.points) ? c.points : 0), 0);
 
   // Build criteria with the given numbers as points (rounded). `scale` converts a
@@ -1817,6 +1849,9 @@ function RubricBuilderModal({
                     style={{ width: 72 }}
                     value={c.points}
                     onChange={(e) => patchCrit(c.key, { points: Number(e.target.value) })}
+                    onBlur={() => {
+                      if (mode === "percent") rebalanceCriterion(c.key);
+                    }}
                     aria-label={`Criterion ${ci + 1} ${mode === "percent" ? "percent" : "points"}`}
                   />
                   <span className={styles.ccCount}>{unit}</span>

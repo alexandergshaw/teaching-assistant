@@ -845,6 +845,155 @@ function BulkUploadModal({
   );
 }
 
+// ── Rename modules (find / replace) ───────────────────────────────────────────
+
+function RenameModulesModal({
+  courseUrl,
+  acronym,
+  modules,
+  onClose,
+  onApplied,
+}: {
+  courseUrl: string;
+  acronym?: string;
+  modules: CanvasModule[];
+  onClose: () => void;
+  onApplied: (message: string) => void;
+}) {
+  const [find, setFind] = useState("");
+  const [replace, setReplace] = useState("");
+  const [applying, setApplying] = useState(false);
+  const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+
+  const computeName = (name: string) => (find ? name.split(find).join(replace) : name);
+  const changed = modules.filter((m) => computeName(m.name) !== m.name);
+
+  const handleApply = async () => {
+    if (!find) {
+      setNote({ kind: "error", text: "Enter the text to find." });
+      return;
+    }
+    if (changed.length === 0) {
+      setNote({ kind: "error", text: "No module names contain that text." });
+      return;
+    }
+    setApplying(true);
+    setNote(null);
+    let updated = 0;
+    let failed = 0;
+    for (const m of changed) {
+      const result = await updateModuleAction(courseUrl, m.id, { name: computeName(m.name) }, acronym);
+      if ("error" in result) failed += 1;
+      else updated += 1;
+    }
+    setApplying(false);
+    if (failed) {
+      setNote({ kind: "error", text: `Renamed ${updated}, ${failed} failed.` });
+      return;
+    }
+    onApplied(`Renamed ${updated} module${updated === 1 ? "" : "s"}.`);
+  };
+
+  return (
+    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
+      <div
+        className={styles.previewModal}
+        style={{ width: "min(640px, 95vw)", maxWidth: "none" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={styles.previewHeader}>
+          <h3>Rename modules</h3>
+          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <p className={styles.fieldHint} style={{ marginTop: 0 }}>
+          Find and replace text in every module name. For example: find Module, replace with Week, and
+          Module 1 becomes Week 1.
+        </p>
+
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+          <div className={styles.field} style={{ flex: "1 1 200px" }}>
+            <label htmlFor="rename-find">Find</label>
+            <input
+              id="rename-find"
+              type="text"
+              className={styles.textInput}
+              placeholder="Module"
+              value={find}
+              onChange={(e) => setFind(e.target.value)}
+            />
+          </div>
+          <div className={styles.field} style={{ flex: "1 1 200px" }}>
+            <label htmlFor="rename-replace">Replace with</label>
+            <input
+              id="rename-replace"
+              type="text"
+              className={styles.textInput}
+              placeholder="Week"
+              value={replace}
+              onChange={(e) => setReplace(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className={styles.field}>
+          <label>Preview {find ? `(${changed.length} will change)` : ""}</label>
+          <div
+            style={{
+              border: "1px solid var(--field-border)",
+              borderRadius: 10,
+              overflow: "hidden",
+              maxHeight: "40vh",
+              overflowY: "auto",
+            }}
+          >
+            {modules.map((m, i) => {
+              const next = computeName(m.name);
+              const willChange = next !== m.name;
+              return (
+                <div
+                  key={m.id}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    padding: "8px 12px",
+                    borderTop: i === 0 ? "none" : "1px solid var(--field-border)",
+                    opacity: willChange ? 1 : 0.5,
+                  }}
+                >
+                  <span style={{ fontWeight: 600 }}>{m.name}</span>
+                  <span className={styles.fieldHint} style={{ margin: 0, whiteSpace: "nowrap" }}>
+                    {willChange ? `to ${next}` : "unchanged"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className={styles.submitButton}
+            onClick={handleApply}
+            disabled={applying || !find || changed.length === 0}
+          >
+            {applying ? "Renaming…" : `Rename ${changed.length} module${changed.length === 1 ? "" : "s"}`}
+          </button>
+          <span className={styles.fieldHint} style={{ margin: 0 }}>
+            Writes module names to Canvas.
+          </span>
+        </div>
+
+        {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
+      </div>
+    </div>
+  );
+}
+
 // ── Module tree ────────────────────────────────────────────────────────────---
 
 function ModulesView({
@@ -897,6 +1046,7 @@ function ModulesView({
 
   // ── Bulk selection across the module tree ──────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectedModules, setSelectedModules] = useState<Set<number>>(new Set());
   const [rubrics, setRubrics] = useState<CanvasRubric[]>([]);
   const [opBusy, setOpBusy] = useState(false);
   const [bulkDue, setBulkDue] = useState("");
@@ -904,6 +1054,8 @@ function ModulesView({
   const [bulkPoints, setBulkPoints] = useState("");
   const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
   const [confirmDeleteContent, setConfirmDeleteContent] = useState(false);
+  const [confirmDeleteModules, setConfirmDeleteModules] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
 
   // Load the course's rubrics once for the bulk rubric-association control.
   useEffect(() => {
@@ -931,7 +1083,10 @@ function ModulesView({
   const allKeys = modules.flatMap((mod) => mod.items.map((it) => itemKey(mod.id, it.id)));
   const allSelected = allKeys.length > 0 && allKeys.every((k) => selected.has(k));
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(allKeys));
-  const clearSelection = () => setSelected(new Set());
+  const clearSelection = () => {
+    setSelected(new Set());
+    setSelectedModules(new Set());
+  };
   const toggleItemSelected = (moduleId: number, itemId: number) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -940,16 +1095,68 @@ function ModulesView({
       else next.add(k);
       return next;
     });
-  const moduleAllChecked = (mod: CanvasModule) =>
-    mod.items.length > 0 && mod.items.every((it) => selected.has(itemKey(mod.id, it.id)));
-  const toggleModuleAll = (mod: CanvasModule) =>
-    setSelected((prev) => {
+
+  // Module-level selection (for deleting / publishing whole modules).
+  const allModuleIds = modules.map((mod) => mod.id);
+  const allModulesSelected = allModuleIds.length > 0 && allModuleIds.every((id) => selectedModules.has(id));
+  const toggleAllModules = () => setSelectedModules(allModulesSelected ? new Set() : new Set(allModuleIds));
+  const toggleModuleSelected = (id: number) =>
+    setSelectedModules((prev) => {
       const next = new Set(prev);
-      const keys = mod.items.map((it) => itemKey(mod.id, it.id));
-      const all = keys.length > 0 && keys.every((k) => next.has(k));
-      keys.forEach((k) => (all ? next.delete(k) : next.add(k)));
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
+
+  const bulkPublishModules = (published: boolean) => {
+    const moduleIds = [...selectedModules];
+    if (moduleIds.length === 0) return;
+    void (async () => {
+      setOpBusy(true);
+      setNote(null);
+      let updated = 0;
+      let failed = 0;
+      for (const id of moduleIds) {
+        const result = await updateModuleAction(courseUrl, id, { published }, acronym);
+        if ("error" in result) failed += 1;
+        else updated += 1;
+      }
+      setOpBusy(false);
+      setNote({
+        kind: failed ? "error" : "success",
+        text: `${published ? "Published" : "Unpublished"} modules: ${updated} done${failed ? `, ${failed} failed` : ""}.`,
+      });
+      reload();
+    })();
+  };
+
+  const bulkDeleteModules = () => {
+    if (!confirmDeleteModules) {
+      setConfirmDeleteModules(true);
+      return;
+    }
+    setConfirmDeleteModules(false);
+    const moduleIds = [...selectedModules];
+    if (moduleIds.length === 0) return;
+    void (async () => {
+      setOpBusy(true);
+      setNote(null);
+      let updated = 0;
+      let failed = 0;
+      for (const id of moduleIds) {
+        const result = await deleteModuleAction(courseUrl, id, acronym);
+        if ("error" in result) failed += 1;
+        else updated += 1;
+      }
+      setOpBusy(false);
+      setNote({
+        kind: failed ? "error" : "success",
+        text: `Deleted modules: ${updated} done${failed ? `, ${failed} failed` : ""}.`,
+      });
+      setSelectedModules(new Set());
+      reload();
+    })();
+  };
 
   // Run a bulk op that returns an {updated, failures} summary; report + refresh.
   const runBulkSummary = async (
@@ -1372,11 +1579,22 @@ function ModulesView({
   return (
     <div className={styles.form}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}>
-          <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={allKeys.length === 0} />
-          Select all items
-        </label>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+          <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}>
+            <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={allKeys.length === 0} />
+            Select all items
+          </label>
+          <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}>
+            <input
+              type="checkbox"
+              checked={allModulesSelected}
+              onChange={toggleAllModules}
+              disabled={modules.length === 0}
+            />
+            Select all modules
+          </label>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             type="button"
             className={styles.downloadButton}
@@ -1384,6 +1602,14 @@ function ModulesView({
             disabled={busy || modules.length === 0}
           >
             Bulk upload
+          </button>
+          <button
+            type="button"
+            className={styles.downloadButton}
+            onClick={() => setRenameOpen(true)}
+            disabled={busy || modules.length === 0}
+          >
+            Rename modules
           </button>
           <button
             type="button"
@@ -1396,7 +1622,7 @@ function ModulesView({
         </div>
       </div>
 
-      {selected.size > 0 && (
+      {(selected.size > 0 || selectedModules.size > 0) && (
         <div
           style={{
             display: "flex",
@@ -1409,12 +1635,50 @@ function ModulesView({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <span style={{ fontWeight: 700 }}>{selected.size} selected</span>
+            <span style={{ fontWeight: 700 }}>
+              {[
+                selectedModules.size > 0
+                  ? `${selectedModules.size} module${selectedModules.size === 1 ? "" : "s"}`
+                  : "",
+                selected.size > 0 ? `${selected.size} item${selected.size === 1 ? "" : "s"}` : "",
+              ]
+                .filter(Boolean)
+                .join(", ")}{" "}
+              selected
+            </span>
             <button type="button" className={styles.clearFileButton} onClick={clearSelection}>
               Clear
             </button>
           </div>
+
+          {selectedModules.size > 0 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <span className={styles.fieldHint} style={{ margin: 0, fontWeight: 600 }}>
+                Modules:
+              </span>
+              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkPublishModules(true)}>
+                Publish
+              </button>
+              <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkPublishModules(false)}>
+                Unpublish
+              </button>
+              <button
+                type="button"
+                className={styles.clearFileButton}
+                disabled={opBusy}
+                onClick={bulkDeleteModules}
+                style={{ color: "#b91c1c", borderColor: "#fecaca" }}
+              >
+                {confirmDeleteModules ? "Confirm delete modules" : "Delete modules"}
+              </button>
+            </div>
+          )}
+
+          {selected.size > 0 && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <span className={styles.fieldHint} style={{ margin: 0, fontWeight: 600 }}>
+              Items:
+            </span>
             <button type="button" className={styles.downloadButton} disabled={opBusy} onClick={() => bulkPublish(true)}>
               Publish
             </button>
@@ -1498,6 +1762,7 @@ function ModulesView({
               {confirmDeleteContent ? "Confirm delete from Canvas" : "Delete from Canvas"}
             </button>
           </div>
+          )}
         </div>
       )}
 
@@ -1536,11 +1801,10 @@ function ModulesView({
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <input
                 type="checkbox"
-                checked={moduleAllChecked(m)}
-                onChange={() => toggleModuleAll(m)}
-                disabled={m.items.length === 0}
-                aria-label={`Select all items in ${m.name}`}
-                title="Select all items in this module"
+                checked={selectedModules.has(m.id)}
+                onChange={() => toggleModuleSelected(m.id)}
+                aria-label={`Select module ${m.name}`}
+                title="Select this module"
                 style={{ flexShrink: 0 }}
               />
               <button
@@ -1842,6 +2106,20 @@ function ModulesView({
           modules={modules}
           onClose={() => setBulkUploadOpen(false)}
           onDone={reload}
+        />
+      )}
+
+      {renameOpen && (
+        <RenameModulesModal
+          courseUrl={courseUrl}
+          acronym={acronym}
+          modules={modules}
+          onClose={() => setRenameOpen(false)}
+          onApplied={(message) => {
+            setRenameOpen(false);
+            setNote({ kind: "success", text: message });
+            reload();
+          }}
         />
       )}
     </div>

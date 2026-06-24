@@ -690,6 +690,86 @@ export async function requestFileUpload(
   return { uploadUrl: data.upload_url, uploadParams: data.upload_params };
 }
 
+// ── Course files (Files subtab) ───────────────────────────────────────────────
+
+/** One file in the course's Files area. */
+export interface CourseFile {
+  id: number;
+  displayName: string;
+  fileName: string;
+  contentType: string;
+  size: number;
+  url: string;
+  folderId: number | null;
+  updatedAt: string | null;
+}
+
+interface RawCourseFile {
+  id?: number;
+  display_name?: string;
+  filename?: string;
+  "content-type"?: string;
+  size?: number;
+  url?: string;
+  folder_id?: number | null;
+  updated_at?: string | null;
+}
+
+/** List every file in the course (paginated), newest first. */
+export async function listCourseFiles(courseUrl: string, code?: string): Promise<CourseFile[]> {
+  const ctx = resolveCourse(courseUrl, code);
+  const raw = await fetchAll<RawCourseFile>(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/files?per_page=100&sort=updated_at&order=desc`,
+    ctx
+  );
+  return raw
+    .filter((f) => typeof f.id === "number")
+    .map((f) => ({
+      id: f.id!,
+      displayName: (f.display_name ?? f.filename ?? `File ${f.id}`).trim() || `File ${f.id}`,
+      fileName: (f.filename ?? f.display_name ?? "").trim(),
+      contentType: f["content-type"] ?? "application/octet-stream",
+      size: typeof f.size === "number" ? f.size : 0,
+      url: f.url ?? "",
+      folderId: f.folder_id ?? null,
+      updatedAt: f.updated_at ?? null,
+    }));
+}
+
+/** Rename a course file (its display name). */
+export async function renameCourseFile(
+  courseUrl: string,
+  fileId: number,
+  name: string,
+  code?: string
+): Promise<void> {
+  if (!name.trim()) throw new Error("A file needs a name.");
+  const ctx = resolveCourse(courseUrl, code);
+  const params = new URLSearchParams();
+  params.append("name", name.trim());
+  // Files are addressed account-wide by id, not under the course.
+  const response = await fetch(`${ctx.baseUrl}/api/v1/files/${fileId}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${ctx.token}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+  if (!response.ok) {
+    throw canvasError(response.status, ctx.institution);
+  }
+}
+
+/** Delete a course file. */
+export async function deleteCourseFile(courseUrl: string, fileId: number, code?: string): Promise<void> {
+  const ctx = resolveCourse(courseUrl, code);
+  const response = await fetch(`${ctx.baseUrl}/api/v1/files/${fileId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${ctx.token}` },
+  });
+  if (!response.ok) {
+    throw canvasError(response.status, ctx.institution);
+  }
+}
+
 // ── Bulk edit ─────────────────────────────────────────────────────────────────
 
 /** Kinds the bulk editor can list and update. */

@@ -34,6 +34,9 @@ import {
   getOfficeEditableAction,
   saveOfficeEditsAction,
   revisePageWithAiAction,
+  listCourseFilesAction,
+  renameCourseFileAction,
+  deleteCourseFileAction,
 } from "../actions";
 import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
@@ -49,6 +52,7 @@ import type {
   FileUploadTicket,
   BulkItem,
   BulkKind,
+  CourseFile,
   CanvasRubric,
   GradableKind,
   QuizQuestionInput,
@@ -101,6 +105,25 @@ function itemKey(moduleId: number, itemId: number): string {
 const DATED_TYPES = ["Assignment", "Quiz", "Discussion"];
 // Of those, the ones whose points can be edited through the gradable API here.
 const POINTS_EDITABLE = ["Assignment", "Quiz"];
+
+// Human-readable file size ("2.4 MB").
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes < 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+// Short type label for a file chip (extension, else a content-type category).
+function fileKindLabel(contentType: string, fileName: string): string {
+  const ext = fileName.includes(".") ? fileName.split(".").pop()?.toUpperCase() : undefined;
+  if (ext && ext.length >= 2 && ext.length <= 4) return ext;
+  if (contentType.startsWith("image/")) return "IMAGE";
+  if (contentType.startsWith("video/")) return "VIDEO";
+  if (contentType.startsWith("audio/")) return "AUDIO";
+  if (contentType === "application/pdf") return "PDF";
+  return "FILE";
+}
 
 // Compact local rendering of a due date for a module row ("Jan 20, 11:59 PM").
 function formatDueDate(iso: string): string {
@@ -4621,7 +4644,232 @@ function BulkEditView({ courseUrl, acronym }: { courseUrl: string; acronym?: str
 
 // ── Tab shell ───────────────────────────────────────────────────────────────-
 
-type ContentView = "modules" | "pages" | "bulk";
+// ── Files (CRUD on the course's Files area) ───────────────────────────────────
+
+function FilesView({ courseUrl, acronym }: { courseUrl: string; acronym?: string }) {
+  const [files, setFiles] = useState<CourseFile[]>([]);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [preview, setPreview] = useState<{ file: PreviewFile; blobUrl: string | null } | null>(null);
+  const [uploads, setUploads] = useState<Array<{ name: string; status: "uploading" | "done" | "error"; error?: string }>>([]);
+
+  const reload = async () => {
+    const result = await listCourseFilesAction(courseUrl, acronym);
+    if ("error" in result) {
+      setError(result.error);
+      setStatus("error");
+      return;
+    }
+    setFiles(result.files);
+    setStatus("ready");
+  };
+
+  useEffect(() => {
+    if (!courseUrl) {
+      setFiles([]);
+      setStatus("ready");
+      return;
+    }
+    let cancelled = false;
+    setStatus("loading");
+    (async () => {
+      const result = await listCourseFilesAction(courseUrl, acronym);
+      if (cancelled) return;
+      if ("error" in result) {
+        setError(result.error);
+        setStatus("error");
+        return;
+      }
+      setFiles(result.files);
+      setStatus("ready");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [courseUrl, acronym]);
+
+  const saveRename = async (f: CourseFile) => {
+    const draft = drafts[f.id];
+    if (draft === undefined) return;
+    const name = draft.trim();
+    if (!name || name === f.displayName) return;
+    setFiles((fs) => fs.map((x) => (x.id === f.id ? { ...x, displayName: name } : x)));
+    setBusy(true);
+    setNote(null);
+    const result = await renameCourseFileAction(courseUrl, f.id, name, acronym);
+    setBusy(false);
+    if ("error" in result) {
+      setNote({ kind: "error", text: result.error });
+      void reload();
+    }
+  };
+
+  const removeFile = async (f: CourseFile) => {
+    if (confirmDelete !== f.id) {
+      setConfirmDelete(f.id);
+      return;
+    }
+    setConfirmDelete(null);
+    setFiles((fs) => fs.filter((x) => x.id !== f.id));
+    setBusy(true);
+    setNote(null);
+    const result = await deleteCourseFileAction(courseUrl, f.id, acronym);
+    setBusy(false);
+    if ("error" in result) {
+      setNote({ kind: "error", text: result.error });
+      void reload();
+    } else {
+      setNote({ kind: "success", text: "File deleted." });
+    }
+  };
+
+  const openPreview = async (f: CourseFile) => {
+    setPreview({ file: { student: "", name: f.displayName, extension: "", content: "Loading…", truncated: false }, blobUrl: null });
+    const result = await previewFileAction(courseUrl, f.id, acronym);
+    if ("error" in result) {
+      setPreview({ file: { student: "", name: f.displayName, extension: "", content: result.error, truncated: false }, blobUrl: null });
+      return;
+    }
+    const p = result.preview;
+    const blobUrl = p.base64 ? base64ToBlobUrl(p.base64, p.mimeType) : null;
+    setPreview({
+      file: { student: "", name: p.name, extension: "", content: p.text, truncated: p.truncated, rawBase64: p.base64 || undefined, mimeType: p.mimeType },
+      blobUrl,
+    });
+  };
+  const closePreview = () =>
+    setPreview((prev) => {
+      if (prev?.blobUrl) URL.revokeObjectURL(prev.blobUrl);
+      return null;
+    });
+
+  const handleFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    const arr = Array.from(fileList);
+    setUploads(arr.map((f) => ({ name: f.name, status: "uploading" as const })));
+    for (let i = 0; i < arr.length; i++) {
+      const file = arr[i];
+      try {
+        const ticket = await requestFileUploadAction(
+          courseUrl,
+          { name: file.name, size: file.size, contentType: file.type, folderPath: "uploads" },
+          acronym
+        );
+        if ("error" in ticket) throw new Error(ticket.error);
+        const form = new FormData();
+        for (const [k, v] of Object.entries(ticket.ticket.uploadParams)) form.append(k, v);
+        form.append("file", file);
+        const up = await fetch(ticket.ticket.uploadUrl, { method: "POST", body: form });
+        if (!up.ok) throw new Error(`Upload failed (HTTP ${up.status}).`);
+        setUploads((u) => u.map((row, idx) => (idx === i ? { ...row, status: "done" as const } : row)));
+      } catch (err) {
+        setUploads((u) =>
+          u.map((row, idx) => (idx === i ? { ...row, status: "error" as const, error: err instanceof Error ? err.message : "Failed" } : row))
+        );
+      }
+    }
+    void reload();
+  };
+
+  return (
+    <div className={styles.form}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <label className={styles.downloadButton} style={{ cursor: "pointer" }}>
+          Upload files
+          <input
+            type="file"
+            multiple
+            style={{ display: "none" }}
+            onChange={(e) => {
+              void handleFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </label>
+        <button type="button" className={styles.downloadButton} onClick={() => void reload()} disabled={busy}>
+          Refresh
+        </button>
+        <span className={styles.fieldHint} style={{ margin: 0 }}>
+          {files.length} file{files.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void handleFiles(e.dataTransfer.files); }} className={styles.ccDrop}>
+        <span className={styles.ccHint}>Drop files here to upload them to the course&apos;s Files area.</span>
+      </div>
+
+      {uploads.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {uploads.map((row, idx) => (
+            <span key={idx} className={styles.ccHint} style={{ color: row.status === "error" ? "#b91c1c" : undefined }}>
+              {row.name}: {row.status === "uploading" ? "uploading…" : row.status === "done" ? "uploaded" : `failed (${row.error})`}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
+
+      {status === "loading" ? (
+        <div className={styles.loadingState} role="status" aria-live="polite">
+          <span className={styles.spinner} aria-hidden="true" />
+          <div>
+            <p className={styles.loadingTitle}>Loading files…</p>
+          </div>
+        </div>
+      ) : status === "error" ? (
+        <p className={styles.error}>{error}</p>
+      ) : files.length === 0 ? (
+        <p className={styles.emptyState}>This course has no files yet.</p>
+      ) : (
+        <div className={styles.ccModule}>
+          <div className={styles.ccItems} style={{ borderTop: "none" }}>
+            {files.map((f) => (
+              <div key={f.id} className={styles.ccItem}>
+                <span className={styles.ccType} title={f.contentType}>
+                  {fileKindLabel(f.contentType, f.fileName)}
+                </span>
+                <input
+                  type="text"
+                  className={styles.ccItemName}
+                  title={f.displayName}
+                  value={drafts[f.id] ?? f.displayName}
+                  onChange={(e) => setDrafts((p) => ({ ...p, [f.id]: e.target.value }))}
+                  onBlur={() => void saveRename(f)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  }}
+                />
+                <span className={styles.ccCount} style={{ width: 78, textAlign: "right", flexShrink: 0 }}>
+                  {formatBytes(f.size)}
+                </span>
+                <button type="button" className={styles.ccBtn} onClick={() => void openPreview(f)}>
+                  Preview
+                </button>
+                {f.url && (
+                  <a className={styles.ccBtn} href={f.url} target="_blank" rel="noreferrer">
+                    Download
+                  </a>
+                )}
+                <button type="button" className={`${styles.ccBtn} ${styles.ccBtnDanger}`} onClick={() => void removeFile(f)} disabled={busy}>
+                  {confirmDelete === f.id ? "Confirm" : "Delete"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {preview && <FilePreviewModal selectedPreview={preview.file} previewBlobUrl={preview.blobUrl} onClose={closePreview} />}
+    </div>
+  );
+}
+
+type ContentView = "modules" | "pages" | "bulk" | "files";
 
 export default function ContentTab() {
   const { active: activeInstitution } = useInstitutionSelection();
@@ -4648,7 +4896,7 @@ export default function ContentTab() {
   const [view, setViewState] = useState<ContentView>(() => {
     if (typeof window === "undefined") return "modules";
     const saved = localStorage.getItem(VIEW_KEY);
-    return saved === "pages" || saved === "bulk" ? saved : "modules";
+    return saved === "pages" || saved === "bulk" || saved === "files" ? saved : "modules";
   });
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorPageUrl, setEditorPageUrl] = useState<string | null>(null);
@@ -4839,6 +5087,13 @@ export default function ContentTab() {
             >
               Bulk edit
             </button>
+            <button
+              type="button"
+              className={`${styles.lessonInnerTab} ${view === "files" ? styles.lessonInnerTabActive : ""}`}
+              onClick={() => setView("files")}
+            >
+              Files
+            </button>
           </div>
 
           {view === "modules" ? (
@@ -4861,8 +5116,10 @@ export default function ContentTab() {
             />
           ) : view === "pages" ? (
             <PagesView pages={pages} onNewPage={() => openEditor(null)} onEditPage={(pageUrl) => openEditor(pageUrl)} />
-          ) : (
+          ) : view === "bulk" ? (
             <BulkEditView courseUrl={courseUrl} acronym={activeInstitution || undefined} />
+          ) : (
+            <FilesView courseUrl={courseUrl} acronym={activeInstitution || undefined} />
           )}
         </>
       )}

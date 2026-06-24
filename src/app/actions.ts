@@ -50,6 +50,9 @@ import {
   listAddableContent,
   setDueDates,
   requestFileUpload,
+  listCourseFiles,
+  renameCourseFile,
+  deleteCourseFile,
   listBulkItems,
   bulkUpdate,
   bulkDelete,
@@ -75,6 +78,7 @@ import {
   type FileUploadTicket,
   type BulkItem,
   type BulkKind,
+  type CourseFile,
   type CanvasRubric,
   type GradableKind,
   type GradableDetail,
@@ -1389,6 +1393,50 @@ export async function requestFileUploadAction(
     return { ticket: await requestFileUpload(courseUrl, file, acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not start the upload." };
+  }
+}
+
+/** List the course's files (Files subtab). */
+export async function listCourseFilesAction(
+  courseUrl: string,
+  acronym?: string
+): Promise<{ files: CourseFile[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return { files: await listCourseFiles(courseUrl, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the files." };
+  }
+}
+
+/** Rename a course file. */
+export async function renameCourseFileAction(
+  courseUrl: string,
+  fileId: number,
+  name: string,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await renameCourseFile(courseUrl, fileId, name, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not rename the file." };
+  }
+}
+
+/** Delete a course file. */
+export async function deleteCourseFileAction(
+  courseUrl: string,
+  fileId: number,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await deleteCourseFile(courseUrl, fileId, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not delete the file." };
   }
 }
 

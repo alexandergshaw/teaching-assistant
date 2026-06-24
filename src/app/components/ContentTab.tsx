@@ -2560,6 +2560,10 @@ function ModulesView({
   const [bulkAddDescription, setBulkAddDescription] = useState("");
   const [bulkAddQuestions, setBulkAddQuestions] = useState<EditableQuestion[]>([]);
   const [bulkQuestionsOpen, setBulkQuestionsOpen] = useState(false);
+  // Editing the description / quiz questions of the items already selected.
+  const [bulkItemsDescription, setBulkItemsDescription] = useState("");
+  const [bulkItemsQuestions, setBulkItemsQuestions] = useState<EditableQuestion[]>([]);
+  const [bulkItemsQuestionsOpen, setBulkItemsQuestionsOpen] = useState(false);
   const [bulkPoints, setBulkPoints] = useState("");
   const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
   // Top-toolbar rubric picker for editing a rubric without selecting items.
@@ -3366,6 +3370,73 @@ function ModulesView({
     setRubricBuilder({ assignments });
   };
 
+  // Replace the description on every selected gradable, and the body on selected
+  // pages, with the text from the bulk "Content" field.
+  const bulkSetDescription = () => {
+    if (bulkItemsDescription.trim() === "") {
+      setNote({ kind: "error", text: "Type a description to set (this replaces the existing one)." });
+      return;
+    }
+    const items = selectedItems();
+    const gradables = items.filter(
+      ({ item }) => ["Assignment", "Quiz", "Discussion"].includes(item.type) && typeof item.contentId === "number"
+    );
+    const pages = items.filter(({ item }) => item.type === "Page" && item.pageUrl);
+    if (gradables.length === 0 && pages.length === 0) {
+      setNote({ kind: "error", text: "No selected items have a description to set." });
+      return;
+    }
+    const desc = bulkItemsDescription;
+    void (async () => {
+      setOpBusy(true);
+      setNote(null);
+      let updated = 0;
+      let failed = 0;
+      for (const { item } of gradables) {
+        const r = await updateGradableAction(courseUrl, item.type as GradableKind, item.contentId as number, { description: desc }, acronym);
+        if ("error" in r) failed += 1;
+        else updated += 1;
+      }
+      for (const { item } of pages) {
+        const r = await updatePageAction(courseUrl, item.pageUrl as string, { body: desc }, acronym);
+        if ("error" in r) failed += 1;
+        else updated += 1;
+      }
+      setOpBusy(false);
+      setNote({ kind: failed ? "error" : "success", text: `Description set: ${updated} done${failed ? `, ${failed} failed` : ""}.` });
+      reload();
+    })();
+  };
+
+  // Append the composed questions to every selected quiz.
+  const bulkAddQuestionsToQuizzes = () => {
+    if (bulkItemsQuestions.length === 0) {
+      setNote({ kind: "error", text: "Add at least one question first." });
+      return;
+    }
+    const quizzes = selectedItems().filter(({ item }) => item.type === "Quiz" && typeof item.contentId === "number");
+    if (quizzes.length === 0) {
+      setNote({ kind: "error", text: "No selected quizzes." });
+      return;
+    }
+    void (async () => {
+      setOpBusy(true);
+      setNote(null);
+      let added = 0;
+      let failed = 0;
+      for (const { item } of quizzes) {
+        for (const q of bulkItemsQuestions) {
+          const r = await createQuizQuestionAction(courseUrl, item.contentId as number, quizQuestionToInput(q), acronym);
+          if ("error" in r) failed += 1;
+          else added += 1;
+        }
+      }
+      setOpBusy(false);
+      setNote({ kind: failed ? "error" : "success", text: `Questions added: ${added} done${failed ? `, ${failed} failed` : ""}.` });
+      reload();
+    })();
+  };
+
   const bulkRemoveFromModule = () => {
     const items = selectedItems();
     if (items.length === 0) return;
@@ -3789,123 +3860,91 @@ function ModulesView({
         value={moduleSearch}
         onChange={(e) => setModuleSearch(e.target.value)}
       />
-      <div className={styles.ccToolbar}>
-        <div className={styles.ccToolGroup}>
-          <span className={styles.ccToolGroupLabel}>Select</span>
-          <div className={styles.ccToolGroupRow}>
-            <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}>
-              <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={allKeys.length === 0} />
-              All items
-            </label>
-            <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}>
-              <input
-                type="checkbox"
-                checked={allModulesSelected}
-                onChange={toggleAllModules}
-                disabled={visibleModules.length === 0}
-              />
-              All modules
-            </label>
-            <select
-              className={styles.bulkSelect}
-              style={{ maxWidth: 150 }}
-              value=""
+      <div className={styles.ccBar}>
+        <div className={styles.ccBarGroup}>
+          <span className={styles.ccBarLabel}>Select</span>
+          <label className={styles.ccBarCheck}>
+            <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={allKeys.length === 0} />
+            Items
+          </label>
+          <label className={styles.ccBarCheck}>
+            <input
+              type="checkbox"
+              checked={allModulesSelected}
+              onChange={toggleAllModules}
               disabled={visibleModules.length === 0}
-              onChange={(e) => selectByKind(e.target.value)}
-              aria-label="Select all items of a type"
-            >
-              <option value="">By type…</option>
-              <option value="Graded">Graded items</option>
-              <option value="Assignment">Assignments</option>
-              <option value="Quiz">Quizzes</option>
-              <option value="Discussion">Discussions</option>
-              <option value="Page">Pages</option>
-              <option value="File">Files</option>
-            </select>
-          </div>
+            />
+            Modules
+          </label>
+          <select
+            className={styles.ccBarSelect}
+            style={{ maxWidth: 150 }}
+            value=""
+            disabled={visibleModules.length === 0}
+            onChange={(e) => selectByKind(e.target.value)}
+            aria-label="Select all items of a type"
+          >
+            <option value="">By type…</option>
+            <option value="Graded">Graded items</option>
+            <option value="Assignment">Assignments</option>
+            <option value="Quiz">Quizzes</option>
+            <option value="Discussion">Discussions</option>
+            <option value="Page">Pages</option>
+            <option value="File">Files</option>
+          </select>
         </div>
 
-        <div className={styles.ccToolGroup}>
-          <span className={styles.ccToolGroupLabel}>Files</span>
-          <div className={styles.ccToolGroupRow}>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={() => setBulkUploadOpen(true)}
-              disabled={busy || modules.length === 0}
-            >
-              Bulk upload
-            </button>
-          </div>
+        <span className={styles.ccBarDivider} aria-hidden="true" />
+
+        <div className={styles.ccBarGroup}>
+          <span className={styles.ccBarLabel}>Files</span>
+          <button type="button" className={styles.ccBarBtn} onClick={() => setBulkUploadOpen(true)} disabled={busy || modules.length === 0}>
+            Bulk upload
+          </button>
         </div>
 
-        <div className={styles.ccToolGroup}>
-          <span className={styles.ccToolGroupLabel}>Modules</span>
-          <div className={styles.ccToolGroupRow}>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={() => setRenameOpen(true)}
-              disabled={busy || modules.length === 0}
-            >
-              Rename modules
-            </button>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={() => setScheduleOpen(true)}
-              disabled={busy || modules.length === 0}
-            >
-              Schedule due dates
-            </button>
-          </div>
+        <span className={styles.ccBarDivider} aria-hidden="true" />
+
+        <div className={styles.ccBarGroup}>
+          <span className={styles.ccBarLabel}>Modules</span>
+          <button type="button" className={styles.ccBarBtn} onClick={() => setRenameOpen(true)} disabled={busy || modules.length === 0}>
+            Rename
+          </button>
+          <button type="button" className={styles.ccBarBtn} onClick={() => setScheduleOpen(true)} disabled={busy || modules.length === 0}>
+            Schedule due dates
+          </button>
         </div>
 
-        <div className={styles.ccToolGroup}>
-          <span className={styles.ccToolGroupLabel}>Rubrics</span>
-          <div className={styles.ccToolGroupRow}>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={() => setRubricBuilder({ assignments: [] })}
-            >
-              New rubric
-            </button>
-            <select
-              value={editRubricId}
-              disabled={rubrics.length === 0}
-              onChange={(e) => setEditRubricId(e.target.value === "" ? "" : Number(e.target.value))}
-              aria-label="Rubric to edit"
-              style={{
-                height: 38,
-                maxWidth: 200,
-                borderRadius: 999,
-                border: "1px solid var(--field-border)",
-                background: "var(--field-background)",
-                color: "var(--text-primary)",
-                padding: "0 14px",
-                font: "inherit",
-                fontSize: "0.88rem",
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              <option value="">{rubrics.length === 0 ? "No rubrics" : "Edit rubric…"}</option>
-              {rubrics.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.title}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className={styles.downloadButton}
-              disabled={editRubricId === ""}
-              onClick={() => editRubricId !== "" && setRubricBuilder({ assignments: [], editRubricId: Number(editRubricId) })}
-            >
-              Edit
-            </button>
-          </div>
+        <span className={styles.ccBarDivider} aria-hidden="true" />
+
+        <div className={styles.ccBarGroup}>
+          <span className={styles.ccBarLabel}>Rubrics</span>
+          <button type="button" className={styles.ccBarBtn} onClick={() => setRubricBuilder({ assignments: [] })}>
+            New
+          </button>
+          <select
+            className={styles.ccBarSelect}
+            style={{ maxWidth: 180 }}
+            value={editRubricId}
+            disabled={rubrics.length === 0}
+            onChange={(e) => setEditRubricId(e.target.value === "" ? "" : Number(e.target.value))}
+            aria-label="Rubric to edit"
+          >
+            <option value="">{rubrics.length === 0 ? "No rubrics" : "Edit…"}</option>
+            {rubrics.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.title}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className={styles.ccBarBtn}
+            disabled={editRubricId === ""}
+            onClick={() => editRubricId !== "" && setRubricBuilder({ assignments: [], editRubricId: Number(editRubricId) })}
+          >
+            Edit
+          </button>
         </div>
       </div>
 
@@ -4114,6 +4153,64 @@ function ModulesView({
                 <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={() => bulkPublish(false)}>
                   Unpublish
                 </button>
+                {selected.size === 1 &&
+                  (() => {
+                    const one = selectedItems()[0];
+                    if (!one) return null;
+                    const it = one.item;
+                    if (["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null) {
+                      return (
+                        <button type="button" className={styles.bulkBtn} onClick={() => setEditingItem(it)} title="Edit every attribute of this item">
+                          Edit in detail
+                        </button>
+                      );
+                    }
+                    if (it.type === "Page" && it.pageUrl) {
+                      return (
+                        <button type="button" className={styles.bulkBtn} onClick={() => onEditPage(it.pageUrl!)} title="Edit this page">
+                          Edit page
+                        </button>
+                      );
+                    }
+                    return null;
+                  })()}
+              </div>
+              <div className={styles.bulkRow}>
+                <span className={styles.bulkLabel}>Content</span>
+                <textarea
+                  value={bulkItemsDescription}
+                  onChange={(e) => setBulkItemsDescription(e.target.value)}
+                  placeholder="Description (HTML allowed) — replaces the description on selected items / the body of selected pages"
+                  spellCheck
+                  aria-label="Description to set on the selected items"
+                  style={{
+                    flexBasis: "100%",
+                    width: "100%",
+                    minHeight: 64,
+                    padding: "8px 10px",
+                    border: "1px solid var(--field-border)",
+                    borderRadius: 8,
+                    background: "var(--field-background)",
+                    color: "var(--text-primary)",
+                    font: "inherit",
+                    fontSize: "0.83rem",
+                  }}
+                />
+                <button type="button" className={styles.bulkBtnPrimary} disabled={opBusy} onClick={bulkSetDescription}>
+                  Set description
+                </button>
+                <span className={styles.bulkField}>
+                  <button type="button" className={styles.bulkBtn} onClick={() => setBulkItemsQuestionsOpen(true)}>
+                    Edit questions{bulkItemsQuestions.length > 0 ? ` (${bulkItemsQuestions.length})` : ""}
+                  </button>
+                  <button type="button" className={styles.bulkBtn} disabled={opBusy || bulkItemsQuestions.length === 0} onClick={bulkAddQuestionsToQuizzes}>
+                    Add to selected quizzes
+                  </button>
+                </span>
+                <span className={styles.bulkHint}>
+                  Set description overwrites the description on selected assignments, quizzes, and discussions (and
+                  the body of selected pages). Questions are appended to every selected quiz.
+                </span>
               </div>
               <div className={styles.bulkRow}>
                 <span className={styles.bulkLabel}>Due dates</span>
@@ -4861,6 +4958,14 @@ function ModulesView({
         />
       )}
 
+      {bulkItemsQuestionsOpen && (
+        <BulkQuestionsModal
+          questions={bulkItemsQuestions}
+          setQuestions={setBulkItemsQuestions}
+          onClose={() => setBulkItemsQuestionsOpen(false)}
+        />
+      )}
+
       {editingItem && (
         <GradableEditorModal
           courseUrl={courseUrl}
@@ -5355,6 +5460,17 @@ function BulkEditView({ courseUrl, acronym }: { courseUrl: string; acronym?: str
 
 // ── Course copy / import ──────────────────────────────────────────────────────
 
+// Content types that can be purged from a course before a copy. Each maps to the
+// delete routine used in purgeDestination below.
+const PURGE_TYPES: Array<{ key: string; label: string }> = [
+  { key: "context_modules", label: "Modules" },
+  { key: "assignments", label: "Assignments" },
+  { key: "quizzes", label: "Quizzes" },
+  { key: "discussion_topics", label: "Discussions" },
+  { key: "wiki_pages", label: "Pages" },
+  { key: "attachments", label: "Files" },
+];
+
 function CourseCopyModal({
   mode,
   courseUrl,
@@ -5384,6 +5500,12 @@ function CourseCopyModal({
   const [props, setProps] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [migration, setMigration] = useState<{ id: number; destId: string } | null>(null);
+  // Optional "clear the destination first": which content types to delete and an
+  // explicit confirmation (destructive, so gated behind both).
+  const [purgeEnabled, setPurgeEnabled] = useState(false);
+  const [purgeTypes, setPurgeTypes] = useState<Set<string>>(new Set());
+  const [purgeConfirm, setPurgeConfirm] = useState(false);
+  const purgeBlocked = purgeEnabled && (purgeTypes.size === 0 || !purgeConfirm);
 
   useEffect(() => {
     if (!acronym) return;
@@ -5411,6 +5533,41 @@ function CourseCopyModal({
     return n;
   };
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  // A course URL for some other course in this institution: the current URL with
+  // its course id swapped out, so the existing course actions target it.
+  const destUrlFor = (destCourseId: string) => courseUrl.replace(/\/courses\/\d+/, `/courses/${destCourseId}`);
+
+  // Delete the chosen content types from one course before a copy runs. Best
+  // effort: it lists each type's items and removes them; failures are skipped.
+  const purgeDestination = async (destCourseId: string): Promise<void> => {
+    const destUrl = destUrlFor(destCourseId);
+    if (purgeTypes.has("context_modules")) {
+      const content = await listCourseContentAction(destUrl, acronym);
+      if (!("error" in content)) {
+        for (const mod of content.modules) await deleteModuleAction(destUrl, mod.id, acronym);
+      }
+    }
+    const kindMap: Array<[string, BulkKind]> = [
+      ["assignments", "Assignment"],
+      ["quizzes", "Quiz"],
+      ["discussion_topics", "Discussion"],
+      ["wiki_pages", "Page"],
+    ];
+    for (const [type, kind] of kindMap) {
+      if (!purgeTypes.has(type)) continue;
+      const list = await listBulkItemsAction(destUrl, kind, acronym);
+      if (!("error" in list) && list.items.length > 0) {
+        await bulkDeleteAction(destUrl, kind, list.items.map((i) => i.id), acronym);
+      }
+    }
+    if (purgeTypes.has("attachments")) {
+      const files = await listCourseFilesAction(destUrl, acronym);
+      if (!("error" in files)) {
+        for (const f of files.files) await deleteCourseFileAction(destUrl, f.id, acronym);
+      }
+    }
+  };
 
   // Create the migration; for selective copies, poll until Canvas is ready to
   // accept a selection. Returns the migration id + destination, or null on error.
@@ -5449,11 +5606,12 @@ function CourseCopyModal({
       return;
     }
 
-    // Per-item selection is interactive and tied to one migration, so it only
-    // works for a single course.
+    // Specific-item selection is interactive: prepare ONE migration to load the
+    // selectable list, then (for export) the chosen items are submitted to every
+    // selected course in submitItems. Importing draws items from a single source.
     if (granularity === "items") {
-      if (ids.length > 1) {
-        setError("Pick a single course to copy specific items.");
+      if (!isExport && ids.length > 1) {
+        setError("Pick a single course to import specific items from.");
         return;
       }
       setRunning(true);
@@ -5485,11 +5643,20 @@ function CourseCopyModal({
 
     setRunning(true);
     setError(null);
+    // Import clears the single destination (this course) once up front.
+    if (purgeEnabled && !isExport) {
+      setStatusText("Clearing this course…");
+      await purgeDestination(currentCourseId);
+    }
     let ok = 0;
     const failed: string[] = [];
     for (let i = 0; i < ids.length; i++) {
       const cid = ids[i];
       const name = courses.find((c) => c.id === cid)?.name ?? cid;
+      if (purgeEnabled && isExport) {
+        setStatusText(`Clearing ${name}…`);
+        await purgeDestination(cid);
+      }
       setStatusText(ids.length > 1 ? `Course ${i + 1} of ${ids.length}: ${name}…` : "Working…");
       const m = await startMigration(granularity === "types", cid);
       if (!m) {
@@ -5523,15 +5690,60 @@ function CourseCopyModal({
     }
     setRunning(true);
     setError(null);
-    setStatusText("Submitting your selection…");
-    const sel = await submitSelectiveImportAction(courseUrl, migration.destId, migration.id, chosen, acronym);
-    setRunning(false);
-    if ("error" in sel) {
-      setError(sel.error);
+
+    // Import: one source into this course (optionally cleared first).
+    if (!isExport) {
+      if (purgeEnabled) {
+        setStatusText("Clearing this course…");
+        await purgeDestination(currentCourseId);
+      }
+      setStatusText("Submitting your selection…");
+      const sel = await submitSelectiveImportAction(courseUrl, migration.destId, migration.id, chosen, acronym);
+      setRunning(false);
+      if ("error" in sel) {
+        setError(sel.error);
+        return;
+      }
+      setPhase("done");
+      setStatusText("Copy started. Canvas is importing the selected items in the background.");
       return;
     }
+
+    // Export: send the same selected items to every chosen destination. The first
+    // already has a prepared migration; the rest get their own.
+    const ids = [...selectedCourses];
+    let ok = 0;
+    const failed: string[] = [];
+    for (let i = 0; i < ids.length; i++) {
+      const cid = ids[i];
+      const name = courses.find((c) => c.id === cid)?.name ?? cid;
+      if (purgeEnabled) {
+        setStatusText(`Clearing ${name}…`);
+        await purgeDestination(cid);
+      }
+      setStatusText(ids.length > 1 ? `Course ${i + 1} of ${ids.length}: ${name}…` : "Submitting your selection…");
+      let dest: { id: number; destId: string } | null = cid === migration.destId ? migration : null;
+      if (!dest) {
+        dest = await startMigration(true, cid);
+        if (!dest) {
+          failed.push(name);
+          continue;
+        }
+      }
+      const sel = await submitSelectiveImportAction(courseUrl, dest.destId, dest.id, chosen, acronym);
+      if ("error" in sel) {
+        failed.push(name);
+        continue;
+      }
+      ok += 1;
+    }
+    setRunning(false);
     setPhase("done");
-    setStatusText("Copy started. Canvas is importing the selected items in the background.");
+    setStatusText(
+      failed.length === 0
+        ? `Started ${ok} cop${ok === 1 ? "y" : "ies"} of ${chosen.length} item${chosen.length === 1 ? "" : "s"}. Canvas is importing in the background.`
+        : `Started ${ok}; failed for ${failed.length} (${failed.join(", ")}).`
+    );
   };
 
   const renderNode = (node: SelectiveNode, depth: number) => {
@@ -5578,13 +5790,21 @@ function CourseCopyModal({
             </>
           ) : phase === "selecting" ? (
             <>
-              <p className={styles.fieldHint} style={{ margin: 0 }}>Choose the individual items to copy.</p>
+              <p className={styles.fieldHint} style={{ margin: 0 }}>
+                {isExport && selectedCourses.size > 1
+                  ? `Choose the items to copy into all ${selectedCourses.size} selected courses.`
+                  : "Choose the individual items to copy."}
+              </p>
               <div style={{ border: "1px solid var(--card-border)", borderRadius: 10, padding: 10, maxHeight: "44vh", overflowY: "auto" }}>
                 {nodes.length === 0 ? <p className={styles.fieldHint}>Canvas returned no selectable items.</p> : nodes.map((n) => renderNode(n, 0))}
               </div>
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
-                <button type="button" className={styles.submitButton} onClick={() => void submitItems()} disabled={running || props.size === 0}>
-                  {running ? "Working…" : `Copy ${props.size} selected`}
+                <button type="button" className={styles.submitButton} onClick={() => void submitItems()} disabled={running || props.size === 0 || purgeBlocked}>
+                  {running
+                    ? "Working…"
+                    : isExport && selectedCourses.size > 1
+                      ? `Copy ${props.size} item${props.size === 1 ? "" : "s"} to ${selectedCourses.size} courses`
+                      : `Copy ${props.size} selected`}
                 </button>
                 {statusText && <span className={styles.fieldHint} style={{ margin: 0 }}>{statusText}</span>}
               </div>
@@ -5632,8 +5852,8 @@ function CourseCopyModal({
                 >
                   <option value="all">All content</option>
                   <option value="types">Specific content types</option>
-                  <option value="items" disabled={selectedCourses.size > 1}>
-                    Specific items{selectedCourses.size > 1 ? " (one course only)" : ""}
+                  <option value="items" disabled={!isExport && selectedCourses.size > 1}>
+                    Specific items{!isExport && selectedCourses.size > 1 ? " (one source only)" : ""}
                   </option>
                 </select>
               </div>
@@ -5651,12 +5871,50 @@ function CourseCopyModal({
 
               {granularity === "items" && (
                 <p className={styles.fieldHint} style={{ margin: 0 }}>
-                  Canvas prepares the course first; you&apos;ll then pick the individual items.
+                  {isExport
+                    ? "Canvas prepares the content first; you'll pick the items, then they're copied into every selected course."
+                    : "Canvas prepares the course first; you'll then pick the individual items."}
                 </p>
               )}
 
+              <div className={styles.field}>
+                <label style={{ display: "inline-flex", gap: 8, alignItems: "center", margin: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={purgeEnabled}
+                    onChange={(e) => setPurgeEnabled(e.target.checked)}
+                    disabled={running}
+                  />
+                  {isExport ? "Clear destination courses before copying" : "Clear this course before importing"}
+                </label>
+                {purgeEnabled && (
+                  <>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
+                      {PURGE_TYPES.map((t) => (
+                        <label key={t.key} className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0, flex: "0 0 130px" }}>
+                          <input type="checkbox" checked={purgeTypes.has(t.key)} onChange={() => setPurgeTypes((s) => toggleIn(s, t.key))} disabled={running} />
+                          {t.label}
+                        </label>
+                      ))}
+                    </div>
+                    <label style={{ display: "inline-flex", gap: 8, alignItems: "flex-start", marginTop: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={purgeConfirm}
+                        onChange={(e) => setPurgeConfirm(e.target.checked)}
+                        disabled={running}
+                      />
+                      <span className={styles.fieldHint} style={{ margin: 0, color: "#b91c1c" }}>
+                        Permanently delete the checked content from {isExport ? "each destination course" : "this course"}{" "}
+                        before copying. This cannot be undone.
+                      </span>
+                    </label>
+                  </>
+                )}
+              </div>
+
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
-                <button type="button" className={styles.submitButton} onClick={() => void start()} disabled={running || selectedCourses.size === 0}>
+                <button type="button" className={styles.submitButton} onClick={() => void start()} disabled={running || selectedCourses.size === 0 || purgeBlocked}>
                   {running
                     ? "Working…"
                     : granularity === "items"
@@ -6317,32 +6575,39 @@ export default function ContentTab({
           {courseTab && loaded && (
             <div className={styles.resultsHeader}>
               <h2>{courseName || "Course content"}</h2>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className={styles.ccBar} style={{ padding: 0 }}>
+                <div className={styles.ccBarGroup}>
+                  <span className={styles.ccBarLabel}>Course copy</span>
+                  <button
+                    type="button"
+                    className={styles.ccBarBtn}
+                    onClick={() => setCopyMode("export")}
+                    disabled={!courseId}
+                    title="Copy this course's content into other courses"
+                  >
+                    Copy to…
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.ccBarBtn}
+                    onClick={() => setCopyMode("import")}
+                    disabled={!courseId}
+                    title="Import another course's content into this one"
+                  >
+                    Import from…
+                  </button>
+                </div>
+
+                <span className={styles.ccBarDivider} aria-hidden="true" />
+
                 <button
                   type="button"
-                  className={styles.downloadButton}
-                  onClick={() => setCopyMode("export")}
-                  disabled={!courseId}
-                  title="Copy this course's content into another course"
-                >
-                  Copy to course
-                </button>
-                <button
-                  type="button"
-                  className={styles.downloadButton}
-                  onClick={() => setCopyMode("import")}
-                  disabled={!courseId}
-                  title="Import another course's content into this one"
-                >
-                  Import from course
-                </button>
-                <button
-                  type="button"
-                  className={styles.downloadButton}
+                  className={styles.ccBarBtn}
                   onClick={reload}
                   disabled={busy || loadState.status === "loading"}
+                  title="Reload this course's content"
                 >
-                  Refresh
+                  {loadState.status === "loading" ? "Refreshing…" : "Refresh"}
                 </button>
               </div>
             </div>

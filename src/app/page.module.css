@@ -3695,39 +3695,85 @@
   white-space: nowrap;
 }
 
-/* ── Course-content toolbar (grouped actions above the module list) ───────────
-   The controls above the modules are clustered into small labeled cards so the
-   row reads as Select / Files / Modules / Rubrics instead of one flat strip. */
-.ccToolbar {
+/* ── Course-content toolbar ───────────────────────────────────────────────────
+   A single quiet bar of grouped actions (Select / Files / Modules / Rubrics above
+   the modules, and Copy / Refresh in the header). Groups are separated by hairline
+   dividers rather than boxed cards, and every control shares one compact, flat
+   style so the row reads as calm and professional. */
+.ccBar {
   display: flex;
-  gap: 10px;
+  align-items: center;
+  gap: 14px;
   flex-wrap: wrap;
-  align-items: stretch;
+  padding: 2px 0;
 }
 
-.ccToolGroup {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 12px;
-  border: 1px solid var(--card-border);
-  border-radius: 12px;
-  background: var(--card-background);
-}
-
-.ccToolGroupLabel {
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-
-.ccToolGroupRow {
+.ccBarGroup {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.ccBarLabel {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
+
+.ccBarDivider {
+  align-self: stretch;
+  width: 1px;
+  min-height: 24px;
+  background: var(--card-border);
+}
+
+.ccBarBtn,
+.ccBarSelect {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.ccBarSelect {
+  padding: 0 10px;
+}
+
+.ccBarBtn:hover:not(:disabled),
+.ccBarSelect:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ccBarBtn:disabled,
+.ccBarSelect:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ccBarCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 /* ── Module list (Course Content) ─────────────────────────────────────────────

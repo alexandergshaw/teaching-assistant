@@ -1499,6 +1499,18 @@ export async function getGradable(
   };
 }
 
+// Canvas stores a gradable's description/message as HTML, so plain-text newlines
+// collapse to whitespace when rendered. If the text carries no HTML tags, convert
+// it so line breaks survive: escape the HTML-special characters and turn each
+// newline into a <br>. Text that already contains tags is assumed to be HTML and
+// is sent unchanged (so re-edited descriptions aren't double-converted).
+function descriptionToHtml(text: string): string {
+  if (text.trim() === "") return text;
+  if (/<\/?[a-z][\s\S]*>/i.test(text)) return text;
+  const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return escaped.replace(/\r\n?/g, "\n").replace(/\n/g, "<br>\n");
+}
+
 /** Update an assignment/quiz/discussion's title, description, and/or points. */
 export async function updateGradable(
   courseUrl: string,
@@ -1510,23 +1522,24 @@ export async function updateGradable(
   const ctx = resolveCourse(courseUrl, code);
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   const params = new URLSearchParams();
+  const description = fields.description !== undefined ? descriptionToHtml(fields.description) : undefined;
   if (kind === "Assignment") {
     if (fields.title !== undefined) params.append("assignment[name]", fields.title);
-    if (fields.description !== undefined) params.append("assignment[description]", fields.description);
+    if (description !== undefined) params.append("assignment[description]", description);
     if (fields.pointsPossible !== undefined) params.append("assignment[points_possible]", String(fields.pointsPossible));
     if ([...params.keys()].length > 0) await writeJson(`${base}/assignments/${contentId}`, "PUT", ctx, params);
     return;
   }
   if (kind === "Quiz") {
     if (fields.title !== undefined) params.append("quiz[title]", fields.title);
-    if (fields.description !== undefined) params.append("quiz[description]", fields.description);
+    if (description !== undefined) params.append("quiz[description]", description);
     if (fields.pointsPossible !== undefined) params.append("quiz[points_possible]", String(fields.pointsPossible));
     if ([...params.keys()].length > 0) await writeJson(`${base}/quizzes/${contentId}`, "PUT", ctx, params);
     return;
   }
   // Discussion (message is the body; points live on its assignment and are not edited here)
   if (fields.title !== undefined) params.append("title", fields.title);
-  if (fields.description !== undefined) params.append("message", fields.description);
+  if (description !== undefined) params.append("message", description);
   if ([...params.keys()].length > 0) await writeJson(`${base}/discussion_topics/${contentId}`, "PUT", ctx, params);
 }
 
@@ -1545,10 +1558,11 @@ export async function createGradable(
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   const params = new URLSearchParams();
   const due = fields.dueAt ?? "";
+  const description = fields.description !== undefined ? descriptionToHtml(fields.description) : undefined;
 
   if (kind === "Assignment") {
     params.append("assignment[name]", fields.title);
-    if (fields.description !== undefined) params.append("assignment[description]", fields.description);
+    if (description !== undefined) params.append("assignment[description]", description);
     if (fields.pointsPossible !== undefined) params.append("assignment[points_possible]", String(fields.pointsPossible));
     if (due) params.append("assignment[due_at]", due);
     params.append("assignment[submission_types][]", "online_text_entry");
@@ -1559,7 +1573,7 @@ export async function createGradable(
   }
   if (kind === "Quiz") {
     params.append("quiz[title]", fields.title);
-    if (fields.description !== undefined) params.append("quiz[description]", fields.description);
+    if (description !== undefined) params.append("quiz[description]", description);
     if (due) params.append("quiz[due_at]", due);
     params.append("quiz[quiz_type]", "assignment");
     params.append("quiz[published]", "false");
@@ -1569,7 +1583,7 @@ export async function createGradable(
   }
   // Discussion (graded so it shares the assignment fields)
   params.append("title", fields.title);
-  if (fields.description !== undefined) params.append("message", fields.description);
+  if (description !== undefined) params.append("message", description);
   params.append("published", "false");
   if (fields.pointsPossible !== undefined) params.append("assignment[points_possible]", String(fields.pointsPossible));
   if (due) params.append("assignment[due_at]", due);

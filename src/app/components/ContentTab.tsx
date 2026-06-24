@@ -22,9 +22,14 @@ import {
   bulkDeleteAction,
   listRubricsAction,
   bulkAssociateRubricAction,
+  createRubricAction,
   getGradableAction,
   updateGradableAction,
   createGradableAction,
+  listQuizQuestionsAction,
+  createQuizQuestionAction,
+  updateQuizQuestionAction,
+  deleteQuizQuestionAction,
   previewFileAction,
   getOfficeEditableAction,
   saveOfficeEditsAction,
@@ -46,6 +51,9 @@ import type {
   BulkKind,
   CanvasRubric,
   GradableKind,
+  QuizQuestionInput,
+  QuizQuestionType,
+  RubricCriterionInput,
 } from "@/lib/canvas-modules";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
@@ -1311,6 +1319,476 @@ function GradableEditorModal({
   );
 }
 
+// ── Quiz questions editor ─────────────────────────────────────────────────────
+
+const QUIZ_TYPE_LABELS: Record<QuizQuestionType, string> = {
+  multiple_choice_question: "Multiple choice",
+  true_false_question: "True / False",
+  short_answer_question: "Fill in the blank",
+  essay_question: "Essay",
+};
+const QUIZ_TYPES = Object.keys(QUIZ_TYPE_LABELS) as QuizQuestionType[];
+
+type EditableQuestion = {
+  key: string;
+  id: number; // 0 until created in Canvas
+  name: string;
+  text: string;
+  type: QuizQuestionType;
+  points: number;
+  answers: Array<{ text: string; correct: boolean }>;
+};
+
+let quizKeySeq = 0;
+const nextQuizKey = () => `qq${++quizKeySeq}`;
+
+function defaultQuizAnswers(type: QuizQuestionType): Array<{ text: string; correct: boolean }> {
+  if (type === "true_false_question") return [{ text: "True", correct: true }, { text: "False", correct: false }];
+  if (type === "multiple_choice_question") return [{ text: "", correct: true }, { text: "", correct: false }];
+  if (type === "short_answer_question") return [{ text: "", correct: true }];
+  return [];
+}
+
+function QuizQuestionsModal({
+  courseUrl,
+  acronym,
+  item,
+  onClose,
+  onSaved,
+}: {
+  courseUrl: string;
+  acronym?: string;
+  item: CanvasModuleItem;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const quizId = item.contentId as number;
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [questions, setQuestions] = useState<EditableQuestion[]>([]);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await listQuizQuestionsAction(courseUrl, quizId, acronym);
+      if (cancelled) return;
+      if ("error" in result) {
+        setLoadError(result.error);
+        setLoading(false);
+        return;
+      }
+      setQuestions(
+        result.questions.map((q) => ({ key: nextQuizKey(), id: q.id, name: q.name, text: q.text, type: q.type, points: q.points, answers: q.answers }))
+      );
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [courseUrl, quizId, acronym]);
+
+  const patch = (key: string, p: Partial<EditableQuestion>) =>
+    setQuestions((qs) => qs.map((q) => (q.key === key ? { ...q, ...p } : q)));
+
+  const changeType = (key: string, type: QuizQuestionType) =>
+    setQuestions((qs) =>
+      qs.map((q) => {
+        if (q.key !== key) return q;
+        const keep = (type === "multiple_choice_question" || type === "short_answer_question") && q.answers.length > 0;
+        return { ...q, type, answers: keep ? q.answers : defaultQuizAnswers(type) };
+      })
+    );
+
+  // `single` enforces one correct answer (multiple choice / true-false).
+  const setAnswer = (key: string, idx: number, p: Partial<{ text: string; correct: boolean }>, single: boolean) =>
+    setQuestions((qs) =>
+      qs.map((q) => {
+        if (q.key !== key) return q;
+        const answers = q.answers.map((a, i) => {
+          if (i === idx) return { ...a, ...p };
+          if (single && p.correct === true) return { ...a, correct: false };
+          return a;
+        });
+        return { ...q, answers };
+      })
+    );
+
+  const addAnswer = (key: string) =>
+    setQuestions((qs) => qs.map((q) => (q.key === key ? { ...q, answers: [...q.answers, { text: "", correct: false }] } : q)));
+  const removeAnswer = (key: string, idx: number) =>
+    setQuestions((qs) => qs.map((q) => (q.key === key ? { ...q, answers: q.answers.filter((_, i) => i !== idx) } : q)));
+
+  const addQuestion = () =>
+    setQuestions((qs) => [
+      ...qs,
+      { key: nextQuizKey(), id: 0, name: "", text: "", type: "multiple_choice_question", points: 1, answers: defaultQuizAnswers("multiple_choice_question") },
+    ]);
+
+  const toInput = (q: EditableQuestion): QuizQuestionInput => ({
+    name: q.name,
+    text: q.text,
+    type: q.type,
+    points: Number.isFinite(q.points) ? q.points : 0,
+    answers: q.answers,
+  });
+
+  const saveQuestion = async (q: EditableQuestion) => {
+    setBusyKey(q.key);
+    setNote(null);
+    if (q.id === 0) {
+      const result = await createQuizQuestionAction(courseUrl, quizId, toInput(q), acronym);
+      setBusyKey(null);
+      if ("error" in result) return setNote({ kind: "error", text: result.error });
+      patch(q.key, { id: result.question.id });
+    } else {
+      const result = await updateQuizQuestionAction(courseUrl, quizId, q.id, toInput(q), acronym);
+      setBusyKey(null);
+      if ("error" in result) return setNote({ kind: "error", text: result.error });
+    }
+    setDirty(true);
+    setNote({ kind: "success", text: "Question saved." });
+  };
+
+  const deleteQuestion = async (q: EditableQuestion) => {
+    if (q.id === 0) {
+      setQuestions((qs) => qs.filter((x) => x.key !== q.key));
+      return;
+    }
+    setBusyKey(q.key);
+    setNote(null);
+    const result = await deleteQuizQuestionAction(courseUrl, quizId, q.id, acronym);
+    setBusyKey(null);
+    if ("error" in result) return setNote({ kind: "error", text: result.error });
+    setQuestions((qs) => qs.filter((x) => x.key !== q.key));
+    setDirty(true);
+  };
+
+  const close = () => {
+    if (dirty) onSaved();
+    onClose();
+  };
+
+  return (
+    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={close}>
+      <div className={styles.previewModal} style={{ width: "min(820px, 95vw)", maxWidth: "none" }} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.previewHeader}>
+          <h3>Edit questions — {item.title}</h3>
+          <button type="button" className={styles.previewCloseButton} onClick={close}>
+            Close
+          </button>
+        </div>
+
+        {loading ? (
+          <div className={styles.loadingState} role="status" aria-live="polite">
+            <span className={styles.spinner} aria-hidden="true" />
+            <div>
+              <p className={styles.loadingTitle}>Loading questions…</p>
+            </div>
+          </div>
+        ) : loadError ? (
+          <p className={styles.error}>{loadError}</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "68vh", overflowY: "auto" }}>
+            {questions.length === 0 && <p className={styles.fieldHint}>This quiz has no questions yet.</p>}
+            {questions.map((q, qi) => {
+              const single = q.type === "multiple_choice_question" || q.type === "true_false_question";
+              const showAnswers = q.type !== "essay_question";
+              const editableAnswers = q.type === "multiple_choice_question" || q.type === "short_answer_question";
+              return (
+                <div key={q.key} style={{ border: "1px solid var(--card-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span className={styles.ccCount}>Q{qi + 1}</span>
+                    <select
+                      className={styles.bulkSelect}
+                      value={q.type}
+                      onChange={(e) => changeType(q.key, e.target.value as QuizQuestionType)}
+                      aria-label="Question type"
+                    >
+                      {QUIZ_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {QUIZ_TYPE_LABELS[t]}
+                        </option>
+                      ))}
+                    </select>
+                    <span className={styles.bulkField}>
+                      <input
+                        type="number"
+                        className={styles.bulkInput}
+                        style={{ width: 64 }}
+                        value={q.points}
+                        onChange={(e) => patch(q.key, { points: Number(e.target.value) })}
+                        aria-label="Points"
+                      />
+                      <span className={styles.ccCount}>pts</span>
+                    </span>
+                    <span style={{ flex: 1 }} />
+                    <button type="button" className={styles.bulkBtnPrimary} disabled={busyKey === q.key} onClick={() => void saveQuestion(q)}>
+                      {busyKey === q.key ? "Saving…" : q.id === 0 ? "Add" : "Save"}
+                    </button>
+                    <button type="button" className={`${styles.ccBtn} ${styles.ccBtnDanger}`} disabled={busyKey === q.key} onClick={() => void deleteQuestion(q)}>
+                      Delete
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    className={styles.textInput}
+                    placeholder="Question title (optional)"
+                    value={q.name}
+                    onChange={(e) => patch(q.key, { name: e.target.value })}
+                  />
+                  <textarea
+                    value={q.text}
+                    onChange={(e) => patch(q.key, { text: e.target.value })}
+                    placeholder="Question text"
+                    spellCheck
+                    style={{ minHeight: 70, width: "100%" }}
+                  />
+                  {showAnswers && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <span className={styles.ccCount}>{q.type === "short_answer_question" ? "Accepted answers" : "Answers"}</span>
+                      {q.answers.map((a, ai) => (
+                        <div key={ai} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          {q.type !== "short_answer_question" && (
+                            <input
+                              type={single ? "radio" : "checkbox"}
+                              name={`${q.key}-correct`}
+                              checked={a.correct}
+                              onChange={(e) => setAnswer(q.key, ai, { correct: e.target.checked }, single)}
+                              aria-label="Correct answer"
+                              title="Mark correct"
+                            />
+                          )}
+                          <input
+                            type="text"
+                            className={styles.bulkInput}
+                            style={{ flex: "1 1 220px", minWidth: 160 }}
+                            value={a.text}
+                            disabled={q.type === "true_false_question"}
+                            placeholder={q.type === "short_answer_question" ? "An accepted answer" : "Answer choice"}
+                            onChange={(e) => setAnswer(q.key, ai, { text: e.target.value }, single)}
+                          />
+                          {editableAnswers && q.answers.length > 1 && (
+                            <button type="button" className={styles.ccIconBtn} title="Remove answer" aria-label="Remove answer" onClick={() => removeAnswer(q.key, ai)}>
+                              &times;
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      {editableAnswers && (
+                        <button type="button" className={styles.ccBtn} style={{ alignSelf: "flex-start" }} onClick={() => addAnswer(q.key)}>
+                          Add answer
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {q.type === "essay_question" && (
+                    <p className={styles.fieldHint} style={{ margin: 0 }}>
+                      Students write a free-form response; there is no answer key.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <button type="button" className={styles.submitButton} onClick={addQuestion}>
+                Add question
+              </button>
+              <span className={styles.fieldHint} style={{ margin: 0 }}>
+                Each question saves to Canvas on its own. Question text is edited as plain text.
+              </span>
+            </div>
+            {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Rubric builder ────────────────────────────────────────────────────────────
+
+type EditRating = { key: string; description: string; points: number };
+type EditCriterion = { key: string; description: string; ratings: EditRating[] };
+
+let rubricKeySeq = 0;
+const nextRubricKey = () => `rb${++rubricKeySeq}`;
+
+function defaultCriterion(): EditCriterion {
+  return {
+    key: nextRubricKey(),
+    description: "",
+    ratings: [
+      { key: nextRubricKey(), description: "Full marks", points: 5 },
+      { key: nextRubricKey(), description: "Partial", points: 3 },
+      { key: nextRubricKey(), description: "No marks", points: 0 },
+    ],
+  };
+}
+
+function RubricBuilderModal({
+  courseUrl,
+  acronym,
+  assignmentIds,
+  onClose,
+  onCreated,
+}: {
+  courseUrl: string;
+  acronym?: string;
+  assignmentIds: string[];
+  onClose: () => void;
+  onCreated: (title: string, associated: number) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [criteria, setCriteria] = useState<EditCriterion[]>(() => [defaultCriterion()]);
+  const [saving, setSaving] = useState(false);
+  const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+
+  const patchCrit = (key: string, p: Partial<EditCriterion>) =>
+    setCriteria((cs) => cs.map((c) => (c.key === key ? { ...c, ...p } : c)));
+  const patchRating = (ck: string, rk: string, p: Partial<EditRating>) =>
+    setCriteria((cs) => cs.map((c) => (c.key !== ck ? c : { ...c, ratings: c.ratings.map((r) => (r.key === rk ? { ...r, ...p } : r)) })));
+  const addCriterion = () => setCriteria((cs) => [...cs, defaultCriterion()]);
+  const removeCriterion = (key: string) => setCriteria((cs) => (cs.length > 1 ? cs.filter((c) => c.key !== key) : cs));
+  const addRating = (ck: string) =>
+    setCriteria((cs) => cs.map((c) => (c.key === ck ? { ...c, ratings: [...c.ratings, { key: nextRubricKey(), description: "", points: 0 }] } : c)));
+  const removeRating = (ck: string, rk: string) =>
+    setCriteria((cs) => cs.map((c) => (c.key !== ck ? c : { ...c, ratings: c.ratings.length > 1 ? c.ratings.filter((r) => r.key !== rk) : c.ratings })));
+
+  const criterionPoints = (c: EditCriterion) => c.ratings.reduce((m, r) => Math.max(m, Number.isFinite(r.points) ? r.points : 0), 0);
+  const total = criteria.reduce((s, c) => s + criterionPoints(c), 0);
+
+  const handleCreate = async () => {
+    if (!title.trim()) {
+      setNote({ kind: "error", text: "Give the rubric a title." });
+      return;
+    }
+    const crit: RubricCriterionInput[] = criteria.map((c) => ({
+      description: c.description.trim() || "Criterion",
+      points: criterionPoints(c),
+      ratings: c.ratings.map((r) => ({ description: r.description.trim() || `${r.points} pts`, points: Number.isFinite(r.points) ? r.points : 0 })),
+    }));
+    setSaving(true);
+    setNote(null);
+    const result = await createRubricAction(courseUrl, { title: title.trim(), criteria: crit }, acronym);
+    if ("error" in result) {
+      setSaving(false);
+      setNote({ kind: "error", text: result.error });
+      return;
+    }
+    let associated = 0;
+    if (assignmentIds.length > 0) {
+      const assoc = await bulkAssociateRubricAction(courseUrl, result.rubric.id, assignmentIds, acronym);
+      if ("error" in assoc) {
+        setSaving(false);
+        setNote({ kind: "error", text: `Rubric created, but could not associate it: ${assoc.error}` });
+        return;
+      }
+      associated = assoc.updated;
+    }
+    setSaving(false);
+    onCreated(result.rubric.title, associated);
+  };
+
+  return (
+    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
+      <div className={styles.previewModal} style={{ width: "min(760px, 95vw)", maxWidth: "none" }} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.previewHeader}>
+          <h3>New rubric</h3>
+          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "68vh", overflowY: "auto" }}>
+          <div className={styles.field}>
+            <label htmlFor="rubric-title">Title</label>
+            <input id="rubric-title" type="text" className={styles.textInput} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Essay rubric" />
+          </div>
+
+          <p className={styles.fieldHint} style={{ margin: 0 }}>
+            {assignmentIds.length > 0
+              ? `Will be associated with ${assignmentIds.length} selected assignment${assignmentIds.length === 1 ? "" : "s"} and used for grading.`
+              : "No assignments selected — the rubric will be created and available to associate later."}
+          </p>
+
+          {criteria.map((c, ci) => (
+            <div key={c.key} style={{ border: "1px solid var(--card-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span className={styles.ccCount}>Criterion {ci + 1}</span>
+                <span style={{ flex: 1 }} />
+                <span className={styles.ccCount}>{criterionPoints(c)} pts</span>
+                {criteria.length > 1 && (
+                  <button type="button" className={`${styles.ccBtn} ${styles.ccBtnDanger}`} onClick={() => removeCriterion(c.key)}>
+                    Remove
+                  </button>
+                )}
+              </div>
+              <input
+                type="text"
+                className={styles.textInput}
+                placeholder="What this criterion measures"
+                value={c.description}
+                onChange={(e) => patchCrit(c.key, { description: e.target.value })}
+              />
+              <span className={styles.ccCount}>Rating tiers</span>
+              {c.ratings.map((r) => (
+                <div key={r.key} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <input
+                    type="text"
+                    className={styles.bulkInput}
+                    style={{ flex: "1 1 200px", minWidth: 150 }}
+                    placeholder="Tier label (e.g. Excellent)"
+                    value={r.description}
+                    onChange={(e) => patchRating(c.key, r.key, { description: e.target.value })}
+                  />
+                  <span className={styles.bulkField}>
+                    <input
+                      type="number"
+                      className={styles.bulkInput}
+                      style={{ width: 70 }}
+                      value={r.points}
+                      onChange={(e) => patchRating(c.key, r.key, { points: Number(e.target.value) })}
+                      aria-label="Tier points"
+                    />
+                    <span className={styles.ccCount}>pts</span>
+                  </span>
+                  {c.ratings.length > 1 && (
+                    <button type="button" className={styles.ccIconBtn} title="Remove tier" aria-label="Remove tier" onClick={() => removeRating(c.key, r.key)}>
+                      &times;
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button type="button" className={styles.ccBtn} style={{ alignSelf: "flex-start" }} onClick={() => addRating(c.key)}>
+                Add tier
+              </button>
+            </div>
+          ))}
+
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <button type="button" className={styles.ccBtn} onClick={addCriterion}>
+              Add criterion
+            </button>
+            <span className={styles.fieldHint} style={{ margin: 0 }}>
+              Total: {total} pts
+            </span>
+          </div>
+
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
+            <button type="button" className={styles.submitButton} onClick={() => void handleCreate()} disabled={saving || !title.trim()}>
+              {saving ? "Creating…" : assignmentIds.length > 0 ? "Create & associate" : "Create rubric"}
+            </button>
+          </div>
+          {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Office file editor (.docx / .pptx, in place) ──────────────────────────────
 
 function OfficeEditorModal({
@@ -1550,6 +2028,9 @@ function ModulesView({
   const [editingItem, setEditingItem] = useState<CanvasModuleItem | null>(null);
   const [filePreview, setFilePreview] = useState<{ file: PreviewFile; blobUrl: string | null } | null>(null);
   const [editingFile, setEditingFile] = useState<CanvasModuleItem | null>(null);
+  // The quiz whose questions are being edited, and the rubric builder's target.
+  const [editingQuiz, setEditingQuiz] = useState<CanvasModuleItem | null>(null);
+  const [rubricBuilder, setRubricBuilder] = useState<{ assignmentIds: string[] } | null>(null);
   const [drag, setDrag] = useState<{ moduleId: number; itemId: number } | null>(null);
   const [dragOverItem, setDragOverItem] = useState<number | null>(null);
   const [dragOverModule, setDragOverModule] = useState<number | null>(null);
@@ -1748,6 +2229,12 @@ function ModulesView({
       if (prev?.blobUrl) URL.revokeObjectURL(prev.blobUrl);
       return null;
     });
+
+  // Reload the course's rubrics (after building a new one, so the picker shows it).
+  const refreshRubrics = async () => {
+    const result = await listRubricsAction(courseUrl, acronym);
+    if (!("error" in result)) setRubrics(result.rubrics);
+  };
 
   // Load the course's rubrics once for the bulk rubric-association control.
   useEffect(() => {
@@ -2222,6 +2709,14 @@ function ModulesView({
       return;
     }
     void runBulkSummary(() => bulkAssociateRubricAction(courseUrl, Number(bulkRubricId), ids, acronym), "Rubric associated");
+  };
+
+  // Open the rubric builder, pre-targeting the selected assignments to associate.
+  const openRubricBuilder = () => {
+    const ids = selectedItems()
+      .filter(({ item }) => item.type === "Assignment" && typeof item.contentId === "number")
+      .map(({ item }) => String(item.contentId));
+    setRubricBuilder({ assignmentIds: ids });
   };
 
   const bulkRemoveFromModule = () => {
@@ -2789,6 +3284,9 @@ function ModulesView({
                     Associate
                   </button>
                 </span>
+                <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={openRubricBuilder}>
+                  New rubric
+                </button>
               </div>
               <div className={styles.bulkRow}>
                 <span className={styles.bulkLabel}>Move</span>
@@ -3139,6 +3637,11 @@ function ModulesView({
                         Edit
                       </button>
                     )}
+                    {it.type === "Quiz" && it.contentId != null && (
+                      <button type="button" className={styles.ccBtn} onClick={() => setEditingQuiz(it)}>
+                        Questions
+                      </button>
+                    )}
                     {it.type === "File" && it.contentId != null && (
                       <button type="button" className={styles.ccBtn} onClick={() => void openFilePreview(it)}>
                         Preview
@@ -3371,6 +3874,35 @@ function ModulesView({
           item={editingFile}
           onClose={() => setEditingFile(null)}
           onSaved={() => setNote({ kind: "success", text: "Saved to Canvas." })}
+        />
+      )}
+
+      {editingQuiz && (
+        <QuizQuestionsModal
+          courseUrl={courseUrl}
+          acronym={acronym}
+          item={editingQuiz}
+          onClose={() => setEditingQuiz(null)}
+          onSaved={reload}
+        />
+      )}
+
+      {rubricBuilder && (
+        <RubricBuilderModal
+          courseUrl={courseUrl}
+          acronym={acronym}
+          assignmentIds={rubricBuilder.assignmentIds}
+          onClose={() => setRubricBuilder(null)}
+          onCreated={(title, associated) => {
+            setRubricBuilder(null);
+            void refreshRubrics();
+            setNote({
+              kind: "success",
+              text: associated > 0
+                ? `Created "${title}" and associated it with ${associated} assignment${associated === 1 ? "" : "s"}.`
+                : `Created rubric "${title}".`,
+            });
+          }}
         />
       )}
     </div>

@@ -15,8 +15,10 @@
 
 import {
   canvasError,
+  htmlToText,
   parseNextLink,
   resolveCourse,
+  textToHtml,
   type CanvasInstitution,
 } from "./canvas-core";
 import { extractTextFromBuffer } from "./office-extract";
@@ -892,6 +894,66 @@ export async function listRubrics(courseUrl: string, code?: string): Promise<Can
     .map((r) => ({ id: r.id!, title: (r.title ?? "").trim() || `Rubric ${r.id}` }));
 }
 
+/** One criterion of a rubric being built: a row with point-tier ratings. */
+export interface RubricCriterionInput {
+  description: string;
+  longDescription?: string;
+  points: number;
+  ratings: Array<{ description: string; points: number }>;
+}
+
+/**
+ * Create a new course rubric from criteria + point-tier ratings. When
+ * `associateAssignmentId` is given, the rubric is attached to that assignment in
+ * the same call (and used for grading), so it shows up in SpeedGrader.
+ */
+export async function createRubric(
+  courseUrl: string,
+  input: {
+    title: string;
+    criteria: RubricCriterionInput[];
+    associateAssignmentId?: number;
+    useForGrading?: boolean;
+  },
+  code?: string
+): Promise<{ id: number; title: string }> {
+  if (!input.title.trim()) throw new Error("A rubric needs a title.");
+  if (input.criteria.length === 0) throw new Error("A rubric needs at least one criterion.");
+  const ctx = resolveCourse(courseUrl, code);
+
+  const params = new URLSearchParams();
+  params.append("rubric[title]", input.title.trim());
+  params.append("rubric[free_form_criterion_comments]", "false");
+  input.criteria.forEach((c, i) => {
+    params.append(`rubric[criteria][${i}][description]`, c.description.trim() || `Criterion ${i + 1}`);
+    if (c.longDescription?.trim()) {
+      params.append(`rubric[criteria][${i}][long_description]`, c.longDescription.trim());
+    }
+    params.append(`rubric[criteria][${i}][points]`, String(c.points));
+    c.ratings.forEach((r, j) => {
+      params.append(`rubric[criteria][${i}][ratings][${j}][description]`, r.description.trim() || `${r.points} pts`);
+      params.append(`rubric[criteria][${i}][ratings][${j}][points]`, String(r.points));
+    });
+  });
+  if (typeof input.associateAssignmentId === "number") {
+    params.append("rubric_association[association_type]", "Assignment");
+    params.append("rubric_association[association_id]", String(input.associateAssignmentId));
+    params.append("rubric_association[purpose]", "grading");
+    params.append("rubric_association[use_for_grading]", String(input.useForGrading ?? true));
+  }
+
+  // The create endpoint wraps the result as { rubric, rubric_association }.
+  const data = await writeJson<{ rubric?: { id?: number; title?: string }; id?: number; title?: string }>(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/rubrics`,
+    "POST",
+    ctx,
+    params
+  );
+  const r = data.rubric ?? data;
+  if (typeof r.id !== "number") throw new Error("Canvas did not return the new rubric.");
+  return { id: r.id, title: (r.title ?? input.title).trim() || input.title.trim() };
+}
+
 /** Attach a rubric to many assignments (one rubric_association per assignment). */
 export async function bulkAssociateRubric(
   courseUrl: string,
@@ -917,6 +979,155 @@ export async function bulkAssociateRubric(
     }
   }
   return { updated, failures };
+}
+
+// ── Quiz questions ────────────────────────────────────────────────────────────
+//
+// Classic-quiz question editing. Question/answer text is HTML in Canvas; we
+// convert to/from plain text for a simple editor (formatting is not preserved).
+
+/** Supported classic-quiz question types this editor can create. */
+export type QuizQuestionType =
+  | "multiple_choice_question"
+  | "true_false_question"
+  | "short_answer_question"
+  | "essay_question";
+
+/** One answer choice. `correct` maps to Canvas answer_weight 100 (else 0). */
+export interface QuizAnswerInput {
+  text: string;
+  correct: boolean;
+}
+
+/** The editable shape of a quiz question. */
+export interface QuizQuestionInput {
+  name: string;
+  text: string;
+  type: QuizQuestionType;
+  points: number;
+  answers: QuizAnswerInput[];
+}
+
+/** A quiz question as loaded from Canvas (with its id + position). */
+export interface QuizQuestion extends QuizQuestionInput {
+  id: number;
+  position: number;
+}
+
+interface RawQuizQuestion {
+  id?: number;
+  question_name?: string;
+  question_text?: string | null;
+  question_type?: string;
+  points_possible?: number;
+  position?: number;
+  answers?: Array<{ text?: string; answer_text?: string; weight?: number }>;
+}
+
+const QUIZ_TYPES_WITH_ANSWERS = new Set<QuizQuestionType>([
+  "multiple_choice_question",
+  "true_false_question",
+  "short_answer_question",
+]);
+
+function mapQuizQuestion(raw: RawQuizQuestion): QuizQuestion {
+  const type = (raw.question_type as QuizQuestionType) ?? "multiple_choice_question";
+  return {
+    id: raw.id ?? 0,
+    name: (raw.question_name ?? "").trim(),
+    text: raw.question_text ? htmlToText(raw.question_text) : "",
+    type,
+    points: typeof raw.points_possible === "number" ? raw.points_possible : 0,
+    position: typeof raw.position === "number" ? raw.position : 0,
+    answers: (raw.answers ?? []).map((a) => ({
+      text: (a.text ?? a.answer_text ?? "").toString(),
+      correct: (a.weight ?? 0) >= 100,
+    })),
+  };
+}
+
+function quizQuestionParams(q: QuizQuestionInput): URLSearchParams {
+  const params = new URLSearchParams();
+  params.append("question[question_name]", q.name.trim() || "Question");
+  params.append("question[question_text]", textToHtml(q.text.trim()));
+  params.append("question[question_type]", q.type);
+  params.append("question[points_possible]", String(Number.isFinite(q.points) ? q.points : 0));
+  if (QUIZ_TYPES_WITH_ANSWERS.has(q.type)) {
+    q.answers.forEach((a, i) => {
+      params.append(`question[answers][${i}][answer_text]`, a.text.trim());
+      // Every accepted answer to a fill-in-the-blank is correct; other types use
+      // the per-answer correct flag.
+      const correct = q.type === "short_answer_question" ? true : a.correct;
+      params.append(`question[answers][${i}][answer_weight]`, correct ? "100" : "0");
+    });
+  }
+  return params;
+}
+
+/** List a classic quiz's questions, in display order. */
+export async function listQuizQuestions(
+  courseUrl: string,
+  quizId: number,
+  code?: string
+): Promise<QuizQuestion[]> {
+  const ctx = resolveCourse(courseUrl, code);
+  const raw = await fetchAll<RawQuizQuestion>(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/quizzes/${quizId}/questions?per_page=100`,
+    ctx
+  );
+  return raw
+    .filter((q) => typeof q.id === "number")
+    .map(mapQuizQuestion)
+    .sort((a, b) => a.position - b.position);
+}
+
+/** Add a question to a quiz. */
+export async function createQuizQuestion(
+  courseUrl: string,
+  quizId: number,
+  question: QuizQuestionInput,
+  code?: string
+): Promise<QuizQuestion> {
+  const ctx = resolveCourse(courseUrl, code);
+  const raw = await writeJson<RawQuizQuestion>(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/quizzes/${quizId}/questions`,
+    "POST",
+    ctx,
+    quizQuestionParams(question)
+  );
+  return mapQuizQuestion(raw);
+}
+
+/** Update one quiz question. */
+export async function updateQuizQuestion(
+  courseUrl: string,
+  quizId: number,
+  questionId: number,
+  question: QuizQuestionInput,
+  code?: string
+): Promise<void> {
+  const ctx = resolveCourse(courseUrl, code);
+  await writeJson(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/quizzes/${quizId}/questions/${questionId}`,
+    "PUT",
+    ctx,
+    quizQuestionParams(question)
+  );
+}
+
+/** Delete one quiz question. */
+export async function deleteQuizQuestion(
+  courseUrl: string,
+  quizId: number,
+  questionId: number,
+  code?: string
+): Promise<void> {
+  const ctx = resolveCourse(courseUrl, code);
+  await writeJson(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/quizzes/${quizId}/questions/${questionId}`,
+    "DELETE",
+    ctx
+  );
 }
 
 /**

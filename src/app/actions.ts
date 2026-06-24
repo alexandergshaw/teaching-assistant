@@ -55,12 +55,17 @@ import {
   bulkDelete,
   listRubrics,
   bulkAssociateRubric,
+  createRubric,
   getGradable,
   updateGradable,
   createGradable,
   getFilePreview,
   getOfficeEditable,
   saveOfficeEdits,
+  listQuizQuestions,
+  createQuizQuestion,
+  updateQuizQuestion,
+  deleteQuizQuestion,
   type CanvasModule,
   type CanvasPageSummary,
   type CanvasPage,
@@ -74,6 +79,9 @@ import {
   type GradableKind,
   type GradableDetail,
   type FilePreview,
+  type RubricCriterionInput,
+  type QuizQuestion,
+  type QuizQuestionInput,
 } from "@/lib/canvas-modules";
 import type { OfficeKind, OfficeParagraph } from "@/lib/office-edit";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
@@ -1470,6 +1478,87 @@ export async function bulkAssociateRubricAction(
     return await bulkAssociateRubric(courseUrl, rubricId, assignmentIds, acronym);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not associate the rubric." };
+  }
+}
+
+/** Create a rubric (optionally associating it to one assignment in the same call). */
+export async function createRubricAction(
+  courseUrl: string,
+  input: {
+    title: string;
+    criteria: RubricCriterionInput[];
+    associateAssignmentId?: number;
+    useForGrading?: boolean;
+  },
+  acronym?: string
+): Promise<{ rubric: { id: number; title: string } } | { error: string }> {
+  try {
+    await requireOwner();
+    return { rubric: await createRubric(courseUrl, input, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the rubric." };
+  }
+}
+
+/** List a classic quiz's questions for the quiz editor. */
+export async function listQuizQuestionsAction(
+  courseUrl: string,
+  quizId: number,
+  acronym?: string
+): Promise<{ questions: QuizQuestion[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return { questions: await listQuizQuestions(courseUrl, quizId, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the quiz questions." };
+  }
+}
+
+/** Add a question to a quiz. */
+export async function createQuizQuestionAction(
+  courseUrl: string,
+  quizId: number,
+  question: QuizQuestionInput,
+  acronym?: string
+): Promise<{ question: QuizQuestion } | { error: string }> {
+  try {
+    await requireOwner();
+    return { question: await createQuizQuestion(courseUrl, quizId, question, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not add the question." };
+  }
+}
+
+/** Update one quiz question. */
+export async function updateQuizQuestionAction(
+  courseUrl: string,
+  quizId: number,
+  questionId: number,
+  question: QuizQuestionInput,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await updateQuizQuestion(courseUrl, quizId, questionId, question, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the question." };
+  }
+}
+
+/** Delete one quiz question. */
+export async function deleteQuizQuestionAction(
+  courseUrl: string,
+  quizId: number,
+  questionId: number,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await deleteQuizQuestion(courseUrl, quizId, questionId, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not delete the question." };
   }
 }
 

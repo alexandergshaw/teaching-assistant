@@ -634,7 +634,8 @@ export default function Home() {
                 onOpenPreview={handleOpenPreview}
               />
             }
-            communications={<CanvasTab />}
+            announcements={<CanvasTab view="announcements" />}
+            inbox={<CanvasTab view="inbox" />}
           />
         )}
 

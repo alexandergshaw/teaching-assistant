@@ -5273,14 +5273,16 @@ function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym
   );
 }
 
-type ContentView = "modules" | "pages" | "files" | "grading" | "communications";
+type ContentView = "modules" | "pages" | "files" | "grading" | "announcements" | "inbox";
 
 export default function ContentTab({
   grading,
-  communications,
+  announcements,
+  inbox,
 }: {
   grading?: ReactNode;
-  communications?: ReactNode;
+  announcements?: ReactNode;
+  inbox?: ReactNode;
 }) {
   const { active: activeInstitution } = useInstitutionSelection();
   const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
@@ -5307,7 +5309,9 @@ export default function ContentTab({
   const [view, setViewState] = useState<ContentView>(() => {
     if (typeof window === "undefined") return "modules";
     const saved = localStorage.getItem(VIEW_KEY);
-    return saved === "pages" || saved === "files" || saved === "grading" || saved === "communications" ? saved : "modules";
+    return saved === "pages" || saved === "files" || saved === "grading" || saved === "announcements" || saved === "inbox"
+      ? saved
+      : "modules";
   });
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorPageUrl, setEditorPageUrl] = useState<string | null>(null);
@@ -5546,14 +5550,23 @@ export default function ContentTab({
                 </span>
               </button>
             )}
-            {communications && (
+            {announcements && (
               <button
                 type="button"
-                className={`${styles.lessonInnerTab} ${view === "communications" ? styles.lessonInnerTabActive : ""}`}
-                onClick={() => setView("communications")}
+                className={`${styles.lessonInnerTab} ${view === "announcements" ? styles.lessonInnerTabActive : ""}`}
+                onClick={() => setView("announcements")}
+              >
+                Announcements
+              </button>
+            )}
+            {inbox && (
+              <button
+                type="button"
+                className={`${styles.lessonInnerTab} ${view === "inbox" ? styles.lessonInnerTabActive : ""}`}
+                onClick={() => setView("inbox")}
               >
                 <span className={styles.tabLabelWrap}>
-                  Communications
+                  Inbox
                   {totalUnread > 0 && <span className={styles.navBadge}>{totalUnread}</span>}
                 </span>
               </button>
@@ -5584,8 +5597,10 @@ export default function ContentTab({
             <FilesView courseUrl={courseUrl} acronym={activeInstitution || undefined} modules={modules} />
           ) : view === "grading" ? (
             grading
+          ) : view === "announcements" ? (
+            announcements
           ) : (
-            communications
+            inbox
           )}
         </>
       )}

@@ -2064,7 +2064,9 @@
   justify-content: center;
   padding: 24px;
   background: rgba(15, 23, 42, 0.55);
-  z-index: 30;
+  /* Above the app chrome (top bar is z-index 9999) so the modal's top is never
+     hidden behind the header. */
+  z-index: 10000;
   backdrop-filter: blur(2px);
 }
 

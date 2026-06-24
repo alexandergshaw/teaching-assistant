@@ -150,31 +150,18 @@ export default function GradingTab({
         </p>
       </div>
 
-      <div className={styles.lessonInnerTabs}>
-        <button
-          type="button"
-          className={`${styles.lessonInnerTab}${source === "zip" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-          onClick={() => selectSource("zip")}
+      <div className={styles.field}>
+        <label htmlFor="grade-source">Grade from</label>
+        <select
+          id="grade-source"
+          className={styles.textInput}
+          value={source}
+          onChange={(e) => selectSource(e.target.value as GradingMode)}
         >
-          Upload ZIP
-        </button>
-        <button
-          type="button"
-          className={`${styles.lessonInnerTab}${source === "canvas" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-          onClick={() => selectSource("canvas")}
-        >
-          Single Assignment
-        </button>
-        <button
-          type="button"
-          className={`${styles.lessonInnerTab}${source === "livefeed" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-          onClick={() => selectSource("livefeed")}
-        >
-          <span className={styles.tabLabelWrap}>
-            Live Feed
-            {totalNeedsGrading > 0 && <span className={styles.navBadge}>{totalNeedsGrading}</span>}
-          </span>
-        </button>
+          <option value="zip">Upload ZIP</option>
+          <option value="canvas">Single Assignment</option>
+          <option value="livefeed">Live Feed{totalNeedsGrading > 0 ? ` (${totalNeedsGrading})` : ""}</option>
+        </select>
       </div>
 
       {pending && (

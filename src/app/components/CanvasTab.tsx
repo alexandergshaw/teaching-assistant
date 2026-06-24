@@ -31,7 +31,6 @@ import { formatRelative } from "../utils/time";
 import styles from "../page.module.css";
 
 const COURSE_URL_KEY = "ta-canvas-course-url";
-const VIEW_KEY = "ta-canvas-view";
 
 // Format a Canvas ISO timestamp for display; blank when absent.
 function formatWhen(iso: string | null): string {
@@ -1081,54 +1080,9 @@ function InboxPanel() {
 
 type CanvasView = "announcements" | "inbox";
 
-export default function CanvasTab() {
-  // Remember which sub-tab was last open across reloads.
-  const [view, setViewState] = useState<CanvasView>(() =>
-    typeof window !== "undefined" && localStorage.getItem(VIEW_KEY) === "inbox"
-      ? "inbox"
-      : "announcements"
-  );
-  const setView = (next: CanvasView) => {
-    setViewState(next);
-    if (typeof window !== "undefined") localStorage.setItem(VIEW_KEY, next);
-  };
-
-  return (
-    <div className={styles.card}>
-      <header className={styles.header}>
-        <span className={styles.eyebrow}>Communications</span>
-        <h1>Announcements & Inbox</h1>
-        <p>
-          Post course announcements and reply to Canvas messages without leaving the teaching
-          assistant. Drafting is optional — nothing is sent to Canvas until you post.
-        </p>
-      </header>
-
-      <div className={styles.lessonInnerTabs}>
-        <button
-          type="button"
-          className={`${styles.lessonInnerTab} ${view === "announcements" ? styles.lessonInnerTabActive : ""}`}
-          onClick={() => setView("announcements")}
-        >
-          Announcements
-        </button>
-        <button
-          type="button"
-          className={`${styles.lessonInnerTab} ${view === "inbox" ? styles.lessonInnerTabActive : ""}`}
-          onClick={() => setView("inbox")}
-        >
-          Inbox
-        </button>
-      </div>
-
-      {/* Both panels stay mounted so the inbox keeps its loaded state when
-          switching sub-tabs; only the active one is shown. */}
-      <div style={{ display: view === "announcements" ? "block" : "none" }}>
-        <AnnouncementsPanel />
-      </div>
-      <div style={{ display: view === "inbox" ? "block" : "none" }}>
-        <InboxPanel />
-      </div>
-    </div>
-  );
+// Announcements and Inbox are surfaced as their own subtabs under LMS
+// Integration, so this renders a single panel chosen by `view` (the tab chrome
+// and institution picker live in the parent).
+export default function CanvasTab({ view }: { view: CanvasView }) {
+  return view === "announcements" ? <AnnouncementsPanel /> : <InboxPanel />;
 }

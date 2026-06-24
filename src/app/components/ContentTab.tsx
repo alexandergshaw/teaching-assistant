@@ -767,7 +767,15 @@ function BulkUploadModal({
             <label>
               {files.length} file{files.length === 1 ? "" : "s"} · {matchedCount} matched
             </label>
-            <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, overflow: "hidden" }}>
+            <div
+              style={{
+                border: "1px solid var(--field-border)",
+                borderRadius: 10,
+                overflow: "hidden",
+                overflowY: "auto",
+                maxHeight: "42vh",
+              }}
+            >
               {files.map((f, i) => (
                 <div
                   key={`${f.name}-${i}`}

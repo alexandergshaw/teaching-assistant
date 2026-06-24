@@ -1466,6 +1466,8 @@ export type GradableKind = "Assignment" | "Quiz" | "Discussion";
 export interface GradableDetail {
   title: string;
   description: string;
+  /** Associated rubric id (assignments with a rubric), for pre-filling bulk edits. */
+  rubricId?: number;
 }
 
 /** Fetch one assignment/quiz/discussion's title + description for editing. */
@@ -1492,10 +1494,12 @@ export async function getGradable(
     title?: string;
     description?: string | null;
     message?: string | null;
+    rubric_settings?: { id?: number } | null;
   };
   return {
     title: (data.name ?? data.title ?? "").trim(),
     description: (kind === "Discussion" ? data.message : data.description) ?? "",
+    rubricId: typeof data.rubric_settings?.id === "number" ? data.rubric_settings.id : undefined,
   };
 }
 

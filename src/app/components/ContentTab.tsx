@@ -2825,10 +2825,9 @@ function ModulesView({
     };
   }, [courseUrl, acronym]);
 
-  // Stable signature of the selected gradables (sorted "kind:id"), so the effect
-  // below only re-fetches when that set actually changes.
-  const gradableSelSig = (() => {
-    const arr: string[] = [];
+  // The selected gradable items plus the data needed to pre-fill the bulk fields.
+  const selGradables = (() => {
+    const arr: Array<{ type: string; contentId: number; dueAt: string | null; pointsPossible: number | null }> = [];
     for (const mod of modules) {
       for (const it of mod.items) {
         if (
@@ -2836,40 +2835,75 @@ function ModulesView({
           ["Assignment", "Quiz", "Discussion"].includes(it.type) &&
           typeof it.contentId === "number"
         ) {
-          arr.push(`${it.type}:${it.contentId}`);
+          arr.push({ type: it.type, contentId: it.contentId, dueAt: it.dueAt, pointsPossible: it.pointsPossible });
         }
       }
     }
-    return arr.sort().join("|");
+    return arr;
   })();
+  // Sorted "kind:id" signature, so the effect only re-runs when the set changes.
+  const gradableSelSig = selGradables.map((g) => `${g.type}:${g.contentId}`).sort().join("|");
+  // Latest data read by the effect without widening its dependencies.
+  const selGradablesRef = useRef(selGradables);
+  selGradablesRef.current = selGradables;
+  const rubricsRef = useRef(rubrics);
+  rubricsRef.current = rubrics;
 
-  // When the selected gradables all share one description, load it into the bulk
-  // "Content" field so the user can edit the common text. Fetches run in parallel
-  // and only when the selection signature changes.
+  // When the selected gradables share a deadline / points / rubric / description,
+  // pre-fill the matching bulk field so the current value loads in for editing;
+  // when they differ (or none is selected), clear it. Runs only when the selection
+  // changes. Deadline + points come from the item data; description + rubric need
+  // a fetch (run in parallel).
   useEffect(() => {
-    if (!gradableSelSig) {
+    const gradables = selGradablesRef.current;
+    if (gradables.length === 0) {
       setDescSharedState("idle");
       return;
     }
-    const pairs = gradableSelSig.split("|").map((s) => {
-      const [kind, id] = s.split(":");
-      return { kind: kind as GradableKind, id: Number(id) };
-    });
+    // Deadline (all gradables) and points (assignments + quizzes) from item data.
+    const dueSame = gradables.every((g) => g.dueAt === gradables[0].dueAt);
+    setBulkDue(dueSame && gradables[0].dueAt ? toLocalInput(gradables[0].dueAt) : "");
+    const pointed = gradables.filter((g) => g.type === "Assignment" || g.type === "Quiz");
+    const pointsSame = pointed.length > 0 && pointed.every((g) => g.pointsPossible === pointed[0].pointsPossible);
+    setBulkPoints(pointsSame && pointed[0].pointsPossible != null ? String(pointed[0].pointsPossible) : "");
+
     let cancelled = false;
     setDescSharedState("loading");
     (async () => {
-      const results = await Promise.all(pairs.map((p) => getGradableAction(courseUrl, p.kind, p.id, acronym)));
+      const results = await Promise.all(
+        gradables.map((g) => getGradableAction(courseUrl, g.type as GradableKind, g.contentId, acronym))
+      );
       if (cancelled) return;
-      const descs = results.filter((r) => !("error" in r)).map((r) => (r as { detail: { description: string } }).detail.description);
-      if (descs.length === 0) {
+      const detailPairs = gradables
+        .map((g, i) => ({ type: g.type, res: results[i] }))
+        .filter((p) => !("error" in p.res))
+        .map((p) => ({ type: p.type, detail: (p.res as { detail: { description: string; rubricId?: number } }).detail }));
+      if (detailPairs.length === 0) {
         setDescSharedState("idle");
         return;
       }
+      // Description (all gradables).
+      const descs = detailPairs.map((p) => p.detail.description);
       if (descs.every((d) => d === descs[0])) {
         setBulkItemsDescription(descs[0]);
         setDescSharedState("same");
       } else {
+        setBulkItemsDescription("");
         setDescSharedState("mixed");
+      }
+      // Rubric (assignments only): pre-fill when they all share one that exists
+      // in the course's rubric list; otherwise clear.
+      const assignmentRubrics = detailPairs.filter((p) => p.type === "Assignment").map((p) => p.detail.rubricId);
+      const sharedRubric = assignmentRubrics[0];
+      if (
+        assignmentRubrics.length > 0 &&
+        typeof sharedRubric === "number" &&
+        assignmentRubrics.every((id) => id === sharedRubric) &&
+        rubricsRef.current.some((r) => r.id === sharedRubric)
+      ) {
+        setBulkRubricId(sharedRubric);
+      } else {
+        setBulkRubricId("");
       }
     })();
     return () => {

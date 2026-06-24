@@ -942,3 +942,76 @@ export async function setDueDates(
   }
   return { updated, failures };
 }
+
+// ── Editing a gradable's detail (title / description / points) ─────────────────
+
+/** Gradable kinds whose title, description, and due date can be edited inline. */
+export type GradableKind = "Assignment" | "Quiz" | "Discussion";
+
+/** A gradable's editable detail. Description is HTML; for discussions it is the message body. */
+export interface GradableDetail {
+  title: string;
+  description: string;
+}
+
+/** Fetch one assignment/quiz/discussion's title + description for editing. */
+export async function getGradable(
+  courseUrl: string,
+  kind: GradableKind,
+  contentId: number,
+  code?: string
+): Promise<GradableDetail> {
+  const ctx = resolveCourse(courseUrl, code);
+  const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
+  const url =
+    kind === "Assignment"
+      ? `${base}/assignments/${contentId}`
+      : kind === "Quiz"
+        ? `${base}/quizzes/${contentId}`
+        : `${base}/discussion_topics/${contentId}`;
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${ctx.token}` } });
+  if (!response.ok) {
+    throw canvasError(response.status, ctx.institution);
+  }
+  const data = (await response.json()) as {
+    name?: string;
+    title?: string;
+    description?: string | null;
+    message?: string | null;
+  };
+  return {
+    title: (data.name ?? data.title ?? "").trim(),
+    description: (kind === "Discussion" ? data.message : data.description) ?? "",
+  };
+}
+
+/** Update an assignment/quiz/discussion's title, description, and/or points. */
+export async function updateGradable(
+  courseUrl: string,
+  kind: GradableKind,
+  contentId: number,
+  fields: { title?: string; description?: string; pointsPossible?: number },
+  code?: string
+): Promise<void> {
+  const ctx = resolveCourse(courseUrl, code);
+  const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
+  const params = new URLSearchParams();
+  if (kind === "Assignment") {
+    if (fields.title !== undefined) params.append("assignment[name]", fields.title);
+    if (fields.description !== undefined) params.append("assignment[description]", fields.description);
+    if (fields.pointsPossible !== undefined) params.append("assignment[points_possible]", String(fields.pointsPossible));
+    if ([...params.keys()].length > 0) await writeJson(`${base}/assignments/${contentId}`, "PUT", ctx, params);
+    return;
+  }
+  if (kind === "Quiz") {
+    if (fields.title !== undefined) params.append("quiz[title]", fields.title);
+    if (fields.description !== undefined) params.append("quiz[description]", fields.description);
+    if (fields.pointsPossible !== undefined) params.append("quiz[points_possible]", String(fields.pointsPossible));
+    if ([...params.keys()].length > 0) await writeJson(`${base}/quizzes/${contentId}`, "PUT", ctx, params);
+    return;
+  }
+  // Discussion (message is the body; points live on its assignment and are not edited here)
+  if (fields.title !== undefined) params.append("title", fields.title);
+  if (fields.description !== undefined) params.append("message", fields.description);
+  if ([...params.keys()].length > 0) await writeJson(`${base}/discussion_topics/${contentId}`, "PUT", ctx, params);
+}

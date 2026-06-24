@@ -55,6 +55,8 @@ import {
   bulkDelete,
   listRubrics,
   bulkAssociateRubric,
+  getGradable,
+  updateGradable,
   type CanvasModule,
   type CanvasPageSummary,
   type CanvasPage,
@@ -65,6 +67,8 @@ import {
   type BulkItem,
   type BulkKind,
   type CanvasRubric,
+  type GradableKind,
+  type GradableDetail,
 } from "@/lib/canvas-modules";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
@@ -1474,6 +1478,38 @@ export async function setModuleDueDatesAction(
     return await setDueDates(courseUrl, updates, acronym);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not update due dates." };
+  }
+}
+
+/** Fetch one assignment/quiz/discussion's title + description for inline editing. */
+export async function getGradableAction(
+  courseUrl: string,
+  kind: GradableKind,
+  contentId: number,
+  acronym?: string
+): Promise<{ detail: GradableDetail } | { error: string }> {
+  try {
+    await requireOwner();
+    return { detail: await getGradable(courseUrl, kind, contentId, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the item." };
+  }
+}
+
+/** Update one assignment/quiz/discussion's title, description, and/or points. */
+export async function updateGradableAction(
+  courseUrl: string,
+  kind: GradableKind,
+  contentId: number,
+  fields: { title?: string; description?: string; pointsPossible?: number },
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await updateGradable(courseUrl, kind, contentId, fields, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the item." };
   }
 }
 

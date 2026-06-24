@@ -22,6 +22,8 @@ import {
   bulkDeleteAction,
   listRubricsAction,
   bulkAssociateRubricAction,
+  getGradableAction,
+  updateGradableAction,
   revisePageWithAiAction,
 } from "../actions";
 import CoursePicker from "./CoursePicker";
@@ -37,6 +39,7 @@ import type {
   BulkItem,
   BulkKind,
   CanvasRubric,
+  GradableKind,
 } from "@/lib/canvas-modules";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
@@ -73,6 +76,15 @@ function previewDoc(html: string): string {
     td, th { border: 1px solid #d2d6dc; padding: 4px 8px; }
     a { color: #2563eb; }
   </style></head><body>${html}</body></html>`;
+}
+
+// Format an ISO timestamp as the local value a datetime-local input expects.
+function toLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 // ── File upload helpers (browser side of the Canvas upload) ───────────────────
@@ -1002,6 +1014,182 @@ function RenameModulesModal({
   );
 }
 
+// ── Gradable editor (description + due date + points) ─────────────────────────
+
+function GradableEditorModal({
+  courseUrl,
+  acronym,
+  item,
+  onClose,
+  onSaved,
+}: {
+  courseUrl: string;
+  acronym?: string;
+  item: CanvasModuleItem;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const kind = item.type as GradableKind;
+  const showPoints = kind === "Assignment" || kind === "Quiz";
+
+  const [loading, setLoading] = useState(item.contentId != null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [title, setTitle] = useState(item.title);
+  const [description, setDescription] = useState("");
+  const [due, setDue] = useState(toLocalInput(item.dueAt));
+  const [points, setPoints] = useState(item.pointsPossible != null ? String(item.pointsPossible) : "");
+  const [saving, setSaving] = useState(false);
+  const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+
+  // Load the item's title + description (await-first so no synchronous setState).
+  useEffect(() => {
+    if (item.contentId == null) return;
+    let cancelled = false;
+    (async () => {
+      const result = await getGradableAction(courseUrl, kind, item.contentId as number, acronym);
+      if (cancelled) return;
+      if ("error" in result) {
+        setLoadError(result.error);
+        setLoading(false);
+        return;
+      }
+      setTitle(result.detail.title || item.title);
+      setDescription(result.detail.description);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [courseUrl, kind, item.contentId, item.title, acronym]);
+
+  const handleSave = async () => {
+    if (item.contentId == null) return;
+    if (!title.trim()) {
+      setNote({ kind: "error", text: "Give it a title first." });
+      return;
+    }
+    setSaving(true);
+    setNote(null);
+    const fields: { title?: string; description?: string; pointsPossible?: number } = {
+      title: title.trim(),
+      description,
+    };
+    if (showPoints && points.trim() !== "") {
+      const p = Number(points);
+      if (Number.isFinite(p)) fields.pointsPossible = p;
+    }
+    const saved = await updateGradableAction(courseUrl, kind, item.contentId, fields, acronym);
+    if ("error" in saved) {
+      setSaving(false);
+      setNote({ kind: "error", text: saved.error });
+      return;
+    }
+    const iso = due ? new Date(due).toISOString() : null;
+    const dueRes = await setModuleDueDatesAction(
+      courseUrl,
+      [{ type: kind, contentId: item.contentId, dueAt: iso }],
+      acronym
+    );
+    setSaving(false);
+    if ("error" in dueRes) {
+      setNote({ kind: "error", text: dueRes.error });
+      return;
+    }
+    onSaved();
+    onClose();
+  };
+
+  return (
+    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
+      <div
+        className={styles.previewModal}
+        style={{ width: "min(820px, 95vw)", maxWidth: "none" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={styles.previewHeader}>
+          <h3>Edit {kind.toLowerCase()}</h3>
+          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        {loading ? (
+          <div className={styles.loadingState} role="status" aria-live="polite">
+            <span className={styles.spinner} aria-hidden="true" />
+            <div>
+              <p className={styles.loadingTitle}>Loading…</p>
+            </div>
+          </div>
+        ) : loadError ? (
+          <p className={styles.error}>{loadError}</p>
+        ) : (
+          <>
+            <div className={styles.field}>
+              <label htmlFor="gradable-title">Title</label>
+              <input
+                id="gradable-title"
+                type="text"
+                className={styles.textInput}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+              <div className={styles.field} style={{ flex: "1 1 220px" }}>
+                <label htmlFor="gradable-due">Due date</label>
+                <input
+                  id="gradable-due"
+                  type="datetime-local"
+                  className={styles.textInput}
+                  value={due}
+                  onChange={(e) => setDue(e.target.value)}
+                />
+                {due && (
+                  <button type="button" className={styles.clearFileButton} style={{ alignSelf: "flex-start", marginTop: 6 }} onClick={() => setDue("")}>
+                    Clear due date
+                  </button>
+                )}
+              </div>
+              {showPoints && (
+                <div className={styles.field} style={{ flex: "0 0 140px" }}>
+                  <label htmlFor="gradable-points">Points</label>
+                  <input
+                    id="gradable-points"
+                    type="number"
+                    className={styles.textInput}
+                    value={points}
+                    onChange={(e) => setPoints(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className={styles.field}>
+              <label htmlFor="gradable-desc">Description (HTML allowed)</label>
+              <textarea
+                id="gradable-desc"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                spellCheck={false}
+                style={{ minHeight: 240, width: "100%", fontFamily: "var(--font-mono, monospace)" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <button type="button" className={styles.submitButton} onClick={handleSave} disabled={saving || !title.trim()}>
+                {saving ? "Saving…" : "Save to Canvas"}
+              </button>
+            </div>
+
+            {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Module tree ────────────────────────────────────────────────────────────---
 
 function ModulesView({
@@ -1064,6 +1252,7 @@ function ModulesView({
   const [confirmDeleteContent, setConfirmDeleteContent] = useState(false);
   const [confirmDeleteModules, setConfirmDeleteModules] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<CanvasModuleItem | null>(null);
 
   // Load the course's rubrics once for the bulk rubric-association control.
   useEffect(() => {
@@ -1929,6 +2118,16 @@ function ModulesView({
                         Edit page
                       </button>
                     )}
+                    {["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null && (
+                      <button
+                        type="button"
+                        className={styles.downloadButton}
+                        onClick={() => setEditingItem(it)}
+                        style={{ padding: "2px 10px" }}
+                      >
+                        Edit
+                      </button>
+                    )}
                     <button
                       type="button"
                       className={styles.clearFileButton}
@@ -2128,6 +2327,16 @@ function ModulesView({
             setNote({ kind: "success", text: message });
             reload();
           }}
+        />
+      )}
+
+      {editingItem && (
+        <GradableEditorModal
+          courseUrl={courseUrl}
+          acronym={acronym}
+          item={editingItem}
+          onClose={() => setEditingItem(null)}
+          onSaved={reload}
         />
       )}
     </div>

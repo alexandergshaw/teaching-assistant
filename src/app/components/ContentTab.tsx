@@ -178,15 +178,10 @@ function PublishToggle({
   return (
     <button
       type="button"
-      className={styles.clearFileButton}
+      className={`${styles.ccPublish} ${published ? styles.ccPublishOn : styles.ccPublishOff}`}
       onClick={onClick}
       disabled={disabled}
       title={published ? "Published — click to unpublish" : "Unpublished — click to publish"}
-      style={{
-        color: published ? "#15803d" : "#92400e",
-        borderColor: published ? "#bbf7d0" : "#fde68a",
-        fontWeight: 600,
-      }}
     >
       {published ? "Published" : "Unpublished"}
     </button>
@@ -2504,12 +2499,11 @@ function ModulesView({
   const arrowBtn = (label: string, onClick: () => void, disabled: boolean) => (
     <button
       type="button"
-      className={styles.clearFileButton}
+      className={styles.ccIconBtn}
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
       title={label}
-      style={{ padding: "2px 8px" }}
     >
       {label === "Move up" ? "↑" : "↓"}
     </button>
@@ -2829,7 +2823,7 @@ function ModulesView({
               if (el) moduleNodes.current.set(m.id, el);
               else moduleNodes.current.delete(m.id);
             }}
-            className={styles.syllabusSectionCard}
+            className={styles.ccModule}
             onDragOver={(e) => {
               if (moduleDrag !== null) {
                 e.preventDefault();
@@ -2846,16 +2840,16 @@ function ModulesView({
             }}
             style={{
               opacity: moduleDrag === m.id ? 0.55 : 1,
-              boxShadow: moduleDrag === m.id ? "0 6px 16px rgba(15, 23, 42, 0.14)" : undefined,
+              boxShadow: moduleDrag === m.id ? "0 8px 20px rgba(15, 23, 42, 0.16)" : undefined,
               outline:
                 dragOverModuleRow === m.id && moduleDrag !== null && moduleDrag !== m.id
-                  ? "2px solid var(--accent)"
+                  ? "2px solid var(--navy)"
                   : undefined,
-              transition: "opacity 0.15s ease, box-shadow 0.15s ease",
+              outlineOffset: -1,
             }}
           >
             <div
-              style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+              className={styles.ccHead}
               onDragOver={(e) => {
                 if (drag) e.preventDefault();
               }}
@@ -2877,41 +2871,33 @@ function ModulesView({
                   setModuleDrag(null);
                   setDragOverModuleRow(null);
                 }}
+                className={styles.ccGrip}
                 title="Drag to reorder modules"
                 aria-label="Drag to reorder module"
-                style={{
-                  cursor: moduleDrag === m.id ? "grabbing" : "grab",
-                  color: moduleDrag === m.id ? "var(--accent)" : "var(--text-secondary)",
-                  userSelect: "none",
-                  padding: "0 2px",
-                  flexShrink: 0,
-                  fontSize: "1.1em",
-                  transition: "color 0.15s ease",
-                }}
+                style={moduleDrag === m.id ? { cursor: "grabbing", color: "var(--navy)" } : undefined}
               >
                 ⠿
               </span>
               <input
                 type="checkbox"
+                className={styles.ccCheckbox}
                 checked={selectedModules.has(m.id)}
                 onChange={() => toggleModuleSelected(m.id)}
                 aria-label={`Select module ${m.name}`}
                 title="Select this module"
-                style={{ flexShrink: 0 }}
               />
               <button
                 type="button"
-                className={styles.clearFileButton}
+                className={styles.ccIconBtn}
                 onClick={() => onToggleExpand(m.id)}
                 aria-expanded={open}
-                style={{ padding: "2px 8px" }}
+                aria-label={open ? "Collapse module" : "Expand module"}
               >
                 {open ? "▾" : "▸"}
               </button>
               <input
                 type="text"
-                className={styles.textInput}
-                style={{ flex: "1 1 220px", fontWeight: 600 }}
+                className={styles.ccName}
                 value={drafts[`m${m.id}`] ?? m.name}
                 onChange={(e) => setDrafts((p) => ({ ...p, [`m${m.id}`]: e.target.value }))}
                 onBlur={() => void saveModuleName(m)}
@@ -2919,16 +2905,15 @@ function ModulesView({
                   if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                 }}
               />
-              <span className={styles.fieldHint} style={{ margin: 0 }}>
+              <span className={styles.ccCount}>
                 {m.items.length} item{m.items.length === 1 ? "" : "s"}
               </span>
               <button
                 type="button"
-                className={styles.clearFileButton}
+                className={`${styles.ccBtn} ${styles.ccBtnGhost}`}
                 onClick={() => toggleModuleItems(m)}
                 disabled={m.items.length === 0}
                 title={moduleItemsSelected ? "Deselect every item in this module" : "Select every item in this module"}
-                style={{ padding: "2px 8px" }}
               >
                 {moduleItemsSelected ? "Deselect items" : "Select items"}
               </button>
@@ -2937,19 +2922,18 @@ function ModulesView({
               <PublishToggle published={m.published} disabled={busy} onClick={() => toggleModule(m)} />
               <button
                 type="button"
-                className={styles.clearFileButton}
+                className={`${styles.ccBtn} ${styles.ccBtnDanger}`}
                 onClick={() => void removeModule(m)}
                 disabled={busy}
-                style={{ color: "#b91c1c", borderColor: "#fecaca" }}
               >
                 {confirmId === `m${m.id}` ? "Confirm delete" : "Delete"}
               </button>
             </div>
 
             {open && (
-              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+              <div className={styles.ccItems}>
                 {m.items.length === 0 && (
-                  <p className={styles.fieldHint} style={{ marginLeft: 4 }}>
+                  <p className={styles.ccHint} style={{ padding: "4px 6px" }}>
                     No items in this module.
                   </p>
                 )}
@@ -2960,6 +2944,7 @@ function ModulesView({
                       if (el) itemNodes.current.set(it.id, el);
                       else itemNodes.current.delete(it.id);
                     }}
+                    className={styles.ccItem}
                     onDragOver={(e) => {
                       if (drag) {
                         e.preventDefault();
@@ -2976,28 +2961,20 @@ function ModulesView({
                       }
                     }}
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      flexWrap: "wrap",
                       marginLeft: it.indent * 18,
-                      padding: "4px 4px",
-                      borderRadius: 6,
-                      borderTop:
+                      boxShadow:
                         dragOverItem === it.id
-                          ? "2px solid var(--accent)"
-                          : ii === 0
-                            ? "none"
-                            : "1px solid var(--field-border)",
+                          ? "inset 0 2px 0 var(--navy)"
+                          : isDraggingItem(m.id, it.id)
+                            ? "0 4px 12px rgba(15, 23, 42, 0.12)"
+                            : undefined,
                       background:
                         dragOverItem === it.id
-                          ? "color-mix(in srgb, var(--accent) 9%, transparent)"
+                          ? "color-mix(in srgb, var(--navy) 8%, #fff)"
                           : isDraggingItem(m.id, it.id)
-                            ? "color-mix(in srgb, var(--accent) 6%, transparent)"
-                            : "transparent",
-                      boxShadow: isDraggingItem(m.id, it.id) ? "0 4px 12px rgba(15, 23, 42, 0.12)" : "none",
+                            ? "color-mix(in srgb, var(--navy) 5%, #fff)"
+                            : undefined,
                       opacity: isDraggingItem(m.id, it.id) ? 0.55 : 1,
-                      transition: "opacity 0.15s ease, background 0.15s ease, box-shadow 0.15s ease",
                     }}
                   >
                     <span
@@ -3012,36 +2989,24 @@ function ModulesView({
                         setDragOverItem(null);
                         setDragOverModule(null);
                       }}
+                      className={styles.ccGrip}
                       title="Drag to reorder or move between modules"
                       aria-label="Drag to reorder"
-                      style={{
-                        cursor: isDraggingItem(m.id, it.id) ? "grabbing" : "grab",
-                        color: isDraggingItem(m.id, it.id) ? "var(--accent)" : "var(--text-secondary)",
-                        userSelect: "none",
-                        padding: "0 2px",
-                        flexShrink: 0,
-                        transition: "color 0.15s ease",
-                      }}
+                      style={isDraggingItem(m.id, it.id) ? { cursor: "grabbing", color: "var(--navy)" } : undefined}
                     >
                       ⠿
                     </span>
                     <input
                       type="checkbox"
+                      className={styles.ccCheckbox}
                       checked={selected.has(itemKey(m.id, it.id))}
                       onChange={() => toggleItemSelected(m.id, it.id)}
                       aria-label={`Select ${it.title}`}
-                      style={{ flexShrink: 0 }}
                     />
-                    <span
-                      className={styles.fieldHint}
-                      style={{ margin: 0, minWidth: 74, fontWeight: 600 }}
-                    >
-                      {it.type || "Item"}
-                    </span>
+                    <span className={styles.ccType}>{it.type || "Item"}</span>
                     <input
                       type="text"
-                      className={styles.textInput}
-                      style={{ flex: "1 1 200px" }}
+                      className={styles.ccItemName}
                       value={drafts[`i${it.id}`] ?? it.title}
                       onChange={(e) => setDrafts((p) => ({ ...p, [`i${it.id}`]: e.target.value }))}
                       onBlur={() => void saveItemTitle(m, it)}
@@ -3053,71 +3018,50 @@ function ModulesView({
                     {arrowBtn("Move down", () => moveItem(m, ii, 1), busy || ii === m.items.length - 1)}
                     <button
                       type="button"
-                      className={styles.clearFileButton}
+                      className={styles.ccIconBtn}
                       onClick={() => indentItem(m, it, -1)}
                       disabled={busy || it.indent === 0}
                       title="Outdent"
-                      style={{ padding: "2px 8px" }}
+                      aria-label="Outdent"
                     >
                       &lt;
                     </button>
                     <button
                       type="button"
-                      className={styles.clearFileButton}
+                      className={styles.ccIconBtn}
                       onClick={() => indentItem(m, it, 1)}
                       disabled={busy || it.indent >= MAX_INDENT}
                       title="Indent"
-                      style={{ padding: "2px 8px" }}
+                      aria-label="Indent"
                     >
                       &gt;
                     </button>
                     <PublishToggle published={it.published} disabled={busy} onClick={() => toggleItem(m, it)} />
                     {it.type === "Page" && it.pageUrl && (
-                      <button
-                        type="button"
-                        className={styles.downloadButton}
-                        onClick={() => onEditPage(it.pageUrl!)}
-                        style={{ padding: "2px 10px" }}
-                      >
+                      <button type="button" className={styles.ccBtn} onClick={() => onEditPage(it.pageUrl!)}>
                         Edit page
                       </button>
                     )}
                     {["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null && (
-                      <button
-                        type="button"
-                        className={styles.downloadButton}
-                        onClick={() => setEditingItem(it)}
-                        style={{ padding: "2px 10px" }}
-                      >
+                      <button type="button" className={styles.ccBtn} onClick={() => setEditingItem(it)}>
                         Edit
                       </button>
                     )}
                     {it.type === "File" && it.contentId != null && (
-                      <button
-                        type="button"
-                        className={styles.downloadButton}
-                        onClick={() => void openFilePreview(it)}
-                        style={{ padding: "2px 10px" }}
-                      >
+                      <button type="button" className={styles.ccBtn} onClick={() => void openFilePreview(it)}>
                         Preview
                       </button>
                     )}
                     {it.type === "File" && it.contentId != null && /\.(docx|pptx)$/i.test(it.title) && (
-                      <button
-                        type="button"
-                        className={styles.downloadButton}
-                        onClick={() => setEditingFile(it)}
-                        style={{ padding: "2px 10px" }}
-                      >
+                      <button type="button" className={styles.ccBtn} onClick={() => setEditingFile(it)}>
                         Edit
                       </button>
                     )}
                     <button
                       type="button"
-                      className={styles.clearFileButton}
+                      className={`${styles.ccBtn} ${styles.ccBtnDanger}`}
                       onClick={() => void removeItem(m, it)}
                       disabled={busy}
-                      style={{ color: "#b91c1c", borderColor: "#fecaca" }}
                     >
                       {confirmId === `i${it.id}` ? "Confirm" : "Remove"}
                     </button>
@@ -3137,39 +3081,16 @@ function ModulesView({
                       e.stopPropagation();
                       performMove(m.id, null);
                     }}
-                    style={{
-                      marginTop: 4,
-                      padding: dragOverModule === m.id ? "14px 12px" : "8px 12px",
-                      borderRadius: 8,
-                      border: `1px dashed ${dragOverModule === m.id ? "var(--accent)" : "var(--field-border)"}`,
-                      background:
-                        dragOverModule === m.id ? "color-mix(in srgb, var(--accent) 10%, #fff)" : "transparent",
-                      color: dragOverModule === m.id ? "var(--accent)" : "var(--text-secondary)",
-                      fontSize: "0.8rem",
-                      textAlign: "center",
-                      transition: "padding 0.15s ease, border-color 0.15s ease, background 0.15s ease, color 0.15s ease",
-                    }}
+                    className={`${styles.ccDropEnd} ${dragOverModule === m.id ? styles.ccDropEndActive : ""}`}
                   >
                     Drop here to move to the end of this module
                   </div>
                 )}
 
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    flexWrap: "wrap",
-                    alignItems: "center",
-                    marginTop: 8,
-                    paddingTop: 8,
-                    borderTop: "1px solid var(--field-border)",
-                  }}
-                >
-                  <span className={styles.fieldHint} style={{ margin: 0 }}>
-                    Add item:
-                  </span>
+                <div className={styles.ccAddRow}>
+                  <span className={styles.ccCount}>Add item</span>
                   <select
-                    className={styles.textInput}
+                    className={styles.bulkSelect}
                     style={{ maxWidth: 150 }}
                     value={addType[m.id] ?? "Page"}
                     onChange={(e) => {
@@ -3192,7 +3113,7 @@ function ModulesView({
 
                   {CONTENT_TYPES.includes(addType[m.id] ?? "Page") && (
                     <select
-                      className={styles.textInput}
+                      className={styles.bulkSelect}
                       style={{ flex: "1 1 200px", maxWidth: 320 }}
                       value={addValue[m.id] ?? ""}
                       onChange={(e) => setAddValue((p) => ({ ...p, [m.id]: e.target.value }))}
@@ -3212,7 +3133,7 @@ function ModulesView({
                     <>
                       <input
                         type="url"
-                        className={styles.textInput}
+                        className={styles.bulkInput}
                         style={{ flex: "1 1 200px", maxWidth: 280 }}
                         placeholder="https://example.com"
                         value={addUrl[m.id] ?? ""}
@@ -3220,7 +3141,7 @@ function ModulesView({
                       />
                       <input
                         type="text"
-                        className={styles.textInput}
+                        className={styles.bulkInput}
                         style={{ flex: "1 1 140px", maxWidth: 200 }}
                         placeholder="Link text (optional)"
                         value={addTitle[m.id] ?? ""}
@@ -3232,7 +3153,7 @@ function ModulesView({
                   {addType[m.id] === "SubHeader" && (
                     <input
                       type="text"
-                      className={styles.textInput}
+                      className={styles.bulkInput}
                       style={{ flex: "1 1 200px", maxWidth: 280 }}
                       placeholder="Header text"
                       value={addTitle[m.id] ?? ""}
@@ -3242,7 +3163,7 @@ function ModulesView({
 
                   <button
                     type="button"
-                    className={styles.downloadButton}
+                    className={styles.bulkBtnPrimary}
                     onClick={() => void addItem(m)}
                     disabled={busy || !canAdd(m)}
                   >
@@ -3256,21 +3177,10 @@ function ModulesView({
                     e.preventDefault();
                     void handleModuleFiles(m, e.dataTransfer.files);
                   }}
-                  style={{
-                    marginTop: 8,
-                    border: "1px dashed var(--field-border)",
-                    borderRadius: 10,
-                    padding: "10px 12px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    flexWrap: "wrap",
-                  }}
+                  className={styles.ccDrop}
                 >
-                  <span className={styles.fieldHint} style={{ margin: 0 }}>
-                    Drop files to add to this module, or
-                  </span>
-                  <label className={styles.downloadButton} style={{ cursor: "pointer" }}>
+                  <span className={styles.ccHint}>Drop files to add to this module, or</span>
+                  <label className={styles.ccBtn} style={{ cursor: "pointer" }}>
                     choose files
                     <input
                       type="file"
@@ -3288,8 +3198,8 @@ function ModulesView({
                     {(uploads[m.id] ?? []).map((row, idx) => (
                       <span
                         key={`${m.id}-up-${idx}`}
-                        className={styles.fieldHint}
-                        style={{ margin: 0, color: row.status === "error" ? "var(--error, #b91c1c)" : undefined }}
+                        className={styles.ccHint}
+                        style={{ color: row.status === "error" ? "var(--error, #b91c1c)" : undefined }}
                       >
                         {row.name}:{" "}
                         {row.status === "uploading"

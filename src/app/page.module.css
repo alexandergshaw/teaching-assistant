@@ -3629,9 +3629,18 @@
 }
 
 .bulkBtnPrimary {
-  border-color: var(--navy);
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--navy);
   background: var(--navy);
   color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .bulkBtnPrimary:hover:not(:disabled) {
@@ -3639,10 +3648,24 @@
   border-color: #243450;
 }
 
+.bulkBtnPrimary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .bulkBtnDanger {
-  border-color: #e3c7c7;
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #e3c7c7;
   background: transparent;
   color: #a8403d;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .bulkBtnDanger:hover:not(:disabled) {
@@ -3650,7 +3673,8 @@
   background: color-mix(in srgb, #a8403d 6%, #fff);
 }
 
-.bulkBtn:disabled {
+.bulkBtn:disabled,
+.bulkBtnDanger:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -3659,5 +3683,293 @@
   flex-basis: 100%;
   margin: 1px 0 0;
   font-size: 0.73rem;
+  color: var(--text-secondary);
+}
+
+/* ── Module list (Course Content) ─────────────────────────────────────────────
+   Quiet cards with edit-in-place name fields and small, low-contrast controls,
+   so a dense list of modules and items still feels calm. Navy is the only accent. */
+.ccModule {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: var(--field-background);
+  transition: box-shadow 0.15s ease, opacity 0.15s ease, outline-color 0.15s ease;
+}
+
+.ccHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+}
+
+.ccGrip {
+  cursor: grab;
+  color: #9aa6b8;
+  user-select: none;
+  padding: 0 2px;
+  flex-shrink: 0;
+  font-size: 1rem;
+  line-height: 1;
+  transition: color 0.15s ease;
+}
+
+.ccGrip:hover {
+  color: var(--navy);
+}
+
+.ccCheckbox {
+  flex-shrink: 0;
+  accent-color: var(--navy);
+}
+
+.ccIconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.ccIconBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--navy) 8%, #fff);
+  color: var(--navy);
+}
+
+.ccIconBtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.ccName {
+  flex: 1 1 200px;
+  min-width: 140px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 0.96rem;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.ccName:hover {
+  background: color-mix(in srgb, var(--navy) 4%, #fff);
+}
+
+.ccName:focus {
+  outline: none;
+  background: var(--field-background);
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--navy) 14%, transparent);
+}
+
+.ccCount {
+  flex-shrink: 0;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ccBtn {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--field-border);
+  border-radius: 7px;
+  background: var(--field-background);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.ccBtn:hover:not(:disabled) {
+  border-color: var(--navy);
+  background: color-mix(in srgb, var(--navy) 6%, #fff);
+}
+
+.ccBtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ccBtnGhost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.ccBtnGhost:hover:not(:disabled) {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--navy) 8%, #fff);
+  color: var(--navy);
+}
+
+.ccBtnDanger {
+  border-color: transparent;
+  background: transparent;
+  color: #a8403d;
+}
+
+.ccBtnDanger:hover:not(:disabled) {
+  background: color-mix(in srgb, #a8403d 8%, #fff);
+}
+
+.ccPublish {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--field-border);
+  border-radius: 999px;
+  background: var(--field-background);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.ccPublish::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.ccPublishOn {
+  color: #15803d;
+  border-color: color-mix(in srgb, #15803d 32%, var(--field-border));
+}
+
+.ccPublishOff {
+  color: #b45309;
+  border-color: color-mix(in srgb, #b45309 32%, var(--field-border));
+}
+
+.ccItems {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--card-border);
+  padding: 6px 10px 10px;
+}
+
+.ccItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 6px;
+  border-radius: 8px;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.ccItem:hover {
+  background: color-mix(in srgb, var(--navy) 3.5%, #fff);
+}
+
+.ccType {
+  flex-shrink: 0;
+  min-width: 62px;
+  text-align: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--navy);
+  background: color-mix(in srgb, var(--navy) 9%, #fff);
+  border-radius: 5px;
+  padding: 3px 7px;
+}
+
+.ccItemName {
+  flex: 1 1 180px;
+  min-width: 130px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+}
+
+.ccItemName:hover {
+  background: color-mix(in srgb, var(--navy) 4%, #fff);
+}
+
+.ccItemName:focus {
+  outline: none;
+  background: var(--field-background);
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--navy) 14%, transparent);
+}
+
+.ccAddRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--card-border);
+}
+
+.ccDrop {
+  margin-top: 8px;
+  border: 1px dashed var(--field-border);
+  border-radius: 9px;
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.ccDropEnd {
+  margin-top: 4px;
+  border: 1px dashed var(--field-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  transition: padding 0.15s ease, border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.ccDropEndActive {
+  padding: 14px 12px;
+  border-color: var(--navy);
+  background: color-mix(in srgb, var(--navy) 8%, #fff);
+  color: var(--navy);
+}
+
+.ccHint {
+  margin: 0;
+  font-size: 0.78rem;
   color: var(--text-secondary);
 }

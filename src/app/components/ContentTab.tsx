@@ -89,6 +89,21 @@ function itemKey(moduleId: number, itemId: number): string {
   return `${moduleId}:${itemId}`;
 }
 
+// Item types that carry a due date (graded). Used to decide which rows show one.
+const DATED_TYPES = ["Assignment", "Quiz", "Discussion"];
+
+// Compact local rendering of a due date for a module row ("Jan 20, 11:59 PM").
+function formatDueDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 // Format an ISO timestamp as the local value a datetime-local input expects.
 function toLocalInput(iso: string | null): string {
   if (!iso) return "";
@@ -2970,9 +2985,9 @@ function ModulesView({
                             : undefined,
                       background:
                         dragOverItem === it.id
-                          ? "color-mix(in srgb, var(--navy) 8%, #fff)"
+                          ? "var(--navy-highlight-strong)"
                           : isDraggingItem(m.id, it.id)
-                            ? "color-mix(in srgb, var(--navy) 5%, #fff)"
+                            ? "var(--navy-highlight)"
                             : undefined,
                       opacity: isDraggingItem(m.id, it.id) ? 0.55 : 1,
                     }}
@@ -3014,6 +3029,17 @@ function ModulesView({
                         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                       }}
                     />
+                    {DATED_TYPES.includes(it.type) &&
+                      (it.dueAt ? (
+                        <span
+                          className={`${styles.ccDue} ${new Date(it.dueAt).getTime() < Date.now() ? styles.ccDueOverdue : ""}`}
+                          title={`Due ${new Date(it.dueAt).toLocaleString()}`}
+                        >
+                          Due {formatDueDate(it.dueAt)}
+                        </span>
+                      ) : (
+                        <span className={`${styles.ccDue} ${styles.ccDueEmpty}`}>No due date</span>
+                      ))}
                     {arrowBtn("Move up", () => moveItem(m, ii, -1), busy || ii === 0)}
                     {arrowBtn("Move down", () => moveItem(m, ii, 1), busy || ii === m.items.length - 1)}
                     <button

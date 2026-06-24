@@ -15,6 +15,9 @@
   --accent-hover: #1d4ed8;
   /* Brand navy (matches the logo mark) used for app chrome: top bar + auth pages. */
   --navy: #1a2744;
+  /* Lighter shades of navy for hover/selection highlights and drag emphasis. */
+  --navy-highlight: #e4eaf6;
+  --navy-highlight-strong: #d3ddf1;
   --topbar-height: 58px;
 }
 

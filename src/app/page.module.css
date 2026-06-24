@@ -3625,7 +3625,7 @@
 
 .bulkBtn:hover:not(:disabled) {
   border-color: var(--navy);
-  background: color-mix(in srgb, var(--navy) 6%, #fff);
+  background: var(--navy-highlight);
 }
 
 .bulkBtnPrimary {
@@ -3743,7 +3743,7 @@
 }
 
 .ccIconBtn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--navy) 8%, #fff);
+  background: var(--navy-highlight);
   color: var(--navy);
 }
 
@@ -3767,7 +3767,7 @@
 }
 
 .ccName:hover {
-  background: color-mix(in srgb, var(--navy) 4%, #fff);
+  background: var(--navy-highlight);
 }
 
 .ccName:focus {
@@ -3802,7 +3802,7 @@
 
 .ccBtn:hover:not(:disabled) {
   border-color: var(--navy);
-  background: color-mix(in srgb, var(--navy) 6%, #fff);
+  background: var(--navy-highlight);
 }
 
 .ccBtn:disabled {
@@ -3818,7 +3818,7 @@
 
 .ccBtnGhost:hover:not(:disabled) {
   border-color: transparent;
-  background: color-mix(in srgb, var(--navy) 8%, #fff);
+  background: var(--navy-highlight);
   color: var(--navy);
 }
 
@@ -3886,7 +3886,7 @@
 }
 
 .ccItem:hover {
-  background: color-mix(in srgb, var(--navy) 3.5%, #fff);
+  background: var(--navy-highlight);
 }
 
 .ccType {
@@ -3917,7 +3917,7 @@
 }
 
 .ccItemName:hover {
-  background: color-mix(in srgb, var(--navy) 4%, #fff);
+  background: var(--navy-highlight);
 }
 
 .ccItemName:focus {
@@ -3964,7 +3964,7 @@
 .ccDropEndActive {
   padding: 14px 12px;
   border-color: var(--navy);
-  background: color-mix(in srgb, var(--navy) 8%, #fff);
+  background: var(--navy-highlight-strong);
   color: var(--navy);
 }
 
@@ -3972,4 +3972,31 @@
   margin: 0;
   font-size: 0.78rem;
   color: var(--text-secondary);
+}
+
+.ccDue {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 6px;
+  background: var(--navy-highlight);
+  color: var(--navy);
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ccDueEmpty {
+  background: transparent;
+  color: #94a3b8;
+  font-weight: 500;
+  font-style: italic;
+}
+
+.ccDueOverdue {
+  background: color-mix(in srgb, #a8403d 12%, #fff);
+  color: #a8403d;
 }

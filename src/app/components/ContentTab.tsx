@@ -97,8 +97,10 @@ function itemKey(moduleId: number, itemId: number): string {
   return `${moduleId}:${itemId}`;
 }
 
-// Item types that carry a due date (graded). Used to decide which rows show one.
+// Item types that carry a due date / points (graded). Decide which rows show them.
 const DATED_TYPES = ["Assignment", "Quiz", "Discussion"];
+// Of those, the ones whose points can be edited through the gradable API here.
+const POINTS_EDITABLE = ["Assignment", "Quiz"];
 
 // Compact local rendering of a due date for a module row ("Jan 20, 11:59 PM").
 function formatDueDate(iso: string): string {
@@ -1793,6 +1795,85 @@ function RubricBuilderModal({
   );
 }
 
+// ── Assignment preview (read-only) ────────────────────────────────────────────
+
+function AssignmentPreviewModal({
+  courseUrl,
+  acronym,
+  item,
+  onClose,
+}: {
+  courseUrl: string;
+  acronym?: string;
+  item: CanvasModuleItem;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [detail, setDetail] = useState<{ title: string; description: string } | null>(null);
+
+  useEffect(() => {
+    if (item.contentId == null) return;
+    let cancelled = false;
+    (async () => {
+      const result = await getGradableAction(courseUrl, "Assignment", item.contentId as number, acronym);
+      if (cancelled) return;
+      if ("error" in result) setError(result.error);
+      else setDetail(result.detail);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [courseUrl, item.contentId, acronym]);
+
+  return (
+    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
+      <div className={styles.previewModal} style={{ width: "min(720px, 94vw)", maxWidth: "none" }} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.previewHeader}>
+          <h3>{detail?.title || item.title}</h3>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {item.htmlUrl && (
+              <a className={styles.ccBtn} href={item.htmlUrl} target="_blank" rel="noreferrer">
+                Open in Canvas
+              </a>
+            )}
+            <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 4 }}>
+          {item.pointsPossible != null && <span className={styles.ccDue}>{item.pointsPossible} pts</span>}
+          {item.dueAt && <span className={styles.ccDue}>Due {formatDueDate(item.dueAt)}</span>}
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+          {loading ? (
+            <div className={styles.loadingState} role="status" aria-live="polite">
+              <span className={styles.spinner} aria-hidden="true" />
+              <div>
+                <p className={styles.loadingTitle}>Loading…</p>
+              </div>
+            </div>
+          ) : error ? (
+            <p className={styles.error}>{error}</p>
+          ) : detail && detail.description.trim() ? (
+            <div
+              style={{ lineHeight: 1.55, wordBreak: "break-word" }}
+              // Instructor's own course content, fetched server-side for preview.
+              dangerouslySetInnerHTML={{ __html: detail.description }}
+            />
+          ) : (
+            <p className={styles.fieldHint}>This assignment has no description.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Office file editor (.docx / .pptx, in place) ──────────────────────────────
 
 function OfficeEditorModal({
@@ -2044,6 +2125,10 @@ function ModulesView({
   const [dragOverModuleRow, setDragOverModuleRow] = useState<number | null>(null);
   // The item whose due date is being edited inline, plus its datetime-local draft.
   const [dueEdit, setDueEdit] = useState<{ id: number; value: string } | null>(null);
+  // The item whose points are being edited inline, plus its draft value.
+  const [pointsEdit, setPointsEdit] = useState<{ id: number; value: string } | null>(null);
+  // The assignment being previewed in a read-only modal.
+  const [previewAssignment, setPreviewAssignment] = useState<CanvasModuleItem | null>(null);
 
   // FLIP animation for reorders: remember each item row's DOM node and its
   // position just before a move, then slide every moved row from its old spot to
@@ -2948,6 +3033,39 @@ function ModulesView({
     })();
   };
 
+  // Persist an inline points edit for an assignment/quiz. Skips an unchanged or
+  // empty value; optimistic, then reconciles on failure.
+  const savePointsEdit = (m: CanvasModule, it: CanvasModuleItem) => {
+    if (!pointsEdit || pointsEdit.id !== it.id) return;
+    const original = it.pointsPossible != null ? String(it.pointsPossible) : "";
+    const raw = pointsEdit.value.trim();
+    if (raw === original || it.contentId == null) {
+      setPointsEdit(null);
+      return;
+    }
+    if (raw === "" || !Number.isFinite(Number(raw))) {
+      setNote({ kind: "error", text: "Enter a number for the points." });
+      setPointsEdit(null);
+      return;
+    }
+    const pts = Number(raw);
+    const contentId = it.contentId;
+    setPointsEdit(null);
+    patchItems(m.id, m.items.map((x) => (x.id === it.id ? { ...x, pointsPossible: pts } : x)));
+    void (async () => {
+      setBusy(true);
+      setNote(null);
+      const result = await updateGradableAction(courseUrl, it.type as GradableKind, contentId, { pointsPossible: pts }, acronym);
+      setBusy(false);
+      if ("error" in result) {
+        setNote({ kind: "error", text: result.error });
+        reload();
+      } else {
+        setNote({ kind: "success", text: "Points updated." });
+      }
+    })();
+  };
+
   const toggleItem = (m: CanvasModule, it: CanvasModuleItem) => {
     const published = !it.published;
     patchItems(m.id, m.items.map((x) => (x.id === it.id ? { ...x, published } : x)));
@@ -3143,6 +3261,13 @@ function ModulesView({
             disabled={busy || modules.length === 0}
           >
             Schedule due dates
+          </button>
+          <button
+            type="button"
+            className={styles.downloadButton}
+            onClick={() => setRubricBuilder({ assignmentIds: [] })}
+          >
+            New rubric
           </button>
         </div>
       </div>
@@ -3490,6 +3615,15 @@ function ModulesView({
               >
                 {open ? "▾" : "▸"}
               </button>
+              <button
+                type="button"
+                className={`${styles.ccBtn} ${styles.ccBtnGhost}`}
+                onClick={() => toggleModuleItems(m)}
+                disabled={m.items.length === 0}
+                title={moduleItemsSelected ? "Deselect every item in this module" : "Select every item in this module"}
+              >
+                {moduleItemsSelected ? "Deselect items" : "Select items"}
+              </button>
               <input
                 type="text"
                 className={styles.ccName}
@@ -3503,15 +3637,6 @@ function ModulesView({
               <span className={styles.ccCount}>
                 {m.items.length} item{m.items.length === 1 ? "" : "s"}
               </span>
-              <button
-                type="button"
-                className={`${styles.ccBtn} ${styles.ccBtnGhost}`}
-                onClick={() => toggleModuleItems(m)}
-                disabled={m.items.length === 0}
-                title={moduleItemsSelected ? "Deselect every item in this module" : "Select every item in this module"}
-              >
-                {moduleItemsSelected ? "Deselect items" : "Select items"}
-              </button>
               {arrowBtn("Move up", () => moveModule(mi, -1), busy || mi === 0)}
               {arrowBtn("Move down", () => moveModule(mi, 1), busy || mi === modules.length - 1)}
               <PublishToggle published={m.published} disabled={busy} onClick={() => toggleModule(m)} />
@@ -3647,6 +3772,40 @@ function ModulesView({
                           </button>
                         ))}
                     </span>
+                    <span className={styles.ccPointsSlot}>
+                      {DATED_TYPES.includes(it.type) &&
+                        (pointsEdit?.id === it.id ? (
+                          <input
+                            type="number"
+                            className={styles.ccDueInput}
+                            autoFocus
+                            value={pointsEdit.value}
+                            onChange={(e) => setPointsEdit({ id: it.id, value: e.target.value })}
+                            onBlur={() => savePointsEdit(m, it)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                              if (e.key === "Escape") setPointsEdit(null);
+                            }}
+                            aria-label="Points"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className={`${styles.ccDue} ${it.pointsPossible == null ? styles.ccDueEmpty : ""}`}
+                            onClick={() =>
+                              setPointsEdit({ id: it.id, value: it.pointsPossible != null ? String(it.pointsPossible) : "" })
+                            }
+                            disabled={busy || it.contentId == null || !POINTS_EDITABLE.includes(it.type)}
+                            title={
+                              POINTS_EDITABLE.includes(it.type)
+                                ? "Click to edit points"
+                                : "Points (edit on the assignment)"
+                            }
+                          >
+                            {it.pointsPossible != null ? `${it.pointsPossible} pts` : "No points"}
+                          </button>
+                        ))}
+                    </span>
                     {arrowBtn("Move up", () => moveItem(m, ii, -1), busy || ii === 0)}
                     {arrowBtn("Move down", () => moveItem(m, ii, 1), busy || ii === m.items.length - 1)}
                     <button
@@ -3678,6 +3837,11 @@ function ModulesView({
                     {["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null && (
                       <button type="button" className={styles.ccBtn} onClick={() => setEditingItem(it)}>
                         Edit
+                      </button>
+                    )}
+                    {it.type === "Assignment" && it.contentId != null && (
+                      <button type="button" className={styles.ccBtn} onClick={() => setPreviewAssignment(it)}>
+                        Preview
                       </button>
                     )}
                     {it.type === "File" && it.contentId != null && (
@@ -3931,6 +4095,15 @@ function ModulesView({
                 : `Created rubric "${title}".`,
             });
           }}
+        />
+      )}
+
+      {previewAssignment && (
+        <AssignmentPreviewModal
+          courseUrl={courseUrl}
+          acronym={acronym}
+          item={previewAssignment}
+          onClose={() => setPreviewAssignment(null)}
         />
       )}
     </div>

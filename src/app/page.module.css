@@ -3870,13 +3870,17 @@
   gap: 2px;
   border-top: 1px solid var(--card-border);
   padding: 6px 10px 10px;
+  /* When the viewport is too narrow for all columns, scroll horizontally rather
+     than wrapping, so the columns stay aligned. */
+  overflow-x: auto;
 }
 
 .ccItem {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  /* No wrap: the title field absorbs shrink, keeping every column in one row. */
+  flex-wrap: nowrap;
   padding: 4px 6px;
   border-radius: 8px;
   transition: background-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
@@ -3925,8 +3929,8 @@
 }
 
 .ccItemName {
-  flex: 1 1 180px;
-  min-width: 130px;
+  flex: 1 1 90px;
+  min-width: 70px;
   height: 30px;
   padding: 0 9px;
   border: 1px solid transparent;
@@ -4055,6 +4059,14 @@
   align-items: center;
 }
 
-.ccDueSlot .ccDueInput {
+.ccPointsSlot {
+  width: 92px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.ccDueSlot .ccDueInput,
+.ccPointsSlot .ccDueInput {
   width: 100%;
 }

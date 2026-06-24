@@ -3767,11 +3767,6 @@
   color: var(--text-primary);
 }
 
-.ccName:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
 .ccName:focus {
   outline: none;
   background: var(--field-background);
@@ -3895,9 +3890,14 @@
 .ccItem:hover .ccGrip {
   color: rgba(255, 255, 255, 0.6);
 }
-.ccItem:hover .ccType {
+.ccItem:hover .ccType,
+.ccItem:hover .ccDue {
   background: rgba(255, 255, 255, 0.18);
   color: #fff;
+}
+.ccItem:hover .ccDueOverdue {
+  background: color-mix(in srgb, #a8403d 38%, transparent);
+  color: #fecaca;
 }
 .ccItem:hover .ccItemName {
   color: #fff;
@@ -4008,7 +4008,7 @@
   padding: 0 9px;
   border: 1px solid transparent;
   border-radius: 6px;
-  background: var(--navy-highlight);
+  background: color-mix(in srgb, var(--navy) 9%, #fff);
   color: var(--navy);
   font-size: 0.72rem;
   font-weight: 600;
@@ -4053,4 +4053,17 @@
 .ccDueInput:focus {
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--navy) 14%, transparent);
+}
+
+/* Fixed-width column for the due date so it never shifts the action buttons.
+   Rendered on every item row (empty for non-dated types) to keep rows aligned. */
+.ccDueSlot {
+  width: 172px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.ccDueSlot .ccDueInput {
+  width: 100%;
 }

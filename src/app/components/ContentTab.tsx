@@ -3609,42 +3609,44 @@ function ModulesView({
                         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                       }}
                     />
-                    {DATED_TYPES.includes(it.type) &&
-                      (dueEdit?.id === it.id ? (
-                        <input
-                          type="datetime-local"
-                          className={styles.ccDueInput}
-                          autoFocus
-                          value={dueEdit.value}
-                          onChange={(e) => setDueEdit({ id: it.id, value: e.target.value })}
-                          onBlur={() => saveDueEdit(m, it)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                            if (e.key === "Escape") setDueEdit(null);
-                          }}
-                          aria-label="Due date"
-                        />
-                      ) : it.dueAt ? (
-                        <button
-                          type="button"
-                          className={`${styles.ccDue} ${new Date(it.dueAt).getTime() < Date.now() ? styles.ccDueOverdue : ""}`}
-                          onClick={() => setDueEdit({ id: it.id, value: toLocalInput(it.dueAt) })}
-                          disabled={busy || it.contentId == null}
-                          title={`Due ${new Date(it.dueAt).toLocaleString()} — click to edit`}
-                        >
-                          Due {formatDueDate(it.dueAt)}
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className={`${styles.ccDue} ${styles.ccDueEmpty}`}
-                          onClick={() => setDueEdit({ id: it.id, value: "" })}
-                          disabled={busy || it.contentId == null}
-                          title="Click to set a due date"
-                        >
-                          No due date
-                        </button>
-                      ))}
+                    <span className={styles.ccDueSlot}>
+                      {DATED_TYPES.includes(it.type) &&
+                        (dueEdit?.id === it.id ? (
+                          <input
+                            type="datetime-local"
+                            className={styles.ccDueInput}
+                            autoFocus
+                            value={dueEdit.value}
+                            onChange={(e) => setDueEdit({ id: it.id, value: e.target.value })}
+                            onBlur={() => saveDueEdit(m, it)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                              if (e.key === "Escape") setDueEdit(null);
+                            }}
+                            aria-label="Due date"
+                          />
+                        ) : it.dueAt ? (
+                          <button
+                            type="button"
+                            className={`${styles.ccDue} ${new Date(it.dueAt).getTime() < Date.now() ? styles.ccDueOverdue : ""}`}
+                            onClick={() => setDueEdit({ id: it.id, value: toLocalInput(it.dueAt) })}
+                            disabled={busy || it.contentId == null}
+                            title={`Due ${new Date(it.dueAt).toLocaleString()} — click to edit`}
+                          >
+                            Due {formatDueDate(it.dueAt)}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className={`${styles.ccDue} ${styles.ccDueEmpty}`}
+                            onClick={() => setDueEdit({ id: it.id, value: "" })}
+                            disabled={busy || it.contentId == null}
+                            title="Click to set a due date"
+                          >
+                            No due date
+                          </button>
+                        ))}
+                    </span>
                     {arrowBtn("Move up", () => moveItem(m, ii, -1), busy || ii === 0)}
                     {arrowBtn("Move down", () => moveItem(m, ii, 1), busy || ii === m.items.length - 1)}
                     <button

@@ -1129,7 +1129,7 @@ export interface RubricCriterionInput {
   description: string;
   longDescription?: string;
   points: number;
-  ratings: Array<{ description: string; points: number }>;
+  ratings: Array<{ description: string; longDescription?: string; points: number }>;
 }
 
 /**
@@ -1162,6 +1162,9 @@ export async function createRubric(
     params.append(`rubric[criteria][${i}][points]`, String(c.points));
     c.ratings.forEach((r, j) => {
       params.append(`rubric[criteria][${i}][ratings][${j}][description]`, r.description.trim() || `${r.points} pts`);
+      if (r.longDescription?.trim()) {
+        params.append(`rubric[criteria][${i}][ratings][${j}][long_description]`, r.longDescription.trim());
+      }
       params.append(`rubric[criteria][${i}][ratings][${j}][points]`, String(r.points));
     });
   });

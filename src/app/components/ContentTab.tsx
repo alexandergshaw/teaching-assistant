@@ -1648,7 +1648,7 @@ function QuizQuestionsEditor({
 
 // ── Rubric builder ────────────────────────────────────────────────────────────
 
-type EditRating = { key: string; description: string; points: number };
+type EditRating = { key: string; description: string; longDescription: string; points: number };
 type EditCriterion = { key: string; description: string; points: number; ratings: EditRating[] };
 
 let rubricKeySeq = 0;
@@ -1660,9 +1660,9 @@ function defaultCriterion(): EditCriterion {
     description: "",
     points: 5,
     ratings: [
-      { key: nextRubricKey(), description: "Full marks", points: 5 },
-      { key: nextRubricKey(), description: "Partial", points: 3 },
-      { key: nextRubricKey(), description: "No marks", points: 0 },
+      { key: nextRubricKey(), description: "Full marks", longDescription: "", points: 5 },
+      { key: nextRubricKey(), description: "Partial", longDescription: "", points: 3 },
+      { key: nextRubricKey(), description: "No marks", longDescription: "", points: 0 },
     ],
   };
 }
@@ -1696,7 +1696,7 @@ function RubricBuilderModal({
   const addCriterion = () => setCriteria((cs) => [...cs, defaultCriterion()]);
   const removeCriterion = (key: string) => setCriteria((cs) => (cs.length > 1 ? cs.filter((c) => c.key !== key) : cs));
   const addRating = (ck: string) =>
-    setCriteria((cs) => cs.map((c) => (c.key === ck ? { ...c, ratings: [...c.ratings, { key: nextRubricKey(), description: "", points: 0 }] } : c)));
+    setCriteria((cs) => cs.map((c) => (c.key === ck ? { ...c, ratings: [...c.ratings, { key: nextRubricKey(), description: "", longDescription: "", points: 0 }] } : c)));
   const removeRating = (ck: string, rk: string) =>
     setCriteria((cs) => cs.map((c) => (c.key !== ck ? c : { ...c, ratings: c.ratings.length > 1 ? c.ratings.filter((r) => r.key !== rk) : c.ratings })));
 
@@ -1742,6 +1742,7 @@ function RubricBuilderModal({
       points: scale(Number.isFinite(c.points) ? c.points : 0),
       ratings: c.ratings.map((r) => ({
         description: r.description.trim() || `${r.points}${unit}`,
+        longDescription: r.longDescription.trim() || undefined,
         points: scale(Number.isFinite(r.points) ? r.points : 0),
       })),
     }));
@@ -1871,31 +1872,41 @@ function RubricBuilderModal({
               />
               <span className={styles.ccCount}>Rating tiers</span>
               {c.ratings.map((r) => (
-                <div key={r.key} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <input
-                    type="text"
-                    className={styles.bulkInput}
-                    style={{ flex: "1 1 200px", minWidth: 150 }}
-                    placeholder="Tier label (e.g. Excellent)"
-                    value={r.description}
-                    onChange={(e) => patchRating(c.key, r.key, { description: e.target.value })}
-                  />
-                  <span className={styles.bulkField}>
+                <div key={r.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <input
-                      type="number"
+                      type="text"
                       className={styles.bulkInput}
-                      style={{ width: 70 }}
-                      value={r.points}
-                      onChange={(e) => patchRating(c.key, r.key, { points: Number(e.target.value) })}
-                      aria-label="Tier value"
+                      style={{ flex: "1 1 200px", minWidth: 150 }}
+                      placeholder="Tier label (e.g. Excellent)"
+                      value={r.description}
+                      onChange={(e) => patchRating(c.key, r.key, { description: e.target.value })}
                     />
-                    <span className={styles.ccCount}>{unit}</span>
-                  </span>
-                  {c.ratings.length > 1 && (
-                    <button type="button" className={styles.ccIconBtn} title="Remove tier" aria-label="Remove tier" onClick={() => removeRating(c.key, r.key)}>
-                      &times;
-                    </button>
-                  )}
+                    <span className={styles.bulkField}>
+                      <input
+                        type="number"
+                        className={styles.bulkInput}
+                        style={{ width: 70 }}
+                        value={r.points}
+                        onChange={(e) => patchRating(c.key, r.key, { points: Number(e.target.value) })}
+                        aria-label="Tier value"
+                      />
+                      <span className={styles.ccCount}>{unit}</span>
+                    </span>
+                    {c.ratings.length > 1 && (
+                      <button type="button" className={styles.ccIconBtn} title="Remove tier" aria-label="Remove tier" onClick={() => removeRating(c.key, r.key)}>
+                        &times;
+                      </button>
+                    )}
+                  </div>
+                  <textarea
+                    className={styles.bulkInput}
+                    style={{ width: "100%", minHeight: 40, resize: "vertical", padding: "6px 10px" }}
+                    placeholder="Tier description (optional — the detail shown to students for this level)"
+                    value={r.longDescription}
+                    onChange={(e) => patchRating(c.key, r.key, { longDescription: e.target.value })}
+                    aria-label="Tier description"
+                  />
                 </div>
               ))}
               <button type="button" className={styles.ccBtn} style={{ alignSelf: "flex-start" }} onClick={() => addRating(c.key)}>

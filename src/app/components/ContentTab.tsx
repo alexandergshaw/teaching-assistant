@@ -2517,6 +2517,13 @@ function ModulesView({
   // The modules currently shown (after the search filter). Select-all and
   // select-by-type act on these so a filtered list only selects what's visible.
   const visibleModules = modules.filter(moduleMatches);
+  // Whether an item row is currently shown: no search, or the module name matched
+  // (whole module shown), or the item's own title matched. Select-all and
+  // select-by-type use this so they only ever touch rows on screen.
+  const itemVisible = (m: CanvasModule, it: CanvasModuleItem): boolean =>
+    !moduleSearchLc ||
+    m.name.toLowerCase().includes(moduleSearchLc) ||
+    it.title.toLowerCase().includes(moduleSearchLc);
   // The course's base URL (".../courses/123"), used to build "Open on Canvas" links.
   const courseBase = courseUrl.replace(/(\/courses\/\d+).*$/, "$1");
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -2871,7 +2878,9 @@ function ModulesView({
   // Only the visible (filtered) items, so "Select all items" tracks the filter.
   // Toggling merges/unmerges rather than replacing, leaving any hidden selection
   // untouched.
-  const allKeys = visibleModules.flatMap((mod) => mod.items.map((it) => itemKey(mod.id, it.id)));
+  const allKeys = visibleModules.flatMap((mod) =>
+    mod.items.filter((it) => itemVisible(mod, it)).map((it) => itemKey(mod.id, it.id))
+  );
   const allSelected = allKeys.length > 0 && allKeys.every((k) => selected.has(k));
   const toggleAll = () =>
     setSelected((prev) => {
@@ -2900,7 +2909,7 @@ function ModulesView({
     const keys: string[] = [];
     for (const mod of visibleModules) {
       for (const it of mod.items) {
-        if (matches(it)) keys.push(itemKey(mod.id, it.id));
+        if (matches(it) && itemVisible(mod, it)) keys.push(itemKey(mod.id, it.id));
       }
     }
     if (keys.length === 0) {
@@ -4465,11 +4474,6 @@ function ModulesView({
         if (!moduleMatches(m)) return null;
         const open = expanded.has(m.id);
         const moduleItemsSelected = m.items.length > 0 && m.items.every((it) => selected.has(itemKey(m.id, it.id)));
-        // While searching, hide item rows that don't match the term — unless the
-        // module name itself matched, in which case the whole module is shown.
-        const moduleNameMatched = !moduleSearchLc || m.name.toLowerCase().includes(moduleSearchLc);
-        const itemHiddenBySearch = (it: CanvasModuleItem) =>
-          !!moduleSearchLc && !moduleNameMatched && !it.title.toLowerCase().includes(moduleSearchLc);
         return (
           <div
             key={m.id}
@@ -4604,7 +4608,7 @@ function ModulesView({
                     No items in this module.
                   </p>
                 )}
-                {m.items.map((it, ii) => itemHiddenBySearch(it) ? null : (
+                {m.items.map((it, ii) => !itemVisible(m, it) ? null : (
                   <div
                     key={it.id}
                     ref={(el) => {

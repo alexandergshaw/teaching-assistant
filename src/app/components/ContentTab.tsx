@@ -2273,6 +2273,28 @@ function ModulesView({
       else next.add(k);
       return next;
     });
+  // Add every item of one kind to the selection. "Graded" matches the gradable
+  // types (assignments, quizzes, graded discussions); otherwise an exact type.
+  const selectByKind = (kind: string) => {
+    if (!kind) return;
+    const matches = (it: CanvasModuleItem) => (kind === "Graded" ? DATED_TYPES.includes(it.type) : it.type === kind);
+    const keys: string[] = [];
+    for (const mod of modules) {
+      for (const it of mod.items) {
+        if (matches(it)) keys.push(itemKey(mod.id, it.id));
+      }
+    }
+    if (keys.length === 0) {
+      setNote({ kind: "error", text: `No ${kind === "Graded" ? "graded items" : `${kind.toLowerCase()}s`} to select.` });
+      return;
+    }
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const k of keys) next.add(k);
+      return next;
+    });
+  };
+
   // Select (or, when all are already selected, deselect) every item in one module.
   const toggleModuleItems = (m: CanvasModule) => {
     const keys = m.items.map((it) => itemKey(m.id, it.id));
@@ -3077,6 +3099,22 @@ function ModulesView({
             />
             Select all modules
           </label>
+          <select
+            className={styles.bulkSelect}
+            style={{ maxWidth: 170 }}
+            value=""
+            disabled={modules.length === 0}
+            onChange={(e) => selectByKind(e.target.value)}
+            aria-label="Select all items of a type"
+          >
+            <option value="">Select by type…</option>
+            <option value="Graded">Graded items</option>
+            <option value="Assignment">Assignments</option>
+            <option value="Quiz">Quizzes</option>
+            <option value="Discussion">Discussions</option>
+            <option value="Page">Pages</option>
+            <option value="File">Files</option>
+          </select>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button

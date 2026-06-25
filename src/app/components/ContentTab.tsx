@@ -83,6 +83,8 @@ import styles from "../page.module.css";
 
 const CONTENT_URL_KEY = "ta-content-course-url";
 const VIEW_KEY = "ta-content-view";
+// Persisted height (px) the user dragged the sticky module header down to.
+const HEADER_HEIGHT_KEY = "ta-content-header-height";
 
 const MAX_INDENT = 5;
 
@@ -2565,6 +2567,37 @@ function ModulesView({
   canCopy: boolean;
 }) {
   const [provider] = useLlmProvider();
+  // Resizable sticky header: null = natural height; a number caps the body's
+  // height (it scrolls) so the module list below gets more room. Persisted.
+  const headerBodyRef = useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const n = Number(localStorage.getItem(HEADER_HEIGHT_KEY));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (headerHeight == null) localStorage.removeItem(HEADER_HEIGHT_KEY);
+    else localStorage.setItem(HEADER_HEIGHT_KEY, String(Math.round(headerHeight)));
+  }, [headerHeight]);
+  const onResizeStart = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const body = headerBodyRef.current;
+    if (!body) return;
+    const top = body.getBoundingClientRect().top;
+    const onMove = (ev: PointerEvent) => {
+      const maxH = Math.max(120, window.innerHeight - top - 120);
+      setHeaderHeight(Math.min(maxH, Math.max(48, ev.clientY - top)));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.body.style.userSelect = "";
+    };
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
   const [newModuleName, setNewModuleName] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -4205,6 +4238,11 @@ function ModulesView({
   return (
     <div className={styles.form}>
       <div className={styles.ccStickyHeader}>
+        <div
+          className={styles.ccHeaderBody}
+          ref={headerBodyRef}
+          style={headerHeight != null ? { maxHeight: headerHeight, overflowY: "auto" } : undefined}
+        >
         <div className={styles.ccHeaderTop}>
           <h2 className={styles.ccCourseTitle}>{courseName || "Course content"}</h2>
           <div className={styles.ccBarGroup}>
@@ -4867,6 +4905,15 @@ function ModulesView({
           )}
         </div>
       )}
+        </div>
+        <div
+          className={styles.ccHeaderResize}
+          onPointerDown={onResizeStart}
+          onDoubleClick={() => setHeaderHeight(null)}
+          role="separator"
+          aria-orientation="horizontal"
+          title="Drag to make the header shorter; double-click to reset"
+        />
       </div>
 
       <div className={styles.field}>

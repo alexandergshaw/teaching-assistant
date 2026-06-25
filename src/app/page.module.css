@@ -3785,13 +3785,46 @@
   z-index: 30;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 10px 0 14px;
+  padding: 10px 0 0;
   background: var(--card-background);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--card-border);
   box-shadow: 0 8px 18px -12px rgba(15, 23, 42, 0.3);
+}
+
+/* The header's controls. When the user drags the resize handle shorter, this body
+   gets a max-height and scrolls, freeing vertical space for the module list. */
+.ccHeaderBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 10px;
+}
+
+/* Drag handle pinned at the header's bottom edge (outside the scrolling body). */
+.ccHeaderResize {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 12px;
+  flex-shrink: 0;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.ccHeaderResize::before {
+  content: "";
+  width: 40px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--card-border);
+  transition: background-color 0.15s ease, width 0.15s ease;
+}
+
+.ccHeaderResize:hover::before {
+  background: var(--accent);
+  width: 56px;
 }
 
 .ccHeaderTop {

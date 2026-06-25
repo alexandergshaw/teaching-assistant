@@ -97,7 +97,7 @@ import {
   type QuizQuestionInput,
 } from "@/lib/canvas-modules";
 import type { OfficeKind, OfficeParagraph } from "@/lib/office-edit";
-import { parseOfficeParagraphs, applyOfficeEdits } from "@/lib/office-edit";
+import { parseOfficeParagraphs, applyDocxSections } from "@/lib/office-edit";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -2501,18 +2501,20 @@ Return ONLY the replacement paragraph text — no JSON, no quotes, no commentary
 }
 
 /**
- * Rewrite the chosen paragraphs of the original syllabus .docx in place (only the
- * class-specific text changes; all other formatting is preserved) and return the
- * new file as base64.
+ * Rebuild the syllabus .docx from the instructor's ordered sections — supporting
+ * edited, deleted, and added paragraphs while preserving the original formatting —
+ * and return the new file as base64. Each section names the source paragraph id
+ * whose style it borrows; a known paragraph absent from the list is removed.
  */
 export async function buildAdaptedSyllabusAction(
   syllabusBase64: string,
-  edits: Record<string, string>
+  sections: Array<{ sourceId: string; text: string }>
 ): Promise<{ base64: string } | { error: string }> {
   try {
     await requireOwner();
     const buffer = Buffer.from(syllabusBase64, "base64");
-    const out = await applyOfficeEdits("docx", buffer, edits);
+    const knownIds = (await parseOfficeParagraphs("docx", buffer)).map((p) => p.id);
+    const out = await applyDocxSections(buffer, knownIds, sections);
     return { base64: out.toString("base64") };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not build the syllabus." };

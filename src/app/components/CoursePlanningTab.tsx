@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChangeEvent, ComponentType } from "react";
+import type { ChangeEvent, ComponentType, CSSProperties } from "react";
 import { useRef, useState, useEffect } from "react";
 import {
   parseSyllabusAction,
@@ -15,7 +15,6 @@ import {
   buildAdaptedSyllabusAction,
   type SyllabusSection,
   type CourseScheduleRow,
-  type SyllabusInputField,
   type SyllabusCourseInfo,
 } from "../actions";
 import SyllabusPreviewModal from "./SyllabusPreviewModal";
@@ -35,6 +34,22 @@ type CoursePlanningTabProps = {
 };
 
 type CoursePlanningStep = "form" | "preview";
+
+/** One editable section (paragraph) of the syllabus being adapted. */
+type AdaptSection = {
+  /** Stable React key. */
+  key: string;
+  /** Original paragraph id whose style/position this section borrows. */
+  sourceId: string;
+  /** Original text (for change detection / "Original:"); "" for added sections. */
+  original: string;
+  /** Current text. */
+  text: string;
+  /** Label for the guided field list; "Section" otherwise. */
+  label: string;
+  /** Whether the AI flagged this as a class-specific field (shown in the form). */
+  isField: boolean;
+};
 type PlanningMode = "syllabus" | "schedule" | "project" | "lecture";
 
 function escapeXml(str: string): string {
@@ -299,8 +314,11 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const adaptZipRef = useRef<HTMLInputElement>(null);
   const [adaptSyllabusBase64, setAdaptSyllabusBase64] = useState<string | null>(null);
   const [adaptSyllabusName, setAdaptSyllabusName] = useState("");
-  const [adaptFields, setAdaptFields] = useState<SyllabusInputField[] | null>(null);
-  const [adaptValues, setAdaptValues] = useState<Record<string, string>>({});
+  // The syllabus as an ordered, editable list of sections (paragraphs). Each
+  // borrows the style/position of its `sourceId` paragraph; added sections clone
+  // their anchor. null = not analyzed yet.
+  const [adaptSections, setAdaptSections] = useState<AdaptSection[] | null>(null);
+  const adaptKeySeq = useRef(0);
   const [adaptStatus, setAdaptStatus] = useState<"idle" | "analyzing" | "building">("idle");
   const [adaptError, setAdaptError] = useState<string | null>(null);
   // Instructor-provided course facts (asked for; not assumed across syllabi).
@@ -314,11 +332,9 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [adaptMeetingTimes, setAdaptMeetingTimes] = useState("");
   const [adaptLocation, setAdaptLocation] = useState("");
   // The full paragraph list + codebase summary, for the live preview and per-field regenerate.
-  const [adaptParagraphs, setAdaptParagraphs] = useState<Array<{ id: string; text: string }>>([]);
   const [adaptCodebaseSummary, setAdaptCodebaseSummary] = useState("");
-  const [adaptRegenId, setAdaptRegenId] = useState<string | null>(null);
+  const [adaptRegenKey, setAdaptRegenKey] = useState<string | null>(null);
   const [adaptShowPreview, setAdaptShowPreview] = useState(false);
-  const adaptFieldIds = new Set((adaptFields ?? []).map((f) => f.paragraphId));
 
   const getFullContext = () => {
     const parts = [
@@ -483,7 +499,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     const zipFile = adaptZipRef.current?.files?.[0] ?? null;
     setAdaptStatus("analyzing");
     setAdaptError(null);
-    setAdaptFields(null);
+    setAdaptSections(null);
     try {
       const syllabusBase64 = await readFileBase64(syllabusFile);
       const zipBase64 = zipFile ? await readFileBase64(zipFile) : null;
@@ -499,14 +515,23 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         setAdaptError(result.error);
         return;
       }
-      setAdaptFields(result.fields);
-      // Seed editable values with the field suggestions AND the full schedule
-      // replacement, so the old schedule is cleared and replaced on download.
-      setAdaptValues({
-        ...Object.fromEntries(result.fields.map((f) => [f.paragraphId, f.suggestedText])),
-        ...result.scheduleReplacements,
+      // Build the editable section list: each paragraph, with the AI field
+      // suggestion or schedule replacement applied.
+      const fieldById = new Map(result.fields.map((f) => [f.paragraphId, f]));
+      const sections: AdaptSection[] = result.paragraphs.map((p) => {
+        const field = fieldById.get(p.id);
+        const sched = result.scheduleReplacements[p.id];
+        const text = field ? field.suggestedText : sched !== undefined ? sched : p.text;
+        return {
+          key: p.id,
+          sourceId: p.id,
+          original: p.text,
+          text,
+          label: field?.label ?? "Section",
+          isField: !!field,
+        };
       });
-      setAdaptParagraphs(result.paragraphs);
+      setAdaptSections(sections);
       setAdaptCodebaseSummary(result.codebaseSummary);
     } catch (err) {
       setAdaptError(err instanceof Error ? err.message : "Failed to analyze the syllabus.");
@@ -527,13 +552,36 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     location: adaptLocation.trim() || undefined,
   });
 
-  // Regenerate the text of one field with AI, leaving the others untouched.
-  const handleRegenerateField = async (field: SyllabusInputField) => {
-    setAdaptRegenId(field.paragraphId);
+  const updateSection = (key: string, patch: Partial<AdaptSection>) =>
+    setAdaptSections((prev) => (prev ? prev.map((s) => (s.key === key ? { ...s, ...patch } : s)) : prev));
+
+  const deleteSection = (key: string) =>
+    setAdaptSections((prev) => (prev ? prev.filter((s) => s.key !== key) : prev));
+
+  // Add a blank section right after `key`, cloning that section's style anchor.
+  const addSectionAfter = (key: string) =>
+    setAdaptSections((prev) => {
+      if (!prev) return prev;
+      const idx = prev.findIndex((s) => s.key === key);
+      if (idx === -1) return prev;
+      const fresh: AdaptSection = {
+        key: `new-${adaptKeySeq.current++}`,
+        sourceId: prev[idx].sourceId,
+        original: "",
+        text: "",
+        label: "New section",
+        isField: false,
+      };
+      return [...prev.slice(0, idx + 1), fresh, ...prev.slice(idx + 1)];
+    });
+
+  // Regenerate one section's text with AI, leaving the others untouched.
+  const handleRegenerateAdaptSection = async (section: AdaptSection) => {
+    setAdaptRegenKey(section.key);
     setAdaptError(null);
     try {
       const result = await regenerateSyllabusFieldAction(
-        { label: field.label, currentText: field.currentText },
+        { label: section.label, currentText: section.original || section.text },
         adaptCodebaseSummary,
         adaptCourseInfo(),
         getStoredProvider()
@@ -542,29 +590,23 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         setAdaptError(result.error);
         return;
       }
-      setAdaptValues((prev) => ({ ...prev, [field.paragraphId]: result.text }));
+      updateSection(section.key, { text: result.text });
     } catch (err) {
-      setAdaptError(err instanceof Error ? err.message : "Failed to regenerate the field.");
+      setAdaptError(err instanceof Error ? err.message : "Failed to regenerate the section.");
     } finally {
-      setAdaptRegenId(null);
+      setAdaptRegenKey(null);
     }
   };
 
-  // Write the instructor's values into the original .docx in place (only the
-  // class-specific paragraphs change) and download the result.
+  // Build the .docx from the current ordered sections (edits, additions, and
+  // deletions) and download it.
   const handleBuildAdaptedSyllabus = async () => {
-    if (!adaptSyllabusBase64 || !adaptFields) return;
-    // Write any paragraph whose value differs from the original — this covers the
-    // AI-flagged fields and any edits made directly in the preview.
-    const edits: Record<string, string> = {};
-    for (const p of adaptParagraphs) {
-      const value = adaptValues[p.id];
-      if (value !== undefined && value !== p.text) edits[p.id] = value;
-    }
+    if (!adaptSyllabusBase64 || !adaptSections) return;
+    const payload = adaptSections.map((s) => ({ sourceId: s.sourceId, text: s.text }));
     setAdaptStatus("building");
     setAdaptError(null);
     try {
-      const result = await buildAdaptedSyllabusAction(adaptSyllabusBase64, edits);
+      const result = await buildAdaptedSyllabusAction(adaptSyllabusBase64, payload);
       if ("error" in result) {
         setAdaptError(result.error);
         return;
@@ -933,63 +975,61 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                 onClick={handleAnalyzeSyllabus}
                 disabled={adaptStatus !== "idle"}
               >
-                {adaptStatus === "analyzing" ? "Analyzing…" : adaptFields ? "Re-analyze" : "Analyze syllabus"}
+                {adaptStatus === "analyzing" ? "Analyzing…" : adaptSections ? "Re-analyze" : "Analyze syllabus"}
               </button>
 
-              {adaptFields && adaptFields.length > 0 && (
+              {adaptSections && adaptSections.length > 0 && (
                 <>
-                  <p style={{ marginTop: 22, fontWeight: 600 }}>
-                    {adaptFields.length} class-specific section{adaptFields.length === 1 ? "" : "s"} to confirm
-                  </p>
-                  {adaptFields.map((f) => {
-                    const value = adaptValues[f.paragraphId] ?? "";
-                    return (
-                      <div key={f.paragraphId} className={styles.field}>
-                        <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                          <span>{f.label}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleRegenerateField(f)}
-                            disabled={adaptRegenId !== null}
-                            style={{
-                              fontSize: "0.78rem",
-                              fontWeight: 600,
-                              color: "var(--accent)",
-                              background: "transparent",
-                              border: "1px solid var(--field-border)",
-                              borderRadius: 8,
-                              padding: "3px 10px",
-                              cursor: adaptRegenId !== null ? "default" : "pointer",
-                              opacity: adaptRegenId !== null && adaptRegenId !== f.paragraphId ? 0.5 : 1,
-                            }}
-                          >
-                            {adaptRegenId === f.paragraphId ? "Regenerating…" : "Regenerate"}
-                          </button>
-                        </label>
-                        <textarea
-                          className={styles.textInput}
-                          rows={Math.max(2, Math.min(8, Math.round(value.length / 70) + 1))}
-                          value={value}
-                          onChange={(e) =>
-                            setAdaptValues((prev) => ({ ...prev, [f.paragraphId]: e.target.value }))
-                          }
-                        />
-                        {f.currentText && f.currentText !== value && (
-                          <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 0" }}>
-                            Original: {f.currentText}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
+                  {adaptSections.some((s) => s.isField) && (
+                    <>
+                      <p style={{ marginTop: 22, fontWeight: 600 }}>
+                        {adaptSections.filter((s) => s.isField).length} class-specific section
+                        {adaptSections.filter((s) => s.isField).length === 1 ? "" : "s"} to confirm
+                      </p>
+                      {adaptSections
+                        .filter((s) => s.isField)
+                        .map((s) => (
+                          <div key={s.key} className={styles.field}>
+                            <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                              <span>{s.label}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleRegenerateAdaptSection(s)}
+                                disabled={adaptRegenKey !== null}
+                                style={{
+                                  fontSize: "0.78rem",
+                                  fontWeight: 600,
+                                  color: "var(--accent)",
+                                  background: "transparent",
+                                  border: "1px solid var(--field-border)",
+                                  borderRadius: 8,
+                                  padding: "3px 10px",
+                                  cursor: adaptRegenKey !== null ? "default" : "pointer",
+                                  opacity: adaptRegenKey !== null && adaptRegenKey !== s.key ? 0.5 : 1,
+                                }}
+                              >
+                                {adaptRegenKey === s.key ? "Regenerating…" : "Regenerate"}
+                              </button>
+                            </label>
+                            <textarea
+                              className={styles.textInput}
+                              rows={Math.max(2, Math.min(8, Math.round(s.text.length / 70) + 1))}
+                              value={s.text}
+                              onChange={(e) => updateSection(s.key, { text: e.target.value })}
+                            />
+                            {s.original && s.original !== s.text && (
+                              <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 0" }}>
+                                Original: {s.original}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                    </>
+                  )}
 
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-                    <button
-                      type="button"
-                      className={styles.submitButton}
-                      onClick={() => setAdaptShowPreview((v) => !v)}
-                    >
-                      {adaptShowPreview ? "Hide preview" : "Preview syllabus"}
+                    <button type="button" className={styles.submitButton} onClick={() => setAdaptShowPreview((v) => !v)}>
+                      {adaptShowPreview ? "Hide preview" : "Preview & edit syllabus"}
                     </button>
                     <button
                       type="button"
@@ -1014,34 +1054,67 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                       }}
                     >
                       <p style={{ margin: "0 0 12px", fontSize: "0.8rem", color: "#6b7280" }}>
-                        Editable preview — click any line to change it. Highlighted lines are the AI-identified
-                        class-specific sections. Edits here are included when you download.
+                        Editable preview — edit any line, regenerate it with AI, add a section below it, or delete
+                        it. Everything here is written to the .docx when you download.
                       </p>
-                      {adaptParagraphs.map((p) => {
-                        const value = adaptValues[p.id] ?? p.text;
-                        const isField = adaptFieldIds.has(p.id) || (p.id in adaptValues && adaptValues[p.id] !== p.text);
+                      {adaptSections.map((s) => {
+                        const changed = s.isField || s.text !== s.original;
+                        const miniBtn: CSSProperties = {
+                          width: 26,
+                          height: 24,
+                          fontSize: "0.75rem",
+                          fontWeight: 700,
+                          lineHeight: 1,
+                          borderRadius: 6,
+                          border: "1px solid var(--field-border)",
+                          background: "#fff",
+                          color: "#475569",
+                          cursor: "pointer",
+                        };
                         return (
-                          <textarea
-                            key={p.id}
-                            value={value}
-                            onChange={(e) => setAdaptValues((prev) => ({ ...prev, [p.id]: e.target.value }))}
-                            rows={Math.max(1, Math.ceil(value.length / 95))}
-                            style={{
-                              display: "block",
-                              width: "100%",
-                              border: "none",
-                              outline: "none",
-                              resize: "vertical",
-                              background: isField ? "rgba(37, 99, 235, 0.08)" : "transparent",
-                              color: "#1f2933",
-                              font: "inherit",
-                              fontSize: "0.95rem",
-                              lineHeight: 1.5,
-                              padding: isField ? "4px 6px" : "2px 0",
-                              margin: "0 0 6px",
-                              borderRadius: 4,
-                            }}
-                          />
+                          <div key={s.key} style={{ display: "flex", gap: 6, alignItems: "flex-start", margin: "0 0 8px" }}>
+                            <textarea
+                              value={s.text}
+                              onChange={(e) => updateSection(s.key, { text: e.target.value })}
+                              rows={Math.max(1, Math.ceil((s.text.length || 1) / 90))}
+                              placeholder="(empty section)"
+                              style={{
+                                flex: 1,
+                                border: "1px solid transparent",
+                                outline: "none",
+                                resize: "vertical",
+                                background: changed ? "rgba(37, 99, 235, 0.08)" : "transparent",
+                                color: "#1f2933",
+                                font: "inherit",
+                                fontSize: "0.95rem",
+                                lineHeight: 1.5,
+                                padding: "4px 6px",
+                                borderRadius: 4,
+                              }}
+                            />
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
+                              <button
+                                type="button"
+                                title="Regenerate this section with AI"
+                                onClick={() => handleRegenerateAdaptSection(s)}
+                                disabled={adaptRegenKey !== null}
+                                style={{ ...miniBtn, color: "var(--accent)", opacity: adaptRegenKey !== null && adaptRegenKey !== s.key ? 0.5 : 1 }}
+                              >
+                                {adaptRegenKey === s.key ? "…" : "AI"}
+                              </button>
+                              <button type="button" title="Add a section below" onClick={() => addSectionAfter(s.key)} style={miniBtn}>
+                                +
+                              </button>
+                              <button
+                                type="button"
+                                title="Delete this section"
+                                onClick={() => deleteSection(s.key)}
+                                style={{ ...miniBtn, color: "#b91c1c" }}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          </div>
                         );
                       })}
                     </div>

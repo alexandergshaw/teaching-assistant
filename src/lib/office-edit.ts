@@ -143,3 +143,43 @@ export async function applyOfficeEdits(
 
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
 }
+
+/**
+ * Rebuild a .docx from an ordered list of sections so paragraphs can be edited,
+ * deleted, or added while keeping the original formatting. Each section names the
+ * source paragraph id whose style/position it borrows; multiple sections may share
+ * a source id (the first rewrites that paragraph, the rest are clones placed right
+ * after it, inheriting its style). A known paragraph with no section is dropped.
+ * Empty/structural paragraphs (not in `knownIds`) are always kept untouched.
+ */
+export async function applyDocxSections(
+  buffer: Buffer,
+  knownIds: string[],
+  sections: Array<{ sourceId: string; text: string }>
+): Promise<Buffer> {
+  const groups = new Map<string, string[]>();
+  for (const s of sections) {
+    const list = groups.get(s.sourceId);
+    if (list) list.push(s.text);
+    else groups.set(s.sourceId, [s.text]);
+  }
+  const known = new Set(knownIds);
+
+  const zip = await JSZip.loadAsync(buffer);
+  const file = zip.file("word/document.xml");
+  if (!file) return buffer;
+  let xml = await file.async("string");
+  let i = -1;
+  xml = xml.replace(DOCX_PARA, (para) => {
+    i += 1;
+    const id = `p${i}`;
+    if (!known.has(id)) return para; // empty/structural paragraph — leave as-is
+    const texts = groups.get(id);
+    if (!texts || texts.length === 0) return ""; // deleted by the user
+    let out = rewriteRuns(para, texts[0], "w:t");
+    for (let k = 1; k < texts.length; k += 1) out += rewriteRuns(para, texts[k], "w:t");
+    return out;
+  });
+  zip.file("word/document.xml", xml);
+  return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+}

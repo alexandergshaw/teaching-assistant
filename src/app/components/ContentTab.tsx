@@ -45,7 +45,10 @@ import {
   getSelectiveDataAction,
   submitSelectiveImportAction,
   listCoursesAction,
+  generateDocumentTextAction,
 } from "../actions";
+import { buildDocxFromPlainText } from "@/lib/docx";
+import { resolveDocumentAuthor } from "@/lib/author";
 import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
 import FilePreviewModal, { type PreviewFile } from "./FilePreviewModal";
@@ -2515,6 +2518,7 @@ function ModulesView({
   refreshing: boolean;
   canCopy: boolean;
 }) {
+  const [provider] = useLlmProvider();
   const [newModuleName, setNewModuleName] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -2580,6 +2584,13 @@ function ModulesView({
   const [bulkAddDescription, setBulkAddDescription] = useState("");
   const [bulkAddQuestions, setBulkAddQuestions] = useState<EditableQuestion[]>([]);
   const [bulkQuestionsOpen, setBulkQuestionsOpen] = useState(false);
+  // For the "File" type: an existing course file to add to each module, or AI-
+  // generated HTML uploaded as a new .html file (named via the pattern) per module.
+  const [bulkAddFileId, setBulkAddFileId] = useState<number | "">("");
+  const [bulkAddFileContent, setBulkAddFileContent] = useState("");
+  // AI prompt + busy flag for generating the item's content (description/body/file).
+  const [bulkAiPrompt, setBulkAiPrompt] = useState("");
+  const [bulkAiBusy, setBulkAiBusy] = useState(false);
   // Editing the description / quiz questions of the items already selected.
   const [bulkItemsDescription, setBulkItemsDescription] = useState("");
   const [bulkItemsQuestions, setBulkItemsQuestions] = useState<EditableQuestion[]>([]);
@@ -3078,12 +3089,31 @@ function ModulesView({
       rubricId?: number;
       description?: string;
       questions?: EditableQuestion[];
+      fileId?: number;
+      fileContent?: string;
     }
   ): Promise<boolean> => {
     try {
       if (type === "SubHeader") {
         const r = await createModuleItemAction(courseUrl, moduleId, { type: "SubHeader", title: name }, acronym);
         return !("error" in r);
+      }
+      if (type === "File") {
+        // AI-generated content is built into a branded .docx and uploaded as a new
+        // file; otherwise link the chosen existing course file into this module.
+        if (opts?.fileContent && opts.fileContent.trim() !== "") {
+          const buffer = await buildDocxFromPlainText(opts.fileContent, undefined, resolveDocumentAuthor());
+          const file = new File([buffer], `${name}.docx`, {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          });
+          await uploadFileToModule(courseUrl, acronym, moduleId, file);
+          return true;
+        }
+        if (opts?.fileId != null) {
+          const r = await createModuleItemAction(courseUrl, moduleId, { type: "File", contentId: opts.fileId }, acronym);
+          return !("error" in r);
+        }
+        return false;
       }
       if (type === "Page") {
         const created = await createPageAction(
@@ -3124,12 +3154,23 @@ function ModulesView({
   const bulkAddToModules = () => {
     const targets = modules.filter((mod) => selectedModules.has(mod.id));
     if (targets.length === 0) return;
+    const type = bulkAddType;
     const pattern = bulkAddPattern.trim();
-    if (!pattern) {
+    const fileId = type === "File" && bulkAddFileId !== "" ? Number(bulkAddFileId) : undefined;
+    const fileContent = type === "File" && bulkAddFileContent.trim() !== "" ? bulkAddFileContent : undefined;
+    if (type === "File") {
+      if (fileContent === undefined && fileId === undefined) {
+        setNote({ kind: "error", text: "Pick a file to add, or generate one with AI first." });
+        return;
+      }
+      if (fileContent !== undefined && !pattern) {
+        setNote({ kind: "error", text: "Enter a name pattern for the generated file." });
+        return;
+      }
+    } else if (!pattern) {
       setNote({ kind: "error", text: "Enter a name pattern for the new items." });
       return;
     }
-    const type = bulkAddType;
     const isGradable = ["Assignment", "Quiz", "Discussion"].includes(type);
     // Gather the optional details; each only applies to the types that support it.
     const points =
@@ -3168,6 +3209,8 @@ function ModulesView({
           rubricId,
           description,
           questions,
+          fileId,
+          fileContent,
         });
         if (ok) added += 1;
         else failed += 1;
@@ -3179,6 +3222,40 @@ function ModulesView({
       });
       reload();
     })();
+  };
+
+  // Generate the "Add to each" content with AI: an HTML description/body for
+  // gradables and pages, or HTML file content when adding a File. The result fills
+  // the matching field for review before the items are created.
+  const bulkAiGenerate = async () => {
+    if (!bulkAiPrompt.trim()) {
+      setNote({ kind: "error", text: "Describe what to generate first." });
+      return;
+    }
+    setBulkAiBusy(true);
+    setNote(null);
+    if (bulkAddType === "File") {
+      // Files become a branded .docx, so generate markdown-ish document text.
+      const result = await generateDocumentTextAction(bulkAiPrompt.trim(), provider);
+      setBulkAiBusy(false);
+      if ("error" in result) {
+        setNote({ kind: "error", text: result.error });
+        return;
+      }
+      setBulkAddFileContent(result.text);
+      setNote({ kind: "success", text: "Generated document text — review it below, then Add to build a .docx per module." });
+      return;
+    }
+    // Other types take an HTML description/body.
+    const instruction = `Write the full HTML body for a ${bulkAddType.toLowerCase()} in a course. ${bulkAiPrompt.trim()}`;
+    const result = await revisePageWithAiAction("", instruction, provider);
+    setBulkAiBusy(false);
+    if ("error" in result) {
+      setNote({ kind: "error", text: result.error });
+      return;
+    }
+    setBulkAddDescription(result.html);
+    setNote({ kind: "success", text: "Generated content — review it above, then Add." });
   };
 
   // Run a bulk op that returns an {updated, failures} summary; report + refresh.
@@ -4157,20 +4234,29 @@ function ModulesView({
                 <select
                   className={styles.bulkSelect}
                   value={bulkAddType}
-                  onChange={(e) => setBulkAddType(e.target.value)}
+                  onChange={(e) => {
+                    const t = e.target.value;
+                    setBulkAddType(t);
+                    if (t === "File") ensureTargets();
+                  }}
                   aria-label="Type of item to add to each selected module"
                 >
                   <option value="Assignment">Assignment</option>
                   <option value="Quiz">Quiz</option>
                   <option value="Discussion">Discussion</option>
                   <option value="Page">Page</option>
+                  <option value="File">File</option>
                   <option value="SubHeader">Text header</option>
                 </select>
                 <input
                   type="text"
                   className={styles.bulkInput}
                   style={{ flex: "1 1 200px", minWidth: 170 }}
-                  placeholder="Name pattern, e.g. {module} - Homework"
+                  placeholder={
+                    bulkAddType === "File"
+                      ? "File name pattern (for an AI-generated file)"
+                      : "Name pattern, e.g. {module} - Homework"
+                  }
                   value={bulkAddPattern}
                   onChange={(e) => setBulkAddPattern(e.target.value)}
                   aria-label="Name pattern for the new items"
@@ -4178,7 +4264,14 @@ function ModulesView({
                 <button
                   type="button"
                   className={styles.bulkBtnPrimary}
-                  disabled={opBusy || !bulkAddPattern.trim()}
+                  disabled={
+                    opBusy ||
+                    bulkAiBusy ||
+                    (bulkAddType === "File"
+                      ? (bulkAddFileContent.trim() === "" && bulkAddFileId === "") ||
+                        (bulkAddFileContent.trim() !== "" && !bulkAddPattern.trim())
+                      : !bulkAddPattern.trim())
+                  }
                   onClick={bulkAddToModules}
                   title="Add one new item to each selected module"
                 >
@@ -4188,6 +4281,35 @@ function ModulesView({
                   {"{module}"} = module name, {"{n}"} = week/module number from the title (e.g. &quot;Week 5&quot; -&gt; 5). New items are unpublished.
                 </span>
               </div>
+              {bulkAddType === "File" && (
+                <div className={styles.bulkRow}>
+                  <span className={styles.bulkLabel}>File</span>
+                  <select
+                    className={styles.bulkSelect}
+                    style={{ flex: "1 1 220px", maxWidth: 340 }}
+                    value={bulkAddFileId}
+                    disabled={opBusy || bulkAddFileContent.trim() !== "" || optionsFor("File").length === 0}
+                    onChange={(e) => setBulkAddFileId(e.target.value === "" ? "" : Number(e.target.value))}
+                    aria-label="Existing file to add to each module"
+                  >
+                    <option value="">{contentPlaceholder("File")}</option>
+                    {optionsFor("File").map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  {bulkAddFileContent.trim() !== "" && (
+                    <button type="button" className={styles.bulkBtn} onClick={() => setBulkAddFileContent("")}>
+                      Discard AI file
+                    </button>
+                  )}
+                  <span className={styles.bulkHint}>
+                    Add an existing course file to every selected module, or generate a new one with AI
+                    below (built into a branded .docx named with the pattern).
+                  </span>
+                </div>
+              )}
               {["Assignment", "Quiz", "Discussion"].includes(bulkAddType) && (
                 <div className={styles.bulkRow}>
                   <span className={styles.bulkLabel}>Details</span>
@@ -4261,19 +4383,27 @@ function ModulesView({
                   </span>
                 </div>
               )}
-              {["Assignment", "Quiz", "Discussion", "Page"].includes(bulkAddType) && (
+              {["Assignment", "Quiz", "Discussion", "Page", "File"].includes(bulkAddType) && (
                 <div className={styles.bulkRow}>
-                  <span className={styles.bulkLabel}>{bulkAddType === "Page" ? "Body" : "Description"}</span>
+                  <span className={styles.bulkLabel}>
+                    {bulkAddType === "Page" ? "Body" : bulkAddType === "File" ? "File content" : "Description"}
+                  </span>
                   <textarea
-                    value={bulkAddDescription}
-                    onChange={(e) => setBulkAddDescription(e.target.value)}
+                    value={bulkAddType === "File" ? bulkAddFileContent : bulkAddDescription}
+                    onChange={(e) =>
+                      bulkAddType === "File"
+                        ? setBulkAddFileContent(e.target.value)
+                        : setBulkAddDescription(e.target.value)
+                    }
                     placeholder={
                       bulkAddType === "Page"
                         ? "Page body (HTML allowed) — written to every new page"
-                        : "Description (HTML allowed) — written to every new item"
+                        : bulkAddType === "File"
+                          ? "Document text (use # Title, ## Section, - bullets) — generate with AI below or write it here; built into a .docx. Leave empty to use the picked file"
+                          : "Description (HTML allowed) — written to every new item"
                     }
                     spellCheck
-                    aria-label="Description for the new items"
+                    aria-label={bulkAddType === "File" ? "File content for the new files" : "Description for the new items"}
                     style={{
                       flexBasis: "100%",
                       width: "100%",
@@ -4302,6 +4432,37 @@ function ModulesView({
                   )}
                   <span className={styles.bulkHint}>
                     Composed once here and created in every new quiz.
+                  </span>
+                </div>
+              )}
+              {bulkAddType !== "SubHeader" && (
+                <div className={styles.bulkRow}>
+                  <span className={styles.bulkLabel}>AI</span>
+                  <input
+                    type="text"
+                    className={styles.bulkInput}
+                    style={{ flex: "1 1 260px", minWidth: 200 }}
+                    placeholder={
+                      bulkAddType === "File"
+                        ? "Describe the file to generate, e.g. a one-page study guide on photosynthesis"
+                        : `Describe the ${bulkAddType.toLowerCase()} content to generate`
+                    }
+                    value={bulkAiPrompt}
+                    onChange={(e) => setBulkAiPrompt(e.target.value)}
+                    aria-label="AI prompt for the new content"
+                  />
+                  <button
+                    type="button"
+                    className={styles.bulkBtn}
+                    disabled={bulkAiBusy || opBusy || !bulkAiPrompt.trim()}
+                    onClick={() => void bulkAiGenerate()}
+                  >
+                    {bulkAiBusy ? "Generating…" : "Generate with AI"}
+                  </button>
+                  <span className={styles.bulkHint}>
+                    {bulkAddType === "File"
+                      ? "Generates the document text above; review it, then Add to build a branded .docx for every module."
+                      : "Fills the description/body above with generated HTML; review it, then Add."}
                   </span>
                 </div>
               )}

@@ -2056,6 +2056,61 @@ Requirements:
   }
 }
 
+/**
+ * Generate a course document's content as clean, markdown-ish plain text suited
+ * to buildDocxFromPlainText (a "# Title" line, "## Section" headings, "- " bullet
+ * lists, and paragraphs). Used by "Add to each" to produce a branded .docx file.
+ */
+export async function generateDocumentTextAction(
+  prompt: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ text: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!prompt.trim()) {
+      return { error: "Describe the document to generate first." };
+    }
+    const llmPrompt = `You are writing a polished course handout/document for students.
+
+TOPIC / INSTRUCTION:
+${prompt.trim()}
+
+Write the document as clean plain text using this lightweight markdown:
+- The first line is the document title, prefixed with a single "# ".
+- Major sections use "## " headings.
+- Use "- " for bullet points.
+- Separate paragraphs with a blank line.
+
+Requirements:
+- Return ONLY the document text. No code fences, no commentary, no HTML.
+- Be clear, well-organized, and professional.
+- Do not invent specific facts, dates, names, or links that were not provided.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: llmPrompt }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { error: `Generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+
+    // Strip a stray ``` fence if the model wraps the output.
+    let text = result.text.trim();
+    const fenced = text.match(/```(?:markdown|md|text)?\s*([\s\S]*?)```/i);
+    if (fenced) text = fenced[1].trim();
+    if (!text) {
+      return { error: "The model returned an empty document." };
+    }
+    return { text };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
 // ── Google Calendar scheduling ──────────────────────────────────────────────
 
 /** Whether the owner has connected Google Calendar (and can read free/busy). */

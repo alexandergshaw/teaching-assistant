@@ -46,8 +46,10 @@ import {
   submitSelectiveImportAction,
   listCoursesAction,
   generateDocumentTextAction,
+  generateSlidesAction,
 } from "../actions";
 import { buildDocxFromPlainText } from "@/lib/docx";
+import { buildSlidesPptx } from "@/lib/pptx";
 import { resolveDocumentAuthor } from "@/lib/author";
 import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
@@ -123,6 +125,50 @@ const ROW_INTERACTIVE = "button, a, input, select, textarea, label, [role='butto
 function rowBlankClick(e: React.MouseEvent, toggle: () => void) {
   if ((e.target as HTMLElement).closest(ROW_INTERACTIVE)) return;
   toggle();
+}
+
+// ── Slide deck <-> plain text (for the "Add to each" .pptx generator) ─────────
+// A deck is kept as editable plain text so it shares the one content textarea
+// with documents: "# Presentation Title", then a "## Slide title" per slide with
+// "- bullet" lines beneath it.
+type SlideDeck = { presentationTitle: string; slides: Array<{ title: string; bullets: string[] }> };
+
+function slidesToText(deck: SlideDeck): string {
+  const parts: string[] = [`# ${deck.presentationTitle}`];
+  for (const s of deck.slides) {
+    parts.push("", `## ${s.title}`, ...s.bullets.map((b) => `- ${b}`));
+  }
+  return parts.join("\n");
+}
+
+function textToSlides(text: string): SlideDeck {
+  let presentationTitle = "Presentation";
+  let titleSet = false;
+  const slides: SlideDeck["slides"] = [];
+  let current: SlideDeck["slides"][number] | null = null;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const h2 = line.match(/^##\s+(.*)$/);
+    const h1 = line.match(/^#\s+(.*)$/);
+    const bullet = line.match(/^[-*•]\s+(.*)$/);
+    if (h2) {
+      current = { title: h2[1].trim(), bullets: [] };
+      slides.push(current);
+    } else if (h1 && !titleSet) {
+      presentationTitle = h1[1].trim() || presentationTitle;
+      titleSet = true;
+    } else {
+      const value = bullet ? bullet[1].trim() : line;
+      if (!current) {
+        current = { title: value, bullets: [] };
+        slides.push(current);
+      } else {
+        current.bullets.push(value);
+      }
+    }
+  }
+  return { presentationTitle, slides: slides.filter((s) => s.title || s.bullets.length > 0) };
 }
 
 // Item types that carry a due date / points (graded). Decide which rows show them.
@@ -2585,9 +2631,10 @@ function ModulesView({
   const [bulkAddQuestions, setBulkAddQuestions] = useState<EditableQuestion[]>([]);
   const [bulkQuestionsOpen, setBulkQuestionsOpen] = useState(false);
   // For the "File" type: an existing course file to add to each module, or AI-
-  // generated HTML uploaded as a new .html file (named via the pattern) per module.
+  // generated content built into a new file (docx or pptx) per module.
   const [bulkAddFileId, setBulkAddFileId] = useState<number | "">("");
   const [bulkAddFileContent, setBulkAddFileContent] = useState("");
+  const [bulkAddFileFormat, setBulkAddFileFormat] = useState<"docx" | "pptx">("docx");
   // AI prompt + busy flag for generating the item's content (description/body/file).
   const [bulkAiPrompt, setBulkAiPrompt] = useState("");
   const [bulkAiBusy, setBulkAiBusy] = useState(false);
@@ -3091,6 +3138,7 @@ function ModulesView({
       questions?: EditableQuestion[];
       fileId?: number;
       fileContent?: string;
+      fileFormat?: "docx" | "pptx";
     }
   ): Promise<boolean> => {
     try {
@@ -3099,10 +3147,24 @@ function ModulesView({
         return !("error" in r);
       }
       if (type === "File") {
-        // AI-generated content is built into a branded .docx and uploaded as a new
-        // file; otherwise link the chosen existing course file into this module.
+        // AI-generated content is built into a branded .docx or .pptx and uploaded
+        // as a new file; otherwise link the chosen existing course file here.
         if (opts?.fileContent && opts.fileContent.trim() !== "") {
-          const buffer = await buildDocxFromPlainText(opts.fileContent, undefined, resolveDocumentAuthor());
+          const author = resolveDocumentAuthor();
+          if (opts.fileFormat === "pptx") {
+            const deck = textToSlides(opts.fileContent);
+            const buffer = await buildSlidesPptx({
+              presentationTitle: deck.presentationTitle,
+              slides: deck.slides,
+              author,
+            });
+            const file = new File([buffer], `${name}.pptx`, {
+              type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            });
+            await uploadFileToModule(courseUrl, acronym, moduleId, file);
+            return true;
+          }
+          const buffer = await buildDocxFromPlainText(opts.fileContent, undefined, author);
           const file = new File([buffer], `${name}.docx`, {
             type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
           });
@@ -3211,6 +3273,7 @@ function ModulesView({
           questions,
           fileId,
           fileContent,
+          fileFormat: bulkAddFileFormat,
         });
         if (ok) added += 1;
         else failed += 1;
@@ -3235,7 +3298,19 @@ function ModulesView({
     setBulkAiBusy(true);
     setNote(null);
     if (bulkAddType === "File") {
-      // Files become a branded .docx, so generate markdown-ish document text.
+      // Files become a branded .docx or .pptx. For slides, generate a structured
+      // deck and keep it as editable text; for documents, markdown-ish text.
+      if (bulkAddFileFormat === "pptx") {
+        const result = await generateSlidesAction(bulkAiPrompt.trim(), provider);
+        setBulkAiBusy(false);
+        if ("error" in result) {
+          setNote({ kind: "error", text: result.error });
+          return;
+        }
+        setBulkAddFileContent(slidesToText(result));
+        setNote({ kind: "success", text: "Generated slides — review them below, then Add to build a .pptx per module." });
+        return;
+      }
       const result = await generateDocumentTextAction(bulkAiPrompt.trim(), provider);
       setBulkAiBusy(false);
       if ("error" in result) {
@@ -4284,15 +4359,27 @@ function ModulesView({
               {bulkAddType === "File" && (
                 <div className={styles.bulkRow}>
                   <span className={styles.bulkLabel}>File</span>
+                  <span className={styles.bulkField}>
+                    <span className={styles.bulkFieldLabel}>New file</span>
+                    <select
+                      className={styles.bulkSelect}
+                      value={bulkAddFileFormat}
+                      onChange={(e) => setBulkAddFileFormat(e.target.value === "pptx" ? "pptx" : "docx")}
+                      aria-label="Format of the generated file"
+                    >
+                      <option value="docx">Word (.docx)</option>
+                      <option value="pptx">PowerPoint (.pptx)</option>
+                    </select>
+                  </span>
                   <select
                     className={styles.bulkSelect}
-                    style={{ flex: "1 1 220px", maxWidth: 340 }}
+                    style={{ flex: "1 1 200px", maxWidth: 300 }}
                     value={bulkAddFileId}
                     disabled={opBusy || bulkAddFileContent.trim() !== "" || optionsFor("File").length === 0}
                     onChange={(e) => setBulkAddFileId(e.target.value === "" ? "" : Number(e.target.value))}
                     aria-label="Existing file to add to each module"
                   >
-                    <option value="">{contentPlaceholder("File")}</option>
+                    <option value="">{`or pick existing — ${contentPlaceholder("File")}`}</option>
                     {optionsFor("File").map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}
@@ -4305,8 +4392,9 @@ function ModulesView({
                     </button>
                   )}
                   <span className={styles.bulkHint}>
-                    Add an existing course file to every selected module, or generate a new one with AI
-                    below (built into a branded .docx named with the pattern).
+                    Add an existing course file to every selected module, or generate a new{" "}
+                    {bulkAddFileFormat === "pptx" ? "PowerPoint deck" : "Word document"} with AI below
+                    (built into a branded {bulkAddFileFormat === "pptx" ? ".pptx" : ".docx"} named with the pattern).
                   </span>
                 </div>
               )}
@@ -4386,7 +4474,13 @@ function ModulesView({
               {["Assignment", "Quiz", "Discussion", "Page", "File"].includes(bulkAddType) && (
                 <div className={styles.bulkRow}>
                   <span className={styles.bulkLabel}>
-                    {bulkAddType === "Page" ? "Body" : bulkAddType === "File" ? "File content" : "Description"}
+                    {bulkAddType === "Page"
+                      ? "Body"
+                      : bulkAddType === "File"
+                        ? bulkAddFileFormat === "pptx"
+                          ? "Slides"
+                          : "File content"
+                        : "Description"}
                   </span>
                   <textarea
                     value={bulkAddType === "File" ? bulkAddFileContent : bulkAddDescription}
@@ -4399,7 +4493,9 @@ function ModulesView({
                       bulkAddType === "Page"
                         ? "Page body (HTML allowed) — written to every new page"
                         : bulkAddType === "File"
-                          ? "Document text (use # Title, ## Section, - bullets) — generate with AI below or write it here; built into a .docx. Leave empty to use the picked file"
+                          ? bulkAddFileFormat === "pptx"
+                            ? "Slides — # Presentation title, then ## Slide title with - bullets. Generate with AI below or write them here; built into a .pptx. Leave empty to use the picked file"
+                            : "Document text (use # Title, ## Section, - bullets) — generate with AI below or write it here; built into a .docx. Leave empty to use the picked file"
                           : "Description (HTML allowed) — written to every new item"
                     }
                     spellCheck
@@ -4444,7 +4540,9 @@ function ModulesView({
                     style={{ flex: "1 1 260px", minWidth: 200 }}
                     placeholder={
                       bulkAddType === "File"
-                        ? "Describe the file to generate, e.g. a one-page study guide on photosynthesis"
+                        ? bulkAddFileFormat === "pptx"
+                          ? "Describe the deck to generate, e.g. an intro to photosynthesis"
+                          : "Describe the document to generate, e.g. a one-page study guide on photosynthesis"
                         : `Describe the ${bulkAddType.toLowerCase()} content to generate`
                     }
                     value={bulkAiPrompt}
@@ -4461,7 +4559,9 @@ function ModulesView({
                   </button>
                   <span className={styles.bulkHint}>
                     {bulkAddType === "File"
-                      ? "Generates the document text above; review it, then Add to build a branded .docx for every module."
+                      ? bulkAddFileFormat === "pptx"
+                        ? "Generates the slides above; review them, then Add to build a branded .pptx for every module."
+                        : "Generates the document text above; review it, then Add to build a branded .docx for every module."
                       : "Fills the description/body above with generated HTML; review it, then Add."}
                   </span>
                 </div>

@@ -2111,6 +2111,87 @@ Requirements:
   }
 }
 
+/**
+ * Generate a slide deck (title + content slides with bullets) as structured data
+ * for buildSlidesPptx. Used by "Add to each" to produce a branded .pptx file.
+ */
+export async function generateSlidesAction(
+  prompt: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ presentationTitle: string; slides: Array<{ title: string; bullets: string[] }> } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!prompt.trim()) {
+      return { error: "Describe the slides to generate first." };
+    }
+    const llmPrompt = `You are an expert educator creating a clear, professional slide deck for students.
+
+TOPIC / INSTRUCTION:
+${prompt.trim()}
+
+Return ONLY valid JSON in this shape:
+{
+  "presentationTitle": "...",
+  "slides": [
+    { "title": "...", "bullets": ["...", "..."] }
+  ]
+}
+
+Requirements:
+- 5-12 content slides, each with a short title and 3-6 concise bullet points.
+- Clear, well-organized, and professional.
+- Do not invent specific facts, dates, names, or links that were not provided.
+- Do not include any text outside the JSON object.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: llmPrompt }] }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 4096 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { error: `Slide generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+
+    const trimmed = result.text.trim();
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return { error: "Could not parse slide data from the model response." };
+    }
+
+    let parsed: { presentationTitle?: unknown; slides?: unknown };
+    try {
+      parsed = JSON.parse(candidate.slice(start, end + 1));
+    } catch {
+      return { error: "The model returned invalid slide JSON." };
+    }
+
+    const presentationTitle = typeof parsed.presentationTitle === "string" ? parsed.presentationTitle.trim() : "";
+    const slides = (Array.isArray(parsed.slides) ? parsed.slides : [])
+      .map((s) => {
+        const obj = (s ?? {}) as { title?: unknown; bullets?: unknown };
+        const title = typeof obj.title === "string" ? obj.title.trim() : "";
+        const bullets = Array.isArray(obj.bullets)
+          ? obj.bullets.filter((b): b is string => typeof b === "string" && b.trim() !== "").map((b) => b.trim())
+          : [];
+        return { title, bullets };
+      })
+      .filter((s) => s.title || s.bullets.length > 0);
+
+    if (slides.length === 0) {
+      return { error: "The model returned no slides." };
+    }
+    return { presentationTitle: presentationTitle || "Presentation", slides };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
 // ── Google Calendar scheduling ──────────────────────────────────────────────
 
 /** Whether the owner has connected Google Calendar (and can read free/busy). */

@@ -1,39 +1,19 @@
 "use client";
 
-import type { ChangeEvent, ComponentType, CSSProperties } from "react";
+import type { ChangeEvent, CSSProperties } from "react";
 import { useRef, useState, useEffect } from "react";
 import {
-  parseSyllabusAction,
-  generateSyllabusSectionAction,
-  generateSyllabusRemainingSectionsAction,
-  reviseSyllabusAction,
-  assembleSyllabusFromTemplateAction,
   generateCourseScheduleAction,
   generateCopilotProjectPromptAction,
   analyzeSyllabusInputsAction,
   regenerateSyllabusFieldAction,
   buildAdaptedSyllabusAction,
-  type SyllabusSection,
   type CourseScheduleRow,
   type SyllabusCourseInfo,
 } from "../actions";
-import SyllabusPreviewModal from "./SyllabusPreviewModal";
 import LecturePlanningTab from "./LecturePlanningTab";
 import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
-
-type CoursePlanningTabProps = {
-  copiedKey: string | null;
-  onCopy: (key: string, value: string) => Promise<void>;
-  icons: {
-    CopyIcon: ComponentType;
-    LockClosedIcon: ComponentType;
-    LockOpenIcon: ComponentType;
-    PencilIcon: ComponentType;
-  };
-};
-
-type CoursePlanningStep = "form" | "preview";
 
 /** One editable section (paragraph) of the syllabus being adapted. */
 type AdaptSection = {
@@ -52,91 +32,6 @@ type AdaptSection = {
 };
 type PlanningMode = "syllabus" | "schedule" | "project" | "lecture";
 
-function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function replaceSectionsInDocx(
-  xml: string,
-  sections: SyllabusSection[],
-  contents: string[]
-): string {
-  // Collect all <w:p> paragraph elements and the gaps between them
-  const paraRegex = /<w:p[ >][\s\S]*?<\/w:p>/g;
-  const paragraphs: string[] = [];
-  const gaps: string[] = [];
-  let lastIndex = 0;
-  let m: RegExpExecArray | null;
-
-  while ((m = paraRegex.exec(xml)) !== null) {
-    gaps.push(xml.slice(lastIndex, m.index));
-    paragraphs.push(m[0]);
-    lastIndex = m.index + m[0].length;
-  }
-  gaps.push(xml.slice(lastIndex));
-
-  const getText = (p: string) => p.replace(/<[^>]+>/g, "").trim();
-
-  // Map each section heading to the paragraph index that contains it
-  const headingIndices = sections.map((s) => {
-    const target = s.heading.trim().toLowerCase();
-    return paragraphs.findIndex((p) => {
-      const t = getText(p).toLowerCase();
-      return t === target || t.includes(target);
-    });
-  });
-
-  const out: string[] = [];
-  let cursor = 0;
-
-  for (let i = 0; i < sections.length; i++) {
-    const hIdx = headingIndices[i];
-    if (hIdx === -1 || hIdx < cursor) continue;
-
-    // Where this section's body ends (start of next found heading)
-    const nextHIdx =
-      headingIndices.slice(i + 1).find((idx) => idx !== -1 && idx > hIdx) ??
-      paragraphs.length;
-
-    // Preserve all paragraphs up to and including the heading
-    out.push(...paragraphs.slice(cursor, hIdx + 1));
-
-
-    const content = contents[i];
-    const bodyParas = paragraphs.slice(hIdx + 1, nextHIdx);
-    if (content) {
-      const lines = content.split("\n");
-      for (let j = 0; j < bodyParas.length; j++) {
-        const p = bodyParas[j];
-        if (j < lines.length) {
-          // Replace only the first <w:t> in the paragraph, keep all formatting/structure
-          const text = escapeXml(lines[j]);
-          const replaced = p.replace(/<w:t[\s\S]*?<\/w:t>/, `<w:t xml:space=\"preserve\">${text}</w:t>`);
-          out.push(replaced);
-        } else {
-          // No more content lines, keep template paragraph as-is
-          out.push(p);
-        }
-      }
-    } else {
-      // No generated content — keep the original template body for this section
-      out.push(...bodyParas);
-    }
-
-    cursor = nextHIdx;
-  }
-
-  // Add any remaining paragraphs after the last section
-  out.push(...paragraphs.slice(cursor));
-
-  // Preamble XML (header, <w:body>) + paragraphs + closing XML (</w:body>, sectPr, </w:document>)
-  return gaps[0] + out.join("") + gaps[gaps.length - 1];
-}
-
 function triggerFileDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -148,82 +43,10 @@ function triggerFileDownload(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-function buildTextTemplateSyllabus(
-  templateText: string,
-  sections: SyllabusSection[],
-  contents: string[]
-): string | null {
-  type FoundSection = { headingStart: number; headingEnd: number; sectionIndex: number };
-  const found: FoundSection[] = [];
-  for (let i = 0; i < sections.length; i++) {
-    const idx = templateText.indexOf(sections[i].heading);
-    if (idx !== -1) found.push({ headingStart: idx, headingEnd: idx + sections[i].heading.length, sectionIndex: i });
-  }
-  if (found.length === 0) return null;
-  found.sort((a, b) => a.headingStart - b.headingStart);
-
-  let result = "";
-  let cursor = 0;
-  for (let p = 0; p < found.length; p++) {
-    const { headingEnd, sectionIndex } = found[p];
-    const nextStart = p + 1 < found.length ? found[p + 1].headingStart : templateText.length;
-    const content = contents[sectionIndex];
-    result += templateText.slice(cursor, headingEnd);
-    result += content ? "\n\n" + content + "\n\n" : templateText.slice(headingEnd, nextStart);
-    cursor = nextStart;
-  }
-  result += templateText.slice(cursor);
-  return result;
-}
-
-function buildSimpleSyllabus(sections: SyllabusSection[], contents: string[]): string {
-  const lines: string[] = [];
-  for (let i = 0; i < sections.length; i++) {
-    const content = contents[i];
-    if (!content) continue;
-    const h = sections[i].heading;
-    lines.push(h, "=".repeat(h.length), "", content, "", "");
-  }
-  return lines.join("\n");
-}
-
-async function downloadDocxSyllabus(
-  fileData: { name: string; base64: string; mimeType: string },
-  sections: SyllabusSection[],
-  contents: string[],
-  baseName: string
-): Promise<void> {
-  const JSZip = (await import("jszip")).default;
-  const binary = atob(fileData.base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-
-  const zip = await JSZip.loadAsync(bytes);
-  const docFile = zip.file("word/document.xml");
-  if (!docFile) throw new Error("Invalid DOCX: missing word/document.xml");
-
-  const modifiedXml = replaceSectionsInDocx(await docFile.async("string"), sections, contents);
-  zip.file("word/document.xml", modifiedXml);
-
-  const blob = await zip.generateAsync({
-    type: "blob",
-    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  });
-  triggerFileDownload(blob, `${baseName}_syllabus.docx`);
-}
-
 // Local storage keys for the course-planning form fields. Module-level so the
 // hydration/persistence effects can reference them without them counting as
 // reactive dependencies.
 const LS_KEYS = {
-  courseTitle: "syllabus_courseTitle",
-  courseCode: "syllabus_courseCode",
-  classTimes: "syllabus_classTimes",
-  semester: "syllabus_semester",
-  officeHours: "syllabus_officeHours",
-  coursePlanningContext: "syllabus_coursePlanningContext",
-  latePolicy: "syllabus_latePolicy",
-  attendancePolicy: "syllabus_attendancePolicy",
   planningMode: "coursePlanning_planningMode",
   courseDescription: "schedule_courseDescription",
   scheduleTerm: "schedule_scheduleTerm",
@@ -232,17 +55,7 @@ const LS_KEYS = {
   scheduleTests: "schedule_scheduleTests",
 };
 
-export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePlanningTabProps) {
-  const syllabusFileRef = useRef<HTMLInputElement>(null);
-  const [courseTitle, setCourseTitle] = useState("");
-  const [courseCode, setCourseCode] = useState("");
-  const [classTimes, setClassTimes] = useState("");
-  const [semester, setSemester] = useState("");
-  const [officeHours, setOfficeHours] = useState("");
-  const [coursePlanningContext, setCoursePlanningContext] = useState("");
-  const [latePolicy, setLatePolicy] = useState("");
-  const [attendancePolicy, setAttendancePolicy] = useState("");
-
+export default function CoursePlanningTab() {
   // Planning mode toggle
   const [planningMode, setPlanningMode] = useState<PlanningMode>("syllabus");
 
@@ -272,14 +85,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     // first client render; a lazy useState initializer would read localStorage
     // during hydration and cause an SSR mismatch. Hence the rule is suppressed.
     /* eslint-disable react-hooks/set-state-in-effect */
-    setCourseTitle(localStorage.getItem(LS_KEYS.courseTitle) || "");
-    setCourseCode(localStorage.getItem(LS_KEYS.courseCode) || "");
-    setClassTimes(localStorage.getItem(LS_KEYS.classTimes) || "");
-    setSemester(localStorage.getItem(LS_KEYS.semester) || "");
-    setOfficeHours(localStorage.getItem(LS_KEYS.officeHours) || "");
-    setCoursePlanningContext(localStorage.getItem(LS_KEYS.coursePlanningContext) || "");
-    setLatePolicy(localStorage.getItem(LS_KEYS.latePolicy) || "");
-    setAttendancePolicy(localStorage.getItem(LS_KEYS.attendancePolicy) || "");
     const savedMode = localStorage.getItem(LS_KEYS.planningMode);
     if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project" || savedMode === "lecture") {
       setPlanningMode(savedMode);
@@ -291,24 +96,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     setScheduleTests(localStorage.getItem(LS_KEYS.scheduleTests) || "");
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
-  const [coursePlanningContextFiles, setCoursePlanningContextFiles] = useState<
-    Array<{ name: string; base64: string; mimeType: string }>
-  >([]);
-  const [coursePlanningStep, setCoursePlanningStep] = useState<CoursePlanningStep>("form");
-  const [parsedSections, setParsedSections] = useState<SyllabusSection[]>([]);
-  const [syllabusTemplateText, setSyllabusTemplateText] = useState("");
-  const [sectionContents, setSectionContents] = useState<string[]>([]);
-  const [isParsingTemplate, setIsParsingTemplate] = useState(false);
-  const [coursePlanningError, setCoursePlanningError] = useState<string | null>(null);
-  const [syllabusRevisionPrompt, setSyllabusRevisionPrompt] = useState("");
-  const [syllabusRevisionFiles, setSyllabusRevisionFiles] = useState<
-    Array<{ name: string; base64: string; mimeType: string }>
-  >([]);
-  const [lockedSyllabusSections, setLockedSyllabusSections] = useState<boolean[]>([]);
-  const [isRevisingSyllabus, setIsRevisingSyllabus] = useState(false);
-  const [isDownloadingSyllabus, setIsDownloadingSyllabus] = useState(false);
-  const [syllabusFileData, setSyllabusFileData] = useState<{ name: string; base64: string; mimeType: string } | null>(null);
-
   // ── Adapt an existing syllabus from a codebase (the Syllabus subtab flow) ──
   const adaptSyllabusRef = useRef<HTMLInputElement>(null);
   const adaptZipRef = useRef<HTMLInputElement>(null);
@@ -335,21 +122,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [adaptCodebaseSummary, setAdaptCodebaseSummary] = useState("");
   const [adaptRegenKey, setAdaptRegenKey] = useState<string | null>(null);
   const [adaptShowPreview, setAdaptShowPreview] = useState(false);
-
-  const getFullContext = () => {
-    const parts = [
-      courseCode.trim() && `Course Code: ${courseCode.trim()}`,
-      semester.trim() && `Semester: ${semester.trim()}`,
-      classTimes.trim() && `Class Times & Location: ${classTimes.trim()}`,
-      officeHours.trim() && `Office Hours: ${officeHours.trim()}`,
-      coursePlanningContext.trim(),
-    ].filter(Boolean) as string[];
-    return parts.length > 0 ? parts.join("\n") : undefined;
-  };
-
-  const getContextFiles = () => [
-    ...coursePlanningContextFiles,
-  ];
 
   const handleGenerateSchedule = async () => {
     if (!courseDescription.trim()) {
@@ -454,26 +226,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     } finally {
       setIsGeneratingProjectPrompt(false);
     }
-  };
-
-  const handleCoursePlanningContextFiles = async (e: ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files ?? []);
-    if (selected.length === 0) return;
-
-    const files = await Promise.all(
-      selected.map(async (file) => {
-        const base64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-        return { name: file.name, base64, mimeType: file.type || "application/octet-stream" };
-      })
-    );
-
-    setCoursePlanningContextFiles((prev) => [...prev, ...files]);
-    e.target.value = "";
   };
 
   const readFileBase64 = (file: File) =>
@@ -624,185 +376,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     }
   };
 
-  const handleStartCoursePlanning = async () => {
-    if (!syllabusFileRef.current?.files?.length) {
-      setCoursePlanningError("Please upload a syllabus template to continue.");
-      return;
-    }
-    if (!courseTitle.trim()) {
-      setCoursePlanningError("Please enter a course title.");
-      return;
-    }
-    const file = syllabusFileRef.current.files[0];
-    setIsParsingTemplate(true);
-    setCoursePlanningError(null);
-    try {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      setSyllabusFileData({ name: file.name, base64, mimeType: file.type || "application/octet-stream" });
-      const parsed = await parseSyllabusAction(
-        courseTitle,
-        { name: file.name, base64, mimeType: file.type || "application/octet-stream" },
-        getFullContext(),
-        getContextFiles(),
-        getStoredProvider()
-      );
-      if ("error" in parsed) { setCoursePlanningError(parsed.error); return; }
-      setParsedSections(parsed.sections);
-      setSyllabusTemplateText(parsed.templateText);
-      setLockedSyllabusSections(new Array(parsed.sections.length).fill(false));
-      const result = await generateSyllabusRemainingSectionsAction(
-        courseTitle,
-        parsed.sections,
-        new Array(parsed.sections.length).fill(""),
-        0,
-        parsed.templateText || undefined,
-        getFullContext(),
-        getContextFiles(),
-        getStoredProvider()
-      );
-      if ("error" in result) { setCoursePlanningError(result.error); return; }
-      setSectionContents(result.contents);
-      setCoursePlanningStep("preview");
-    } catch (err) {
-      setCoursePlanningError(err instanceof Error ? err.message : "Failed to generate syllabus.");
-    } finally {
-      setIsParsingTemplate(false);
-    }
-  };
-
-  const handleSyllabusRevisionFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const fileList = Array.from(e.target.files ?? []);
-    const encoded = await Promise.all(
-      fileList.map(async (file) => {
-        const base64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-        return { name: file.name, base64, mimeType: file.type || "application/octet-stream" };
-      })
-    );
-    setSyllabusRevisionFiles((prev) => [...prev, ...encoded]);
-    e.target.value = "";
-  };
-
-  const handleReviseSyllabus = async () => {
-    if (!syllabusRevisionPrompt.trim() && syllabusRevisionFiles.length === 0) return;
-    setIsRevisingSyllabus(true);
-    setCoursePlanningError(null);
-    try {
-      const result = await reviseSyllabusAction(
-        courseTitle,
-        parsedSections,
-        sectionContents,
-        syllabusTemplateText,
-        syllabusRevisionPrompt.trim(),
-        syllabusRevisionFiles,
-        getFullContext(),
-        getContextFiles(),
-        lockedSyllabusSections,
-        getStoredProvider()
-      );
-      if ("error" in result) { setCoursePlanningError(result.error); return; }
-      setSectionContents(result.contents);
-      setSyllabusRevisionPrompt("");
-      setSyllabusRevisionFiles([]);
-    } finally {
-      setIsRevisingSyllabus(false);
-    }
-  };
-
-  const handleRegenerateSection = async (i: number, revisionPrompt: string) => {
-    setCoursePlanningError(null);
-    const completedSections = parsedSections
-      .map((s, idx) => ({ heading: s.heading, content: sectionContents[idx] }))
-      .filter((s) => s.content);
-    const prompt = revisionPrompt.trim()
-      ? `${revisionPrompt.trim()}`
-      : undefined;
-    const sectionWithHint = prompt
-      ? { ...parsedSections[i], hint: `${parsedSections[i].hint ?? ""} Additional instruction: ${prompt}`.trim() }
-      : parsedSections[i];
-    const result = await generateSyllabusSectionAction(
-      courseTitle,
-      sectionWithHint,
-      completedSections.filter((s) => s.heading !== parsedSections[i].heading),
-      syllabusTemplateText || undefined,
-      getFullContext(),
-      getContextFiles(),
-      getStoredProvider()
-    );
-    if (typeof result === "string") {
-      setSectionContents((prev) => {
-        const next = [...prev];
-        next[i] = result;
-        return next;
-      });
-    } else {
-      setCoursePlanningError(result.error);
-    }
-  };
-
-  const resetCoursePlanning = () => {
-    setCoursePlanningStep("form");
-    setParsedSections([]);
-    setSectionContents([]);
-    setCoursePlanningError(null);
-    setSyllabusRevisionPrompt("");
-    setSyllabusRevisionFiles([]);
-    setLockedSyllabusSections([]);
-    setSyllabusFileData(null);
-  };
-
-  const saveEditSyllabusSection = (i: number, content: string) => {
-    setSectionContents((prev) => {
-      const next = [...prev];
-      next[i] = content;
-      return next;
-    });
-  };
-
-  const handleDownloadSyllabus = async () => {
-    setIsDownloadingSyllabus(true);
-    try {
-      const ext = syllabusFileData?.name.split(".").pop()?.toLowerCase();
-      const baseName = courseTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
-
-      if (syllabusFileData && ext === "docx") {
-        await downloadDocxSyllabus(syllabusFileData, parsedSections, sectionContents, baseName);
-        return;
-      }
-
-      let output: string;
-      if (syllabusTemplateText) {
-        output = buildTextTemplateSyllabus(syllabusTemplateText, parsedSections, sectionContents)
-          ?? buildSimpleSyllabus(parsedSections, sectionContents);
-      } else if (syllabusFileData) {
-        const result = await assembleSyllabusFromTemplateAction(syllabusFileData, parsedSections, sectionContents, getStoredProvider());
-        output = "error" in result ? buildSimpleSyllabus(parsedSections, sectionContents) : result.text;
-      } else {
-        output = buildSimpleSyllabus(parsedSections, sectionContents);
-      }
-
-      triggerFileDownload(
-        new Blob([output], { type: "text/plain;charset=utf-8" }),
-        `${baseName}_syllabus.txt`
-      );
-    } finally {
-      setIsDownloadingSyllabus(false);
-    }
-  };
-
   return (
-    <>
-      {coursePlanningStep === "form" && (
-        <section className={styles.card}>
+    <section className={styles.card}>
           <div className={styles.header}>
             <h1>New Build Courses</h1>
             <p>Build a syllabus or generate a weekly course schedule with the help of AI.</p>
@@ -1295,39 +870,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
           {planningMode === "lecture" && (
             <LecturePlanningTab />
           )}
-        </section>
-      )}
-
-      {coursePlanningStep === "preview" && (
-        <SyllabusPreviewModal
-          courseTitle={courseTitle}
-          parsedSections={parsedSections}
-          sectionContents={sectionContents}
-          copiedKey={copiedKey}
-          lockedSyllabusSections={lockedSyllabusSections}
-          coursePlanningError={coursePlanningError}
-          syllabusRevisionPrompt={syllabusRevisionPrompt}
-          revisionFileCount={syllabusRevisionFiles.length}
-          isRevisingSyllabus={isRevisingSyllabus}
-          onClose={resetCoursePlanning}
-          onCopy={onCopy}
-          onToggleLock={(i) =>
-            setLockedSyllabusSections((prev) => {
-              const next = [...prev];
-              next[i] = !next[i];
-              return next;
-            })
-          }
-          onSaveSection={saveEditSyllabusSection}
-          onRevisionFileChange={handleSyllabusRevisionFileChange}
-          onRevisionPromptChange={setSyllabusRevisionPrompt}
-          onRevise={handleReviseSyllabus}
-          onRegenerateSection={handleRegenerateSection}
-          onDownload={handleDownloadSyllabus}
-          isDownloadingSyllabus={isDownloadingSyllabus}
-          icons={icons}
-        />
-      )}
-    </>
+    </section>
   );
 }

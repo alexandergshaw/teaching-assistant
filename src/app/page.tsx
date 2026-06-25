@@ -613,13 +613,7 @@ export default function Home() {
           />
         </Tabs>
 
-        {activeTab === "course-planning" && (
-          <CoursePlanningTab
-            copiedKey={copiedKey}
-            onCopy={handleCopy}
-            icons={{ CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon }}
-          />
-        )}
+        {activeTab === "course-planning" && <CoursePlanningTab />}
 
         {activeTab === "content" && (
           <ContentTab

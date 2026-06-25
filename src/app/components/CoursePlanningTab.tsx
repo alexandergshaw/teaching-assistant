@@ -10,8 +10,11 @@ import {
   assembleSyllabusFromTemplateAction,
   generateCourseScheduleAction,
   generateCopilotProjectPromptAction,
+  analyzeSyllabusInputsAction,
+  buildAdaptedSyllabusAction,
   type SyllabusSection,
   type CourseScheduleRow,
+  type SyllabusInputField,
 } from "../actions";
 import SyllabusPreviewModal from "./SyllabusPreviewModal";
 import LecturePlanningTab from "./LecturePlanningTab";
@@ -289,6 +292,16 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [isDownloadingSyllabus, setIsDownloadingSyllabus] = useState(false);
   const [syllabusFileData, setSyllabusFileData] = useState<{ name: string; base64: string; mimeType: string } | null>(null);
 
+  // ── Adapt an existing syllabus from a codebase (the Syllabus subtab flow) ──
+  const adaptSyllabusRef = useRef<HTMLInputElement>(null);
+  const adaptZipRef = useRef<HTMLInputElement>(null);
+  const [adaptSyllabusBase64, setAdaptSyllabusBase64] = useState<string | null>(null);
+  const [adaptSyllabusName, setAdaptSyllabusName] = useState("");
+  const [adaptFields, setAdaptFields] = useState<SyllabusInputField[] | null>(null);
+  const [adaptValues, setAdaptValues] = useState<Record<string, string>>({});
+  const [adaptStatus, setAdaptStatus] = useState<"idle" | "analyzing" | "building">("idle");
+  const [adaptError, setAdaptError] = useState<string | null>(null);
+
   const getFullContext = () => {
     const parts = [
       courseCode.trim() && `Course Code: ${courseCode.trim()}`,
@@ -427,6 +440,83 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
 
     setCoursePlanningContextFiles((prev) => [...prev, ...files]);
     e.target.value = "";
+  };
+
+  const readFileBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  // Analyze the former syllabus + optional codebase zip; AI returns the
+  // class-specific fields, each pre-filled with a suggested value.
+  const handleAnalyzeSyllabus = async () => {
+    const syllabusFile = adaptSyllabusRef.current?.files?.[0];
+    if (!syllabusFile) {
+      setAdaptError("Upload the former syllabus (.docx) first.");
+      return;
+    }
+    if (!/\.docx$/i.test(syllabusFile.name)) {
+      setAdaptError("The former syllabus must be a Word .docx file.");
+      return;
+    }
+    const zipFile = adaptZipRef.current?.files?.[0] ?? null;
+    setAdaptStatus("analyzing");
+    setAdaptError(null);
+    setAdaptFields(null);
+    try {
+      const syllabusBase64 = await readFileBase64(syllabusFile);
+      const zipBase64 = zipFile ? await readFileBase64(zipFile) : null;
+      setAdaptSyllabusBase64(syllabusBase64);
+      setAdaptSyllabusName(syllabusFile.name);
+      const result = await analyzeSyllabusInputsAction(
+        { name: syllabusFile.name, base64: syllabusBase64 },
+        zipBase64,
+        getStoredProvider()
+      );
+      if ("error" in result) {
+        setAdaptError(result.error);
+        return;
+      }
+      setAdaptFields(result.fields);
+      setAdaptValues(Object.fromEntries(result.fields.map((f) => [f.paragraphId, f.suggestedText])));
+    } catch (err) {
+      setAdaptError(err instanceof Error ? err.message : "Failed to analyze the syllabus.");
+    } finally {
+      setAdaptStatus("idle");
+    }
+  };
+
+  // Write the instructor's values into the original .docx in place (only the
+  // class-specific paragraphs change) and download the result.
+  const handleBuildAdaptedSyllabus = async () => {
+    if (!adaptSyllabusBase64 || !adaptFields) return;
+    const edits: Record<string, string> = {};
+    for (const f of adaptFields) {
+      const value = adaptValues[f.paragraphId] ?? f.suggestedText;
+      if (value !== f.currentText) edits[f.paragraphId] = value;
+    }
+    setAdaptStatus("building");
+    setAdaptError(null);
+    try {
+      const result = await buildAdaptedSyllabusAction(adaptSyllabusBase64, edits);
+      if ("error" in result) {
+        setAdaptError(result.error);
+        return;
+      }
+      const bytes = Uint8Array.from(atob(result.base64), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      });
+      const baseName = adaptSyllabusName.replace(/\.docx$/i, "") || "syllabus";
+      triggerFileDownload(blob, `${baseName}_adapted.docx`);
+    } catch (err) {
+      setAdaptError(err instanceof Error ? err.message : "Failed to build the syllabus.");
+    } finally {
+      setAdaptStatus("idle");
+    }
   };
 
   const handleStartCoursePlanning = async () => {
@@ -617,13 +707,6 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
           <div className={styles.scheduleModeToggle}>
             <button
               type="button"
-              className={`${styles.scheduleModeBtn}${planningMode === "syllabus" ? ` ${styles.active}` : ""}`}
-              onClick={() => { setPlanningMode("syllabus"); localStorage.setItem(LS_KEYS.planningMode, "syllabus"); }}
-            >
-              Syllabus
-            </button>
-            <button
-              type="button"
               className={`${styles.scheduleModeBtn}${planningMode === "schedule" ? ` ${styles.active}` : ""}`}
               onClick={() => { setPlanningMode("schedule"); localStorage.setItem(LS_KEYS.planningMode, "schedule"); }}
             >
@@ -643,152 +726,87 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
             >
               Lecture Planning
             </button>
+            <button
+              type="button"
+              className={`${styles.scheduleModeBtn}${planningMode === "syllabus" ? ` ${styles.active}` : ""}`}
+              onClick={() => { setPlanningMode("syllabus"); localStorage.setItem(LS_KEYS.planningMode, "syllabus"); }}
+            >
+              Syllabus
+            </button>
           </div>
 
-          {/* ── Syllabus mode ── */}
+          {/* ── Syllabus mode: adapt an existing syllabus from a codebase ── */}
           {planningMode === "syllabus" && (
             <>
+              <p style={{ marginTop: 0, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                Upload a previous offering&apos;s syllabus and (optionally) a zip of the course&apos;s codebase.
+                The AI finds the class-specific parts that need your input, you confirm or edit them, and the new
+                syllabus is written back into the original Word file — so its formatting matches exactly.
+              </p>
+
               <div className={styles.field}>
-                <label htmlFor="courseTitle">Course Title</label>
-                <input
-                  id="courseTitle"
-                  type="text"
-                  className={styles.textInput}
-                  placeholder="e.g. Introduction to Data Science"
-                  value={courseTitle}
-                  onChange={(e) => {
-                    setCourseTitle(e.target.value);
-                    localStorage.setItem(LS_KEYS.courseTitle, e.target.value);
-                  }}
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="courseCode">Course Code</label>
-                <input
-                  id="courseCode"
-                  type="text"
-                  className={styles.textInput}
-                  placeholder="e.g. CS 101"
-                  value={courseCode}
-                  onChange={(e) => {
-                    setCourseCode(e.target.value);
-                    localStorage.setItem(LS_KEYS.courseCode, e.target.value);
-                  }}
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="semester">Semester &amp; Year</label>
-                <input
-                  id="semester"
-                  type="text"
-                  className={styles.textInput}
-                  placeholder="e.g. Fall 2026"
-                  value={semester}
-                  onChange={(e) => {
-                    setSemester(e.target.value);
-                    localStorage.setItem(LS_KEYS.semester, e.target.value);
-                  }}
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="classTimes">Class Times &amp; Location</label>
-                <input
-                  id="classTimes"
-                  type="text"
-                  className={styles.textInput}
-                  placeholder="e.g. MWF 9:00–10:00am, Room 204"
-                  value={classTimes}
-                  onChange={(e) => {
-                    setClassTimes(e.target.value);
-                    localStorage.setItem(LS_KEYS.classTimes, e.target.value);
-                  }}
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="latePolicy">Late/Makeup Work Policy</label>
-                <textarea
-                  id="latePolicy"
-                  className={styles.textInput}
-                  placeholder="Describe your late or makeup work policy..."
-                  value={latePolicy}
-                  onChange={(e) => {
-                    setLatePolicy(e.target.value);
-                    localStorage.setItem(LS_KEYS.latePolicy, e.target.value);
-                  }}
-                  rows={3}
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="attendancePolicy">Attendance Policy</label>
-                <textarea
-                  id="attendancePolicy"
-                  className={styles.textInput}
-                  placeholder="Describe your attendance policy..."
-                  value={attendancePolicy}
-                  onChange={(e) => {
-                    setAttendancePolicy(e.target.value);
-                    localStorage.setItem(LS_KEYS.attendancePolicy, e.target.value);
-                  }}
-                  rows={3}
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="officeHours">Office Hours</label>
-                <input
-                  id="officeHours"
-                  type="text"
-                  className={styles.textInput}
-                  placeholder="e.g. Tuesdays 2–4pm, Office 305"
-                  value={officeHours}
-                  onChange={(e) => {
-                    setOfficeHours(e.target.value);
-                    localStorage.setItem(LS_KEYS.officeHours, e.target.value);
-                  }}
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="syllabusFile">Syllabus Template</label>
+                <label htmlFor="adaptSyllabusFile">Former syllabus (.docx)</label>
                 <div className={styles.fileField}>
-                  <input id="syllabusFile" type="file" ref={syllabusFileRef} />
-                  <p>Upload a syllabus template (.txt, .pdf, .docx, etc.) to use as a starting point.</p>
+                  <input id="adaptSyllabusFile" type="file" accept=".docx" ref={adaptSyllabusRef} />
+                  <p>Word .docx only. The new syllabus keeps its exact formatting; only class-specific text changes.</p>
                 </div>
               </div>
+
               <div className={styles.field}>
-                <label htmlFor="coursePlanningContext">Additional Context</label>
-                <textarea
-                  id="coursePlanningContext"
-                  placeholder="Optional context to guide syllabus generation (program goals, institution policies, audience details, tone, etc.)"
-                  value={coursePlanningContext}
-                  onChange={(e) => {
-                    setCoursePlanningContext(e.target.value);
-                    localStorage.setItem(LS_KEYS.coursePlanningContext, e.target.value);
-                  }}
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="coursePlanningContextFiles">Additional Context Files</label>
+                <label htmlFor="adaptZipFile">Course codebase (.zip, optional)</label>
                 <div className={styles.fileField}>
-                  <input
-                    id="coursePlanningContextFiles"
-                    type="file"
-                    multiple
-                    onChange={handleCoursePlanningContextFiles}
-                  />
-                  <p>Attach multiple supporting files (optional). Text, PDF, image, and DOCX files are used as extra context.</p>
-                  {coursePlanningContextFiles.length > 0 && (
-                    <p>{coursePlanningContextFiles.length} context file(s) selected.</p>
-                  )}
+                  <input id="adaptZipFile" type="file" accept=".zip" ref={adaptZipRef} />
+                  <p>Optional. A zip of the course&apos;s codebase so the AI can suggest accurate, class-specific values.</p>
                 </div>
               </div>
-              {coursePlanningError && <p className={styles.error}>{coursePlanningError}</p>}
+
+              {adaptError && <p className={styles.error}>{adaptError}</p>}
+
               <button
                 type="button"
                 className={styles.submitButton}
-                onClick={handleStartCoursePlanning}
-                disabled={isParsingTemplate || !courseTitle.trim()}
+                onClick={handleAnalyzeSyllabus}
+                disabled={adaptStatus !== "idle"}
               >
-                {isParsingTemplate ? "Generating syllabus…" : "Generate Syllabus"}
+                {adaptStatus === "analyzing" ? "Analyzing…" : adaptFields ? "Re-analyze" : "Analyze syllabus"}
               </button>
+
+              {adaptFields && adaptFields.length > 0 && (
+                <>
+                  <p style={{ marginTop: 22, fontWeight: 600 }}>
+                    {adaptFields.length} class-specific section{adaptFields.length === 1 ? "" : "s"} to confirm
+                  </p>
+                  {adaptFields.map((f) => {
+                    const value = adaptValues[f.paragraphId] ?? "";
+                    return (
+                      <div key={f.paragraphId} className={styles.field}>
+                        <label>{f.label}</label>
+                        <textarea
+                          className={styles.textInput}
+                          rows={Math.max(2, Math.min(8, Math.round(value.length / 70) + 1))}
+                          value={value}
+                          onChange={(e) =>
+                            setAdaptValues((prev) => ({ ...prev, [f.paragraphId]: e.target.value }))
+                          }
+                        />
+                        {f.currentText && f.currentText !== value && (
+                          <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 0" }}>
+                            Original: {f.currentText}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    className={styles.submitButton}
+                    onClick={handleBuildAdaptedSyllabus}
+                    disabled={adaptStatus !== "idle"}
+                  >
+                    {adaptStatus === "building" ? "Building…" : "Generate adapted syllabus (.docx)"}
+                  </button>
+                </>
+              )}
             </>
           )}
 

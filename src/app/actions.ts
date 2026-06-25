@@ -97,6 +97,7 @@ import {
   type QuizQuestionInput,
 } from "@/lib/canvas-modules";
 import type { OfficeKind, OfficeParagraph } from "@/lib/office-edit";
+import { parseOfficeParagraphs, applyOfficeEdits } from "@/lib/office-edit";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -2189,6 +2190,162 @@ Requirements:
     return { presentationTitle: presentationTitle || "Presentation", slides };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+// ── Adapt an existing syllabus from a codebase ──────────────────────────────
+
+/** One class-specific paragraph of a syllabus the instructor should fill in. */
+export interface SyllabusInputField {
+  /** The paragraph id (matches parseOfficeParagraphs) to rewrite. */
+  paragraphId: string;
+  /** Short human label for the input. */
+  label: string;
+  /** The paragraph's current text in the uploaded syllabus. */
+  currentText: string;
+  /** AI-suggested replacement text for this offering. */
+  suggestedText: string;
+}
+
+/** Summarize a codebase zip (file tree + a few key files) as LLM context. */
+async function summarizeCodebaseZip(zipBase64: string): Promise<string> {
+  const JSZipMod = (await import("jszip")).default;
+  const zip = await JSZipMod.loadAsync(Buffer.from(zipBase64, "base64"));
+  const paths: string[] = [];
+  zip.forEach((relativePath, entry) => {
+    if (!entry.dir) paths.push(relativePath);
+  });
+  const tree = paths.slice(0, 250).join("\n");
+  const KEY_RE =
+    /(^|\/)(readme(\.[a-z]+)?|package\.json|pyproject\.toml|requirements\.txt|setup\.py|cargo\.toml|go\.mod|pom\.xml|composer\.json|gemfile|index\.(md|html|js|ts))$/i;
+  const keyPaths = paths.filter((p) => KEY_RE.test(p)).slice(0, 8);
+  let keyContents = "";
+  let budget = 12000;
+  for (const p of keyPaths) {
+    if (budget <= 0) break;
+    const entry = zip.file(p);
+    if (!entry) continue;
+    try {
+      const text = (await entry.async("string")).slice(0, Math.min(budget, 4000));
+      keyContents += `\n--- ${p} ---\n${text}\n`;
+      budget -= text.length;
+    } catch {
+      // Skip binary / unreadable entries.
+    }
+  }
+  return `FILE TREE (truncated):\n${tree}\n\nKEY FILES:${keyContents || "\n(none found)"}`;
+}
+
+/**
+ * Read a former syllabus (.docx) and a codebase zip, and use AI to identify the
+ * class-specific paragraphs that need the instructor's input, each with a
+ * suggested value informed by the codebase. Returns the editable fields.
+ */
+export async function analyzeSyllabusInputsAction(
+  syllabus: { name: string; base64: string },
+  zipBase64: string | null,
+  provider: LlmProvider = "gemini"
+): Promise<{ fields: SyllabusInputField[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const buffer = Buffer.from(syllabus.base64, "base64");
+    const paragraphs = await parseOfficeParagraphs("docx", buffer);
+    if (paragraphs.length === 0) {
+      return { error: "Could not read any text from that file. Upload the former syllabus as a Word .docx." };
+    }
+    const codebaseSummary = zipBase64 ? await summarizeCodebaseZip(zipBase64) : "(no codebase provided)";
+    const paraList = paragraphs.map((p) => `[${p.id}] ${p.text}`).join("\n");
+
+    const prompt = `You are adapting an existing course syllabus for a new offering. The course's codebase is summarized so you know what the course is actually about.
+
+CODEBASE SUMMARY:
+${codebaseSummary}
+
+The syllabus is a list of numbered paragraphs (id in brackets):
+${paraList}
+
+Identify ONLY the paragraphs that are CLASS-SPECIFIC and need the instructor to provide or confirm a value for this offering — e.g. course title/number, instructor name, term/semester, meeting times and location, office hours, course description, learning objectives, topic/weekly schedule, textbooks/tools, and grading breakdown. Leave generic boilerplate OUT (university policies, academic-integrity, accessibility/Title IX statements, etc.).
+
+For each class-specific paragraph, return a field with a short human label and a SUGGESTED complete replacement text for this offering, informed by the codebase where relevant. Keep the original paragraph's style, labels, and length; only change the class-specific content.
+
+Return ONLY valid JSON:
+{
+  "fields": [
+    { "paragraphId": "p12", "label": "Course title", "suggestedText": "..." }
+  ]
+}
+
+Requirements:
+- Use the exact paragraphId values from the list.
+- suggestedText is the COMPLETE replacement text for that paragraph, not a fragment.
+- Do not invent specific facts (instructor name, dates, room numbers) the codebase does not imply; for those, set suggestedText to the paragraph's original text so the instructor can fill it in.
+- Do not include any text outside the JSON object.`;
+
+    const result = await callLlm(
+      { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 6144 } },
+      provider
+    );
+    if (!result.ok) {
+      return { error: `Analysis failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+
+    const trimmed = result.text.trim();
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fenced?.[1]?.trim() ?? trimmed;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return { error: "Could not parse the analysis result." };
+    }
+    let parsed: { fields?: unknown };
+    try {
+      parsed = JSON.parse(candidate.slice(start, end + 1));
+    } catch {
+      return { error: "The model returned invalid JSON." };
+    }
+
+    const byId = new Map(paragraphs.map((p) => [p.id, p.text]));
+    const fields: SyllabusInputField[] = (Array.isArray(parsed.fields) ? parsed.fields : [])
+      .map((f) => {
+        const o = (f ?? {}) as { paragraphId?: unknown; label?: unknown; suggestedText?: unknown };
+        const paragraphId = typeof o.paragraphId === "string" ? o.paragraphId : "";
+        const currentText = byId.get(paragraphId) ?? "";
+        const suggestedText =
+          typeof o.suggestedText === "string" && o.suggestedText.trim() ? o.suggestedText.trim() : currentText;
+        return {
+          paragraphId,
+          label: typeof o.label === "string" && o.label.trim() ? o.label.trim() : "Field",
+          currentText,
+          suggestedText,
+        };
+      })
+      .filter((f) => f.paragraphId && byId.has(f.paragraphId));
+
+    if (fields.length === 0) {
+      return { error: "No class-specific sections were identified in that syllabus." };
+    }
+    return { fields };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Rewrite the chosen paragraphs of the original syllabus .docx in place (only the
+ * class-specific text changes; all other formatting is preserved) and return the
+ * new file as base64.
+ */
+export async function buildAdaptedSyllabusAction(
+  syllabusBase64: string,
+  edits: Record<string, string>
+): Promise<{ base64: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const buffer = Buffer.from(syllabusBase64, "base64");
+    const out = await applyOfficeEdits("docx", buffer, edits);
+    return { base64: out.toString("base64") };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not build the syllabus." };
   }
 }
 

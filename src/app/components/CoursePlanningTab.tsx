@@ -308,6 +308,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [adaptCourseCode, setAdaptCourseCode] = useState("");
   const [adaptInstructorName, setAdaptInstructorName] = useState("");
   const [adaptInstructorEmail, setAdaptInstructorEmail] = useState("");
+  const [adaptDescription, setAdaptDescription] = useState("");
   const [adaptStartDate, setAdaptStartDate] = useState("");
   const [adaptMeetingDays, setAdaptMeetingDays] = useState("");
   const [adaptMeetingTimes, setAdaptMeetingTimes] = useState("");
@@ -519,6 +520,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
     courseCode: adaptCourseCode.trim() || undefined,
     instructorName: adaptInstructorName.trim() || undefined,
     instructorEmail: adaptInstructorEmail.trim() || undefined,
+    courseDescription: adaptDescription.trim() || undefined,
     startDate: adaptStartDate.trim() || undefined,
     meetingDays: adaptMeetingDays.trim() || undefined,
     meetingTimes: adaptMeetingTimes.trim() || undefined,
@@ -863,6 +865,17 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                   placeholder="e.g. shaw@university.edu"
                   value={adaptInstructorEmail}
                   onChange={(e) => setAdaptInstructorEmail(e.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="adaptDescription">Official course description</label>
+                <textarea
+                  id="adaptDescription"
+                  className={styles.textInput}
+                  rows={4}
+                  placeholder="Paste the official catalog description — used verbatim for the course description section."
+                  value={adaptDescription}
+                  onChange={(e) => setAdaptDescription(e.target.value)}
                 />
               </div>
               <div className={styles.field}>

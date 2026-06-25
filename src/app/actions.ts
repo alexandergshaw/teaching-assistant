@@ -2217,6 +2217,8 @@ export interface SyllabusCourseInfo {
   instructorName?: string;
   /** Instructor email. */
   instructorEmail?: string;
+  /** Official course description (use verbatim for the description section). */
+  courseDescription?: string;
   /** Course start date including the year, e.g. "2026-08-25". */
   startDate?: string;
   /** Meeting days, e.g. "Mon/Wed/Fri". */
@@ -2234,6 +2236,7 @@ function courseInfoBlock(info: SyllabusCourseInfo): string {
     info.courseCode ? `Course code/number: ${info.courseCode}` : "",
     info.instructorName ? `Instructor name: ${info.instructorName}` : "",
     info.instructorEmail ? `Instructor email: ${info.instructorEmail}` : "",
+    info.courseDescription ? `Official course description (use this VERBATIM for the course description section): ${info.courseDescription}` : "",
     info.startDate ? `Course start date (compute any week/date schedule from this; do not reuse dates from the old syllabus): ${info.startDate}` : "",
     info.meetingDays ? `Meeting days: ${info.meetingDays}` : "",
     info.meetingTimes ? `Meeting times: ${info.meetingTimes}` : "",
@@ -2256,6 +2259,11 @@ async function summarizeCodebaseZip(zipBase64: string): Promise<string> {
     if (!entry.dir) paths.push(relativePath);
   });
   const tree = paths.slice(0, 250).join("\n");
+  // Top-level entries (folders/files at the repo root), in natural order — these
+  // are typically the per-week assignments, so list them so the AI can map them.
+  const topLevel = Array.from(new Set(paths.map((p) => p.split("/")[0]).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true })
+  );
   const KEY_RE =
     /(^|\/)(readme(\.[a-z]+)?|package\.json|pyproject\.toml|requirements\.txt|setup\.py|cargo\.toml|go\.mod|pom\.xml|composer\.json|gemfile|index\.(md|html|js|ts))$/i;
   const keyPaths = paths.filter((p) => KEY_RE.test(p)).slice(0, 8);
@@ -2273,7 +2281,7 @@ async function summarizeCodebaseZip(zipBase64: string): Promise<string> {
       // Skip binary / unreadable entries.
     }
   }
-  return `FILE TREE (truncated):\n${tree}\n\nKEY FILES:${keyContents || "\n(none found)"}`;
+  return `TOP-LEVEL ENTRIES (in order — each is typically one weekly assignment):\n${topLevel.join("\n")}\n\nFILE TREE (truncated):\n${tree}\n\nKEY FILES:${keyContents || "\n(none found)"}`;
 }
 
 /** Parse the first JSON object out of an LLM response (strips a ``` fence). */
@@ -2402,7 +2410,7 @@ ${courseInfoBlock(courseInfo)}
 Here are the schedule paragraphs (id in brackets), in order:
 ${schedList}
 
-Return a NEW replacement for EVERY paragraph id above. Compute consecutive weekly dates starting from the course start date (week 1 begins on the start date) and advancing one week per week. Derive new weekly topics and descriptions for THIS course from the codebase. Preserve each paragraph's role and format (a "Week N (dates): topic" line stays that format; a separate dates/topic/description cell stays that format) but with entirely new content. Clear ALL old dates, topics, and descriptions — leave nothing from the previous offering.
+Return a NEW replacement for EVERY paragraph id above. Compute consecutive weekly dates starting from the course start date (week 1 begins on the start date) and advancing one week per week. EACH ASSIGNMENT IN THE CODEBASE REPRESENTS ONE WHOLE WEEK OF THE COURSE — map the codebase's assignments to weeks IN ORDER (the first assignment is week 1, the next is week 2, and so on, one assignment per week) and base each week's topic and description on its corresponding assignment. Preserve each paragraph's role and format (a "Week N (dates): topic" line stays that format; a separate dates/topic/description cell stays that format) but with entirely new content. Clear ALL old dates, topics, and descriptions — leave nothing from the previous offering.
 
 Return ONLY valid JSON mapping each id to its new text:
 { "replacements": { "p81": "...", "p82": "..." } }

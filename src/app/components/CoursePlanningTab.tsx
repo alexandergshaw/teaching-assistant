@@ -499,7 +499,12 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
         return;
       }
       setAdaptFields(result.fields);
-      setAdaptValues(Object.fromEntries(result.fields.map((f) => [f.paragraphId, f.suggestedText])));
+      // Seed editable values with the field suggestions AND the full schedule
+      // replacement, so the old schedule is cleared and replaced on download.
+      setAdaptValues({
+        ...Object.fromEntries(result.fields.map((f) => [f.paragraphId, f.suggestedText])),
+        ...result.scheduleReplacements,
+      });
       setAdaptParagraphs(result.paragraphs);
       setAdaptCodebaseSummary(result.codebaseSummary);
     } catch (err) {
@@ -1000,8 +1005,8 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                         class-specific sections. Edits here are included when you download.
                       </p>
                       {adaptParagraphs.map((p) => {
-                        const isField = adaptFieldIds.has(p.id);
                         const value = adaptValues[p.id] ?? p.text;
+                        const isField = adaptFieldIds.has(p.id) || (p.id in adaptValues && adaptValues[p.id] !== p.text);
                         return (
                           <textarea
                             key={p.id}

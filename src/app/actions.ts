@@ -2276,10 +2276,27 @@ async function summarizeCodebaseZip(zipBase64: string): Promise<string> {
   return `FILE TREE (truncated):\n${tree}\n\nKEY FILES:${keyContents || "\n(none found)"}`;
 }
 
+/** Parse the first JSON object out of an LLM response (strips a ``` fence). */
+function extractJsonObject(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced?.[1]?.trim() ?? trimmed;
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    return JSON.parse(candidate.slice(start, end + 1)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Read a former syllabus (.docx) and a codebase zip, and use AI to identify the
- * class-specific paragraphs that need the instructor's input, each with a
- * suggested value informed by the codebase. Returns the editable fields.
+ * Read a former syllabus (.docx) and a codebase zip. Pass 1 identifies the
+ * class-specific NON-schedule fields and the weekly-schedule block's bounds; pass
+ * 2 produces a complete replacement for EVERY paragraph in that block, so the old
+ * schedule is fully cleared and replaced. Returns the editable fields, the
+ * schedule replacements, all paragraphs, and the codebase summary.
  */
 export async function analyzeSyllabusInputsAction(
   syllabus: { name: string; base64: string },
@@ -2287,7 +2304,12 @@ export async function analyzeSyllabusInputsAction(
   courseInfo: SyllabusCourseInfo = {},
   provider: LlmProvider = "gemini"
 ): Promise<
-  | { fields: SyllabusInputField[]; paragraphs: Array<{ id: string; text: string }>; codebaseSummary: string }
+  | {
+      fields: SyllabusInputField[];
+      scheduleReplacements: Record<string, string>;
+      paragraphs: Array<{ id: string; text: string }>;
+      codebaseSummary: string;
+    }
   | { error: string }
 > {
   try {
@@ -2299,8 +2321,10 @@ export async function analyzeSyllabusInputsAction(
     }
     const codebaseSummary = zipBase64 ? await summarizeCodebaseZip(zipBase64) : "(no codebase provided)";
     const paraList = paragraphs.map((p) => `[${p.id}] ${p.text}`).join("\n");
+    const byId = new Map(paragraphs.map((p) => [p.id, p.text]));
 
-    const prompt = `You are adapting an existing course syllabus for a new offering. The course's codebase is summarized so you know what the course is actually about.
+    // ── Pass 1: non-schedule class-specific fields + schedule block bounds. ──
+    const prompt1 = `You are adapting an existing course syllabus for a new offering. The codebase is summarized so you know what the course is about.
 
 CODEBASE SUMMARY:
 ${codebaseSummary}
@@ -2311,50 +2335,43 @@ ${courseInfoBlock(courseInfo)}
 The syllabus is a list of numbered paragraphs (id in brackets):
 ${paraList}
 
-Identify ONLY the paragraphs that are CLASS-SPECIFIC and need the instructor to provide or confirm a value for this offering — e.g. course title/number, instructor name, term/semester, meeting times and location, office hours, course description, learning objectives, topic/weekly schedule, textbooks/tools, and grading breakdown. Leave generic boilerplate OUT (university policies, academic-integrity, accessibility/Title IX statements, etc.).
+1) Identify the CLASS-SPECIFIC, NON-SCHEDULE paragraphs that need the instructor to provide or confirm a value — course title/number, instructor name, term/semester, meeting times and location, office hours, course description, learning objectives, textbooks/tools, grading breakdown, and similar. Leave generic boilerplate OUT (university policies, academic-integrity, accessibility/Title IX, etc.). Do NOT include weekly-schedule paragraphs here.
 
-For each class-specific paragraph, return a field with a short human label and a SUGGESTED complete replacement text for this offering, informed by the codebase and course facts where relevant. Keep the original paragraph's style, labels, and length; only change the class-specific content.
-
-SCHEDULE — CRITICAL: The course/weekly schedule is usually a TABLE with SEVERAL separate paragraphs per week — for example one paragraph like "Week 3 (dates): Topic" AND one or more separate paragraphs holding the week's dates, topic, and a description. Treat EACH bracketed [pN] paragraph independently and flag EVERY schedule paragraph: every paragraph that contains a week label, a date, a topic, or a weekly description from the previous offering. For each, replace the previous offering's dates with consecutive weekly dates computed from the start date (week 1 begins on the start date), and replace the previous offering's topics and descriptions with ones for THIS course derived from the codebase. You MUST NOT leave any paragraph that still contains an old date, an old topic, or an old weekly description from the previous offering — clear them all.
+2) Locate the WEEKLY SCHEDULE / course outline block — the consecutive run of paragraphs that list the weeks, dates, topics, and weekly descriptions (often a table). Return the id of its FIRST and LAST paragraph. If there is no weekly schedule, use null for both.
 
 Return ONLY valid JSON:
 {
-  "fields": [
-    { "paragraphId": "p12", "label": "Course title", "suggestedText": "..." }
-  ]
+  "fields": [ { "paragraphId": "p12", "label": "Course title", "suggestedText": "..." } ],
+  "scheduleStartId": "p81",
+  "scheduleEndId": "p131"
 }
 
 Requirements:
-- Use the exact paragraphId values from the list.
-- suggestedText is the COMPLETE replacement text for that paragraph, not a fragment.
+- Use exact paragraphId values; suggestedText is the COMPLETE replacement for that paragraph.
 ${SYLLABUS_STYLE_RULES}
 - Do not include any text outside the JSON object.`;
 
-    const result = await callLlm(
-      { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 16384 } },
+    const r1 = await callLlm(
+      { contents: [{ role: "user", parts: [{ text: prompt1 }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 8192 } },
       provider
     );
-    if (!result.ok) {
-      return { error: `Analysis failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    if (!r1.ok) {
+      return { error: `Analysis failed: HTTP ${r1.status} — ${r1.body.slice(0, 200)}` };
     }
-
-    const trimmed = result.text.trim();
-    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fenced?.[1]?.trim() ?? trimmed;
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
+    const parsed1 = extractJsonObject(r1.text);
+    if (!parsed1) {
       return { error: "Could not parse the analysis result." };
     }
-    let parsed: { fields?: unknown };
-    try {
-      parsed = JSON.parse(candidate.slice(start, end + 1));
-    } catch {
-      return { error: "The model returned invalid JSON." };
-    }
 
-    const byId = new Map(paragraphs.map((p) => [p.id, p.text]));
-    const fields: SyllabusInputField[] = (Array.isArray(parsed.fields) ? parsed.fields : [])
+    const startId = typeof parsed1.scheduleStartId === "string" ? parsed1.scheduleStartId : "";
+    const endId = typeof parsed1.scheduleEndId === "string" ? parsed1.scheduleEndId : "";
+    const startIdx = paragraphs.findIndex((p) => p.id === startId);
+    const endIdx = paragraphs.findIndex((p) => p.id === endId);
+    const schedulePairs =
+      startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx ? paragraphs.slice(startIdx, endIdx + 1) : [];
+    const scheduleIds = new Set(schedulePairs.map((p) => p.id));
+
+    const fields: SyllabusInputField[] = (Array.isArray(parsed1.fields) ? parsed1.fields : [])
       .map((f) => {
         const o = (f ?? {}) as { paragraphId?: unknown; label?: unknown; suggestedText?: unknown };
         const paragraphId = typeof o.paragraphId === "string" ? o.paragraphId : "";
@@ -2368,13 +2385,56 @@ ${SYLLABUS_STYLE_RULES}
           suggestedText,
         };
       })
-      .filter((f) => f.paragraphId && byId.has(f.paragraphId));
+      .filter((f) => f.paragraphId && byId.has(f.paragraphId) && !scheduleIds.has(f.paragraphId));
 
-    if (fields.length === 0) {
+    // ── Pass 2: a complete replacement for EVERY schedule paragraph. ──
+    const scheduleReplacements: Record<string, string> = {};
+    if (schedulePairs.length > 0) {
+      const schedList = schedulePairs.map((p) => `[${p.id}] ${p.text}`).join("\n");
+      const prompt2 = `You are completely rewriting the WEEKLY SCHEDULE of a course syllabus for a new offering. The previous offering's schedule must be entirely cleared and replaced.
+
+CODEBASE SUMMARY:
+${codebaseSummary}
+
+INSTRUCTOR-PROVIDED COURSE FACTS:
+${courseInfoBlock(courseInfo)}
+
+Here are the schedule paragraphs (id in brackets), in order:
+${schedList}
+
+Return a NEW replacement for EVERY paragraph id above. Compute consecutive weekly dates starting from the course start date (week 1 begins on the start date) and advancing one week per week. Derive new weekly topics and descriptions for THIS course from the codebase. Preserve each paragraph's role and format (a "Week N (dates): topic" line stays that format; a separate dates/topic/description cell stays that format) but with entirely new content. Clear ALL old dates, topics, and descriptions — leave nothing from the previous offering.
+
+Return ONLY valid JSON mapping each id to its new text:
+{ "replacements": { "p81": "...", "p82": "..." } }
+
+Requirements:
+- Include a replacement for EVERY id listed above; do not omit any.
+${SYLLABUS_STYLE_RULES}
+- Do not include any text outside the JSON object.`;
+
+      const r2 = await callLlm(
+        { contents: [{ role: "user", parts: [{ text: prompt2 }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 16384 } },
+        provider
+      );
+      if (r2.ok) {
+        const parsed2 = extractJsonObject(r2.text);
+        const reps =
+          parsed2 && typeof parsed2.replacements === "object" && parsed2.replacements
+            ? (parsed2.replacements as Record<string, unknown>)
+            : {};
+        for (const p of schedulePairs) {
+          const v = reps[p.id];
+          if (typeof v === "string" && v.trim()) scheduleReplacements[p.id] = v.trim();
+        }
+      }
+    }
+
+    if (fields.length === 0 && Object.keys(scheduleReplacements).length === 0) {
       return { error: "No class-specific sections were identified in that syllabus." };
     }
     return {
       fields,
+      scheduleReplacements,
       paragraphs: paragraphs.map((p) => ({ id: p.id, text: p.text })),
       codebaseSummary,
     };

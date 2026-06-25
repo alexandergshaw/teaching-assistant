@@ -2598,6 +2598,11 @@ function ModulesView({
   const [addValue, setAddValue] = useState<Record<number, string>>({});
   const [addUrl, setAddUrl] = useState<Record<number, string>>({});
   const [addTitle, setAddTitle] = useState<Record<number, string>>({});
+  // Per-module "File" creation: docx/pptx format, AI prompt, generated content.
+  const [addFileFormat, setAddFileFormat] = useState<Record<number, "docx" | "pptx">>({});
+  const [addFileContent, setAddFileContent] = useState<Record<number, string>>({});
+  const [addAiPrompt, setAddAiPrompt] = useState<Record<number, string>>({});
+  const [addAiBusy, setAddAiBusy] = useState<Record<number, boolean>>({});
 
   // ── Bulk selection across the module tree ──────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -4066,11 +4071,75 @@ function ModulesView({
     const type = addType[m.id] ?? "Page";
     if (type === "ExternalUrl") return !!(addUrl[m.id] ?? "").trim();
     if (type === "SubHeader") return !!(addTitle[m.id] ?? "").trim();
+    if (type === "File") return !!addValue[m.id] || (addFileContent[m.id] ?? "").trim() !== "";
     return !!addValue[m.id];
+  };
+
+  // A file name derived from the generated content's first heading/line.
+  const titleFromText = (text: string): string => {
+    for (const raw of text.split("\n")) {
+      const line = raw.trim();
+      if (!line) continue;
+      const h = line.match(/^#{1,2}\s+(.*)$/);
+      return ((h ? h[1] : line).trim() || "Document").slice(0, 80);
+    }
+    return "Document";
+  };
+
+  // Generate the per-module file's content with AI (docx text or a slide deck).
+  const addAiGenerate = async (m: CanvasModule) => {
+    const prompt = (addAiPrompt[m.id] ?? "").trim();
+    if (!prompt) {
+      setNote({ kind: "error", text: "Describe what to generate first." });
+      return;
+    }
+    const format = addFileFormat[m.id] ?? "docx";
+    setAddAiBusy((p) => ({ ...p, [m.id]: true }));
+    setNote(null);
+    if (format === "pptx") {
+      const result = await generateSlidesAction(prompt, provider);
+      setAddAiBusy((p) => ({ ...p, [m.id]: false }));
+      if ("error" in result) {
+        setNote({ kind: "error", text: result.error });
+        return;
+      }
+      setAddFileContent((p) => ({ ...p, [m.id]: slidesToText(result) }));
+      setNote({ kind: "success", text: "Generated slides — review them, then Add." });
+      return;
+    }
+    const result = await generateDocumentTextAction(prompt, provider);
+    setAddAiBusy((p) => ({ ...p, [m.id]: false }));
+    if ("error" in result) {
+      setNote({ kind: "error", text: result.error });
+      return;
+    }
+    setAddFileContent((p) => ({ ...p, [m.id]: result.text }));
+    setNote({ kind: "success", text: "Generated document — review it, then Add." });
   };
 
   const addItem = async (m: CanvasModule) => {
     const type = addType[m.id] ?? "Page";
+    // AI-generated file: build a .docx/.pptx and upload it into this module.
+    if (type === "File" && (addFileContent[m.id] ?? "").trim() !== "") {
+      const content = addFileContent[m.id];
+      const format = addFileFormat[m.id] ?? "docx";
+      setBusy(true);
+      setNote(null);
+      const ok = await addContentToModule("File", m.id, titleFromText(content), {
+        fileContent: content,
+        fileFormat: format,
+      });
+      setBusy(false);
+      if (!ok) {
+        setNote({ kind: "error", text: "Could not generate and add the file." });
+        return;
+      }
+      setAddFileContent((p) => ({ ...p, [m.id]: "" }));
+      setAddAiPrompt((p) => ({ ...p, [m.id]: "" }));
+      setNote({ kind: "success", text: `Added the generated .${format} to "${m.name}".` });
+      reload();
+      return;
+    }
     let item: NewModuleItem | null = null;
     if (type === "Page") {
       const pageUrl = addValue[m.id];
@@ -5268,22 +5337,101 @@ function ModulesView({
                     <option value="SubHeader">Text header</option>
                   </select>
 
+                  {addType[m.id] === "File" && (
+                    <select
+                      className={styles.bulkSelect}
+                      style={{ maxWidth: 150 }}
+                      value={addFileFormat[m.id] ?? "docx"}
+                      onChange={(e) =>
+                        setAddFileFormat((p) => ({ ...p, [m.id]: e.target.value === "pptx" ? "pptx" : "docx" }))
+                      }
+                      disabled={busy}
+                      aria-label="Format of the generated file"
+                    >
+                      <option value="docx">Word (.docx)</option>
+                      <option value="pptx">PowerPoint (.pptx)</option>
+                    </select>
+                  )}
+
                   {CONTENT_TYPES.includes(addType[m.id] ?? "Page") && (
                     <select
                       className={styles.bulkSelect}
                       style={{ flex: "1 1 200px", maxWidth: 320 }}
                       value={addValue[m.id] ?? ""}
                       onChange={(e) => setAddValue((p) => ({ ...p, [m.id]: e.target.value }))}
-                      disabled={busy || optionsFor(addType[m.id] ?? "Page").length === 0}
+                      disabled={
+                        busy ||
+                        optionsFor(addType[m.id] ?? "Page").length === 0 ||
+                        (addType[m.id] === "File" && (addFileContent[m.id] ?? "").trim() !== "")
+                      }
                       aria-label="Content to add"
                     >
-                      <option value="">{contentPlaceholder(addType[m.id] ?? "Page")}</option>
+                      <option value="">
+                        {addType[m.id] === "File"
+                          ? `or pick existing — ${contentPlaceholder("File")}`
+                          : contentPlaceholder(addType[m.id] ?? "Page")}
+                      </option>
                       {optionsFor(addType[m.id] ?? "Page").map((o) => (
                         <option key={o.value} value={o.value}>
                           {o.label}
                         </option>
                       ))}
                     </select>
+                  )}
+
+                  {addType[m.id] === "File" && (
+                    <>
+                      <input
+                        type="text"
+                        className={styles.bulkInput}
+                        style={{ flex: "1 1 200px", minWidth: 160 }}
+                        placeholder={
+                          (addFileFormat[m.id] ?? "docx") === "pptx"
+                            ? "Describe a deck to generate with AI"
+                            : "Describe a document to generate with AI"
+                        }
+                        value={addAiPrompt[m.id] ?? ""}
+                        onChange={(e) => setAddAiPrompt((p) => ({ ...p, [m.id]: e.target.value }))}
+                        aria-label="AI prompt for the new file"
+                      />
+                      <button
+                        type="button"
+                        className={styles.ccBtn}
+                        disabled={busy || !!addAiBusy[m.id] || !(addAiPrompt[m.id] ?? "").trim()}
+                        onClick={() => void addAiGenerate(m)}
+                      >
+                        {addAiBusy[m.id] ? "Generating…" : "Generate with AI"}
+                      </button>
+                      {(addFileContent[m.id] ?? "").trim() !== "" && (
+                        <>
+                          <textarea
+                            value={addFileContent[m.id] ?? ""}
+                            onChange={(e) => setAddFileContent((p) => ({ ...p, [m.id]: e.target.value }))}
+                            spellCheck
+                            aria-label="Generated file content"
+                            style={{
+                              flexBasis: "100%",
+                              width: "100%",
+                              minHeight: 64,
+                              padding: "8px 10px",
+                              border: "1px solid var(--field-border)",
+                              borderRadius: 8,
+                              background: "var(--field-background)",
+                              color: "var(--text-primary)",
+                              font: "inherit",
+                              fontSize: "0.83rem",
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className={styles.ccBtn}
+                            onClick={() => setAddFileContent((p) => ({ ...p, [m.id]: "" }))}
+                          >
+                            Discard
+                          </button>
+                        </>
+                      )}
+                    </>
                   )}
 
                   {addType[m.id] === "ExternalUrl" && (

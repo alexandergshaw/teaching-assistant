@@ -304,6 +304,10 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [adaptStatus, setAdaptStatus] = useState<"idle" | "analyzing" | "building">("idle");
   const [adaptError, setAdaptError] = useState<string | null>(null);
   // Instructor-provided course facts (asked for; not assumed across syllabi).
+  const [adaptCourseName, setAdaptCourseName] = useState("");
+  const [adaptCourseCode, setAdaptCourseCode] = useState("");
+  const [adaptInstructorName, setAdaptInstructorName] = useState("");
+  const [adaptInstructorEmail, setAdaptInstructorEmail] = useState("");
   const [adaptStartDate, setAdaptStartDate] = useState("");
   const [adaptMeetingDays, setAdaptMeetingDays] = useState("");
   const [adaptMeetingTimes, setAdaptMeetingTimes] = useState("");
@@ -506,6 +510,10 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   };
 
   const adaptCourseInfo = (): SyllabusCourseInfo => ({
+    courseName: adaptCourseName.trim() || undefined,
+    courseCode: adaptCourseCode.trim() || undefined,
+    instructorName: adaptInstructorName.trim() || undefined,
+    instructorEmail: adaptInstructorEmail.trim() || undefined,
     startDate: adaptStartDate.trim() || undefined,
     meetingDays: adaptMeetingDays.trim() || undefined,
     meetingTimes: adaptMeetingTimes.trim() || undefined,
@@ -808,6 +816,50 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                 </div>
               </div>
 
+              <div className={styles.field}>
+                <label htmlFor="adaptCourseName">Course name</label>
+                <input
+                  id="adaptCourseName"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. Database Management"
+                  value={adaptCourseName}
+                  onChange={(e) => setAdaptCourseName(e.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="adaptCourseCode">Course code</label>
+                <input
+                  id="adaptCourseCode"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. BIT270"
+                  value={adaptCourseCode}
+                  onChange={(e) => setAdaptCourseCode(e.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="adaptInstructorName">Instructor name</label>
+                <input
+                  id="adaptInstructorName"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. Alex Shaw"
+                  value={adaptInstructorName}
+                  onChange={(e) => setAdaptInstructorName(e.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="adaptInstructorEmail">Instructor email</label>
+                <input
+                  id="adaptInstructorEmail"
+                  type="email"
+                  className={styles.textInput}
+                  placeholder="e.g. shaw@university.edu"
+                  value={adaptInstructorEmail}
+                  onChange={(e) => setAdaptInstructorEmail(e.target.value)}
+                />
+              </div>
               <div className={styles.field}>
                 <label htmlFor="adaptStartDate">Course start date</label>
                 <input

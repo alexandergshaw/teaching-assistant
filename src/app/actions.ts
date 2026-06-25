@@ -2209,6 +2209,14 @@ export interface SyllabusInputField {
 
 /** Instructor-provided facts the codebase can't supply; not assumed across syllabi. */
 export interface SyllabusCourseInfo {
+  /** Course name/title, e.g. "Database Management". */
+  courseName?: string;
+  /** Course code/number, e.g. "BIT270". */
+  courseCode?: string;
+  /** Instructor name. */
+  instructorName?: string;
+  /** Instructor email. */
+  instructorEmail?: string;
   /** Course start date including the year, e.g. "2026-08-25". */
   startDate?: string;
   /** Meeting days, e.g. "Mon/Wed/Fri". */
@@ -2222,6 +2230,10 @@ export interface SyllabusCourseInfo {
 /** Render the instructor's course facts as a prompt block (empty when none given). */
 function courseInfoBlock(info: SyllabusCourseInfo): string {
   const lines = [
+    info.courseName ? `Course name/title: ${info.courseName}` : "",
+    info.courseCode ? `Course code/number: ${info.courseCode}` : "",
+    info.instructorName ? `Instructor name: ${info.instructorName}` : "",
+    info.instructorEmail ? `Instructor email: ${info.instructorEmail}` : "",
     info.startDate ? `Course start date (compute any week/date schedule from this; do not reuse dates from the old syllabus): ${info.startDate}` : "",
     info.meetingDays ? `Meeting days: ${info.meetingDays}` : "",
     info.meetingTimes ? `Meeting times: ${info.meetingTimes}` : "",

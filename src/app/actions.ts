@@ -2303,6 +2303,8 @@ Identify ONLY the paragraphs that are CLASS-SPECIFIC and need the instructor to 
 
 For each class-specific paragraph, return a field with a short human label and a SUGGESTED complete replacement text for this offering, informed by the codebase and course facts where relevant. Keep the original paragraph's style, labels, and length; only change the class-specific content.
 
+SCHEDULE — CRITICAL: The course/weekly schedule is usually a TABLE with SEVERAL separate paragraphs per week — for example one paragraph like "Week 3 (dates): Topic" AND one or more separate paragraphs holding the week's dates, topic, and a description. Treat EACH bracketed [pN] paragraph independently and flag EVERY schedule paragraph: every paragraph that contains a week label, a date, a topic, or a weekly description from the previous offering. For each, replace the previous offering's dates with consecutive weekly dates computed from the start date (week 1 begins on the start date), and replace the previous offering's topics and descriptions with ones for THIS course derived from the codebase. You MUST NOT leave any paragraph that still contains an old date, an old topic, or an old weekly description from the previous offering — clear them all.
+
 Return ONLY valid JSON:
 {
   "fields": [
@@ -2317,7 +2319,7 @@ ${SYLLABUS_STYLE_RULES}
 - Do not include any text outside the JSON object.`;
 
     const result = await callLlm(
-      { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 6144 } },
+      { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 16384 } },
       provider
     );
     if (!result.ok) {

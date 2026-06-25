@@ -37,6 +37,8 @@ export interface LlmGenerationConfig {
 export interface LlmRequest {
   contents: LlmContent[];
   generationConfig?: LlmGenerationConfig;
+  /** Optional system instruction prepended to steer the model (e.g. tone, format). */
+  systemInstruction?: string;
 }
 
 /**
@@ -101,6 +103,9 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
   const body = JSON.stringify({
     contents: req.contents,
     ...(req.generationConfig ? { generationConfig: req.generationConfig } : {}),
+    ...(req.systemInstruction
+      ? { system_instruction: { parts: [{ text: req.systemInstruction }] } }
+      : {}),
   });
 
   let lastResult: LlmResult = { ok: false, status: 0, body: "Request was never attempted." };

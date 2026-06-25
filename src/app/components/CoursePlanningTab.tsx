@@ -313,6 +313,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [adaptCodebaseSummary, setAdaptCodebaseSummary] = useState("");
   const [adaptRegenId, setAdaptRegenId] = useState<string | null>(null);
   const [adaptShowPreview, setAdaptShowPreview] = useState(false);
+  const adaptFieldIds = new Set((adaptFields ?? []).map((f) => f.paragraphId));
 
   const getFullContext = () => {
     const parts = [
@@ -538,10 +539,12 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   // class-specific paragraphs change) and download the result.
   const handleBuildAdaptedSyllabus = async () => {
     if (!adaptSyllabusBase64 || !adaptFields) return;
+    // Write any paragraph whose value differs from the original — this covers the
+    // AI-flagged fields and any edits made directly in the preview.
     const edits: Record<string, string> = {};
-    for (const f of adaptFields) {
-      const value = adaptValues[f.paragraphId] ?? f.suggestedText;
-      if (value !== f.currentText) edits[f.paragraphId] = value;
+    for (const p of adaptParagraphs) {
+      const value = adaptValues[p.id];
+      if (value !== undefined && value !== p.text) edits[p.id] = value;
     }
     setAdaptStatus("building");
     setAdaptError(null);
@@ -940,24 +943,35 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                         overflowY: "auto",
                       }}
                     >
+                      <p style={{ margin: "0 0 12px", fontSize: "0.8rem", color: "#6b7280" }}>
+                        Editable preview — click any line to change it. Highlighted lines are the AI-identified
+                        class-specific sections. Edits here are included when you download.
+                      </p>
                       {adaptParagraphs.map((p) => {
-                        const isField = p.id in adaptValues;
-                        const text = isField ? adaptValues[p.id] ?? p.text : p.text;
+                        const isField = adaptFieldIds.has(p.id);
+                        const value = adaptValues[p.id] ?? p.text;
                         return (
-                          <p
+                          <textarea
                             key={p.id}
+                            value={value}
+                            onChange={(e) => setAdaptValues((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                            rows={Math.max(1, Math.ceil(value.length / 95))}
                             style={{
-                              margin: "0 0 10px",
-                              lineHeight: 1.55,
-                              color: "#1f2933",
-                              whiteSpace: "pre-wrap",
+                              display: "block",
+                              width: "100%",
+                              border: "none",
+                              outline: "none",
+                              resize: "vertical",
                               background: isField ? "rgba(37, 99, 235, 0.08)" : "transparent",
-                              borderRadius: isField ? 4 : 0,
-                              padding: isField ? "2px 6px" : 0,
+                              color: "#1f2933",
+                              font: "inherit",
+                              fontSize: "0.95rem",
+                              lineHeight: 1.5,
+                              padding: isField ? "4px 6px" : "2px 0",
+                              margin: "0 0 6px",
+                              borderRadius: 4,
                             }}
-                          >
-                            {text}
-                          </p>
+                          />
                         );
                       })}
                     </div>

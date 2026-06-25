@@ -26,7 +26,12 @@ export async function POST(req: NextRequest) {
     }));
 
     const result = await callLlm(
-      { contents, generationConfig: { temperature: 0.7, maxOutputTokens: 1024 } },
+      {
+        contents,
+        generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+        systemInstruction:
+          "Respond in plain text only. Never use markdown or any rich formatting: no asterisks, bold, italics, headings, bullet points, numbered lists, tables, code fences, or backticks. Write in plain sentences and paragraphs.",
+      },
       provider
     );
 

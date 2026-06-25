@@ -11,10 +11,12 @@ import {
   generateCourseScheduleAction,
   generateCopilotProjectPromptAction,
   analyzeSyllabusInputsAction,
+  regenerateSyllabusFieldAction,
   buildAdaptedSyllabusAction,
   type SyllabusSection,
   type CourseScheduleRow,
   type SyllabusInputField,
+  type SyllabusCourseInfo,
 } from "../actions";
 import SyllabusPreviewModal from "./SyllabusPreviewModal";
 import LecturePlanningTab from "./LecturePlanningTab";
@@ -301,6 +303,16 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
   const [adaptValues, setAdaptValues] = useState<Record<string, string>>({});
   const [adaptStatus, setAdaptStatus] = useState<"idle" | "analyzing" | "building">("idle");
   const [adaptError, setAdaptError] = useState<string | null>(null);
+  // Instructor-provided course facts (asked for; not assumed across syllabi).
+  const [adaptStartDate, setAdaptStartDate] = useState("");
+  const [adaptMeetingDays, setAdaptMeetingDays] = useState("");
+  const [adaptMeetingTimes, setAdaptMeetingTimes] = useState("");
+  const [adaptLocation, setAdaptLocation] = useState("");
+  // The full paragraph list + codebase summary, for the live preview and per-field regenerate.
+  const [adaptParagraphs, setAdaptParagraphs] = useState<Array<{ id: string; text: string }>>([]);
+  const [adaptCodebaseSummary, setAdaptCodebaseSummary] = useState("");
+  const [adaptRegenId, setAdaptRegenId] = useState<string | null>(null);
+  const [adaptShowPreview, setAdaptShowPreview] = useState(false);
 
   const getFullContext = () => {
     const parts = [
@@ -474,6 +486,7 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       const result = await analyzeSyllabusInputsAction(
         { name: syllabusFile.name, base64: syllabusBase64 },
         zipBase64,
+        adaptCourseInfo(),
         getStoredProvider()
       );
       if ("error" in result) {
@@ -482,10 +495,42 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
       }
       setAdaptFields(result.fields);
       setAdaptValues(Object.fromEntries(result.fields.map((f) => [f.paragraphId, f.suggestedText])));
+      setAdaptParagraphs(result.paragraphs);
+      setAdaptCodebaseSummary(result.codebaseSummary);
     } catch (err) {
       setAdaptError(err instanceof Error ? err.message : "Failed to analyze the syllabus.");
     } finally {
       setAdaptStatus("idle");
+    }
+  };
+
+  const adaptCourseInfo = (): SyllabusCourseInfo => ({
+    startDate: adaptStartDate.trim() || undefined,
+    meetingDays: adaptMeetingDays.trim() || undefined,
+    meetingTimes: adaptMeetingTimes.trim() || undefined,
+    location: adaptLocation.trim() || undefined,
+  });
+
+  // Regenerate the text of one field with AI, leaving the others untouched.
+  const handleRegenerateField = async (field: SyllabusInputField) => {
+    setAdaptRegenId(field.paragraphId);
+    setAdaptError(null);
+    try {
+      const result = await regenerateSyllabusFieldAction(
+        { label: field.label, currentText: field.currentText },
+        adaptCodebaseSummary,
+        adaptCourseInfo(),
+        getStoredProvider()
+      );
+      if ("error" in result) {
+        setAdaptError(result.error);
+        return;
+      }
+      setAdaptValues((prev) => ({ ...prev, [field.paragraphId]: result.text }));
+    } catch (err) {
+      setAdaptError(err instanceof Error ? err.message : "Failed to regenerate the field.");
+    } finally {
+      setAdaptRegenId(null);
     }
   };
 
@@ -760,6 +805,53 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                 </div>
               </div>
 
+              <div className={styles.field}>
+                <label htmlFor="adaptStartDate">Course start date</label>
+                <input
+                  id="adaptStartDate"
+                  type="date"
+                  className={styles.textInput}
+                  value={adaptStartDate}
+                  onChange={(e) => setAdaptStartDate(e.target.value)}
+                />
+                <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 0" }}>
+                  Include the year — used to compute the schedule. Not assumed from the old syllabus.
+                </p>
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="adaptMeetingDays">Meeting days</label>
+                <input
+                  id="adaptMeetingDays"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. Mon / Wed / Fri"
+                  value={adaptMeetingDays}
+                  onChange={(e) => setAdaptMeetingDays(e.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="adaptMeetingTimes">Meeting times</label>
+                <input
+                  id="adaptMeetingTimes"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. 9:00–10:15am"
+                  value={adaptMeetingTimes}
+                  onChange={(e) => setAdaptMeetingTimes(e.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="adaptLocation">Meeting location</label>
+                <input
+                  id="adaptLocation"
+                  type="text"
+                  className={styles.textInput}
+                  placeholder="e.g. Room 204, Science Hall"
+                  value={adaptLocation}
+                  onChange={(e) => setAdaptLocation(e.target.value)}
+                />
+              </div>
+
               {adaptError && <p className={styles.error}>{adaptError}</p>}
 
               <button
@@ -780,7 +872,27 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                     const value = adaptValues[f.paragraphId] ?? "";
                     return (
                       <div key={f.paragraphId} className={styles.field}>
-                        <label>{f.label}</label>
+                        <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                          <span>{f.label}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRegenerateField(f)}
+                            disabled={adaptRegenId !== null}
+                            style={{
+                              fontSize: "0.78rem",
+                              fontWeight: 600,
+                              color: "var(--accent)",
+                              background: "transparent",
+                              border: "1px solid var(--field-border)",
+                              borderRadius: 8,
+                              padding: "3px 10px",
+                              cursor: adaptRegenId !== null ? "default" : "pointer",
+                              opacity: adaptRegenId !== null && adaptRegenId !== f.paragraphId ? 0.5 : 1,
+                            }}
+                          >
+                            {adaptRegenId === f.paragraphId ? "Regenerating…" : "Regenerate"}
+                          </button>
+                        </label>
                         <textarea
                           className={styles.textInput}
                           rows={Math.max(2, Math.min(8, Math.round(value.length / 70) + 1))}
@@ -797,14 +909,59 @@ export default function CoursePlanningTab({ copiedKey, onCopy, icons }: CoursePl
                       </div>
                     );
                   })}
-                  <button
-                    type="button"
-                    className={styles.submitButton}
-                    onClick={handleBuildAdaptedSyllabus}
-                    disabled={adaptStatus !== "idle"}
-                  >
-                    {adaptStatus === "building" ? "Building…" : "Generate adapted syllabus (.docx)"}
-                  </button>
+
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+                    <button
+                      type="button"
+                      className={styles.submitButton}
+                      onClick={() => setAdaptShowPreview((v) => !v)}
+                    >
+                      {adaptShowPreview ? "Hide preview" : "Preview syllabus"}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.submitButton}
+                      onClick={handleBuildAdaptedSyllabus}
+                      disabled={adaptStatus !== "idle"}
+                    >
+                      {adaptStatus === "building" ? "Building…" : "Download adapted syllabus (.docx)"}
+                    </button>
+                  </div>
+
+                  {adaptShowPreview && (
+                    <div
+                      style={{
+                        marginTop: 14,
+                        padding: "22px 26px",
+                        border: "1px solid var(--field-border)",
+                        borderRadius: 12,
+                        background: "#ffffff",
+                        maxHeight: "60vh",
+                        overflowY: "auto",
+                      }}
+                    >
+                      {adaptParagraphs.map((p) => {
+                        const isField = p.id in adaptValues;
+                        const text = isField ? adaptValues[p.id] ?? p.text : p.text;
+                        return (
+                          <p
+                            key={p.id}
+                            style={{
+                              margin: "0 0 10px",
+                              lineHeight: 1.55,
+                              color: "#1f2933",
+                              whiteSpace: "pre-wrap",
+                              background: isField ? "rgba(37, 99, 235, 0.08)" : "transparent",
+                              borderRadius: isField ? 4 : 0,
+                              padding: isField ? "2px 6px" : 0,
+                            }}
+                          >
+                            {text}
+                          </p>
+                        );
+                      })}
+                    </div>
+                  )}
                 </>
               )}
             </>

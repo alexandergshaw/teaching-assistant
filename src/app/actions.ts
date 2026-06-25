@@ -2207,6 +2207,34 @@ export interface SyllabusInputField {
   suggestedText: string;
 }
 
+/** Instructor-provided facts the codebase can't supply; not assumed across syllabi. */
+export interface SyllabusCourseInfo {
+  /** Course start date including the year, e.g. "2026-08-25". */
+  startDate?: string;
+  /** Meeting days, e.g. "Mon/Wed/Fri". */
+  meetingDays?: string;
+  /** Meeting times, e.g. "9:00–10:15am". */
+  meetingTimes?: string;
+  /** Meeting location, e.g. "Room 204, Science Hall". */
+  location?: string;
+}
+
+/** Render the instructor's course facts as a prompt block (empty when none given). */
+function courseInfoBlock(info: SyllabusCourseInfo): string {
+  const lines = [
+    info.startDate ? `Course start date (compute any week/date schedule from this; do not reuse dates from the old syllabus): ${info.startDate}` : "",
+    info.meetingDays ? `Meeting days: ${info.meetingDays}` : "",
+    info.meetingTimes ? `Meeting times: ${info.meetingTimes}` : "",
+    info.location ? `Meeting location: ${info.location}` : "",
+  ].filter(Boolean);
+  return lines.length ? lines.join("\n") : "(none provided)";
+}
+
+// Shared guidance so the AI describes work generically and uses instructor facts.
+const SYLLABUS_STYLE_RULES = `- When describing weekly tasks or content, use generic, domain-neutral language for the TYPE of work (e.g. "create tables", "write functions", "build an API endpoint") rather than the codebase's specific project nouns (e.g. do NOT write "create mission/moon tables" — write "create tables").
+- Use the instructor-provided course facts above exactly where they apply (meeting info, and schedule dates derived from the start date).
+- Do not invent specific facts (instructor name, room numbers, dates) that are neither provided above nor implied by the codebase; leave the original text for the instructor to fill in.`;
+
 /** Summarize a codebase zip (file tree + a few key files) as LLM context. */
 async function summarizeCodebaseZip(zipBase64: string): Promise<string> {
   const JSZipMod = (await import("jszip")).default;
@@ -2244,8 +2272,12 @@ async function summarizeCodebaseZip(zipBase64: string): Promise<string> {
 export async function analyzeSyllabusInputsAction(
   syllabus: { name: string; base64: string },
   zipBase64: string | null,
+  courseInfo: SyllabusCourseInfo = {},
   provider: LlmProvider = "gemini"
-): Promise<{ fields: SyllabusInputField[] } | { error: string }> {
+): Promise<
+  | { fields: SyllabusInputField[]; paragraphs: Array<{ id: string; text: string }>; codebaseSummary: string }
+  | { error: string }
+> {
   try {
     await requireOwner();
     const buffer = Buffer.from(syllabus.base64, "base64");
@@ -2261,12 +2293,15 @@ export async function analyzeSyllabusInputsAction(
 CODEBASE SUMMARY:
 ${codebaseSummary}
 
+INSTRUCTOR-PROVIDED COURSE FACTS:
+${courseInfoBlock(courseInfo)}
+
 The syllabus is a list of numbered paragraphs (id in brackets):
 ${paraList}
 
 Identify ONLY the paragraphs that are CLASS-SPECIFIC and need the instructor to provide or confirm a value for this offering — e.g. course title/number, instructor name, term/semester, meeting times and location, office hours, course description, learning objectives, topic/weekly schedule, textbooks/tools, and grading breakdown. Leave generic boilerplate OUT (university policies, academic-integrity, accessibility/Title IX statements, etc.).
 
-For each class-specific paragraph, return a field with a short human label and a SUGGESTED complete replacement text for this offering, informed by the codebase where relevant. Keep the original paragraph's style, labels, and length; only change the class-specific content.
+For each class-specific paragraph, return a field with a short human label and a SUGGESTED complete replacement text for this offering, informed by the codebase and course facts where relevant. Keep the original paragraph's style, labels, and length; only change the class-specific content.
 
 Return ONLY valid JSON:
 {
@@ -2278,7 +2313,7 @@ Return ONLY valid JSON:
 Requirements:
 - Use the exact paragraphId values from the list.
 - suggestedText is the COMPLETE replacement text for that paragraph, not a fragment.
-- Do not invent specific facts (instructor name, dates, room numbers) the codebase does not imply; for those, set suggestedText to the paragraph's original text so the instructor can fill it in.
+${SYLLABUS_STYLE_RULES}
 - Do not include any text outside the JSON object.`;
 
     const result = await callLlm(
@@ -2324,7 +2359,60 @@ Requirements:
     if (fields.length === 0) {
       return { error: "No class-specific sections were identified in that syllabus." };
     }
-    return { fields };
+    return {
+      fields,
+      paragraphs: paragraphs.map((p) => ({ id: p.id, text: p.text })),
+      codebaseSummary,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Regenerate the replacement text for a single syllabus field, using the codebase
+ * summary and instructor facts. Returns just the new paragraph text.
+ */
+export async function regenerateSyllabusFieldAction(
+  field: { label: string; currentText: string },
+  codebaseSummary: string,
+  courseInfo: SyllabusCourseInfo = {},
+  provider: LlmProvider = "gemini"
+): Promise<{ text: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const prompt = `You are writing the replacement text for ONE field of a course syllabus being adapted for a new offering.
+
+CODEBASE SUMMARY:
+${codebaseSummary}
+
+INSTRUCTOR-PROVIDED COURSE FACTS:
+${courseInfoBlock(courseInfo)}
+
+FIELD: ${field.label}
+CURRENT TEXT IN THE SYLLABUS:
+${field.currentText}
+
+Write a fresh, complete replacement for this one paragraph for the new offering. Keep the original's style, labels, and approximate length; only change the class-specific content.
+
+${SYLLABUS_STYLE_RULES}
+
+Return ONLY the replacement paragraph text — no JSON, no quotes, no commentary.`;
+
+    const result = await callLlm(
+      { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.5, maxOutputTokens: 1024 } },
+      provider
+    );
+    if (!result.ok) {
+      return { error: `Regeneration failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+    let text = result.text.trim();
+    const fenced = text.match(/```(?:\w+)?\s*([\s\S]*?)```/);
+    if (fenced) text = fenced[1].trim();
+    if (!text) {
+      return { error: "The model returned empty text." };
+    }
+    return { text };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }

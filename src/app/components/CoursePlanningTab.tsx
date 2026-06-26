@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChangeEvent, CSSProperties } from "react";
+import type { ChangeEvent } from "react";
 import { useRef, useState, useEffect } from "react";
 import {
   generateCourseScheduleAction,
@@ -12,7 +12,8 @@ import {
   type SyllabusCourseInfo,
 } from "../actions";
 import LecturePlanningTab from "./LecturePlanningTab";
-import { RichTextEditor, FormattingToolbar, spansToPlainText } from "./RichTextEditor";
+import { spansToPlainText } from "./RichTextEditor";
+import { RichTextSectionEditor } from "./RichTextSectionEditor";
 import type { RunSpan } from "@/lib/office-edit";
 import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
@@ -603,74 +604,43 @@ export default function CoursePlanningTab() {
                     </button>
                   </div>
 
-                  <div
-                    style={{
-                      marginTop: 12,
-                      padding: "16px 18px",
-                      border: "1px solid var(--field-border)",
-                      borderRadius: 12,
-                      background: "#ffffff",
-                      maxHeight: "65vh",
-                      overflowY: "auto",
-                    }}
-                  >
-                    <FormattingToolbar />
-                    {adaptSections.map((s) => {
-                      const changed = s.isField || spansToPlainText(s.spans) !== s.original;
-                      const miniBtn: CSSProperties = {
-                        width: 26,
-                        height: 24,
-                        fontSize: "0.75rem",
-                        fontWeight: 700,
-                        lineHeight: 1,
-                        borderRadius: 6,
-                        border: "1px solid var(--field-border)",
-                        background: "#fff",
-                        color: "#475569",
-                        cursor: "pointer",
-                      };
-                      return (
-                        <div key={s.key} style={{ display: "flex", gap: 8, alignItems: "flex-start", margin: "0 0 10px" }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            {s.isField && (
-                              <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 2px" }}>
-                                {s.label}
-                              </div>
-                            )}
-                            <RichTextEditor
-                              value={s.spans}
-                              onChange={(spans) => updateSection(s.key, { spans })}
-                              changed={changed}
-                              placeholder="(empty section)"
-                              ariaLabel={s.isField ? s.label : "Syllabus section"}
-                            />
-                          </div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
-                            <button
-                              type="button"
-                              title="Regenerate this section with AI"
-                              onClick={() => handleRegenerateAdaptSection(s)}
-                              disabled={adaptRegenKey !== null}
-                              style={{ ...miniBtn, color: "var(--accent)", opacity: adaptRegenKey !== null && adaptRegenKey !== s.key ? 0.5 : 1 }}
-                            >
-                              {adaptRegenKey === s.key ? "…" : "AI"}
-                            </button>
-                            <button type="button" title="Add a section below" onClick={() => addSectionAfter(s.key)} style={miniBtn}>
-                              +
-                            </button>
-                            <button
-                              type="button"
-                              title="Delete this section"
-                              onClick={() => deleteSection(s.key)}
-                              style={{ ...miniBtn, color: "#b91c1c" }}
-                            >
-                              ×
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <RichTextSectionEditor
+                    bordered
+                    maxHeight="65vh"
+                    onChange={(key, spans) => updateSection(key, { spans })}
+                    sections={adaptSections.map((s) => ({
+                      key: s.key,
+                      spans: s.spans,
+                      changed: s.isField || spansToPlainText(s.spans) !== s.original,
+                      placeholder: "(empty section)",
+                      label: s.isField ? s.label : undefined,
+                      ariaLabel: s.isField ? s.label : "Syllabus section",
+                      actions: [
+                        {
+                          key: "ai",
+                          label: adaptRegenKey === s.key ? "…" : "AI",
+                          title: "Regenerate this section with AI",
+                          tone: "accent",
+                          onClick: () => handleRegenerateAdaptSection(s),
+                          disabled: adaptRegenKey !== null,
+                          style: { opacity: adaptRegenKey !== null && adaptRegenKey !== s.key ? 0.5 : 1 },
+                        },
+                        {
+                          key: "add",
+                          label: "+",
+                          title: "Add a section below",
+                          onClick: () => addSectionAfter(s.key),
+                        },
+                        {
+                          key: "del",
+                          label: "×",
+                          title: "Delete this section",
+                          tone: "danger",
+                          onClick: () => deleteSection(s.key),
+                        },
+                      ],
+                    }))}
+                  />
                 </>
               )}
             </>

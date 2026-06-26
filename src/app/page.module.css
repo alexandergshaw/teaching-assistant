@@ -4353,3 +4353,71 @@
   color: #9aa5b1;
   pointer-events: none;
 }
+
+/* ── Rich text section editor (shared by syllabus + Office file editors) ────── */
+.rteSectionList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.rteSectionListBordered {
+  margin-top: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--field-border);
+  border-radius: 12px;
+  background: #ffffff;
+}
+.rteSectionHeading {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.rteSectionRow {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.rteSectionMain {
+  flex: 1;
+  min-width: 0;
+}
+.rteSectionLabel {
+  margin: 0 0 2px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.rteSectionActions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.rteSectionActionBtn {
+  width: 26px;
+  height: 24px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 6px;
+  border: 1px solid var(--field-border);
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+}
+.rteSectionActionBtn:disabled {
+  cursor: default;
+}
+.rteSectionActionBtnAccent {
+  color: var(--accent);
+}
+.rteSectionActionBtnDanger {
+  color: #b91c1c;
+}

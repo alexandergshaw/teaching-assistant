@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   listCourseContentAction,
   getPageAction,
@@ -55,7 +55,8 @@ import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
 import FilePreviewModal, { type PreviewFile } from "./FilePreviewModal";
 import type { OfficeParagraph, RunSpan } from "@/lib/office-edit";
-import { RichTextEditor, FormattingToolbar, spansEqual } from "./RichTextEditor";
+import { spansEqual } from "./RichTextEditor";
+import { RichTextSectionEditor } from "./RichTextSectionEditor";
 import type {
   CanvasModule,
   CanvasModuleItem,
@@ -2464,36 +2465,20 @@ function OfficeEditorModal({
               Edit the text below — select text and use the toolbar to bold, italicize, underline, or
               resize it. Images and layout are kept; saving overwrites the file in Canvas.
             </p>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-                maxHeight: "52vh",
-                overflowY: "auto",
-                paddingRight: 4,
-              }}
-            >
-              <FormattingToolbar />
-              {paragraphs.map((p, i) => {
-                const showSlide = p.slide != null && (i === 0 || paragraphs[i - 1].slide !== p.slide);
-                return (
-                  <Fragment key={p.id}>
-                    {showSlide && (
-                      <p className={styles.fileMetaLabel} style={{ marginTop: i === 0 ? 0 : 8 }}>
-                        Slide {p.slide}
-                      </p>
-                    )}
-                    <RichTextEditor
-                      value={draft[p.id] ?? [{ text: "" }]}
-                      onChange={(spans) => setDraft((d) => ({ ...d, [p.id]: spans }))}
-                      changed={isChanged(p.id)}
-                      ariaLabel={`Paragraph ${i + 1}`}
-                    />
-                  </Fragment>
-                );
-              })}
-            </div>
+            <RichTextSectionEditor
+              maxHeight="52vh"
+              onChange={(key, spans) => setDraft((d) => ({ ...d, [key]: spans }))}
+              sections={paragraphs.map((p, i) => ({
+                key: p.id,
+                spans: draft[p.id] ?? [{ text: "" }],
+                changed: isChanged(p.id),
+                ariaLabel: `Paragraph ${i + 1}`,
+                heading:
+                  p.slide != null && (i === 0 || paragraphs[i - 1].slide !== p.slide)
+                    ? `Slide ${p.slide}`
+                    : undefined,
+              }))}
+            />
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <button
                 type="button"

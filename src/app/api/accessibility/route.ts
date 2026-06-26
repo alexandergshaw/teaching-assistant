@@ -12,6 +12,7 @@ import {
 } from "@/lib/canvas-modules";
 import { scanHtml } from "@/lib/accessibility/engine";
 import { scanPdf } from "@/lib/accessibility/pdf";
+import { buildOfficeIssues } from "@/lib/accessibility/office-issues";
 import { countsOf, type AccessibleItemType, type Issue, type ItemScan } from "@/lib/accessibility/types";
 import { getCachedScans, upsertScans, deleteScans } from "@/lib/supabase/accessibility";
 
@@ -28,20 +29,6 @@ function toItemScan(
 ): ItemScan {
   const { errorCount, warningCount, suggestionCount } = countsOf(issues);
   return { ...item, errorCount, warningCount, suggestionCount, issues };
-}
-
-function officeImageIssues(images: { id: string; name: string; alt: string }[]): Issue[] {
-  return images
-    .filter((im) => !im.alt.trim())
-    .map((im) => ({
-      ruleId: "office-image-alt",
-      severity: "warning" as const,
-      message: `Image "${im.name}" has no alt text.`,
-      wcag: "1.1.1",
-      help: "Add alt text describing the image's content or purpose.",
-      locator: { selector: im.id, snippet: im.name },
-      fixKind: "edit" as const,
-    }));
 }
 
 export async function POST(req: NextRequest) {
@@ -120,17 +107,7 @@ export async function POST(req: NextRequest) {
             issues = await scanPdf(await getCanvasFileBuffer(courseUrl, f.id, acronym));
           } else {
             const scan = await getOfficeFileScan(courseUrl, f.id, acronym);
-            if (scan) {
-              issues = officeImageIssues(scan.images);
-              if (scan.kind === "docx") {
-                if (!scan.hasHeadings) {
-                  issues.push({ ruleId: "doc-no-structure", severity: "error", message: "File does not include headings for structure.", wcag: "1.3.1", help: "Use Word's Heading styles so the document has a navigable structure.", locator: { selector: "", snippet: "" }, fixKind: "edit" });
-                }
-                if (!scan.title.trim()) {
-                  issues.push({ ruleId: "doc-no-title", severity: "warning", message: "File is missing a title element.", wcag: "2.4.2", help: "Set a document title in File > Info > Properties.", locator: { selector: "", snippet: "" }, fixKind: "edit" });
-                }
-              }
-            }
+            if (scan) issues = buildOfficeIssues(scan);
           }
         } catch {
           continue; // a file we can't read (too large, encrypted, etc.) is skipped

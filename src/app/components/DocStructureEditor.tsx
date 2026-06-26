@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getOfficeFileStructureAction, saveOfficeFileStructureAction } from "../actions";
+import { suggestHeadingLevels, titleFromFileName } from "@/lib/doc-headings";
 import type { OfficeParagraph, RunSpan } from "@/lib/office-edit";
 
 // Heading-style ids Word uses; "" is body text.
@@ -11,43 +12,6 @@ const LEVELS: Array<{ value: string; label: string }> = [
   { value: "Heading2", label: "Heading 2" },
   { value: "Heading3", label: "Heading 3" },
 ];
-
-// A clean default title from the file name: drop the extension and Canvas's
-// " (N)" dedup suffix so "Syllabus (3).docx" suggests "Syllabus".
-function titleFromFileName(name: string): string {
-  const dot = name.lastIndexOf(".");
-  const stem = dot > 0 ? name.slice(0, dot) : name;
-  return stem.replace(/\s*\(\d+\)\s*$/, "").trim();
-}
-
-// Heuristic: guess which paragraphs are headings (short, all-bold or larger than
-// the body text, not ending like a sentence). The first becomes Heading 1, the
-// rest Heading 2 — a starting point the user reviews before saving.
-function suggestLevels(paras: OfficeParagraph[]): Record<string, string> {
-  const sizeCounts = new Map<number, number>();
-  for (const p of paras) {
-    const sz = p.runs[0]?.sizePt;
-    if (sz) sizeCounts.set(sz, (sizeCounts.get(sz) ?? 0) + 1);
-  }
-  let bodySize = 0;
-  let best = 0;
-  for (const [sz, c] of sizeCounts) if (c > best) [best, bodySize] = [c, sz];
-
-  const out: Record<string, string> = {};
-  let assignedFirst = false;
-  for (const p of paras) {
-    const text = p.text.trim();
-    if (!text || text.length > 90) continue;
-    const allBold = p.runs.length > 0 && p.runs.every((r) => r.bold);
-    const sz = p.runs[0]?.sizePt;
-    const bigger = sz != null && bodySize > 0 && sz > bodySize;
-    if ((allBold || bigger) && !/[.!?,:;]$/.test(text)) {
-      out[p.id] = assignedFirst ? "Heading2" : "Heading1";
-      assignedFirst = true;
-    }
-  }
-  return out;
-}
 
 /**
  * Fixes a docx file's structural accessibility flags: sets a document title
@@ -62,6 +26,7 @@ export default function DocStructureEditor({
   fileId,
   title,
   progress,
+  onSkip,
   onClose,
 }: {
   courseUrl: string;
@@ -69,6 +34,7 @@ export default function DocStructureEditor({
   fileId: number;
   title: string;
   progress?: { index: number; total: number };
+  onSkip?: () => void;
   onClose: (resolved?: string[]) => void;
 }) {
   const [stage, setStage] = useState<"loading" | "ready" | "saving">("loading");
@@ -98,7 +64,7 @@ export default function DocStructureEditor({
       // If the document has no headings yet (the flag being fixed), prefill the
       // dropdowns with suggested headings so the fix is ready to save on open.
       if (!r.paragraphs.some((p) => /^Heading[1-9]$/.test(p.style))) {
-        Object.assign(seeded, suggestLevels(r.paragraphs));
+        Object.assign(seeded, suggestHeadingLevels(r.paragraphs));
       }
       setLevels(seeded);
       setStage("ready");
@@ -120,7 +86,7 @@ export default function DocStructureEditor({
   const titleTrimmed = docTitle.trim();
   const titleChanged = titleTrimmed !== originalTitle.trim();
 
-  const applySuggestion = () => setLevels((prev) => ({ ...prev, ...suggestLevels(paragraphs) }));
+  const applySuggestion = () => setLevels((prev) => ({ ...prev, ...suggestHeadingLevels(paragraphs) }));
 
   const toggleSelected = (id: string) =>
     setSelected((prev) => {
@@ -203,6 +169,9 @@ export default function DocStructureEditor({
                   value={docTitle}
                   placeholder="A short, descriptive title…"
                   onChange={(e) => setDocTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && stage === "ready") void save();
+                  }}
                   style={{ width: "100%", padding: "8px 10px", border: `1px solid ${titleTrimmed ? "var(--field-border, #cbd5e1)" : "#d97706"}`, borderRadius: 8, fontSize: "0.9rem" }}
                 />
               </div>
@@ -306,6 +275,15 @@ export default function DocStructureEditor({
             >
               Cancel
             </button>
+            {onSkip && (
+              <button
+                type="button"
+                onClick={onSkip}
+                style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: "0.85rem", cursor: "pointer", color: "#334155" }}
+              >
+                Skip
+              </button>
+            )}
             <button
               type="button"
               onClick={save}

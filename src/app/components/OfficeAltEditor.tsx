@@ -34,6 +34,7 @@ export default function OfficeAltEditor({
   fileId,
   title,
   progress,
+  onSkip,
   onClose,
 }: {
   courseUrl: string;
@@ -41,6 +42,7 @@ export default function OfficeAltEditor({
   fileId: number;
   title: string;
   progress?: { index: number; total: number };
+  onSkip?: () => void;
   onClose: (result?: { issues: Issue[] }) => void;
 }) {
   const [stage, setStage] = useState<"loading" | "ready" | "saving">("loading");
@@ -172,6 +174,9 @@ export default function OfficeAltEditor({
                       value={value}
                       placeholder="Describe this image…"
                       onChange={(e) => setAlts((prev) => ({ ...prev, [im.id]: e.target.value }))}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && stage === "ready") void save();
+                      }}
                       style={{ flex: 1, padding: "7px 10px", border: `1px solid ${missing ? "#d97706" : "var(--field-border, #cbd5e1)"}`, borderRadius: 8, fontSize: "0.88rem" }}
                     />
                     <button
@@ -204,6 +209,15 @@ export default function OfficeAltEditor({
             >
               Cancel
             </button>
+            {onSkip && (
+              <button
+                type="button"
+                onClick={onSkip}
+                style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: "0.85rem", cursor: "pointer", color: "#334155" }}
+              >
+                Skip
+              </button>
+            )}
             <button
               type="button"
               onClick={save}

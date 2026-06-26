@@ -101,6 +101,7 @@ import {
   saveOfficeFileImageAlt,
   getOfficeFileStructure,
   saveOfficeFileStructure,
+  saveOfficeFileFixes,
   uploadFileToModule,
   appendOfficeParagraph,
   listScannableFiles,
@@ -108,7 +109,9 @@ import {
 import type { OfficeImage } from "@/lib/office-edit";
 import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
 import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
-import { type AccessibleItemType } from "@/lib/accessibility/types";
+import { suggestHeadingLevels, titleFromFileName } from "@/lib/doc-headings";
+import { buildOfficeIssues } from "@/lib/accessibility/office-issues";
+import { type AccessibleItemType, type Issue } from "@/lib/accessibility/types";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -1411,6 +1414,27 @@ export async function getOfficeFileImagesAction(
   }
 }
 
+// Ask a vision model for alt text for one image's bytes; "" on failure/empty.
+async function generateImageAlt(mimeType: string, base64: string, provider: LlmProvider): Promise<string> {
+  const result = await callLlm(
+    {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: "Write concise, descriptive alt text (under 125 characters) for this image, for screen-reader users. Describe its content or purpose. Do not start with \"image of\" or \"picture of\". Return ONLY the alt text, no quotes." },
+            { inlineData: { mimeType, data: base64 } },
+          ],
+        },
+      ],
+      generationConfig: { temperature: 0.4, maxOutputTokens: 120 },
+    },
+    provider
+  );
+  if (!result.ok) return "";
+  return result.text.trim().replace(/^["']|["']$/g, "").slice(0, 200);
+}
+
 /** Suggest alt text for one Office-file image by sending it to a vision model. */
 export async function suggestOfficeImageAltAction(
   courseUrl: string,
@@ -1423,23 +1447,7 @@ export async function suggestOfficeImageAltAction(
     await requireOwner();
     const image = await getOfficeFileImageData(courseUrl, fileId, imageId, acronym);
     if (!image) return { error: "This image can't be previewed for a suggestion (e.g. a vector image)." };
-    const result = await callLlm(
-      {
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: "Write concise, descriptive alt text (under 125 characters) for this image, for screen-reader users. Describe its content or purpose. Do not start with \"image of\" or \"picture of\". Return ONLY the alt text, no quotes." },
-              { inlineData: { mimeType: image.mimeType, data: image.base64 } },
-            ],
-          },
-        ],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 120 },
-      },
-      provider
-    );
-    if (!result.ok) return { error: `Suggestion failed: HTTP ${result.status}` };
-    const text = result.text.trim().replace(/^["']|["']$/g, "").slice(0, 200);
+    const text = await generateImageAlt(image.mimeType, image.base64, provider);
     return text ? { text } : { error: "The model returned empty text." };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
@@ -1459,6 +1467,56 @@ export async function saveOfficeImageAltAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the file to Canvas." };
+  }
+}
+
+/**
+ * Headless "fix everything" for one Office file: AI alt text for images that
+ * lack it, plus (docx) a title from the file name and heuristic heading styles.
+ * Applies all of it in one Canvas save and returns the issues that remain, so
+ * the review pane can update without opening an editor.
+ */
+export async function autoFixOfficeFileAction(
+  courseUrl: string,
+  fileId: number,
+  acronym?: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ issues: Issue[] } | { error: string }> {
+  try {
+    await requireOwner();
+
+    // AI alt for every image missing it that we can actually render.
+    const images = await getOfficeFileImagesWithData(courseUrl, fileId, acronym);
+    const altEdits: Record<string, string> = {};
+    for (const im of images) {
+      if (im.alt.trim() || !im.base64 || !im.mimeType) continue;
+      const alt = await generateImageAlt(im.mimeType, im.base64, provider);
+      if (alt) altEdits[im.id] = alt;
+    }
+
+    // Title + headings (docx only; getOfficeFileStructure returns null otherwise).
+    let title: string | null = null;
+    let sections: Array<{ sourceId: string; spans: RunSpan[]; style?: string }> = [];
+    const structure = await getOfficeFileStructure(courseUrl, fileId, acronym);
+    if (structure) {
+      if (!structure.title.trim()) title = titleFromFileName(structure.name);
+      const hasHeadings = structure.paragraphs.some((p) => /^Heading[1-9]$/.test(p.style));
+      if (!hasHeadings) {
+        const levels = suggestHeadingLevels(structure.paragraphs);
+        if (Object.keys(levels).length > 0) {
+          sections = structure.paragraphs.map((p) => ({
+            sourceId: p.id,
+            spans: p.runs.length > 0 ? p.runs : [{ text: p.text }],
+            style: levels[p.id] ?? p.style,
+          }));
+        }
+      }
+    }
+
+    const after = await saveOfficeFileFixes(courseUrl, fileId, { title, sections, altEdits }, acronym);
+    return { issues: buildOfficeIssues(after) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not fix the file." };
   }
 }
 

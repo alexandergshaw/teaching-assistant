@@ -6,7 +6,15 @@ import { useAccessibility } from "./AccessibilityProvider";
 import RemediationEditor, { isRemediable } from "./RemediationEditor";
 import OfficeAltEditor from "./OfficeAltEditor";
 import DocStructureEditor from "./DocStructureEditor";
+import { autoFixOfficeFileAction } from "../actions";
+import { getStoredProvider } from "@/lib/llm-provider";
 import type { AccessibleItemType, Issue, ItemScan, Severity } from "@/lib/accessibility/types";
+
+// Ids of the file issues that the headless "fix without preview" can resolve;
+// their presence also marks a file as a docx/pptx (vs a PDF we can't auto-fix).
+const OFFICE_FIX_RULES = new Set(["office-image-alt", "doc-no-title", "doc-no-structure"]);
+const isOfficeFixable = (item: ItemScan): boolean =>
+  item.type === "file" && item.issues.some((i) => OFFICE_FIX_RULES.has(i.ruleId));
 
 // What's being fixed right now (drives the RemediationEditor overlay).
 type FixTarget = { type: AccessibleItemType; id: string; title: string; issue: Issue };
@@ -70,6 +78,9 @@ export default function AccessibilityCenter() {
   // null queue = not reviewing (the Fix buttons open editors one-off).
   const [reviewQueue, setReviewQueue] = useState<FixTarget[] | null>(null);
   const [reviewIndex, setReviewIndex] = useState(0);
+  // Headless bulk-fix: ticked file ids and live progress while fixing.
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [fixing, setFixing] = useState<{ done: number; total: number } | null>(null);
   // Keep the panel mounted through its slide-out so the exit animates too:
   // `render` controls mounting, `shown` drives the open/closed transform.
   const [render, setRender] = useState(false);
@@ -143,6 +154,35 @@ export default function AccessibilityCenter() {
     else endReview();
   };
   const reviewProgress = reviewQueue ? { index: reviewIndex + 1, total: reviewQueue.length } : undefined;
+
+  const officeFiles = flagged.filter(isOfficeFixable);
+  const allFilesSelected = officeFiles.length > 0 && officeFiles.every((f) => selectedFiles.has(f.id));
+  const toggleFile = (id: string) =>
+    setSelectedFiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAllFiles = () =>
+    setSelectedFiles(allFilesSelected ? new Set() : new Set(officeFiles.map((f) => f.id)));
+
+  // Fix every selected file headlessly (AI alt + title + headings) and save each
+  // back to Canvas, updating the pane as it goes — no editor previews.
+  const fixSelectedFiles = async () => {
+    const targets = officeFiles.filter((f) => selectedFiles.has(f.id));
+    if (targets.length === 0 || fixing) return;
+    const provider = getStoredProvider();
+    setFixing({ done: 0, total: targets.length });
+    for (let i = 0; i < targets.length; i += 1) {
+      const f = targets[i];
+      const r = await autoFixOfficeFileAction(a11y.courseUrl, Number(f.id), a11y.acronym, provider);
+      if (!("error" in r)) a11y.setFileScan(f.id, f.title, r.issues);
+      setFixing({ done: i + 1, total: targets.length });
+    }
+    setFixing(null);
+    setSelectedFiles(new Set());
+  };
 
   const panel: CSSProperties = {
     position: "fixed",
@@ -270,13 +310,34 @@ export default function AccessibilityCenter() {
               No accessibility issues found in this course.
             </p>
           ) : (
-            flagged.map((item) => (
-              <ItemBlock
-                key={`${item.type}:${item.id}`}
-                item={item}
-                onFix={(issue) => setFixTarget({ type: item.type, id: item.id, title: item.title, issue })}
-              />
-            ))
+            <>
+              {officeFiles.length > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 10px", marginBottom: 10, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8, background: "#f8fafc" }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.8rem", color: "#334155", cursor: "pointer" }}>
+                    <input type="checkbox" checked={allFilesSelected} onChange={toggleAllFiles} aria-label="Select all fixable files" />
+                    {selectedFiles.size > 0 ? `${selectedFiles.size} selected` : "Select files"}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={fixSelectedFiles}
+                    disabled={selectedFiles.size === 0 || !!fixing}
+                    title="Auto-fix the selected files (AI alt text, title, headings) and save to Canvas without opening an editor"
+                    style={{ marginLeft: "auto", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: "0.8rem", fontWeight: 600, background: selectedFiles.size === 0 || fixing ? "#cbd5e1" : "var(--accent, #2563eb)", color: "#fff", cursor: selectedFiles.size === 0 || fixing ? "default" : "pointer" }}
+                  >
+                    {fixing ? `Fixing ${fixing.done}/${fixing.total}…` : "Fix selected without preview"}
+                  </button>
+                </div>
+              )}
+              {flagged.map((item) => (
+                <ItemBlock
+                  key={`${item.type}:${item.id}`}
+                  item={item}
+                  selected={isOfficeFixable(item) ? selectedFiles.has(item.id) : undefined}
+                  onToggleSelect={isOfficeFixable(item) ? () => toggleFile(item.id) : undefined}
+                  onFix={(issue) => setFixTarget({ type: item.type, id: item.id, title: item.title, issue })}
+                />
+              ))}
+            </>
           )}
         </div>
       </aside>
@@ -288,6 +349,7 @@ export default function AccessibilityCenter() {
           fileId={Number(fixTarget.id)}
           title={fixTarget.title}
           progress={reviewProgress}
+          onSkip={reviewQueue ? advanceReview : undefined}
           onClose={(result) => {
             if (result) a11y.setFileScan(fixTarget.id, fixTarget.title, result.issues);
             afterFix(!!result);
@@ -300,6 +362,7 @@ export default function AccessibilityCenter() {
           fileId={Number(fixTarget.id)}
           title={fixTarget.title}
           progress={reviewProgress}
+          onSkip={reviewQueue ? advanceReview : undefined}
           onClose={(resolved) => {
             // Clear just the issues this editor fixed; keep the file's others.
             if (resolved && resolved.length > 0) {
@@ -318,6 +381,7 @@ export default function AccessibilityCenter() {
           title={fixTarget.title}
           issue={fixTarget.issue}
           progress={reviewProgress}
+          onSkip={reviewQueue ? advanceReview : undefined}
           onClose={(saved) => afterFix(saved)}
         />
       ) : null}
@@ -325,16 +389,37 @@ export default function AccessibilityCenter() {
   );
 }
 
-function ItemBlock({ item, onFix }: { item: ItemScan; onFix: (issue: Issue) => void }) {
+function ItemBlock({
+  item,
+  selected,
+  onToggleSelect,
+  onFix,
+}: {
+  item: ItemScan;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+  onFix: (issue: Issue) => void;
+}) {
   const remediable = isRemediable(item.type) || item.type === "file";
   const issues = [...item.issues].sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity]);
   return (
     <div style={{ marginBottom: 14, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 10, overflow: "hidden" }}>
-      <div style={{ padding: "9px 12px", background: "#f8fafc", borderBottom: "1px solid var(--field-border, #eef2f7)" }}>
-        <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: "#64748b" }}>
-          {TYPE_LABEL[item.type]}
+      <div style={{ padding: "9px 12px", background: "#f8fafc", borderBottom: "1px solid var(--field-border, #eef2f7)", display: "flex", gap: 9, alignItems: "flex-start" }}>
+        {onToggleSelect && (
+          <input
+            type="checkbox"
+            checked={!!selected}
+            onChange={onToggleSelect}
+            aria-label={`Select ${item.title} for bulk fix`}
+            style={{ marginTop: 3, flexShrink: 0 }}
+          />
+        )}
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: "#64748b" }}>
+            {TYPE_LABEL[item.type]}
+          </div>
+          <div style={{ fontSize: "0.92rem", fontWeight: 600, color: "#0f172a", wordBreak: "break-word" }}>{item.title}</div>
         </div>
-        <div style={{ fontSize: "0.92rem", fontWeight: 600, color: "#0f172a", wordBreak: "break-word" }}>{item.title}</div>
       </div>
       <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
         {issues.map((issue, i) => (

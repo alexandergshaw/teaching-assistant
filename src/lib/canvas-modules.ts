@@ -2271,6 +2271,32 @@ export async function saveOfficeFileStructure(
   await overwriteCanvasFile({ ...ctx, courseId: ctx.courseId }, meta, edited);
 }
 
+/**
+ * Apply a batch of fixes (title, heading styles, image alt text) to an Office
+ * file in a single Canvas round-trip and return the post-fix analysis (so the
+ * caller can report any issues that remain). Used by the headless auto-fix.
+ */
+export async function saveOfficeFileFixes(
+  courseUrl: string,
+  fileId: number,
+  fixes: {
+    title: string | null;
+    sections: Array<{ sourceId: string; spans: RunSpan[]; style?: string }>;
+    altEdits: Record<string, string>;
+  },
+  code?: string
+): Promise<{ kind: OfficeKind; images: OfficeImage[]; hasHeadings: boolean; title: string }> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
+  if (!meta.kind) throw new Error("Only Word (.docx) and PowerPoint (.pptx) files can be edited here.");
+  let edited = buffer;
+  if (fixes.sections.length) edited = await applyOfficeSections(meta.kind, edited, fixes.sections);
+  if (fixes.title != null && meta.kind === "docx") edited = await setDocxTitle(edited, fixes.title);
+  if (Object.keys(fixes.altEdits).length) edited = await setOfficeImageAlt(meta.kind, edited, fixes.altEdits);
+  await overwriteCanvasFile({ ...ctx, courseId: ctx.courseId }, meta, edited);
+  return { kind: meta.kind, ...(await analyzeOfficeFile(meta.kind, edited)) };
+}
+
 /** Write alt text onto a file's images by id and overwrite the file in Canvas. */
 export async function saveOfficeFileImageAlt(
   courseUrl: string,

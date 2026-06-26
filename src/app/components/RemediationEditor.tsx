@@ -31,6 +31,7 @@ export default function RemediationEditor({
   title,
   issue,
   progress,
+  onSkip,
   onClose,
 }: {
   courseUrl: string;
@@ -40,6 +41,7 @@ export default function RemediationEditor({
   title: string;
   issue: Issue;
   progress?: { index: number; total: number };
+  onSkip?: () => void;
   onClose: (saved: boolean) => void;
 }) {
   const [stage, setStage] = useState<"loading" | "ready" | "saving">("loading");
@@ -132,6 +134,13 @@ export default function RemediationEditor({
               <textarea
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
+                onKeyDown={(e) => {
+                  // Plain Enter edits the HTML; Ctrl/Cmd+Enter saves.
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && stage === "ready" && body.trim()) {
+                    e.preventDefault();
+                    void save();
+                  }
+                }}
                 spellCheck={false}
                 style={{ width: "100%", minHeight: 260, fontFamily: "ui-monospace, Menlo, monospace", fontSize: "0.8rem", lineHeight: 1.5, padding: 10, border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, resize: "vertical" }}
               />
@@ -148,6 +157,15 @@ export default function RemediationEditor({
           >
             Cancel
           </button>
+          {onSkip && (
+            <button
+              type="button"
+              onClick={onSkip}
+              style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: "0.85rem", cursor: "pointer", color: "#334155" }}
+            >
+              Skip
+            </button>
+          )}
           <button
             type="button"
             onClick={save}

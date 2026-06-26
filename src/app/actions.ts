@@ -115,6 +115,14 @@ import { suggestHeadingLevels, titleFromFileName } from "@/lib/doc-headings";
 import { buildOfficeIssues } from "@/lib/accessibility/office-issues";
 import { type AccessibleItemType, type Issue } from "@/lib/accessibility/types";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
+import {
+  githubConfigured,
+  listRepos,
+  ingestRepo,
+  parseRepoRef,
+  type GithubRepo,
+  type RepoDigest,
+} from "@/lib/github";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
   courseEngineSchedule,
@@ -4552,5 +4560,34 @@ export async function generateCourseMaterialsAction(
     return { ...materials, rubricCsv };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Materials generation failed." };
+  }
+}
+
+// ── GitHub integration ────────────────────────────────────────────────────────
+
+/** Whether a GitHub token is configured, so the UI can show/hide GitHub features. */
+export async function githubConfiguredAction(): Promise<{ configured: boolean }> {
+  return { configured: githubConfigured() };
+}
+
+/** List the repos the configured token can see (for repo pickers). */
+export async function listGithubReposAction(): Promise<{ repos: GithubRepo[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return { repos: await listRepos() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list GitHub repositories." };
+  }
+}
+
+/** Build a bounded text digest of a repo (README + source) for course/rubric generation. */
+export async function ingestRepoAction(repoRef: string): Promise<{ digest: RepoDigest } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return { digest: await ingestRepo(parsed.owner, parsed.repo) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not read the repository." };
   }
 }

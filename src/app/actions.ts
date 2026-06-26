@@ -126,6 +126,7 @@ import {
   ingestRepo,
   parseRepoRef,
   createRepo,
+  createOrgRepo,
   generateFromTemplate,
   putFile,
   getFileText,
@@ -4705,18 +4706,22 @@ export async function ingestRepoAction(repoRef: string, branch?: string): Promis
 export async function createCopilotRepoAction(
   name: string,
   prompt: string,
-  isPrivate = true
+  isPrivate = true,
+  org?: string,
+  isTemplate = false
 ): Promise<{ fullName: string; htmlUrl: string } | { error: string }> {
   try {
     await requireOwner();
     const clean = name.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
     if (!clean) return { error: "Enter a repository name." };
     if (!prompt.trim()) return { error: "Generate the Copilot prompt first." };
-    const repo = await createRepo(clean, {
+    const opts = {
       description: "Project scaffold generated from a Copilot prompt.",
       private: isPrivate,
       autoInit: true,
-    });
+      isTemplate,
+    };
+    const repo = org?.trim() ? await createOrgRepo(org.trim(), clean, opts) : await createRepo(clean, opts);
     await putFile(repo.owner, repo.name, ".github/copilot-instructions.md", prompt, "Add Copilot project instructions", repo.defaultBranch);
     await putFile(
       repo.owner,

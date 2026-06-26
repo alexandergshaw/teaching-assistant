@@ -185,21 +185,40 @@ export async function generateFromTemplate(
   );
 }
 
+interface CreateRepoOptions {
+  description?: string;
+  private?: boolean;
+  autoInit?: boolean;
+  isTemplate?: boolean;
+}
+
+const createRepoBody = (name: string, opts: CreateRepoOptions): string =>
+  JSON.stringify({
+    name,
+    description: opts.description ?? "",
+    private: opts.private ?? true,
+    auto_init: opts.autoInit ?? true,
+    is_template: opts.isTemplate ?? false,
+  });
+
 /** Create a new repo for the authenticated user. */
-export async function createRepo(
-  name: string,
-  opts: { description?: string; private?: boolean; autoInit?: boolean } = {}
-): Promise<GithubRepo> {
+export async function createRepo(name: string, opts: CreateRepoOptions = {}): Promise<GithubRepo> {
   return mapRepo(
     await ghJson<RawRepo>(`/user/repos`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        description: opts.description ?? "",
-        private: opts.private ?? true,
-        auto_init: opts.autoInit ?? true,
-      }),
+      body: createRepoBody(name, opts),
+    })
+  );
+}
+
+/** Create a new repo inside an organization (the token must be able to create repos there). */
+export async function createOrgRepo(org: string, name: string, opts: CreateRepoOptions = {}): Promise<GithubRepo> {
+  return mapRepo(
+    await ghJson<RawRepo>(`/orgs/${org}/repos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: createRepoBody(name, opts),
     })
   );
 }

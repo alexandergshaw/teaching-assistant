@@ -6,6 +6,7 @@ import {
   generateCourseScheduleAction,
   generateCopilotProjectPromptAction,
   createCopilotRepoAction,
+  listMyOrgsAction,
   getRepoZipAction,
   analyzeSyllabusInputsAction,
   regenerateSyllabusFieldAction,
@@ -117,9 +118,28 @@ export default function CoursePlanningTab() {
   // Create-a-repo from the generated Copilot prompt.
   const [repoName, setRepoName] = useState("");
   const [repoPrivate, setRepoPrivate] = useState(true);
+  const [repoOrg, setRepoOrg] = useState("");
+  const [repoTemplate, setRepoTemplate] = useState(false);
+  const [repoOrgs, setRepoOrgs] = useState<string[]>([]);
   const [creatingRepo, setCreatingRepo] = useState(false);
   const [createdRepo, setCreatedRepo] = useState<{ fullName: string; htmlUrl: string } | null>(null);
   const [createRepoError, setCreateRepoError] = useState<string | null>(null);
+
+  const loadRepoOrgs = async () => {
+    const r = await listMyOrgsAction();
+    if (!("error" in r)) setRepoOrgs(r.orgs);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const r = await listMyOrgsAction();
+      if (!cancelled && !("error" in r)) setRepoOrgs(r.orgs);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleCreateRepo = async () => {
     if (!projectPrompt) return;
@@ -128,7 +148,7 @@ export default function CoursePlanningTab() {
     setCreateRepoError(null);
     setCreatedRepo(null);
     try {
-      const r = await createCopilotRepoAction(name, projectPrompt, repoPrivate);
+      const r = await createCopilotRepoAction(name, projectPrompt, repoPrivate, repoOrg || undefined, repoTemplate);
       if ("error" in r) setCreateRepoError(r.error);
       else setCreatedRepo(r);
     } catch (err) {
@@ -1046,6 +1066,35 @@ export default function CoursePlanningTab() {
                     <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 8px" }}>
                       Creates the repo and commits the prompt to <code>.github/copilot-instructions.md</code>, ready to open in Copilot Agent mode.
                     </p>
+
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                      <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>Owner</span>
+                      <select
+                        value={repoOrg}
+                        onChange={(e) => setRepoOrg(e.target.value)}
+                        disabled={creatingRepo}
+                        style={{ flex: "1 1 200px", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem", background: "#fff", color: "#334155" }}
+                      >
+                        <option value="">Your personal account</option>
+                        {repoOrgs.map((o) => (
+                          <option key={o} value={o}>
+                            {o} (organization)
+                          </option>
+                        ))}
+                      </select>
+                      <a href="https://github.com/account/organizations/new" target="_blank" rel="noreferrer" style={{ fontSize: "0.82rem" }}>
+                        Create org on GitHub
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => void loadRepoOrgs()}
+                        disabled={creatingRepo}
+                        style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: "0.8rem", color: "#334155", cursor: "pointer" }}
+                      >
+                        Refresh
+                      </button>
+                    </div>
+
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                       <input
                         type="text"
@@ -1059,6 +1108,10 @@ export default function CoursePlanningTab() {
                         <input type="checkbox" checked={repoPrivate} onChange={(e) => setRepoPrivate(e.target.checked)} disabled={creatingRepo} />
                         Private
                       </label>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }} title="Mark as a template so the Version Control Integration tab can generate one repo per student from it">
+                        <input type="checkbox" checked={repoTemplate} onChange={(e) => setRepoTemplate(e.target.checked)} disabled={creatingRepo} />
+                        Template
+                      </label>
                       <button type="button" className={styles.submitButton} onClick={handleCreateRepo} disabled={creatingRepo}>
                         {creatingRepo ? "Creating repo…" : "Create GitHub repo"}
                       </button>
@@ -1070,7 +1123,7 @@ export default function CoursePlanningTab() {
                         <a href={createdRepo.htmlUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>
                           {createdRepo.fullName}
                         </a>
-                        .
+                        {repoTemplate ? " — use it in Version Control Integration to generate student repos." : "."}
                       </p>
                     )}
                   </div>

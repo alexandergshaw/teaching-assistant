@@ -7,7 +7,14 @@ import RemediationEditor, { isRemediable } from "./RemediationEditor";
 import OfficeAltEditor from "./OfficeAltEditor";
 import DocStructureEditor from "./DocStructureEditor";
 import PdfFixEditor from "./PdfFixEditor";
-import { autoFixOfficeFileAction } from "../actions";
+import {
+  autoFixOfficeFileAction,
+  getAccessibilityItemHtmlAction,
+  saveAccessibilityItemHtmlAction,
+  suggestAltTextAction,
+  suggestLinkTextAction,
+} from "../actions";
+import { applyFix, isAutoFix, needsAiValue } from "@/lib/accessibility/remediate";
 import { getStoredProvider } from "@/lib/llm-provider";
 import type { AccessibleItemType, Issue, ItemScan, Severity } from "@/lib/accessibility/types";
 
@@ -16,6 +23,15 @@ import type { AccessibleItemType, Issue, ItemScan, Severity } from "@/lib/access
 const OFFICE_FIX_RULES = new Set(["office-image-alt", "doc-no-title", "doc-no-structure"]);
 const isOfficeFixable = (item: ItemScan): boolean =>
   item.type === "file" && item.issues.some((i) => OFFICE_FIX_RULES.has(i.ruleId));
+
+// An HTML issue the headless fix can apply on its own (deterministic transform or
+// an AI alt/link value) — i.e. everything except human-judgment fixes like broken
+// links and contrast.
+const isHeadlessHtmlFix = (issue: Issue): boolean => isAutoFix(issue) || needsAiValue(issue);
+// Any item that the bulk "fix without preview" can act on.
+const isBulkFixable = (item: ItemScan): boolean =>
+  isOfficeFixable(item) || (isRemediable(item.type) && item.issues.some(isHeadlessHtmlFix));
+const itemKey = (item: { type: AccessibleItemType; id: string }) => `${item.type}:${item.id}`;
 
 // What's being fixed right now (drives the RemediationEditor overlay).
 type FixTarget = { type: AccessibleItemType; id: string; title: string; issue: Issue };
@@ -81,8 +97,8 @@ export default function AccessibilityCenter() {
   // null queue = not reviewing (the Fix buttons open editors one-off).
   const [reviewQueue, setReviewQueue] = useState<FixTarget[] | null>(null);
   const [reviewIndex, setReviewIndex] = useState(0);
-  // Headless bulk-fix: ticked file ids and live progress while fixing.
-  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  // Headless bulk-fix: ticked item keys (`type:id`) and live progress while fixing.
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [fixing, setFixing] = useState<{ done: number; total: number } | null>(null);
   // Keep the panel mounted through its slide-out so the exit animates too:
   // `render` controls mounting, `shown` drives the open/closed transform.
@@ -158,33 +174,61 @@ export default function AccessibilityCenter() {
   };
   const reviewProgress = reviewQueue ? { index: reviewIndex + 1, total: reviewQueue.length } : undefined;
 
-  const officeFiles = flagged.filter(isOfficeFixable);
-  const allFilesSelected = officeFiles.length > 0 && officeFiles.every((f) => selectedFiles.has(f.id));
-  const toggleFile = (id: string) =>
-    setSelectedFiles((prev) => {
+  const bulkItems = flagged.filter(isBulkFixable);
+  const selectedCount = bulkItems.filter((it) => selectedKeys.has(itemKey(it))).length;
+  const allSelected = bulkItems.length > 0 && selectedCount === bulkItems.length;
+  const toggleSelected = (it: ItemScan) =>
+    setSelectedKeys((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      const k = itemKey(it);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
       return next;
     });
-  const toggleAllFiles = () =>
-    setSelectedFiles(allFilesSelected ? new Set() : new Set(officeFiles.map((f) => f.id)));
+  const toggleSelectAll = () =>
+    setSelectedKeys(allSelected ? new Set() : new Set(bulkItems.map(itemKey)));
 
-  // Fix every selected file headlessly (AI alt + title + headings) and save each
-  // back to Canvas, updating the pane as it goes — no editor previews.
-  const fixSelectedFiles = async () => {
-    const targets = officeFiles.filter((f) => selectedFiles.has(f.id));
+  // Apply every headless HTML fix on one item (AI alt/link + deterministic
+  // transforms) in the browser, save the result, and re-scan it.
+  const fixHtmlItem = async (item: ItemScan, provider: ReturnType<typeof getStoredProvider>): Promise<void> => {
+    const fetched = await getAccessibilityItemHtmlAction(a11y.courseUrl, item.type, item.id, a11y.acronym);
+    if ("error" in fetched) return;
+    let html = fetched.html;
+    for (const issue of item.issues.filter(isHeadlessHtmlFix)) {
+      let value: string | undefined;
+      if (needsAiValue(issue)) {
+        const sug =
+          issue.fixKind === "ai-alt"
+            ? await suggestAltTextAction(item.title, issue.locator.snippet, provider)
+            : await suggestLinkTextAction(item.title, issue.locator.snippet, provider);
+        if (!("error" in sug)) value = sug.text;
+      }
+      const res = applyFix(html, issue, value);
+      if (res.changed) html = res.html;
+    }
+    const saved = await saveAccessibilityItemHtmlAction(a11y.courseUrl, item.type, item.id, html, a11y.acronym);
+    if (!("error" in saved)) await a11y.rescanItem(item.type, item.id);
+  };
+
+  // Fix every selected item headlessly (files via the server action, pages/etc.
+  // in the browser) and save each back to Canvas — no editor previews.
+  const fixSelected = async () => {
+    const targets = bulkItems.filter((it) => selectedKeys.has(itemKey(it)));
     if (targets.length === 0 || fixing) return;
     const provider = getStoredProvider();
     setFixing({ done: 0, total: targets.length });
     for (let i = 0; i < targets.length; i += 1) {
-      const f = targets[i];
-      const r = await autoFixOfficeFileAction(a11y.courseUrl, Number(f.id), a11y.acronym, provider);
-      if (!("error" in r)) a11y.setFileScan(f.id, f.title, r.issues);
+      const it = targets[i];
+      if (it.type === "file") {
+        const r = await autoFixOfficeFileAction(a11y.courseUrl, Number(it.id), a11y.acronym, provider);
+        if (!("error" in r)) a11y.setFileScan(it.id, it.title, r.issues);
+      } else {
+        await fixHtmlItem(it, provider);
+      }
       setFixing({ done: i + 1, total: targets.length });
     }
     setFixing(null);
-    setSelectedFiles(new Set());
+    setSelectedKeys(new Set());
   };
 
   const panel: CSSProperties = {
@@ -296,6 +340,24 @@ export default function AccessibilityCenter() {
               <Dot color={SEVERITY.suggestion.color} /> {a11y.suggestionCount} suggestions
             </span>
           </div>
+
+          {bulkItems.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--field-border, #eef2f7)" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.8rem", color: "#334155", cursor: "pointer" }}>
+                <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} aria-label="Select all fixable items" />
+                {selectedCount > 0 ? `${selectedCount} selected` : `Select all (${bulkItems.length})`}
+              </label>
+              <button
+                type="button"
+                onClick={fixSelected}
+                disabled={selectedCount === 0 || !!fixing}
+                title="Auto-fix the selected items (AI alt/link text, headings, titles, language) and save to Canvas without opening an editor"
+                style={{ marginLeft: "auto", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: "0.8rem", fontWeight: 600, background: selectedCount === 0 || fixing ? "#cbd5e1" : "var(--accent, #2563eb)", color: "#fff", cursor: selectedCount === 0 || fixing ? "default" : "pointer" }}
+              >
+                {fixing ? `Fixing ${fixing.done}/${fixing.total}…` : "Fix selected without preview"}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Body */}
@@ -313,34 +375,15 @@ export default function AccessibilityCenter() {
               No accessibility issues found in this course.
             </p>
           ) : (
-            <>
-              {officeFiles.length > 0 && (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 10px", marginBottom: 10, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8, background: "#f8fafc" }}>
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.8rem", color: "#334155", cursor: "pointer" }}>
-                    <input type="checkbox" checked={allFilesSelected} onChange={toggleAllFiles} aria-label="Select all fixable files" />
-                    {selectedFiles.size > 0 ? `${selectedFiles.size} selected` : "Select files"}
-                  </label>
-                  <button
-                    type="button"
-                    onClick={fixSelectedFiles}
-                    disabled={selectedFiles.size === 0 || !!fixing}
-                    title="Auto-fix the selected files (AI alt text, title, headings) and save to Canvas without opening an editor"
-                    style={{ marginLeft: "auto", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: "0.8rem", fontWeight: 600, background: selectedFiles.size === 0 || fixing ? "#cbd5e1" : "var(--accent, #2563eb)", color: "#fff", cursor: selectedFiles.size === 0 || fixing ? "default" : "pointer" }}
-                  >
-                    {fixing ? `Fixing ${fixing.done}/${fixing.total}…` : "Fix selected without preview"}
-                  </button>
-                </div>
-              )}
-              {flagged.map((item) => (
-                <ItemBlock
-                  key={`${item.type}:${item.id}`}
-                  item={item}
-                  selected={isOfficeFixable(item) ? selectedFiles.has(item.id) : undefined}
-                  onToggleSelect={isOfficeFixable(item) ? () => toggleFile(item.id) : undefined}
-                  onFix={(issue) => setFixTarget({ type: item.type, id: item.id, title: item.title, issue })}
-                />
-              ))}
-            </>
+            flagged.map((item) => (
+              <ItemBlock
+                key={`${item.type}:${item.id}`}
+                item={item}
+                selected={isBulkFixable(item) ? selectedKeys.has(itemKey(item)) : undefined}
+                onToggleSelect={isBulkFixable(item) ? () => toggleSelected(item) : undefined}
+                onFix={(issue) => setFixTarget({ type: item.type, id: item.id, title: item.title, issue })}
+              />
+            ))
           )}
         </div>
       </aside>

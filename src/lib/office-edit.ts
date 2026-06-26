@@ -456,6 +456,31 @@ export async function applyOfficeSections(
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
 }
 
+/**
+ * Append a new paragraph (built from spans + optional style) to the end of a
+ * docx body, before the final section properties. Used to move a section from
+ * one file into another.
+ */
+export async function appendDocxParagraph(buffer: Buffer, spans: RunSpan[], style: string): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(buffer);
+  const file = zip.file("word/document.xml");
+  if (!file) return buffer;
+  let xml = await file.async("string");
+
+  const pPr = style ? `<w:pPr><w:pStyle w:val="${escapeXml(style)}"/></w:pPr>` : "";
+  const runs = (spans.length ? spans : [{ text: "" }])
+    .map((s) => `<w:r>${buildDocxRunProps("", s)}<w:t xml:space="preserve">${escapeXml(s.text)}</w:t></w:r>`)
+    .join("");
+  const para = `<w:p>${pPr}${runs}</w:p>`;
+
+  const sectPrIdx = xml.lastIndexOf("<w:sectPr");
+  if (sectPrIdx !== -1) xml = xml.slice(0, sectPrIdx) + para + xml.slice(sectPrIdx);
+  else xml = xml.replace("</w:body>", `${para}</w:body>`);
+
+  zip.file("word/document.xml", xml);
+  return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+}
+
 // ── Image alt text (accessibility) ────────────────────────────────────────────
 
 /** One image in an Office file and its current alt text. */

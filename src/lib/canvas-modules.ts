@@ -25,6 +25,7 @@ import { extractTextFromBuffer } from "./office-extract";
 import {
   parseOfficeParagraphs,
   applyOfficeSections,
+  appendDocxParagraph,
   extractOfficeImages,
   extractOfficeImageData,
   setOfficeImageAlt,
@@ -2126,6 +2127,21 @@ export async function saveOfficeEdits(
     throw new Error("Only Word (.docx) and PowerPoint (.pptx) files can be edited here.");
   }
   const edited = await applyOfficeSections(meta.kind, buffer, sections);
+  await overwriteCanvasFile({ ...ctx, courseId: ctx.courseId }, meta, edited);
+}
+
+/** Append a paragraph (spans + style) to the end of a target .docx in Canvas. */
+export async function appendOfficeParagraph(
+  courseUrl: string,
+  fileId: number,
+  spans: RunSpan[],
+  style: string,
+  code?: string
+): Promise<void> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
+  if (meta.kind !== "docx") throw new Error("Sections can only be moved into a Word (.docx) file.");
+  const edited = await appendDocxParagraph(buffer, spans, style);
   await overwriteCanvasFile({ ...ctx, courseId: ctx.courseId }, meta, edited);
 }
 

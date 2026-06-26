@@ -35,6 +35,8 @@ import {
   previewFileAction,
   getOfficeEditableAction,
   saveOfficeEditsAction,
+  listMovableFilesAction,
+  appendOfficeParagraphAction,
   rewriteOfficeParagraphAction,
   revisePageWithAiAction,
   listCourseFilesAction,
@@ -2459,6 +2461,10 @@ function OfficeEditorModal({
   const [regenKey, setRegenKey] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+  const [movingSection, setMovingSection] = useState<OfficeSection | null>(null);
+  const [moveFiles, setMoveFiles] = useState<Array<{ id: number; title: string }> | null>(null);
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -2516,6 +2522,42 @@ function OfficeEditorModal({
 
   const removeSection = (key: string) => setSections((prev) => prev.filter((s) => s.key !== key));
 
+  // Load the course's other .docx files when the move picker opens (await-first
+  // so the effect body performs no synchronous setState; the list is reset in the
+  // button handler that opens the picker).
+  useEffect(() => {
+    if (!movingSection) return;
+    let cancelled = false;
+    (async () => {
+      const r = await listMovableFilesAction(courseUrl, acronym);
+      if (cancelled) return;
+      if ("error" in r) {
+        setMoveError(r.error);
+        return;
+      }
+      setMoveFiles(r.files.filter((f) => f.id !== fileId));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [movingSection, courseUrl, acronym, fileId]);
+
+  const moveTo = async (targetId: number) => {
+    if (!movingSection) return;
+    setMoveBusy(true);
+    setMoveError(null);
+    const r = await appendOfficeParagraphAction(courseUrl, targetId, movingSection.spans, movingSection.style, acronym);
+    setMoveBusy(false);
+    if ("error" in r) {
+      setMoveError(r.error);
+      return;
+    }
+    const key = movingSection.key;
+    setMovingSection(null);
+    removeSection(key);
+    setNote({ kind: "success", text: "Section moved. Save this file to remove it from here." });
+  };
+
   // Rewrite one paragraph with AI, using the whole document as context.
   const regenerate = async (section: OfficeSection) => {
     setRegenKey(section.key);
@@ -2552,6 +2594,7 @@ function OfficeEditorModal({
   };
 
   return (
+    <>
     <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
       <div
         className={styles.previewModal}
@@ -2608,6 +2651,7 @@ function OfficeEditorModal({
                     style: { opacity: regenKey !== null && regenKey !== s.key ? 0.5 : 1 },
                   },
                   { key: "add", label: "+", title: "Add a paragraph below", onClick: () => addAfter(s.key) },
+                  { key: "move", label: "→", title: "Move this paragraph to another file", onClick: () => { setMoveFiles(null); setMoveError(null); setMovingSection(s); } },
                   { key: "del", label: "×", title: "Delete this paragraph", tone: "danger", onClick: () => removeSection(s.key) },
                 ],
               }))}
@@ -2631,6 +2675,58 @@ function OfficeEditorModal({
         )}
       </div>
     </div>
+
+    {movingSection && (
+      <div
+        onClick={() => setMovingSection(null)}
+        style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Move section to another file"
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{ width: "min(440px, 96vw)", maxHeight: "80vh", background: "#fff", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
+        >
+          <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border)" }}>
+            <div style={{ fontWeight: 700, color: "#0f172a" }}>Move section to another file</div>
+            <div style={{ fontSize: "0.85rem", color: "#475569", marginTop: 2 }}>
+              Appends &ldquo;{spansToPlainText(movingSection.spans).slice(0, 60) || "(empty)"}&rdquo; to the end of the chosen Word file.
+            </div>
+          </div>
+          <div style={{ padding: "10px 12px", overflowY: "auto" }}>
+            {!moveFiles ? (
+              <p style={{ color: "#64748b" }}>Loading files…</p>
+            ) : moveFiles.length === 0 ? (
+              <p style={{ color: "#64748b" }}>No other Word (.docx) files in this course.</p>
+            ) : (
+              moveFiles.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  disabled={moveBusy}
+                  onClick={() => moveTo(f.id)}
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", border: "1px solid var(--field-border)", borderRadius: 8, background: "#fff", marginBottom: 6, cursor: moveBusy ? "default" : "pointer", fontSize: "0.9rem", color: "#1f2933" }}
+                >
+                  {f.title}
+                </button>
+              ))
+            )}
+            {moveError && <p className={styles.error} style={{ marginTop: 8 }}>{moveError}</p>}
+          </div>
+          <div style={{ padding: "10px 18px", borderTop: "1px solid var(--field-border)", display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={() => setMovingSection(null)}
+              style={{ border: "1px solid var(--field-border)", background: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: "0.85rem", cursor: "pointer", color: "#334155" }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

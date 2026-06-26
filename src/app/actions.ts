@@ -100,6 +100,8 @@ import {
   getOfficeFileImageData,
   saveOfficeFileImageAlt,
   uploadFileToModule,
+  appendOfficeParagraph,
+  listScannableFiles,
 } from "@/lib/canvas-modules";
 import type { OfficeImage } from "@/lib/office-edit";
 import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
@@ -1338,6 +1340,39 @@ export async function getOfficeEditableAction(
     return await getOfficeEditable(courseUrl, fileId, acronym);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not open the file for editing." };
+  }
+}
+
+/** List the course's .docx files a section can be moved into (excludes none). */
+export async function listMovableFilesAction(
+  courseUrl: string,
+  acronym?: string
+): Promise<{ files: Array<{ id: number; title: string }> } | { error: string }> {
+  try {
+    await requireOwner();
+    const files = (await listScannableFiles(courseUrl, acronym))
+      .filter((f) => f.kind === "docx")
+      .map((f) => ({ id: f.id, title: f.title }));
+    return { files };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list files." };
+  }
+}
+
+/** Append a section (spans + style) to the end of another .docx file in Canvas. */
+export async function appendOfficeParagraphAction(
+  courseUrl: string,
+  fileId: number,
+  spans: RunSpan[],
+  style: string,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await appendOfficeParagraph(courseUrl, fileId, spans, style, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not move the section." };
   }
 }
 

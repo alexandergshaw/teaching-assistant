@@ -1356,6 +1356,20 @@ async function gradeStudentEntries(
   };
 }
 
+/**
+ * Grade pre-built submission entries (e.g. one per GitHub repo) against a rubric.
+ * A thin public wrapper over the shared grading path so non-Canvas, non-zip
+ * sources can produce identical runs.
+ */
+export async function gradeEntries(
+  entries: StudentSubmissionEntry[],
+  assignmentInstructions: string,
+  rubric: string,
+  provider: LlmProvider = "gemini"
+): Promise<GradingRun> {
+  return gradeStudentEntries(entries, assignmentInstructions, rubric, provider);
+}
+
 // Turn one student's Canvas work (discussion text and/or uploaded files) into a
 // gradable entry: text and extracted file text go into `content`; image files
 // are attached with rawBase64 so the vision grader sees them (the same image

@@ -15,9 +15,10 @@ import { useInstitutionCounts } from "./InstitutionCounts";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import LiveFeedPanel from "./LiveFeedPanel";
 import GradingResults from "./GradingResults";
+import GithubGradingPanel from "./GithubGradingPanel";
 import styles from "../page.module.css";
 
-type GradingMode = "zip" | "canvas" | "livefeed";
+type GradingMode = "zip" | "canvas" | "livefeed" | "github";
 
 type GradingTabProps = {
   formAction: (payload: FormData) => void;
@@ -52,7 +53,7 @@ export default function GradingTab({
   const [source, setSource] = useState<GradingMode>(() => {
     if (typeof window === "undefined") return "zip";
     const saved = localStorage.getItem("ta-grading-source");
-    return saved === "canvas" || saved === "livefeed" ? saved : "zip";
+    return saved === "canvas" || saved === "livefeed" || saved === "github" ? saved : "zip";
   });
   const [canvasUrl, setCanvasUrl] = useState("");
   const [canvasRetrieved, setCanvasRetrieved] = useState(false);
@@ -161,6 +162,7 @@ export default function GradingTab({
           <option value="zip">Upload ZIP</option>
           <option value="canvas">Single Assignment</option>
           <option value="livefeed">Live Feed{totalNeedsGrading > 0 ? ` (${totalNeedsGrading})` : ""}</option>
+          <option value="github">GitHub Repo</option>
         </select>
       </div>
 
@@ -182,7 +184,9 @@ export default function GradingTab({
         </p>
       )}
 
-      {source === "livefeed" ? (
+      {source === "github" ? (
+        <GithubGradingPanel />
+      ) : source === "livefeed" ? (
         <LiveFeedPanel
           provider={selectedProvider}
           pending={pending}

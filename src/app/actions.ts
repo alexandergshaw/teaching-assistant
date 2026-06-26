@@ -6,8 +6,10 @@ import {
   synthesizeFullCreditChecklist,
   extractSubmissions,
   generateRubric,
+  gradeEntries,
   scaleResultToPoints,
   type GradingRun,
+  type StudentSubmissionEntry,
 } from "@/lib/grade";
 import {
   fetchCanvasWork,
@@ -123,8 +125,10 @@ import {
   createRepo,
   putFile,
   getFileText,
+  getLatestWorkflowRun,
   type GithubRepo,
   type RepoDigest,
+  type WorkflowRunInfo,
 } from "@/lib/github";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
 import { filesToLlmParts } from "@/lib/llm-files";
@@ -4629,6 +4633,67 @@ export async function createCopilotRepoAction(
     return { fullName: repo.fullName, htmlUrl: repo.htmlUrl };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not create the repository." };
+  }
+}
+
+/** Generate a grading rubric from a repo's code (optionally guided by instructions). */
+export async function generateRubricFromRepoAction(
+  repoRef: string,
+  instructions = "",
+  provider: LlmProvider = "gemini"
+): Promise<{ rubric: string; fullName: string; fileCount: number } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const digest = await ingestRepo(parsed.owner, parsed.repo);
+    const basis = `${instructions.trim() ? `${instructions.trim()}\n\n` : ""}Reference codebase (${digest.fullName}) — base the rubric criteria on the features, structure, and logic actually present here:\n\n${digest.text}`;
+    const rubric = await generateRubric(basis, provider);
+    return { rubric, fullName: digest.fullName, fileCount: digest.fileCount };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate a rubric." };
+  }
+}
+
+/** Grade a student's GitHub repo against a rubric (generating one if not given). */
+export async function gradeRepoAction(
+  repoRef: string,
+  assignmentInstructions: string,
+  rubric: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ run: GradingRun; rubric: string; fullName: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const digest = await ingestRepo(parsed.owner, parsed.repo);
+    const instructions = assignmentInstructions.trim() || `Evaluate the repository "${digest.fullName}".`;
+    const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${digest.text}`, provider));
+    const entry: StudentSubmissionEntry = {
+      student: digest.fullName,
+      content: digest.text,
+      mergedFileCount: digest.fileCount,
+      submittedFiles: [],
+    };
+    const run = await gradeEntries([entry], instructions, effectiveRubric, provider);
+    return { run, rubric: effectiveRubric, fullName: digest.fullName };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not grade the repository." };
+  }
+}
+
+/** Read a repo's latest GitHub Actions run (CI signal for the grading view). */
+export async function getRepoCiAction(
+  repoRef: string,
+  branch?: string
+): Promise<{ run: WorkflowRunInfo | null } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return { run: await getLatestWorkflowRun(parsed.owner, parsed.repo, branch) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not read CI status." };
   }
 }
 

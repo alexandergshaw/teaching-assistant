@@ -132,6 +132,17 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
     void runScan(courseUrl, institution);
   }, [courseUrl, institution, runScan]);
 
+  // Editors dispatch this after saving an item, so its badge updates without a
+  // full course re-scan.
+  useEffect(() => {
+    const onSaved = (e: Event) => {
+      const d = (e as CustomEvent<{ type?: AccessibleItemType; id?: string }>).detail;
+      if (d?.type && d?.id) void rescanItem(d.type, d.id);
+    };
+    window.addEventListener("ta-content-saved", onSaved);
+    return () => window.removeEventListener("ta-content-saved", onSaved);
+  }, [rescanItem]);
+
   const value = useMemo<AccessibilityValue>(() => {
     let errorCount = 0;
     let warningCount = 0;

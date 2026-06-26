@@ -58,6 +58,8 @@ import FilePreviewModal, { type PreviewFile } from "./FilePreviewModal";
 import type { RunSpan } from "@/lib/office-edit";
 import { spansEqual, spansToPlainText } from "./RichTextEditor";
 import { RichTextSectionEditor } from "./RichTextSectionEditor";
+import { useAccessibility } from "./AccessibilityProvider";
+import type { AccessibleItemType } from "@/lib/accessibility/types";
 import type {
   CanvasModule,
   CanvasModuleItem,
@@ -288,6 +290,54 @@ function bestModuleIdFor(fileName: string, modules: CanvasModule[]): number | ""
   return best ? best.id : "";
 }
 
+// Map a module item to its accessibility scan key, when it's a scannable type.
+function a11yRefForItem(item: CanvasModuleItem): { type: AccessibleItemType; id: string } | null {
+  if (item.type === "Page" && item.pageUrl) return { type: "page", id: item.pageUrl };
+  if (item.contentId == null) return null;
+  if (item.type === "Assignment") return { type: "assignment", id: String(item.contentId) };
+  if (item.type === "Quiz") return { type: "quiz", id: String(item.contentId) };
+  if (item.type === "Discussion") return { type: "discussion", id: String(item.contentId) };
+  return null;
+}
+
+// A small badge on a module item row showing its accessibility error/warning
+// tally; click opens the Accessibility Center. Renders nothing when clean or
+// not yet scanned (the TopBar pill shows overall scan progress).
+function ItemA11yBadge({ item }: { item: CanvasModuleItem }) {
+  const a11y = useAccessibility();
+  const ref = a11yRefForItem(item);
+  const scan = ref ? a11y.getItem(ref.type, ref.id) : undefined;
+  if (!scan) return null;
+  const issues = scan.errorCount + scan.warningCount;
+  if (issues === 0) return null;
+  const color = scan.errorCount > 0 ? "#dc2626" : "#d97706";
+  return (
+    <button
+      type="button"
+      onClick={() => a11y.setCenterOpen(true)}
+      title={`${issues} accessibility issue${issues === 1 ? "" : "s"} — open Accessibility Center`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        height: 24,
+        padding: "0 7px",
+        borderRadius: 6,
+        border: `1px solid ${color}`,
+        background: "#fff",
+        color,
+        fontSize: "0.74rem",
+        fontWeight: 700,
+        lineHeight: 1,
+        cursor: "pointer",
+      }}
+    >
+      <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: color }} />
+      {issues}
+    </button>
+  );
+}
+
 // A subtle pill that shows (and toggles) the published state of a module or item.
 function PublishToggle({
   published,
@@ -395,6 +445,8 @@ function PageEditorModal({
       setNote({ kind: "error", text: result.error });
       return;
     }
+    // Re-scan this page's accessibility so its badge updates immediately.
+    if (pageUrl) window.dispatchEvent(new CustomEvent("ta-content-saved", { detail: { type: "page", id: pageUrl } }));
     onSaved();
     onClose();
   };
@@ -1246,6 +1298,12 @@ function GradableEditorModal({
     if ("error" in dueRes) {
       setNote({ kind: "error", text: dueRes.error });
       return;
+    }
+    // Re-scan this item's accessibility so its badge updates immediately.
+    if (item.contentId != null) {
+      window.dispatchEvent(
+        new CustomEvent("ta-content-saved", { detail: { type: kind.toLowerCase(), id: String(item.contentId) } })
+      );
     }
     onSaved();
     onClose();
@@ -5334,6 +5392,7 @@ function ModulesView({
                         &gt;
                       </button>
                       <span className={styles.ccActionsSep} aria-hidden="true" />
+                      <ItemA11yBadge item={it} />
                       <PublishToggle published={it.published} disabled={busy} onClick={() => toggleItem(m, it)} />
                       {it.type === "Page" && it.pageUrl && (
                         <button type="button" className={styles.ccBtn} onClick={() => onEditPage(it.pageUrl!)}>

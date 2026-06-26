@@ -121,7 +121,6 @@ export default function CoursePlanningTab() {
   // The full paragraph list + codebase summary, for the live preview and per-field regenerate.
   const [adaptCodebaseSummary, setAdaptCodebaseSummary] = useState("");
   const [adaptRegenKey, setAdaptRegenKey] = useState<string | null>(null);
-  const [adaptShowPreview, setAdaptShowPreview] = useState(false);
 
   const handleGenerateSchedule = async () => {
     if (!courseDescription.trim()) {
@@ -555,57 +554,10 @@ export default function CoursePlanningTab() {
 
               {adaptSections && adaptSections.length > 0 && (
                 <>
-                  {adaptSections.some((s) => s.isField) && (
-                    <>
-                      <p style={{ marginTop: 22, fontWeight: 600 }}>
-                        {adaptSections.filter((s) => s.isField).length} class-specific section
-                        {adaptSections.filter((s) => s.isField).length === 1 ? "" : "s"} to confirm
-                      </p>
-                      {adaptSections
-                        .filter((s) => s.isField)
-                        .map((s) => (
-                          <div key={s.key} className={styles.field}>
-                            <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                              <span>{s.label}</span>
-                              <button
-                                type="button"
-                                onClick={() => handleRegenerateAdaptSection(s)}
-                                disabled={adaptRegenKey !== null}
-                                style={{
-                                  fontSize: "0.78rem",
-                                  fontWeight: 600,
-                                  color: "var(--accent)",
-                                  background: "transparent",
-                                  border: "1px solid var(--field-border)",
-                                  borderRadius: 8,
-                                  padding: "3px 10px",
-                                  cursor: adaptRegenKey !== null ? "default" : "pointer",
-                                  opacity: adaptRegenKey !== null && adaptRegenKey !== s.key ? 0.5 : 1,
-                                }}
-                              >
-                                {adaptRegenKey === s.key ? "Regenerating…" : "Regenerate"}
-                              </button>
-                            </label>
-                            <textarea
-                              className={styles.textInput}
-                              rows={Math.max(2, Math.min(8, Math.round(s.text.length / 70) + 1))}
-                              value={s.text}
-                              onChange={(e) => updateSection(s.key, { text: e.target.value })}
-                            />
-                            {s.original && s.original !== s.text && (
-                              <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 0" }}>
-                                Original: {s.original}
-                              </p>
-                            )}
-                          </div>
-                        ))}
-                    </>
-                  )}
-
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-                    <button type="button" className={styles.submitButton} onClick={() => setAdaptShowPreview((v) => !v)}>
-                      {adaptShowPreview ? "Hide preview" : "Preview & edit syllabus"}
-                    </button>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", marginTop: 22 }}>
+                    <p style={{ fontWeight: 600, margin: 0 }}>
+                      {adaptSections.length} section{adaptSections.length === 1 ? "" : "s"} — edit, regenerate with AI, add, or delete any of them
+                    </p>
                     <button
                       type="button"
                       className={styles.submitButton}
@@ -616,45 +568,46 @@ export default function CoursePlanningTab() {
                     </button>
                   </div>
 
-                  {adaptShowPreview && (
-                    <div
-                      style={{
-                        marginTop: 14,
-                        padding: "22px 26px",
+                  <div
+                    style={{
+                      marginTop: 12,
+                      padding: "16px 18px",
+                      border: "1px solid var(--field-border)",
+                      borderRadius: 12,
+                      background: "#ffffff",
+                      maxHeight: "65vh",
+                      overflowY: "auto",
+                    }}
+                  >
+                    {adaptSections.map((s) => {
+                      const changed = s.isField || s.text !== s.original;
+                      const miniBtn: CSSProperties = {
+                        width: 26,
+                        height: 24,
+                        fontSize: "0.75rem",
+                        fontWeight: 700,
+                        lineHeight: 1,
+                        borderRadius: 6,
                         border: "1px solid var(--field-border)",
-                        borderRadius: 12,
-                        background: "#ffffff",
-                        maxHeight: "60vh",
-                        overflowY: "auto",
-                      }}
-                    >
-                      <p style={{ margin: "0 0 12px", fontSize: "0.8rem", color: "#6b7280" }}>
-                        Editable preview — edit any line, regenerate it with AI, add a section below it, or delete
-                        it. Everything here is written to the .docx when you download.
-                      </p>
-                      {adaptSections.map((s) => {
-                        const changed = s.isField || s.text !== s.original;
-                        const miniBtn: CSSProperties = {
-                          width: 26,
-                          height: 24,
-                          fontSize: "0.75rem",
-                          fontWeight: 700,
-                          lineHeight: 1,
-                          borderRadius: 6,
-                          border: "1px solid var(--field-border)",
-                          background: "#fff",
-                          color: "#475569",
-                          cursor: "pointer",
-                        };
-                        return (
-                          <div key={s.key} style={{ display: "flex", gap: 6, alignItems: "flex-start", margin: "0 0 8px" }}>
+                        background: "#fff",
+                        color: "#475569",
+                        cursor: "pointer",
+                      };
+                      return (
+                        <div key={s.key} style={{ display: "flex", gap: 8, alignItems: "flex-start", margin: "0 0 10px" }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            {s.isField && (
+                              <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 2px" }}>
+                                {s.label}
+                              </div>
+                            )}
                             <textarea
                               value={s.text}
                               onChange={(e) => updateSection(s.key, { text: e.target.value })}
                               rows={Math.max(1, Math.ceil((s.text.length || 1) / 90))}
                               placeholder="(empty section)"
                               style={{
-                                flex: 1,
+                                width: "100%",
                                 border: "1px solid transparent",
                                 outline: "none",
                                 resize: "vertical",
@@ -667,33 +620,33 @@ export default function CoursePlanningTab() {
                                 borderRadius: 4,
                               }}
                             />
-                            <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
-                              <button
-                                type="button"
-                                title="Regenerate this section with AI"
-                                onClick={() => handleRegenerateAdaptSection(s)}
-                                disabled={adaptRegenKey !== null}
-                                style={{ ...miniBtn, color: "var(--accent)", opacity: adaptRegenKey !== null && adaptRegenKey !== s.key ? 0.5 : 1 }}
-                              >
-                                {adaptRegenKey === s.key ? "…" : "AI"}
-                              </button>
-                              <button type="button" title="Add a section below" onClick={() => addSectionAfter(s.key)} style={miniBtn}>
-                                +
-                              </button>
-                              <button
-                                type="button"
-                                title="Delete this section"
-                                onClick={() => deleteSection(s.key)}
-                                style={{ ...miniBtn, color: "#b91c1c" }}
-                              >
-                                ×
-                              </button>
-                            </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
+                            <button
+                              type="button"
+                              title="Regenerate this section with AI"
+                              onClick={() => handleRegenerateAdaptSection(s)}
+                              disabled={adaptRegenKey !== null}
+                              style={{ ...miniBtn, color: "var(--accent)", opacity: adaptRegenKey !== null && adaptRegenKey !== s.key ? 0.5 : 1 }}
+                            >
+                              {adaptRegenKey === s.key ? "…" : "AI"}
+                            </button>
+                            <button type="button" title="Add a section below" onClick={() => addSectionAfter(s.key)} style={miniBtn}>
+                              +
+                            </button>
+                            <button
+                              type="button"
+                              title="Delete this section"
+                              onClick={() => deleteSection(s.key)}
+                              style={{ ...miniBtn, color: "#b91c1c" }}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </>
               )}
             </>

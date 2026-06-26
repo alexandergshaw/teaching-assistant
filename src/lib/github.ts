@@ -278,6 +278,13 @@ export async function ingestRepo(
   return { fullName: info.fullName, description: info.description, fileCount: count, text: parts.join(""), truncated };
 }
 
+/** Download a repo as a zip archive (GitHub's zipball) at `ref` / default branch. */
+export async function downloadRepoZipball(owner: string, repo: string, ref?: string): Promise<Buffer> {
+  const branch = ref || (await getRepo(owner, repo)).defaultBranch;
+  const res = await ghFetch(`/repos/${owner}/${repo}/zipball/${encodeURIComponent(branch)}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 // ── CI / GitHub Actions ────────────────────────────────────────────────────────
 
 export interface WorkflowRunInfo {

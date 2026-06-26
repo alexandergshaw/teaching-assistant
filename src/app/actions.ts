@@ -126,6 +126,7 @@ import {
   putFile,
   getFileText,
   getLatestWorkflowRun,
+  downloadRepoZipball,
   type GithubRepo,
   type RepoDigest,
   type WorkflowRunInfo,
@@ -4679,6 +4680,42 @@ export async function gradeRepoAction(
     return { run, rubric: effectiveRubric, fullName: digest.fullName };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not grade the repository." };
+  }
+}
+
+/**
+ * Download a repo as a zip whose entries sit at the root (GitHub wraps everything
+ * in a "<repo>-<sha>/" folder; we strip it) so the result is a drop-in for the
+ * uploaded-zip flows in lecture and syllabus planning.
+ */
+export async function getRepoZipAction(
+  repoRef: string
+): Promise<{ base64: string; name: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const buffer = await downloadRepoZipball(parsed.owner, parsed.repo);
+    const JSZipMod = (await import("jszip")).default;
+    const src = await JSZipMod.loadAsync(buffer);
+    // The wrapper folder is the common first path segment of every entry.
+    let wrapper = "";
+    src.forEach((path) => {
+      if (!wrapper) wrapper = path.split("/")[0];
+    });
+    const out = new JSZipMod();
+    const entries: Array<{ path: string; file: import("jszip").JSZipObject }> = [];
+    src.forEach((path, file) => {
+      if (!file.dir) entries.push({ path, file });
+    });
+    for (const { path, file } of entries) {
+      const stripped = wrapper && path.startsWith(`${wrapper}/`) ? path.slice(wrapper.length + 1) : path;
+      if (stripped) out.file(stripped, await file.async("uint8array"));
+    }
+    const base64 = await out.generateAsync({ type: "base64" });
+    return { base64, name: `${parsed.repo}.zip` };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not download the repository." };
   }
 }
 

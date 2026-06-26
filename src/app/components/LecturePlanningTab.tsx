@@ -7,8 +7,10 @@ import {
   listAssignmentFoldersAction,
   generateCourseRubricFromZipAction,
   generateCourseMaterialsAction,
+  getRepoZipAction,
   type AssignmentPlan,
 } from "../actions";
+import GithubRepoPicker from "./GithubRepoPicker";
 import { parseGeneratedRubric } from "../utils/rubric";
 import { saveFile, loadFile, deleteFile } from "../../lib/file-persistence";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
@@ -35,6 +37,13 @@ function readFileAsBase64(file: File): Promise<string> {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+// Build a File from a base64 payload (used to turn a downloaded GitHub repo zip
+// into the same File the upload flow produces).
+function base64ToFile(base64: string, name: string, type = "application/zip"): File {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  return new File([bytes], name, { type });
 }
 
 // Decode a base64 payload (e.g. the Course Engine materials zip) and download it.
@@ -87,6 +96,10 @@ export default function LecturePlanningTab() {
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [introTemplateFile, setIntroTemplateFile] = useState<File | null>(null);
   const [instructionsTemplateFile, setInstructionsTemplateFile] = useState<File | null>(null);
+  // Loading the course repo from GitHub instead of a zip upload.
+  const [githubRepo, setGithubRepo] = useState("");
+  const [githubLoading, setGithubLoading] = useState(false);
+  const [githubError, setGithubError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,6 +175,21 @@ export default function LecturePlanningTab() {
     setFile(null);
     if (inputRef.current) inputRef.current.value = "";
     deleteFile(key).catch(() => {});
+  };
+
+  // Download a GitHub repo as a normalized zip and use it as the course repository,
+  // exactly as if it had been uploaded.
+  const loadRepoFromGithub = async () => {
+    if (!githubRepo.trim()) return;
+    setGithubLoading(true);
+    setGithubError(null);
+    const r = await getRepoZipAction(githubRepo.trim());
+    setGithubLoading(false);
+    if ("error" in r) {
+      setGithubError(r.error);
+      return;
+    }
+    handleFileChange(base64ToFile(r.base64, r.name), ZIP_FILE_KEY, setZipFile);
   };
 
   // Read the zip + optional templates and generate the module for one assignment.
@@ -556,6 +584,23 @@ export default function LecturePlanningTab() {
             Each subfolder should include the README, any unit tests, and assignment source files.
             Maximum upload size: ~7 MB zip.
           </p>
+          <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "8px 0 4px" }}>
+            or load one of your GitHub repositories:
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+              <GithubRepoPicker value={githubRepo} onChange={setGithubRepo} disabled={githubLoading} />
+            </div>
+            <button
+              type="button"
+              className={styles.submitButton}
+              onClick={loadRepoFromGithub}
+              disabled={githubLoading || !githubRepo.trim()}
+            >
+              {githubLoading ? "Loading…" : "Load from GitHub"}
+            </button>
+          </div>
+          {githubError && <p className={styles.error}>{githubError}</p>}
         </div>
       </div>
 

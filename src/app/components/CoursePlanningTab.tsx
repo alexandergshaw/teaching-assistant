@@ -6,7 +6,7 @@ import {
   generateCourseScheduleAction,
   generateCopilotProjectPromptAction,
   createCopilotRepoAction,
-  generateCourseFromRepoAction,
+  getRepoZipAction,
   analyzeSyllabusInputsAction,
   regenerateSyllabusFieldAction,
   buildAdaptedSyllabusAction,
@@ -41,7 +41,7 @@ type AdaptSection = {
   /** Whether the AI flagged this as a class-specific field (shown in the form). */
   isField: boolean;
 };
-type PlanningMode = "syllabus" | "schedule" | "project" | "lecture" | "codebase" | "sync";
+type PlanningMode = "syllabus" | "schedule" | "project" | "lecture" | "sync";
 
 // Map an AI replacement string onto the paragraph's original formatting: if the
 // replacement still starts with the original's leading bold label, keep that
@@ -138,36 +138,8 @@ export default function CoursePlanningTab() {
     }
   };
 
-  // "From a Codebase" mode: generate a course outline from a GitHub repo.
-  const [codebaseRepo, setCodebaseRepo] = useState("");
-  const [codebaseBusy, setCodebaseBusy] = useState(false);
-  const [codebaseOutline, setCodebaseOutline] = useState<string | null>(null);
-  const [codebaseNote, setCodebaseNote] = useState<string | null>(null);
-  const [codebaseError, setCodebaseError] = useState<string | null>(null);
-
-  const handleGenerateFromCodebase = async () => {
-    if (!codebaseRepo.trim()) {
-      setCodebaseError("Choose or enter a repository first.");
-      return;
-    }
-    setCodebaseBusy(true);
-    setCodebaseError(null);
-    setCodebaseOutline(null);
-    setCodebaseNote(null);
-    try {
-      const r = await generateCourseFromRepoAction(codebaseRepo.trim(), getStoredProvider());
-      if ("error" in r) {
-        setCodebaseError(r.error);
-      } else {
-        setCodebaseOutline(r.outline);
-        setCodebaseNote(`Read ${r.fileCount} file${r.fileCount === 1 ? "" : "s"} from ${r.fullName}${r.truncated ? " (truncated)" : ""}.`);
-      }
-    } catch (err) {
-      setCodebaseError(err instanceof Error ? err.message : "Failed to generate the course.");
-    } finally {
-      setCodebaseBusy(false);
-    }
-  };
+  // Syllabus mode: an optional GitHub repo as the codebase source (instead of a zip).
+  const [adaptRepo, setAdaptRepo] = useState("");
 
 
   useEffect(() => {
@@ -177,7 +149,7 @@ export default function CoursePlanningTab() {
     // during hydration and cause an SSR mismatch. Hence the rule is suppressed.
     /* eslint-disable react-hooks/set-state-in-effect */
     const savedMode = localStorage.getItem(LS_KEYS.planningMode);
-    if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project" || savedMode === "lecture" || savedMode === "codebase" || savedMode === "sync") {
+    if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project" || savedMode === "lecture" || savedMode === "sync") {
       setPlanningMode(savedMode);
     }
     setCourseDescription(localStorage.getItem(LS_KEYS.courseDescription) || "");
@@ -282,7 +254,7 @@ export default function CoursePlanningTab() {
     setScheduleError(null);
   };
 
-  const handleExportScheduleCsv = () => {
+  const buildScheduleCsv = (): { content: string; fileName: string } => {
     const header = ["Week", "Dates", "Topics", "Assignment"];
     const escapeCell = (val: string) => `"${val.replace(/"/g, '""')}"`;
     const rows = [
@@ -293,10 +265,25 @@ export default function CoursePlanningTab() {
     ];
     const courseName = courseDescription.split("\n")[0].trim().slice(0, 60);
     const sanitized = courseName.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "course";
-    triggerFileDownload(
-      new Blob([rows.join("\r\n")], { type: "text/csv;charset=utf-8" }),
-      `${sanitized}_schedule.csv`
-    );
+    return { content: rows.join("\r\n"), fileName: `${sanitized}_schedule.csv` };
+  };
+
+  const handleExportScheduleCsv = () => {
+    const { content, fileName } = buildScheduleCsv();
+    triggerFileDownload(new Blob([content], { type: "text/csv;charset=utf-8" }), fileName);
+  };
+
+  // Hand the generated schedule straight to Project Planning and kick off the
+  // Copilot prompt — no manual export/re-upload round trip.
+  const handleUseScheduleForProject = () => {
+    const { content, fileName } = buildScheduleCsv();
+    setProjectFileContent(content);
+    setProjectFileName(fileName);
+    setProjectPrompt(null);
+    setProjectError(null);
+    setPlanningMode("project");
+    localStorage.setItem(LS_KEYS.planningMode, "project");
+    void handleGenerateProjectPrompt(content, fileName);
   };
 
   const handleProjectFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -312,8 +299,10 @@ export default function CoursePlanningTab() {
     e.target.value = "";
   };
 
-  const handleGenerateProjectPrompt = async () => {
-    if (!projectFileContent || !projectFileName) {
+  const handleGenerateProjectPrompt = async (contentArg?: string, nameArg?: string) => {
+    const content = contentArg ?? projectFileContent;
+    const name = nameArg ?? projectFileName;
+    if (!content || !name) {
       setProjectError("Please upload a schedule file first.");
       return;
     }
@@ -321,7 +310,7 @@ export default function CoursePlanningTab() {
     setProjectError(null);
     setProjectPrompt(null);
     try {
-      const promptResult = await generateCopilotProjectPromptAction(projectFileContent, projectFileName, getStoredProvider());
+      const promptResult = await generateCopilotProjectPromptAction(content, name, getStoredProvider());
       if ("error" in promptResult) {
         setProjectError(promptResult.error);
       } else {
@@ -360,7 +349,17 @@ export default function CoursePlanningTab() {
     setAdaptSections(null);
     try {
       const syllabusBase64 = await readFileBase64(syllabusFile);
-      const zipBase64 = zipFile ? await readFileBase64(zipFile) : null;
+      let zipBase64: string | null = null;
+      if (adaptRepo.trim()) {
+        const z = await getRepoZipAction(adaptRepo.trim());
+        if ("error" in z) {
+          setAdaptError(z.error);
+          return;
+        }
+        zipBase64 = z.base64;
+      } else if (zipFile) {
+        zipBase64 = await readFileBase64(zipFile);
+      }
       setAdaptSyllabusBase64(syllabusBase64);
       setAdaptSyllabusName(syllabusFile.name);
       const result = await analyzeSyllabusInputsAction(
@@ -599,13 +598,6 @@ export default function CoursePlanningTab() {
             </button>
             <button
               type="button"
-              className={`${styles.scheduleModeBtn}${planningMode === "codebase" ? ` ${styles.active}` : ""}`}
-              onClick={() => { setPlanningMode("codebase"); localStorage.setItem(LS_KEYS.planningMode, "codebase"); }}
-            >
-              From a Codebase
-            </button>
-            <button
-              type="button"
               className={`${styles.scheduleModeBtn}${planningMode === "sync" ? ` ${styles.active}` : ""}`}
               onClick={() => { setPlanningMode("sync"); localStorage.setItem(LS_KEYS.planningMode, "sync"); }}
             >
@@ -631,11 +623,13 @@ export default function CoursePlanningTab() {
               </div>
 
               <div className={styles.field}>
-                <label htmlFor="adaptZipFile">Course codebase (.zip, optional)</label>
+                <label htmlFor="adaptZipFile">Course codebase (optional)</label>
                 <div className={styles.fileField}>
-                  <input id="adaptZipFile" type="file" accept=".zip" ref={adaptZipRef} />
+                  <input id="adaptZipFile" type="file" accept=".zip" ref={adaptZipRef} disabled={!!adaptRepo.trim()} />
                   <p>Optional. A zip of the course&apos;s codebase so the AI can suggest accurate, class-specific values.</p>
                 </div>
+                <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "8px 0 4px" }}>or select one of your GitHub repositories:</p>
+                <GithubRepoPicker value={adaptRepo} onChange={setAdaptRepo} disabled={adaptStatus === "analyzing"} />
               </div>
 
               <div className={styles.field}>
@@ -985,6 +979,15 @@ export default function CoursePlanningTab() {
                 >
                   Export CSV
                 </button>
+                <button
+                  type="button"
+                  className={styles.submitButton}
+                  onClick={handleUseScheduleForProject}
+                  disabled={isGeneratingProjectPrompt}
+                  title="Use this schedule for Course Project Planning and generate the Copilot prompt"
+                >
+                  {isGeneratingProjectPrompt ? "Generating prompt…" : "Use for Project Planning"}
+                </button>
               </div>
             </>
           )}
@@ -1010,7 +1013,7 @@ export default function CoursePlanningTab() {
               <button
                 type="button"
                 className={styles.submitButton}
-                onClick={handleGenerateProjectPrompt}
+                onClick={() => handleGenerateProjectPrompt()}
                 disabled={isGeneratingProjectPrompt || !projectFileContent}
               >
                 {isGeneratingProjectPrompt ? "Generating prompt…" : "Generate Copilot Prompt"}
@@ -1070,52 +1073,6 @@ export default function CoursePlanningTab() {
                       </p>
                     )}
                   </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* ── From a Codebase mode: generate a course outline from a GitHub repo ── */}
-          {planningMode === "codebase" && (
-            <>
-              <p style={{ marginTop: 0, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                Pick a GitHub repository and generate a teachable course outline — a weekly schedule and
-                assignments grounded in the technologies and structure of that codebase.
-              </p>
-              <div className={styles.field}>
-                <label>Repository</label>
-                <GithubRepoPicker value={codebaseRepo} onChange={setCodebaseRepo} disabled={codebaseBusy} />
-              </div>
-              <button
-                type="button"
-                className={styles.submitButton}
-                onClick={handleGenerateFromCodebase}
-                disabled={codebaseBusy || !codebaseRepo.trim()}
-              >
-                {codebaseBusy ? "Reading the codebase…" : "Generate course outline"}
-              </button>
-              {codebaseError && <p className={styles.error}>{codebaseError}</p>}
-              {codebaseOutline && (
-                <div className={styles.field}>
-                  <label>Course outline</label>
-                  {codebaseNote && (
-                    <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: 8 }}>{codebaseNote}</p>
-                  )}
-                  <textarea
-                    className={styles.textInput}
-                    value={codebaseOutline}
-                    readOnly
-                    rows={20}
-                    style={{ fontFamily: "monospace", fontSize: "0.85rem" }}
-                  />
-                  <button
-                    type="button"
-                    className={styles.submitButton}
-                    style={{ marginTop: 8 }}
-                    onClick={() => void navigator.clipboard.writeText(codebaseOutline)}
-                  >
-                    Copy to Clipboard
-                  </button>
                 </div>
               )}
             </>

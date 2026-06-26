@@ -134,6 +134,10 @@ export default function AccessibilityCenter() {
 
   const close = () => a11y.setCenterOpen(false);
 
+  // Name the course under review: its display name, else its Canvas id from the URL.
+  const courseId = a11y.courseUrl.match(/\/courses\/(\d+)/)?.[1];
+  const courseLabel = a11y.courseName || (courseId ? `Course ${courseId}` : "");
+
   const reviewQueueNow = buildReviewQueue(flagged);
 
   // Open the first stop and enter review mode.
@@ -266,7 +270,17 @@ export default function AccessibilityCenter() {
         {/* Header */}
         <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-            <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "#0f172a" }}>Accessibility</h2>
+            <div style={{ minWidth: 0 }}>
+              <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "#0f172a" }}>Accessibility</h2>
+              {a11y.hasCourse && courseLabel && (
+                <div
+                  title={courseLabel}
+                  style={{ fontSize: "0.78rem", color: "#64748b", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}
+                >
+                  {courseLabel}
+                </div>
+              )}
+            </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 type="button"

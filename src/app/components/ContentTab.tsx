@@ -7350,8 +7350,8 @@ export default function ContentTab({
   // it in the background; fires on mount and whenever the course/school changes.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.dispatchEvent(new CustomEvent("ta-course-changed", { detail: { courseUrl } }));
-  }, [courseUrl, activeInstitution]);
+    window.dispatchEvent(new CustomEvent("ta-course-changed", { detail: { courseUrl, courseName } }));
+  }, [courseUrl, courseName, activeInstitution]);
 
   // `silent` re-fetches without swapping the content for the loading spinner, so
   // a reload keeps the page mounted (scroll position, open accordions, and the

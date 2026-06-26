@@ -72,6 +72,8 @@ export interface AccessibilityValue {
   /** The active course URL and institution code, for remediation fetch/save. */
   courseUrl: string;
   acronym?: string;
+  /** The active course's display name (for the header), when known. */
+  courseName: string;
   /** Whether a course is selected (so the pill knows to appear). */
   hasCourse: boolean;
   /** Scanned items keyed by `${type}:${id}`. */
@@ -96,6 +98,7 @@ export interface AccessibilityValue {
 const DEFAULT: AccessibilityValue = {
   status: "idle",
   courseUrl: "",
+  courseName: "",
   hasCourse: false,
   items: {},
   errorCount: 0,
@@ -129,6 +132,7 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
   const [courseUrl, setCourseUrl] = useState<string>(() =>
     typeof window !== "undefined" ? localStorage.getItem(CONTENT_URL_KEY) ?? "" : ""
   );
+  const [courseName, setCourseName] = useState("");
   const [items, setItems] = useState<Record<string, ItemScan>>({});
   const [status, setStatus] = useState<ScanStatus>("idle");
   const [error, setError] = useState<string | undefined>();
@@ -141,8 +145,9 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
   // The content tab dispatches this when the loaded course changes.
   useEffect(() => {
     const onCourseChanged = (e: Event) => {
-      const detail = (e as CustomEvent<{ courseUrl?: string }>).detail;
+      const detail = (e as CustomEvent<{ courseUrl?: string; courseName?: string }>).detail;
       setCourseUrl(detail?.courseUrl ?? localStorage.getItem(CONTENT_URL_KEY) ?? "");
+      setCourseName(detail?.courseName ?? "");
     };
     window.addEventListener("ta-course-changed", onCourseChanged);
     return () => window.removeEventListener("ta-course-changed", onCourseChanged);
@@ -347,6 +352,7 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
       status,
       error,
       courseUrl,
+      courseName,
       acronym: institution || undefined,
       hasCourse: hasCourseId(courseUrl),
       items: merged,
@@ -363,7 +369,7 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
       centerOpen,
       setCenterOpen,
     };
-  }, [items, linkGroups, status, error, courseUrl, institution, linkStatus, rescanItem, rescanAll, checkLinks, setFileScan, centerOpen]);
+  }, [items, linkGroups, status, error, courseUrl, courseName, institution, linkStatus, rescanItem, rescanAll, checkLinks, setFileScan, centerOpen]);
 
   return (
     <AccessibilityContext.Provider value={value}>

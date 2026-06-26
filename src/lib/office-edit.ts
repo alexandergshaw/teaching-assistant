@@ -481,6 +481,87 @@ export async function extractOfficeImages(kind: OfficeKind, buffer: Buffer): Pro
   return images;
 }
 
+const IMAGE_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  bmp: "image/bmp",
+  webp: "image/webp",
+};
+
+// Normalize a zip path of `${baseDir}/${target}` (collapsing ./ and ../).
+function resolveZipPath(baseDir: string, target: string): string {
+  const out: string[] = [];
+  for (const part of `${baseDir}/${target}`.split("/")) {
+    if (part === "..") out.pop();
+    else if (part && part !== ".") out.push(part);
+  }
+  return out.join("/");
+}
+
+/**
+ * Read an image's raw bytes (base64 + mime) by its {@link OfficeImage.id}, for
+ * sending to a vision model. Returns null for vector/unsupported formats
+ * (emf/wmf/svg) or when the image can't be resolved.
+ */
+export async function extractOfficeImageData(
+  kind: OfficeKind,
+  buffer: Buffer,
+  id: string
+): Promise<{ mimeType: string; base64: string } | null> {
+  const zip = await JSZip.loadAsync(buffer);
+
+  const readImage = async (path: string) => {
+    const file = zip.file(path);
+    if (!file) return null;
+    const mime = IMAGE_MIME[path.split(".").pop()?.toLowerCase() ?? ""];
+    if (!mime) return null;
+    return { mimeType: mime, base64: await file.async("base64") };
+  };
+  const embedTarget = (relsXml: string, embed: string): string | undefined =>
+    relsXml.match(new RegExp(`Id="${embed}"[^>]*?Target="([^"]+)"`))?.[1] ??
+    relsXml.match(new RegExp(`Target="([^"]+)"[^>]*?Id="${embed}"`))?.[1];
+
+  if (kind === "docx") {
+    const docXml = await zip.file("word/document.xml")?.async("string");
+    if (!docXml) return null;
+    const numId = id.replace(/^d/, "");
+    let embed: string | undefined;
+    for (const dr of docXml.matchAll(/<w:drawing\b[\s\S]*?<\/w:drawing>/g)) {
+      if (new RegExp(`<wp:docPr\\b[^>]*\\bid="${numId}"`).test(dr[0])) {
+        embed = dr[0].match(/<a:blip\b[^>]*\br:embed="([^"]+)"/)?.[1];
+        break;
+      }
+    }
+    if (!embed) return null;
+    const relsXml = await zip.file("word/_rels/document.xml.rels")?.async("string");
+    if (!relsXml) return null;
+    const target = embedTarget(relsXml, embed);
+    return target ? readImage(resolveZipPath("word", target)) : null;
+  }
+
+  const m = id.match(/^s(\d+)_(\d+)$/);
+  if (!m) return null;
+  const slides = sortedSlides(zip);
+  const slide = slides[Number(m[1])];
+  if (!slide) return null;
+  const slideXml = await slide.async("string");
+  let embed: string | undefined;
+  for (const pic of slideXml.matchAll(/<p:pic\b[\s\S]*?<\/p:pic>/g)) {
+    if (new RegExp(`<p:cNvPr\\b[^>]*\\bid="${m[2]}"`).test(pic[0])) {
+      embed = pic[0].match(/<a:blip\b[^>]*\br:embed="([^"]+)"/)?.[1];
+      break;
+    }
+  }
+  if (!embed) return null;
+  const relsName = slide.name.replace(/slides\/(slide\d+)\.xml$/, "slides/_rels/$1.xml.rels");
+  const relsXml = await zip.file(relsName)?.async("string");
+  if (!relsXml) return null;
+  const target = embedTarget(relsXml, embed);
+  return target ? readImage(resolveZipPath("ppt/slides", target)) : null;
+}
+
 /** Set alt text (descr) on images by their {@link OfficeImage.id}; return new bytes. */
 export async function setOfficeImageAlt(
   kind: OfficeKind,

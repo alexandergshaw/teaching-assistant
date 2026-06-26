@@ -26,6 +26,7 @@ import {
   parseOfficeParagraphs,
   applyOfficeSections,
   extractOfficeImages,
+  extractOfficeImageData,
   setOfficeImageAlt,
   type OfficeKind,
   type OfficeParagraph,
@@ -2072,6 +2073,19 @@ export async function getOfficeFileImages(courseUrl: string, fileId: number, cod
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (!meta.kind) return [];
   return extractOfficeImages(meta.kind, buffer);
+}
+
+/** Read one image's bytes (base64 + mime) from an Office file, for vision alt text. */
+export async function getOfficeFileImageData(
+  courseUrl: string,
+  fileId: number,
+  imageId: string,
+  code?: string
+): Promise<{ mimeType: string; base64: string } | null> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
+  if (!meta.kind) return null;
+  return extractOfficeImageData(meta.kind, buffer, imageId);
 }
 
 /** Write alt text onto a file's images by id and overwrite the file in Canvas. */

@@ -97,6 +97,7 @@ import {
   getAccessibilityItem,
   saveAccessibilityItemHtml,
   getOfficeFileImages,
+  getOfficeFileImageData,
   saveOfficeFileImageAlt,
 } from "@/lib/canvas-modules";
 import type { OfficeImage } from "@/lib/office-edit";
@@ -1347,6 +1348,41 @@ export async function getOfficeFileImagesAction(
     return { images: await getOfficeFileImages(courseUrl, fileId, acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not read the file." };
+  }
+}
+
+/** Suggest alt text for one Office-file image by sending it to a vision model. */
+export async function suggestOfficeImageAltAction(
+  courseUrl: string,
+  fileId: number,
+  imageId: string,
+  acronym?: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ text: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const image = await getOfficeFileImageData(courseUrl, fileId, imageId, acronym);
+    if (!image) return { error: "This image can't be previewed for a suggestion (e.g. a vector image)." };
+    const result = await callLlm(
+      {
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: "Write concise, descriptive alt text (under 125 characters) for this image, for screen-reader users. Describe its content or purpose. Do not start with \"image of\" or \"picture of\". Return ONLY the alt text, no quotes." },
+              { inlineData: { mimeType: image.mimeType, data: image.base64 } },
+            ],
+          },
+        ],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 120 },
+      },
+      provider
+    );
+    if (!result.ok) return { error: `Suggestion failed: HTTP ${result.status}` };
+    const text = result.text.trim().replace(/^["']|["']$/g, "").slice(0, 200);
+    return text ? { text } : { error: "The model returned empty text." };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
 }
 

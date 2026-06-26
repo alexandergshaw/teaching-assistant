@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getOfficeFileImagesAction, saveOfficeImageAltAction } from "../actions";
+import { getOfficeFileImagesAction, saveOfficeImageAltAction, suggestOfficeImageAltAction } from "../actions";
+import { getStoredProvider } from "@/lib/llm-provider";
 import type { Issue } from "@/lib/accessibility/types";
 import type { OfficeImage } from "@/lib/office-edit";
 
@@ -42,6 +43,8 @@ export default function OfficeAltEditor({
   const [error, setError] = useState<string | null>(null);
   const [images, setImages] = useState<OfficeImage[]>([]);
   const [alts, setAlts] = useState<Record<string, string>>({});
+  const [suggesting, setSuggesting] = useState<Record<string, boolean>>({});
+  const [suggestingAll, setSuggestingAll] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,6 +83,21 @@ export default function OfficeAltEditor({
     onClose({ issues: remainingIssues(images, alts) });
   };
 
+  const suggestOne = async (id: string): Promise<void> => {
+    setSuggesting((s) => ({ ...s, [id]: true }));
+    const r = await suggestOfficeImageAltAction(courseUrl, fileId, id, acronym, getStoredProvider());
+    if (!("error" in r)) setAlts((prev) => ({ ...prev, [id]: r.text }));
+    setSuggesting((s) => ({ ...s, [id]: false }));
+  };
+
+  const suggestAllMissing = async (): Promise<void> => {
+    setSuggestingAll(true);
+    for (const im of images) {
+      if (!(alts[im.id] ?? "").trim()) await suggestOne(im.id);
+    }
+    setSuggestingAll(false);
+  };
+
   const missingCount = images.filter((im) => !(alts[im.id] ?? "").trim()).length;
 
   return (
@@ -98,8 +116,20 @@ export default function OfficeAltEditor({
           <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b" }}>
             Image alt text · {title}
           </div>
-          <div style={{ fontSize: "0.85rem", color: "#475569", marginTop: 2 }}>
-            Describe each image for screen-reader users, then save back to Canvas.
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 4 }}>
+            <span style={{ fontSize: "0.85rem", color: "#475569" }}>
+              Describe each image for screen-reader users, then save back to Canvas.
+            </span>
+            {images.length > 0 && missingCount > 0 && (
+              <button
+                type="button"
+                onClick={suggestAllMissing}
+                disabled={suggestingAll || stage !== "ready"}
+                style={{ flexShrink: 0, border: "1px solid var(--accent, #2563eb)", background: "#fff", color: "var(--accent, #2563eb)", borderRadius: 8, padding: "5px 11px", fontSize: "0.8rem", fontWeight: 600, cursor: suggestingAll ? "default" : "pointer" }}
+              >
+                {suggestingAll ? "Suggesting…" : "Suggest missing with AI"}
+              </button>
+            )}
           </div>
         </div>
 
@@ -118,13 +148,24 @@ export default function OfficeAltEditor({
                     {missing && <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: "#d97706" }} />}
                     {im.name}
                   </label>
-                  <input
-                    type="text"
-                    value={value}
-                    placeholder="Describe this image…"
-                    onChange={(e) => setAlts((prev) => ({ ...prev, [im.id]: e.target.value }))}
-                    style={{ width: "100%", padding: "7px 10px", border: `1px solid ${missing ? "#d97706" : "var(--field-border, #cbd5e1)"}`, borderRadius: 8, fontSize: "0.88rem" }}
-                  />
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input
+                      type="text"
+                      value={value}
+                      placeholder="Describe this image…"
+                      onChange={(e) => setAlts((prev) => ({ ...prev, [im.id]: e.target.value }))}
+                      style={{ flex: 1, padding: "7px 10px", border: `1px solid ${missing ? "#d97706" : "var(--field-border, #cbd5e1)"}`, borderRadius: 8, fontSize: "0.88rem" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => suggestOne(im.id)}
+                      disabled={!!suggesting[im.id] || suggestingAll}
+                      title="Suggest alt text with AI"
+                      style={{ flexShrink: 0, border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", color: "var(--accent, #2563eb)", borderRadius: 8, padding: "0 12px", fontSize: "0.8rem", fontWeight: 600, cursor: suggesting[im.id] ? "default" : "pointer" }}
+                    >
+                      {suggesting[im.id] ? "…" : "Suggest"}
+                    </button>
+                  </div>
                 </div>
               );
             })

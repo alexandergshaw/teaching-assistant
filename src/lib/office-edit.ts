@@ -167,6 +167,40 @@ function rewriteRuns(paraXml: string, newText: string, tag: "w:t" | "a:t"): stri
   });
 }
 
+// All of `newText` collapses into a paragraph's first run, so if that run is
+// bold/italic/underlined the whole line inherits it (e.g. a bold "Label:" run
+// in front of a plain value). The plain path means the spans carry no marks, so
+// neutralize those toggles on the first text-bearing run to keep the text plain.
+function stripFirstRunMarksDocx(paraXml: string): string {
+  let done = false;
+  return paraXml.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g, (run) => {
+    if (done || !/<w:t\b/.test(run)) return run;
+    done = true;
+    return run.replace(/<w:rPr>([\s\S]*?)<\/w:rPr>/, (_m, inner: string) => {
+      const stripped = inner
+        .replace(/<w:b\b[^>]*\/>/g, "")
+        .replace(/<w:bCs\b[^>]*\/>/g, "")
+        .replace(/<w:i\b[^>]*\/>/g, "")
+        .replace(/<w:iCs\b[^>]*\/>/g, "")
+        .replace(/<w:u\b[^>]*\/>/g, "");
+      return stripped ? `<w:rPr>${stripped}</w:rPr>` : "";
+    });
+  });
+}
+
+// pptx equivalent: run marks are attributes (b/i/u) on the first run's <a:rPr>.
+function stripFirstRunMarksPptx(paraXml: string): string {
+  let done = false;
+  return paraXml.replace(/<a:r\b[^>]*>[\s\S]*?<\/a:r>/g, (run) => {
+    if (done || !/<a:t\b/.test(run)) return run;
+    done = true;
+    return run.replace(/<a:rPr\b([^>]*?)(\/?)>/, (_m, attrs: string, slash: string) => {
+      const cleaned = attrs.replace(/\s+(?:b|i|u)="[^"]*"/g, "");
+      return `<a:rPr${cleaned}${slash}>`;
+    });
+  });
+}
+
 // Build a docx run's <w:rPr> from a base run's rPr inner XML (keeps rStyle,
 // font, and colour) with this span's bold/italic/underline/size layered on.
 // Children are emitted in OOXML CT_RPr order so Word accepts the file.
@@ -192,7 +226,7 @@ function buildDocxRunProps(baseInner: string, span: RunSpan): string {
 // carries formatting; structural inline content (hyperlinks, bookmarks) in that
 // paragraph is not preserved, matching how intra-paragraph runs already collapse.
 function rebuildDocxParagraph(paraXml: string, spans: RunSpan[]): string {
-  if (spansArePlain(spans)) return rewriteRuns(paraXml, spansPlainText(spans), "w:t");
+  if (spansArePlain(spans)) return rewriteRuns(stripFirstRunMarksDocx(paraXml), spansPlainText(spans), "w:t");
   const open = paraXml.match(/^<w:p\b[^>]*>/)?.[0] ?? "<w:p>";
   const pPr = paraXml.match(/<w:pPr>[\s\S]*?<\/w:pPr>/)?.[0] ?? paraXml.match(/<w:pPr\/>/)?.[0] ?? "";
   const afterPPr = pPr ? paraXml.slice(paraXml.indexOf(pPr) + pPr.length) : paraXml;
@@ -225,7 +259,7 @@ function buildPptxRunProps(baseRpr: string, span: RunSpan): string {
 // Rebuild a pptx paragraph from formatted spans, keeping <a:pPr> and the closing
 // <a:endParaRPr>. Used only when a span carries formatting.
 function rebuildPptxParagraph(paraXml: string, spans: RunSpan[]): string {
-  if (spansArePlain(spans)) return rewriteRuns(paraXml, spansPlainText(spans), "a:t");
+  if (spansArePlain(spans)) return rewriteRuns(stripFirstRunMarksPptx(paraXml), spansPlainText(spans), "a:t");
   const open = paraXml.match(/^<a:p\b[^>]*>/)?.[0] ?? "<a:p>";
   const pPr = paraXml.match(/<a:pPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:pPr>)/)?.[0] ?? "";
   const endPr = paraXml.match(/<a:endParaRPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:endParaRPr>)/)?.[0] ?? "";

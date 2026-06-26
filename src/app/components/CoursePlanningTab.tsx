@@ -35,6 +35,22 @@ type AdaptSection = {
 };
 type PlanningMode = "syllabus" | "schedule" | "project" | "lecture";
 
+// Map an AI replacement string onto the paragraph's original formatting: if the
+// replacement still starts with the original's leading bold label, keep that
+// label bold and the rest plain; otherwise the whole replacement is plain. This
+// preserves bold field labels without bolding the value the AI filled in.
+function boldLabelSpans(runs: RunSpan[], replacement: string): RunSpan[] {
+  let prefix = "";
+  for (const r of runs) {
+    if (!r.bold) break;
+    prefix += r.text;
+  }
+  if (prefix && replacement.startsWith(prefix) && replacement.length > prefix.length) {
+    return [{ text: prefix, bold: true }, { text: replacement.slice(prefix.length) }];
+  }
+  return [{ text: replacement }];
+}
+
 function triggerFileDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -301,11 +317,13 @@ export default function CoursePlanningTab() {
         const field = fieldById.get(p.id);
         const sched = result.scheduleReplacements[p.id];
         const replacement = field ? field.suggestedText : sched;
-        // AI replacements arrive as plain text; unchanged paragraphs keep their
-        // original formatting (runs) so the editor shows it.
+        // AI replacements arrive as plain text. Where the replacement still
+        // begins with the paragraph's original bold label (e.g. "Instructor
+        // name: "), keep that label bold and the value plain; otherwise plain.
+        // Unchanged paragraphs keep their original run formatting.
         const spans: RunSpan[] =
           replacement !== undefined
-            ? [{ text: replacement }]
+            ? boldLabelSpans(p.runs, replacement)
             : p.runs.length > 0
               ? p.runs
               : [{ text: p.text }];

@@ -5,7 +5,7 @@ import {
   listAccessibilityItems,
   getAccessibilityItem,
   listScannableFiles,
-  getOfficeFileImages,
+  getOfficeFileScan,
   getCanvasFileBuffer,
   getLinkValidation,
   startLinkValidation,
@@ -116,10 +116,22 @@ export async function POST(req: NextRequest) {
       for (const f of files.slice(0, 4)) {
         let issues: Issue[] = [];
         try {
-          issues =
-            f.kind === "pdf"
-              ? await scanPdf(await getCanvasFileBuffer(courseUrl, f.id, acronym))
-              : officeImageIssues(await getOfficeFileImages(courseUrl, f.id, acronym));
+          if (f.kind === "pdf") {
+            issues = await scanPdf(await getCanvasFileBuffer(courseUrl, f.id, acronym));
+          } else {
+            const scan = await getOfficeFileScan(courseUrl, f.id, acronym);
+            if (scan) {
+              issues = officeImageIssues(scan.images);
+              if (scan.kind === "docx") {
+                if (!scan.hasHeadings) {
+                  issues.push({ ruleId: "doc-no-structure", severity: "error", message: "File does not include headings for structure.", wcag: "1.3.1", help: "Use Word's Heading styles so the document has a navigable structure.", locator: { selector: "", snippet: "" }, fixKind: "flag" });
+                }
+                if (!scan.title.trim()) {
+                  issues.push({ ruleId: "doc-no-title", severity: "warning", message: "File is missing a title element.", wcag: "2.4.2", help: "Set a document title in File > Info > Properties.", locator: { selector: "", snippet: "" }, fixKind: "flag" });
+                }
+              }
+            }
+          }
         } catch {
           continue; // a file we can't read (too large, encrypted, etc.) is skipped
         }

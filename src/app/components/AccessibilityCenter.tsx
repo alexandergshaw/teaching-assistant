@@ -52,9 +52,16 @@ export default function AccessibilityCenter() {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (a11y.centerOpen) {
       setRender(true);
-      // Next tick so the browser paints the off-screen state before transitioning.
-      const id = window.setTimeout(() => setShown(true), 15);
-      return () => window.clearTimeout(id);
+      // Two animation frames so the browser actually paints the off-screen state
+      // (translateX 100%) before we flip to 0 — otherwise it jumps instead of slides.
+      let raf2 = 0;
+      const raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => setShown(true));
+      });
+      return () => {
+        cancelAnimationFrame(raf1);
+        cancelAnimationFrame(raf2);
+      };
     }
     setShown(false);
     const id = window.setTimeout(() => setRender(false), TRANSITION_MS);

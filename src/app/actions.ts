@@ -96,7 +96,7 @@ import {
   type QuizQuestionInput,
   getAccessibilityItem,
   saveAccessibilityItemHtml,
-  getOfficeFileImages,
+  getOfficeFileImagesWithData,
   getOfficeFileImageData,
   saveOfficeFileImageAlt,
   uploadFileToModule,
@@ -1400,10 +1400,10 @@ export async function getOfficeFileImagesAction(
   courseUrl: string,
   fileId: number,
   acronym?: string
-): Promise<{ images: OfficeImage[] } | { error: string }> {
+): Promise<{ images: Array<OfficeImage & { mimeType?: string; base64?: string }> } | { error: string }> {
   try {
     await requireOwner();
-    return { images: await getOfficeFileImages(courseUrl, fileId, acronym) };
+    return { images: await getOfficeFileImagesWithData(courseUrl, fileId, acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not read the file." };
   }

@@ -28,6 +28,8 @@ import {
   appendDocxParagraph,
   extractOfficeImages,
   extractOfficeImageData,
+  extractOfficeImagesWithData,
+  analyzeOfficeFile,
   setOfficeImageAlt,
   type OfficeKind,
   type OfficeParagraph,
@@ -2187,6 +2189,30 @@ export async function getOfficeFileImages(courseUrl: string, fileId: number, cod
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (!meta.kind) return [];
   return extractOfficeImages(meta.kind, buffer);
+}
+
+/** Read a file's images with their bytes (data URLs) for the alt editor's previews. */
+export async function getOfficeFileImagesWithData(
+  courseUrl: string,
+  fileId: number,
+  code?: string
+): Promise<Array<OfficeImage & { mimeType?: string; base64?: string }>> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
+  if (!meta.kind) return [];
+  return extractOfficeImagesWithData(meta.kind, buffer);
+}
+
+/** Full accessibility analysis of an Office file (images + docx headings/title). */
+export async function getOfficeFileScan(
+  courseUrl: string,
+  fileId: number,
+  code?: string
+): Promise<{ kind: OfficeKind; images: OfficeImage[]; hasHeadings: boolean; title: string } | null> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
+  if (!meta.kind) return null;
+  return { kind: meta.kind, ...(await analyzeOfficeFile(meta.kind, buffer)) };
 }
 
 /** Read one image's bytes (base64 + mime) from an Office file, for vision alt text. */

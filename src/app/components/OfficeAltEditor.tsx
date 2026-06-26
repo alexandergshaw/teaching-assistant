@@ -6,6 +6,8 @@ import { getStoredProvider } from "@/lib/llm-provider";
 import type { Issue } from "@/lib/accessibility/types";
 import type { OfficeImage } from "@/lib/office-edit";
 
+type ImageWithData = OfficeImage & { mimeType?: string; base64?: string };
+
 // Remaining image-alt issues for the file, given the current alt values.
 function remainingIssues(images: OfficeImage[], alts: Record<string, string>): Issue[] {
   return images
@@ -41,7 +43,7 @@ export default function OfficeAltEditor({
 }) {
   const [stage, setStage] = useState<"loading" | "ready" | "saving">("loading");
   const [error, setError] = useState<string | null>(null);
-  const [images, setImages] = useState<OfficeImage[]>([]);
+  const [images, setImages] = useState<ImageWithData[]>([]);
   const [alts, setAlts] = useState<Record<string, string>>({});
   const [suggesting, setSuggesting] = useState<Record<string, boolean>>({});
   const [suggestingAll, setSuggestingAll] = useState(false);
@@ -143,7 +145,20 @@ export default function OfficeAltEditor({
               const value = alts[im.id] ?? "";
               const missing = !value.trim();
               return (
-                <div key={im.id} style={{ marginBottom: 12 }}>
+                <div key={im.id} style={{ marginBottom: 14, display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  {im.base64 ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- inline data-URL preview, not a remote image
+                    <img
+                      src={`data:${im.mimeType ?? "image/png"};base64,${im.base64}`}
+                      alt=""
+                      style={{ width: 64, height: 64, objectFit: "contain", flexShrink: 0, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8, background: "#f8fafc" }}
+                    />
+                  ) : (
+                    <div style={{ width: 64, height: 64, flexShrink: 0, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8, background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.65rem", color: "#94a3b8", textAlign: "center" }}>
+                      no preview
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
                   <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.82rem", color: "#334155", marginBottom: 4 }}>
                     {missing && <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: "#d97706" }} />}
                     {im.name}
@@ -165,6 +180,7 @@ export default function OfficeAltEditor({
                     >
                       {suggesting[im.id] ? "…" : "Suggest"}
                     </button>
+                  </div>
                   </div>
                 </div>
               );

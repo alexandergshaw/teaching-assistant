@@ -657,3 +657,42 @@ export async function setOfficeImageAlt(
 
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
 }
+
+/** Read a docx's document title from its core properties (docProps/core.xml). */
+export async function extractDocxTitle(buffer: Buffer): Promise<string> {
+  const zip = await JSZip.loadAsync(buffer);
+  const core = await zip.file("docProps/core.xml")?.async("string");
+  if (!core) return "";
+  return decodeXmlEntities(core.match(/<dc:title>([\s\S]*?)<\/dc:title>/)?.[1]?.trim() ?? "");
+}
+
+/**
+ * Analyze an Office file for accessibility: its images (+ alt), and for docx
+ * whether it has heading-styled paragraphs and a document title. Used to flag
+ * untitled / headingless documents like UDOIT does.
+ */
+export async function analyzeOfficeFile(
+  kind: OfficeKind,
+  buffer: Buffer
+): Promise<{ images: OfficeImage[]; hasHeadings: boolean; title: string }> {
+  const images = await extractOfficeImages(kind, buffer);
+  if (kind !== "docx") return { images, hasHeadings: true, title: "n/a" };
+  const paragraphs = await parseOfficeParagraphs("docx", buffer);
+  const hasHeadings = paragraphs.some((p) => /^Heading[1-9]$/.test(p.style));
+  const title = await extractDocxTitle(buffer);
+  return { images, hasHeadings, title };
+}
+
+/** Like {@link extractOfficeImages} but also includes each image's bytes (for previews). */
+export async function extractOfficeImagesWithData(
+  kind: OfficeKind,
+  buffer: Buffer
+): Promise<Array<OfficeImage & { mimeType?: string; base64?: string }>> {
+  const images = await extractOfficeImages(kind, buffer);
+  const out: Array<OfficeImage & { mimeType?: string; base64?: string }> = [];
+  for (const im of images) {
+    const data = await extractOfficeImageData(kind, buffer, im.id);
+    out.push(data ? { ...im, mimeType: data.mimeType, base64: data.base64 } : { ...im });
+  }
+  return out;
+}

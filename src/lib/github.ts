@@ -303,27 +303,91 @@ export async function downloadRepoZipball(owner: string, repo: string, ref?: str
 // ── CI / GitHub Actions ────────────────────────────────────────────────────────
 
 export interface WorkflowRunInfo {
+  id: number;
   name: string;
+  /** queued | in_progress | completed | … */
   status: string;
+  /** success | failure | cancelled | … (null until completed). */
   conclusion: string | null;
   headBranch: string;
   htmlUrl: string;
   createdAt: string;
 }
 
+interface RawRun {
+  id?: number;
+  name?: string;
+  status?: string;
+  conclusion?: string | null;
+  head_branch?: string;
+  html_url?: string;
+  created_at?: string;
+}
+
+function mapRun(r: RawRun): WorkflowRunInfo {
+  return {
+    id: r.id ?? 0,
+    name: r.name ?? "workflow",
+    status: r.status ?? "unknown",
+    conclusion: r.conclusion ?? null,
+    headBranch: r.head_branch ?? "",
+    htmlUrl: r.html_url ?? "",
+    createdAt: r.created_at ?? "",
+  };
+}
+
 /** The most recent GitHub Actions run for a repo (optionally on one branch). */
 export async function getLatestWorkflowRun(owner: string, repo: string, branch?: string): Promise<WorkflowRunInfo | null> {
-  const data = await ghJson<{
-    workflow_runs?: Array<{ name?: string; status?: string; conclusion?: string | null; head_branch?: string; html_url?: string; created_at?: string }>;
-  }>(`/repos/${owner}/${repo}/actions/runs?per_page=1${branch ? `&branch=${encodeURIComponent(branch)}` : ""}`);
+  const data = await ghJson<{ workflow_runs?: RawRun[] }>(
+    `/repos/${owner}/${repo}/actions/runs?per_page=1${branch ? `&branch=${encodeURIComponent(branch)}` : ""}`
+  );
   const run = data.workflow_runs?.[0];
-  if (!run) return null;
-  return {
-    name: run.name ?? "workflow",
-    status: run.status ?? "unknown",
-    conclusion: run.conclusion ?? null,
-    headBranch: run.head_branch ?? "",
-    htmlUrl: run.html_url ?? "",
-    createdAt: run.created_at ?? "",
-  };
+  return run ? mapRun(run) : null;
+}
+
+export interface WorkflowInfo {
+  id: number;
+  name: string;
+  /** The workflow file path, e.g. ".github/workflows/tests.yml". */
+  path: string;
+  state: string;
+}
+
+/** List a repo's Actions workflows (for choosing which one to run). */
+export async function listWorkflows(owner: string, repo: string): Promise<WorkflowInfo[]> {
+  const data = await ghJson<{ workflows?: Array<{ id?: number; name?: string; path?: string; state?: string }> }>(
+    `/repos/${owner}/${repo}/actions/workflows?per_page=100`
+  );
+  return (data.workflows ?? [])
+    .filter((w): w is { id: number; name?: string; path?: string; state?: string } => typeof w.id === "number")
+    .map((w) => ({ id: w.id, name: w.name ?? "", path: w.path ?? "", state: w.state ?? "" }));
+}
+
+/**
+ * Trigger a workflow_dispatch run. `workflowRef` is the workflow file name (e.g.
+ * "tests.yml") or its numeric id; the workflow must declare `on: workflow_dispatch`.
+ * Returns 204 with no body, so the caller correlates the resulting run via
+ * {@link findWorkflowRunSince}.
+ */
+export async function dispatchWorkflow(owner: string, repo: string, workflowRef: string, ref: string): Promise<void> {
+  await ghFetch(`/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflowRef)}/dispatches`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ref }),
+  });
+}
+
+/** Find the newest workflow_dispatch run on `ref` created at or after `sinceIso`. */
+export async function findWorkflowRunSince(
+  owner: string,
+  repo: string,
+  ref: string,
+  sinceIso: string
+): Promise<WorkflowRunInfo | null> {
+  const data = await ghJson<{ workflow_runs?: RawRun[] }>(
+    `/repos/${owner}/${repo}/actions/runs?branch=${encodeURIComponent(ref)}&event=workflow_dispatch&per_page=10`
+  );
+  const since = Date.parse(sinceIso) - 15_000; // small buffer for clock skew
+  const run = (data.workflow_runs ?? []).find((r) => r.created_at && Date.parse(r.created_at) >= since);
+  return run ? mapRun(run) : null;
 }

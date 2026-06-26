@@ -126,11 +126,16 @@ import {
   createRepo,
   putFile,
   getFileText,
+  getRepo,
   getLatestWorkflowRun,
+  listWorkflows,
+  dispatchWorkflow,
+  findWorkflowRunSince,
   downloadRepoZipball,
   type GithubRepo,
   type RepoDigest,
   type WorkflowRunInfo,
+  type WorkflowInfo,
 } from "@/lib/github";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
 import { filesToLlmParts } from "@/lib/llm-files";
@@ -4669,6 +4674,109 @@ export async function generateRubricFromRepoAction(
     return { rubric, fullName: digest.fullName, fileCount: digest.fileCount };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate a rubric." };
+  }
+}
+
+/** One queued student repo to grade/test. */
+export interface RepoQueueItem {
+  repoRef: string;
+  branch?: string;
+  /** Friendly student label; falls back to the repo's full name. */
+  label?: string;
+}
+
+/**
+ * Grade several student repos against one rubric in a single run, so the results
+ * matrix shows every student as a row. Generates a rubric from the first repo
+ * when none is supplied.
+ */
+export async function gradeReposAction(
+  repos: RepoQueueItem[],
+  assignmentInstructions: string,
+  rubric: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ run: GradingRun; rubric: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const entries: StudentSubmissionEntry[] = [];
+    for (const item of repos) {
+      const parsed = parseRepoRef(item.repoRef);
+      if (!parsed) continue;
+      const digest = await ingestRepo(parsed.owner, parsed.repo, {}, item.branch || undefined);
+      entries.push({
+        student: item.label?.trim() || digest.fullName,
+        content: digest.text,
+        mergedFileCount: digest.fileCount,
+        submittedFiles: [],
+      });
+    }
+    if (entries.length === 0) return { error: "No valid repositories to grade." };
+    const instructions = assignmentInstructions.trim() || "Evaluate each student's repository.";
+    const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${entries[0].content}`, provider));
+    const run = await gradeEntries(entries, instructions, effectiveRubric, provider);
+    return { run, rubric: effectiveRubric };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not grade the repositories." };
+  }
+}
+
+/** List a repo's Actions workflows (so the user can choose which to run). */
+export async function listWorkflowsAction(
+  repoRef: string
+): Promise<{ workflows: WorkflowInfo[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return { workflows: await listWorkflows(parsed.owner, parsed.repo) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list workflows." };
+  }
+}
+
+/**
+ * Trigger a repo's unit-test workflow (workflow_dispatch). `workflowRef` is a
+ * workflow file name; when blank, the repo's first active workflow is used.
+ * Returns the dispatch time so the caller can poll {@link getTestRunStatusAction}.
+ */
+export async function dispatchTestsAction(
+  repoRef: string,
+  branch?: string,
+  workflowRef?: string
+): Promise<{ since: string; ref: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const ref = branch?.trim() || (await getRepo(parsed.owner, parsed.repo)).defaultBranch;
+    let wf = workflowRef?.trim();
+    if (!wf) {
+      const workflows = await listWorkflows(parsed.owner, parsed.repo);
+      const chosen = workflows.find((w) => w.state === "active") ?? workflows[0];
+      if (!chosen) return { error: "This repository has no Actions workflows to run." };
+      wf = chosen.path.split("/").pop() || String(chosen.id);
+    }
+    const since = new Date().toISOString();
+    await dispatchWorkflow(parsed.owner, parsed.repo, wf, ref);
+    return { since, ref };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not start the test run." };
+  }
+}
+
+/** Poll the status of a dispatched test run (newest workflow_dispatch run since `sinceIso`). */
+export async function getTestRunStatusAction(
+  repoRef: string,
+  ref: string,
+  sinceIso: string
+): Promise<{ run: WorkflowRunInfo | null } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return { run: await findWorkflowRunSince(parsed.owner, parsed.repo, ref, sinceIso) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not read the test run status." };
   }
 }
 

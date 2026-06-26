@@ -65,6 +65,21 @@ export default function OfficeAltEditor({
       setImages(r.images);
       setAlts(Object.fromEntries(r.images.map((im) => [im.id, im.alt])));
       setStage("ready");
+
+      // Auto-load AI alt text for the images that are missing it (the flagged
+      // issue) and can be rendered for the vision model, so the fix is pre-filled
+      // on open. Skips any field the user has already started typing into.
+      const missing = r.images.filter((im) => !im.alt.trim() && im.base64);
+      if (missing.length === 0) return;
+      const provider = getStoredProvider();
+      setSuggesting(Object.fromEntries(missing.map((im) => [im.id, true])));
+      for (const im of missing) {
+        if (cancelled) return;
+        const s = await suggestOfficeImageAltAction(courseUrl, fileId, im.id, acronym, provider);
+        if (cancelled) return;
+        if (!("error" in s)) setAlts((prev) => (prev[im.id]?.trim() ? prev : { ...prev, [im.id]: s.text }));
+        setSuggesting((prev) => ({ ...prev, [im.id]: false }));
+      }
     })();
     return () => {
       cancelled = true;

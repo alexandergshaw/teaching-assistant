@@ -126,6 +126,7 @@ import {
   ingestRepo,
   parseRepoRef,
   createRepo,
+  generateFromTemplate,
   putFile,
   getFileText,
   getRepo,
@@ -4596,6 +4597,52 @@ export async function listGithubReposAction(): Promise<{ repos: GithubRepo[] } |
     return { repos: await listRepos() };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not list GitHub repositories." };
+  }
+}
+
+/** Result of generating one student's repo from a template. */
+export interface StudentRepoResult {
+  student: string;
+  name: string;
+  htmlUrl?: string;
+  error?: string;
+}
+
+const repoSlug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+/**
+ * Generate one repo per student in `org` from a template repo within that org.
+ * Each repo is named `<prefix>-<student>` (prefix optional). Returns a per-student
+ * result so the UI can show successes and failures (e.g. a name that already exists).
+ */
+export async function generateStudentReposAction(
+  org: string,
+  templateRepo: string,
+  prefix: string,
+  students: string[],
+  isPrivate: boolean
+): Promise<{ results: StudentRepoResult[] } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!org.trim()) return { error: "Choose an organization." };
+    if (!templateRepo.trim()) return { error: "Choose a template repository." };
+    const list = students.map((s) => s.trim()).filter(Boolean);
+    if (list.length === 0) return { error: "Add at least one student." };
+    const base = prefix.trim() ? repoSlug(prefix) : "";
+    const results: StudentRepoResult[] = [];
+    for (const student of list) {
+      const suffix = repoSlug(student) || "student";
+      const name = (base ? `${base}-${suffix}` : suffix).slice(0, 95);
+      try {
+        const repo = await generateFromTemplate(org.trim(), templateRepo.trim(), org.trim(), name, isPrivate);
+        results.push({ student, name, htmlUrl: repo.htmlUrl });
+      } catch (err) {
+        results.push({ student, name, error: err instanceof Error ? err.message : "Failed" });
+      }
+    }
+    return { results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate the repositories." };
   }
 }
 

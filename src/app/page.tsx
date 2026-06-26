@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
 import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, generateLectureDeckAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData } from "./actions";
 import CoursePlanningTab from "./components/CoursePlanningTab";
+import VersionControlTab from "./components/VersionControlTab";
 import CanvasTab from "./components/CanvasTab";
 import ContentTab from "./components/ContentTab";
 import GradingTab from "./components/GradingTab";
@@ -25,7 +26,7 @@ import { parseGeneratedRubric } from "./utils/rubric";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "lesson-planning" | "course-planning" | "content";
+type ActiveTab = "lesson-planning" | "course-planning" | "content" | "version-control";
 
 // The hosted Course Engine runs on Vercel, which caps the request body at
 // ~4.5 MB. Reject larger uploads client-side with a clear message rather than
@@ -131,7 +132,7 @@ export default function Home() {
     const saved = localStorage.getItem("ta-active-tab");
     // Grading and Communications are now subtabs of LMS Integration ("content").
     if (saved === "grading" || saved === "canvas") return "content";
-    return saved === "lesson-planning" || saved === "course-planning" || saved === "content" ? saved : "lesson-planning";
+    return saved === "lesson-planning" || saved === "course-planning" || saved === "content" || saved === "version-control" ? saved : "lesson-planning";
   });
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
@@ -611,9 +612,12 @@ export default function Home() {
             value="content"
             disableRipple
           />
+          <Tab label="Version Control Integration" value="version-control" disableRipple />
         </Tabs>
 
         {activeTab === "course-planning" && <CoursePlanningTab />}
+
+        {activeTab === "version-control" && <VersionControlTab />}
 
         {activeTab === "content" && (
           <ContentTab

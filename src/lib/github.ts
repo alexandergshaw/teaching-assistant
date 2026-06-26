@@ -65,6 +65,8 @@ export interface GithubRepo {
   defaultBranch: string;
   updatedAt: string;
   htmlUrl: string;
+  /** Whether this repo is a template (can seed new repos via generate). */
+  isTemplate: boolean;
 }
 
 interface RawRepo {
@@ -76,6 +78,7 @@ interface RawRepo {
   default_branch?: string;
   updated_at?: string | null;
   html_url?: string;
+  is_template?: boolean;
 }
 
 function mapRepo(r: RawRepo): GithubRepo {
@@ -88,6 +91,7 @@ function mapRepo(r: RawRepo): GithubRepo {
     defaultBranch: r.default_branch ?? "main",
     updatedAt: r.updated_at ?? "",
     htmlUrl: r.html_url ?? "",
+    isTemplate: !!r.is_template,
   };
 }
 
@@ -158,6 +162,27 @@ export async function listBranches(owner: string, repo: string): Promise<{ branc
   }
   const branches = [info.defaultBranch, ...names.filter((b) => b !== info.defaultBranch)];
   return { branches, defaultBranch: info.defaultBranch };
+}
+
+/**
+ * Create a new repo from a template repo (the template must have is_template=true).
+ * `owner` is the target user or org login. Returns the created repo.
+ */
+export async function generateFromTemplate(
+  templateOwner: string,
+  templateRepo: string,
+  owner: string,
+  name: string,
+  isPrivate: boolean,
+  description = ""
+): Promise<GithubRepo> {
+  return mapRepo(
+    await ghJson<RawRepo>(`/repos/${templateOwner}/${templateRepo}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ owner, name, private: isPrivate, description, include_all_branches: false }),
+    })
+  );
 }
 
 /** Create a new repo for the authenticated user. */

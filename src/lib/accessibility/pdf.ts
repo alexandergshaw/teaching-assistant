@@ -2,11 +2,36 @@
 // pdf-lib for the core UDOIT-style PDF checks: tagged, language, and title. PDF
 // remediation isn't possible in-app (needs Acrobat), so these are flag-only.
 
-import { PDFDocument, PDFName, PDFDict, PDFString, PDFHexString } from "pdf-lib";
+import { PDFDocument, PDFName, PDFDict, PDFArray, PDFString, PDFHexString } from "pdf-lib";
 import type { Issue } from "./types";
 
 function flag(ruleId: string, severity: Issue["severity"], message: string, wcag: string, help: string): Issue {
   return { ruleId, severity, message, wcag, help, locator: { selector: "", snippet: "" }, fixKind: "flag" };
+}
+
+// Walk a PDF structure tree looking for a heading element (/S = H or H1–H6).
+// Catches tagged PDFs that still lack headings, not just fully-untagged ones.
+function hasHeadingStructure(structRoot: PDFDict): boolean {
+  let found = false;
+  let visited = 0;
+  const walk = (node: unknown, depth: number): void => {
+    if (found || depth > 60 || visited > 8000 || node == null) return;
+    visited += 1;
+    if (node instanceof PDFArray) {
+      for (let i = 0; i < node.size() && !found; i += 1) walk(node.lookup(i), depth + 1);
+      return;
+    }
+    if (node instanceof PDFDict) {
+      const s = node.lookup(PDFName.of("S"));
+      if (s instanceof PDFName && /^H[1-6]?$/.test(String(s).replace(/^\//, ""))) {
+        found = true;
+        return;
+      }
+      walk(node.lookup(PDFName.of("K")), depth + 1);
+    }
+  };
+  walk(structRoot.lookup(PDFName.of("K")), 0);
+  return found;
 }
 
 /** Check a PDF for tagging, language, and title (flag-only). */
@@ -35,9 +60,10 @@ export async function scanPdf(buffer: Buffer): Promise<Issue[]> {
     ));
   }
 
-  // Structure / headings: no StructTreeRoot means no tagged heading structure.
+  // Headings for structure: flag when there's no tagged structure at all, or it
+  // has no heading elements (a tagged-but-headingless PDF, e.g. a Word export).
   const structRoot = catalog.lookupMaybe(PDFName.of("StructTreeRoot"), PDFDict);
-  if (!structRoot) {
+  if (!structRoot || !hasHeadingStructure(structRoot)) {
     issues.push(flag(
       "pdf-no-structure",
       "error",

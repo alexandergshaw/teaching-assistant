@@ -666,6 +666,63 @@ export async function extractDocxTitle(buffer: Buffer): Promise<string> {
   return decodeXmlEntities(core.match(/<dc:title>([\s\S]*?)<\/dc:title>/)?.[1]?.trim() ?? "");
 }
 
+const CORE_PROPS = "docProps/core.xml";
+const CORE_CT = "application/vnd.openxmlformats-package.core-properties+xml";
+const CORE_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata/core-properties";
+
+/**
+ * Set the document title (dc:title) in a docx's core properties, so the file is
+ * no longer "missing a title" (WCAG 2.4.2). Replaces an existing title, fills an
+ * empty one, or inserts a dc:title; if the core-properties part is missing
+ * entirely it is created and registered in [Content_Types].xml and _rels/.rels.
+ */
+export async function setDocxTitle(buffer: Buffer, title: string): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(buffer);
+  const esc = escapeXml(title);
+  const core = await zip.file(CORE_PROPS)?.async("string");
+
+  if (core) {
+    let xml = core;
+    if (/<dc:title>[\s\S]*?<\/dc:title>/.test(xml)) {
+      xml = xml.replace(/<dc:title>[\s\S]*?<\/dc:title>/, `<dc:title>${esc}</dc:title>`);
+    } else if (/<dc:title\s*\/>/.test(xml)) {
+      xml = xml.replace(/<dc:title\s*\/>/, `<dc:title>${esc}</dc:title>`);
+    } else {
+      // The coreProperties root declares the dc namespace, so insert there.
+      xml = xml.replace(/(<cp:coreProperties\b[^>]*>)/, `$1<dc:title>${esc}</dc:title>`);
+    }
+    zip.file(CORE_PROPS, xml);
+  } else {
+    zip.file(
+      CORE_PROPS,
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+        `<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"` +
+        ` xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/"` +
+        ` xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">` +
+        `<dc:title>${esc}</dc:title></cp:coreProperties>`
+    );
+    const ct = await zip.file("[Content_Types].xml")?.async("string");
+    if (ct && !ct.includes('PartName="/docProps/core.xml"')) {
+      zip.file(
+        "[Content_Types].xml",
+        ct.replace("</Types>", `<Override PartName="/docProps/core.xml" ContentType="${CORE_CT}"/></Types>`)
+      );
+    }
+    const rels = await zip.file("_rels/.rels")?.async("string");
+    if (rels && !rels.includes(CORE_REL)) {
+      zip.file(
+        "_rels/.rels",
+        rels.replace(
+          "</Relationships>",
+          `<Relationship Id="rIdCoreProps" Type="${CORE_REL}" Target="docProps/core.xml"/></Relationships>`
+        )
+      );
+    }
+  }
+
+  return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+}
+
 /**
  * Analyze an Office file for accessibility: its images (+ alt), and for docx
  * whether it has heading-styled paragraphs and a document title. Used to flag

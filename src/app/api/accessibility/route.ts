@@ -124,10 +124,10 @@ export async function POST(req: NextRequest) {
               issues = officeImageIssues(scan.images);
               if (scan.kind === "docx") {
                 if (!scan.hasHeadings) {
-                  issues.push({ ruleId: "doc-no-structure", severity: "error", message: "File does not include headings for structure.", wcag: "1.3.1", help: "Use Word's Heading styles so the document has a navigable structure.", locator: { selector: "", snippet: "" }, fixKind: "flag" });
+                  issues.push({ ruleId: "doc-no-structure", severity: "error", message: "File does not include headings for structure.", wcag: "1.3.1", help: "Use Word's Heading styles so the document has a navigable structure.", locator: { selector: "", snippet: "" }, fixKind: "edit" });
                 }
                 if (!scan.title.trim()) {
-                  issues.push({ ruleId: "doc-no-title", severity: "warning", message: "File is missing a title element.", wcag: "2.4.2", help: "Set a document title in File > Info > Properties.", locator: { selector: "", snippet: "" }, fixKind: "flag" });
+                  issues.push({ ruleId: "doc-no-title", severity: "warning", message: "File is missing a title element.", wcag: "2.4.2", help: "Set a document title in File > Info > Properties.", locator: { selector: "", snippet: "" }, fixKind: "edit" });
                 }
               }
             }

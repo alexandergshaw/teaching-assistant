@@ -99,6 +99,8 @@ import {
   getOfficeFileImagesWithData,
   getOfficeFileImageData,
   saveOfficeFileImageAlt,
+  getOfficeFileStructure,
+  saveOfficeFileStructure,
   uploadFileToModule,
   appendOfficeParagraph,
   listScannableFiles,
@@ -1454,6 +1456,39 @@ export async function saveOfficeImageAltAction(
   try {
     await requireOwner();
     await saveOfficeFileImageAlt(courseUrl, fileId, edits, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the file to Canvas." };
+  }
+}
+
+/** Load a docx's title + paragraphs for the document-structure fix editor. */
+export async function getOfficeFileStructureAction(
+  courseUrl: string,
+  fileId: number,
+  acronym?: string
+): Promise<{ name: string; title: string; paragraphs: OfficeParagraph[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const structure = await getOfficeFileStructure(courseUrl, fileId, acronym);
+    if (!structure) return { error: "Only Word (.docx) files have a document title and headings." };
+    return structure;
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not read the file." };
+  }
+}
+
+/** Set a docx's title and/or heading styles and overwrite it in Canvas. */
+export async function saveOfficeFileStructureAction(
+  courseUrl: string,
+  fileId: number,
+  title: string | null,
+  sections: Array<{ sourceId: string; spans: RunSpan[]; style?: string }>,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await saveOfficeFileStructure(courseUrl, fileId, title, sections, acronym);
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the file to Canvas." };

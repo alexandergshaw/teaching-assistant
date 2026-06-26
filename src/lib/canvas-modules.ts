@@ -31,6 +31,8 @@ import {
   extractOfficeImagesWithData,
   analyzeOfficeFile,
   setOfficeImageAlt,
+  extractDocxTitle,
+  setDocxTitle,
   type OfficeKind,
   type OfficeParagraph,
   type OfficeImage,
@@ -2232,6 +2234,41 @@ export async function getOfficeFileImageData(
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (!meta.kind) return null;
   return extractOfficeImageData(meta.kind, buffer, imageId);
+}
+
+/** Load a docx's paragraphs + current title (for the document-structure fix editor). */
+export async function getOfficeFileStructure(
+  courseUrl: string,
+  fileId: number,
+  code?: string
+): Promise<{ name: string; title: string; paragraphs: OfficeParagraph[] } | null> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
+  if (meta.kind !== "docx") return null;
+  const [paragraphs, title] = await Promise.all([parseOfficeParagraphs("docx", buffer), extractDocxTitle(buffer)]);
+  return { name: meta.name, title, paragraphs };
+}
+
+/**
+ * Set a docx's title and/or paragraph heading styles in one Canvas round-trip
+ * (fixes the "missing title" / "no headings" accessibility flags). `title` is
+ * skipped when null; `sections` is the full paragraph list (as the office editor
+ * sends it) and is skipped when empty.
+ */
+export async function saveOfficeFileStructure(
+  courseUrl: string,
+  fileId: number,
+  title: string | null,
+  sections: Array<{ sourceId: string; spans: RunSpan[]; style?: string }>,
+  code?: string
+): Promise<void> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
+  if (meta.kind !== "docx") throw new Error("Only Word (.docx) files have a document title and headings.");
+  let edited = buffer;
+  if (sections.length) edited = await applyOfficeSections("docx", edited, sections);
+  if (title != null) edited = await setDocxTitle(edited, title);
+  await overwriteCanvasFile({ ...ctx, courseId: ctx.courseId }, meta, edited);
 }
 
 /** Write alt text onto a file's images by id and overwrite the file in Canvas. */

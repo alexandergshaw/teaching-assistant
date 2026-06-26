@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useAccessibility } from "./AccessibilityProvider";
 import RemediationEditor, { isRemediable } from "./RemediationEditor";
 import OfficeAltEditor from "./OfficeAltEditor";
+import DocStructureEditor from "./DocStructureEditor";
 import type { AccessibleItemType, Issue, ItemScan, Severity } from "@/lib/accessibility/types";
 
 // What's being fixed right now (drives the RemediationEditor overlay).
@@ -196,7 +197,7 @@ export default function AccessibilityCenter() {
         </div>
       </aside>
 
-      {fixTarget && fixTarget.type === "file" ? (
+      {fixTarget && fixTarget.type === "file" && fixTarget.issue.ruleId === "office-image-alt" ? (
         <OfficeAltEditor
           courseUrl={a11y.courseUrl}
           acronym={a11y.acronym}
@@ -204,6 +205,21 @@ export default function AccessibilityCenter() {
           title={fixTarget.title}
           onClose={(result) => {
             if (result) a11y.setFileScan(fixTarget.id, fixTarget.title, result.issues);
+            setFixTarget(null);
+          }}
+        />
+      ) : fixTarget && fixTarget.type === "file" ? (
+        <DocStructureEditor
+          courseUrl={a11y.courseUrl}
+          acronym={a11y.acronym}
+          fileId={Number(fixTarget.id)}
+          title={fixTarget.title}
+          onClose={(resolved) => {
+            // Clear just the issues this editor fixed; keep the file's others.
+            if (resolved && resolved.length > 0) {
+              const current = a11y.getItem("file", fixTarget.id)?.issues ?? [];
+              a11y.setFileScan(fixTarget.id, fixTarget.title, current.filter((i) => !resolved.includes(i.ruleId)));
+            }
             setFixTarget(null);
           }}
         />

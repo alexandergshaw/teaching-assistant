@@ -2070,6 +2070,49 @@ async function overwriteCanvasFile(
   }
 }
 
+/**
+ * Upload a file (base64) into a course and add it to a module at `position`
+ * (1-based; omit for the end). Returns the created module item. Used to drop a
+ * generated syllabus straight into a course's module.
+ */
+export async function uploadFileToModule(
+  courseUrl: string,
+  base64: string,
+  fileName: string,
+  contentType: string,
+  moduleId: number,
+  position?: number,
+  code?: string
+): Promise<CanvasModuleItem> {
+  const ctx = resolveCourse(courseUrl, code);
+  const buffer = Buffer.from(base64, "base64");
+
+  const params = new URLSearchParams();
+  params.append("name", fileName);
+  params.append("size", String(buffer.byteLength));
+  params.append("content_type", contentType);
+  params.append("parent_folder_path", "uploads");
+  params.append("on_duplicate", "rename");
+  const presign = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/files`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${ctx.token}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+  if (!presign.ok) throw canvasError(presign.status, ctx.institution);
+  const ticket = (await presign.json()) as { upload_url?: string; upload_params?: Record<string, string> };
+  if (!ticket.upload_url || !ticket.upload_params) throw new Error("Canvas did not return an upload URL.");
+
+  const form = new FormData();
+  for (const [key, value] of Object.entries(ticket.upload_params)) form.append(key, value);
+  form.append("file", new Blob([new Uint8Array(buffer)], { type: contentType }), fileName);
+  const upload = await fetch(ticket.upload_url, { method: "POST", body: form });
+  if (!upload.ok) throw new Error(`Upload to Canvas failed (HTTP ${upload.status}).`);
+  const uploaded = (await upload.json().catch(() => null)) as { id?: number } | null;
+  if (typeof uploaded?.id !== "number") throw new Error("Canvas did not return the uploaded file id.");
+
+  return createModuleItem(courseUrl, moduleId, { type: "File", contentId: uploaded.id, title: fileName, position }, code);
+}
+
 /** Apply paragraph edits to a docx/pptx file and overwrite it in Canvas. */
 export async function saveOfficeEdits(
   courseUrl: string,

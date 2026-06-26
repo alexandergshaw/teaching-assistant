@@ -99,6 +99,7 @@ import {
   getOfficeFileImages,
   getOfficeFileImageData,
   saveOfficeFileImageAlt,
+  uploadFileToModule,
 } from "@/lib/canvas-modules";
 import type { OfficeImage } from "@/lib/office-edit";
 import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
@@ -913,6 +914,28 @@ export async function listCourseContentAction(
     return { courseName, modules, pages };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load course content." };
+  }
+}
+
+/**
+ * Upload a generated syllabus (.docx, base64) into a course and add it to a
+ * module at `position` (1-based; omit for the end).
+ */
+export async function placeSyllabusInModuleAction(
+  base64: string,
+  courseUrl: string,
+  moduleId: number,
+  fileName: string,
+  position?: number,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    await uploadFileToModule(courseUrl, base64, fileName, DOCX, moduleId, position, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not add the syllabus to Canvas." };
   }
 }
 

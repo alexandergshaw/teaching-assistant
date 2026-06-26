@@ -8,13 +8,17 @@ import {
   analyzeSyllabusInputsAction,
   regenerateSyllabusFieldAction,
   buildAdaptedSyllabusAction,
+  listCourseContentAction,
+  placeSyllabusInModuleAction,
   type CourseScheduleRow,
   type SyllabusCourseInfo,
 } from "../actions";
 import LecturePlanningTab from "./LecturePlanningTab";
 import { spansToPlainText } from "./RichTextEditor";
 import { RichTextSectionEditor } from "./RichTextSectionEditor";
+import { useInstitutionSelection } from "@/lib/institutions";
 import type { RunSpan } from "@/lib/office-edit";
+import type { CanvasModule } from "@/lib/canvas-modules";
 import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
 
@@ -403,29 +407,97 @@ export default function CoursePlanningTab() {
     }
   };
 
-  // Build the .docx from the current ordered sections (edits, additions, and
-  // deletions) and download it.
-  const handleBuildAdaptedSyllabus = async () => {
-    if (!adaptSyllabusBase64 || !adaptSections) return;
+  // Build the adapted .docx from the current ordered sections and return its
+  // base64, or null on error (error is surfaced via setAdaptError).
+  const buildSyllabusBase64 = async (): Promise<string | null> => {
+    if (!adaptSyllabusBase64 || !adaptSections) return null;
     const payload = adaptSections.map((s) => ({ sourceId: s.sourceId, spans: s.spans }));
+    const result = await buildAdaptedSyllabusAction(adaptSyllabusBase64, payload);
+    if ("error" in result) {
+      setAdaptError(result.error);
+      return null;
+    }
+    return result.base64;
+  };
+
+  const adaptedFileName = () => `${adaptSyllabusName.replace(/\.docx$/i, "") || "syllabus"}_adapted.docx`;
+
+  // Build and download.
+  const handleBuildAdaptedSyllabus = async () => {
     setAdaptStatus("building");
     setAdaptError(null);
     try {
-      const result = await buildAdaptedSyllabusAction(adaptSyllabusBase64, payload);
-      if ("error" in result) {
-        setAdaptError(result.error);
-        return;
-      }
-      const bytes = Uint8Array.from(atob(result.base64), (c) => c.charCodeAt(0));
+      const base64 = await buildSyllabusBase64();
+      if (!base64) return;
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
       const blob = new Blob([bytes], {
         type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       });
-      const baseName = adaptSyllabusName.replace(/\.docx$/i, "") || "syllabus";
-      triggerFileDownload(blob, `${baseName}_adapted.docx`);
+      triggerFileDownload(blob, adaptedFileName());
     } catch (err) {
       setAdaptError(err instanceof Error ? err.message : "Failed to build the syllabus.");
     } finally {
       setAdaptStatus("idle");
+    }
+  };
+
+  // ── Place the generated syllabus into a Canvas course module ──
+  const { active: activeInstitution } = useInstitutionSelection();
+  const [placeCourseUrl, setPlaceCourseUrl] = useState<string>(() =>
+    typeof window !== "undefined" ? localStorage.getItem("ta-content-course-url") ?? "" : ""
+  );
+  const [placeModules, setPlaceModules] = useState<CanvasModule[] | null>(null);
+  const [placeModuleId, setPlaceModuleId] = useState<number | "">("");
+  const [placePosition, setPlacePosition] = useState("");
+  const [placeBusy, setPlaceBusy] = useState<"idle" | "loading" | "adding">("idle");
+  const [placeNote, setPlaceNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+
+  const handleLoadPlaceModules = async () => {
+    if (!/\/courses\/\d+/.test(placeCourseUrl)) {
+      setPlaceNote({ kind: "error", text: "Enter a Canvas course URL like .../courses/123." });
+      return;
+    }
+    setPlaceBusy("loading");
+    setPlaceNote(null);
+    const result = await listCourseContentAction(placeCourseUrl, activeInstitution || undefined);
+    setPlaceBusy("idle");
+    if ("error" in result) {
+      setPlaceNote({ kind: "error", text: result.error });
+      return;
+    }
+    setPlaceModules(result.modules);
+    setPlaceModuleId(result.modules[0]?.id ?? "");
+  };
+
+  const handleAddToModule = async () => {
+    if (placeModuleId === "") return;
+    setPlaceBusy("adding");
+    setPlaceNote(null);
+    try {
+      const base64 = await buildSyllabusBase64();
+      if (!base64) {
+        setPlaceNote({ kind: "error", text: adaptError ?? "Could not build the syllabus." });
+        return;
+      }
+      const pos = placePosition.trim() ? Number(placePosition) : undefined;
+      const result = await placeSyllabusInModuleAction(
+        base64,
+        placeCourseUrl,
+        placeModuleId,
+        adaptedFileName(),
+        Number.isFinite(pos) ? pos : undefined,
+        activeInstitution || undefined
+      );
+      if ("error" in result) {
+        setPlaceNote({ kind: "error", text: result.error });
+        return;
+      }
+      const moduleName = placeModules?.find((m) => m.id === placeModuleId)?.name ?? "the module";
+      setPlaceNote({ kind: "success", text: `Added the syllabus to ${moduleName}.` });
+    } catch (err) {
+      setPlaceNote({ kind: "error", text: err instanceof Error ? err.message : "Could not add the syllabus." });
+    } finally {
+      setPlaceBusy("idle");
     }
   };
 
@@ -620,6 +692,70 @@ export default function CoursePlanningTab() {
                     >
                       {adaptStatus === "building" ? "Building…" : "Download adapted syllabus (.docx)"}
                     </button>
+                  </div>
+
+                  {/* Place the generated syllabus directly into a Canvas module */}
+                  <div style={{ marginTop: 12, padding: "14px 16px", border: "1px solid var(--field-border)", borderRadius: 12, background: "#ffffff" }}>
+                    <p style={{ margin: "0 0 10px", fontWeight: 600 }}>Add to a Canvas module</p>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                      <div className={styles.field} style={{ flex: "1 1 280px", margin: 0 }}>
+                        <label htmlFor="placeCourseUrl">Course URL</label>
+                        <input
+                          id="placeCourseUrl"
+                          type="text"
+                          className={styles.textInput}
+                          placeholder="https://canvas.../courses/123"
+                          value={placeCourseUrl}
+                          onChange={(e) => setPlaceCourseUrl(e.target.value)}
+                        />
+                      </div>
+                      <button type="button" className={styles.submitButton} onClick={handleLoadPlaceModules} disabled={placeBusy !== "idle"}>
+                        {placeBusy === "loading" ? "Loading…" : "Load modules"}
+                      </button>
+                    </div>
+                    {placeModules && (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
+                        <div className={styles.field} style={{ flex: "1 1 240px", margin: 0 }}>
+                          <label htmlFor="placeModule">Module</label>
+                          <select
+                            id="placeModule"
+                            className={styles.textInput}
+                            value={placeModuleId}
+                            onChange={(e) => setPlaceModuleId(Number(e.target.value))}
+                          >
+                            {placeModules.length === 0 && <option value="">No modules in this course</option>}
+                            {placeModules.map((m) => (
+                              <option key={m.id} value={m.id}>{m.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className={styles.field} style={{ width: 110, margin: 0 }}>
+                          <label htmlFor="placePosition">Position</label>
+                          <input
+                            id="placePosition"
+                            type="number"
+                            min={1}
+                            className={styles.textInput}
+                            placeholder="End"
+                            value={placePosition}
+                            onChange={(e) => setPlacePosition(e.target.value)}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          className={styles.submitButton}
+                          onClick={handleAddToModule}
+                          disabled={placeBusy !== "idle" || placeModuleId === ""}
+                        >
+                          {placeBusy === "adding" ? "Adding…" : "Add to module"}
+                        </button>
+                      </div>
+                    )}
+                    {placeNote && (
+                      <p className={placeNote.kind === "error" ? styles.error : styles.fieldHint} style={{ marginTop: 8 }}>
+                        {placeNote.text}
+                      </p>
+                    )}
                   </div>
 
                   <RichTextSectionEditor

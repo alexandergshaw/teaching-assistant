@@ -7081,6 +7081,13 @@ export default function ContentTab({
     setEditorOpen(false);
   }
 
+  // Tell the global AccessibilityProvider which course is loaded so it can scan
+  // it in the background; fires on mount and whenever the course/school changes.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("ta-course-changed", { detail: { courseUrl } }));
+  }, [courseUrl, activeInstitution]);
+
   // `silent` re-fetches without swapping the content for the loading spinner, so
   // a reload keeps the page mounted (scroll position, open accordions, and the
   // selected subtab are all preserved as the modules/pages update in place).

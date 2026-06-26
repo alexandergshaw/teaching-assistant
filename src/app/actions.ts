@@ -101,6 +101,8 @@ import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
 import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
 import { scanHtml } from "@/lib/accessibility/engine";
 import { countsOf, type AccessibleItemType, type ItemScan, type Issue as A11yIssue } from "@/lib/accessibility/types";
+import { getCachedScans, upsertScans, deleteScans } from "@/lib/supabase/accessibility";
+import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -1350,35 +1352,48 @@ function toItemScan(item: { type: AccessibleItemType; id: string; title: string;
 
 /**
  * Scan every editable HTML item in a course (pages, assignment/quiz descriptions,
- * discussion/announcement messages, syllabus) for accessibility issues. Optionally
- * skip items whose fingerprint matches `knownFingerprints` (already cached).
+ * discussion/announcement messages, syllabus) for accessibility issues. Reuses
+ * cached results for items whose fingerprint is unchanged, only re-scanning what
+ * changed, and prunes cache rows for deleted content. Returns the full set.
  */
 export async function scanCourseAccessibilityAction(
   courseUrl: string,
-  acronym?: string,
-  knownFingerprints: Record<string, string> = {}
-): Promise<{ items: ItemScan[]; unchanged: string[] } | { error: string }> {
+  acronym?: string
+): Promise<{ items: ItemScan[] } | { error: string }> {
   try {
-    await requireOwner();
+    const user = await requireOwner();
+    const institution = acronym ?? "";
+    const courseId = parseCanvasCourseId(courseUrl) ?? courseUrl;
     const content = await listAccessibilityContent(courseUrl, acronym);
+    const cached = await getCachedScans(user.id, institution, courseId);
+    const cachedByKey = new Map(cached.map((c) => [`${c.type}:${c.id}`, c]));
+
     const items: ItemScan[] = [];
-    const unchanged: string[] = [];
+    const toUpsert: ItemScan[] = [];
     for (const c of content) {
-      const key = `${c.type}:${c.id}`;
-      if (knownFingerprints[key] === c.fingerprint) {
-        unchanged.push(key);
+      const prev = cachedByKey.get(`${c.type}:${c.id}`);
+      if (prev && prev.fingerprint === c.fingerprint) {
+        items.push(prev);
         continue;
       }
-      const issues = await scanHtml(c.html);
-      items.push(toItemScan(c, issues));
+      const scan = toItemScan(c, await scanHtml(c.html));
+      items.push(scan);
+      toUpsert.push(scan);
     }
-    return { items, unchanged };
+    await upsertScans(user.id, institution, courseId, toUpsert);
+
+    // Drop cache rows for content that no longer exists.
+    const currentKeys = new Set(content.map((c) => `${c.type}:${c.id}`));
+    const stale = cached.filter((c) => !currentKeys.has(`${c.type}:${c.id}`)).map((c) => ({ type: c.type, id: c.id }));
+    await deleteScans(user.id, institution, courseId, stale);
+
+    return { items };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not scan the course." };
   }
 }
 
-/** Re-scan a single item (used right after it's edited). */
+/** Re-scan a single item (used right after it's edited) and refresh its cache row. */
 export async function scanItemAccessibilityAction(
   courseUrl: string,
   type: AccessibleItemType,
@@ -1386,11 +1401,18 @@ export async function scanItemAccessibilityAction(
   acronym?: string
 ): Promise<{ item: ItemScan } | { error: string }> {
   try {
-    await requireOwner();
+    const user = await requireOwner();
+    const institution = acronym ?? "";
+    const courseId = parseCanvasCourseId(courseUrl) ?? courseUrl;
     const content = await getAccessibilityItem(courseUrl, type, id, acronym);
-    if (!content) return { error: "Could not load that item to scan." };
-    const issues = await scanHtml(content.html);
-    return { item: toItemScan(content, issues) };
+    if (!content) {
+      // Content was deleted — clear its cache row and report no issues.
+      await deleteScans(user.id, institution, courseId, [{ type, id }]);
+      return { item: { type, id, title: "", fingerprint: "", errorCount: 0, warningCount: 0, suggestionCount: 0, issues: [] } };
+    }
+    const scan = toItemScan(content, await scanHtml(content.html));
+    await upsertScans(user.id, institution, courseId, [scan]);
+    return { item: scan };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not scan the item." };
   }

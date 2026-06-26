@@ -61,6 +61,50 @@ export interface Database {
           updated_at?: string;
         };
       };
+      accessibility_scans: {
+        Row: {
+          user_id: string;
+          institution: string;
+          course_id: string;
+          item_type: string;
+          item_id: string;
+          item_title: string;
+          fingerprint: string;
+          error_count: number;
+          warning_count: number;
+          suggestion_count: number;
+          issues: Json;
+          scanned_at: string;
+        };
+        Insert: {
+          user_id: string;
+          institution: string;
+          course_id: string;
+          item_type: string;
+          item_id: string;
+          item_title: string;
+          fingerprint: string;
+          error_count?: number;
+          warning_count?: number;
+          suggestion_count?: number;
+          issues: Json;
+          scanned_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          institution?: string;
+          course_id?: string;
+          item_type?: string;
+          item_id?: string;
+          item_title?: string;
+          fingerprint?: string;
+          error_count?: number;
+          warning_count?: number;
+          suggestion_count?: number;
+          issues?: Json;
+          scanned_at?: string;
+        };
+      };
       ai_chat_messages: {
         Row: {
           id: string;

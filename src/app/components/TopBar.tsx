@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ProviderToggle from "./ProviderToggle";
+import { useAccessibility } from "./AccessibilityProvider";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { useInstitutions, writeInstitutions } from "@/lib/institutions";
 import { checkInstitutionsAction } from "../actions";
@@ -106,6 +107,59 @@ function InstitutionsSection({ open }: { open: boolean }) {
         </ul>
       )}
     </div>
+  );
+}
+
+// Universal-access glyph (head + arms-out body), tinted by severity.
+function AccessIcon({ color }: { color: string }) {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill={color} aria-hidden="true" focusable="false">
+      <circle cx="12" cy="4.2" r="2.1" />
+      <path d="M21 8.6a1 1 0 0 1-.72 1.18l-4.28 1.07V21a1 1 0 1 1-2 0v-5h-2v5a1 1 0 1 1-2 0V10.85L3.72 9.78A1 1 0 1 1 4.28 7.86l5.06 1.27c.43.1.88.16 1.32.16h2.68c.44 0 .89-.06 1.32-.16l5.06-1.27A1 1 0 0 1 21 8.6Z" />
+    </svg>
+  );
+}
+
+// Persistent accessibility status: shows the current course's error/warning
+// tally on every tab and opens the Accessibility Center on click. Hidden until a
+// course is selected.
+function AccessibilityPill() {
+  const a11y = useAccessibility();
+  if (!a11y.hasCourse) return null;
+  const issues = a11y.errorCount + a11y.warningCount;
+  const scanning = a11y.status === "scanning";
+  const color = a11y.errorCount > 0 ? "#dc2626" : a11y.warningCount > 0 ? "#d97706" : "#16a34a";
+  const label = scanning && issues === 0 ? "Scanning accessibility" : `${issues} accessibility issue${issues === 1 ? "" : "s"}`;
+  return (
+    <button
+      type="button"
+      onClick={() => a11y.setCenterOpen(true)}
+      title={label}
+      aria-label={label}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        height: 34,
+        padding: "0 11px",
+        borderRadius: 9,
+        border: "1px solid var(--field-border, #cbd5e1)",
+        background: "#fff",
+        color: "#334155",
+        fontSize: "0.85rem",
+        fontWeight: 600,
+        cursor: "pointer",
+      }}
+    >
+      <AccessIcon color={color} />
+      {scanning && issues === 0 ? (
+        <span style={{ color: "#94a3b8" }}>…</span>
+      ) : issues > 0 ? (
+        <span style={{ color }}>{issues}</span>
+      ) : (
+        <span style={{ color: "#16a34a" }}>OK</span>
+      )}
+    </button>
   );
 }
 
@@ -233,6 +287,7 @@ export default function TopBar() {
         <span className={styles.name}>Teaching Assistant</span>
       </Link>
       <nav className={styles.actions}>
+        <AccessibilityPill />
         <SettingsMenu />
         {user && (
           <button type="button" className={styles.signout} onClick={handleSignOut}>

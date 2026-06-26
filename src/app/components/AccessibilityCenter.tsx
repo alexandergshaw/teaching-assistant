@@ -76,6 +76,23 @@ export default function AccessibilityCenter() {
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 type="button"
+                onClick={() => a11y.checkLinks()}
+                disabled={a11y.linkStatus === "running"}
+                title="Run Canvas's link validator and merge broken links into this list"
+                style={{
+                  border: "1px solid var(--field-border, #cbd5e1)",
+                  background: "#fff",
+                  borderRadius: 8,
+                  padding: "5px 10px",
+                  fontSize: "0.82rem",
+                  cursor: a11y.linkStatus === "running" ? "default" : "pointer",
+                  color: "#334155",
+                }}
+              >
+                {a11y.linkStatus === "running" ? "Checking links…" : a11y.linkStatus === "done" ? "Recheck links" : "Check links"}
+              </button>
+              <button
+                type="button"
                 onClick={() => a11y.rescanAll()}
                 disabled={a11y.status === "scanning"}
                 style={{

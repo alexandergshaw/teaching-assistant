@@ -97,6 +97,9 @@ import {
   listAccessibilityContent,
   getAccessibilityItem,
   saveAccessibilityItemHtml,
+  getLinkValidation,
+  startLinkValidation,
+  type BrokenLink,
 } from "@/lib/canvas-modules";
 import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
 import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
@@ -1391,6 +1394,33 @@ export async function scanCourseAccessibilityAction(
     return { items };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not scan the course." };
+  }
+}
+
+/** Status + broken links from the course's last link-validation run. */
+export async function getLinkValidationAction(
+  courseUrl: string,
+  acronym?: string
+): Promise<{ state: string; links: BrokenLink[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return await getLinkValidation(courseUrl, acronym);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not read link validation." };
+  }
+}
+
+/** Start a fresh course link-validation run (poll getLinkValidationAction for results). */
+export async function startLinkValidationAction(
+  courseUrl: string,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await startLinkValidation(courseUrl, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not start link validation." };
   }
 }
 

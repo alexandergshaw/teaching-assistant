@@ -892,6 +892,67 @@ export async function getAccessibilityItem(
   return null;
 }
 
+// ── Course Link Validator ─────────────────────────────────────────────────────
+
+/** One broken link found by Canvas's course link validator, tied to its item. */
+export interface BrokenLink {
+  itemType: AccessibleItemType;
+  itemId: string;
+  itemTitle: string;
+  url: string;
+  /** Canvas reason code, e.g. "unpublished_item", "missing_item", "broken_link". */
+  reason: string;
+  linkText?: string;
+}
+
+// Map a link-validator issue (type + content_url) to a scannable item ref.
+function parseLinkRef(type: string, contentUrl: string): { itemType: AccessibleItemType; itemId: string } | null {
+  if (type === "course_syllabus") return { itemType: "syllabus", itemId: "syllabus" };
+  const path = (contentUrl || "").replace(/^https?:\/\/[^/]+/, "");
+  let m: RegExpMatchArray | null;
+  if ((m = path.match(/\/pages\/([^/?#]+)/))) return { itemType: "page", itemId: decodeURIComponent(m[1]) };
+  if ((m = path.match(/\/assignments\/(\d+)/))) return { itemType: "assignment", itemId: m[1] };
+  if ((m = path.match(/\/quizzes\/(\d+)/))) return { itemType: "quiz", itemId: m[1] };
+  if ((m = path.match(/\/discussion_topics\/(\d+)/)))
+    return { itemType: type === "announcement" ? "announcement" : "discussion", itemId: m[1] };
+  return null;
+}
+
+/** Get the status + results of the course's last link-validation run. */
+export async function getLinkValidation(courseUrl: string, code?: string): Promise<{ state: string; links: BrokenLink[] }> {
+  const ctx = resolveCourse(courseUrl, code);
+  const res = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/link_validation`, {
+    headers: { Authorization: `Bearer ${ctx.token}` },
+  });
+  if (!res.ok) return { state: "none", links: [] };
+  const data = (await res.json()) as {
+    workflow_state?: string;
+    results?: { issues?: unknown[] } | unknown[];
+  };
+  const state = data.workflow_state ?? "none";
+  const raw = Array.isArray(data.results) ? data.results : Array.isArray(data.results?.issues) ? data.results!.issues! : [];
+  const links: BrokenLink[] = [];
+  for (const entry of raw as Array<{ type?: string; name?: string; content_url?: string; invalid_links?: Array<{ url?: string; reason?: string; link_text?: string }> }>) {
+    const ref = parseLinkRef(entry.type ?? "", entry.content_url ?? "");
+    if (!ref) continue;
+    const title = (entry.name ?? "").trim() || `${ref.itemType} ${ref.itemId}`;
+    for (const bl of entry.invalid_links ?? []) {
+      links.push({ ...ref, itemTitle: title, url: bl.url ?? "", reason: bl.reason ?? "broken_link", linkText: bl.link_text });
+    }
+  }
+  return { state, links };
+}
+
+/** Kick off a fresh course link-validation run. */
+export async function startLinkValidation(courseUrl: string, code?: string): Promise<void> {
+  const ctx = resolveCourse(courseUrl, code);
+  const res = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/link_validation`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${ctx.token}` },
+  });
+  if (!res.ok) throw canvasError(res.status, ctx.institution);
+}
+
 /** Save edited HTML back to a scannable item, routed by type (for remediation). */
 export async function saveAccessibilityItemHtml(
   courseUrl: string,

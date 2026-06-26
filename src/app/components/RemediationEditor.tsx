@@ -119,10 +119,12 @@ export default function RemediationEditor({
             <p style={{ color: "#64748b" }}>Preparing the fix…</p>
           ) : (
             <>
-              <p style={{ fontSize: "0.85rem", color: located ? "#16a34a" : "#d97706", margin: "0 0 8px" }}>
+              <p style={{ fontSize: "0.85rem", color: located ? "#16a34a" : "#475569", margin: "0 0 8px" }}>
                 {located
                   ? "Fix pre-applied below — review the HTML and save."
-                  : "Couldn't auto-locate the element (the content may have changed). Edit the HTML below and save."}
+                  : issue.ruleId === "broken-link"
+                    ? "Find the link below and update or remove it, then save."
+                    : "Locate the highlighted issue in the HTML below, fix it, and save."}
               </p>
               <textarea
                 value={body}

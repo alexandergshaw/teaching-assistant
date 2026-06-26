@@ -35,6 +35,7 @@ import {
   previewFileAction,
   getOfficeEditableAction,
   saveOfficeEditsAction,
+  rewriteOfficeParagraphAction,
   revisePageWithAiAction,
   listCourseFilesAction,
   renameCourseFileAction,
@@ -54,8 +55,8 @@ import { resolveDocumentAuthor } from "@/lib/author";
 import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
 import FilePreviewModal, { type PreviewFile } from "./FilePreviewModal";
-import type { OfficeParagraph, RunSpan } from "@/lib/office-edit";
-import { spansEqual } from "./RichTextEditor";
+import type { RunSpan } from "@/lib/office-edit";
+import { spansEqual, spansToPlainText } from "./RichTextEditor";
 import { RichTextSectionEditor } from "./RichTextSectionEditor";
 import type {
   CanvasModule,
@@ -2377,12 +2378,23 @@ function OfficeEditorModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  // One editable paragraph. `originalSpans` is null for paragraphs the user added.
+  type OfficeSection = {
+    key: string;
+    sourceId: string;
+    slide?: number;
+    spans: RunSpan[];
+    originalSpans: RunSpan[] | null;
+  };
+
+  const [provider] = useLlmProvider();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [name, setName] = useState(fileName);
-  const [paragraphs, setParagraphs] = useState<OfficeParagraph[]>([]);
-  const [original, setOriginal] = useState<Record<string, RunSpan[]>>({});
-  const [draft, setDraft] = useState<Record<string, RunSpan[]>>({});
+  const [sections, setSections] = useState<OfficeSection[]>([]);
+  const [initialIds, setInitialIds] = useState<string[]>([]);
+  const sectionSeq = useRef(0);
+  const [regenKey, setRegenKey] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
 
@@ -2397,12 +2409,12 @@ function OfficeEditorModal({
         return;
       }
       setName(result.name);
-      setParagraphs(result.paragraphs);
-      const seed: Record<string, RunSpan[]> = Object.fromEntries(
-        result.paragraphs.map((p) => [p.id, p.runs.length > 0 ? p.runs : [{ text: p.text }]])
-      );
-      setOriginal(seed);
-      setDraft(seed);
+      const seeded: OfficeSection[] = result.paragraphs.map((p) => {
+        const spans = p.runs.length > 0 ? p.runs : [{ text: p.text }];
+        return { key: p.id, sourceId: p.id, slide: p.slide, spans, originalSpans: spans };
+      });
+      setInitialIds(seeded.map((s) => s.sourceId));
+      setSections(seeded);
       setLoading(false);
     })();
     return () => {
@@ -2410,21 +2422,57 @@ function OfficeEditorModal({
     };
   }, [courseUrl, fileId, acronym]);
 
-  const isChanged = (id: string) => !spansEqual(draft[id] ?? [], original[id] ?? []);
-  const changedCount = paragraphs.filter((p) => isChanged(p.id)).length;
+  const sectionChanged = (s: OfficeSection) => !s.originalSpans || !spansEqual(s.spans, s.originalSpans);
+  const presentIds = new Set(sections.map((s) => s.sourceId));
+  const deletedCount = initialIds.filter((id) => !presentIds.has(id)).length;
+  const changedCount = sections.filter(sectionChanged).length + deletedCount;
+
+  const updateSpans = (key: string, spans: RunSpan[]) =>
+    setSections((prev) => prev.map((s) => (s.key === key ? { ...s, spans } : s)));
+
+  // Add a blank paragraph right after `key`, cloning that paragraph's style anchor.
+  const addAfter = (key: string) =>
+    setSections((prev) => {
+      const idx = prev.findIndex((s) => s.key === key);
+      if (idx === -1) return prev;
+      const fresh: OfficeSection = {
+        key: `new-${sectionSeq.current++}`,
+        sourceId: prev[idx].sourceId,
+        slide: prev[idx].slide,
+        spans: [{ text: "" }],
+        originalSpans: null,
+      };
+      return [...prev.slice(0, idx + 1), fresh, ...prev.slice(idx + 1)];
+    });
+
+  const removeSection = (key: string) => setSections((prev) => prev.filter((s) => s.key !== key));
+
+  // Rewrite one paragraph with AI, using the whole document as context.
+  const regenerate = async (section: OfficeSection) => {
+    setRegenKey(section.key);
+    setNote(null);
+    try {
+      const documentText = sections.map((s) => spansToPlainText(s.spans)).join("\n");
+      const result = await rewriteOfficeParagraphAction(documentText, spansToPlainText(section.spans), provider);
+      if ("error" in result) {
+        setNote({ kind: "error", text: result.error });
+        return;
+      }
+      updateSpans(section.key, [{ text: result.text }]);
+    } finally {
+      setRegenKey(null);
+    }
+  };
 
   const handleSave = async () => {
-    const edits: Record<string, RunSpan[]> = {};
-    for (const p of paragraphs) {
-      if (isChanged(p.id)) edits[p.id] = draft[p.id] ?? [{ text: "" }];
-    }
-    if (Object.keys(edits).length === 0) {
+    if (changedCount === 0) {
       setNote({ kind: "error", text: "No changes to save." });
       return;
     }
     setSaving(true);
     setNote(null);
-    const result = await saveOfficeEditsAction(courseUrl, fileId, edits, acronym);
+    const payload = sections.map((s) => ({ sourceId: s.sourceId, spans: s.spans }));
+    const result = await saveOfficeEditsAction(courseUrl, fileId, payload, acronym);
     setSaving(false);
     if ("error" in result) {
       setNote({ kind: "error", text: result.error });
@@ -2457,26 +2505,40 @@ function OfficeEditorModal({
           </div>
         ) : loadError ? (
           <p className={styles.error}>{loadError}</p>
-        ) : paragraphs.length === 0 ? (
+        ) : initialIds.length === 0 ? (
           <p className={styles.emptyState}>No editable text was found in this file.</p>
         ) : (
           <>
             <p className={styles.fieldHint} style={{ marginTop: 0 }}>
               Edit the text below — select text and use the toolbar to bold, italicize, underline, or
-              resize it. Images and layout are kept; saving overwrites the file in Canvas.
+              resize it. Use the side buttons to rewrite a paragraph with AI, add one below, or delete it.
+              Images and layout are kept; saving overwrites the file in Canvas.
             </p>
             <RichTextSectionEditor
               maxHeight="52vh"
-              onChange={(key, spans) => setDraft((d) => ({ ...d, [key]: spans }))}
-              sections={paragraphs.map((p, i) => ({
-                key: p.id,
-                spans: draft[p.id] ?? [{ text: "" }],
-                changed: isChanged(p.id),
+              onChange={updateSpans}
+              sections={sections.map((s, i) => ({
+                key: s.key,
+                spans: s.spans,
+                changed: sectionChanged(s),
                 ariaLabel: `Paragraph ${i + 1}`,
                 heading:
-                  p.slide != null && (i === 0 || paragraphs[i - 1].slide !== p.slide)
-                    ? `Slide ${p.slide}`
+                  s.slide != null && (i === 0 || sections[i - 1].slide !== s.slide)
+                    ? `Slide ${s.slide}`
                     : undefined,
+                actions: [
+                  {
+                    key: "ai",
+                    label: regenKey === s.key ? "…" : "AI",
+                    title: "Rewrite this paragraph with AI",
+                    tone: "accent",
+                    onClick: () => regenerate(s),
+                    disabled: regenKey !== null,
+                    style: { opacity: regenKey !== null && regenKey !== s.key ? 0.5 : 1 },
+                  },
+                  { key: "add", label: "+", title: "Add a paragraph below", onClick: () => addAfter(s.key) },
+                  { key: "del", label: "×", title: "Delete this paragraph", tone: "danger", onClick: () => removeSection(s.key) },
+                ],
               }))}
             />
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>

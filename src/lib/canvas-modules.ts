@@ -22,7 +22,7 @@ import {
   type CanvasInstitution,
 } from "./canvas-core";
 import { extractTextFromBuffer } from "./office-extract";
-import { parseOfficeParagraphs, applyOfficeEdits, type OfficeKind, type OfficeParagraph, type RunSpan } from "./office-edit";
+import { parseOfficeParagraphs, applyOfficeSections, type OfficeKind, type OfficeParagraph, type RunSpan } from "./office-edit";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1774,7 +1774,7 @@ async function overwriteCanvasFile(
 export async function saveOfficeEdits(
   courseUrl: string,
   fileId: number,
-  edits: Record<string, RunSpan[]>,
+  sections: Array<{ sourceId: string; spans: RunSpan[] }>,
   code?: string
 ): Promise<void> {
   const ctx = resolveCourse(courseUrl, code);
@@ -1782,6 +1782,6 @@ export async function saveOfficeEdits(
   if (!meta.kind) {
     throw new Error("Only Word (.docx) and PowerPoint (.pptx) files can be edited here.");
   }
-  const edited = await applyOfficeEdits(meta.kind, buffer, edits);
+  const edited = await applyOfficeSections(meta.kind, buffer, sections);
   await overwriteCanvasFile({ ...ctx, courseId: ctx.courseId }, meta, edited);
 }

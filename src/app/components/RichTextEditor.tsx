@@ -24,7 +24,8 @@ export function spansEqual(a: RunSpan[], b: RunSpan[]): boolean {
       !!x.bold !== !!y.bold ||
       !!x.italic !== !!y.italic ||
       !!x.underline !== !!y.underline ||
-      (x.sizePt ?? null) !== (y.sizePt ?? null)
+      (x.sizePt ?? null) !== (y.sizePt ?? null) ||
+      (x.link ?? "") !== (y.link ?? "")
     ) {
       return false;
     }
@@ -34,6 +35,10 @@ export function spansEqual(a: RunSpan[], b: RunSpan[]): boolean {
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escapeAttr(value: string): string {
+  return escapeHtml(value).replace(/"/g, "&quot;");
 }
 
 // Merge neighbouring spans with identical marks (mirrors office-edit's helper,
@@ -47,7 +52,8 @@ function mergeSpans(spans: RunSpan[]): RunSpan[] {
       !!prev.bold === !!s.bold &&
       !!prev.italic === !!s.italic &&
       !!prev.underline === !!s.underline &&
-      prev.sizePt === s.sizePt
+      prev.sizePt === s.sizePt &&
+      (prev.link ?? "") === (s.link ?? "")
     ) {
       prev.text += s.text;
     } else {
@@ -66,6 +72,11 @@ export function spansToHtml(spans: RunSpan[]): string {
       if (s.underline) html = `<u>${html}</u>`;
       if (s.italic) html = `<em>${html}</em>`;
       if (s.bold) html = `<strong>${html}</strong>`;
+      // A preserved hyperlink: shown as a link in the editor and carried through
+      // serialization via data-wlink so the rebuild can re-wrap it.
+      if (s.link) {
+        html = `<a data-wlink="${escapeAttr(s.link)}" style="color:#2563eb;text-decoration:underline">${html}</a>`;
+      }
       return html;
     })
     .join("");
@@ -110,6 +121,7 @@ function walk(node: Node, ctx: Marks, out: RunSpan[], root: HTMLElement): void {
     if (tag === "B" || tag === "STRONG") next.bold = true;
     if (tag === "I" || tag === "EM") next.italic = true;
     if (tag === "U") next.underline = true;
+    if (tag === "A" && el.dataset.wlink) next.link = el.dataset.wlink;
     const fw = el.style.fontWeight;
     if (fw === "bold" || fw === "bolder" || (/^\d+$/.test(fw) && Number(fw) >= 600)) next.bold = true;
     if (el.style.fontStyle === "italic" || el.style.fontStyle === "oblique") next.italic = true;
@@ -134,6 +146,7 @@ export function serializeToSpans(root: HTMLElement): RunSpan[] {
     if (s.italic) r.italic = true;
     if (s.underline) r.underline = true;
     if (s.sizePt != null) r.sizePt = s.sizePt;
+    if (s.link) r.link = s.link;
     return r;
   });
   return cleaned.length ? cleaned : [{ text: "" }];

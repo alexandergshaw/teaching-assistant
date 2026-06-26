@@ -28,6 +28,13 @@ export interface RunSpan {
   italic?: boolean;
   underline?: boolean;
   sizePt?: number;
+  /**
+   * For runs inside a docx <w:hyperlink>, the hyperlink element's attributes
+   * (e.g. `r:id="rId5"` or `w:anchor="top"`), kept verbatim so the link can be
+   * re-wrapped on rebuild. The r:id points at an existing relationship we never
+   * touch, so it stays valid.
+   */
+  link?: string;
 }
 
 /** One editable paragraph. `slide` is set (1-based) for pptx. */
@@ -50,18 +57,29 @@ export function spansPlainText(spans: RunSpan[]): string {
   return spans.map((s) => s.text).join("");
 }
 
+/** Whether two spans carry the same marks (ignoring text). */
+function sameMarks(a: RunSpan, b: RunSpan): boolean {
+  return (
+    !!a.bold === !!b.bold &&
+    !!a.italic === !!b.italic &&
+    !!a.underline === !!b.underline &&
+    a.sizePt === b.sizePt &&
+    (a.link ?? "") === (b.link ?? "")
+  );
+}
+
+/** Whether two span lists carry identical text and formatting. */
+export function spansEqual(a: RunSpan[], b: RunSpan[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((s, i) => s.text === b[i].text && sameMarks(s, b[i]));
+}
+
 /** Merge neighbouring spans that share identical marks. */
 function mergeSpans(spans: RunSpan[]): RunSpan[] {
   const out: RunSpan[] = [];
   for (const s of spans) {
     const prev = out[out.length - 1];
-    if (
-      prev &&
-      !!prev.bold === !!s.bold &&
-      !!prev.italic === !!s.italic &&
-      !!prev.underline === !!s.underline &&
-      prev.sizePt === s.sizePt
-    ) {
+    if (prev && sameMarks(prev, s)) {
       prev.text += s.text;
     } else {
       out.push({ ...s });
@@ -120,13 +138,27 @@ function readDocxMarks(rprInner: string): Omit<RunSpan, "text"> {
 /** Split a docx paragraph into formatted spans (runs that carry text). */
 function extractDocxRuns(paraXml: string): RunSpan[] {
   const spans: RunSpan[] = [];
-  for (const run of paraXml.matchAll(/<w:r\b[^>]*>([\s\S]*?)<\/w:r>/g)) {
-    const inner = run[1];
+  // Walk runs and hyperlink boundaries in order so each run knows whether it
+  // sits inside a <w:hyperlink> (hyperlinks can't nest, so a flat flag suffices).
+  let link: string | undefined;
+  const tokens = /<w:hyperlink\b([^>]*)>|<\/w:hyperlink>|<w:r\b[^>]*>([\s\S]*?)<\/w:r>/g;
+  for (const m of paraXml.matchAll(tokens)) {
+    if (m[0] === "</w:hyperlink>") {
+      link = undefined;
+      continue;
+    }
+    if (m[0].startsWith("<w:hyperlink")) {
+      link = m[1].trim();
+      continue;
+    }
+    const inner = m[2];
     const rprInner = inner.match(/<w:rPr>([\s\S]*?)<\/w:rPr>/)?.[1] ?? "";
     let text = "";
     for (const t of inner.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)) text += decodeXmlEntities(t[1] ?? "");
     if (!text) continue;
-    spans.push({ text, ...readDocxMarks(rprInner) });
+    const span: RunSpan = { text, ...readDocxMarks(rprInner) };
+    if (link) span.link = link;
+    spans.push(span);
   }
   return mergeSpans(spans);
 }
@@ -211,7 +243,11 @@ function buildDocxRunProps(baseInner: string, span: RunSpan): string {
   const baseSz = baseInner.match(/<w:sz\b[^>]*\bw:val="(\d+)"/)?.[1];
   const half = span.sizePt != null ? Math.round(span.sizePt * 2) : baseSz ? Number(baseSz) : undefined;
   const parts: string[] = [];
+  // Keep the base run's character style; if a link run has none, fall back to the
+  // built-in "Hyperlink" style so it still renders blue/underlined (Word ignores
+  // the reference if that style isn't defined, so it's safe).
   if (rStyle) parts.push(rStyle);
+  else if (span.link) parts.push('<w:rStyle w:val="Hyperlink"/>');
   if (rFonts) parts.push(rFonts);
   if (span.bold) parts.push("<w:b/>");
   if (span.italic) parts.push("<w:i/>");
@@ -222,19 +258,32 @@ function buildDocxRunProps(baseInner: string, span: RunSpan): string {
 }
 
 // Rebuild a docx paragraph from formatted spans, keeping its <w:pPr> and basing
-// each run's properties on the paragraph's first run. Used only when a span
-// carries formatting; structural inline content (hyperlinks, bookmarks) in that
-// paragraph is not preserved, matching how intra-paragraph runs already collapse.
+// each run's properties on the paragraph's first run. Consecutive spans that
+// share a `link` are re-wrapped in their original <w:hyperlink> so links survive
+// edits. Used only when a span carries formatting (or a link); other structural
+// inline content (bookmarks) in that paragraph is not preserved.
 function rebuildDocxParagraph(paraXml: string, spans: RunSpan[]): string {
-  if (spansArePlain(spans)) return rewriteRuns(stripFirstRunMarksDocx(paraXml), spansPlainText(spans), "w:t");
+  if (spansArePlain(spans) && spans.every((s) => !s.link)) {
+    return rewriteRuns(stripFirstRunMarksDocx(paraXml), spansPlainText(spans), "w:t");
+  }
   const open = paraXml.match(/^<w:p\b[^>]*>/)?.[0] ?? "<w:p>";
   const pPr = paraXml.match(/<w:pPr>[\s\S]*?<\/w:pPr>/)?.[0] ?? paraXml.match(/<w:pPr\/>/)?.[0] ?? "";
   const afterPPr = pPr ? paraXml.slice(paraXml.indexOf(pPr) + pPr.length) : paraXml;
   const baseInner = afterPPr.match(/<w:rPr>([\s\S]*?)<\/w:rPr>/)?.[1] ?? "";
-  const runs = spans
-    .map((s) => `<w:r>${buildDocxRunProps(baseInner, s)}<w:t xml:space="preserve">${escapeXml(s.text)}</w:t></w:r>`)
-    .join("");
-  return `${open}${pPr}${runs}</w:p>`;
+  const run = (s: RunSpan) =>
+    `<w:r>${buildDocxRunProps(baseInner, s)}<w:t xml:space="preserve">${escapeXml(s.text)}</w:t></w:r>`;
+  let body = "";
+  for (let i = 0; i < spans.length; ) {
+    const link = spans[i].link;
+    if (link) {
+      let group = "";
+      while (i < spans.length && spans[i].link === link) group += run(spans[i++]);
+      body += `<w:hyperlink ${link}>${group}</w:hyperlink>`;
+    } else {
+      body += run(spans[i++]);
+    }
+  }
+  return `${open}${pPr}${body}</w:p>`;
 }
 
 // Build a pptx run's <a:rPr> from a base run's rPr (keeps fill/font children)
@@ -310,14 +359,42 @@ export async function parseOfficeParagraphs(kind: OfficeKind, buffer: Buffer): P
   return out;
 }
 
-/** Apply edited paragraph spans back into the original file; return the new bytes. */
-export async function applyOfficeEdits(
+/**
+ * Apply an ordered list of sections back into the original file. Each section
+ * names the source paragraph id whose style/position it borrows; multiple
+ * sections may share a source id (the first rewrites that paragraph, the rest
+ * are clones placed right after it — this is how "add below" works). A known
+ * paragraph with no section is deleted. A paragraph whose single section is
+ * unchanged is left byte-for-byte (so its formatting, images, and hyperlinks
+ * are untouched); only edited/added/cloned paragraphs are rebuilt. Structural
+ * paragraphs (no editable text) are always left as-is. Works for docx + pptx.
+ */
+export async function applyOfficeSections(
   kind: OfficeKind,
   buffer: Buffer,
-  edits: Record<string, RunSpan[]>
+  sections: Array<{ sourceId: string; spans: RunSpan[] }>
 ): Promise<Buffer> {
-  const zip = await JSZip.loadAsync(buffer);
+  const originals = await parseOfficeParagraphs(kind, buffer);
+  const originalRuns = new Map(originals.map((p) => [p.id, p.runs]));
 
+  const groups = new Map<string, RunSpan[][]>();
+  for (const s of sections) {
+    const list = groups.get(s.sourceId);
+    if (list) list.push(s.spans);
+    else groups.set(s.sourceId, [s.spans]);
+  }
+
+  const rebuild = kind === "docx" ? rebuildDocxParagraph : rebuildPptxParagraph;
+  const render = (para: string, id: string): string => {
+    const base = originalRuns.get(id);
+    if (!base) return para; // structural / non-text paragraph — leave as-is
+    const spanLists = groups.get(id);
+    if (!spanLists || spanLists.length === 0) return ""; // deleted by the user
+    if (spanLists.length === 1 && spansEqual(spanLists[0], base)) return para; // unchanged
+    return spanLists.map((spans) => rebuild(para, spans)).join("");
+  };
+
+  const zip = await JSZip.loadAsync(buffer);
   if (kind === "docx") {
     const file = zip.file("word/document.xml");
     if (!file) return buffer;
@@ -325,8 +402,7 @@ export async function applyOfficeEdits(
     let i = -1;
     xml = xml.replace(DOCX_PARA, (para) => {
       i += 1;
-      const id = `p${i}`;
-      return id in edits ? rebuildDocxParagraph(para, edits[id]) : para;
+      return render(para, `p${i}`);
     });
     zip.file("word/document.xml", xml);
   } else {
@@ -338,52 +414,13 @@ export async function applyOfficeEdits(
       let touched = false;
       xml = xml.replace(PPTX_PARA, (para) => {
         p += 1;
-        const id = `s${s}_p${p}`;
-        if (!(id in edits)) return para;
-        touched = true;
-        return rebuildPptxParagraph(para, edits[id]);
+        const out = render(para, `s${s}_p${p}`);
+        if (out !== para) touched = true;
+        return out;
       });
       if (touched) zip.file(file.name, xml);
     }
   }
 
-  return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
-}
-
-/**
- * Rebuild a .docx from an ordered list of sections so paragraphs can be edited,
- * deleted, or added while keeping the original formatting. Each section names the
- * source paragraph id whose style/position it borrows; multiple sections may share
- * a source id (the first rewrites that paragraph, the rest are clones placed right
- * after it, inheriting its style). A known paragraph with no section is dropped.
- * Empty/structural paragraphs (not in `knownIds`) are always kept untouched.
- */
-export async function applyDocxSections(
-  buffer: Buffer,
-  knownIds: string[],
-  sections: Array<{ sourceId: string; spans: RunSpan[] }>
-): Promise<Buffer> {
-  const groups = new Map<string, RunSpan[][]>();
-  for (const s of sections) {
-    const list = groups.get(s.sourceId);
-    if (list) list.push(s.spans);
-    else groups.set(s.sourceId, [s.spans]);
-  }
-  const known = new Set(knownIds);
-
-  const zip = await JSZip.loadAsync(buffer);
-  const file = zip.file("word/document.xml");
-  if (!file) return buffer;
-  let xml = await file.async("string");
-  let i = -1;
-  xml = xml.replace(DOCX_PARA, (para) => {
-    i += 1;
-    const id = `p${i}`;
-    if (!known.has(id)) return para; // empty/structural paragraph — leave as-is
-    const spanLists = groups.get(id);
-    if (!spanLists || spanLists.length === 0) return ""; // deleted by the user
-    return spanLists.map((spans) => rebuildDocxParagraph(para, spans)).join("");
-  });
-  zip.file("word/document.xml", xml);
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
 }

@@ -96,7 +96,7 @@ import {
   type QuizQuestionInput,
 } from "@/lib/canvas-modules";
 import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
-import { parseOfficeParagraphs, applyDocxSections } from "@/lib/office-edit";
+import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -1315,12 +1315,12 @@ export async function getOfficeEditableAction(
 export async function saveOfficeEditsAction(
   courseUrl: string,
   fileId: number,
-  edits: Record<string, RunSpan[]>,
+  sections: Array<{ sourceId: string; spans: RunSpan[] }>,
   acronym?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
     await requireOwner();
-    await saveOfficeEdits(courseUrl, fileId, edits, acronym);
+    await saveOfficeEdits(courseUrl, fileId, sections, acronym);
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the file to Canvas." };
@@ -2064,6 +2064,51 @@ Return ONLY the replacement paragraph text — no JSON, no quotes, no commentary
 }
 
 /**
+ * Rewrite a single paragraph of an Office document with AI. The whole document's
+ * text is given as context so the rewrite fits in; only the named paragraph is
+ * rewritten and its plain text returned (no formatting).
+ */
+export async function rewriteOfficeParagraphAction(
+  documentText: string,
+  paragraphText: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ text: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!paragraphText.trim()) return { error: "There is no text in this paragraph to rewrite." };
+    const prompt = `You are editing one paragraph of a document. Here is the full document for context:
+
+---
+${documentText.slice(0, 12000)}
+---
+
+Rewrite ONLY this paragraph so it is clearer and well written, keeping its meaning, role, and approximate length, and matching the document's tone:
+
+"""
+${paragraphText}
+"""
+
+Return ONLY the rewritten paragraph text — no JSON, no quotes, no commentary.`;
+
+    const result = await callLlm(
+      { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.5, maxOutputTokens: 1024 } },
+      provider
+    );
+    if (!result.ok) {
+      return { error: `Rewrite failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+    let text = result.text.trim();
+    const fenced = text.match(/```(?:\w+)?\s*([\s\S]*?)```/);
+    if (fenced) text = fenced[1].trim();
+    text = text.replace(/^"|"$/g, "").trim();
+    if (!text) return { error: "The model returned empty text." };
+    return { text };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+/**
  * Rebuild the syllabus .docx from the instructor's ordered sections — supporting
  * edited, deleted, and added paragraphs while preserving the original formatting —
  * and return the new file as base64. Each section names the source paragraph id
@@ -2076,8 +2121,7 @@ export async function buildAdaptedSyllabusAction(
   try {
     await requireOwner();
     const buffer = Buffer.from(syllabusBase64, "base64");
-    const knownIds = (await parseOfficeParagraphs("docx", buffer)).map((p) => p.id);
-    const out = await applyDocxSections(buffer, knownIds, sections);
+    const out = await applyOfficeSections("docx", buffer, sections);
     return { base64: out.toString("base64") };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not build the syllabus." };

@@ -1393,6 +1393,56 @@ export async function scanCourseAccessibilityAction(
   }
 }
 
+/** Suggest concise alt text for an image, from its HTML + the item it lives on. */
+export async function suggestAltTextAction(
+  itemTitle: string,
+  snippet: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ text: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const prompt = `An image on a course item titled "${itemTitle}" needs better alt text for screen-reader users. Here is the image's HTML (use its file name and any context to infer the subject):
+
+${snippet}
+
+Write concise, descriptive alt text under 125 characters that conveys the image's content or purpose. Do not start with "image of" or "picture of". Return ONLY the alt text, with no quotes or commentary.`;
+    const result = await callLlm(
+      { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.4, maxOutputTokens: 120 } },
+      provider
+    );
+    if (!result.ok) return { error: `Suggestion failed: HTTP ${result.status}` };
+    const text = result.text.trim().replace(/^["']|["']$/g, "").slice(0, 200);
+    return text ? { text } : { error: "The model returned empty text." };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+/** Suggest descriptive link text from the link's HTML + the item it lives on. */
+export async function suggestLinkTextAction(
+  itemTitle: string,
+  snippet: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ text: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const prompt = `A hyperlink on a course item titled "${itemTitle}" has unclear link text (e.g. "click here"). Here is the link's HTML:
+
+${snippet}
+
+Write concise, descriptive link text (a few words) that tells the reader where the link goes, based on its URL. Return ONLY the link text, with no quotes or commentary.`;
+    const result = await callLlm(
+      { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.4, maxOutputTokens: 60 } },
+      provider
+    );
+    if (!result.ok) return { error: `Suggestion failed: HTTP ${result.status}` };
+    const text = result.text.trim().replace(/^["']|["']$/g, "").slice(0, 120);
+    return text ? { text } : { error: "The model returned empty text." };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
 /** Re-scan a single item (used right after it's edited) and refresh its cache row. */
 export async function scanItemAccessibilityAction(
   courseUrl: string,

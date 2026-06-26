@@ -13,6 +13,9 @@ export type ScanStatus = "idle" | "scanning" | "done" | "error";
 export interface AccessibilityValue {
   status: ScanStatus;
   error?: string;
+  /** The active course URL and institution code, for remediation fetch/save. */
+  courseUrl: string;
+  acronym?: string;
   /** Whether a course is selected (so the pill knows to appear). */
   hasCourse: boolean;
   /** Scanned items keyed by `${type}:${id}`. */
@@ -31,6 +34,7 @@ export interface AccessibilityValue {
 
 const DEFAULT: AccessibilityValue = {
   status: "idle",
+  courseUrl: "",
   hasCourse: false,
   items: {},
   errorCount: 0,
@@ -157,6 +161,8 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
     return {
       status,
       error,
+      courseUrl,
+      acronym: institution || undefined,
       hasCourse: hasCourseId(courseUrl),
       items,
       errorCount,
@@ -169,7 +175,7 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
       centerOpen,
       setCenterOpen,
     };
-  }, [items, status, error, courseUrl, rescanItem, rescanAll, centerOpen]);
+  }, [items, status, error, courseUrl, institution, rescanItem, rescanAll, centerOpen]);
 
   return (
     <AccessibilityContext.Provider value={value}>

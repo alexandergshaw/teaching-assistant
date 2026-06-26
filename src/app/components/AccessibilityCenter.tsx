@@ -1,8 +1,13 @@
 "use client";
 
 import type { CSSProperties } from "react";
+import { useState } from "react";
 import { useAccessibility } from "./AccessibilityProvider";
-import type { AccessibleItemType, ItemScan, Severity } from "@/lib/accessibility/types";
+import RemediationEditor, { isRemediable } from "./RemediationEditor";
+import type { AccessibleItemType, Issue, ItemScan, Severity } from "@/lib/accessibility/types";
+
+// What's being fixed right now (drives the RemediationEditor overlay).
+type FixTarget = { type: AccessibleItemType; id: string; title: string; issue: Issue };
 
 const SEVERITY: Record<Severity, { color: string; label: string }> = {
   error: { color: "#dc2626", label: "Error" },
@@ -33,6 +38,7 @@ function Dot({ color }: { color: string }) {
 
 export default function AccessibilityCenter() {
   const a11y = useAccessibility();
+  const [fixTarget, setFixTarget] = useState<FixTarget | null>(null);
   if (!a11y.centerOpen) return null;
 
   const flagged = Object.values(a11y.items)
@@ -122,15 +128,34 @@ export default function AccessibilityCenter() {
               No accessibility issues found in this course.
             </p>
           ) : (
-            flagged.map((item) => <ItemBlock key={`${item.type}:${item.id}`} item={item} />)
+            flagged.map((item) => (
+              <ItemBlock
+                key={`${item.type}:${item.id}`}
+                item={item}
+                onFix={(issue) => setFixTarget({ type: item.type, id: item.id, title: item.title, issue })}
+              />
+            ))
           )}
         </div>
       </aside>
+
+      {fixTarget && (
+        <RemediationEditor
+          courseUrl={a11y.courseUrl}
+          acronym={a11y.acronym}
+          type={fixTarget.type}
+          id={fixTarget.id}
+          title={fixTarget.title}
+          issue={fixTarget.issue}
+          onClose={() => setFixTarget(null)}
+        />
+      )}
     </>
   );
 }
 
-function ItemBlock({ item }: { item: ItemScan }) {
+function ItemBlock({ item, onFix }: { item: ItemScan; onFix: (issue: Issue) => void }) {
+  const remediable = isRemediable(item.type);
   const issues = [...item.issues].sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity]);
   return (
     <div style={{ marginBottom: 14, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 10, overflow: "hidden" }}>
@@ -149,13 +174,23 @@ function ItemBlock({ item }: { item: ItemScan }) {
             <span style={{ marginTop: 4 }}>
               <Dot color={SEVERITY[issue.severity].color} />
             </span>
-            <div style={{ minWidth: 0 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontSize: "0.88rem", color: "#1f2933" }}>{issue.message}</div>
               <div style={{ fontSize: "0.74rem", color: "#94a3b8", marginTop: 2 }}>
                 {SEVERITY[issue.severity].label}
                 {issue.wcag ? ` · WCAG ${issue.wcag}` : ""}
               </div>
             </div>
+            {remediable && issue.fixKind !== "flag" && (
+              <button
+                type="button"
+                onClick={() => onFix(issue)}
+                title="Open an editor with this fix pre-applied"
+                style={{ flexShrink: 0, border: "1px solid var(--accent, #2563eb)", background: "#fff", color: "var(--accent, #2563eb)", borderRadius: 6, padding: "3px 10px", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer", alignSelf: "center" }}
+              >
+                Fix
+              </button>
+            )}
           </li>
         ))}
       </ul>

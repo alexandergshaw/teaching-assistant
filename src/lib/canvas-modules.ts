@@ -2044,8 +2044,14 @@ async function overwriteCanvasFile(
   meta: CanvasFileMeta,
   buffer: Buffer
 ): Promise<void> {
+  // Canvas's on_duplicate=overwrite matches the existing file by its DISPLAY name,
+  // not its stored filename. For files Canvas auto-deduped on a past upload (e.g.
+  // "… (3).docx"), the display name carries the suffix while the internal filename
+  // does not, so overwriting by `filename` fails to match and Canvas silently
+  // writes a renamed copy instead of replacing the file the editor read by id —
+  // making edits (alt text, etc.) appear not to "stick". Overwrite by display name.
   const params = new URLSearchParams();
-  params.append("name", meta.filename);
+  params.append("name", meta.name);
   if (meta.folderId != null) params.append("parent_folder_id", String(meta.folderId));
   params.append("content_type", meta.contentType);
   params.append("on_duplicate", "overwrite");
@@ -2066,7 +2072,7 @@ async function overwriteCanvasFile(
 
   const form = new FormData();
   for (const [key, value] of Object.entries(ticket.upload_params)) form.append(key, value);
-  form.append("file", new Blob([new Uint8Array(buffer)], { type: meta.contentType }), meta.filename);
+  form.append("file", new Blob([new Uint8Array(buffer)], { type: meta.contentType }), meta.name);
   const upload = await fetch(ticket.upload_url, { method: "POST", body: form });
   if (!upload.ok) {
     throw new Error(`Saving to Canvas failed (HTTP ${upload.status}).`);

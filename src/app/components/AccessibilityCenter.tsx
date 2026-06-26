@@ -96,7 +96,7 @@ export default function AccessibilityCenter() {
                 type="button"
                 onClick={() => a11y.scanFiles()}
                 disabled={a11y.fileStatus === "running"}
-                title="Scan Word/PowerPoint files for images missing alt text (downloads files)"
+                title="Scan Word/PowerPoint files (image alt text) and PDFs (tagging, language, title)"
                 style={{
                   border: "1px solid var(--field-border, #cbd5e1)",
                   background: "#fff",

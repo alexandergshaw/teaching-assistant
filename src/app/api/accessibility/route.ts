@@ -4,12 +4,14 @@ import { parseCanvasCourseId } from "@/lib/canvas-url";
 import {
   listAccessibilityContent,
   getAccessibilityItem,
-  listScannableOfficeFiles,
+  listScannableFiles,
   getOfficeFileImages,
+  getCanvasFileBuffer,
   getLinkValidation,
   startLinkValidation,
 } from "@/lib/canvas-modules";
 import { scanHtml } from "@/lib/accessibility/engine";
+import { scanPdf } from "@/lib/accessibility/pdf";
 import { countsOf, type AccessibleItemType, type Issue, type ItemScan } from "@/lib/accessibility/types";
 import { getCachedScans, upsertScans, deleteScans } from "@/lib/supabase/accessibility";
 
@@ -94,7 +96,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (op === "scan-files") {
-      const files = await listScannableOfficeFiles(courseUrl, acronym);
+      const files = await listScannableFiles(courseUrl, acronym);
       const cached = await getCachedScans(user.id, institution, courseId);
       const cachedByKey = new Map(cached.map((c) => [`${c.type}:${c.id}`, c]));
       const items: ItemScan[] = [];
@@ -108,9 +110,12 @@ export async function POST(req: NextRequest) {
         }
         let issues: Issue[] = [];
         try {
-          issues = officeImageIssues(await getOfficeFileImages(courseUrl, f.id, acronym));
+          issues =
+            f.kind === "pdf"
+              ? await scanPdf(await getCanvasFileBuffer(courseUrl, f.id, acronym))
+              : officeImageIssues(await getOfficeFileImages(courseUrl, f.id, acronym));
         } catch {
-          continue;
+          continue; // a file we can't read (too large, encrypted, etc.) is skipped
         }
         const scan = toItemScan({ type: "file", id, title: f.title, fingerprint: f.fingerprint }, issues);
         items.push(scan);

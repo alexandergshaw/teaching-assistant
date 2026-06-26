@@ -2046,25 +2046,38 @@ export async function saveOfficeEdits(
 
 // ── Office-file accessibility (image alt text) ────────────────────────────────
 
-/** A docx/pptx file in the course that can be scanned for image alt text. */
-export interface ScannableOfficeFile {
+/** A course file that can be scanned for accessibility (docx/pptx images, or PDF). */
+export interface ScannableFile {
   id: number;
   title: string;
-  kind: OfficeKind;
+  kind: OfficeKind | "pdf";
   fingerprint: string;
 }
 
-/** List the course's editable Office files (docx/pptx) for accessibility scanning. */
-export async function listScannableOfficeFiles(courseUrl: string, code?: string): Promise<ScannableOfficeFile[]> {
+/** List the course's scannable files (docx/pptx/pdf) for accessibility scanning. */
+export async function listScannableFiles(courseUrl: string, code?: string): Promise<ScannableFile[]> {
   const files = await listCourseFiles(courseUrl, code);
-  const out: ScannableOfficeFile[] = [];
+  const out: ScannableFile[] = [];
   for (const f of files) {
     const lower = (f.fileName || f.displayName || "").toLowerCase();
-    const kind: OfficeKind | null = lower.endsWith(".docx") ? "docx" : lower.endsWith(".pptx") ? "pptx" : null;
+    const kind: ScannableFile["kind"] | null = lower.endsWith(".docx")
+      ? "docx"
+      : lower.endsWith(".pptx")
+        ? "pptx"
+        : lower.endsWith(".pdf")
+          ? "pdf"
+          : null;
     if (!kind) continue;
     out.push({ id: f.id, title: f.displayName, kind, fingerprint: f.updatedAt || String(f.size) });
   }
   return out;
+}
+
+/** Fetch a course file's raw bytes (e.g. to scan a PDF). */
+export async function getCanvasFileBuffer(courseUrl: string, fileId: number, code?: string): Promise<Buffer> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { buffer } = await fetchCanvasFile(ctx, fileId);
+  return buffer;
 }
 
 /** Read a file's images + current alt text (for the office alt remediation editor). */

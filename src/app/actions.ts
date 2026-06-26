@@ -94,9 +94,13 @@ import {
   type RubricCriterionInput,
   type QuizQuestion,
   type QuizQuestionInput,
+  listAccessibilityContent,
+  getAccessibilityItem,
 } from "@/lib/canvas-modules";
 import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
 import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
+import { scanHtml } from "@/lib/accessibility/engine";
+import { countsOf, type AccessibleItemType, type ItemScan, type Issue as A11yIssue } from "@/lib/accessibility/types";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -1324,6 +1328,71 @@ export async function saveOfficeEditsAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the file to Canvas." };
+  }
+}
+
+// ── Accessibility scanning ──────────────────────────────────────────────────
+
+// Scan one item's HTML and shape it into an ItemScan.
+function toItemScan(item: { type: AccessibleItemType; id: string; title: string; fingerprint: string; html: string }, issues: A11yIssue[]): ItemScan {
+  const { errorCount, warningCount, suggestionCount } = countsOf(issues);
+  return {
+    type: item.type,
+    id: item.id,
+    title: item.title,
+    fingerprint: item.fingerprint,
+    errorCount,
+    warningCount,
+    suggestionCount,
+    issues,
+  };
+}
+
+/**
+ * Scan every editable HTML item in a course (pages, assignment/quiz descriptions,
+ * discussion/announcement messages, syllabus) for accessibility issues. Optionally
+ * skip items whose fingerprint matches `knownFingerprints` (already cached).
+ */
+export async function scanCourseAccessibilityAction(
+  courseUrl: string,
+  acronym?: string,
+  knownFingerprints: Record<string, string> = {}
+): Promise<{ items: ItemScan[]; unchanged: string[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const content = await listAccessibilityContent(courseUrl, acronym);
+    const items: ItemScan[] = [];
+    const unchanged: string[] = [];
+    for (const c of content) {
+      const key = `${c.type}:${c.id}`;
+      if (knownFingerprints[key] === c.fingerprint) {
+        unchanged.push(key);
+        continue;
+      }
+      const issues = await scanHtml(c.html);
+      items.push(toItemScan(c, issues));
+    }
+    return { items, unchanged };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not scan the course." };
+  }
+}
+
+/** Re-scan a single item (used right after it's edited). */
+export async function scanItemAccessibilityAction(
+  courseUrl: string,
+  type: AccessibleItemType,
+  id: string,
+  acronym?: string
+): Promise<{ item: ItemScan } | { error: string }> {
+  try {
+    await requireOwner();
+    const content = await getAccessibilityItem(courseUrl, type, id, acronym);
+    if (!content) return { error: "Could not load that item to scan." };
+    const issues = await scanHtml(content.html);
+    return { item: toItemScan(content, issues) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not scan the item." };
   }
 }
 

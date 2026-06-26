@@ -23,6 +23,8 @@ import {
 } from "./canvas-core";
 import { extractTextFromBuffer } from "./office-extract";
 import { parseOfficeParagraphs, applyOfficeSections, type OfficeKind, type OfficeParagraph, type RunSpan } from "./office-edit";
+import { createHash } from "crypto";
+import type { AccessibleItemType } from "./accessibility/types";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -734,6 +736,160 @@ export async function listCourseFiles(courseUrl: string, code?: string): Promise
       folderId: f.folder_id ?? null,
       updatedAt: f.updated_at ?? null,
     }));
+}
+
+// ── Accessibility content ─────────────────────────────────────────────────────
+
+/** One piece of HTML content to scan for accessibility. */
+export interface ScannableItem {
+  type: AccessibleItemType;
+  /** Page slug, content id (as string), or "syllabus". */
+  id: string;
+  title: string;
+  /** Canvas updated_at when available, else a content hash — re-scan key. */
+  fingerprint: string;
+  html: string;
+}
+
+// Loose shape for Canvas content objects that carry editable HTML.
+interface RawHtmlContent {
+  id?: number;
+  name?: string;
+  title?: string;
+  description?: string | null;
+  message?: string | null;
+  updated_at?: string | null;
+  is_announcement?: boolean;
+}
+
+function contentHash(html: string): string {
+  return createHash("sha1").update(html).digest("hex").slice(0, 16);
+}
+
+// Run `fn` over `items` with at most `limit` in flight (pages need per-item GETs).
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const idx = cursor;
+      cursor += 1;
+      out[idx] = await fn(items[idx]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+function htmlItem(
+  type: AccessibleItemType,
+  id: string | number,
+  title: string | undefined,
+  html: string | null | undefined,
+  updatedAt: string | null | undefined
+): ScannableItem | null {
+  const body = (html ?? "").trim();
+  if (!body) return null;
+  return {
+    type,
+    id: String(id),
+    title: (title ?? "").trim() || `${type} ${id}`,
+    fingerprint: updatedAt || contentHash(body),
+    html: body,
+  };
+}
+
+async function fetchJson<T>(url: string, ctx: CourseContext): Promise<T | null> {
+  try {
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${ctx.token}` } });
+    return r.ok ? ((await r.json()) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * List every editable HTML item in a course for accessibility scanning: pages
+ * (bodies fetched with limited concurrency), assignment/quiz descriptions,
+ * discussion/announcement messages, and the syllabus. Empty-HTML items are
+ * skipped. Best-effort per type — one failing type doesn't blank the others.
+ */
+export async function listAccessibilityContent(courseUrl: string, code?: string): Promise<ScannableItem[]> {
+  const ctx = resolveCourse(courseUrl, code);
+  const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
+
+  const [pageSummaries, assignments, quizzes, topics, course] = await Promise.all([
+    listPages(courseUrl, code).catch(() => [] as CanvasPageSummary[]),
+    safeFetchAll<RawHtmlContent>(`${base}/assignments?per_page=100`, ctx),
+    safeFetchAll<RawHtmlContent>(`${base}/quizzes?per_page=100`, ctx),
+    safeFetchAll<RawHtmlContent>(`${base}/discussion_topics?per_page=100`, ctx),
+    fetchJson<{ syllabus_body?: string | null }>(`${base}?include[]=syllabus_body`, ctx),
+  ]);
+
+  const items: ScannableItem[] = [];
+
+  const pages = await mapWithConcurrency(pageSummaries, 6, async (p) => {
+    try {
+      const full = await getPage(courseUrl, p.url, code);
+      return htmlItem("page", p.url, full.title, full.body, p.updatedAt);
+    } catch {
+      return null;
+    }
+  });
+  for (const p of pages) if (p) items.push(p);
+
+  for (const a of assignments) {
+    if (typeof a.id !== "number") continue;
+    const it = htmlItem("assignment", a.id, a.name, a.description, a.updated_at);
+    if (it) items.push(it);
+  }
+  for (const q of quizzes) {
+    if (typeof q.id !== "number") continue;
+    const it = htmlItem("quiz", q.id, q.title, q.description, q.updated_at);
+    if (it) items.push(it);
+  }
+  for (const t of topics) {
+    if (typeof t.id !== "number") continue;
+    const it = htmlItem(t.is_announcement ? "announcement" : "discussion", t.id, t.title, t.message, t.updated_at);
+    if (it) items.push(it);
+  }
+  const syllabus = htmlItem("syllabus", "syllabus", "Syllabus", course?.syllabus_body, null);
+  if (syllabus) items.push(syllabus);
+
+  return items;
+}
+
+/** Fetch a single scannable item's current HTML (used to re-scan after an edit). */
+export async function getAccessibilityItem(
+  courseUrl: string,
+  type: AccessibleItemType,
+  id: string,
+  code?: string
+): Promise<ScannableItem | null> {
+  const ctx = resolveCourse(courseUrl, code);
+  const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
+  if (type === "page") {
+    try {
+      const full = await getPage(courseUrl, id, code);
+      return { type, id, title: full.title, fingerprint: full.updatedAt || contentHash(full.body), html: full.body };
+    } catch {
+      return null;
+    }
+  }
+  if (type === "assignment" || type === "quiz") {
+    const endpoint = type === "assignment" ? "assignments" : "quizzes";
+    const raw = await fetchJson<RawHtmlContent>(`${base}/${endpoint}/${id}`, ctx);
+    return raw ? htmlItem(type, id, raw.name ?? raw.title, raw.description, raw.updated_at) : null;
+  }
+  if (type === "discussion" || type === "announcement") {
+    const raw = await fetchJson<RawHtmlContent>(`${base}/discussion_topics/${id}`, ctx);
+    return raw ? htmlItem(type, id, raw.title, raw.message, raw.updated_at) : null;
+  }
+  if (type === "syllabus") {
+    const course = await fetchJson<{ syllabus_body?: string | null }>(`${base}?include[]=syllabus_body`, ctx);
+    return htmlItem("syllabus", "syllabus", "Syllabus", course?.syllabus_body, null);
+  }
+  return null;
 }
 
 /** Rename a course file (its display name). */

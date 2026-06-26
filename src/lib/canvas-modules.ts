@@ -892,6 +892,37 @@ export async function getAccessibilityItem(
   return null;
 }
 
+/** Save edited HTML back to a scannable item, routed by type (for remediation). */
+export async function saveAccessibilityItemHtml(
+  courseUrl: string,
+  type: AccessibleItemType,
+  id: string,
+  html: string,
+  code?: string
+): Promise<void> {
+  const ctx = resolveCourse(courseUrl, code);
+  const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
+  const params = new URLSearchParams();
+  if (type === "page") {
+    params.append("wiki_page[body]", html);
+    await writeJson(`${base}/pages/${encodeURIComponent(id)}`, "PUT", ctx, params);
+  } else if (type === "assignment") {
+    params.append("assignment[description]", html);
+    await writeJson(`${base}/assignments/${id}`, "PUT", ctx, params);
+  } else if (type === "quiz") {
+    params.append("quiz[description]", html);
+    await writeJson(`${base}/quizzes/${id}`, "PUT", ctx, params);
+  } else if (type === "discussion" || type === "announcement") {
+    params.append("message", html);
+    await writeJson(`${base}/discussion_topics/${id}`, "PUT", ctx, params);
+  } else if (type === "syllabus") {
+    params.append("course[syllabus_body]", html);
+    await writeJson(`${base}`, "PUT", ctx, params);
+  } else {
+    throw new Error("This item type can't be edited here.");
+  }
+}
+
 /** Rename a course file (its display name). */
 export async function renameCourseFile(
   courseUrl: string,

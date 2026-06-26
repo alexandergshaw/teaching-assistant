@@ -96,6 +96,7 @@ import {
   type QuizQuestionInput,
   listAccessibilityContent,
   getAccessibilityItem,
+  saveAccessibilityItemHtml,
 } from "@/lib/canvas-modules";
 import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
 import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
@@ -1390,6 +1391,40 @@ export async function scanCourseAccessibilityAction(
     return { items };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not scan the course." };
+  }
+}
+
+/** Fetch one scannable item's current HTML + title (for the remediation editor). */
+export async function getAccessibilityItemHtmlAction(
+  courseUrl: string,
+  type: AccessibleItemType,
+  id: string,
+  acronym?: string
+): Promise<{ html: string; title: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const item = await getAccessibilityItem(courseUrl, type, id, acronym);
+    if (!item) return { error: "Could not load that item." };
+    return { html: item.html, title: item.title };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load that item." };
+  }
+}
+
+/** Save edited HTML back to a scannable item (page/gradable/announcement/syllabus). */
+export async function saveAccessibilityItemHtmlAction(
+  courseUrl: string,
+  type: AccessibleItemType,
+  id: string,
+  html: string,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await saveAccessibilityItemHtml(courseUrl, type, id, html, acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the item to Canvas." };
   }
 }
 

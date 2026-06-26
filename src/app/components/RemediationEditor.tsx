@@ -2,27 +2,20 @@
 
 import { useEffect, useState } from "react";
 import {
-  getPageAction,
-  updatePageAction,
-  getGradableAction,
-  updateGradableAction,
+  getAccessibilityItemHtmlAction,
+  saveAccessibilityItemHtmlAction,
   suggestAltTextAction,
   suggestLinkTextAction,
 } from "../actions";
 import { applyFix, needsAiValue } from "@/lib/accessibility/remediate";
 import type { AccessibleItemType, Issue } from "@/lib/accessibility/types";
-import type { GradableKind } from "@/lib/canvas-modules";
 import { getStoredProvider } from "@/lib/llm-provider";
 
-const KIND: Partial<Record<AccessibleItemType, GradableKind>> = {
-  assignment: "Assignment",
-  quiz: "Quiz",
-  discussion: "Discussion",
-};
+const REMEDIABLE: AccessibleItemType[] = ["page", "assignment", "quiz", "discussion", "announcement", "syllabus"];
 
-/** Whether this item type can be fetched + saved here (has an editor action). */
+/** Whether this item type can be fetched + saved here (has an editor route). */
 export function isRemediable(type: AccessibleItemType): boolean {
-  return type === "page" || type in KIND;
+  return REMEDIABLE.includes(type);
 }
 
 /**
@@ -56,32 +49,14 @@ export default function RemediationEditor({
     let cancelled = false;
     (async () => {
       // 1) Fetch current content.
-      let html = "";
-      if (type === "page") {
-        const r = await getPageAction(courseUrl, id, acronym);
-        if (cancelled) return;
-        if ("error" in r) {
-          setError(r.error);
-          setStage("ready");
-          return;
-        }
-        html = r.page.body;
-      } else {
-        const kind = KIND[type];
-        if (!kind) {
-          setError("This item type can't be edited here.");
-          setStage("ready");
-          return;
-        }
-        const r = await getGradableAction(courseUrl, kind, Number(id), acronym);
-        if (cancelled) return;
-        if ("error" in r) {
-          setError(r.error);
-          setStage("ready");
-          return;
-        }
-        html = r.detail.description;
+      const r = await getAccessibilityItemHtmlAction(courseUrl, type, id, acronym);
+      if (cancelled) return;
+      if ("error" in r) {
+        setError(r.error);
+        setStage("ready");
+        return;
       }
+      const html = r.html;
 
       // 2) AI value for alt/link fixes.
       let value: string | undefined;
@@ -109,11 +84,8 @@ export default function RemediationEditor({
   const save = async () => {
     setStage("saving");
     setError(null);
-    const result =
-      type === "page"
-        ? await updatePageAction(courseUrl, id, { body }, acronym)
-        : await updateGradableAction(courseUrl, KIND[type]!, Number(id), { description: body }, acronym);
-    if (result && "error" in result) {
+    const result = await saveAccessibilityItemHtmlAction(courseUrl, type, id, body, acronym);
+    if ("error" in result) {
       setError(result.error);
       setStage("ready");
       return;

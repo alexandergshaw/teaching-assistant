@@ -4591,3 +4591,37 @@ export async function ingestRepoAction(repoRef: string): Promise<{ digest: RepoD
     return { error: err instanceof Error ? err.message : "Could not read the repository." };
   }
 }
+
+/** Generate a teachable course outline (weekly schedule + assignments) from a repo. */
+export async function generateCourseFromRepoAction(
+  repoRef: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ outline: string; fullName: string; fileCount: number; truncated: boolean } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const digest = await ingestRepo(parsed.owner, parsed.repo);
+    const prompt = `You are an instructional designer building a course that teaches the concepts, technologies, and skills demonstrated in the codebase below.
+
+Produce a course outline as clean Markdown with:
+- A one-paragraph course summary naming the main technologies and what students will learn.
+- A weekly schedule of 8-14 weeks. For each week: "## Week N — <topic>", a short description, the key concepts/files from this codebase it draws on, and 1-2 assignments ("**Assignment:** ...") grounded in the actual code.
+- A final "## Capstone" tied to extending or rebuilding part of this project.
+
+Base everything on what the code actually contains — do not invent technologies that are not present. Keep it practical and specific.
+
+CODEBASE (${digest.fullName}${digest.truncated ? ", truncated" : ""}):
+${digest.text}`;
+    const result = await callLlm(
+      { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.5, maxOutputTokens: 2600 } },
+      provider
+    );
+    if (!result.ok) return { error: `Generation failed: HTTP ${result.status}` };
+    const outline = result.text.trim();
+    if (!outline) return { error: "The model returned an empty outline." };
+    return { outline, fullName: digest.fullName, fileCount: digest.fileCount, truncated: digest.truncated };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate the course." };
+  }
+}

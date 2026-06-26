@@ -5,6 +5,7 @@ import { useRef, useState, useEffect } from "react";
 import {
   generateCourseScheduleAction,
   generateCopilotProjectPromptAction,
+  generateCourseFromRepoAction,
   analyzeSyllabusInputsAction,
   regenerateSyllabusFieldAction,
   buildAdaptedSyllabusAction,
@@ -13,6 +14,7 @@ import {
   type CourseScheduleRow,
   type SyllabusCourseInfo,
 } from "../actions";
+import GithubRepoPicker from "./GithubRepoPicker";
 import LecturePlanningTab from "./LecturePlanningTab";
 import { spansToPlainText } from "./RichTextEditor";
 import { RichTextSectionEditor } from "./RichTextSectionEditor";
@@ -37,7 +39,7 @@ type AdaptSection = {
   /** Whether the AI flagged this as a class-specific field (shown in the form). */
   isField: boolean;
 };
-type PlanningMode = "syllabus" | "schedule" | "project" | "lecture";
+type PlanningMode = "syllabus" | "schedule" | "project" | "lecture" | "codebase";
 
 // Map an AI replacement string onto the paragraph's original formatting: if the
 // replacement still starts with the original's leading bold label, keep that
@@ -110,6 +112,37 @@ export default function CoursePlanningTab() {
   const [projectPrompt, setProjectPrompt] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
 
+  // "From a Codebase" mode: generate a course outline from a GitHub repo.
+  const [codebaseRepo, setCodebaseRepo] = useState("");
+  const [codebaseBusy, setCodebaseBusy] = useState(false);
+  const [codebaseOutline, setCodebaseOutline] = useState<string | null>(null);
+  const [codebaseNote, setCodebaseNote] = useState<string | null>(null);
+  const [codebaseError, setCodebaseError] = useState<string | null>(null);
+
+  const handleGenerateFromCodebase = async () => {
+    if (!codebaseRepo.trim()) {
+      setCodebaseError("Choose or enter a repository first.");
+      return;
+    }
+    setCodebaseBusy(true);
+    setCodebaseError(null);
+    setCodebaseOutline(null);
+    setCodebaseNote(null);
+    try {
+      const r = await generateCourseFromRepoAction(codebaseRepo.trim(), getStoredProvider());
+      if ("error" in r) {
+        setCodebaseError(r.error);
+      } else {
+        setCodebaseOutline(r.outline);
+        setCodebaseNote(`Read ${r.fileCount} file${r.fileCount === 1 ? "" : "s"} from ${r.fullName}${r.truncated ? " (truncated)" : ""}.`);
+      }
+    } catch (err) {
+      setCodebaseError(err instanceof Error ? err.message : "Failed to generate the course.");
+    } finally {
+      setCodebaseBusy(false);
+    }
+  };
+
 
   useEffect(() => {
     // One-time hydration of editable form fields from localStorage. This must
@@ -118,7 +151,7 @@ export default function CoursePlanningTab() {
     // during hydration and cause an SSR mismatch. Hence the rule is suppressed.
     /* eslint-disable react-hooks/set-state-in-effect */
     const savedMode = localStorage.getItem(LS_KEYS.planningMode);
-    if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project" || savedMode === "lecture") {
+    if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project" || savedMode === "lecture" || savedMode === "codebase") {
       setPlanningMode(savedMode);
     }
     setCourseDescription(localStorage.getItem(LS_KEYS.courseDescription) || "");
@@ -537,6 +570,13 @@ export default function CoursePlanningTab() {
               onClick={() => { setPlanningMode("syllabus"); localStorage.setItem(LS_KEYS.planningMode, "syllabus"); }}
             >
               Syllabus
+            </button>
+            <button
+              type="button"
+              className={`${styles.scheduleModeBtn}${planningMode === "codebase" ? ` ${styles.active}` : ""}`}
+              onClick={() => { setPlanningMode("codebase"); localStorage.setItem(LS_KEYS.planningMode, "codebase"); }}
+            >
+              From a Codebase
             </button>
           </div>
 
@@ -960,6 +1000,52 @@ export default function CoursePlanningTab() {
                     className={styles.submitButton}
                     style={{ marginTop: 8 }}
                     onClick={() => void navigator.clipboard.writeText(projectPrompt)}
+                  >
+                    Copy to Clipboard
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── From a Codebase mode: generate a course outline from a GitHub repo ── */}
+          {planningMode === "codebase" && (
+            <>
+              <p style={{ marginTop: 0, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                Pick a GitHub repository and generate a teachable course outline — a weekly schedule and
+                assignments grounded in the technologies and structure of that codebase.
+              </p>
+              <div className={styles.field}>
+                <label>Repository</label>
+                <GithubRepoPicker value={codebaseRepo} onChange={setCodebaseRepo} disabled={codebaseBusy} />
+              </div>
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleGenerateFromCodebase}
+                disabled={codebaseBusy || !codebaseRepo.trim()}
+              >
+                {codebaseBusy ? "Reading the codebase…" : "Generate course outline"}
+              </button>
+              {codebaseError && <p className={styles.error}>{codebaseError}</p>}
+              {codebaseOutline && (
+                <div className={styles.field}>
+                  <label>Course outline</label>
+                  {codebaseNote && (
+                    <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: 8 }}>{codebaseNote}</p>
+                  )}
+                  <textarea
+                    className={styles.textInput}
+                    value={codebaseOutline}
+                    readOnly
+                    rows={20}
+                    style={{ fontFamily: "monospace", fontSize: "0.85rem" }}
+                  />
+                  <button
+                    type="button"
+                    className={styles.submitButton}
+                    style={{ marginTop: 8 }}
+                    onClick={() => void navigator.clipboard.writeText(codebaseOutline)}
                   >
                     Copy to Clipboard
                   </button>

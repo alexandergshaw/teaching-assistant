@@ -90,7 +90,13 @@ export default function DocStructureEditor({
       setParagraphs(r.paragraphs);
       setOriginalTitle(r.title);
       setDocTitle(r.title || titleFromFileName(r.name));
-      setLevels(Object.fromEntries(r.paragraphs.map((p) => [p.id, p.style])));
+      const seeded: Record<string, string> = Object.fromEntries(r.paragraphs.map((p) => [p.id, p.style]));
+      // If the document has no headings yet (the flag being fixed), prefill the
+      // dropdowns with suggested headings so the fix is ready to save on open.
+      if (!r.paragraphs.some((p) => /^Heading[1-9]$/.test(p.style))) {
+        Object.assign(seeded, suggestLevels(r.paragraphs));
+      }
+      setLevels(seeded);
       setStage("ready");
     })();
     return () => {

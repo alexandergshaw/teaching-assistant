@@ -5,8 +5,15 @@
 import { PDFDocument, PDFName, PDFDict, PDFArray, PDFString, PDFHexString } from "pdf-lib";
 import type { Issue } from "./types";
 
-function flag(ruleId: string, severity: Issue["severity"], message: string, wcag: string, help: string): Issue {
-  return { ruleId, severity, message, wcag, help, locator: { selector: "", snippet: "" }, fixKind: "flag" };
+function flag(
+  ruleId: string,
+  severity: Issue["severity"],
+  message: string,
+  wcag: string,
+  help: string,
+  fixKind: Issue["fixKind"] = "flag"
+): Issue {
+  return { ruleId, severity, message, wcag, help, locator: { selector: "", snippet: "" }, fixKind };
 }
 
 // Walk a PDF structure tree looking for a heading element (/S = H or H1–H6).
@@ -56,7 +63,7 @@ export async function scanPdf(buffer: Buffer): Promise<Issue[]> {
       "error",
       "PDF is not tagged for accessibility.",
       "1.3.1",
-      "Tag the PDF (in Acrobat: Accessibility > Autotag Document, then check the reading order)."
+      "Tagging can't be done here (it needs a real structure tree). In Acrobat: Accessibility > Autotag Document, or fix the source Word file's headings and re-export as a tagged PDF."
     ));
   }
 
@@ -69,21 +76,47 @@ export async function scanPdf(buffer: Buffer): Promise<Issue[]> {
       "error",
       "PDF does not include headings for structure.",
       "1.3.1",
-      "Tag the PDF and mark headings so screen-reader users can navigate it."
+      "Marking headings needs a tagged structure tree, which can't be authored here. Use Acrobat's reading-order tools, or add headings in the source Word file and re-export."
     ));
   }
 
-  // Document language /Lang
+  // Document language /Lang — fixable in-app.
   const lang = catalog.lookup(PDFName.of("Lang"));
   const langStr = lang instanceof PDFString || lang instanceof PDFHexString ? lang.decodeText() : "";
   if (!langStr.trim()) {
-    issues.push(flag("pdf-no-lang", "warning", "PDF has no document language set.", "3.1.1", "Set the document language in the PDF's properties."));
+    issues.push(flag("pdf-no-lang", "warning", "PDF has no document language set.", "3.1.1", "Set the document language so screen readers use the right pronunciation.", "edit"));
   }
 
-  // Document title (and ideally displayed instead of the file name)
+  // Document title (and ideally displayed instead of the file name) — fixable in-app.
   if (!(doc.getTitle() ?? "").trim()) {
-    issues.push(flag("pdf-no-title", "warning", "PDF is missing a document title.", "2.4.2", "Add a title in the PDF's properties and set it to display."));
+    issues.push(flag("pdf-no-title", "warning", "PDF is missing a document title.", "2.4.2", "Add a title and set it to display instead of the file name.", "edit"));
   }
 
   return issues;
+}
+
+/** Read a PDF's current language + title (to prefill the PDF fix editor). */
+export async function readPdfMeta(buffer: Buffer): Promise<{ lang: string; title: string }> {
+  let doc: PDFDocument;
+  try {
+    doc = await PDFDocument.load(buffer, { ignoreEncryption: true, updateMetadata: false, throwOnInvalidObject: false });
+  } catch {
+    return { lang: "", title: "" };
+  }
+  const lang = doc.catalog.lookup(PDFName.of("Lang"));
+  const langStr = lang instanceof PDFString || lang instanceof PDFHexString ? lang.decodeText() : "";
+  return { lang: langStr.trim(), title: (doc.getTitle() ?? "").trim() };
+}
+
+/**
+ * Set a PDF's document language (/Lang) and/or title, the two accessibility
+ * properties that can be authored without a structure tree. Returns new bytes.
+ * (Tagging and heading structure are intentionally not touched — claiming them
+ * without real tags would mislead assistive tech.)
+ */
+export async function setPdfAccessibility(buffer: Buffer, fixes: { lang?: string; title?: string }): Promise<Buffer> {
+  const doc = await PDFDocument.load(buffer, { ignoreEncryption: true, updateMetadata: false, throwOnInvalidObject: false });
+  if (fixes.lang?.trim()) doc.catalog.set(PDFName.of("Lang"), PDFString.of(fixes.lang.trim()));
+  if (fixes.title?.trim()) doc.setTitle(fixes.title.trim(), { showInWindowTitleBar: true });
+  return Buffer.from(await doc.save());
 }

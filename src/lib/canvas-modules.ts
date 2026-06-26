@@ -39,7 +39,8 @@ import {
   type RunSpan,
 } from "./office-edit";
 import { createHash } from "crypto";
-import type { AccessibleItemType } from "./accessibility/types";
+import type { AccessibleItemType, Issue } from "./accessibility/types";
+import { scanPdf, readPdfMeta, setPdfAccessibility } from "./accessibility/pdf";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -2189,6 +2190,31 @@ export async function getCanvasFileBuffer(courseUrl: string, fileId: number, cod
   const ctx = resolveCourse(courseUrl, code);
   const { buffer } = await fetchCanvasFile(ctx, fileId);
   return buffer;
+}
+
+/** Read a PDF's current language + title (to prefill the PDF fix editor). */
+export async function getPdfMeta(
+  courseUrl: string,
+  fileId: number,
+  code?: string
+): Promise<{ lang: string; title: string }> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { buffer } = await fetchCanvasFile(ctx, fileId);
+  return readPdfMeta(buffer);
+}
+
+/** Set a PDF's language/title, overwrite it in Canvas, and return its remaining issues. */
+export async function savePdfFixes(
+  courseUrl: string,
+  fileId: number,
+  fixes: { lang?: string; title?: string },
+  code?: string
+): Promise<Issue[]> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
+  const edited = await setPdfAccessibility(buffer, fixes);
+  await overwriteCanvasFile({ ...ctx, courseId: ctx.courseId }, meta, edited);
+  return scanPdf(edited);
 }
 
 /** Read a file's images + current alt text (for the office alt remediation editor). */

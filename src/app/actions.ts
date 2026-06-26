@@ -102,6 +102,8 @@ import {
   getOfficeFileStructure,
   saveOfficeFileStructure,
   saveOfficeFileFixes,
+  getPdfMeta,
+  savePdfFixes,
   uploadFileToModule,
   appendOfficeParagraph,
   listScannableFiles,
@@ -1517,6 +1519,37 @@ export async function autoFixOfficeFileAction(
     return { issues: buildOfficeIssues(after) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not fix the file." };
+  }
+}
+
+/** Read a PDF's current language + title for the PDF fix editor. */
+export async function getPdfMetaAction(
+  courseUrl: string,
+  fileId: number,
+  acronym?: string
+): Promise<{ lang: string; title: string } | { error: string }> {
+  try {
+    await requireOwner();
+    return await getPdfMeta(courseUrl, fileId, acronym);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not read the file." };
+  }
+}
+
+/** Set a PDF's language/title, save it to Canvas, and return the issues that remain. */
+export async function savePdfAccessibilityAction(
+  courseUrl: string,
+  fileId: number,
+  lang: string,
+  title: string,
+  acronym?: string
+): Promise<{ issues: Issue[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const issues = await savePdfFixes(courseUrl, fileId, { lang, title }, acronym);
+    return { issues };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the file to Canvas." };
   }
 }
 

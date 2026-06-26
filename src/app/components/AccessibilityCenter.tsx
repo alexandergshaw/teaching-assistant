@@ -6,6 +6,7 @@ import { useAccessibility } from "./AccessibilityProvider";
 import RemediationEditor, { isRemediable } from "./RemediationEditor";
 import OfficeAltEditor from "./OfficeAltEditor";
 import DocStructureEditor from "./DocStructureEditor";
+import PdfFixEditor from "./PdfFixEditor";
 import { autoFixOfficeFileAction } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import type { AccessibleItemType, Issue, ItemScan, Severity } from "@/lib/accessibility/types";
@@ -34,6 +35,8 @@ function buildReviewQueue(items: ItemScan[]): FixTarget[] {
       if (alt) queue.push(at(alt));
       const structure = fixable.find((i) => i.ruleId === "doc-no-title" || i.ruleId === "doc-no-structure");
       if (structure) queue.push(at(structure));
+      const pdf = fixable.find((i) => i.ruleId.startsWith("pdf-"));
+      if (pdf) queue.push(at(pdf));
     } else if (isRemediable(item.type)) {
       for (const issue of fixable) queue.push(at(issue));
     }
@@ -344,6 +347,19 @@ export default function AccessibilityCenter() {
 
       {fixTarget && fixTarget.type === "file" && fixTarget.issue.ruleId === "office-image-alt" ? (
         <OfficeAltEditor
+          courseUrl={a11y.courseUrl}
+          acronym={a11y.acronym}
+          fileId={Number(fixTarget.id)}
+          title={fixTarget.title}
+          progress={reviewProgress}
+          onSkip={reviewQueue ? advanceReview : undefined}
+          onClose={(result) => {
+            if (result) a11y.setFileScan(fixTarget.id, fixTarget.title, result.issues);
+            afterFix(!!result);
+          }}
+        />
+      ) : fixTarget && fixTarget.type === "file" && fixTarget.issue.ruleId.startsWith("pdf-") ? (
+        <PdfFixEditor
           courseUrl={a11y.courseUrl}
           acronym={a11y.acronym}
           fileId={Number(fixTarget.id)}

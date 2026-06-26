@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import { useState } from "react";
 import { useAccessibility } from "./AccessibilityProvider";
 import RemediationEditor, { isRemediable } from "./RemediationEditor";
+import OfficeAltEditor from "./OfficeAltEditor";
 import type { AccessibleItemType, Issue, ItemScan, Severity } from "@/lib/accessibility/types";
 
 // What's being fixed right now (drives the RemediationEditor overlay).
@@ -93,6 +94,23 @@ export default function AccessibilityCenter() {
               </button>
               <button
                 type="button"
+                onClick={() => a11y.scanFiles()}
+                disabled={a11y.fileStatus === "running"}
+                title="Scan Word/PowerPoint files for images missing alt text (downloads files)"
+                style={{
+                  border: "1px solid var(--field-border, #cbd5e1)",
+                  background: "#fff",
+                  borderRadius: 8,
+                  padding: "5px 10px",
+                  fontSize: "0.82rem",
+                  cursor: a11y.fileStatus === "running" ? "default" : "pointer",
+                  color: "#334155",
+                }}
+              >
+                {a11y.fileStatus === "running" ? "Scanning files…" : a11y.fileStatus === "done" ? "Rescan files" : "Scan files"}
+              </button>
+              <button
+                type="button"
                 onClick={() => a11y.rescanAll()}
                 disabled={a11y.status === "scanning"}
                 style={{
@@ -156,7 +174,18 @@ export default function AccessibilityCenter() {
         </div>
       </aside>
 
-      {fixTarget && (
+      {fixTarget && fixTarget.type === "file" ? (
+        <OfficeAltEditor
+          courseUrl={a11y.courseUrl}
+          acronym={a11y.acronym}
+          fileId={Number(fixTarget.id)}
+          title={fixTarget.title}
+          onClose={(result) => {
+            if (result) a11y.setFileScan(fixTarget.id, fixTarget.title, result.issues);
+            setFixTarget(null);
+          }}
+        />
+      ) : fixTarget ? (
         <RemediationEditor
           courseUrl={a11y.courseUrl}
           acronym={a11y.acronym}
@@ -166,13 +195,13 @@ export default function AccessibilityCenter() {
           issue={fixTarget.issue}
           onClose={() => setFixTarget(null)}
         />
-      )}
+      ) : null}
     </>
   );
 }
 
 function ItemBlock({ item, onFix }: { item: ItemScan; onFix: (issue: Issue) => void }) {
-  const remediable = isRemediable(item.type);
+  const remediable = isRemediable(item.type) || item.type === "file";
   const issues = [...item.issues].sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity]);
   return (
     <div style={{ marginBottom: 14, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 10, overflow: "hidden" }}>

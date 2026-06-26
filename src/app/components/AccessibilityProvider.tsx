@@ -5,6 +5,7 @@ import { useInstitutionSelection } from "@/lib/institutions";
 import {
   scanCourseAccessibilityAction,
   scanItemAccessibilityAction,
+  scanCourseFilesAccessibilityAction,
   getLinkValidationAction,
   startLinkValidationAction,
 } from "../actions";
@@ -72,6 +73,11 @@ export interface AccessibilityValue {
   /** Course Link Validator: status + trigger a fresh run. */
   linkStatus: LinkStatus;
   checkLinks: () => void;
+  /** Office-file (docx/pptx) image-alt scan: status + trigger. */
+  fileStatus: LinkStatus;
+  scanFiles: () => void;
+  /** Replace a file's issues after its alt text is edited. */
+  setFileScan: (id: string, title: string, issues: Issue[]) => void;
   centerOpen: boolean;
   setCenterOpen: (open: boolean) => void;
 }
@@ -90,6 +96,9 @@ const DEFAULT: AccessibilityValue = {
   rescanAll: () => {},
   linkStatus: "idle",
   checkLinks: () => {},
+  fileStatus: "idle",
+  scanFiles: () => {},
+  setFileScan: () => {},
   centerOpen: false,
   setCenterOpen: () => {},
 };
@@ -116,6 +125,8 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
   const [error, setError] = useState<string | undefined>();
   const [linkGroups, setLinkGroups] = useState<Record<string, LinkGroup>>({});
   const [linkStatus, setLinkStatus] = useState<LinkStatus>("idle");
+  const [fileItems, setFileItems] = useState<Record<string, ItemScan>>({});
+  const [fileStatus, setFileStatus] = useState<LinkStatus>("idle");
   const [centerOpen, setCenterOpen] = useState(false);
   const scannedSig = useRef<string>("");
 
@@ -134,6 +145,8 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
     setItems({}); // clear the previous course's results while the new scan runs
     setLinkGroups({});
     setLinkStatus("idle");
+    setFileItems({});
+    setFileStatus("idle");
     setError(undefined);
     const result = await scanCourseAccessibilityAction(url, inst || undefined);
     if ("error" in result) {
@@ -159,7 +172,24 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
     setError(undefined);
     setLinkGroups({});
     setLinkStatus("idle");
+    setFileItems({});
+    setFileStatus("idle");
   }, []);
+
+  // Scan the course's Office files for missing image alt text (downloads files).
+  const scanFiles = useCallback(async () => {
+    if (!hasCourseId(courseUrl)) return;
+    setFileStatus("running");
+    const result = await scanCourseFilesAccessibilityAction(courseUrl, institution || undefined);
+    if ("error" in result) {
+      setFileStatus("error");
+      return;
+    }
+    const map: Record<string, ItemScan> = {};
+    for (const it of result.items) map[itemKey(it.type, it.id)] = it;
+    setFileItems(map);
+    setFileStatus("done");
+  }, [courseUrl, institution]);
 
   // Start a fresh link-validation run and poll until it completes (~2 min cap).
   const checkLinks = useCallback(async () => {
@@ -229,6 +259,18 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
     void runScan(courseUrl, institution);
   }, [courseUrl, institution, runScan]);
 
+  // Update one file's issues after its alt text is edited (the office alt editor
+  // already knows the new state, so no re-download is needed).
+  const setFileScan = useCallback((id: string, title: string, issues: Issue[]) => {
+    setFileItems((prev) => {
+      const c = countsOf(issues);
+      return {
+        ...prev,
+        [`file:${id}`]: { type: "file", id, title, fingerprint: prev[`file:${id}`]?.fingerprint ?? "", errorCount: c.errorCount, warningCount: c.warningCount, suggestionCount: c.suggestionCount, issues },
+      };
+    });
+  }, []);
+
   // Editors dispatch this after saving an item, so its badge updates without a
   // full course re-scan.
   useEffect(() => {
@@ -241,9 +283,11 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
   }, [rescanItem]);
 
   const value = useMemo<AccessibilityValue>(() => {
-    // Merge HTML-scan issues with broken-link issues per item, recomputing counts.
+    // Merge HTML-scan issues with file (office image-alt) and broken-link issues
+    // per item, recomputing counts.
     const merged: Record<string, ItemScan> = {};
     for (const [k, it] of Object.entries(items)) merged[k] = { ...it, issues: [...it.issues] };
+    for (const [k, it] of Object.entries(fileItems)) merged[k] = { ...it, issues: [...it.issues] };
     for (const [k, g] of Object.entries(linkGroups)) {
       if (merged[k]) merged[k].issues.push(...g.issues);
       else merged[k] = { type: g.type, id: g.id, title: g.title, fingerprint: "", errorCount: 0, warningCount: 0, suggestionCount: 0, issues: [...g.issues] };
@@ -278,10 +322,13 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
       rescanAll,
       linkStatus,
       checkLinks: () => void checkLinks(),
+      fileStatus,
+      scanFiles: () => void scanFiles(),
+      setFileScan,
       centerOpen,
       setCenterOpen,
     };
-  }, [items, linkGroups, status, error, courseUrl, institution, linkStatus, rescanItem, rescanAll, checkLinks, centerOpen]);
+  }, [items, fileItems, linkGroups, status, error, courseUrl, institution, linkStatus, fileStatus, rescanItem, rescanAll, checkLinks, scanFiles, setFileScan, centerOpen]);
 
   return (
     <AccessibilityContext.Provider value={value}>

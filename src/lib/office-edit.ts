@@ -424,3 +424,99 @@ export async function applyOfficeSections(
 
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
 }
+
+// ── Image alt text (accessibility) ────────────────────────────────────────────
+
+/** One image in an Office file and its current alt text. */
+export interface OfficeImage {
+  /** Stable handle: docx "d{docPrId}", pptx "s{slideIdx}_{cNvPrId}". */
+  id: string;
+  /** The image's name (e.g. "Picture 1"). */
+  name: string;
+  /** Current alt text (the descr attribute), "" when missing. */
+  alt: string;
+}
+
+const attr = (attrs: string, name: string): string => {
+  const m = attrs.match(new RegExp(`\\b${name}="([^"]*)"`));
+  return m ? decodeXmlEntities(m[1]) : "";
+};
+
+// Set (or replace) the descr attribute on an element's opening-tag attribute string.
+// Escapes for an attribute value (incl. the double-quote that delimits it).
+const withDescr = (attrs: string, alt: string): string => {
+  const cleaned = attrs.replace(/\s+descr="[^"]*"/, "");
+  return `${cleaned} descr="${escapeXml(alt).replace(/"/g, "&quot;")}"`;
+};
+
+/** List the images (with alt text) in a docx/pptx file. */
+export async function extractOfficeImages(kind: OfficeKind, buffer: Buffer): Promise<OfficeImage[]> {
+  const zip = await JSZip.loadAsync(buffer);
+  const images: OfficeImage[] = [];
+
+  if (kind === "docx") {
+    const file = zip.file("word/document.xml");
+    if (!file) return [];
+    const xml = await file.async("string");
+    for (const m of xml.matchAll(/<wp:docPr\b([^>]*?)\/?>/g)) {
+      const id = attr(m[1], "id");
+      if (!id) continue;
+      images.push({ id: `d${id}`, name: attr(m[1], "name") || `Image ${id}`, alt: attr(m[1], "descr") });
+    }
+    return images;
+  }
+
+  const slides = sortedSlides(zip);
+  for (let s = 0; s < slides.length; s += 1) {
+    const xml = await slides[s].async("string");
+    // Only <p:cNvPr> inside a <p:pic> (a picture) — not every shape.
+    for (const pic of xml.matchAll(/<p:pic\b[\s\S]*?<\/p:pic>/g)) {
+      const cn = pic[0].match(/<p:cNvPr\b([^>]*?)\/?>/);
+      if (!cn) continue;
+      const id = attr(cn[1], "id");
+      if (!id) continue;
+      images.push({ id: `s${s}_${id}`, name: attr(cn[1], "name") || `Image ${id}`, alt: attr(cn[1], "descr") });
+    }
+  }
+  return images;
+}
+
+/** Set alt text (descr) on images by their {@link OfficeImage.id}; return new bytes. */
+export async function setOfficeImageAlt(
+  kind: OfficeKind,
+  buffer: Buffer,
+  edits: Record<string, string>
+): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(buffer);
+
+  if (kind === "docx") {
+    const file = zip.file("word/document.xml");
+    if (!file) return buffer;
+    let xml = await file.async("string");
+    xml = xml.replace(/<wp:docPr\b([^>]*?)(\/?)>/g, (whole, attrs: string, slash: string) => {
+      const id = attr(attrs, "id");
+      const alt = id ? edits[`d${id}`] : undefined;
+      return alt === undefined ? whole : `<wp:docPr${withDescr(attrs, alt)}${slash}>`;
+    });
+    zip.file("word/document.xml", xml);
+  } else {
+    const slides = sortedSlides(zip);
+    for (let s = 0; s < slides.length; s += 1) {
+      const file = slides[s];
+      let xml = await file.async("string");
+      let touched = false;
+      xml = xml.replace(/<p:pic\b[\s\S]*?<\/p:pic>/g, (pic) =>
+        pic.replace(/<p:cNvPr\b([^>]*?)(\/?)>/, (whole, attrs: string, slash: string) => {
+          const id = attr(attrs, "id");
+          const alt = id ? edits[`s${s}_${id}`] : undefined;
+          if (alt === undefined) return whole;
+          touched = true;
+          return `<p:cNvPr${withDescr(attrs, alt)}${slash}>`;
+        })
+      );
+      if (touched) zip.file(file.name, xml);
+    }
+  }
+
+  return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+}

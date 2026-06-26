@@ -22,7 +22,16 @@ import {
   type CanvasInstitution,
 } from "./canvas-core";
 import { extractTextFromBuffer } from "./office-extract";
-import { parseOfficeParagraphs, applyOfficeSections, type OfficeKind, type OfficeParagraph, type RunSpan } from "./office-edit";
+import {
+  parseOfficeParagraphs,
+  applyOfficeSections,
+  extractOfficeImages,
+  setOfficeImageAlt,
+  type OfficeKind,
+  type OfficeParagraph,
+  type OfficeImage,
+  type RunSpan,
+} from "./office-edit";
 import { createHash } from "crypto";
 import type { AccessibleItemType } from "./accessibility/types";
 
@@ -2031,5 +2040,50 @@ export async function saveOfficeEdits(
     throw new Error("Only Word (.docx) and PowerPoint (.pptx) files can be edited here.");
   }
   const edited = await applyOfficeSections(meta.kind, buffer, sections);
+  await overwriteCanvasFile({ ...ctx, courseId: ctx.courseId }, meta, edited);
+}
+
+// ── Office-file accessibility (image alt text) ────────────────────────────────
+
+/** A docx/pptx file in the course that can be scanned for image alt text. */
+export interface ScannableOfficeFile {
+  id: number;
+  title: string;
+  kind: OfficeKind;
+  fingerprint: string;
+}
+
+/** List the course's editable Office files (docx/pptx) for accessibility scanning. */
+export async function listScannableOfficeFiles(courseUrl: string, code?: string): Promise<ScannableOfficeFile[]> {
+  const files = await listCourseFiles(courseUrl, code);
+  const out: ScannableOfficeFile[] = [];
+  for (const f of files) {
+    const lower = (f.fileName || f.displayName || "").toLowerCase();
+    const kind: OfficeKind | null = lower.endsWith(".docx") ? "docx" : lower.endsWith(".pptx") ? "pptx" : null;
+    if (!kind) continue;
+    out.push({ id: f.id, title: f.displayName, kind, fingerprint: f.updatedAt || String(f.size) });
+  }
+  return out;
+}
+
+/** Read a file's images + current alt text (for the office alt remediation editor). */
+export async function getOfficeFileImages(courseUrl: string, fileId: number, code?: string): Promise<OfficeImage[]> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
+  if (!meta.kind) return [];
+  return extractOfficeImages(meta.kind, buffer);
+}
+
+/** Write alt text onto a file's images by id and overwrite the file in Canvas. */
+export async function saveOfficeFileImageAlt(
+  courseUrl: string,
+  fileId: number,
+  edits: Record<string, string>,
+  code?: string
+): Promise<void> {
+  const ctx = resolveCourse(courseUrl, code);
+  const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
+  if (!meta.kind) throw new Error("Only Word (.docx) and PowerPoint (.pptx) files can be edited here.");
+  const edited = await setOfficeImageAlt(meta.kind, buffer, edits);
   await overwriteCanvasFile({ ...ctx, courseId: ctx.courseId }, meta, edited);
 }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOwner } from "@/lib/supabase/auth";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import {
-  listAccessibilityContent,
+  listAccessibilityItems,
   getAccessibilityItem,
   listScannableFiles,
   getOfficeFileImages,
@@ -53,32 +53,36 @@ export async function POST(req: NextRequest) {
       acronym?: string;
       type?: AccessibleItemType;
       id?: string;
+      items?: Array<{ type: AccessibleItemType; id: string }>;
     };
     const { op, courseUrl } = body;
     const acronym = body.acronym;
     const institution = acronym ?? "";
     const courseId = parseCanvasCourseId(courseUrl) ?? courseUrl;
 
-    if (op === "scan-course") {
-      const content = await listAccessibilityContent(courseUrl, acronym);
+    // Cheap: list the scannable items (no page bodies) + the cached results, and
+    // prune cache rows for items that no longer exist. The client diffs by
+    // fingerprint and scans only what changed, in small batches.
+    if (op === "list-items") {
+      const refs = await listAccessibilityItems(courseUrl, acronym);
       const cached = await getCachedScans(user.id, institution, courseId);
-      const cachedByKey = new Map(cached.map((c) => [`${c.type}:${c.id}`, c]));
-      const items: ItemScan[] = [];
-      const toUpsert: ItemScan[] = [];
-      for (const c of content) {
-        const prev = cachedByKey.get(`${c.type}:${c.id}`);
-        if (prev && prev.fingerprint === c.fingerprint) {
-          items.push(prev);
-          continue;
-        }
-        const scan = toItemScan(c, await scanHtml(c.html));
-        items.push(scan);
-        toUpsert.push(scan);
-      }
-      await upsertScans(user.id, institution, courseId, toUpsert);
-      const currentKeys = new Set(content.map((c) => `${c.type}:${c.id}`));
+      const currentKeys = new Set(refs.map((r) => `${r.type}:${r.id}`));
       const stale = cached.filter((c) => !currentKeys.has(`${c.type}:${c.id}`)).map((c) => ({ type: c.type, id: c.id }));
       await deleteScans(user.id, institution, courseId, stale);
+      return NextResponse.json({ items: refs, cached });
+    }
+
+    // Scan a small batch of items (the client chunks the work so no single
+    // request fetches+scans a whole course, which would time out / OOM).
+    if (op === "scan-batch") {
+      const refs = (body.items ?? []) as Array<{ type: AccessibleItemType; id: string }>;
+      const items: ItemScan[] = [];
+      for (const ref of refs.slice(0, 12)) {
+        const content = await getAccessibilityItem(courseUrl, ref.type, ref.id, acronym);
+        if (!content) continue;
+        items.push(toItemScan(content, await scanHtml(content.html)));
+      }
+      await upsertScans(user.id, institution, courseId, items);
       return NextResponse.json({ items });
     }
 

@@ -869,6 +869,48 @@ export async function listAccessibilityContent(courseUrl: string, code?: string)
   return items;
 }
 
+/** A lightweight reference to a scannable item (no HTML) for incremental scanning. */
+export interface AccessibilityItemRef {
+  type: AccessibleItemType;
+  id: string;
+  title: string;
+  fingerprint: string;
+}
+
+/**
+ * List scannable items WITHOUT fetching page bodies — cheap enough to return fast
+ * even for big courses. The actual HTML is fetched per item at scan time, so a
+ * whole-course scan can be done in small batches instead of one heavy request.
+ */
+export async function listAccessibilityItems(courseUrl: string, code?: string): Promise<AccessibilityItemRef[]> {
+  const ctx = resolveCourse(courseUrl, code);
+  const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
+
+  const [pageSummaries, assignments, quizzes, topics, course] = await Promise.all([
+    listPages(courseUrl, code).catch(() => [] as CanvasPageSummary[]),
+    safeFetchAll<RawHtmlContent>(`${base}/assignments?per_page=100`, ctx),
+    safeFetchAll<RawHtmlContent>(`${base}/quizzes?per_page=100`, ctx),
+    safeFetchAll<RawHtmlContent>(`${base}/discussion_topics?per_page=100`, ctx),
+    fetchJson<{ syllabus_body?: string | null }>(`${base}?include[]=syllabus_body`, ctx),
+  ]);
+
+  const out: AccessibilityItemRef[] = [];
+  for (const p of pageSummaries) {
+    out.push({ type: "page", id: p.url, title: p.title, fingerprint: p.updatedAt || p.url });
+  }
+  const pushIfHtml = (type: AccessibleItemType, id: number, title: string | undefined, html: string | null | undefined, updatedAt: string | null | undefined) => {
+    const body = (html ?? "").trim();
+    if (body) out.push({ type, id: String(id), title: (title ?? "").trim() || `${type} ${id}`, fingerprint: updatedAt || contentHash(body) });
+  };
+  for (const a of assignments) if (typeof a.id === "number") pushIfHtml("assignment", a.id, a.name, a.description, a.updated_at);
+  for (const q of quizzes) if (typeof q.id === "number") pushIfHtml("quiz", q.id, q.title, q.description, q.updated_at);
+  for (const t of topics) if (typeof t.id === "number") pushIfHtml(t.is_announcement ? "announcement" : "discussion", t.id, t.title, t.message, t.updated_at);
+  const syllabus = (course?.syllabus_body ?? "").trim();
+  if (syllabus) out.push({ type: "syllabus", id: "syllabus", title: "Syllabus", fingerprint: contentHash(syllabus) });
+
+  return out;
+}
+
 /** Fetch a single scannable item's current HTML (used to re-scan after an edit). */
 export async function getAccessibilityItem(
   courseUrl: string,

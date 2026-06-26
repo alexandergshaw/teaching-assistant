@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useInstitutionSelection } from "@/lib/institutions";
 import type { AccessibleItemType, Issue, ItemScan } from "@/lib/accessibility/types";
 import { countsOf } from "@/lib/accessibility/types";
-import type { BrokenLink } from "@/lib/canvas-modules";
+import type { BrokenLink, AccessibilityItemRef } from "@/lib/canvas-modules";
 import AccessibilityCenter from "./AccessibilityCenter";
 
 // Scans run through a route handler (not server actions) so they never block the
@@ -143,6 +143,7 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
   const [fileStatus, setFileStatus] = useState<LinkStatus>("idle");
   const [centerOpen, setCenterOpen] = useState(false);
   const scannedSig = useRef<string>("");
+  const scanRunId = useRef(0);
 
   // The content tab dispatches this when the loaded course changes.
   useEffect(() => {
@@ -155,6 +156,8 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
   }, []);
 
   const runScan = useCallback(async (url: string, inst: string) => {
+    const runId = ++scanRunId.current;
+    const aborted = () => scanRunId.current !== runId;
     setStatus("scanning");
     setItems({}); // clear the previous course's results while the new scan runs
     setLinkGroups({});
@@ -162,19 +165,48 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
     setFileItems({});
     setFileStatus("idle");
     setError(undefined);
-    const result = await a11yApi<{ items: ItemScan[] }>("scan-course", { courseUrl: url, acronym: inst || undefined });
-    if ("error" in result) {
+
+    // 1) Cheap list of items + cached results (no page bodies fetched yet).
+    const list = await a11yApi<{ items: AccessibilityItemRef[]; cached: ItemScan[] }>("list-items", { courseUrl: url, acronym: inst || undefined });
+    if (aborted()) return;
+    if ("error" in list) {
       setStatus("error");
-      setError(result.error);
+      setError(list.error);
       return;
     }
-    const map: Record<string, ItemScan> = {};
-    for (const it of result.items) map[itemKey(it.type, it.id)] = it;
-    setItems(map);
+
+    // 2) Seed cached (unchanged) items immediately; collect what needs scanning.
+    const cachedByKey = new Map(list.cached.map((c) => [itemKey(c.type, c.id), c]));
+    const seed: Record<string, ItemScan> = {};
+    const toScan: Array<{ type: AccessibleItemType; id: string }> = [];
+    for (const r of list.items) {
+      const cached = cachedByKey.get(itemKey(r.type, r.id));
+      if (cached && cached.fingerprint === r.fingerprint) seed[itemKey(r.type, r.id)] = cached;
+      else toScan.push({ type: r.type, id: r.id });
+    }
+    setItems(seed);
+
+    // 3) Scan the changed items in small batches; badges fill in as each returns.
+    const BATCH = 6;
+    for (let i = 0; i < toScan.length; i += BATCH) {
+      if (aborted()) return;
+      const chunk = toScan.slice(i, i + BATCH);
+      const res = await a11yApi<{ items: ItemScan[] }>("scan-batch", { courseUrl: url, acronym: inst || undefined, items: chunk });
+      if (aborted()) return;
+      if (!("error" in res)) {
+        setItems((prev) => {
+          const next = { ...prev };
+          for (const it of res.items) next[itemKey(it.type, it.id)] = it;
+          return next;
+        });
+      }
+    }
+    if (aborted()) return;
     setStatus("done");
-    // Pick up any already-completed link-validation run (a free GET, no new job).
+
+    // 4) Pick up any already-completed link-validation run (a free GET, no new job).
     const lv = await a11yApi<{ state: string; links: BrokenLink[] }>("links-get", { courseUrl: url, acronym: inst || undefined });
-    if (!("error" in lv) && lv.state === "completed") {
+    if (!aborted() && !("error" in lv) && lv.state === "completed") {
       setLinkGroups(mapBrokenLinks(lv.links));
       setLinkStatus("done");
     }

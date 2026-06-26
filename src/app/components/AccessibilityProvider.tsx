@@ -2,17 +2,25 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useInstitutionSelection } from "@/lib/institutions";
-import {
-  scanCourseAccessibilityAction,
-  scanItemAccessibilityAction,
-  scanCourseFilesAccessibilityAction,
-  getLinkValidationAction,
-  startLinkValidationAction,
-} from "../actions";
 import type { AccessibleItemType, Issue, ItemScan } from "@/lib/accessibility/types";
 import { countsOf } from "@/lib/accessibility/types";
 import type { BrokenLink } from "@/lib/canvas-modules";
 import AccessibilityCenter from "./AccessibilityCenter";
+
+// Scans run through a route handler (not server actions) so they never block the
+// course-content fetches — Next serializes server actions, route handlers don't.
+async function a11yApi<T>(op: string, payload: Record<string, unknown>): Promise<T | { error: string }> {
+  try {
+    const res = await fetch("/api/accessibility", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ op, ...payload }),
+    });
+    return (await res.json()) as T | { error: string };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Network error" };
+  }
+}
 
 const CONTENT_URL_KEY = "ta-content-course-url";
 
@@ -148,7 +156,7 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
     setFileItems({});
     setFileStatus("idle");
     setError(undefined);
-    const result = await scanCourseAccessibilityAction(url, inst || undefined);
+    const result = await a11yApi<{ items: ItemScan[] }>("scan-course", { courseUrl: url, acronym: inst || undefined });
     if ("error" in result) {
       setStatus("error");
       setError(result.error);
@@ -159,7 +167,7 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
     setItems(map);
     setStatus("done");
     // Pick up any already-completed link-validation run (a free GET, no new job).
-    const lv = await getLinkValidationAction(url, inst || undefined);
+    const lv = await a11yApi<{ state: string; links: BrokenLink[] }>("links-get", { courseUrl: url, acronym: inst || undefined });
     if (!("error" in lv) && lv.state === "completed") {
       setLinkGroups(mapBrokenLinks(lv.links));
       setLinkStatus("done");
@@ -180,7 +188,7 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
   const scanFiles = useCallback(async () => {
     if (!hasCourseId(courseUrl)) return;
     setFileStatus("running");
-    const result = await scanCourseFilesAccessibilityAction(courseUrl, institution || undefined);
+    const result = await a11yApi<{ items: ItemScan[] }>("scan-files", { courseUrl, acronym: institution || undefined });
     if ("error" in result) {
       setFileStatus("error");
       return;
@@ -195,14 +203,14 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
   const checkLinks = useCallback(async () => {
     if (!hasCourseId(courseUrl)) return;
     setLinkStatus("running");
-    const started = await startLinkValidationAction(courseUrl, institution || undefined);
+    const started = await a11yApi<{ ok: true }>("links-start", { courseUrl, acronym: institution || undefined });
     if ("error" in started) {
       setLinkStatus("error");
       return;
     }
     for (let i = 0; i < 40; i += 1) {
       await sleep(3000);
-      const lv = await getLinkValidationAction(courseUrl, institution || undefined);
+      const lv = await a11yApi<{ state: string; links: BrokenLink[] }>("links-get", { courseUrl, acronym: institution || undefined });
       if ("error" in lv) continue;
       if (lv.state === "completed") {
         setLinkGroups(mapBrokenLinks(lv.links));
@@ -246,7 +254,7 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
         delete next[key];
         return next;
       });
-      const result = await scanItemAccessibilityAction(courseUrl, type, id, institution || undefined);
+      const result = await a11yApi<{ item: ItemScan }>("scan-item", { courseUrl, type, id, acronym: institution || undefined });
       if ("error" in result) return;
       setItems((prev) => ({ ...prev, [key]: result.item }));
     },

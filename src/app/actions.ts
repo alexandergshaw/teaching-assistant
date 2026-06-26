@@ -94,23 +94,15 @@ import {
   type RubricCriterionInput,
   type QuizQuestion,
   type QuizQuestionInput,
-  listAccessibilityContent,
   getAccessibilityItem,
   saveAccessibilityItemHtml,
-  getLinkValidation,
-  startLinkValidation,
-  type BrokenLink,
-  listScannableOfficeFiles,
   getOfficeFileImages,
   saveOfficeFileImageAlt,
 } from "@/lib/canvas-modules";
 import type { OfficeImage } from "@/lib/office-edit";
 import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
 import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
-import { scanHtml } from "@/lib/accessibility/engine";
-import { countsOf, type AccessibleItemType, type ItemScan, type Issue as A11yIssue } from "@/lib/accessibility/types";
-import { getCachedScans, upsertScans, deleteScans } from "@/lib/supabase/accessibility";
-import { parseCanvasCourseId } from "@/lib/canvas-url";
+import { type AccessibleItemType } from "@/lib/accessibility/types";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -1341,123 +1333,8 @@ export async function saveOfficeEditsAction(
   }
 }
 
-// ── Accessibility scanning ──────────────────────────────────────────────────
+// ── Accessibility remediation (scans run in /api/accessibility) ─────────────
 
-// Scan one item's HTML and shape it into an ItemScan.
-function toItemScan(item: { type: AccessibleItemType; id: string; title: string; fingerprint: string; html: string }, issues: A11yIssue[]): ItemScan {
-  const { errorCount, warningCount, suggestionCount } = countsOf(issues);
-  return {
-    type: item.type,
-    id: item.id,
-    title: item.title,
-    fingerprint: item.fingerprint,
-    errorCount,
-    warningCount,
-    suggestionCount,
-    issues,
-  };
-}
-
-/**
- * Scan every editable HTML item in a course (pages, assignment/quiz descriptions,
- * discussion/announcement messages, syllabus) for accessibility issues. Reuses
- * cached results for items whose fingerprint is unchanged, only re-scanning what
- * changed, and prunes cache rows for deleted content. Returns the full set.
- */
-export async function scanCourseAccessibilityAction(
-  courseUrl: string,
-  acronym?: string
-): Promise<{ items: ItemScan[] } | { error: string }> {
-  try {
-    const user = await requireOwner();
-    const institution = acronym ?? "";
-    const courseId = parseCanvasCourseId(courseUrl) ?? courseUrl;
-    const content = await listAccessibilityContent(courseUrl, acronym);
-    const cached = await getCachedScans(user.id, institution, courseId);
-    const cachedByKey = new Map(cached.map((c) => [`${c.type}:${c.id}`, c]));
-
-    const items: ItemScan[] = [];
-    const toUpsert: ItemScan[] = [];
-    for (const c of content) {
-      const prev = cachedByKey.get(`${c.type}:${c.id}`);
-      if (prev && prev.fingerprint === c.fingerprint) {
-        items.push(prev);
-        continue;
-      }
-      const scan = toItemScan(c, await scanHtml(c.html));
-      items.push(scan);
-      toUpsert.push(scan);
-    }
-    await upsertScans(user.id, institution, courseId, toUpsert);
-
-    // Drop cache rows for content that no longer exists.
-    const currentKeys = new Set(content.map((c) => `${c.type}:${c.id}`));
-    const stale = cached.filter((c) => !currentKeys.has(`${c.type}:${c.id}`)).map((c) => ({ type: c.type, id: c.id }));
-    await deleteScans(user.id, institution, courseId, stale);
-
-    return { items };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not scan the course." };
-  }
-}
-
-// Build the image-alt issues for one Office file's images.
-function officeImageIssues(images: OfficeImage[]): A11yIssue[] {
-  return images
-    .filter((im) => !im.alt.trim())
-    .map((im) => ({
-      ruleId: "office-image-alt",
-      severity: "warning" as const,
-      message: `Image "${im.name}" has no alt text.`,
-      wcag: "1.1.1",
-      help: "Add alt text describing the image's content or purpose.",
-      locator: { selector: im.id, snippet: im.name },
-      fixKind: "edit" as const,
-    }));
-}
-
-/**
- * Scan the course's Word/PowerPoint files for images missing alt text. Heavier
- * than the HTML scan (downloads each file), so it's triggered on demand; results
- * are cached by file fingerprint like the rest.
- */
-export async function scanCourseFilesAccessibilityAction(
-  courseUrl: string,
-  acronym?: string
-): Promise<{ items: ItemScan[] } | { error: string }> {
-  try {
-    const user = await requireOwner();
-    const institution = acronym ?? "";
-    const courseId = parseCanvasCourseId(courseUrl) ?? courseUrl;
-    const files = await listScannableOfficeFiles(courseUrl, acronym);
-    const cached = await getCachedScans(user.id, institution, courseId);
-    const cachedByKey = new Map(cached.map((c) => [`${c.type}:${c.id}`, c]));
-
-    const items: ItemScan[] = [];
-    const toUpsert: ItemScan[] = [];
-    for (const f of files) {
-      const id = String(f.id);
-      const prev = cachedByKey.get(`file:${id}`);
-      if (prev && prev.fingerprint === f.fingerprint) {
-        items.push(prev);
-        continue;
-      }
-      let issues: A11yIssue[] = [];
-      try {
-        issues = officeImageIssues(await getOfficeFileImages(courseUrl, f.id, acronym));
-      } catch {
-        continue; // a file we can't read (too large, etc.) is skipped, not fatal
-      }
-      const scan = toItemScan({ type: "file", id, title: f.title, fingerprint: f.fingerprint, html: "" }, issues);
-      items.push(scan);
-      toUpsert.push(scan);
-    }
-    await upsertScans(user.id, institution, courseId, toUpsert);
-    return { items };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not scan the course files." };
-  }
-}
 
 /** List an Office file's images + current alt text (for the alt remediation editor). */
 export async function getOfficeFileImagesAction(
@@ -1489,32 +1366,6 @@ export async function saveOfficeImageAltAction(
   }
 }
 
-/** Status + broken links from the course's last link-validation run. */
-export async function getLinkValidationAction(
-  courseUrl: string,
-  acronym?: string
-): Promise<{ state: string; links: BrokenLink[] } | { error: string }> {
-  try {
-    await requireOwner();
-    return await getLinkValidation(courseUrl, acronym);
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not read link validation." };
-  }
-}
-
-/** Start a fresh course link-validation run (poll getLinkValidationAction for results). */
-export async function startLinkValidationAction(
-  courseUrl: string,
-  acronym?: string
-): Promise<{ ok: true } | { error: string }> {
-  try {
-    await requireOwner();
-    await startLinkValidation(courseUrl, acronym);
-    return { ok: true };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not start link validation." };
-  }
-}
 
 /** Fetch one scannable item's current HTML + title (for the remediation editor). */
 export async function getAccessibilityItemHtmlAction(
@@ -1600,30 +1451,6 @@ Write concise, descriptive link text (a few words) that tells the reader where t
   }
 }
 
-/** Re-scan a single item (used right after it's edited) and refresh its cache row. */
-export async function scanItemAccessibilityAction(
-  courseUrl: string,
-  type: AccessibleItemType,
-  id: string,
-  acronym?: string
-): Promise<{ item: ItemScan } | { error: string }> {
-  try {
-    const user = await requireOwner();
-    const institution = acronym ?? "";
-    const courseId = parseCanvasCourseId(courseUrl) ?? courseUrl;
-    const content = await getAccessibilityItem(courseUrl, type, id, acronym);
-    if (!content) {
-      // Content was deleted — clear its cache row and report no issues.
-      await deleteScans(user.id, institution, courseId, [{ type, id }]);
-      return { item: { type, id, title: "", fingerprint: "", errorCount: 0, warningCount: 0, suggestionCount: 0, issues: [] } };
-    }
-    const scan = toItemScan(content, await scanHtml(content.html));
-    await upsertScans(user.id, institution, courseId, [scan]);
-    return { item: scan };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not scan the item." };
-  }
-}
 
 /** Fetch a Canvas file's previewable contents (base64 for image/PDF, else text). */
 export async function previewFileAction(

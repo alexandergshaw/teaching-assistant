@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAccessibility } from "./AccessibilityProvider";
 import RemediationEditor, { isRemediable } from "./RemediationEditor";
 import OfficeAltEditor from "./OfficeAltEditor";
@@ -37,10 +37,32 @@ function Dot({ color }: { color: string }) {
   );
 }
 
+const TRANSITION_MS = 320;
+const EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
+
 export default function AccessibilityCenter() {
   const a11y = useAccessibility();
   const [fixTarget, setFixTarget] = useState<FixTarget | null>(null);
-  if (!a11y.centerOpen) return null;
+  // Keep the panel mounted through its slide-out so the exit animates too:
+  // `render` controls mounting, `shown` drives the open/closed transform.
+  const [render, setRender] = useState(false);
+  const [shown, setShown] = useState(false);
+
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (a11y.centerOpen) {
+      setRender(true);
+      // Next tick so the browser paints the off-screen state before transitioning.
+      const id = window.setTimeout(() => setShown(true), 15);
+      return () => window.clearTimeout(id);
+    }
+    setShown(false);
+    const id = window.setTimeout(() => setRender(false), TRANSITION_MS);
+    return () => window.clearTimeout(id);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [a11y.centerOpen]);
+
+  if (!render) return null;
 
   const flagged = Object.values(a11y.items)
     .filter((it) => it.issues.length > 0)
@@ -60,13 +82,23 @@ export default function AccessibilityCenter() {
     zIndex: 10000,
     display: "flex",
     flexDirection: "column",
+    transform: shown ? "translateX(0)" : "translateX(100%)",
+    transition: `transform ${TRANSITION_MS}ms ${EASE}`,
+    willChange: "transform",
   };
 
   return (
     <>
       <div
         onClick={close}
-        style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.32)", zIndex: 9999 }}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(15,23,42,0.32)",
+          zIndex: 9999,
+          opacity: shown ? 1 : 0,
+          transition: `opacity ${TRANSITION_MS}ms ease`,
+        }}
         aria-hidden="true"
       />
       <aside style={panel} role="dialog" aria-modal="true" aria-label="Accessibility Center">

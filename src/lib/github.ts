@@ -391,3 +391,19 @@ export async function findWorkflowRunSince(
   const run = (data.workflow_runs ?? []).find((r) => r.created_at && Date.parse(r.created_at) >= since);
   return run ? mapRun(run) : null;
 }
+
+/** List a completed run's uploaded artifacts (e.g. a JUnit test report). */
+export async function listRunArtifacts(owner: string, repo: string, runId: number): Promise<Array<{ id: number; name: string }>> {
+  const data = await ghJson<{ artifacts?: Array<{ id?: number; name?: string }> }>(
+    `/repos/${owner}/${repo}/actions/runs/${runId}/artifacts?per_page=100`
+  );
+  return (data.artifacts ?? [])
+    .filter((a): a is { id: number; name?: string } => typeof a.id === "number")
+    .map((a) => ({ id: a.id, name: a.name ?? "" }));
+}
+
+/** Download an artifact's zip bytes (the API 302-redirects to signed storage). */
+export async function downloadArtifactZip(owner: string, repo: string, artifactId: number): Promise<Buffer> {
+  const res = await ghFetch(`/repos/${owner}/${repo}/actions/artifacts/${artifactId}/zip`);
+  return Buffer.from(await res.arrayBuffer());
+}

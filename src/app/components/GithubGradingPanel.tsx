@@ -6,7 +6,9 @@ import {
   gradeReposAction,
   dispatchTestsAction,
   getTestRunStatusAction,
+  setupTestsWorkflowAction,
   type GradeActionState,
+  type TestSummary,
 } from "../actions";
 import { useLlmProvider } from "@/lib/llm-provider";
 import GithubRepoPicker from "./GithubRepoPicker";
@@ -22,6 +24,7 @@ type TestState = {
   conclusion?: string | null;
   htmlUrl?: string;
   message?: string;
+  summary?: TestSummary | null;
 };
 
 type QueueRow = { id: string; repoRef: string; branch: string; label: string; test: TestState };
@@ -36,12 +39,16 @@ function TestStatusCell({ test }: { test: TestState }) {
   const ok = test.conclusion === "success";
   const failed = test.conclusion === "failure" || test.conclusion === "timed_out";
   const color = test.status === "running" ? "#2563eb" : ok ? "#16a34a" : failed ? "#dc2626" : "#64748b";
-  const label =
-    test.status === "running" ? "Running…" : ok ? "Passed" : failed ? "Failed" : test.conclusion ?? "Done";
+  const base = test.status === "running" ? "Running…" : ok ? "Passed" : failed ? "Failed" : test.conclusion ?? "Done";
+  const s = test.summary;
+  const counts = s ? ` ${s.passed}/${s.tests}${s.skipped ? ` (+${s.skipped} skipped)` : ""}` : "";
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.82rem" }}>
       <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: color }} />
-      <strong style={{ color }}>{label}</strong>
+      <strong style={{ color }}>
+        {base}
+        {counts}
+      </strong>
       {test.htmlUrl && (
         <a href={test.htmlUrl} target="_blank" rel="noreferrer">
           view
@@ -79,8 +86,12 @@ export default function GithubGradingPanel() {
   const [rubricRepo, setRubricRepo] = useState("");
   const [rubricBranch, setRubricBranch] = useState("");
   const [workflowFile, setWorkflowFile] = useState("");
+  // "Set up tests" workflow pusher.
+  const [setupTemplate, setSetupTemplate] = useState("python");
+  const [setupCommand, setSetupCommand] = useState("");
+  const [setupNote, setSetupNote] = useState<string | null>(null);
   const [run, setRun] = useState<GradingRun | null>(null);
-  const [busy, setBusy] = useState<"" | "rubric" | "grade">("");
+  const [busy, setBusy] = useState<"" | "rubric" | "grade" | "setup">("");
   const [error, setError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const aliveRef = useRef(true);
@@ -171,7 +182,7 @@ export default function GithubGradingPanel() {
       }
       const found = r.run;
       if (found && found.status === "completed") {
-        setTest(id, { status: "done", conclusion: found.conclusion, htmlUrl: found.htmlUrl });
+        setTest(id, { status: "done", conclusion: found.conclusion, htmlUrl: found.htmlUrl, summary: r.summary });
         return;
       }
       if (found) setTest(id, { status: "running", htmlUrl: found.htmlUrl });
@@ -193,6 +204,23 @@ export default function GithubGradingPanel() {
 
   const runAllTests = () => {
     for (const row of queue) void runTests(row);
+  };
+
+  // Push a standard test workflow into every queued repo.
+  const setupAll = async () => {
+    if (queue.length === 0) return;
+    setBusy("setup");
+    setError(null);
+    setSetupNote(null);
+    let ok = 0;
+    let failed = 0;
+    for (const row of queue) {
+      const r = await setupTestsWorkflowAction(row.repoRef, row.branch || undefined, setupTemplate, setupCommand);
+      if ("error" in r) failed += 1;
+      else ok += 1;
+    }
+    setBusy("");
+    setSetupNote(`Added the test workflow to ${ok} repo${ok === 1 ? "" : "s"}${failed ? `, ${failed} failed (check token 'workflow' scope and access)` : ""}.`);
   };
 
   return (
@@ -276,6 +304,38 @@ export default function GithubGradingPanel() {
               style={{ padding: "4px 8px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 6, fontSize: "0.8rem", minWidth: 240 }}
             />
           </p>
+
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #f1f5f9" }}>
+            <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", margin: "0 0 6px" }}>
+              No <code>workflow_dispatch</code> workflow yet? Push a standard one (runs tests + uploads a JUnit
+              report) into every queued repo. Needs the token&apos;s <code>workflow</code> scope.
+            </p>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <select
+                value={setupTemplate}
+                onChange={(e) => setSetupTemplate(e.target.value)}
+                style={{ padding: "6px 8px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 6, fontSize: "0.8rem", background: "#fff", color: "#334155" }}
+              >
+                <option value="python">Python (pytest)</option>
+                <option value="node">Node (npm test)</option>
+                <option value="java">Java (Maven)</option>
+                <option value="custom">Custom command</option>
+              </select>
+              {setupTemplate === "custom" && (
+                <input
+                  type="text"
+                  value={setupCommand}
+                  placeholder="test command, e.g. make test"
+                  onChange={(e) => setSetupCommand(e.target.value)}
+                  style={{ flex: "1 1 200px", padding: "6px 8px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 6, fontSize: "0.8rem" }}
+                />
+              )}
+              <button type="button" className={styles.submitButton} onClick={setupAll} disabled={busy === "setup"}>
+                {busy === "setup" ? "Adding…" : "Add test workflow to all repos"}
+              </button>
+            </div>
+            {setupNote && <p style={{ fontSize: "0.8rem", color: "#16a34a", marginTop: 6 }}>{setupNote}</p>}
+          </div>
         </div>
       )}
 

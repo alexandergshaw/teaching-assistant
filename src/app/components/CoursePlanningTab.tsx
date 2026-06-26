@@ -5,6 +5,7 @@ import { useRef, useState, useEffect } from "react";
 import {
   generateCourseScheduleAction,
   generateCopilotProjectPromptAction,
+  createCopilotRepoAction,
   generateCourseFromRepoAction,
   analyzeSyllabusInputsAction,
   regenerateSyllabusFieldAction,
@@ -111,6 +112,30 @@ export default function CoursePlanningTab() {
   const [isGeneratingProjectPrompt, setIsGeneratingProjectPrompt] = useState(false);
   const [projectPrompt, setProjectPrompt] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
+
+  // Create-a-repo from the generated Copilot prompt.
+  const [repoName, setRepoName] = useState("");
+  const [repoPrivate, setRepoPrivate] = useState(true);
+  const [creatingRepo, setCreatingRepo] = useState(false);
+  const [createdRepo, setCreatedRepo] = useState<{ fullName: string; htmlUrl: string } | null>(null);
+  const [createRepoError, setCreateRepoError] = useState<string | null>(null);
+
+  const handleCreateRepo = async () => {
+    if (!projectPrompt) return;
+    const name = repoName.trim() || (projectFileName ? projectFileName.replace(/\.[^.]+$/, "") : "course-project");
+    setCreatingRepo(true);
+    setCreateRepoError(null);
+    setCreatedRepo(null);
+    try {
+      const r = await createCopilotRepoAction(name, projectPrompt, repoPrivate);
+      if ("error" in r) setCreateRepoError(r.error);
+      else setCreatedRepo(r);
+    } catch (err) {
+      setCreateRepoError(err instanceof Error ? err.message : "Failed to create the repository.");
+    } finally {
+      setCreatingRepo(false);
+    }
+  };
 
   // "From a Codebase" mode: generate a course outline from a GitHub repo.
   const [codebaseRepo, setCodebaseRepo] = useState("");
@@ -1003,6 +1028,40 @@ export default function CoursePlanningTab() {
                   >
                     Copy to Clipboard
                   </button>
+
+                  <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--card-border, #e2e8f0)" }}>
+                    <label>Or create a GitHub repo with this prompt</label>
+                    <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 8px" }}>
+                      Creates the repo and commits the prompt to <code>.github/copilot-instructions.md</code>, ready to open in Copilot Agent mode.
+                    </p>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <input
+                        type="text"
+                        value={repoName}
+                        placeholder={projectFileName ? projectFileName.replace(/\.[^.]+$/, "") : "course-project"}
+                        onChange={(e) => setRepoName(e.target.value)}
+                        disabled={creatingRepo}
+                        style={{ flex: "1 1 220px", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem" }}
+                      />
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                        <input type="checkbox" checked={repoPrivate} onChange={(e) => setRepoPrivate(e.target.checked)} disabled={creatingRepo} />
+                        Private
+                      </label>
+                      <button type="button" className={styles.submitButton} onClick={handleCreateRepo} disabled={creatingRepo}>
+                        {creatingRepo ? "Creating repo…" : "Create GitHub repo"}
+                      </button>
+                    </div>
+                    {createRepoError && <p className={styles.error}>{createRepoError}</p>}
+                    {createdRepo && (
+                      <p style={{ fontSize: "0.85rem", marginTop: 8 }}>
+                        Created{" "}
+                        <a href={createdRepo.htmlUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>
+                          {createdRepo.fullName}
+                        </a>
+                        .
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
             </>

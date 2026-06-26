@@ -120,6 +120,8 @@ import {
   listRepos,
   ingestRepo,
   parseRepoRef,
+  createRepo,
+  putFile,
   type GithubRepo,
   type RepoDigest,
 } from "@/lib/github";
@@ -4589,6 +4591,42 @@ export async function ingestRepoAction(repoRef: string): Promise<{ digest: RepoD
     return { digest: await ingestRepo(parsed.owner, parsed.repo) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not read the repository." };
+  }
+}
+
+/**
+ * Create a new GitHub repo seeded with a generated Copilot prompt, so the page
+ * that used to only produce the prompt can hand back a ready-to-build repo. The
+ * prompt is written to .github/copilot-instructions.md (Copilot Agent reads it)
+ * and PROMPT.md for visibility.
+ */
+export async function createCopilotRepoAction(
+  name: string,
+  prompt: string,
+  isPrivate = true
+): Promise<{ fullName: string; htmlUrl: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const clean = name.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
+    if (!clean) return { error: "Enter a repository name." };
+    if (!prompt.trim()) return { error: "Generate the Copilot prompt first." };
+    const repo = await createRepo(clean, {
+      description: "Project scaffold generated from a Copilot prompt.",
+      private: isPrivate,
+      autoInit: true,
+    });
+    await putFile(repo.owner, repo.name, ".github/copilot-instructions.md", prompt, "Add Copilot project instructions", repo.defaultBranch);
+    await putFile(
+      repo.owner,
+      repo.name,
+      "PROMPT.md",
+      `# Build prompt\n\nOpen this repository in GitHub Copilot (Agent mode) to scaffold the project. The full instructions are in \`.github/copilot-instructions.md\`.\n\n---\n\n${prompt}\n`,
+      "Add build prompt",
+      repo.defaultBranch
+    );
+    return { fullName: repo.fullName, htmlUrl: repo.htmlUrl };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the repository." };
   }
 }
 

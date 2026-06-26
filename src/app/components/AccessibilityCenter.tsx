@@ -11,6 +11,28 @@ import type { AccessibleItemType, Issue, ItemScan, Severity } from "@/lib/access
 // What's being fixed right now (drives the RemediationEditor overlay).
 type FixTarget = { type: AccessibleItemType; id: string; title: string; issue: Issue };
 
+// Build the ordered list of editor "stops" for a review walkthrough. Each stop
+// opens one editor: a file contributes at most one image-alt stop and one
+// structure stop (each editor fixes all of its kind at once); HTML items
+// contribute one stop per fixable issue.
+function buildReviewQueue(items: ItemScan[]): FixTarget[] {
+  const queue: FixTarget[] = [];
+  for (const item of items) {
+    const fixable = item.issues.filter((i) => i.fixKind !== "flag");
+    if (fixable.length === 0) continue;
+    const at = (issue: Issue): FixTarget => ({ type: item.type, id: item.id, title: item.title, issue });
+    if (item.type === "file") {
+      const alt = fixable.find((i) => i.ruleId === "office-image-alt");
+      if (alt) queue.push(at(alt));
+      const structure = fixable.find((i) => i.ruleId === "doc-no-title" || i.ruleId === "doc-no-structure");
+      if (structure) queue.push(at(structure));
+    } else if (isRemediable(item.type)) {
+      for (const issue of fixable) queue.push(at(issue));
+    }
+  }
+  return queue;
+}
+
 const SEVERITY: Record<Severity, { color: string; label: string }> = {
   error: { color: "#dc2626", label: "Error" },
   warning: { color: "#d97706", label: "Warning" },
@@ -44,6 +66,10 @@ const EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 export default function AccessibilityCenter() {
   const a11y = useAccessibility();
   const [fixTarget, setFixTarget] = useState<FixTarget | null>(null);
+  // The review walkthrough: a snapshot queue of stops and the current index.
+  // null queue = not reviewing (the Fix buttons open editors one-off).
+  const [reviewQueue, setReviewQueue] = useState<FixTarget[] | null>(null);
+  const [reviewIndex, setReviewIndex] = useState(0);
   // Keep the panel mounted through its slide-out so the exit animates too:
   // `render` controls mounting, `shown` drives the open/closed transform.
   const [render, setRender] = useState(false);
@@ -77,6 +103,46 @@ export default function AccessibilityCenter() {
     .sort((x, y) => y.errorCount - x.errorCount || y.warningCount - x.warningCount);
 
   const close = () => a11y.setCenterOpen(false);
+
+  const reviewQueueNow = buildReviewQueue(flagged);
+
+  // Open the first stop and enter review mode.
+  const startReview = () => {
+    if (reviewQueueNow.length === 0) return;
+    setReviewQueue(reviewQueueNow);
+    setReviewIndex(0);
+    setFixTarget(reviewQueueNow[0]);
+  };
+  const endReview = () => {
+    setReviewQueue(null);
+    setReviewIndex(0);
+    setFixTarget(null);
+  };
+  // Move to the next stop after a save; end the walkthrough once past the last.
+  const advanceReview = () => {
+    if (!reviewQueue) {
+      setFixTarget(null);
+      return;
+    }
+    const next = reviewIndex + 1;
+    if (next >= reviewQueue.length) {
+      endReview();
+    } else {
+      setReviewIndex(next);
+      setFixTarget(reviewQueue[next]);
+    }
+  };
+  // After an editor closes: in review, a save advances and a cancel exits;
+  // outside review, just clear the overlay.
+  const afterFix = (saved: boolean) => {
+    if (!reviewQueue) {
+      setFixTarget(null);
+      return;
+    }
+    if (saved) advanceReview();
+    else endReview();
+  };
+  const reviewProgress = reviewQueue ? { index: reviewIndex + 1, total: reviewQueue.length } : undefined;
 
   const panel: CSSProperties = {
     position: "fixed",
@@ -131,6 +197,24 @@ export default function AccessibilityCenter() {
                 }}
               >
                 {a11y.linkStatus === "running" ? "Checking links…" : a11y.linkStatus === "done" ? "Recheck links" : "Check links"}
+              </button>
+              <button
+                type="button"
+                onClick={startReview}
+                disabled={reviewQueueNow.length === 0}
+                title="Step through every fixable issue; saving moves you to the next"
+                style={{
+                  border: "1px solid var(--accent, #2563eb)",
+                  background: reviewQueueNow.length === 0 ? "#fff" : "var(--accent, #2563eb)",
+                  color: reviewQueueNow.length === 0 ? "#94a3b8" : "#fff",
+                  borderRadius: 8,
+                  padding: "5px 10px",
+                  fontSize: "0.82rem",
+                  fontWeight: 600,
+                  cursor: reviewQueueNow.length === 0 ? "default" : "pointer",
+                }}
+              >
+                {reviewQueueNow.length === 0 ? "Review all" : `Review all (${reviewQueueNow.length})`}
               </button>
               <button
                 type="button"
@@ -203,9 +287,10 @@ export default function AccessibilityCenter() {
           acronym={a11y.acronym}
           fileId={Number(fixTarget.id)}
           title={fixTarget.title}
+          progress={reviewProgress}
           onClose={(result) => {
             if (result) a11y.setFileScan(fixTarget.id, fixTarget.title, result.issues);
-            setFixTarget(null);
+            afterFix(!!result);
           }}
         />
       ) : fixTarget && fixTarget.type === "file" ? (
@@ -214,13 +299,14 @@ export default function AccessibilityCenter() {
           acronym={a11y.acronym}
           fileId={Number(fixTarget.id)}
           title={fixTarget.title}
+          progress={reviewProgress}
           onClose={(resolved) => {
             // Clear just the issues this editor fixed; keep the file's others.
             if (resolved && resolved.length > 0) {
               const current = a11y.getItem("file", fixTarget.id)?.issues ?? [];
               a11y.setFileScan(fixTarget.id, fixTarget.title, current.filter((i) => !resolved.includes(i.ruleId)));
             }
-            setFixTarget(null);
+            afterFix(!!resolved);
           }}
         />
       ) : fixTarget ? (
@@ -231,7 +317,8 @@ export default function AccessibilityCenter() {
           id={fixTarget.id}
           title={fixTarget.title}
           issue={fixTarget.issue}
-          onClose={() => setFixTarget(null)}
+          progress={reviewProgress}
+          onClose={(saved) => afterFix(saved)}
         />
       ) : null}
     </>

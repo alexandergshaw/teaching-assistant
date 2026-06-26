@@ -30,6 +30,7 @@ export default function RemediationEditor({
   id,
   title,
   issue,
+  progress,
   onClose,
 }: {
   courseUrl: string;
@@ -38,6 +39,7 @@ export default function RemediationEditor({
   id: string;
   title: string;
   issue: Issue;
+  progress?: { index: number; total: number };
   onClose: (saved: boolean) => void;
 }) {
   const [stage, setStage] = useState<"loading" | "ready" | "saving">("loading");
@@ -108,8 +110,9 @@ export default function RemediationEditor({
         style={{ width: "min(720px, 96vw)", maxHeight: "90vh", background: "#fff", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
       >
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b" }}>
-            Fix · {title}
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b", display: "flex", justifyContent: "space-between", gap: 8 }}>
+            <span>Fix · {title}</span>
+            {progress && <span style={{ color: "var(--accent, #2563eb)" }}>{progress.index} of {progress.total}</span>}
           </div>
           <div style={{ fontSize: "0.95rem", color: "#0f172a", marginTop: 2 }}>{issue.message}</div>
         </div>

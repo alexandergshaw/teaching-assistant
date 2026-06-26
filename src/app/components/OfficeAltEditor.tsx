@@ -33,12 +33,14 @@ export default function OfficeAltEditor({
   acronym,
   fileId,
   title,
+  progress,
   onClose,
 }: {
   courseUrl: string;
   acronym?: string;
   fileId: number;
   title: string;
+  progress?: { index: number; total: number };
   onClose: (result?: { issues: Issue[] }) => void;
 }) {
   const [stage, setStage] = useState<"loading" | "ready" | "saving">("loading");
@@ -115,8 +117,9 @@ export default function OfficeAltEditor({
         style={{ width: "min(640px, 96vw)", maxHeight: "90vh", background: "#fff", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
       >
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b" }}>
-            Image alt text · {title}
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b", display: "flex", justifyContent: "space-between", gap: 8 }}>
+            <span>Image alt text · {title}</span>
+            {progress && <span style={{ color: "var(--accent, #2563eb)" }}>{progress.index} of {progress.total}</span>}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 4 }}>
             <span style={{ fontSize: "0.85rem", color: "#475569" }}>

@@ -118,6 +118,19 @@ export async function getRepo(owner: string, repo: string): Promise<GithubRepo> 
   return mapRepo(await ghJson<RawRepo>(`/repos/${owner}/${repo}`));
 }
 
+/** A repo's branch names (default branch first) plus which one is the default. */
+export async function listBranches(owner: string, repo: string): Promise<{ branches: string[]; defaultBranch: string }> {
+  const info = await getRepo(owner, repo);
+  const names: string[] = [];
+  for (let page = 1; page <= 2; page += 1) {
+    const data = await ghJson<Array<{ name?: string }>>(`/repos/${owner}/${repo}/branches?per_page=100&page=${page}`);
+    for (const b of data) if (b.name) names.push(b.name);
+    if (data.length < 100) break;
+  }
+  const branches = [info.defaultBranch, ...names.filter((b) => b !== info.defaultBranch)];
+  return { branches, defaultBranch: info.defaultBranch };
+}
+
 /** Create a new repo for the authenticated user. */
 export async function createRepo(
   name: string,
@@ -233,14 +246,16 @@ export interface RepoDigest {
 export async function ingestRepo(
   owner: string,
   repo: string,
-  opts: { maxFiles?: number; maxBytes?: number; perFileBytes?: number } = {}
+  opts: { maxFiles?: number; maxBytes?: number; perFileBytes?: number } = {},
+  ref?: string
 ): Promise<RepoDigest> {
   const maxFiles = opts.maxFiles ?? 40;
   const maxBytes = opts.maxBytes ?? 220_000;
   const perFileBytes = opts.perFileBytes ?? 8_000;
 
   const info = await getRepo(owner, repo);
-  const tree = await getRepoTree(owner, repo, info.defaultBranch);
+  const branch = ref || info.defaultBranch;
+  const tree = await getRepoTree(owner, repo, branch);
   const candidates = tree
     .filter(
       (t) =>
@@ -264,7 +279,7 @@ export async function ingestRepo(
     }
     let body: string;
     try {
-      body = await getFileText(owner, repo, f.path, info.defaultBranch);
+      body = await getFileText(owner, repo, f.path, branch);
     } catch {
       continue;
     }

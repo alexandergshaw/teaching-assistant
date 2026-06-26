@@ -98,6 +98,7 @@ export default function LecturePlanningTab() {
   const [instructionsTemplateFile, setInstructionsTemplateFile] = useState<File | null>(null);
   // Loading the course repo from GitHub instead of a zip upload.
   const [githubRepo, setGithubRepo] = useState("");
+  const [githubBranch, setGithubBranch] = useState("");
   const [githubLoading, setGithubLoading] = useState(false);
   const [githubError, setGithubError] = useState<string | null>(null);
 
@@ -183,7 +184,7 @@ export default function LecturePlanningTab() {
     if (!githubRepo.trim()) return;
     setGithubLoading(true);
     setGithubError(null);
-    const r = await getRepoZipAction(githubRepo.trim());
+    const r = await getRepoZipAction(githubRepo.trim(), githubBranch || undefined);
     setGithubLoading(false);
     if ("error" in r) {
       setGithubError(r.error);
@@ -589,7 +590,7 @@ export default function LecturePlanningTab() {
           </p>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 220px", minWidth: 0 }}>
-              <GithubRepoPicker value={githubRepo} onChange={setGithubRepo} disabled={githubLoading} />
+              <GithubRepoPicker value={githubRepo} onChange={setGithubRepo} disabled={githubLoading} branch={githubBranch} onBranchChange={setGithubBranch} />
             </div>
             <button
               type="button"

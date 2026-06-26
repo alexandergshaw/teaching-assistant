@@ -140,6 +140,7 @@ export default function CoursePlanningTab() {
 
   // Syllabus mode: an optional GitHub repo as the codebase source (instead of a zip).
   const [adaptRepo, setAdaptRepo] = useState("");
+  const [adaptBranch, setAdaptBranch] = useState("");
 
 
   useEffect(() => {
@@ -351,7 +352,7 @@ export default function CoursePlanningTab() {
       const syllabusBase64 = await readFileBase64(syllabusFile);
       let zipBase64: string | null = null;
       if (adaptRepo.trim()) {
-        const z = await getRepoZipAction(adaptRepo.trim());
+        const z = await getRepoZipAction(adaptRepo.trim(), adaptBranch || undefined);
         if ("error" in z) {
           setAdaptError(z.error);
           return;
@@ -629,7 +630,7 @@ export default function CoursePlanningTab() {
                   <p>Optional. A zip of the course&apos;s codebase so the AI can suggest accurate, class-specific values.</p>
                 </div>
                 <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "8px 0 4px" }}>or select one of your GitHub repositories:</p>
-                <GithubRepoPicker value={adaptRepo} onChange={setAdaptRepo} disabled={adaptStatus === "analyzing"} />
+                <GithubRepoPicker value={adaptRepo} onChange={setAdaptRepo} disabled={adaptStatus === "analyzing"} branch={adaptBranch} onBranchChange={setAdaptBranch} />
               </div>
 
               <div className={styles.field}>

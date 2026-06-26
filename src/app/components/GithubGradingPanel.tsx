@@ -42,6 +42,7 @@ function CiBadge({ ci }: { ci: WorkflowRunInfo }) {
 export default function GithubGradingPanel() {
   const [provider] = useLlmProvider();
   const [repoRef, setRepoRef] = useState("");
+  const [branch, setBranch] = useState("");
   const [instructions, setInstructions] = useState("");
   const [rubric, setRubric] = useState("");
   const [ci, setCi] = useState<WorkflowRunInfo | null>(null);
@@ -61,7 +62,7 @@ export default function GithubGradingPanel() {
     if (!repoRef.trim()) return;
     setBusy("ci");
     setError(null);
-    const r = await getRepoCiAction(repoRef.trim());
+    const r = await getRepoCiAction(repoRef.trim(), branch || undefined);
     setBusy("");
     setCiChecked(true);
     if ("error" in r) setError(r.error);
@@ -75,7 +76,7 @@ export default function GithubGradingPanel() {
     }
     setBusy("rubric");
     setError(null);
-    const r = await generateRubricFromRepoAction(repoRef.trim(), instructions, provider);
+    const r = await generateRubricFromRepoAction(repoRef.trim(), instructions, provider, branch || undefined);
     setBusy("");
     if ("error" in r) setError(r.error);
     else setRubric(r.rubric);
@@ -89,7 +90,7 @@ export default function GithubGradingPanel() {
     setBusy("grade");
     setError(null);
     setRun(null);
-    const r = await gradeRepoAction(repoRef.trim(), instructions, rubric, provider);
+    const r = await gradeRepoAction(repoRef.trim(), instructions, rubric, provider, branch || undefined);
     setBusy("");
     if ("error" in r) {
       setError(r.error);
@@ -108,7 +109,7 @@ export default function GithubGradingPanel() {
 
       <div className={styles.field}>
         <label>Repository</label>
-        <GithubRepoPicker value={repoRef} onChange={(v) => { setRepoRef(v); setCi(null); setCiChecked(false); }} disabled={!!busy} />
+        <GithubRepoPicker value={repoRef} onChange={(v) => { setRepoRef(v); setCi(null); setCiChecked(false); }} disabled={!!busy} branch={branch} onBranchChange={setBranch} />
       </div>
 
       <div className={styles.field}>

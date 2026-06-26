@@ -20,6 +20,7 @@ type Loaded = { title: string; canvasMarkdown: string; repoMarkdown: string | nu
 export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
   const [assignmentUrl, setAssignmentUrl] = useState("");
   const [repoRef, setRepoRef] = useState("");
+  const [branch, setBranch] = useState("");
   const [path, setPath] = useState("");
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [busy, setBusy] = useState<"" | "load" | "push" | "pull">("");
@@ -31,7 +32,7 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
     setError(null);
     setNote(null);
     setLoaded(null);
-    const r = await getAssignmentSyncStateAction(assignmentUrl.trim(), repoRef.trim(), path, acronym);
+    const r = await getAssignmentSyncStateAction(assignmentUrl.trim(), repoRef.trim(), path, acronym, branch || undefined);
     setBusy("");
     if ("error" in r) {
       setError(r.error);
@@ -45,7 +46,7 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
     setBusy("push");
     setError(null);
     setNote(null);
-    const r = await syncAssignmentToRepoAction(assignmentUrl.trim(), repoRef.trim(), path, acronym);
+    const r = await syncAssignmentToRepoAction(assignmentUrl.trim(), repoRef.trim(), path, acronym, branch || undefined);
     setBusy("");
     if ("error" in r) setError(r.error);
     else {
@@ -58,7 +59,7 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
     setBusy("pull");
     setError(null);
     setNote(null);
-    const r = await syncAssignmentFromRepoAction(assignmentUrl.trim(), repoRef.trim(), path, acronym);
+    const r = await syncAssignmentFromRepoAction(assignmentUrl.trim(), repoRef.trim(), path, acronym, branch || undefined);
     setBusy("");
     if ("error" in r) setError(r.error);
     else {
@@ -88,7 +89,7 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
       </div>
       <div className={styles.field}>
         <label>Repository</label>
-        <GithubRepoPicker value={repoRef} onChange={setRepoRef} disabled={!!busy} />
+        <GithubRepoPicker value={repoRef} onChange={setRepoRef} disabled={!!busy} branch={branch} onBranchChange={setBranch} />
       </div>
       <div className={styles.field}>
         <label>Repo file path</label>

@@ -120,6 +120,7 @@ import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import {
   githubConfigured,
   listRepos,
+  listBranches,
   ingestRepo,
   parseRepoRef,
   createRepo,
@@ -4589,13 +4590,27 @@ export async function listGithubReposAction(): Promise<{ repos: GithubRepo[] } |
   }
 }
 
-/** Build a bounded text digest of a repo (README + source) for course/rubric generation. */
-export async function ingestRepoAction(repoRef: string): Promise<{ digest: RepoDigest } | { error: string }> {
+/** List a repo's branches (default first) for the branch picker. */
+export async function listGithubBranchesAction(
+  repoRef: string
+): Promise<{ branches: string[]; defaultBranch: string } | { error: string }> {
   try {
     await requireOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
-    return { digest: await ingestRepo(parsed.owner, parsed.repo) };
+    return await listBranches(parsed.owner, parsed.repo);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list branches." };
+  }
+}
+
+/** Build a bounded text digest of a repo (README + source) for course/rubric generation. */
+export async function ingestRepoAction(repoRef: string, branch?: string): Promise<{ digest: RepoDigest } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return { digest: await ingestRepo(parsed.owner, parsed.repo, {}, branch) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not read the repository." };
   }
@@ -4641,13 +4656,14 @@ export async function createCopilotRepoAction(
 export async function generateRubricFromRepoAction(
   repoRef: string,
   instructions = "",
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  branch?: string
 ): Promise<{ rubric: string; fullName: string; fileCount: number } | { error: string }> {
   try {
     await requireOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
-    const digest = await ingestRepo(parsed.owner, parsed.repo);
+    const digest = await ingestRepo(parsed.owner, parsed.repo, {}, branch);
     const basis = `${instructions.trim() ? `${instructions.trim()}\n\n` : ""}Reference codebase (${digest.fullName}) — base the rubric criteria on the features, structure, and logic actually present here:\n\n${digest.text}`;
     const rubric = await generateRubric(basis, provider);
     return { rubric, fullName: digest.fullName, fileCount: digest.fileCount };
@@ -4661,13 +4677,14 @@ export async function gradeRepoAction(
   repoRef: string,
   assignmentInstructions: string,
   rubric: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  branch?: string
 ): Promise<{ run: GradingRun; rubric: string; fullName: string } | { error: string }> {
   try {
     await requireOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
-    const digest = await ingestRepo(parsed.owner, parsed.repo);
+    const digest = await ingestRepo(parsed.owner, parsed.repo, {}, branch);
     const instructions = assignmentInstructions.trim() || `Evaluate the repository "${digest.fullName}".`;
     const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${digest.text}`, provider));
     const entry: StudentSubmissionEntry = {
@@ -4689,13 +4706,14 @@ export async function gradeRepoAction(
  * uploaded-zip flows in lecture and syllabus planning.
  */
 export async function getRepoZipAction(
-  repoRef: string
+  repoRef: string,
+  branch?: string
 ): Promise<{ base64: string; name: string } | { error: string }> {
   try {
     await requireOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
-    const buffer = await downloadRepoZipball(parsed.owner, parsed.repo);
+    const buffer = await downloadRepoZipball(parsed.owner, parsed.repo, branch);
     const JSZipMod = (await import("jszip")).default;
     const src = await JSZipMod.loadAsync(buffer);
     // The wrapper folder is the common first path segment of every entry.
@@ -4755,7 +4773,8 @@ export async function getAssignmentSyncStateAction(
   assignmentUrl: string,
   repoRef: string,
   path: string,
-  acronym?: string
+  acronym?: string,
+  branch?: string
 ): Promise<
   { title: string; canvasMarkdown: string; repoMarkdown: string | null; path: string } | { error: string }
 > {
@@ -4768,7 +4787,7 @@ export async function getAssignmentSyncStateAction(
     const resolvedPath = path.trim() || `assignments/${assignmentSlug(item.title)}/README.md`;
     let repoMarkdown: string | null = null;
     try {
-      repoMarkdown = await getFileText(ref.owner, ref.repo, resolvedPath);
+      repoMarkdown = await getFileText(ref.owner, ref.repo, resolvedPath, branch);
     } catch {
       repoMarkdown = null; // file not there yet
     }
@@ -4783,7 +4802,8 @@ export async function syncAssignmentToRepoAction(
   assignmentUrl: string,
   repoRef: string,
   path: string,
-  acronym?: string
+  acronym?: string,
+  branch?: string
 ): Promise<{ ok: true; path: string } | { error: string }> {
   try {
     await requireOwner();
@@ -4793,7 +4813,7 @@ export async function syncAssignmentToRepoAction(
     if (!item) return { error: "Could not load that Canvas assignment." };
     const resolvedPath = path.trim() || `assignments/${assignmentSlug(item.title)}/README.md`;
     const markdown = `# ${item.title}\n\n${htmlToMarkdown(item.html)}\n`;
-    await putFile(ref.owner, ref.repo, resolvedPath, markdown, `Sync "${item.title}" instructions from Canvas`);
+    await putFile(ref.owner, ref.repo, resolvedPath, markdown, `Sync "${item.title}" instructions from Canvas`, branch);
     return { ok: true, path: resolvedPath };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not write to the repository." };
@@ -4805,7 +4825,8 @@ export async function syncAssignmentFromRepoAction(
   assignmentUrl: string,
   repoRef: string,
   path: string,
-  acronym?: string
+  acronym?: string,
+  branch?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
     await requireOwner();
@@ -4814,7 +4835,7 @@ export async function syncAssignmentFromRepoAction(
     if (!path.trim()) return { error: "Specify the repo file path to pull from." };
     let markdown: string;
     try {
-      markdown = await getFileText(ref.owner, ref.repo, path.trim());
+      markdown = await getFileText(ref.owner, ref.repo, path.trim(), branch);
     } catch {
       return { error: "That file wasn't found in the repository." };
     }

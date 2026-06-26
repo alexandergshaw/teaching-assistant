@@ -57,6 +57,7 @@ import { resolveDocumentAuthor } from "@/lib/author";
 import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
 import FilePreviewModal, { type PreviewFile } from "./FilePreviewModal";
+import DocStructureEditor from "./DocStructureEditor";
 import type { RunSpan } from "@/lib/office-edit";
 import { spansEqual, spansToPlainText } from "./RichTextEditor";
 import { RichTextSectionEditor } from "./RichTextSectionEditor";
@@ -6856,6 +6857,7 @@ function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym
   const [bulkModule, setBulkModule] = useState<number | "">("");
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [editFile, setEditFile] = useState<CourseFile | null>(null);
+  const [structureFile, setStructureFile] = useState<CourseFile | null>(null);
 
   const shown = files.filter((f) => f.displayName.toLowerCase().includes(search.trim().toLowerCase()));
   const dupGroups = useMemo(() => findDuplicateGroups(files), [files]);
@@ -7220,6 +7222,16 @@ function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym
                     Edit
                   </button>
                 )}
+                {/\.docx$/i.test(f.fileName || f.displayName) && (
+                  <button
+                    type="button"
+                    className={styles.ccBtn}
+                    title="Set the document title and mark headings (accessibility)"
+                    onClick={() => setStructureFile(f)}
+                  >
+                    Structure
+                  </button>
+                )}
                 <button type="button" className={`${styles.ccBtn} ${styles.ccBtnDanger}`} onClick={() => void removeFile(f)} disabled={busy}>
                   {confirmDelete === f.id ? "Confirm" : "Delete"}
                 </button>
@@ -7242,6 +7254,24 @@ function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym
             setEditFile(null);
             setNote({ kind: "success", text: "Saved to Canvas." });
             void reload();
+          }}
+        />
+      )}
+
+      {structureFile && (
+        <DocStructureEditor
+          courseUrl={courseUrl}
+          acronym={acronym}
+          fileId={structureFile.id}
+          title={structureFile.displayName}
+          onClose={(resolved) => {
+            setStructureFile(null);
+            // `resolved` is defined (possibly empty) only when a save happened;
+            // undefined means the editor was cancelled.
+            if (resolved) {
+              setNote({ kind: "success", text: "Saved to Canvas." });
+              void reload();
+            }
           }}
         />
       )}

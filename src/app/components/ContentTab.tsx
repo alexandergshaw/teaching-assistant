@@ -193,6 +193,44 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+// Strip Canvas's auto-dedup suffix from a display name so renamed copies of the
+// same upload group together: "Syllabus (3).docx" -> "syllabus.docx". Canvas
+// inserts " (N)" before the extension when a duplicate name is uploaded.
+function dedupBaseName(displayName: string): string {
+  const dot = displayName.lastIndexOf(".");
+  const ext = dot > 0 ? displayName.slice(dot) : "";
+  const stem = dot > 0 ? displayName.slice(0, dot) : displayName;
+  return `${stem.replace(/\s*\(\d+\)\s*$/, "")}${ext}`.trim().toLowerCase();
+}
+
+// One group of likely-duplicate files (same base name in the same folder). `keep`
+// is the copy to retain (newest, since the latest edit lands on it); `strays` are
+// the older copies that can be removed. Only groups with a real duplicate appear.
+export interface DuplicateGroup {
+  baseName: string;
+  keep: CourseFile;
+  strays: CourseFile[];
+}
+
+// Find files that look like Canvas dedup copies of one upload: grouped by base
+// name + folder, keeping the most recently updated copy and flagging the rest.
+function findDuplicateGroups(files: CourseFile[]): DuplicateGroup[] {
+  const byKey = new Map<string, CourseFile[]>();
+  for (const f of files) {
+    const key = `${f.folderId ?? "root"}::${dedupBaseName(f.displayName)}`;
+    const list = byKey.get(key);
+    if (list) list.push(f);
+    else byKey.set(key, [f]);
+  }
+  const groups: DuplicateGroup[] = [];
+  for (const [key, list] of byKey) {
+    if (list.length < 2) continue;
+    const sorted = [...list].sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "") || b.id - a.id);
+    groups.push({ baseName: key.split("::")[1], keep: sorted[0], strays: sorted.slice(1) });
+  }
+  return groups;
+}
+
 // Short type label for a file chip (extension, else a content-type category).
 function fileKindLabel(contentType: string, fileName: string): string {
   const ext = fileName.includes(".") ? fileName.split(".").pop()?.toUpperCase() : undefined;
@@ -6820,6 +6858,11 @@ function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym
   const [editFile, setEditFile] = useState<CourseFile | null>(null);
 
   const shown = files.filter((f) => f.displayName.toLowerCase().includes(search.trim().toLowerCase()));
+  const dupGroups = useMemo(() => findDuplicateGroups(files), [files]);
+  const strayCount = dupGroups.reduce((n, g) => n + g.strays.length, 0);
+  // Select every older copy across duplicate groups so the user can review the
+  // selection and remove them through the existing (confirm-guarded) bulk delete.
+  const selectStrays = () => setSelected(new Set(dupGroups.flatMap((g) => g.strays.map((s) => s.id))));
   const toggleSelected = (id: number) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -7078,6 +7121,30 @@ function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym
       )}
 
       {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
+
+      {strayCount > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+            padding: "10px 14px",
+            border: "1px solid #fde68a",
+            background: "#fffbeb",
+            borderRadius: 8,
+          }}
+        >
+          <span style={{ fontSize: "0.85rem", color: "#92400e", flex: "1 1 240px" }}>
+            {strayCount} duplicate {strayCount === 1 ? "copy" : "copies"} found across{" "}
+            {dupGroups.length} {dupGroups.length === 1 ? "file" : "files"} (e.g. &ldquo;{dupGroups[0].strays[0].displayName}&rdquo;).
+            The newest copy of each is kept.
+          </span>
+          <button type="button" className={styles.downloadButton} onClick={selectStrays} disabled={busy}>
+            Select {strayCount} older {strayCount === 1 ? "copy" : "copies"}
+          </button>
+        </div>
+      )}
 
       {status === "loading" ? (
         <div className={styles.loadingState} role="status" aria-live="polite">

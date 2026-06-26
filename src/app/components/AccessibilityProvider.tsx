@@ -16,6 +16,12 @@ async function a11yApi<T>(op: string, payload: Record<string, unknown>): Promise
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ op, ...payload }),
     });
+    // The route always replies JSON; anything else (an auth redirect to the login
+    // page, a 500 error page) means the request didn't reach it — surface a clean
+    // message instead of letting JSON.parse throw "Unexpected token '<'".
+    if (!res.headers.get("content-type")?.includes("application/json")) {
+      return { error: res.status === 401 || res.status === 403 ? "Your session expired — sign in again." : `Accessibility scan failed (HTTP ${res.status}).` };
+    }
     return (await res.json()) as T | { error: string };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Network error" };

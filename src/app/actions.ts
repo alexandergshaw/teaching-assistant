@@ -95,7 +95,7 @@ import {
   type QuizQuestion,
   type QuizQuestionInput,
 } from "@/lib/canvas-modules";
-import type { OfficeKind, OfficeParagraph } from "@/lib/office-edit";
+import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
 import { parseOfficeParagraphs, applyDocxSections } from "@/lib/office-edit";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
@@ -1315,7 +1315,7 @@ export async function getOfficeEditableAction(
 export async function saveOfficeEditsAction(
   courseUrl: string,
   fileId: number,
-  edits: Record<string, string>,
+  edits: Record<string, RunSpan[]>,
   acronym?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
@@ -1853,7 +1853,7 @@ export async function analyzeSyllabusInputsAction(
   | {
       fields: SyllabusInputField[];
       scheduleReplacements: Record<string, string>;
-      paragraphs: Array<{ id: string; text: string }>;
+      paragraphs: Array<{ id: string; text: string; runs: RunSpan[] }>;
       codebaseSummary: string;
     }
   | { error: string }
@@ -2006,7 +2006,7 @@ ${SYLLABUS_STYLE_RULES}
     return {
       fields,
       scheduleReplacements,
-      paragraphs: paragraphs.map((p) => ({ id: p.id, text: p.text })),
+      paragraphs: paragraphs.map((p) => ({ id: p.id, text: p.text, runs: p.runs })),
       codebaseSummary,
     };
   } catch (err) {
@@ -2071,7 +2071,7 @@ Return ONLY the replacement paragraph text — no JSON, no quotes, no commentary
  */
 export async function buildAdaptedSyllabusAction(
   syllabusBase64: string,
-  sections: Array<{ sourceId: string; text: string }>
+  sections: Array<{ sourceId: string; spans: RunSpan[] }>
 ): Promise<{ base64: string } | { error: string }> {
   try {
     await requireOwner();

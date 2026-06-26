@@ -12,6 +12,8 @@ import {
   type SyllabusCourseInfo,
 } from "../actions";
 import LecturePlanningTab from "./LecturePlanningTab";
+import { RichTextEditor, FormattingToolbar, spansToPlainText } from "./RichTextEditor";
+import type { RunSpan } from "@/lib/office-edit";
 import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
 
@@ -23,8 +25,8 @@ type AdaptSection = {
   sourceId: string;
   /** Original text (for change detection / "Original:"); "" for added sections. */
   original: string;
-  /** Current text. */
-  text: string;
+  /** Current content as formatted spans. */
+  spans: RunSpan[];
   /** Label for the guided field list; "Section" otherwise. */
   label: string;
   /** Whether the AI flagged this as a class-specific field (shown in the form). */
@@ -297,12 +299,20 @@ export default function CoursePlanningTab() {
       const sections: AdaptSection[] = result.paragraphs.map((p) => {
         const field = fieldById.get(p.id);
         const sched = result.scheduleReplacements[p.id];
-        const text = field ? field.suggestedText : sched !== undefined ? sched : p.text;
+        const replacement = field ? field.suggestedText : sched;
+        // AI replacements arrive as plain text; unchanged paragraphs keep their
+        // original formatting (runs) so the editor shows it.
+        const spans: RunSpan[] =
+          replacement !== undefined
+            ? [{ text: replacement }]
+            : p.runs.length > 0
+              ? p.runs
+              : [{ text: p.text }];
         return {
           key: p.id,
           sourceId: p.id,
           original: p.text,
-          text,
+          spans,
           label: field?.label ?? "Section",
           isField: !!field,
         };
@@ -344,7 +354,7 @@ export default function CoursePlanningTab() {
         key: `new-${adaptKeySeq.current++}`,
         sourceId: prev[idx].sourceId,
         original: "",
-        text: "",
+        spans: [{ text: "" }],
         label: "New section",
         isField: false,
       };
@@ -357,7 +367,7 @@ export default function CoursePlanningTab() {
     setAdaptError(null);
     try {
       const result = await regenerateSyllabusFieldAction(
-        { label: section.label, currentText: section.original || section.text },
+        { label: section.label, currentText: section.original || spansToPlainText(section.spans) },
         adaptCodebaseSummary,
         adaptCourseInfo(),
         getStoredProvider()
@@ -366,7 +376,7 @@ export default function CoursePlanningTab() {
         setAdaptError(result.error);
         return;
       }
-      updateSection(section.key, { text: result.text });
+      updateSection(section.key, { spans: [{ text: result.text }] });
     } catch (err) {
       setAdaptError(err instanceof Error ? err.message : "Failed to regenerate the section.");
     } finally {
@@ -378,7 +388,7 @@ export default function CoursePlanningTab() {
   // deletions) and download it.
   const handleBuildAdaptedSyllabus = async () => {
     if (!adaptSyllabusBase64 || !adaptSections) return;
-    const payload = adaptSections.map((s) => ({ sourceId: s.sourceId, text: s.text }));
+    const payload = adaptSections.map((s) => ({ sourceId: s.sourceId, spans: s.spans }));
     setAdaptStatus("building");
     setAdaptError(null);
     try {
@@ -604,8 +614,9 @@ export default function CoursePlanningTab() {
                       overflowY: "auto",
                     }}
                   >
+                    <FormattingToolbar />
                     {adaptSections.map((s) => {
-                      const changed = s.isField || s.text !== s.original;
+                      const changed = s.isField || spansToPlainText(s.spans) !== s.original;
                       const miniBtn: CSSProperties = {
                         width: 26,
                         height: 24,
@@ -626,24 +637,12 @@ export default function CoursePlanningTab() {
                                 {s.label}
                               </div>
                             )}
-                            <textarea
-                              value={s.text}
-                              onChange={(e) => updateSection(s.key, { text: e.target.value })}
-                              rows={Math.max(1, Math.ceil((s.text.length || 1) / 90))}
+                            <RichTextEditor
+                              value={s.spans}
+                              onChange={(spans) => updateSection(s.key, { spans })}
+                              changed={changed}
                               placeholder="(empty section)"
-                              style={{
-                                width: "100%",
-                                border: "1px solid transparent",
-                                outline: "none",
-                                resize: "vertical",
-                                background: changed ? "rgba(37, 99, 235, 0.08)" : "transparent",
-                                color: "#1f2933",
-                                font: "inherit",
-                                fontSize: "0.95rem",
-                                lineHeight: 1.5,
-                                padding: "4px 6px",
-                                borderRadius: 4,
-                              }}
+                              ariaLabel={s.isField ? s.label : "Syllabus section"}
                             />
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>

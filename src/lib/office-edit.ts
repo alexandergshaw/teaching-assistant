@@ -16,11 +16,58 @@ import JSZip from "jszip";
 
 export type OfficeKind = "docx" | "pptx";
 
+/**
+ * One inline span of a paragraph: a stretch of text with uniform formatting.
+ * Marks are direct run formatting only (what the run carries itself, not what
+ * it inherits from paragraph/character styles), which is what the editors can
+ * toggle. `sizePt` is the font size in points.
+ */
+export interface RunSpan {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  sizePt?: number;
+}
+
 /** One editable paragraph. `slide` is set (1-based) for pptx. */
 export interface OfficeParagraph {
   id: string;
   slide?: number;
+  /** The paragraph's full text (all runs concatenated). */
   text: string;
+  /** The paragraph split into formatted spans (concatenate to `text`). */
+  runs: RunSpan[];
+}
+
+/** Whether a span list carries no formatting (so it can use the plain path). */
+export function spansArePlain(spans: RunSpan[]): boolean {
+  return spans.every((s) => !s.bold && !s.italic && !s.underline && s.sizePt == null);
+}
+
+/** The plain text of a span list. */
+export function spansPlainText(spans: RunSpan[]): string {
+  return spans.map((s) => s.text).join("");
+}
+
+/** Merge neighbouring spans that share identical marks. */
+function mergeSpans(spans: RunSpan[]): RunSpan[] {
+  const out: RunSpan[] = [];
+  for (const s of spans) {
+    const prev = out[out.length - 1];
+    if (
+      prev &&
+      !!prev.bold === !!s.bold &&
+      !!prev.italic === !!s.italic &&
+      !!prev.underline === !!s.underline &&
+      prev.sizePt === s.sizePt
+    ) {
+      prev.text += s.text;
+    } else {
+      out.push({ ...s });
+    }
+  }
+  return out;
 }
 
 function decodeXmlEntities(value: string): string {
@@ -51,6 +98,61 @@ function paragraphText(paraXml: string, runRe: RegExp): string {
   return text;
 }
 
+// An on/off docx toggle (<w:b/>, <w:i/>): present and not explicitly disabled.
+function docxToggleOn(rprInner: string, tag: "w:b" | "w:i"): boolean {
+  const m = rprInner.match(new RegExp(`<${tag}\\b(?:[^>]*\\bw:val="([^"]*)")?[^>]*/>`));
+  if (!m) return false;
+  return m[1] == null || !/^(0|false|none|off)$/i.test(m[1]);
+}
+
+/** Read the direct formatting marks from a docx run's <w:rPr> inner XML. */
+function readDocxMarks(rprInner: string): Omit<RunSpan, "text"> {
+  const u = rprInner.match(/<w:u\b[^>]*\bw:val="([^"]*)"[^>]*\/>/);
+  const sz = rprInner.match(/<w:sz\b[^>]*\bw:val="(\d+)"[^>]*\/>/);
+  return {
+    bold: docxToggleOn(rprInner, "w:b") || undefined,
+    italic: docxToggleOn(rprInner, "w:i") || undefined,
+    underline: u && !/^none$/i.test(u[1]) ? true : undefined,
+    sizePt: sz ? Number(sz[1]) / 2 : undefined,
+  };
+}
+
+/** Split a docx paragraph into formatted spans (runs that carry text). */
+function extractDocxRuns(paraXml: string): RunSpan[] {
+  const spans: RunSpan[] = [];
+  for (const run of paraXml.matchAll(/<w:r\b[^>]*>([\s\S]*?)<\/w:r>/g)) {
+    const inner = run[1];
+    const rprInner = inner.match(/<w:rPr>([\s\S]*?)<\/w:rPr>/)?.[1] ?? "";
+    let text = "";
+    for (const t of inner.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)) text += decodeXmlEntities(t[1] ?? "");
+    if (!text) continue;
+    spans.push({ text, ...readDocxMarks(rprInner) });
+  }
+  return mergeSpans(spans);
+}
+
+/** Split a pptx paragraph into formatted spans (runs that carry text). */
+function extractPptxRuns(paraXml: string): RunSpan[] {
+  const spans: RunSpan[] = [];
+  for (const run of paraXml.matchAll(/<a:r\b[^>]*>([\s\S]*?)<\/a:r>/g)) {
+    const inner = run[1];
+    const rpr = inner.match(/<a:rPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:rPr>)/)?.[0] ?? "";
+    let text = "";
+    for (const t of inner.matchAll(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/g)) text += decodeXmlEntities(t[1] ?? "");
+    if (!text) continue;
+    const u = rpr.match(/\bu="([^"]*)"/);
+    const sz = rpr.match(/\bsz="(\d+)"/);
+    spans.push({
+      text,
+      bold: /\bb="(?:1|true|on)"/i.test(rpr) || undefined,
+      italic: /\bi="(?:1|true|on)"/i.test(rpr) || undefined,
+      underline: u && !/^none$/i.test(u[1]) ? true : undefined,
+      sizePt: sz ? Number(sz[1]) / 100 : undefined,
+    });
+  }
+  return mergeSpans(spans);
+}
+
 /** Put `newText` into the paragraph's first text run; empty the remaining runs. */
 function rewriteRuns(paraXml: string, newText: string, tag: "w:t" | "a:t"): string {
   const re = new RegExp(`<${tag}\\b([^>]*)>[\\s\\S]*?</${tag}>`, "g");
@@ -63,6 +165,76 @@ function rewriteRuns(paraXml: string, newText: string, tag: "w:t" | "a:t"): stri
     }
     return `<${tag}${attrs}></${tag}>`;
   });
+}
+
+// Build a docx run's <w:rPr> from a base run's rPr inner XML (keeps rStyle,
+// font, and colour) with this span's bold/italic/underline/size layered on.
+// Children are emitted in OOXML CT_RPr order so Word accepts the file.
+function buildDocxRunProps(baseInner: string, span: RunSpan): string {
+  const rStyle = baseInner.match(/<w:rStyle\b[^>]*\/>/)?.[0] ?? "";
+  const rFonts = baseInner.match(/<w:rFonts\b[^>]*\/>/)?.[0] ?? "";
+  const color = baseInner.match(/<w:color\b[^>]*\/>/)?.[0] ?? "";
+  const baseSz = baseInner.match(/<w:sz\b[^>]*\bw:val="(\d+)"/)?.[1];
+  const half = span.sizePt != null ? Math.round(span.sizePt * 2) : baseSz ? Number(baseSz) : undefined;
+  const parts: string[] = [];
+  if (rStyle) parts.push(rStyle);
+  if (rFonts) parts.push(rFonts);
+  if (span.bold) parts.push("<w:b/>");
+  if (span.italic) parts.push("<w:i/>");
+  if (color) parts.push(color);
+  if (half != null) parts.push(`<w:sz w:val="${half}"/><w:szCs w:val="${half}"/>`);
+  if (span.underline) parts.push('<w:u w:val="single"/>');
+  return parts.length ? `<w:rPr>${parts.join("")}</w:rPr>` : "";
+}
+
+// Rebuild a docx paragraph from formatted spans, keeping its <w:pPr> and basing
+// each run's properties on the paragraph's first run. Used only when a span
+// carries formatting; structural inline content (hyperlinks, bookmarks) in that
+// paragraph is not preserved, matching how intra-paragraph runs already collapse.
+function rebuildDocxParagraph(paraXml: string, spans: RunSpan[]): string {
+  if (spansArePlain(spans)) return rewriteRuns(paraXml, spansPlainText(spans), "w:t");
+  const open = paraXml.match(/^<w:p\b[^>]*>/)?.[0] ?? "<w:p>";
+  const pPr = paraXml.match(/<w:pPr>[\s\S]*?<\/w:pPr>/)?.[0] ?? paraXml.match(/<w:pPr\/>/)?.[0] ?? "";
+  const afterPPr = pPr ? paraXml.slice(paraXml.indexOf(pPr) + pPr.length) : paraXml;
+  const baseInner = afterPPr.match(/<w:rPr>([\s\S]*?)<\/w:rPr>/)?.[1] ?? "";
+  const runs = spans
+    .map((s) => `<w:r>${buildDocxRunProps(baseInner, s)}<w:t xml:space="preserve">${escapeXml(s.text)}</w:t></w:r>`)
+    .join("");
+  return `${open}${pPr}${runs}</w:p>`;
+}
+
+// Build a pptx run's <a:rPr> from a base run's rPr (keeps fill/font children)
+// with this span's marks merged in as attributes (order-independent in XML).
+function buildPptxRunProps(baseRpr: string, span: RunSpan): string {
+  const open = baseRpr.match(/^<a:rPr\b([^>]*?)(\/?)>/);
+  let attrs = open ? open[1] : "";
+  const children = open && open[2] !== "/" ? baseRpr.slice(open[0].length, baseRpr.lastIndexOf("</a:rPr>")) : "";
+  attrs = attrs.replace(/\s+(?:b|i|u|sz)="[^"]*"/g, "");
+  const baseSz = baseRpr.match(/\bsz="(\d+)"/)?.[1];
+  const hundredths = span.sizePt != null ? Math.round(span.sizePt * 100) : baseSz ? Number(baseSz) : undefined;
+  let add = "";
+  if (hundredths != null) add += ` sz="${hundredths}"`;
+  if (span.bold) add += ' b="1"';
+  if (span.italic) add += ' i="1"';
+  if (span.underline) add += ' u="sng"';
+  const attrStr = `${attrs}${add}`.trim();
+  const prefix = attrStr ? ` ${attrStr}` : "";
+  return children ? `<a:rPr${prefix}>${children}</a:rPr>` : `<a:rPr${prefix}/>`;
+}
+
+// Rebuild a pptx paragraph from formatted spans, keeping <a:pPr> and the closing
+// <a:endParaRPr>. Used only when a span carries formatting.
+function rebuildPptxParagraph(paraXml: string, spans: RunSpan[]): string {
+  if (spansArePlain(spans)) return rewriteRuns(paraXml, spansPlainText(spans), "a:t");
+  const open = paraXml.match(/^<a:p\b[^>]*>/)?.[0] ?? "<a:p>";
+  const pPr = paraXml.match(/<a:pPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:pPr>)/)?.[0] ?? "";
+  const endPr = paraXml.match(/<a:endParaRPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:endParaRPr>)/)?.[0] ?? "";
+  const afterPPr = pPr ? paraXml.slice(paraXml.indexOf(pPr) + pPr.length) : paraXml;
+  const baseRpr = afterPPr.match(/<a:rPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:rPr>)/)?.[0] ?? "";
+  const runs = spans
+    .map((s) => `<a:r>${buildPptxRunProps(baseRpr, s)}<a:t>${escapeXml(s.text)}</a:t></a:r>`)
+    .join("");
+  return `${open}${pPr}${runs}${endPr}</a:p>`;
 }
 
 function sortedSlides(zip: JSZip) {
@@ -83,7 +255,7 @@ export async function parseOfficeParagraphs(kind: OfficeKind, buffer: Buffer): P
     let i = 0;
     for (const match of xml.matchAll(DOCX_PARA)) {
       const text = paragraphText(match[0], DOCX_RUN);
-      if (text.trim()) out.push({ id: `p${i}`, text });
+      if (text.trim()) out.push({ id: `p${i}`, text, runs: extractDocxRuns(match[0]) });
       i += 1;
     }
     return out;
@@ -97,18 +269,18 @@ export async function parseOfficeParagraphs(kind: OfficeKind, buffer: Buffer): P
     let p = 0;
     for (const match of xml.matchAll(PPTX_PARA)) {
       const text = paragraphText(match[0], PPTX_RUN);
-      if (text.trim()) out.push({ id: `s${s}_p${p}`, slide: s + 1, text });
+      if (text.trim()) out.push({ id: `s${s}_p${p}`, slide: s + 1, text, runs: extractPptxRuns(match[0]) });
       p += 1;
     }
   }
   return out;
 }
 
-/** Apply edited paragraph text back into the original file; return the new bytes. */
+/** Apply edited paragraph spans back into the original file; return the new bytes. */
 export async function applyOfficeEdits(
   kind: OfficeKind,
   buffer: Buffer,
-  edits: Record<string, string>
+  edits: Record<string, RunSpan[]>
 ): Promise<Buffer> {
   const zip = await JSZip.loadAsync(buffer);
 
@@ -120,7 +292,7 @@ export async function applyOfficeEdits(
     xml = xml.replace(DOCX_PARA, (para) => {
       i += 1;
       const id = `p${i}`;
-      return id in edits ? rewriteRuns(para, edits[id], "w:t") : para;
+      return id in edits ? rebuildDocxParagraph(para, edits[id]) : para;
     });
     zip.file("word/document.xml", xml);
   } else {
@@ -135,7 +307,7 @@ export async function applyOfficeEdits(
         const id = `s${s}_p${p}`;
         if (!(id in edits)) return para;
         touched = true;
-        return rewriteRuns(para, edits[id], "a:t");
+        return rebuildPptxParagraph(para, edits[id]);
       });
       if (touched) zip.file(file.name, xml);
     }
@@ -155,13 +327,13 @@ export async function applyOfficeEdits(
 export async function applyDocxSections(
   buffer: Buffer,
   knownIds: string[],
-  sections: Array<{ sourceId: string; text: string }>
+  sections: Array<{ sourceId: string; spans: RunSpan[] }>
 ): Promise<Buffer> {
-  const groups = new Map<string, string[]>();
+  const groups = new Map<string, RunSpan[][]>();
   for (const s of sections) {
     const list = groups.get(s.sourceId);
-    if (list) list.push(s.text);
-    else groups.set(s.sourceId, [s.text]);
+    if (list) list.push(s.spans);
+    else groups.set(s.sourceId, [s.spans]);
   }
   const known = new Set(knownIds);
 
@@ -174,11 +346,9 @@ export async function applyDocxSections(
     i += 1;
     const id = `p${i}`;
     if (!known.has(id)) return para; // empty/structural paragraph — leave as-is
-    const texts = groups.get(id);
-    if (!texts || texts.length === 0) return ""; // deleted by the user
-    let out = rewriteRuns(para, texts[0], "w:t");
-    for (let k = 1; k < texts.length; k += 1) out += rewriteRuns(para, texts[k], "w:t");
-    return out;
+    const spanLists = groups.get(id);
+    if (!spanLists || spanLists.length === 0) return ""; // deleted by the user
+    return spanLists.map((spans) => rebuildDocxParagraph(para, spans)).join("");
   });
   zip.file("word/document.xml", xml);
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));

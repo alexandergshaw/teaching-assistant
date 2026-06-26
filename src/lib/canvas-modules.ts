@@ -22,7 +22,7 @@ import {
   type CanvasInstitution,
 } from "./canvas-core";
 import { extractTextFromBuffer } from "./office-extract";
-import { parseOfficeParagraphs, applyOfficeEdits, type OfficeKind, type OfficeParagraph } from "./office-edit";
+import { parseOfficeParagraphs, applyOfficeEdits, type OfficeKind, type OfficeParagraph, type RunSpan } from "./office-edit";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1774,7 +1774,7 @@ async function overwriteCanvasFile(
 export async function saveOfficeEdits(
   courseUrl: string,
   fileId: number,
-  edits: Record<string, string>,
+  edits: Record<string, RunSpan[]>,
   code?: string
 ): Promise<void> {
   const ctx = resolveCourse(courseUrl, code);

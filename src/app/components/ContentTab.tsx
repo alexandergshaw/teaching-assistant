@@ -54,7 +54,8 @@ import { resolveDocumentAuthor } from "@/lib/author";
 import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
 import FilePreviewModal, { type PreviewFile } from "./FilePreviewModal";
-import type { OfficeParagraph } from "@/lib/office-edit";
+import type { OfficeParagraph, RunSpan } from "@/lib/office-edit";
+import { RichTextEditor, FormattingToolbar, spansEqual } from "./RichTextEditor";
 import type {
   CanvasModule,
   CanvasModuleItem,
@@ -2379,8 +2380,8 @@ function OfficeEditorModal({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [name, setName] = useState(fileName);
   const [paragraphs, setParagraphs] = useState<OfficeParagraph[]>([]);
-  const [original, setOriginal] = useState<Record<string, string>>({});
-  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [original, setOriginal] = useState<Record<string, RunSpan[]>>({});
+  const [draft, setDraft] = useState<Record<string, RunSpan[]>>({});
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
 
@@ -2396,7 +2397,9 @@ function OfficeEditorModal({
       }
       setName(result.name);
       setParagraphs(result.paragraphs);
-      const seed = Object.fromEntries(result.paragraphs.map((p) => [p.id, p.text]));
+      const seed: Record<string, RunSpan[]> = Object.fromEntries(
+        result.paragraphs.map((p) => [p.id, p.runs.length > 0 ? p.runs : [{ text: p.text }]])
+      );
       setOriginal(seed);
       setDraft(seed);
       setLoading(false);
@@ -2406,12 +2409,13 @@ function OfficeEditorModal({
     };
   }, [courseUrl, fileId, acronym]);
 
-  const changedCount = paragraphs.filter((p) => (draft[p.id] ?? "") !== (original[p.id] ?? "")).length;
+  const isChanged = (id: string) => !spansEqual(draft[id] ?? [], original[id] ?? []);
+  const changedCount = paragraphs.filter((p) => isChanged(p.id)).length;
 
   const handleSave = async () => {
-    const edits: Record<string, string> = {};
+    const edits: Record<string, RunSpan[]> = {};
     for (const p of paragraphs) {
-      if ((draft[p.id] ?? "") !== (original[p.id] ?? "")) edits[p.id] = draft[p.id] ?? "";
+      if (isChanged(p.id)) edits[p.id] = draft[p.id] ?? [{ text: "" }];
     }
     if (Object.keys(edits).length === 0) {
       setNote({ kind: "error", text: "No changes to save." });
@@ -2457,8 +2461,8 @@ function OfficeEditorModal({
         ) : (
           <>
             <p className={styles.fieldHint} style={{ marginTop: 0 }}>
-              Edit the text below. Formatting, images, and layout are kept; saving overwrites the file in
-              Canvas.
+              Edit the text below — select text and use the toolbar to bold, italicize, underline, or
+              resize it. Images and layout are kept; saving overwrites the file in Canvas.
             </p>
             <div
               style={{
@@ -2470,6 +2474,7 @@ function OfficeEditorModal({
                 paddingRight: 4,
               }}
             >
+              <FormattingToolbar />
               {paragraphs.map((p, i) => {
                 const showSlide = p.slide != null && (i === 0 || paragraphs[i - 1].slide !== p.slide);
                 return (
@@ -2479,20 +2484,11 @@ function OfficeEditorModal({
                         Slide {p.slide}
                       </p>
                     )}
-                    <textarea
-                      value={draft[p.id] ?? ""}
-                      onChange={(e) => setDraft((d) => ({ ...d, [p.id]: e.target.value }))}
-                      rows={Math.min(6, Math.max(1, (draft[p.id] ?? "").split("\n").length))}
-                      style={{
-                        width: "100%",
-                        resize: "vertical",
-                        padding: "8px 10px",
-                        fontFamily: "inherit",
-                        border: "1px solid var(--field-border)",
-                        borderRadius: 8,
-                        lineHeight: 1.4,
-                        minHeight: 0,
-                      }}
+                    <RichTextEditor
+                      value={draft[p.id] ?? [{ text: "" }]}
+                      onChange={(spans) => setDraft((d) => ({ ...d, [p.id]: spans }))}
+                      changed={isChanged(p.id)}
+                      ariaLabel={`Paragraph ${i + 1}`}
                     />
                   </Fragment>
                 );

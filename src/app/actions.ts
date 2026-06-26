@@ -1771,6 +1771,23 @@ const SYLLABUS_STYLE_RULES = `- When describing weekly tasks or content, use gen
 - Use the instructor-provided course facts above exactly where they apply (meeting info, and schedule dates derived from the start date).
 - Do not invent specific facts (instructor name, room numbers, dates) that are neither provided above nor implied by the codebase; leave the original text for the instructor to fill in.`;
 
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "Week k: Mon D - Mon D" lines computed exactly from a YYYY-MM-DD start date. */
+function computeWeekDates(startDate: string | undefined, weeks: number): string {
+  if (!startDate) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(startDate.trim());
+  if (!m) return "";
+  const base = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const lines: string[] = [];
+  for (let k = 0; k < weeks; k += 1) {
+    const s = new Date(base + k * 7 * 86_400_000);
+    const e = new Date(base + (k * 7 + 6) * 86_400_000);
+    lines.push(`Week ${k + 1}: ${MONTH_ABBR[s.getUTCMonth()]} ${s.getUTCDate()} - ${MONTH_ABBR[e.getUTCMonth()]} ${e.getUTCDate()}`);
+  }
+  return lines.join("\n");
+}
+
 /** Summarize a codebase zip (file tree + a few key files) as LLM context. */
 async function summarizeCodebaseZip(zipBase64: string): Promise<string> {
   const JSZipMod = (await import("jszip")).default;
@@ -1920,6 +1937,18 @@ ${SYLLABUS_STYLE_RULES}
     const scheduleReplacements: Record<string, string> = {};
     if (schedulePairs.length > 0) {
       const schedList = schedulePairs.map((p) => `[${p.id}] ${p.text}`).join("\n");
+      // How many weeks: the largest "Week N" in the schedule, else one per paragraph.
+      let maxWeek = 0;
+      for (const p of schedulePairs) {
+        const wm = p.text.match(/week\s*(\d+)/i);
+        if (wm) maxWeek = Math.max(maxWeek, Number(wm[1]));
+      }
+      const weeks = maxWeek > 0 ? maxWeek : Math.min(20, schedulePairs.length);
+      const weekDates = computeWeekDates(courseInfo.startDate, weeks);
+      const datesBlock = weekDates
+        ? `EXACT WEEK DATES — use these verbatim and never any other date:\n${weekDates}\n\n`
+        : "";
+
       const prompt2 = `You are completely rewriting the WEEKLY SCHEDULE of a course syllabus for a new offering. The previous offering's schedule must be entirely cleared and replaced.
 
 CODEBASE SUMMARY:
@@ -1928,21 +1957,30 @@ ${codebaseSummary}
 INSTRUCTOR-PROVIDED COURSE FACTS:
 ${courseInfoBlock(courseInfo)}
 
-Here are the schedule paragraphs (id in brackets), in order:
+${datesBlock}Here are the schedule paragraphs (id in brackets), in order:
 ${schedList}
 
-Return a NEW replacement for EVERY paragraph id above. Compute consecutive weekly dates starting from the course start date (week 1 begins on the start date) and advancing one week per week. EACH ASSIGNMENT IN THE CODEBASE REPRESENTS ONE WHOLE WEEK OF THE COURSE — map the codebase's assignments to weeks IN ORDER (the first assignment is week 1, the next is week 2, and so on, one assignment per week) and base each week's topic and description on its corresponding assignment. Preserve each paragraph's role and format (a "Week N (dates): topic" line stays that format; a separate dates/topic/description cell stays that format) but with entirely new content. Clear ALL old dates, topics, and descriptions — leave nothing from the previous offering.
+Rewrite the schedule for THIS course. Return a NEW replacement for EVERY paragraph id above.
+
+DATES — ${weekDates
+        ? "Use ONLY the EXACT WEEK DATES listed above: a paragraph for week k uses week k's dates, in the SAME date style the paragraph already uses."
+        : "Compute consecutive weekly dates from the course start date (week 1 begins on the start date), one week apart."} The previous offering's dates MUST NOT appear anywhere — every old date (for example any January/February/March/April dates that are not in the list above) must be replaced.
+
+TOPICS — Each assignment in the codebase (the TOP-LEVEL ENTRIES in the summary) is one whole week, in order: week k's topic and description come from the k-th assignment. The previous offering's topics and descriptions MUST NOT appear anywhere — every old topic or description (anything not derived from THIS codebase) must be replaced.
+
+FORMAT — Preserve each paragraph's role and layout (a "Week N (dates): topic" line stays that shape; a separate dates cell stays a dates cell; a topic/description cell stays a topic/description cell) — only the content changes.
 
 Return ONLY valid JSON mapping each id to its new text:
 { "replacements": { "p81": "...", "p82": "..." } }
 
 Requirements:
-- Include a replacement for EVERY id listed above; do not omit any.
+- Include a replacement for EVERY id listed above; do not omit a single one.
+- Do not keep ANY date, topic, or description from the previous offering.
 ${SYLLABUS_STYLE_RULES}
 - Do not include any text outside the JSON object.`;
 
       const r2 = await callLlm(
-        { contents: [{ role: "user", parts: [{ text: prompt2 }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 16384 } },
+        { contents: [{ role: "user", parts: [{ text: prompt2 }] }], generationConfig: { temperature: 0.2, maxOutputTokens: 16384 } },
         provider
       );
       if (r2.ok) {
@@ -1951,9 +1989,13 @@ ${SYLLABUS_STYLE_RULES}
           parsed2 && typeof parsed2.replacements === "object" && parsed2.replacements
             ? (parsed2.replacements as Record<string, unknown>)
             : {};
+        const returnedAny = Object.keys(reps).length > 0;
         for (const p of schedulePairs) {
           const v = reps[p.id];
           if (typeof v === "string" && v.trim()) scheduleReplacements[p.id] = v.trim();
+          // Clear any schedule paragraph the model skipped so no old date/topic survives
+          // (only when it returned something — never blank the whole schedule on a failure).
+          else if (returnedAny) scheduleReplacements[p.id] = "";
         }
       }
     }

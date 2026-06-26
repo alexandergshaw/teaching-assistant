@@ -2443,12 +2443,16 @@ function OfficeEditorModal({
     slide?: number;
     spans: RunSpan[];
     originalSpans: RunSpan[] | null;
+    /** docx paragraph style id ("Heading1", "" for body). */
+    style: string;
+    originalStyle: string;
   };
 
   const [provider] = useLlmProvider();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [name, setName] = useState(fileName);
+  const [isDocx, setIsDocx] = useState(false);
   const [sections, setSections] = useState<OfficeSection[]>([]);
   const [initialIds, setInitialIds] = useState<string[]>([]);
   const sectionSeq = useRef(0);
@@ -2467,9 +2471,10 @@ function OfficeEditorModal({
         return;
       }
       setName(result.name);
+      setIsDocx(result.kind === "docx");
       const seeded: OfficeSection[] = result.paragraphs.map((p) => {
         const spans = p.runs.length > 0 ? p.runs : [{ text: p.text }];
-        return { key: p.id, sourceId: p.id, slide: p.slide, spans, originalSpans: spans };
+        return { key: p.id, sourceId: p.id, slide: p.slide, spans, originalSpans: spans, style: p.style, originalStyle: p.style };
       });
       setInitialIds(seeded.map((s) => s.sourceId));
       setSections(seeded);
@@ -2480,13 +2485,17 @@ function OfficeEditorModal({
     };
   }, [courseUrl, fileId, acronym]);
 
-  const sectionChanged = (s: OfficeSection) => !s.originalSpans || !spansEqual(s.spans, s.originalSpans);
+  const sectionChanged = (s: OfficeSection) =>
+    !s.originalSpans || !spansEqual(s.spans, s.originalSpans) || s.style !== s.originalStyle;
   const presentIds = new Set(sections.map((s) => s.sourceId));
   const deletedCount = initialIds.filter((id) => !presentIds.has(id)).length;
   const changedCount = sections.filter(sectionChanged).length + deletedCount;
 
   const updateSpans = (key: string, spans: RunSpan[]) =>
     setSections((prev) => prev.map((s) => (s.key === key ? { ...s, spans } : s)));
+
+  const updateStyle = (key: string, style: string) =>
+    setSections((prev) => prev.map((s) => (s.key === key ? { ...s, style } : s)));
 
   // Add a blank paragraph right after `key`, cloning that paragraph's style anchor.
   const addAfter = (key: string) =>
@@ -2499,6 +2508,8 @@ function OfficeEditorModal({
         slide: prev[idx].slide,
         spans: [{ text: "" }],
         originalSpans: null,
+        style: prev[idx].style,
+        originalStyle: prev[idx].style,
       };
       return [...prev.slice(0, idx + 1), fresh, ...prev.slice(idx + 1)];
     });
@@ -2529,7 +2540,7 @@ function OfficeEditorModal({
     }
     setSaving(true);
     setNote(null);
-    const payload = sections.map((s) => ({ sourceId: s.sourceId, spans: s.spans }));
+    const payload = sections.map((s) => ({ sourceId: s.sourceId, spans: s.spans, style: s.style }));
     const result = await saveOfficeEditsAction(courseUrl, fileId, payload, acronym);
     setSaving(false);
     if ("error" in result) {
@@ -2569,8 +2580,9 @@ function OfficeEditorModal({
           <>
             <p className={styles.fieldHint} style={{ marginTop: 0 }}>
               Edit the text below — select text and use the toolbar to bold, italicize, underline, or
-              resize it. Use the side buttons to rewrite a paragraph with AI, add one below, or delete it.
-              Images and layout are kept; saving overwrites the file in Canvas.
+              resize it{isDocx ? ", and set each paragraph's style (Body, Heading 1, 2…)" : ""}. Use the
+              side buttons to rewrite a paragraph with AI, add one below, or delete it. Images and layout
+              are kept; saving overwrites the file in Canvas.
             </p>
             <RichTextSectionEditor
               maxHeight="52vh"
@@ -2580,6 +2592,7 @@ function OfficeEditorModal({
                 spans: s.spans,
                 changed: sectionChanged(s),
                 ariaLabel: `Paragraph ${i + 1}`,
+                style: isDocx ? { value: s.style, onChange: (v) => updateStyle(s.key, v) } : undefined,
                 heading:
                   s.slide != null && (i === 0 || sections[i - 1].slide !== s.slide)
                     ? `Slide ${s.slide}`

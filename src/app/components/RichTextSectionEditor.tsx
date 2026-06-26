@@ -22,12 +22,24 @@ export interface RichTextSectionAction {
   style?: CSSProperties;
 }
 
+/** docx paragraph styles offered by the per-section style menu. */
+export const HEADING_STYLES: Array<{ value: string; label: string }> = [
+  { value: "", label: "Body text" },
+  { value: "Title", label: "Title" },
+  { value: "Heading1", label: "Heading 1" },
+  { value: "Heading2", label: "Heading 2" },
+  { value: "Heading3", label: "Heading 3" },
+  { value: "Heading4", label: "Heading 4" },
+];
+
 /** One editable section in the list. */
 export interface RichTextSection {
   /** Stable React key. */
   key: string;
   /** Current content as formatted spans. */
   spans: RunSpan[];
+  /** Optional paragraph-style control (docx headings); shown left of the field. */
+  style?: { value: string; onChange: (value: string) => void };
   /** Optional full-width heading above this section (e.g. "Slide 2"). */
   heading?: string;
   /** Optional small uppercase field label above the editor. */
@@ -80,7 +92,26 @@ export function RichTextSectionEditor({
           {s.heading && <p className={styles.rteSectionHeading}>{s.heading}</p>}
           <div className={styles.rteSectionRow}>
             <div className={styles.rteSectionMain}>
-              {s.label && <div className={styles.rteSectionLabel}>{s.label}</div>}
+              {(s.label || s.style) && (
+                <div className={styles.rteSectionTop}>
+                  {s.label && <span className={styles.rteSectionLabel}>{s.label}</span>}
+                  {s.style && (
+                    <select
+                      className={styles.rteStyleSelect}
+                      value={s.style.value}
+                      onChange={(e) => s.style!.onChange(e.target.value)}
+                      title="Paragraph style"
+                      aria-label="Paragraph style"
+                    >
+                      {HEADING_STYLES.map((h) => (
+                        <option key={h.value} value={h.value}>
+                          {h.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
               <RichTextEditor
                 value={s.spans}
                 onChange={(spans) => onChange(s.key, spans)}

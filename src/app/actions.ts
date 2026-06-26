@@ -1322,7 +1322,7 @@ export async function getOfficeEditableAction(
 export async function saveOfficeEditsAction(
   courseUrl: string,
   fileId: number,
-  sections: Array<{ sourceId: string; spans: RunSpan[] }>,
+  sections: Array<{ sourceId: string; spans: RunSpan[]; style?: string }>,
   acronym?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {

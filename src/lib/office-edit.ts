@@ -45,6 +45,8 @@ export interface OfficeParagraph {
   text: string;
   /** The paragraph split into formatted spans (concatenate to `text`). */
   runs: RunSpan[];
+  /** docx paragraph style id (w:pStyle), e.g. "Heading1"; "" for body/none. */
+  style: string;
 }
 
 /** Whether a span list carries no formatting (so it can use the plain path). */
@@ -262,6 +264,22 @@ function buildDocxRunProps(baseInner: string, span: RunSpan): string {
 // share a `link` are re-wrapped in their original <w:hyperlink> so links survive
 // edits. Used only when a span carries formatting (or a link); other structural
 // inline content (bookmarks) in that paragraph is not preserved.
+// Set (or clear, when styleVal is "") the paragraph style (w:pStyle) on a docx
+// paragraph, keeping the rest of its pPr. pStyle must be the first pPr child.
+function setDocxParagraphStyle(paraXml: string, styleVal: string): string {
+  const styleTag = styleVal ? `<w:pStyle w:val="${escapeXml(styleVal)}"/>` : "";
+  const pPr = paraXml.match(/<w:pPr>[\s\S]*?<\/w:pPr>/)?.[0] ?? paraXml.match(/<w:pPr\/>/)?.[0];
+  if (pPr) {
+    const inner = pPr === "<w:pPr/>" ? "" : pPr.replace(/^<w:pPr>/, "").replace(/<\/w:pPr>$/, "");
+    const innerNoStyle = inner.replace(/<w:pStyle\b[^>]*\/>/, "");
+    const newInner = `${styleTag}${innerNoStyle}`;
+    return paraXml.replace(pPr, newInner ? `<w:pPr>${newInner}</w:pPr>` : "");
+  }
+  if (!styleTag) return paraXml;
+  const open = paraXml.match(/^<w:p\b[^>]*>/)?.[0] ?? "<w:p>";
+  return paraXml.replace(open, `${open}<w:pPr>${styleTag}</w:pPr>`);
+}
+
 function rebuildDocxParagraph(paraXml: string, spans: RunSpan[]): string {
   if (spansArePlain(spans) && spans.every((s) => !s.link)) {
     return rewriteRuns(stripFirstRunMarksDocx(paraXml), spansPlainText(spans), "w:t");
@@ -338,7 +356,10 @@ export async function parseOfficeParagraphs(kind: OfficeKind, buffer: Buffer): P
     let i = 0;
     for (const match of xml.matchAll(DOCX_PARA)) {
       const text = paragraphText(match[0], DOCX_RUN);
-      if (text.trim()) out.push({ id: `p${i}`, text, runs: extractDocxRuns(match[0]) });
+      if (text.trim()) {
+        const style = match[0].match(/<w:pStyle\b[^>]*\bw:val="([^"]*)"/)?.[1] ?? "";
+        out.push({ id: `p${i}`, text, runs: extractDocxRuns(match[0]), style });
+      }
       i += 1;
     }
     return out;
@@ -352,7 +373,7 @@ export async function parseOfficeParagraphs(kind: OfficeKind, buffer: Buffer): P
     let p = 0;
     for (const match of xml.matchAll(PPTX_PARA)) {
       const text = paragraphText(match[0], PPTX_RUN);
-      if (text.trim()) out.push({ id: `s${s}_p${p}`, slide: s + 1, text, runs: extractPptxRuns(match[0]) });
+      if (text.trim()) out.push({ id: `s${s}_p${p}`, slide: s + 1, text, runs: extractPptxRuns(match[0]), style: "" });
       p += 1;
     }
   }
@@ -372,26 +393,36 @@ export async function parseOfficeParagraphs(kind: OfficeKind, buffer: Buffer): P
 export async function applyOfficeSections(
   kind: OfficeKind,
   buffer: Buffer,
-  sections: Array<{ sourceId: string; spans: RunSpan[] }>
+  sections: Array<{ sourceId: string; spans: RunSpan[]; style?: string }>
 ): Promise<Buffer> {
   const originals = await parseOfficeParagraphs(kind, buffer);
   const originalRuns = new Map(originals.map((p) => [p.id, p.runs]));
+  const originalStyle = new Map(originals.map((p) => [p.id, p.style]));
 
-  const groups = new Map<string, RunSpan[][]>();
+  const groups = new Map<string, Array<{ spans: RunSpan[]; style?: string }>>();
   for (const s of sections) {
+    const entry = { spans: s.spans, style: s.style };
     const list = groups.get(s.sourceId);
-    if (list) list.push(s.spans);
-    else groups.set(s.sourceId, [s.spans]);
+    if (list) list.push(entry);
+    else groups.set(s.sourceId, [entry]);
   }
 
   const rebuild = kind === "docx" ? rebuildDocxParagraph : rebuildPptxParagraph;
   const render = (para: string, id: string): string => {
     const base = originalRuns.get(id);
     if (!base) return para; // structural / non-text paragraph — leave as-is
-    const spanLists = groups.get(id);
-    if (!spanLists || spanLists.length === 0) return ""; // deleted by the user
-    if (spanLists.length === 1 && spansEqual(spanLists[0], base)) return para; // unchanged
-    return spanLists.map((spans) => rebuild(para, spans)).join("");
+    const entries = groups.get(id);
+    if (!entries || entries.length === 0) return ""; // deleted by the user
+    const baseStyle = originalStyle.get(id) ?? "";
+    const styleUnchanged = (e: { style?: string }) => e.style === undefined || e.style === baseStyle;
+    if (entries.length === 1 && spansEqual(entries[0].spans, base) && styleUnchanged(entries[0])) return para;
+    return entries
+      .map((e) => {
+        let out = rebuild(para, e.spans);
+        if (kind === "docx" && e.style !== undefined && e.style !== baseStyle) out = setDocxParagraphStyle(out, e.style);
+        return out;
+      })
+      .join("");
   };
 
   const zip = await JSZip.loadAsync(buffer);

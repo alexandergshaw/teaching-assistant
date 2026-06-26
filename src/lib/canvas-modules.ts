@@ -2074,7 +2074,7 @@ async function overwriteCanvasFile(
 export async function saveOfficeEdits(
   courseUrl: string,
   fileId: number,
-  sections: Array<{ sourceId: string; spans: RunSpan[] }>,
+  sections: Array<{ sourceId: string; spans: RunSpan[]; style?: string }>,
   code?: string
 ): Promise<void> {
   const ctx = resolveCourse(courseUrl, code);

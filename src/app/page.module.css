@@ -4421,3 +4421,22 @@
 .rteSectionActionBtnDanger {
   color: #b91c1c;
 }
+
+/* Per-section paragraph-style control in the rich text section editor */
+.rteSectionTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+}
+.rteStyleSelect {
+  height: 24px;
+  padding: 0 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569;
+  border: 1px solid var(--field-border);
+  border-radius: 6px;
+  background: #ffffff;
+  cursor: pointer;
+}

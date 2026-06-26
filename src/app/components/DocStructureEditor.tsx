@@ -76,6 +76,8 @@ export default function DocStructureEditor({
   const [docTitle, setDocTitle] = useState("");
   // Chosen heading style per paragraph id (defaults to the paragraph's own style).
   const [levels, setLevels] = useState<Record<string, string>>({});
+  // Paragraph ids ticked for a bulk style change.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -117,6 +119,23 @@ export default function DocStructureEditor({
   const titleChanged = titleTrimmed !== originalTitle.trim();
 
   const applySuggestion = () => setLevels((prev) => ({ ...prev, ...suggestLevels(paragraphs) }));
+
+  const toggleSelected = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const allSelected = paragraphs.length > 0 && paragraphs.every((p) => selected.has(p.id));
+  const toggleSelectAll = () => setSelected(allSelected ? new Set() : new Set(paragraphs.map((p) => p.id)));
+  // Set every ticked paragraph to one style at once (Body / Heading 1-3).
+  const applyToSelected = (style: string) =>
+    setLevels((prev) => {
+      const next = { ...prev };
+      for (const id of selected) next[id] = style;
+      return next;
+    });
 
   const save = async () => {
     setStage("saving");
@@ -188,7 +207,10 @@ export default function DocStructureEditor({
               {paragraphs.length > 0 && (
                 <>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                    <label style={{ fontSize: "0.82rem", fontWeight: 600, color: "#334155" }}>Headings</label>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: "0.82rem", fontWeight: 600, color: "#334155", cursor: "pointer" }}>
+                      <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} aria-label="Select all lines" />
+                      Headings
+                    </label>
                     <button
                       type="button"
                       onClick={applySuggestion}
@@ -197,15 +219,49 @@ export default function DocStructureEditor({
                       Suggest headings
                     </button>
                   </div>
+
+                  {selected.size > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 10px", background: "#f1f5f9", borderRadius: 8, marginBottom: 6 }}>
+                      <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#334155" }}>
+                        {selected.size} selected — set to
+                      </span>
+                      {LEVELS.map((l) => (
+                        <button
+                          key={l.value}
+                          type="button"
+                          onClick={() => applyToSelected(l.value)}
+                          style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", color: "#334155", borderRadius: 6, padding: "4px 10px", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer" }}
+                        >
+                          {l.label}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setSelected(new Set())}
+                        style={{ marginLeft: "auto", border: "none", background: "none", color: "var(--accent, #2563eb)", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer" }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  )}
+
                   <div style={{ border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8 }}>
                     {paragraphs.map((p, i) => {
                       const lvl = levelOf(p);
                       const isHeading = /^Heading[1-9]$/.test(lvl);
+                      const isSelected = selected.has(p.id);
                       return (
                         <div
                           key={p.id}
-                          style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 10px", borderTop: i === 0 ? "none" : "1px solid #f1f5f9" }}
+                          style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 10px", borderTop: i === 0 ? "none" : "1px solid #f1f5f9", background: isSelected ? "#eff6ff" : undefined }}
                         >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelected(p.id)}
+                            aria-label={`Select "${p.text.slice(0, 40)}"`}
+                            style={{ flexShrink: 0 }}
+                          />
                           <span
                             title={p.text}
                             style={{ flex: 1, minWidth: 0, fontSize: "0.85rem", color: isHeading ? "#0f172a" : "#475569", fontWeight: isHeading ? 700 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}

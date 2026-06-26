@@ -87,9 +87,6 @@ export interface AccessibilityValue {
   /** Course Link Validator: status + trigger a fresh run. */
   linkStatus: LinkStatus;
   checkLinks: () => void;
-  /** Office-file (docx/pptx) image-alt scan: status + trigger. */
-  fileStatus: LinkStatus;
-  scanFiles: () => void;
   /** Replace a file's issues after its alt text is edited. */
   setFileScan: (id: string, title: string, issues: Issue[]) => void;
   centerOpen: boolean;
@@ -110,8 +107,6 @@ const DEFAULT: AccessibilityValue = {
   rescanAll: () => {},
   linkStatus: "idle",
   checkLinks: () => {},
-  fileStatus: "idle",
-  scanFiles: () => {},
   setFileScan: () => {},
   centerOpen: false,
   setCenterOpen: () => {},
@@ -139,8 +134,6 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
   const [error, setError] = useState<string | undefined>();
   const [linkGroups, setLinkGroups] = useState<Record<string, LinkGroup>>({});
   const [linkStatus, setLinkStatus] = useState<LinkStatus>("idle");
-  const [fileItems, setFileItems] = useState<Record<string, ItemScan>>({});
-  const [fileStatus, setFileStatus] = useState<LinkStatus>("idle");
   const [centerOpen, setCenterOpen] = useState(false);
   const scannedSig = useRef<string>("");
   const scanRunId = useRef(0);
@@ -155,19 +148,28 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
     return () => window.removeEventListener("ta-course-changed", onCourseChanged);
   }, []);
 
+  const mergeItems = (incoming: ItemScan[]) =>
+    setItems((prev) => {
+      const next = { ...prev };
+      for (const it of incoming) next[itemKey(it.type, it.id)] = it;
+      return next;
+    });
+
   const runScan = useCallback(async (url: string, inst: string) => {
     const runId = ++scanRunId.current;
     const aborted = () => scanRunId.current !== runId;
+    const acronym = inst || undefined;
     setStatus("scanning");
     setItems({}); // clear the previous course's results while the new scan runs
     setLinkGroups({});
     setLinkStatus("idle");
-    setFileItems({});
-    setFileStatus("idle");
     setError(undefined);
 
-    // 1) Cheap list of items + cached results (no page bodies fetched yet).
-    const list = await a11yApi<{ items: AccessibilityItemRef[]; cached: ItemScan[] }>("list-items", { courseUrl: url, acronym: inst || undefined });
+    // 1) Cheap lists (HTML items + files) and cached results — no downloads yet.
+    const [list, filesResp] = await Promise.all([
+      a11yApi<{ items: AccessibilityItemRef[]; cached: ItemScan[] }>("list-items", { courseUrl: url, acronym }),
+      a11yApi<{ files: Array<{ id: number; title: string; kind: string; fingerprint: string }> }>("list-files", { courseUrl: url, acronym }),
+    ]);
     if (aborted()) return;
     if ("error" in list) {
       setStatus("error");
@@ -184,28 +186,35 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
       if (cached && cached.fingerprint === r.fingerprint) seed[itemKey(r.type, r.id)] = cached;
       else toScan.push({ type: r.type, id: r.id });
     }
+    const fileRefs = "error" in filesResp ? [] : filesResp.files;
+    const filesToScan: typeof fileRefs = [];
+    for (const f of fileRefs) {
+      const cached = cachedByKey.get(`file:${f.id}`);
+      if (cached && cached.fingerprint === f.fingerprint) seed[`file:${f.id}`] = cached;
+      else filesToScan.push(f);
+    }
     setItems(seed);
 
-    // 3) Scan the changed items in small batches; badges fill in as each returns.
-    const BATCH = 6;
-    for (let i = 0; i < toScan.length; i += BATCH) {
+    // 3) Scan changed HTML items in small batches; badges fill in as each returns.
+    for (let i = 0; i < toScan.length; i += 6) {
       if (aborted()) return;
-      const chunk = toScan.slice(i, i + BATCH);
-      const res = await a11yApi<{ items: ItemScan[] }>("scan-batch", { courseUrl: url, acronym: inst || undefined, items: chunk });
+      const res = await a11yApi<{ items: ItemScan[] }>("scan-batch", { courseUrl: url, acronym, items: toScan.slice(i, i + 6) });
       if (aborted()) return;
-      if (!("error" in res)) {
-        setItems((prev) => {
-          const next = { ...prev };
-          for (const it of res.items) next[itemKey(it.type, it.id)] = it;
-          return next;
-        });
-      }
+      if (!("error" in res)) mergeItems(res.items);
+    }
+
+    // 4) Scan changed files (downloads — smaller batches).
+    for (let i = 0; i < filesToScan.length; i += 3) {
+      if (aborted()) return;
+      const res = await a11yApi<{ items: ItemScan[] }>("scan-files-batch", { courseUrl: url, acronym, files: filesToScan.slice(i, i + 3) });
+      if (aborted()) return;
+      if (!("error" in res)) mergeItems(res.items);
     }
     if (aborted()) return;
     setStatus("done");
 
-    // 4) Pick up any already-completed link-validation run (a free GET, no new job).
-    const lv = await a11yApi<{ state: string; links: BrokenLink[] }>("links-get", { courseUrl: url, acronym: inst || undefined });
+    // 5) Pick up any already-completed link-validation run (a free GET, no new job).
+    const lv = await a11yApi<{ state: string; links: BrokenLink[] }>("links-get", { courseUrl: url, acronym });
     if (!aborted() && !("error" in lv) && lv.state === "completed") {
       setLinkGroups(mapBrokenLinks(lv.links));
       setLinkStatus("done");
@@ -218,24 +227,7 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
     setError(undefined);
     setLinkGroups({});
     setLinkStatus("idle");
-    setFileItems({});
-    setFileStatus("idle");
   }, []);
-
-  // Scan the course's Office files for missing image alt text (downloads files).
-  const scanFiles = useCallback(async () => {
-    if (!hasCourseId(courseUrl)) return;
-    setFileStatus("running");
-    const result = await a11yApi<{ items: ItemScan[] }>("scan-files", { courseUrl, acronym: institution || undefined });
-    if ("error" in result) {
-      setFileStatus("error");
-      return;
-    }
-    const map: Record<string, ItemScan> = {};
-    for (const it of result.items) map[itemKey(it.type, it.id)] = it;
-    setFileItems(map);
-    setFileStatus("done");
-  }, [courseUrl, institution]);
 
   // Start a fresh link-validation run and poll until it completes (~2 min cap).
   const checkLinks = useCallback(async () => {
@@ -308,7 +300,7 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
   // Update one file's issues after its alt text is edited (the office alt editor
   // already knows the new state, so no re-download is needed).
   const setFileScan = useCallback((id: string, title: string, issues: Issue[]) => {
-    setFileItems((prev) => {
+    setItems((prev) => {
       const c = countsOf(issues);
       return {
         ...prev,
@@ -329,11 +321,10 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
   }, [rescanItem]);
 
   const value = useMemo<AccessibilityValue>(() => {
-    // Merge HTML-scan issues with file (office image-alt) and broken-link issues
-    // per item, recomputing counts.
+    // Merge per-item scan issues (HTML pages + files) with broken-link issues,
+    // recomputing counts.
     const merged: Record<string, ItemScan> = {};
     for (const [k, it] of Object.entries(items)) merged[k] = { ...it, issues: [...it.issues] };
-    for (const [k, it] of Object.entries(fileItems)) merged[k] = { ...it, issues: [...it.issues] };
     for (const [k, g] of Object.entries(linkGroups)) {
       if (merged[k]) merged[k].issues.push(...g.issues);
       else merged[k] = { type: g.type, id: g.id, title: g.title, fingerprint: "", errorCount: 0, warningCount: 0, suggestionCount: 0, issues: [...g.issues] };
@@ -368,13 +359,11 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
       rescanAll,
       linkStatus,
       checkLinks: () => void checkLinks(),
-      fileStatus,
-      scanFiles: () => void scanFiles(),
       setFileScan,
       centerOpen,
       setCenterOpen,
     };
-  }, [items, fileItems, linkGroups, status, error, courseUrl, institution, linkStatus, fileStatus, rescanItem, rescanAll, checkLinks, scanFiles, setFileScan, centerOpen]);
+  }, [items, linkGroups, status, error, courseUrl, institution, linkStatus, rescanItem, rescanAll, checkLinks, setFileScan, centerOpen]);
 
   return (
     <AccessibilityContext.Provider value={value}>

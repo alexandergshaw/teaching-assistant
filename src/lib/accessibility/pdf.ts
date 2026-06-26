@@ -35,6 +35,18 @@ export async function scanPdf(buffer: Buffer): Promise<Issue[]> {
     ));
   }
 
+  // Structure / headings: no StructTreeRoot means no tagged heading structure.
+  const structRoot = catalog.lookupMaybe(PDFName.of("StructTreeRoot"), PDFDict);
+  if (!structRoot) {
+    issues.push(flag(
+      "pdf-no-structure",
+      "error",
+      "PDF does not include headings for structure.",
+      "1.3.1",
+      "Tag the PDF and mark headings so screen-reader users can navigate it."
+    ));
+  }
+
   // Document language /Lang
   const lang = catalog.lookup(PDFName.of("Lang"));
   const langStr = lang instanceof PDFString || lang instanceof PDFHexString ? lang.decodeText() : "";
@@ -44,7 +56,7 @@ export async function scanPdf(buffer: Buffer): Promise<Issue[]> {
 
   // Document title (and ideally displayed instead of the file name)
   if (!(doc.getTitle() ?? "").trim()) {
-    issues.push(flag("pdf-no-title", "warning", "PDF has no document title.", "2.4.2", "Add a title in the PDF's properties and set it to display."));
+    issues.push(flag("pdf-no-title", "warning", "PDF is missing a document title.", "2.4.2", "Add a title in the PDF's properties and set it to display."));
   }
 
   return issues;

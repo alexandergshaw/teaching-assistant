@@ -126,23 +126,6 @@ export default function AccessibilityCenter() {
               </button>
               <button
                 type="button"
-                onClick={() => a11y.scanFiles()}
-                disabled={a11y.fileStatus === "running"}
-                title="Scan Word/PowerPoint files (image alt text) and PDFs (tagging, language, title)"
-                style={{
-                  border: "1px solid var(--field-border, #cbd5e1)",
-                  background: "#fff",
-                  borderRadius: 8,
-                  padding: "5px 10px",
-                  fontSize: "0.82rem",
-                  cursor: a11y.fileStatus === "running" ? "default" : "pointer",
-                  color: "#334155",
-                }}
-              >
-                {a11y.fileStatus === "running" ? "Scanning files…" : a11y.fileStatus === "done" ? "Rescan files" : "Scan files"}
-              </button>
-              <button
-                type="button"
                 onClick={() => a11y.rescanAll()}
                 disabled={a11y.status === "scanning"}
                 style={{

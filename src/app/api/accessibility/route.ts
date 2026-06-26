@@ -54,6 +54,7 @@ export async function POST(req: NextRequest) {
       type?: AccessibleItemType;
       id?: string;
       items?: Array<{ type: AccessibleItemType; id: string }>;
+      files?: Array<{ id: number; title: string; kind: string; fingerprint: string }>;
     };
     const { op, courseUrl } = body;
     const acronym = body.acronym;
@@ -99,19 +100,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ item: scan });
     }
 
-    if (op === "scan-files") {
+    // Cheap: list the course's scannable files (docx/pptx/pdf) — metadata only,
+    // no downloads. The client diffs against cache and scans changed ones in
+    // small batches (downloads are heavy, so files can't be done all at once).
+    if (op === "list-files") {
       const files = await listScannableFiles(courseUrl, acronym);
-      const cached = await getCachedScans(user.id, institution, courseId);
-      const cachedByKey = new Map(cached.map((c) => [`${c.type}:${c.id}`, c]));
+      return NextResponse.json({
+        files: files.map((f) => ({ id: f.id, title: f.title, kind: f.kind, fingerprint: f.fingerprint })),
+      });
+    }
+
+    if (op === "scan-files-batch") {
+      const files = (body.files ?? []) as Array<{ id: number; title: string; kind: string; fingerprint: string }>;
       const items: ItemScan[] = [];
-      const toUpsert: ItemScan[] = [];
-      for (const f of files) {
-        const id = String(f.id);
-        const prev = cachedByKey.get(`file:${id}`);
-        if (prev && prev.fingerprint === f.fingerprint) {
-          items.push(prev);
-          continue;
-        }
+      for (const f of files.slice(0, 4)) {
         let issues: Issue[] = [];
         try {
           issues =
@@ -121,11 +123,9 @@ export async function POST(req: NextRequest) {
         } catch {
           continue; // a file we can't read (too large, encrypted, etc.) is skipped
         }
-        const scan = toItemScan({ type: "file", id, title: f.title, fingerprint: f.fingerprint }, issues);
-        items.push(scan);
-        toUpsert.push(scan);
+        items.push(toItemScan({ type: "file", id: String(f.id), title: f.title, fingerprint: f.fingerprint }, issues));
       }
-      await upsertScans(user.id, institution, courseId, toUpsert);
+      await upsertScans(user.id, institution, courseId, items);
       return NextResponse.json({ items });
     }
 

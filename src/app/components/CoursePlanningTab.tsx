@@ -53,6 +53,15 @@ const LS_KEYS = {
   scheduleStartDate: "schedule_scheduleStartDate",
   scheduleWeeks: "schedule_scheduleWeeks",
   scheduleTests: "schedule_scheduleTests",
+  adaptCourseName: "adapt_courseName",
+  adaptCourseCode: "adapt_courseCode",
+  adaptInstructorName: "adapt_instructorName",
+  adaptInstructorEmail: "adapt_instructorEmail",
+  adaptDescription: "adapt_description",
+  adaptStartDate: "adapt_startDate",
+  adaptMeetingDays: "adapt_meetingDays",
+  adaptMeetingTimes: "adapt_meetingTimes",
+  adaptLocation: "adapt_location",
 };
 
 export default function CoursePlanningTab() {
@@ -121,6 +130,22 @@ export default function CoursePlanningTab() {
   // The full paragraph list + codebase summary, for the live preview and per-field regenerate.
   const [adaptCodebaseSummary, setAdaptCodebaseSummary] = useState("");
   const [adaptRegenKey, setAdaptRegenKey] = useState<string | null>(null);
+
+  // One-time hydration of the syllabus-adapter text inputs from localStorage
+  // (client-only, to avoid an SSR mismatch — same reasoning as the effect above).
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setAdaptCourseName(localStorage.getItem(LS_KEYS.adaptCourseName) || "");
+    setAdaptCourseCode(localStorage.getItem(LS_KEYS.adaptCourseCode) || "");
+    setAdaptInstructorName(localStorage.getItem(LS_KEYS.adaptInstructorName) || "");
+    setAdaptInstructorEmail(localStorage.getItem(LS_KEYS.adaptInstructorEmail) || "");
+    setAdaptDescription(localStorage.getItem(LS_KEYS.adaptDescription) || "");
+    setAdaptStartDate(localStorage.getItem(LS_KEYS.adaptStartDate) || "");
+    setAdaptMeetingDays(localStorage.getItem(LS_KEYS.adaptMeetingDays) || "");
+    setAdaptMeetingTimes(localStorage.getItem(LS_KEYS.adaptMeetingTimes) || "");
+    setAdaptLocation(localStorage.getItem(LS_KEYS.adaptLocation) || "");
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
 
   const handleGenerateSchedule = async () => {
     if (!courseDescription.trim()) {
@@ -447,7 +472,7 @@ export default function CoursePlanningTab() {
                   className={styles.textInput}
                   placeholder="e.g. Database Management"
                   value={adaptCourseName}
-                  onChange={(e) => setAdaptCourseName(e.target.value)}
+                  onChange={(e) => { setAdaptCourseName(e.target.value); localStorage.setItem(LS_KEYS.adaptCourseName, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
@@ -458,7 +483,7 @@ export default function CoursePlanningTab() {
                   className={styles.textInput}
                   placeholder="e.g. BIT270"
                   value={adaptCourseCode}
-                  onChange={(e) => setAdaptCourseCode(e.target.value)}
+                  onChange={(e) => { setAdaptCourseCode(e.target.value); localStorage.setItem(LS_KEYS.adaptCourseCode, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
@@ -469,7 +494,7 @@ export default function CoursePlanningTab() {
                   className={styles.textInput}
                   placeholder="e.g. Alex Shaw"
                   value={adaptInstructorName}
-                  onChange={(e) => setAdaptInstructorName(e.target.value)}
+                  onChange={(e) => { setAdaptInstructorName(e.target.value); localStorage.setItem(LS_KEYS.adaptInstructorName, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
@@ -480,7 +505,7 @@ export default function CoursePlanningTab() {
                   className={styles.textInput}
                   placeholder="e.g. shaw@university.edu"
                   value={adaptInstructorEmail}
-                  onChange={(e) => setAdaptInstructorEmail(e.target.value)}
+                  onChange={(e) => { setAdaptInstructorEmail(e.target.value); localStorage.setItem(LS_KEYS.adaptInstructorEmail, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
@@ -491,7 +516,7 @@ export default function CoursePlanningTab() {
                   rows={4}
                   placeholder="Paste the official catalog description — used verbatim for the course description section."
                   value={adaptDescription}
-                  onChange={(e) => setAdaptDescription(e.target.value)}
+                  onChange={(e) => { setAdaptDescription(e.target.value); localStorage.setItem(LS_KEYS.adaptDescription, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
@@ -501,7 +526,7 @@ export default function CoursePlanningTab() {
                   type="date"
                   className={styles.textInput}
                   value={adaptStartDate}
-                  onChange={(e) => setAdaptStartDate(e.target.value)}
+                  onChange={(e) => { setAdaptStartDate(e.target.value); localStorage.setItem(LS_KEYS.adaptStartDate, e.target.value); }}
                 />
                 <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 0" }}>
                   Include the year — used to compute the schedule. Not assumed from the old syllabus.
@@ -515,7 +540,7 @@ export default function CoursePlanningTab() {
                   className={styles.textInput}
                   placeholder="e.g. Mon / Wed / Fri"
                   value={adaptMeetingDays}
-                  onChange={(e) => setAdaptMeetingDays(e.target.value)}
+                  onChange={(e) => { setAdaptMeetingDays(e.target.value); localStorage.setItem(LS_KEYS.adaptMeetingDays, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
@@ -526,7 +551,7 @@ export default function CoursePlanningTab() {
                   className={styles.textInput}
                   placeholder="e.g. 9:00–10:15am"
                   value={adaptMeetingTimes}
-                  onChange={(e) => setAdaptMeetingTimes(e.target.value)}
+                  onChange={(e) => { setAdaptMeetingTimes(e.target.value); localStorage.setItem(LS_KEYS.adaptMeetingTimes, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
@@ -537,7 +562,7 @@ export default function CoursePlanningTab() {
                   className={styles.textInput}
                   placeholder="e.g. Room 204, Science Hall"
                   value={adaptLocation}
-                  onChange={(e) => setAdaptLocation(e.target.value)}
+                  onChange={(e) => { setAdaptLocation(e.target.value); localStorage.setItem(LS_KEYS.adaptLocation, e.target.value); }}
                 />
               </div>
 

@@ -16,6 +16,7 @@ import {
   type SyllabusCourseInfo,
 } from "../actions";
 import GithubRepoPicker from "./GithubRepoPicker";
+import GithubSyncPanel from "./GithubSyncPanel";
 import LecturePlanningTab from "./LecturePlanningTab";
 import { spansToPlainText } from "./RichTextEditor";
 import { RichTextSectionEditor } from "./RichTextSectionEditor";
@@ -40,7 +41,7 @@ type AdaptSection = {
   /** Whether the AI flagged this as a class-specific field (shown in the form). */
   isField: boolean;
 };
-type PlanningMode = "syllabus" | "schedule" | "project" | "lecture" | "codebase";
+type PlanningMode = "syllabus" | "schedule" | "project" | "lecture" | "codebase" | "sync";
 
 // Map an AI replacement string onto the paragraph's original formatting: if the
 // replacement still starts with the original's leading bold label, keep that
@@ -176,7 +177,7 @@ export default function CoursePlanningTab() {
     // during hydration and cause an SSR mismatch. Hence the rule is suppressed.
     /* eslint-disable react-hooks/set-state-in-effect */
     const savedMode = localStorage.getItem(LS_KEYS.planningMode);
-    if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project" || savedMode === "lecture" || savedMode === "codebase") {
+    if (savedMode === "syllabus" || savedMode === "schedule" || savedMode === "project" || savedMode === "lecture" || savedMode === "codebase" || savedMode === "sync") {
       setPlanningMode(savedMode);
     }
     setCourseDescription(localStorage.getItem(LS_KEYS.courseDescription) || "");
@@ -602,6 +603,13 @@ export default function CoursePlanningTab() {
               onClick={() => { setPlanningMode("codebase"); localStorage.setItem(LS_KEYS.planningMode, "codebase"); }}
             >
               From a Codebase
+            </button>
+            <button
+              type="button"
+              className={`${styles.scheduleModeBtn}${planningMode === "sync" ? ` ${styles.active}` : ""}`}
+              onClick={() => { setPlanningMode("sync"); localStorage.setItem(LS_KEYS.planningMode, "sync"); }}
+            >
+              Assignment Sync
             </button>
           </div>
 
@@ -1112,6 +1120,8 @@ export default function CoursePlanningTab() {
               )}
             </>
           )}
+
+          {planningMode === "sync" && <GithubSyncPanel acronym={activeInstitution || undefined} />}
 
           {planningMode === "lecture" && (
             <LecturePlanningTab />

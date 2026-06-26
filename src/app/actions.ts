@@ -122,9 +122,11 @@ import {
   parseRepoRef,
   createRepo,
   putFile,
+  getFileText,
   type GithubRepo,
   type RepoDigest,
 } from "@/lib/github";
+import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
   courseEngineSchedule,
@@ -4627,6 +4629,97 @@ export async function createCopilotRepoAction(
     return { fullName: repo.fullName, htmlUrl: repo.htmlUrl };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not create the repository." };
+  }
+}
+
+// ── Assignment instruction sync (Canvas <-> repo) ─────────────────────────────
+
+const assignmentSlug = (title: string): string =>
+  title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "assignment";
+
+function parseAssignmentRef(
+  assignmentUrl: string,
+  repoRef: string
+): { assignmentId: string; owner: string; repo: string } | { error: string } {
+  const assignmentId = assignmentUrl.match(/\/assignments\/(\d+)/)?.[1];
+  if (!assignmentId) return { error: "Paste a Canvas assignment URL (…/courses/<id>/assignments/<id>)." };
+  const parsed = parseRepoRef(repoRef);
+  if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+  return { assignmentId, owner: parsed.owner, repo: parsed.repo };
+}
+
+/** Load both sides of an assignment's instructions (Canvas + repo file) for review. */
+export async function getAssignmentSyncStateAction(
+  assignmentUrl: string,
+  repoRef: string,
+  path: string,
+  acronym?: string
+): Promise<
+  { title: string; canvasMarkdown: string; repoMarkdown: string | null; path: string } | { error: string }
+> {
+  try {
+    await requireOwner();
+    const ref = parseAssignmentRef(assignmentUrl, repoRef);
+    if ("error" in ref) return ref;
+    const item = await getAccessibilityItem(assignmentUrl, "assignment", ref.assignmentId, acronym);
+    if (!item) return { error: "Could not load that Canvas assignment." };
+    const resolvedPath = path.trim() || `assignments/${assignmentSlug(item.title)}/README.md`;
+    let repoMarkdown: string | null = null;
+    try {
+      repoMarkdown = await getFileText(ref.owner, ref.repo, resolvedPath);
+    } catch {
+      repoMarkdown = null; // file not there yet
+    }
+    return { title: item.title, canvasMarkdown: htmlToMarkdown(item.html), repoMarkdown, path: resolvedPath };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the assignment." };
+  }
+}
+
+/** Push Canvas assignment instructions into the repo file (as Markdown). */
+export async function syncAssignmentToRepoAction(
+  assignmentUrl: string,
+  repoRef: string,
+  path: string,
+  acronym?: string
+): Promise<{ ok: true; path: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const ref = parseAssignmentRef(assignmentUrl, repoRef);
+    if ("error" in ref) return ref;
+    const item = await getAccessibilityItem(assignmentUrl, "assignment", ref.assignmentId, acronym);
+    if (!item) return { error: "Could not load that Canvas assignment." };
+    const resolvedPath = path.trim() || `assignments/${assignmentSlug(item.title)}/README.md`;
+    const markdown = `# ${item.title}\n\n${htmlToMarkdown(item.html)}\n`;
+    await putFile(ref.owner, ref.repo, resolvedPath, markdown, `Sync "${item.title}" instructions from Canvas`);
+    return { ok: true, path: resolvedPath };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not write to the repository." };
+  }
+}
+
+/** Pull the repo file (Markdown) into the Canvas assignment description (as HTML). */
+export async function syncAssignmentFromRepoAction(
+  assignmentUrl: string,
+  repoRef: string,
+  path: string,
+  acronym?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const ref = parseAssignmentRef(assignmentUrl, repoRef);
+    if ("error" in ref) return ref;
+    if (!path.trim()) return { error: "Specify the repo file path to pull from." };
+    let markdown: string;
+    try {
+      markdown = await getFileText(ref.owner, ref.repo, path.trim());
+    } catch {
+      return { error: "That file wasn't found in the repository." };
+    }
+    await saveAccessibilityItemHtml(assignmentUrl, "assignment", ref.assignmentId, markdownToHtml(markdown), acronym);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the Canvas assignment." };
   }
 }
 

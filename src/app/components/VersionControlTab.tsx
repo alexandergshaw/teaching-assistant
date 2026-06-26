@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { listMyOrgsAction, listOrgReposAction, generateStudentReposAction, type StudentRepoResult } from "../actions";
+import {
+  listMyOrgsAction,
+  listOrgReposAction,
+  generateStudentReposAction,
+  createCopilotRepoAction,
+  type StudentRepoResult,
+} from "../actions";
 import type { GithubRepo } from "@/lib/github";
 import styles from "../page.module.css";
 
@@ -23,6 +29,22 @@ export default function VersionControlTab() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<StudentRepoResult[] | null>(null);
+  // Create a repo with a Copilot prompt in the selected org.
+  const [copilotName, setCopilotName] = useState("");
+  const [copilotPrompt, setCopilotPrompt] = useState("");
+  const [copilotPrivate, setCopilotPrivate] = useState(true);
+  const [copilotTemplate, setCopilotTemplate] = useState(true);
+  const [copilotBusy, setCopilotBusy] = useState(false);
+  const [copilotResult, setCopilotResult] = useState<{ fullName: string; htmlUrl: string } | null>(null);
+  const [copilotError, setCopilotError] = useState<string | null>(null);
+
+  const refreshOrgs = async () => {
+    const r = await listMyOrgsAction();
+    if (!("error" in r)) {
+      setOrgs(r.orgs);
+      setOrgsState("ready");
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +118,34 @@ export default function VersionControlTab() {
     setResults(r.results);
   };
 
+  const createWithCopilot = async () => {
+    if (!selectedOrg) {
+      setCopilotError("Choose an organization first.");
+      return;
+    }
+    if (!copilotName.trim()) {
+      setCopilotError("Enter a repository name.");
+      return;
+    }
+    if (!copilotPrompt.trim()) {
+      setCopilotError("Paste a Copilot prompt to seed the repo with.");
+      return;
+    }
+    setCopilotBusy(true);
+    setCopilotError(null);
+    setCopilotResult(null);
+    const r = await createCopilotRepoAction(copilotName.trim(), copilotPrompt, copilotPrivate, selectedOrg, copilotTemplate);
+    setCopilotBusy(false);
+    if ("error" in r) {
+      setCopilotError(r.error);
+      return;
+    }
+    setCopilotResult(r);
+    // Reload the org's repos so a newly-created template shows in the dropdown.
+    const repos = await listOrgReposAction(selectedOrg);
+    if (!("error" in repos)) setRepos(repos.repos);
+  };
+
   if (orgsState === "unconfigured") {
     return (
       <div className={styles.form}>
@@ -118,22 +168,84 @@ export default function VersionControlTab() {
 
       <div className={styles.field}>
         <label>Organization</label>
-        <select
-          value={selectedOrg}
-          onChange={(e) => setSelectedOrg(e.target.value)}
-          disabled={busy || orgsState === "loading"}
-          className={styles.textInput}
-        >
-          <option value="">{orgsState === "loading" ? "Loading organizations…" : "Choose an organization…"}</option>
-          {orgs.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <select
+            value={selectedOrg}
+            onChange={(e) => setSelectedOrg(e.target.value)}
+            disabled={busy || orgsState === "loading"}
+            className={styles.textInput}
+            style={{ flex: "1 1 220px" }}
+          >
+            <option value="">{orgsState === "loading" ? "Loading organizations…" : "Choose an organization…"}</option>
+            {orgs.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+          <a href="https://github.com/account/organizations/new" target="_blank" rel="noreferrer" style={{ fontSize: "0.82rem" }}>
+            Create org on GitHub
+          </a>
+          <button
+            type="button"
+            onClick={() => void refreshOrgs()}
+            disabled={busy}
+            style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "6px 10px", fontSize: "0.8rem", color: "#334155", cursor: "pointer" }}
+          >
+            Refresh
+          </button>
+        </div>
         {orgsState === "ready" && orgs.length === 0 && (
           <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 4 }}>
-            Your token doesn&apos;t own any organizations. Create one on GitHub first, then it will appear here.
+            Your token doesn&apos;t own any organizations. Create one on GitHub (link above), then hit Refresh.
+          </p>
+        )}
+      </div>
+
+      <div className={styles.field} style={{ border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 10, padding: 12 }}>
+        <label>Create a repo with a Copilot prompt{selectedOrg ? ` in ${selectedOrg}` : ""}</label>
+        <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 8px" }}>
+          Creates a repo in the selected org and commits the prompt to <code>.github/copilot-instructions.md</code>. Mark it a
+          template to use it as the source above.
+        </p>
+        <input
+          type="text"
+          className={styles.textInput}
+          placeholder="Repository name"
+          value={copilotName}
+          onChange={(e) => setCopilotName(e.target.value)}
+          disabled={copilotBusy}
+        />
+        <textarea
+          className={styles.textInput}
+          rows={6}
+          placeholder="Paste the GitHub Copilot prompt to seed the repo with…"
+          value={copilotPrompt}
+          onChange={(e) => setCopilotPrompt(e.target.value)}
+          disabled={copilotBusy}
+          style={{ marginTop: 8, fontFamily: "monospace", fontSize: "0.85rem" }}
+        />
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+            <input type="checkbox" checked={copilotPrivate} onChange={(e) => setCopilotPrivate(e.target.checked)} disabled={copilotBusy} />
+            Private
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+            <input type="checkbox" checked={copilotTemplate} onChange={(e) => setCopilotTemplate(e.target.checked)} disabled={copilotBusy} />
+            Template
+          </label>
+          <button type="button" className={styles.submitButton} onClick={createWithCopilot} disabled={copilotBusy || !selectedOrg}>
+            {copilotBusy ? "Creating…" : "Create repo"}
+          </button>
+        </div>
+        {copilotError && <p className={styles.error}>{copilotError}</p>}
+        {copilotResult && (
+          <p style={{ fontSize: "0.85rem", marginTop: 8 }}>
+            Created{" "}
+            <a href={copilotResult.htmlUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>
+              {copilotResult.fullName}
+            </a>
+            {copilotTemplate ? " — now selectable as a template below." : "."}
           </p>
         )}
       </div>

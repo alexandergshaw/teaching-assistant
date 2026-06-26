@@ -93,13 +93,15 @@ export function applyFix(html: string, issue: Issue, value?: string): { html: st
   let changed = false;
   switch (issue.ruleId) {
     case "image-alt":
+    case "input-image-alt":
     case "alt-quality":
-      if (el.tagName === "IMG") {
+      if (el.tagName === "IMG" || el.tagName === "INPUT") {
         el.setAttribute("alt", value ?? "");
         changed = true;
       }
       break;
     case "link-text":
+    case "link-name":
       if (el.tagName === "A" && value) {
         el.textContent = value;
         changed = true;

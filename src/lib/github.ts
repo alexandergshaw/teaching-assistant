@@ -118,6 +118,35 @@ export async function getRepo(owner: string, repo: string): Promise<GithubRepo> 
   return mapRepo(await ghJson<RawRepo>(`/repos/${owner}/${repo}`));
 }
 
+/** Logins of the orgs the authenticated user owns (admin role), sorted. */
+export async function listOwnedOrgs(): Promise<string[]> {
+  const out: string[] = [];
+  for (let page = 1; page <= 3; page += 1) {
+    const data = await ghJson<Array<{ role?: string; organization?: { login?: string } }>>(
+      `/user/memberships/orgs?state=active&per_page=100&page=${page}`
+    );
+    for (const m of data) if (m.role === "admin" && m.organization?.login) out.push(m.organization.login);
+    if (data.length < 100) break;
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+}
+
+/** Repos in an org (optionally filtered to names starting with `prefix`). */
+export async function listOrgRepos(org: string, prefix?: string): Promise<GithubRepo[]> {
+  const needle = prefix?.trim().toLowerCase();
+  const out: GithubRepo[] = [];
+  for (let page = 1; page <= 10; page += 1) {
+    const repos = await ghJson<RawRepo[]>(`/orgs/${org}/repos?per_page=100&sort=full_name&page=${page}`);
+    for (const r of repos) {
+      if (!r.name || !r.owner?.login) continue;
+      if (needle && !r.name.toLowerCase().startsWith(needle)) continue;
+      out.push(mapRepo(r));
+    }
+    if (repos.length < 100) break;
+  }
+  return out;
+}
+
 /** A repo's branch names (default branch first) plus which one is the default. */
 export async function listBranches(owner: string, repo: string): Promise<{ branches: string[]; defaultBranch: string }> {
   const info = await getRepo(owner, repo);

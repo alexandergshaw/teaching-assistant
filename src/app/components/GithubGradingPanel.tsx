@@ -7,6 +7,8 @@ import {
   dispatchTestsAction,
   getTestRunStatusAction,
   setupTestsWorkflowAction,
+  listMyOrgsAction,
+  listOrgReposAction,
   type GradeActionState,
   type TestSummary,
 } from "../actions";
@@ -80,6 +82,12 @@ export default function GithubGradingPanel() {
   const [pickRepo, setPickRepo] = useState("");
   const [pickBranch, setPickBranch] = useState("");
   const [pickLabel, setPickLabel] = useState("");
+  // Import-from-org.
+  const [orgs, setOrgs] = useState<string[]>([]);
+  const [selectedOrg, setSelectedOrg] = useState("");
+  const [orgPrefix, setOrgPrefix] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importNote, setImportNote] = useState<string | null>(null);
   // Grading inputs.
   const [instructions, setInstructions] = useState("");
   const [rubric, setRubric] = useState("");
@@ -101,6 +109,18 @@ export default function GithubGradingPanel() {
     aliveRef.current = true;
     return () => {
       aliveRef.current = false;
+    };
+  }, []);
+
+  // Load the orgs the token owns (for the import dropdown).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const r = await listMyOrgsAction();
+      if (!cancelled && !("error" in r)) setOrgs(r.orgs);
+    })();
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -131,6 +151,42 @@ export default function GithubGradingPanel() {
   };
 
   const removeRow = (id: string) => persist(queue.filter((r) => r.id !== id));
+
+  // Pull every repo in the chosen org (optionally by name prefix) into the queue,
+  // deriving the student label from the part after the prefix (Classroom pattern).
+  const importFromOrg = async () => {
+    if (!selectedOrg) {
+      setError("Choose an organization.");
+      return;
+    }
+    setImporting(true);
+    setError(null);
+    setImportNote(null);
+    const r = await listOrgReposAction(selectedOrg, orgPrefix.trim() || undefined);
+    setImporting(false);
+    if ("error" in r) {
+      setError(r.error);
+      return;
+    }
+    const existing = new Set(queue.map((q) => q.repoRef.toLowerCase()));
+    const prefix = orgPrefix.trim();
+    const added: QueueRow[] = [];
+    for (const repo of r.repos) {
+      if (existing.has(repo.fullName.toLowerCase())) continue;
+      const label =
+        prefix && repo.name.toLowerCase().startsWith(prefix.toLowerCase())
+          ? repo.name.slice(prefix.length).replace(/^[-_.]+/, "") || repo.name
+          : repo.name;
+      added.push({ id: newId(), repoRef: repo.fullName, branch: "", label, test: { status: "idle" } });
+    }
+    persist([...queue, ...added]);
+    const skipped = r.repos.length - added.length;
+    setImportNote(
+      r.repos.length === 0
+        ? "No repositories matched."
+        : `Imported ${added.length} repo${added.length === 1 ? "" : "s"}${skipped > 0 ? `, skipped ${skipped} already queued` : ""}.`
+    );
+  };
 
   const genRubric = async () => {
     if (!rubricRepo.trim()) {
@@ -247,6 +303,42 @@ export default function GithubGradingPanel() {
           </button>
         </div>
       </div>
+
+      {orgs.length > 0 && (
+        <div className={styles.field}>
+          <label>Or import every repo from an organization</label>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <select
+              value={selectedOrg}
+              onChange={(e) => setSelectedOrg(e.target.value)}
+              disabled={importing}
+              style={{ flex: "1 1 200px", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem", background: "#fff", color: "#334155" }}
+            >
+              <option value="">Choose an organization…</option>
+              {orgs.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={orgPrefix}
+              placeholder="name prefix (optional, e.g. lab1-)"
+              onChange={(e) => setOrgPrefix(e.target.value)}
+              disabled={importing}
+              style={{ flex: "1 1 180px", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem" }}
+            />
+            <button type="button" className={styles.submitButton} onClick={importFromOrg} disabled={importing || !selectedOrg}>
+              {importing ? "Importing…" : "Import"}
+            </button>
+          </div>
+          <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", margin: "6px 0 0" }}>
+            With a prefix, the student label is taken from the rest of the repo name (e.g. <code>lab1-jsmith</code> → <code>jsmith</code>).
+          </p>
+          {importNote && <p style={{ fontSize: "0.8rem", color: "#16a34a", marginTop: 4 }}>{importNote}</p>}
+        </div>
+      )}
 
       {/* Queue table */}
       {queue.length > 0 && (

@@ -120,6 +120,8 @@ import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import {
   githubConfigured,
   listRepos,
+  listOwnedOrgs,
+  listOrgRepos,
   listBranches,
   ingestRepo,
   parseRepoRef,
@@ -4594,6 +4596,30 @@ export async function listGithubReposAction(): Promise<{ repos: GithubRepo[] } |
     return { repos: await listRepos() };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not list GitHub repositories." };
+  }
+}
+
+/** List the orgs the token owns, for the "Import from org" dropdown. */
+export async function listMyOrgsAction(): Promise<{ orgs: string[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return { orgs: await listOwnedOrgs() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list organizations." };
+  }
+}
+
+/** List an org's repos (optionally filtered by name prefix) for bulk import. */
+export async function listOrgReposAction(
+  org: string,
+  prefix?: string
+): Promise<{ repos: GithubRepo[] } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!org.trim()) return { error: "Choose an organization." };
+    return { repos: await listOrgRepos(org.trim(), prefix?.trim() || undefined) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list the organization's repositories." };
   }
 }
 

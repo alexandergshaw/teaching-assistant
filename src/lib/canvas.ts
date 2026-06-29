@@ -178,6 +178,14 @@ async function fetchAssignment(
       continue;
     }
 
+    // Only grade submissions that haven't been graded yet. A submission Canvas
+    // already marks "graded" is skipped so a grading run never re-grades work
+    // that is already done (a resubmission flips the state back to "submitted",
+    // so it correctly returns to the queue).
+    if (submission.workflow_state === "graded") {
+      continue;
+    }
+
     const userId = typeof submission.user_id === "number" ? submission.user_id : -1;
     const student =
       submission.user?.sortable_name?.trim() ||

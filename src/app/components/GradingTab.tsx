@@ -318,7 +318,14 @@ export default function GradingTab({
           type="submit"
           disabled={pending || (source === "canvas" && !canvasRetrieved)}
         >
-          {pending ? "Grading..." : "Start Review"}
+          {pending ? (
+            <>
+              <span className={styles.btnSpinner} aria-hidden="true" />
+              Grading...
+            </>
+          ) : (
+            "Start Review"
+          )}
         </button>
       </form>
       )}
@@ -334,7 +341,7 @@ export default function GradingTab({
         <p className={styles.emptyState}>
           {source === "zip"
             ? "No supported submission files were found in the zip archive."
-            : "No discussion posts were found for that topic."}
+            : "Nothing left to grade here. Every submission has already been graded, or no one has submitted yet."}
         </p>
       )}
 
@@ -383,17 +390,6 @@ export default function GradingTab({
           <ul>
             {state.warnings.map((item, index) => (
               <li key={`grading-warning-${index + 1}`}>{item}</li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {run && run.fullCreditChecklist.length > 0 && (
-        <section className={styles.checklistCard}>
-          <h2>Full Credit Checklist</h2>
-          <ul>
-            {run.fullCreditChecklist.map((item, index) => (
-              <li key={`full-credit-${index + 1}`}>{item}</li>
             ))}
           </ul>
         </section>

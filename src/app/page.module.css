@@ -389,6 +389,10 @@
 
 .submitButton {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-width: 148px;
   padding: 12px 22px;
   border: 0;
@@ -401,6 +405,17 @@
   letter-spacing: 0.01em;
   cursor: pointer;
   transition: background-color 0.2s ease;
+}
+
+/* Small spinner that sits inside an accent button while it is working. */
+.btnSpinner {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  animation: spin 0.8s linear infinite;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -674,6 +689,39 @@
   color: var(--text-primary);
 }
 
+/* "What earns full credit" checklist, shown inside the grading pane above the
+   results table. */
+.resultsChecklist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 18px;
+  border: 1px solid var(--field-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--field-background) 92%, var(--accent) 8%);
+}
+
+.resultsChecklist h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.resultsChecklist ul {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resultsChecklist li {
+  line-height: 1.5;
+}
+
 .downloadButton {
   display: inline-flex;
   align-items: center;
@@ -769,6 +817,10 @@
   border-radius: 14px;
   background: var(--field-background);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--field-background) 80%, var(--field-border) 20%);
+  /* Smooth, contained horizontal scroll so the dense grading table is usable on
+     narrow screens without rubber-banding the whole page. */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
 }
 
 /* ── Lecture-plan document editor ─────────────────────────────────────────── */
@@ -1599,6 +1651,19 @@
   color: #fff;
 }
 
+.lfDetail .resultsChecklist {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.lfDetail .resultsChecklist h3 {
+  color: #fff;
+}
+
+.lfDetail .resultsChecklist ul {
+  color: rgba(255, 255, 255, 0.82);
+}
+
 .lfDetail .fileMetaLabel {
   color: rgba(255, 255, 255, 0.72);
 }
@@ -2054,6 +2119,27 @@
   position: relative;
   padding-top: 2px;
   padding-right: 30px;
+}
+
+/* Readable feedback textareas in the results table. Only layout/typography is
+   set here (no colors) so the dark Live Feed pane's own theming still wins. */
+.feedbackText {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--field-border);
+  border-radius: 10px;
+  background: var(--field-background);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.feedbackText:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline-offset: 1px;
+  border-color: var(--accent);
 }
 
 .previewBackdrop {
@@ -3035,6 +3121,22 @@
 .deadlineDeleteBtn:hover {
   color: #dc2626;
   background: rgba(220, 38, 38, 0.06);
+}
+
+@media (max-width: 1024px) {
+  .matrix {
+    min-width: 1040px;
+  }
+
+  .matrix th,
+  .matrix td {
+    padding: 10px 8px;
+    font-size: 0.84rem;
+  }
+
+  .resultsHeader {
+    flex-wrap: wrap;
+  }
 }
 
 @media (max-width: 600px) {

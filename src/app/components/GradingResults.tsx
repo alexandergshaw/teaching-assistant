@@ -501,6 +501,17 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         </p>
       )}
 
+      {run.fullCreditChecklist && run.fullCreditChecklist.length > 0 && (
+        <section className={styles.resultsChecklist}>
+          <h3>What earns full credit</h3>
+          <ul>
+            {run.fullCreditChecklist.map((item, index) => (
+              <li key={`full-credit-${index + 1}`}>{item}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <div className={styles.matrixWrap}>
         <table className={styles.matrix}>
           <thead>
@@ -685,7 +696,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                             />
                             <textarea
                               aria-label={`${areaName} feedback for ${result.student}`}
-                              style={{ minHeight: "70px", width: "100%" }}
+                              className={styles.feedbackText}
+                              style={{ minHeight: "104px", width: "100%" }}
                               value={areaEdit.comment}
                               onChange={(e) => updateArea(result.student, areaName, { comment: e.target.value })}
                             />
@@ -728,7 +740,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                       </button>
                       <textarea
                         aria-label={`Overall feedback for ${result.student}`}
-                        style={{ minHeight: "90px", width: "100%" }}
+                        className={styles.feedbackText}
+                        style={{ minHeight: "128px", width: "100%" }}
                         value={edit.overall}
                         onChange={(e) => updateEdit(result.student, { overall: e.target.value })}
                       />

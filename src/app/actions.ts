@@ -3102,6 +3102,12 @@ export async function gradeAction(
           fetchCanvasWork(canvasUrl),
           fetchAssignmentPointsPossible(canvasUrl),
         ]);
+        // Everything that came back is already graded (or there is nothing to
+        // grade): return an empty run so the UI shows its "nothing left" state
+        // instead of sending an empty archive to the engine.
+        if (students.length === 0) {
+          return { run: { results: [], rubricAreaNames: [], fullCreditChecklist: [], speedGraderUrl }, error: null };
+        }
         const zipBase64 = await canvasWorkToZipBase64(students);
         const state = await gradeZipViaEngine(zipBase64, rubric, rubricFile, institution, pointsPossible);
         return state.run ? { ...state, run: { ...state.run, speedGraderUrl } } : state;

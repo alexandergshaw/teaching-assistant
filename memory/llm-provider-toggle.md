@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-Most LLM calls route through `callLlm(req, provider)` in `src/lib/llm.ts` (single dispatcher; the old per-site Gemini `fetch` blocks were consolidated here on 2026-06-13). Provider is `"gemini"` or `"other"`.
+Most LLM calls route through `callLlm(req, provider)` in `src/lib/llm.ts` (single dispatcher; the old per-site Gemini `fetch` blocks were consolidated here on 2026-06-13). Provider is `"gemini"`, `"other"`, or `"embedded"`. `callLlm` ignores anything non-Gemini and falls back to Gemini, so non-grading features stay on Gemini regardless of the toggle.
 
 The active provider is chosen via an in-app UI toggle (`src/app/components/ProviderToggle.tsx`), persisted in localStorage and read through `src/lib/llm-provider.ts` (`getStoredProvider` / `useLlmProvider`). The choice is passed to the server as an **argument**: server actions take a trailing `provider: LlmProvider = "gemini"` param; API routes (`ai-chat`, `parse-calendar`) read it from the request body/formData; the grading form sends it via a hidden `provider` input.
 
@@ -17,5 +17,7 @@ The active provider is chosen via an in-app UI toggle (`src/app/components/Provi
 - `generateCopilotProjectPromptAction` → `POST /api/v1/copilot-prompt` (deterministic, JSON in/out; returns `{ prompt }`).
 
 Grading uses a **separate** dedicated service (NOT the Course Engine), client in `src/lib/grading-engine.ts` (env: `GRADING_ENGINE_URL` required, optional `GRADING_API_KEY`; error envelope `{error, messages}`). When the toggle is `"other"`, `gradeAction` (`src/app/actions.ts`) branches to `gradeViaGradingEngine` → `POST /api/v1/grade` (multipart: `submissions` zip + one of `rubric_csv`/`rubric_json`/`rubric_text`, auto-detected from an uploaded file or the pasted rubric). The deterministic per-criterion result is mapped to `GradingRun` via `gradingApiToRun` so the existing GradingTab matrix renders it (Files column shows "-", no full-credit checklist). The `GradingTab` shows a CSV/JSON rubric-file upload only when the toggle is `"other"`, and renders `state.warnings`.
+
+**The `"embedded"` provider is the Embedded Deterministic Engine** (`src/lib/embedded-grader/`), an in-process grader with NO external service, key, or LLM. `gradeAction` branches on `provider === "embedded"` for both the zip and Canvas paths: it builds an `EmbeddedRubric` via `buildEmbeddedRubric` (a supplied rubric — Canvas/pasted/uploaded — wins; otherwise checks are generated from the assignment instructions by rule-based parsing), then `gradeEntriesEmbedded` runs each check (keyword/min_words/file_type/min_file_count/regex/code_symbol) and returns a `GradingRun` directly (keeping each student's userId + submittedFiles, so Canvas write-back and file previews work — better than "other"). Ingestion reuses `extractStudentEntries` (zip) / `extractCanvasEntries` (Canvas) added to `grade.ts` (deterministic, no filename-inference LLM call). When the rubric was generated from instructions it is surfaced via `state.generatedRubric` (rendered by `renderRubricText`); generation/mapping notes go to `state.warnings`.
 
 Every other feature (syllabus, chat, calendar, standalone intro/assignment/examples) ignores the toggle and always uses Gemini.

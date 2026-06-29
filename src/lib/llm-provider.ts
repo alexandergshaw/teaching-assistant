@@ -14,7 +14,9 @@ const STORAGE_KEY = "ta-llm-provider";
 const DEFAULT_PROVIDER: LlmProvider = "gemini";
 
 function coerce(value: string | null): LlmProvider {
-  return value === "other" ? "other" : "gemini";
+  if (value === "other") return "other";
+  if (value === "embedded") return "embedded";
+  return "gemini";
 }
 
 export function getStoredProvider(): LlmProvider {

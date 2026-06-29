@@ -10,6 +10,7 @@ import type { LlmProvider } from "@/lib/llm";
 const OPTIONS: Array<{ value: LlmProvider; label: string }> = [
   { value: "gemini", label: "Gemini" },
   { value: "other", label: "Other API" },
+  { value: "embedded", label: "Embedded Deterministic Engine" },
 ];
 
 export default function ProviderToggle() {
@@ -21,6 +22,7 @@ export default function ProviderToggle() {
       aria-label="LLM provider"
       style={{
         display: "inline-flex",
+        flexWrap: "wrap",
         gap: 2,
         padding: 2,
         borderRadius: 8,

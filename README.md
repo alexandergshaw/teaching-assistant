@@ -82,6 +82,23 @@ materials `rubric.csv`) via that service instead of Gemini:
 - `GRADING_ENGINE_URL` (required to use the deterministic grader) — base URL of the grading service.
 - `GRADING_API_KEY` (optional) — only required if the grading service enforces a key; sent as `X-API-Key`. Never exposed to the client.
 
+### Embedded Deterministic Engine (the third provider)
+
+A third provider, **Embedded Deterministic Engine**, grades entirely in-process:
+no external service, no API key, no LLM. It builds a rubric of concrete,
+mechanically-checkable requirements (file types, word counts, required terms,
+function/class names, patterns) and awards each criterion's points by running its
+check against the submission. The same submission always scores the same.
+
+Rubric precedence: a supplied rubric is used when present (the Canvas rubric, or
+one pasted/uploaded); only when none is supplied is a rubric generated from the
+assignment instructions by rule-based parsing (shown in the auto-generated rubric
+panel for review). It requires no configuration and works on both the ZIP upload
+and Single Assignment (Canvas) sources. Because it runs in-process it keeps each
+student's Canvas userId and files, so grades post back to Canvas and files preview
+from the results table. The engine lives in `src/lib/embedded-grader/`. Only the
+Grading tab is affected; every other feature stays on Gemini.
+
 ### Canvas grading
 
 The Grading tab can grade Canvas **discussions and assignments** directly from a
@@ -93,9 +110,14 @@ student's work (discussion posts/replies, or assignment text + uploaded files) i
 pulled via the Canvas API and graded against the rubric.
 
 Canvas grading respects the provider toggle: **Gemini** uses the AI grader (needs
-assignment instructions; the rubric is synthesized if not provided), while
-**Other API** sends the fetched work to the deterministic grading service as a
-synthesized Canvas-style zip (needs a check-based CSV/JSON rubric).
+assignment instructions; the rubric is synthesized if not provided), **Other API**
+sends the fetched work to the deterministic grading service as a synthesized
+Canvas-style zip (needs a check-based CSV/JSON rubric), and **Embedded
+Deterministic Engine** grades in-process against the Canvas rubric when present,
+otherwise a rubric generated from the instructions.
+
+Both deterministic providers (Single Assignment source) only grade submissions
+that Canvas has not already marked graded.
 
 After grading a Canvas URL you can **review and post grades back to Canvas**: edit
 each student's points and comment, then post. Grades write to the assignment's

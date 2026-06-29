@@ -1,0 +1,392 @@
+/**
+ * Rubric construction for the Embedded Deterministic Engine.
+ *
+ * Precedence (matches the product decision): when a rubric is supplied (from
+ * Canvas, or pasted/uploaded), grade against it; only when none is supplied is a
+ * rubric generated from the assignment instructions. All parsing is rule-based.
+ */
+
+import type { CheckType, EmbeddedRubric, RubricCheck } from "./types";
+
+const POINTS_PER_CHECK = 10;
+
+const KNOWN_EXTENSIONS = [
+  "pdf", "docx", "doc", "pptx", "ppt", "xlsx", "xls", "csv", "txt", "md",
+  "ipynb", "py", "java", "js", "ts", "tsx", "jsx", "html", "css", "json",
+  "zip", "png", "jpg", "jpeg", "gif", "sql", "r",
+];
+
+const STOPWORDS = new Set([
+  "the", "and", "for", "with", "your", "you", "this", "that", "from", "into",
+  "must", "should", "include", "including", "use", "using", "contain", "have",
+  "submit", "upload", "attach", "provide", "ensure", "make", "sure", "least",
+  "also", "each", "every", "all", "any", "are", "will", "shall", "a", "an",
+  "of", "to", "in", "on", "at", "be", "is", "as", "or", "it", "its",
+]);
+
+let idCounter = 0;
+function nextId(prefix: string): string {
+  idCounter += 1;
+  return `${prefix}-${idCounter}`;
+}
+
+function titleCase(value: string): string {
+  return value.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function dedupe<T>(items: T[], key: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of items) {
+    const k = key(item);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(item);
+  }
+  return out;
+}
+
+// ── Generation from free-text instructions ──────────────────────────────────
+
+function extractFileTypeChecks(text: string): RubricCheck[] {
+  const exts = new Set<string>();
+  const extAlternation = KNOWN_EXTENSIONS.join("|");
+
+  // "submit/upload/attach/provide ... a PDF/.docx/..." within a short window.
+  const verbRe = new RegExp(
+    `\\b(?:submit|upload|attach|provide|include|turn in|hand in)\\b[^.\\n]{0,40}?\\b(${extAlternation})\\b`,
+    "gi"
+  );
+  // "a PDF file", "your .docx document", "PPTX deck".
+  const nounRe = new RegExp(`\\b(${extAlternation})\\b\\s+(?:file|document|report|deck|slides?|notebook|script)`, "gi");
+  // explicit ".pdf" mentions.
+  const dotRe = new RegExp(`\\.(${extAlternation})\\b`, "gi");
+
+  for (const re of [verbRe, nounRe, dotRe]) {
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(text)) !== null) {
+      exts.add(match[1].toLowerCase());
+    }
+  }
+
+  return [...exts].map((ext) => ({
+    id: nextId("file"),
+    criterion: `Submitted a .${ext} file`,
+    checkType: "file_type" as CheckType,
+    target: ext,
+    points: POINTS_PER_CHECK,
+  }));
+}
+
+function extractLengthChecks(text: string): RubricCheck[] {
+  const checks: RubricCheck[] = [];
+
+  const wordsRe = /\b(?:at least|minimum of|no fewer than|at minimum)\s+(\d{2,6})\s*(?:\+\s*)?words?\b/gi;
+  let maxWords = 0;
+  let match: RegExpExecArray | null;
+  while ((match = wordsRe.exec(text)) !== null) {
+    maxWords = Math.max(maxWords, Number(match[1]));
+  }
+  // "300-word", "500+ words"
+  const wordsRe2 = /\b(\d{2,6})\s*(?:\+|-)?\s*words?\b/gi;
+  while ((match = wordsRe2.exec(text)) !== null) {
+    maxWords = Math.max(maxWords, Number(match[1]));
+  }
+
+  const pagesRe = /\b(?:at least|minimum of)\s+(\d{1,3})\s+pages?\b/gi;
+  let maxPages = 0;
+  while ((match = pagesRe.exec(text)) !== null) {
+    maxPages = Math.max(maxPages, Number(match[1]));
+  }
+  // A page is treated as ~250 words for a deterministic floor.
+  const fromPages = maxPages > 0 ? maxPages * 250 : 0;
+  const words = Math.max(maxWords, fromPages);
+
+  if (words > 0) {
+    checks.push({
+      id: nextId("len"),
+      criterion: `At least ${words} words`,
+      checkType: "min_words",
+      target: String(words),
+      count: words,
+      points: POINTS_PER_CHECK,
+    });
+  }
+  return checks;
+}
+
+function extractFileCountChecks(text: string): RubricCheck[] {
+  const re = /\b(?:at least|minimum of)\s+(\d{1,2})\s+(files|documents|images|screenshots|attachments)\b/gi;
+  const match = re.exec(text);
+  if (!match) return [];
+  const count = Number(match[1]);
+  return [
+    {
+      id: nextId("files"),
+      criterion: `At least ${count} ${match[2].toLowerCase()}`,
+      checkType: "min_file_count",
+      target: String(count),
+      count,
+      points: POINTS_PER_CHECK,
+    },
+  ];
+}
+
+function extractCodeSymbolChecks(text: string): RubricCheck[] {
+  const symbols = new Set<string>();
+  const namedRe = /\b(?:function|method|procedure|def|class)\s+(?:named|called)?\s*["'`]?([A-Za-z_]\w{1,40})\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = namedRe.exec(text)) !== null) {
+    symbols.add(match[1]);
+  }
+  // Backtick-quoted call like `clean_data()`.
+  const callRe = /`([A-Za-z_]\w{1,40})\s*\(\s*\)`/g;
+  while ((match = callRe.exec(text)) !== null) {
+    symbols.add(match[1]);
+  }
+
+  return [...symbols].map((symbol) => ({
+    id: nextId("sym"),
+    criterion: `Defines ${symbol}`,
+    checkType: "code_symbol" as CheckType,
+    target: symbol,
+    points: POINTS_PER_CHECK,
+  }));
+}
+
+function extractKeywordChecks(text: string): RubricCheck[] {
+  const terms = new Set<string>();
+
+  // Quoted terms: "normalization", 'outliers'.
+  const quotedRe = /["'“”‘’]([A-Za-z][A-Za-z0-9 \-]{2,40})["'“”‘’]/g;
+  let match: RegExpExecArray | null;
+  while ((match = quotedRe.exec(text)) !== null) {
+    const term = match[1].trim().toLowerCase();
+    if (term && !STOPWORDS.has(term)) terms.add(term);
+  }
+
+  // "must include/use/contain/discuss/address/cover X" up to a clause boundary.
+  const mustRe =
+    /\b(?:must|should|need to|are required to)\s+(?:include|use|contain|discuss|address|cover|implement|reference|mention)\s+([A-Za-z][A-Za-z0-9 \-]{2,40})/gi;
+  while ((match = mustRe.exec(text)) !== null) {
+    const term = match[1].trim().toLowerCase().replace(/\b(a|an|the)\s+/g, "");
+    const firstWord = term.split(/\s+/).find((w) => !STOPWORDS.has(w) && w.length > 2);
+    if (firstWord) terms.add(firstWord);
+  }
+
+  return [...terms].slice(0, 6).map((term) => ({
+    id: nextId("kw"),
+    criterion: `Mentions ${titleCase(term)}`,
+    checkType: "keyword" as CheckType,
+    target: term,
+    points: POINTS_PER_CHECK,
+  }));
+}
+
+export function buildRubricFromInstructions(instructions: string): EmbeddedRubric {
+  idCounter = 0;
+  const checks = dedupe(
+    [
+      ...extractFileTypeChecks(instructions),
+      ...extractLengthChecks(instructions),
+      ...extractFileCountChecks(instructions),
+      ...extractCodeSymbolChecks(instructions),
+      ...extractKeywordChecks(instructions),
+    ],
+    (c) => `${c.checkType}:${c.target.toLowerCase()}`
+  );
+
+  if (checks.length === 0) {
+    return {
+      checks: [
+        {
+          id: nextId("len"),
+          criterion: "Submission is present and substantive",
+          checkType: "min_words",
+          target: "50",
+          count: 50,
+          points: POINTS_PER_CHECK,
+        },
+      ],
+      origin: "instructions",
+      warnings: [
+        "No explicit, checkable requirements were found in the instructions, so a single completeness check was generated. Add a rubric, or state concrete requirements (file types, required terms, word counts, function names), for finer grading.",
+      ],
+    };
+  }
+
+  return {
+    checks,
+    origin: "instructions",
+    warnings: [
+      "This rubric was generated from the assignment instructions by rule-based checks. Review it before posting grades.",
+    ],
+  };
+}
+
+// ── Mapping a supplied rubric onto checks ────────────────────────────────────
+
+function checkTypeFrom(value: unknown): CheckType | null {
+  const valid: CheckType[] = [
+    "keyword", "all_keywords", "any_keywords", "min_words",
+    "file_type", "min_file_count", "regex", "code_symbol",
+  ];
+  return typeof value === "string" && valid.includes(value as CheckType) ? (value as CheckType) : null;
+}
+
+/** Parse a structured, check-based JSON rubric. Returns null when it is not one. */
+function tryParseCheckRubric(text: string): RubricCheck[] | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  const list = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray((parsed as { criteria?: unknown }).criteria)
+      ? (parsed as { criteria: unknown[] }).criteria
+      : null;
+  if (!list) return null;
+
+  const checks: RubricCheck[] = [];
+  for (const raw of list) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const checkType = checkTypeFrom(item.checkType ?? item.check_type ?? item.type);
+    if (!checkType) continue;
+    const criterion =
+      typeof item.criterion === "string"
+        ? item.criterion
+        : typeof item.area === "string"
+          ? item.area
+          : typeof item.name === "string"
+            ? item.name
+            : checkType;
+    const target = typeof item.target === "string" ? item.target : "";
+    const terms = Array.isArray(item.terms) ? item.terms.filter((t): t is string => typeof t === "string") : undefined;
+    const count = typeof item.count === "number" ? item.count : undefined;
+    const pattern = typeof item.pattern === "string" ? item.pattern : undefined;
+    const points = typeof item.points === "number" && item.points > 0 ? item.points : POINTS_PER_CHECK;
+    if (!target && !terms && !count && !pattern) continue;
+    checks.push({ id: nextId("chk"), criterion, checkType, target, terms, count, pattern, points });
+  }
+  return checks.length > 0 ? checks : null;
+}
+
+/** Pull "Name (10 pts): description" criteria out of a free-text rubric. */
+function parseCriteriaLines(text: string): Array<{ name: string; description: string; points: number }> {
+  const out: Array<{ name: string; description: string; points: number }> = [];
+  for (const raw of text.split(/\r?\n/)) {
+    if (/^\s/.test(raw)) continue; // indented = rating / subcategory line
+    const line = raw.trim();
+    if (!line) continue;
+    const match = line.match(/^(.+?)\s*\(\s*(\d+(?:\.\d+)?)\s*(?:pts?|points?|%)?\s*\)\s*:\s*(.*)$/i);
+    if (!match) continue;
+    const name = match[1].trim();
+    if (!name) continue;
+    out.push({ name, description: match[3].trim(), points: Number(match[2]) || POINTS_PER_CHECK });
+  }
+  return out;
+}
+
+/** Build the most specific check available for one free-text criterion. */
+function criterionToCheck(name: string, description: string, points: number): RubricCheck {
+  const haystack = `${name} ${description}`;
+  const extAlternation = KNOWN_EXTENSIONS.join("|");
+
+  const ext = new RegExp(`\\b(${extAlternation})\\b`, "i").exec(haystack);
+  if (ext) {
+    return { id: nextId("c"), criterion: name, checkType: "file_type", target: ext[1].toLowerCase(), points };
+  }
+  const symbol = /\b(?:function|method|class|def)\s+(?:named|called)?\s*["'`]?([A-Za-z_]\w{1,40})\b/i.exec(haystack);
+  if (symbol) {
+    return { id: nextId("c"), criterion: name, checkType: "code_symbol", target: symbol[1], points };
+  }
+  const words = /\b(?:at least|minimum of)\s+(\d{2,6})\s*words?\b/i.exec(haystack);
+  if (words) {
+    const count = Number(words[1]);
+    return { id: nextId("c"), criterion: name, checkType: "min_words", target: String(count), count, points };
+  }
+
+  // Default: require the criterion's significant terms to appear.
+  const terms = name
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w));
+  if (terms.length === 0) {
+    return { id: nextId("c"), criterion: name, checkType: "min_words", target: "25", count: 25, points };
+  }
+  return { id: nextId("c"), criterion: name, checkType: "any_keywords", target: terms[0], terms, points };
+}
+
+export function buildRubricFromRubricText(text: string, fileName?: string): EmbeddedRubric {
+  idCounter = 0;
+
+  const structured = tryParseCheckRubric(text);
+  if (structured) {
+    return { checks: structured, origin: "checks", warnings: [] };
+  }
+
+  const criteria = parseCriteriaLines(text);
+  if (criteria.length > 0) {
+    const checks = criteria.map((c) => criterionToCheck(c.name, c.description, c.points));
+    return {
+      checks,
+      origin: "rubric",
+      warnings: [
+        "Your rubric was graded with deterministic keyword and structure checks derived from each criterion. For exact control, supply a check-based JSON rubric.",
+      ],
+    };
+  }
+
+  // No structured form recognised: fall back to treating the rubric prose as the
+  // brief and generating checks from it.
+  void fileName;
+  const generated = buildRubricFromInstructions(text);
+  return {
+    ...generated,
+    origin: "rubric",
+    warnings: [
+      "The supplied rubric had no parseable criteria, so checks were generated from its text. Review them before posting grades.",
+    ],
+  };
+}
+
+// ── Presentation ─────────────────────────────────────────────────────────────
+
+/** A short requirement phrase for one check (used in the full-credit checklist). */
+function requirementPhrase(check: RubricCheck): string {
+  switch (check.checkType) {
+    case "file_type":
+      return `Submit a .${check.target.replace(/^\./, "")} file.`;
+    case "min_words":
+      return `Write at least ${check.count ?? check.target} words.`;
+    case "min_file_count":
+      return `Submit at least ${check.count ?? 1} files.`;
+    case "code_symbol":
+      return `Define ${check.target} in your code.`;
+    case "all_keywords":
+      return `Address all of: ${(check.terms ?? []).join(", ")}.`;
+    case "any_keywords":
+      return `Address at least one of: ${(check.terms ?? [check.target]).join(", ")}.`;
+    case "regex":
+      return `Match the required format for "${check.criterion}".`;
+    case "keyword":
+    default:
+      return `Address "${check.target}" in your submission.`;
+  }
+}
+
+export function fullCreditChecklist(rubric: EmbeddedRubric): string[] {
+  return rubric.checks.map(requirementPhrase);
+}
+
+/** Human-readable rendering of the rubric, shown in the "auto-generated" panel. */
+export function renderRubricText(rubric: EmbeddedRubric): string {
+  return rubric.checks
+    .map((check) => `${check.criterion} (${check.points} pts): ${requirementPhrase(check)}`)
+    .join("\n");
+}

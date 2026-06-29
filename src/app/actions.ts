@@ -5,12 +5,19 @@ import {
   gradeCanvasUrl,
   synthesizeFullCreditChecklist,
   extractSubmissions,
+  extractStudentEntries,
+  extractCanvasEntries,
   generateRubric,
   gradeEntries,
   scaleResultToPoints,
   type GradingRun,
   type StudentSubmissionEntry,
 } from "@/lib/grade";
+import {
+  buildEmbeddedRubric,
+  gradeEntriesEmbedded,
+  renderRubricText,
+} from "@/lib/embedded-grader";
 import {
   fetchCanvasWork,
   canvasWorkToZipBase64,
@@ -3113,6 +3120,26 @@ export async function gradeAction(
         return state.run ? { ...state, run: { ...state.run, speedGraderUrl } } : state;
       }
 
+      // Embedded Deterministic Engine: grade in-process against the Canvas rubric
+      // when one is present, otherwise a rubric generated from the instructions.
+      if (provider === "embedded") {
+        const { entries, pointsPossible } = await extractCanvasEntries(canvasUrl);
+        if (entries.length === 0) {
+          return { run: { results: [], rubricAreaNames: [], fullCreditChecklist: [], speedGraderUrl }, error: null };
+        }
+        const builtRubric = buildEmbeddedRubric({ rubricText: rubric, instructions: assignmentInstructions });
+        if (builtRubric.checks.length === 0) {
+          return { run: null, error: builtRubric.warnings[0] ?? "Provide a rubric or assignment instructions." };
+        }
+        const run = gradeEntriesEmbedded(entries, builtRubric, pointsPossible);
+        return {
+          run: { ...run, speedGraderUrl },
+          error: null,
+          warnings: builtRubric.warnings.length ? builtRubric.warnings : undefined,
+          generatedRubric: builtRubric.origin === "instructions" ? renderRubricText(builtRubric) : undefined,
+        };
+      }
+
       if (!assignmentInstructions.trim()) {
         return { run: null, error: "Please provide assignment instructions." };
       }
@@ -3133,6 +3160,32 @@ export async function gradeAction(
     if (provider === "other") {
       const zipBase64 = Buffer.from(await file.arrayBuffer()).toString("base64");
       return gradeZipViaEngine(zipBase64, rubric, rubricFile, institution);
+    }
+
+    // Embedded Deterministic Engine path (provider toggle = "embedded"). Grades
+    // in-process against a supplied rubric, or one generated from the instructions.
+    if (provider === "embedded") {
+      const entries = await extractStudentEntries(await file.arrayBuffer());
+      if (entries.length === 0) {
+        return { run: { results: [], rubricAreaNames: [], fullCreditChecklist: [] }, error: null };
+      }
+      const rubricText = rubricFile && rubricFile.size > 0 ? await rubricFile.text() : rubric;
+      const rubricName = rubricFile && rubricFile.size > 0 ? rubricFile.name : undefined;
+      const builtRubric = buildEmbeddedRubric({
+        rubricText,
+        rubricFileName: rubricName,
+        instructions: assignmentInstructions,
+      });
+      if (builtRubric.checks.length === 0) {
+        return { run: null, error: builtRubric.warnings[0] ?? "Provide a rubric or assignment instructions." };
+      }
+      const run = gradeEntriesEmbedded(entries, builtRubric);
+      return {
+        run,
+        error: null,
+        warnings: builtRubric.warnings.length ? builtRubric.warnings : undefined,
+        generatedRubric: builtRubric.origin === "instructions" ? renderRubricText(builtRubric) : undefined,
+      };
     }
 
     // Gemini path.

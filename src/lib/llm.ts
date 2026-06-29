@@ -10,13 +10,15 @@ import { getGeminiApiKey, getGeminiModel } from "./gemini";
  * a placeholder for the API we will wire in shortly.
  */
 
-export type LlmProvider = "gemini" | "other";
+export type LlmProvider = "gemini" | "other" | "embedded";
 
 export const DEFAULT_PROVIDER: LlmProvider = "gemini";
 
 /** Coerce an arbitrary value (e.g. from the client/localStorage) to a provider. */
 export function normalizeProvider(value: string | undefined | null): LlmProvider {
-  return value === "other" ? "other" : "gemini";
+  if (value === "other") return "other";
+  if (value === "embedded") return "embedded";
+  return "gemini";
 }
 
 export type LlmPart =

@@ -71,7 +71,9 @@ export default function GradingTab({
   const graderLabel =
     selectedProvider === "other"
       ? "deterministic grader (against your CSV/JSON rubric)"
-      : "AI grader";
+      : selectedProvider === "embedded"
+        ? "embedded deterministic engine (rule-based checks, no AI; the rubric is used if present, otherwise generated from the instructions)"
+        : "AI grader";
 
   // Retrieve the assignment/discussion description + rubric from Canvas and show
   // them as read-only fields. Triggered by the button below the URL.

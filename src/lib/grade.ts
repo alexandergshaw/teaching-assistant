@@ -1202,6 +1202,37 @@ export async function gradeSubmissions(
   );
 }
 
+/**
+ * Group a submissions zip into per-student entries WITHOUT any LLM call (uses the
+ * deterministic filename-convention parsing only). Feeds the Embedded
+ * Deterministic Engine, which must never depend on a model.
+ */
+export async function extractStudentEntries(
+  zipBuffer: ArrayBuffer
+): Promise<StudentSubmissionEntry[]> {
+  const { submissions, rawData } = await extractSubmissions(zipBuffer);
+  return groupSubmissionsByStudent(submissions, undefined, rawData);
+}
+
+/**
+ * Pull a Canvas discussion/assignment into per-student entries plus the
+ * assignment's points_possible, reusing the same ingestion the AI path uses
+ * (including the "skip already-graded submissions" filtering). No LLM call.
+ */
+export async function extractCanvasEntries(
+  url: string
+): Promise<{ entries: StudentSubmissionEntry[]; pointsPossible: number | null }> {
+  const [{ students }, pointsPossible] = await Promise.all([
+    fetchCanvasWork(url),
+    fetchAssignmentPointsPossible(url),
+  ]);
+  const entries: StudentSubmissionEntry[] = [];
+  for (const work of students) {
+    entries.push(await canvasWorkToEntry(work));
+  }
+  return { entries, pointsPossible };
+}
+
 /** One student's submission ready to grade (text + any attached files). */
 export interface StudentSubmissionEntry {
   student: string;

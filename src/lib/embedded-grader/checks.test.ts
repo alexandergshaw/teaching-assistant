@@ -45,6 +45,17 @@ describe("runCheck: keyword", () => {
     expect(out.passed).toBe(true);
     expect(out.detail).toContain("2 mentions");
   });
+
+  it("matches single words on boundaries (no 'art' inside 'start')", () => {
+    expect(runCheck(check({ checkType: "keyword", target: "art" }), entry("we will start now")).passed).toBe(false);
+    expect(runCheck(check({ checkType: "keyword", target: "art" }), entry("modern art today")).passed).toBe(true);
+  });
+
+  it("still substring-matches multi-word phrases", () => {
+    expect(
+      runCheck(check({ checkType: "keyword", target: "machine learning" }), entry("a machine learning model")).passed
+    ).toBe(true);
+  });
 });
 
 describe("runCheck: all_keywords / any_keywords", () => {

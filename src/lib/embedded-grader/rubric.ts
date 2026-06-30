@@ -22,6 +22,17 @@ const STOPWORDS = new Set([
   "submit", "upload", "attach", "provide", "ensure", "make", "sure", "least",
   "also", "each", "every", "all", "any", "are", "will", "shall", "a", "an",
   "of", "to", "in", "on", "at", "be", "is", "as", "or", "it", "its",
+  "term", "terms", "following", "example", "examples", "etc", "when", "where",
+]);
+
+// Structural / deliverable nouns that describe HOW MUCH to submit rather than a
+// topic to grade on. They are kept out of generated keyword checks (a "figures"
+// count is already a min_file_count; "figures" is not a content term).
+const STRUCTURAL_NOUNS = new Set([
+  "figure", "figures", "image", "images", "screenshot", "screenshots",
+  "file", "files", "source", "sources", "page", "pages", "word", "words",
+  "chart", "charts", "table", "tables", "diagram", "diagrams", "photo", "photos",
+  "visualization", "visualizations", "attachment", "attachments", "reference", "references",
 ]);
 
 let idCounter = 0;
@@ -116,7 +127,7 @@ function extractLengthChecks(text: string): RubricCheck[] {
 }
 
 function extractFileCountChecks(text: string): RubricCheck[] {
-  const re = /\b(?:at least|minimum of)\s+(\d{1,2})\s+(files|documents|images|screenshots|attachments)\b/gi;
+  const re = /\b(?:at least|minimum of)\s+(\d{1,2})\s+(files|documents|images|screenshots|attachments|figures|diagrams|photos)\b/gi;
   const match = re.exec(text);
   if (!match) return [];
   const count = Number(match[1]);
@@ -155,32 +166,19 @@ function extractCodeSymbolChecks(text: string): RubricCheck[] {
 }
 
 function extractKeywordChecks(text: string): RubricCheck[] {
-  const terms = new Set<string>();
-
-  // Quoted terms: "normalization", 'outliers'.
-  const quotedRe = /["'“”‘’]([A-Za-z][A-Za-z0-9 \-]{2,40})["'“”‘’]/g;
-  let match: RegExpExecArray | null;
-  while ((match = quotedRe.exec(text)) !== null) {
-    const term = match[1].trim().toLowerCase();
-    if (term && !STOPWORDS.has(term)) terms.add(term);
-  }
-
-  // "must include/use/contain/discuss/address/cover X" up to a clause boundary.
-  const mustRe =
-    /\b(?:must|should|need to|are required to)\s+(?:include|use|contain|discuss|address|cover|implement|reference|mention)\s+([A-Za-z][A-Za-z0-9 \-]{2,40})/gi;
-  while ((match = mustRe.exec(text)) !== null) {
-    const term = match[1].trim().toLowerCase().replace(/\b(a|an|the)\s+/g, "");
-    const firstWord = term.split(/\s+/).find((w) => !STOPWORDS.has(w) && w.length > 2);
-    if (firstWord) terms.add(firstWord);
-  }
-
-  return [...terms].slice(0, 6).map((term) => ({
-    id: nextId("kw"),
-    criterion: `Mentions ${titleCase(term)}`,
-    checkType: "keyword" as CheckType,
-    target: term,
-    points: POINTS_PER_CHECK,
-  }));
+  // Reuse the shared explicit-term extractor (quoted terms + the object of
+  // include/use/import/cite/... phrases), then drop structural/deliverable nouns
+  // so only real content terms become keyword checks.
+  return extractExplicitTerms(text)
+    .filter((term) => !STRUCTURAL_NOUNS.has(term))
+    .slice(0, 6)
+    .map((term) => ({
+      id: nextId("kw"),
+      criterion: `Mentions ${titleCase(term)}`,
+      checkType: "keyword" as CheckType,
+      target: term,
+      points: POINTS_PER_CHECK,
+    }));
 }
 
 export function buildRubricFromInstructions(instructions: string): EmbeddedRubric {
@@ -452,7 +450,7 @@ function extractExplicitTerms(text: string): string[] {
   }
 
   const requireRe =
-    /\b(?:include|includes|including|use|uses|using|contain|contains|cite|cites|reference|references|mention|mentions|discuss|discusses|address|addresses|cover|covers|implement|implements)\s+(?:a|an|the|some|any|at least)?\s*([A-Za-z][A-Za-z0-9 ,\-]{2,60})/gi;
+    /\b(?:include|includes|including|use|uses|using|import|imports|incorporate|incorporates|apply|applies|employ|employs|contain|contains|cite|cites|reference|references|mention|mentions|discuss|discusses|address|addresses|cover|covers|implement|implements)\s+(?:a|an|the|some|any|at least)?\s*([A-Za-z][A-Za-z0-9 ,\-]{2,60})/gi;
   while ((match = requireRe.exec(text)) !== null) {
     // Split a list like "pandas, numpy and matplotlib" into individual terms.
     for (const part of match[1].toLowerCase().split(/\s*(?:,|\band\b|\bor\b|\/|;)\s*/)) {

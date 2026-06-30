@@ -20,10 +20,8 @@ function wordCount(text: string): number {
   return matches ? matches.length : 0;
 }
 
-/** Count non-overlapping, case-insensitive occurrences of `needle` in `haystackLower`. */
-function countOccurrences(haystackLower: string, needle: string): number {
-  const term = needle.trim().toLowerCase();
-  if (!term) return 0;
+/** Count non-overlapping, case-insensitive substring occurrences. */
+function substringCount(haystackLower: string, term: string): number {
   let count = 0;
   let index = haystackLower.indexOf(term);
   while (index !== -1) {
@@ -31,6 +29,21 @@ function countOccurrences(haystackLower: string, needle: string): number {
     index = haystackLower.indexOf(term, index + term.length);
   }
   return count;
+}
+
+/**
+ * Count occurrences of a term. A single alphanumeric word is matched on word
+ * boundaries (so "art" does not match "start" and "r" does not match "for");
+ * multi-word phrases fall back to substring matching.
+ */
+function termMatchCount(haystackLower: string, needle: string): number {
+  const term = needle.trim().toLowerCase();
+  if (!term) return 0;
+  if (/^[a-z0-9]+$/.test(term)) {
+    const matches = haystackLower.match(new RegExp(`\\b${term}\\b`, "g"));
+    return matches ? matches.length : 0;
+  }
+  return substringCount(haystackLower, term);
 }
 
 function escapeRegExp(value: string): string {
@@ -69,7 +82,7 @@ export function runCheck(check: RubricCheck, entry: StudentSubmissionEntry): Che
 
   switch (check.checkType) {
     case "keyword": {
-      const occurrences = countOccurrences(lower, check.target);
+      const occurrences = termMatchCount(lower, check.target);
       return occurrences > 0
         ? pass(`Met: found the required term "${check.target}" (${occurrences} mention${occurrences === 1 ? "" : "s"}).`)
         : fail(`Not met: the required term "${check.target}" was not found.`);
@@ -77,7 +90,7 @@ export function runCheck(check: RubricCheck, entry: StudentSubmissionEntry): Che
     case "all_keywords": {
       const terms = check.terms ?? [];
       if (terms.length === 0) return fail("Not met: no required terms were defined for this criterion.");
-      const present = terms.filter((term) => countOccurrences(lower, term) > 0);
+      const present = terms.filter((term) => termMatchCount(lower, term) > 0);
       const missing = terms.filter((term) => !present.includes(term));
       if (missing.length === 0) {
         return pass(`Met: all required terms are present (${terms.join(", ")}).`);
@@ -92,7 +105,7 @@ export function runCheck(check: RubricCheck, entry: StudentSubmissionEntry): Che
     }
     case "any_keywords": {
       const terms = check.terms ?? [];
-      const present = terms.filter((term) => countOccurrences(lower, term) > 0);
+      const present = terms.filter((term) => termMatchCount(lower, term) > 0);
       return present.length > 0
         ? pass(`Met: found ${present.join(", ")}.`)
         : fail(`Not met: none of these were found (${terms.join(", ")}).`);

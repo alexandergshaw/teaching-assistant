@@ -32,6 +32,50 @@ describe("buildRubricFromInstructions", () => {
   });
 });
 
+describe("buildRubricFromInstructions: a realistic assignment brief", () => {
+  const brief = `Assignment 3: Exploratory Data Analysis in Python
+
+Requirements:
+- Submit a single Jupyter notebook (.ipynb) named analysis.ipynb.
+- Also submit a written summary as a PDF, at least 500 words.
+- Your notebook must import pandas and matplotlib.
+- Define a function named load_data that reads the CSV into a DataFrame.
+- Define a function called plot_trends that produces a chart.
+- Use the term "normalization" when you discuss preprocessing.
+- Include at least 2 figures.
+- Cite at least 3 sources.`;
+
+  const rubric = buildRubricFromInstructions(brief);
+  const has = (checkType: string, target?: string) =>
+    rubric.checks.some((c) => c.checkType === checkType && (target === undefined || c.target === target));
+
+  it("captures both required file types", () => {
+    expect(has("file_type", "ipynb")).toBe(true);
+    expect(has("file_type", "pdf")).toBe(true);
+  });
+
+  it("captures the word floor and the figure count", () => {
+    expect(rubric.checks.some((c) => c.checkType === "min_words" && c.count === 500)).toBe(true);
+    expect(rubric.checks.some((c) => c.checkType === "min_file_count" && c.count === 2)).toBe(true);
+  });
+
+  it("captures both required function definitions", () => {
+    expect(has("code_symbol", "load_data")).toBe(true);
+    expect(has("code_symbol", "plot_trends")).toBe(true);
+  });
+
+  it("captures content terms from quoted text and import/use phrases", () => {
+    const keywords = rubric.checks.filter((c) => c.checkType === "keyword").map((c) => c.target);
+    expect(keywords).toEqual(expect.arrayContaining(["normalization", "pandas", "matplotlib"]));
+  });
+
+  it("does not turn structural nouns (sources, figures) into content keywords", () => {
+    const keywords = rubric.checks.filter((c) => c.checkType === "keyword").map((c) => c.target);
+    expect(keywords).not.toContain("sources");
+    expect(keywords).not.toContain("figures");
+  });
+});
+
 describe("buildRubricFromRubricText", () => {
   it("parses a structured check-based JSON rubric and keeps its points", () => {
     const rubric = buildRubricFromRubricText(

@@ -61,6 +61,50 @@ describe("buildRubricFromRubricText", () => {
   });
 });
 
+describe("buildRubricFromRubricText: CSV", () => {
+  it("parses a structured check-based CSV with loosely named headers", () => {
+    const csv = [
+      "Criterion,Check Type,Target,Points,Count,Terms",
+      "Uses pandas,keyword,pandas,20,,",
+      "Defines main,code_symbol,main,30,,",
+      "Long enough,min_words,,10,300,",
+      'Covers topics,all_keywords,,10,,"bias;variance"',
+    ].join("\n");
+    const rubric = buildRubricFromRubricText(csv, "rubric.csv");
+    expect(rubric.origin).toBe("checks");
+    expect(rubric.warnings).toHaveLength(0);
+    expect(rubric.checks).toHaveLength(4);
+    expect(rubric.checks[0]).toMatchObject({ checkType: "keyword", target: "pandas", points: 20 });
+    expect(rubric.checks[1]).toMatchObject({ checkType: "code_symbol", target: "main", points: 30 });
+    expect(rubric.checks[2]).toMatchObject({ checkType: "min_words", count: 300 });
+    expect(rubric.checks[3].terms).toEqual(["bias", "variance"]);
+  });
+
+  it("handles quoted cells containing commas", () => {
+    const csv = 'criterion,check_type,target,points\n"Imports os, sys",regex,"import\\s+os",15';
+    const rubric = buildRubricFromRubricText(csv, "rubric.csv");
+    expect(rubric.origin).toBe("checks");
+    expect(rubric.checks[0].criterion).toBe("Imports os, sys");
+    // The pattern sits in the target column; runCheck reads `pattern ?? target`.
+    expect(rubric.checks[0].target).toBe("import\\s+os");
+    expect(rubric.checks[0].points).toBe(15);
+  });
+
+  it("maps a criterion/points CSV (no check_type) heuristically with a warning", () => {
+    const csv = "criterion,points,description\nDocumentation,10,include a README file\nTesting,10,write unit tests";
+    const rubric = buildRubricFromRubricText(csv, "rubric.csv");
+    expect(rubric.origin).toBe("rubric");
+    expect(rubric.checks).toHaveLength(2);
+    expect(rubric.warnings[0]).toContain("check_type");
+  });
+
+  it("does not misread a free-text criteria rubric as CSV", () => {
+    const rubric = buildRubricFromRubricText("Code Quality (10 pts): clean, readable code.");
+    expect(rubric.origin).toBe("rubric");
+    expect(rubric.checks).toHaveLength(1);
+  });
+});
+
 describe("presentation helpers", () => {
   it("renders a readable rubric and a full-credit checklist", () => {
     const rubric = buildRubricFromInstructions("Submit a PDF. Define a function named solve.");

@@ -276,6 +276,134 @@ function tryParseCheckRubric(text: string): RubricCheck[] | null {
   return checks.length > 0 ? checks : null;
 }
 
+// Header cell -> canonical rubric field. Lets CSV columns be named loosely
+// ("Check Type", "checkType", "type" all map to the check type).
+const CSV_HEADER_ALIASES: Record<string, string> = {
+  criterion: "criterion", area: "criterion", name: "criterion",
+  checktype: "checkType", check: "checkType", type: "checkType",
+  target: "target", value: "target", arg: "target",
+  points: "points", point: "points", pts: "points", weight: "points",
+  count: "count", threshold: "count", min: "count", minimum: "count",
+  pattern: "pattern", regex: "pattern",
+  terms: "terms", keywords: "terms", words: "terms",
+  description: "description", detail: "description", desc: "description",
+};
+
+function normalizeHeaderCell(cell: string): string {
+  return cell.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+/** RFC4180-ish CSV parse: handles quoted fields, escaped quotes, and CRLF. */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      row.push(field);
+      field = "";
+    } else if (ch === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else if (ch !== "\r") {
+      field += ch;
+    }
+  }
+  row.push(field);
+  rows.push(row);
+
+  return rows.filter((r) => !(r.length === 1 && r[0].trim() === ""));
+}
+
+/**
+ * Parse a tabular CSV rubric. A `check_type` column yields structured checks
+ * (origin "checks"); a criterion/points table without one is mapped per criterion
+ * (origin "rubric"). Returns null when the text is not a recognizable rubric CSV.
+ */
+function tryParseCsvRubric(
+  text: string
+): { checks: RubricCheck[]; origin: "checks" | "rubric"; warnings: string[] } | null {
+  const rows = parseCsv(text.trim());
+  if (rows.length < 2) return null;
+
+  const column: Record<string, number> = {};
+  rows[0].forEach((cell, index) => {
+    const field = CSV_HEADER_ALIASES[normalizeHeaderCell(cell)];
+    if (field && !(field in column)) column[field] = index;
+  });
+  if (!("criterion" in column) && !("checkType" in column)) return null;
+
+  const dataRows = rows.slice(1).filter((r) => r.some((cell) => cell.trim() !== ""));
+  const cell = (r: string[], field: string): string =>
+    field in column ? (r[column[field]] ?? "").trim() : "";
+  const pointsOf = (r: string[]): number => {
+    const raw = cell(r, "points");
+    return raw && Number(raw) > 0 ? Number(raw) : POINTS_PER_CHECK;
+  };
+
+  // Structured check rubric.
+  if ("checkType" in column) {
+    const checks: RubricCheck[] = [];
+    for (const r of dataRows) {
+      const checkType = checkTypeFrom(cell(r, "checkType"));
+      if (!checkType) continue;
+      const target = cell(r, "target");
+      const termsRaw = cell(r, "terms");
+      const terms = termsRaw ? termsRaw.split(/[;|]/).map((t) => t.trim()).filter(Boolean) : undefined;
+      const countRaw = cell(r, "count");
+      const count = countRaw && !Number.isNaN(Number(countRaw)) ? Number(countRaw) : undefined;
+      const pattern = cell(r, "pattern") || undefined;
+      if (!target && !terms && count === undefined && !pattern) continue;
+      checks.push({
+        id: nextId("csv"),
+        criterion: cell(r, "criterion") || checkType,
+        checkType,
+        target,
+        terms,
+        count,
+        pattern,
+        points: pointsOf(r),
+      });
+    }
+    return checks.length > 0 ? { checks, origin: "checks", warnings: [] } : null;
+  }
+
+  // Criterion/points table with no checks: map each criterion heuristically.
+  const checks: RubricCheck[] = [];
+  for (const r of dataRows) {
+    const name = cell(r, "criterion");
+    if (!name) continue;
+    checks.push(criterionToCheck(name, cell(r, "description"), pointsOf(r)));
+  }
+  return checks.length > 0
+    ? {
+        checks,
+        origin: "rubric",
+        warnings: [
+          "Your CSV rubric had no check_type column, so each criterion was graded with deterministic checks derived from its text. For exact control, add a check_type column (keyword, min_words, file_type, code_symbol, regex).",
+        ],
+      }
+    : null;
+}
+
 /** Pull "Name (10 pts): description" criteria out of a free-text rubric. */
 function parseCriteriaLines(text: string): Array<{ name: string; description: string; points: number }> {
   const out: Array<{ name: string; description: string; points: number }> = [];
@@ -324,10 +452,20 @@ function criterionToCheck(name: string, description: string, points: number): Ru
 
 export function buildRubricFromRubricText(text: string, fileName?: string): EmbeddedRubric {
   idCounter = 0;
+  const lower = (fileName ?? "").toLowerCase();
 
-  const structured = tryParseCheckRubric(text);
-  if (structured) {
-    return { checks: structured, origin: "checks", warnings: [] };
+  const tryJson = (): EmbeddedRubric | null => {
+    const checks = tryParseCheckRubric(text);
+    return checks ? { checks, origin: "checks", warnings: [] } : null;
+  };
+  const tryCsv = (): EmbeddedRubric | null => tryParseCsvRubric(text);
+
+  // Both structured forms are tried; a ".csv" filename tips the order so a comma
+  // table is read as CSV rather than risking a stray JSON interpretation.
+  const order = lower.endsWith(".csv") ? [tryCsv, tryJson] : [tryJson, tryCsv];
+  for (const attempt of order) {
+    const parsed = attempt();
+    if (parsed) return parsed;
   }
 
   const criteria = parseCriteriaLines(text);
@@ -337,14 +475,13 @@ export function buildRubricFromRubricText(text: string, fileName?: string): Embe
       checks,
       origin: "rubric",
       warnings: [
-        "Your rubric was graded with deterministic keyword and structure checks derived from each criterion. For exact control, supply a check-based JSON rubric.",
+        "Your rubric was graded with deterministic keyword and structure checks derived from each criterion. For exact control, supply a check-based JSON or CSV rubric.",
       ],
     };
   }
 
   // No structured form recognised: fall back to treating the rubric prose as the
   // brief and generating checks from it.
-  void fileName;
   const generated = buildRubricFromInstructions(text);
   return {
     ...generated,

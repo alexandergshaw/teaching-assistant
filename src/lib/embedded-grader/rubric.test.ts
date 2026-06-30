@@ -54,6 +54,36 @@ describe("buildRubricFromRubricText", () => {
     expect(rubric.checks).toHaveLength(2);
   });
 
+  it("reads the criterion description, not just its name", () => {
+    const rubric = buildRubricFromRubricText("Deliverable (10 pts): submit your report as a PDF.");
+    expect(rubric.checks[0]).toMatchObject({ checkType: "file_type", target: "pdf" });
+  });
+
+  it("captures a list of explicitly required terms as all_keywords", () => {
+    const rubric = buildRubricFromRubricText("Libraries (10 pts): you must use pandas and numpy.");
+    const c = rubric.checks[0];
+    expect(c.checkType).toBe("all_keywords");
+    expect(c.terms).toEqual(expect.arrayContaining(["pandas", "numpy"]));
+  });
+
+  it("detects a minimum file count from the description", () => {
+    const rubric = buildRubricFromRubricText("Evidence (10 pts): attach at least 3 screenshots.");
+    expect(rubric.checks[0]).toMatchObject({ checkType: "min_file_count", count: 3 });
+  });
+
+  it("does not treat a stray letter in prose as a file type", () => {
+    const rubric = buildRubricFromRubricText("Clarity (10 pts): write clearly for the reader.");
+    expect(rubric.checks[0].checkType).not.toBe("file_type");
+  });
+
+  it("falls back to an on-topic keyword check for a subjective criterion", () => {
+    const rubric = buildRubricFromRubricText("Analysis (10 pts): interpret the regression results thoughtfully.");
+    const c = rubric.checks[0];
+    expect(["keyword", "any_keywords"]).toContain(c.checkType);
+    const haystack = [c.target, ...(c.terms ?? [])].join(" ");
+    expect(haystack).toContain("regression");
+  });
+
   it("generates checks from prose when the rubric has no parseable criteria", () => {
     const rubric = buildRubricFromRubricText("Make sure to define a function named solve and submit a PDF.");
     expect(rubric.origin).toBe("rubric");

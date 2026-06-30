@@ -420,34 +420,112 @@ function parseCriteriaLines(text: string): Array<{ name: string; description: st
   return out;
 }
 
-/** Build the most specific check available for one free-text criterion. */
-function criterionToCheck(name: string, description: string, points: number): RubricCheck {
-  const haystack = `${name} ${description}`;
+/**
+ * Detect a required file extension only in a strong context (a verb like
+ * "submit", a following noun like "file", or a dotted ".pdf"), so a bare letter
+ * such as "r" sitting in prose is not mistaken for a file type.
+ */
+function detectFileExtension(text: string): string | null {
   const extAlternation = KNOWN_EXTENSIONS.join("|");
-
-  const ext = new RegExp(`\\b(${extAlternation})\\b`, "i").exec(haystack);
-  if (ext) {
-    return { id: nextId("c"), criterion: name, checkType: "file_type", target: ext[1].toLowerCase(), points };
+  const patterns = [
+    new RegExp(`\\b(?:submit|upload|attach|provide|include|turn in|hand in)\\b[^.\\n]{0,40}?\\b(${extAlternation})\\b`, "i"),
+    new RegExp(`\\b(${extAlternation})\\b\\s+(?:file|document|report|deck|slides?|notebook|script)`, "i"),
+    new RegExp(`\\.(${extAlternation})\\b`, "i"),
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (match) return match[1].toLowerCase();
   }
+  return null;
+}
+
+/** Concrete terms a criterion explicitly requires: quoted terms and the object of
+ *  "include / use / cite / reference / discuss X" phrases. */
+function extractExplicitTerms(text: string): string[] {
+  const terms = new Set<string>();
+
+  const quotedRe = /["'“”‘’]([A-Za-z][A-Za-z0-9 \-]{2,40})["'“”‘’]/g;
+  let match: RegExpExecArray | null;
+  while ((match = quotedRe.exec(text)) !== null) {
+    const term = match[1].trim().toLowerCase();
+    if (term && !STOPWORDS.has(term)) terms.add(term);
+  }
+
+  const requireRe =
+    /\b(?:include|includes|including|use|uses|using|contain|contains|cite|cites|reference|references|mention|mentions|discuss|discusses|address|addresses|cover|covers|implement|implements)\s+(?:a|an|the|some|any|at least)?\s*([A-Za-z][A-Za-z0-9 ,\-]{2,60})/gi;
+  while ((match = requireRe.exec(text)) !== null) {
+    // Split a list like "pandas, numpy and matplotlib" into individual terms.
+    for (const part of match[1].toLowerCase().split(/\s*(?:,|\band\b|\bor\b|\/|;)\s*/)) {
+      const cleaned = part.replace(/^(?:a|an|the|your|their)\s+/, "").trim();
+      const word = cleaned.split(/\s+/).find((w) => w.length > 2 && !STOPWORDS.has(w));
+      if (word) terms.add(word);
+    }
+  }
+
+  return [...terms];
+}
+
+/** Salient topical words for a soft "is the submission on-topic" fallback. */
+function salientTerms(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const word of text.toLowerCase().split(/[^a-z0-9]+/)) {
+    if (word.length >= 4 && !STOPWORDS.has(word) && !seen.has(word)) {
+      seen.add(word);
+      out.push(word);
+    }
+  }
+  return out;
+}
+
+/** Build the most specific check available for one free-text criterion, reading
+ *  both its name and description. */
+function criterionToCheck(name: string, description: string, points: number): RubricCheck {
+  const haystack = `${name}. ${description}`;
+
+  const ext = detectFileExtension(haystack);
+  if (ext) {
+    return { id: nextId("c"), criterion: name, checkType: "file_type", target: ext, points };
+  }
+
   const symbol = /\b(?:function|method|class|def)\s+(?:named|called)?\s*["'`]?([A-Za-z_]\w{1,40})\b/i.exec(haystack);
   if (symbol) {
     return { id: nextId("c"), criterion: name, checkType: "code_symbol", target: symbol[1], points };
   }
-  const words = /\b(?:at least|minimum of)\s+(\d{2,6})\s*words?\b/i.exec(haystack);
+
+  const words = /\b(?:at least|minimum of|no fewer than)\s+(\d{2,6})\s*words?\b/i.exec(haystack);
   if (words) {
     const count = Number(words[1]);
     return { id: nextId("c"), criterion: name, checkType: "min_words", target: String(count), count, points };
   }
 
-  // Default: require the criterion's significant terms to appear.
-  const terms = name
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((w) => w.length > 2 && !STOPWORDS.has(w));
-  if (terms.length === 0) {
+  const fileCount =
+    /\b(?:at least|minimum of)\s+(\d{1,2})\s+(?:files|images|screenshots|attachments|diagrams|figures|charts|tables)\b/i.exec(
+      haystack
+    );
+  if (fileCount) {
+    const count = Number(fileCount[1]);
+    return { id: nextId("c"), criterion: name, checkType: "min_file_count", target: String(count), count, points };
+  }
+
+  // Explicit required terms from the criterion -> require them (precise).
+  const explicit = extractExplicitTerms(haystack).slice(0, 5);
+  if (explicit.length === 1) {
+    return { id: nextId("c"), criterion: name, checkType: "keyword", target: explicit[0], points };
+  }
+  if (explicit.length > 1) {
+    return { id: nextId("c"), criterion: name, checkType: "all_keywords", target: explicit[0], terms: explicit, points };
+  }
+
+  // Topical fallback: the submission should at least be on-topic for this criterion.
+  const topical = salientTerms(haystack).slice(0, 4);
+  if (topical.length === 0) {
     return { id: nextId("c"), criterion: name, checkType: "min_words", target: "25", count: 25, points };
   }
-  return { id: nextId("c"), criterion: name, checkType: "any_keywords", target: terms[0], terms, points };
+  if (topical.length === 1) {
+    return { id: nextId("c"), criterion: name, checkType: "keyword", target: topical[0], points };
+  }
+  return { id: nextId("c"), criterion: name, checkType: "any_keywords", target: topical[0], terms: topical, points };
 }
 
 export function buildRubricFromRubricText(text: string, fileName?: string): EmbeddedRubric {

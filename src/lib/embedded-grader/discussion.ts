@@ -214,17 +214,23 @@ function buildOverall(stats: StudentStats): string {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-/** A sensible default discussion rubric when the prompt states no thresholds. */
+/**
+ * The default discussion rubric when no prompt is available. It grades the
+ * near-universal mechanics (a post, two replies, on time) and surface proxies,
+ * but does NOT invent a word count or a multi-day requirement.
+ */
 export function defaultDiscussionRubric(): DiscussionRubric {
-  return {
-    criteria: [
-      { criterion: "Participation", points: 10, signals: [{ kind: "initial_post" }, { kind: "min_replies", count: 2 }, { kind: "min_words", count: 150 }] },
-      { criterion: "Timeliness", points: 10, signals: [{ kind: "posted_by_due" }, { kind: "distinct_days", count: 2 }] },
-      { criterion: "Engagement", points: 10, signals: [{ kind: "replies_to_peers", count: 2 }, { kind: "mentions_peer" }] },
-      { criterion: "Quality proxies", points: 10, proxy: true, signals: [{ kind: "asks_question" }, { kind: "includes_source" }, { kind: "min_words_per_post", count: 50 }] },
+  return assembleRubric({
+    repliesCount: 2,
+    wordsTotal: null,
+    wordsPerPost: null,
+    multiDayCount: null,
+    terms: [],
+    warnings: [
+      proxyWarning(),
+      "No discussion prompt was provided, so default participation thresholds (initial post, 2 replies) were used. Review before posting.",
     ],
-    warnings: [proxyWarning()],
-  };
+  });
 }
 
 export function proxyWarning(): string {
@@ -270,48 +276,118 @@ function extractPromptTerms(text: string): string[] {
   return [...terms].slice(0, 3);
 }
 
+// Detection: each returns null when the prompt does not state the requirement,
+// so the engine never grades a threshold the instructor never asked for.
+
+function detectReplyCount(text: string): number | null {
+  const patterns = [
+    /\b(?:reply|replies|respond(?:ing)?|response)\b[^.\n]{0,30}?\b(?:to\s+)?(?:at least\s+)?(\d{1,2}|one|two|three|four|five|six)\b/i,
+    /\b(\d{1,2}|one|two|three|four|five|six)\s+(?:replies|responses|peer responses|classmates|peers)\b/i,
+    /\bat least\s+(\d{1,2}|one|two|three|four|five|six)\s+(?:replies|responses|classmates|peers|students|posts)\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    const n = match ? toCount(match[1]) : null;
+    if (n) return n;
+  }
+  return null;
+}
+
+function detectWordCount(text: string): number | null {
+  const match =
+    /\b(?:at least|minimum of|no fewer than)\s+(\d{2,5})\s*words?\b/i.exec(text) ||
+    /\b(\d{2,5})\s*(?:\+|or more)?\s*words?\b/i.exec(text);
+  return match ? Number(match[1]) : null;
+}
+
+function detectWordsPerPost(text: string): number | null {
+  const match =
+    /\b(?:each|per|every)\s+(?:post|reply|response)\b[^.\n]{0,30}?\b(\d{2,4})\s*words?\b/i.exec(text) ||
+    /\b(\d{2,4})\s*words?\s+(?:per|each|for each)\s+(?:post|reply|response)\b/i.exec(text);
+  return match ? Number(match[1]) : null;
+}
+
+/** A multi-day participation requirement, only when the prompt explicitly states one. */
+function detectMultiDay(text: string): number | null {
+  const numbered = /\b(?:on\s+)?(?:at least\s+)?(\d{1,2}|two|three|four|five)\s+(?:different|separate|distinct)?\s*days\b/i.exec(text);
+  if (numbered) {
+    const n = toCount(numbered[1]);
+    if (n && n >= 2) return n;
+  }
+  const phrased =
+    /\bthroughout the (?:week|module|unit)\b|\bover (?:the|several|multiple) (?:days|weeks?)\b|\bmultiple days\b|\bsustained (?:participation|engagement|discussion)\b|\bon (?:more than one|several|multiple) days\b/i.test(
+      text
+    );
+  return phrased ? 2 : null;
+}
+
 /**
- * Build a discussion rubric from the prompt: detect the reply count and word
- * floor when stated, pull a few content terms for the coverage proxy, and fall
- * back to sensible defaults otherwise. Always 4 composite criteria.
+ * Assemble composite criteria, including only the columns and signals that apply.
+ * Empty columns are dropped, so a discussion is never graded on a requirement the
+ * prompt never stated.
  */
-export function buildDiscussionRubric(source: string): DiscussionRubric {
-  if (!source || !source.trim()) {
-    const base = defaultDiscussionRubric();
-    return {
-      ...base,
-      warnings: [...base.warnings, "No discussion prompt was provided, so default participation thresholds (1 post, 2 replies, 150 words) were used. Review before posting."],
-    };
+function assembleRubric(opts: {
+  repliesCount: number | null;
+  wordsTotal: number | null;
+  wordsPerPost: number | null;
+  multiDayCount: number | null;
+  terms: string[];
+  warnings: string[];
+}): DiscussionRubric {
+  const participation: DiscussionSignal[] = [{ kind: "initial_post" }];
+  if (opts.repliesCount != null) participation.push({ kind: "min_replies", count: opts.repliesCount });
+  if (opts.wordsTotal != null) participation.push({ kind: "min_words", count: opts.wordsTotal });
+
+  const timeliness: DiscussionSignal[] = [{ kind: "posted_by_due" }];
+  if (opts.multiDayCount != null) timeliness.push({ kind: "distinct_days", count: opts.multiDayCount });
+
+  const engagement: DiscussionSignal[] = [];
+  if (opts.repliesCount != null) {
+    engagement.push({ kind: "replies_to_peers", count: opts.repliesCount }, { kind: "mentions_peer" });
   }
 
-  const wordsMatch =
-    /\b(?:at least|minimum of|no fewer than)\s+(\d{2,5})\s*words?\b/i.exec(source) ||
-    /\b(\d{2,5})\s*(?:\+|or more)?\s*words?\b/i.exec(source);
-  const minWords = wordsMatch ? Number(wordsMatch[1]) : 150;
+  const quality: DiscussionSignal[] = [];
+  if (opts.terms.length > 0) quality.push({ kind: "keywords", terms: opts.terms });
+  quality.push({ kind: "asks_question" }, { kind: "includes_source" });
+  if (opts.wordsPerPost != null) quality.push({ kind: "min_words_per_post", count: opts.wordsPerPost });
 
-  const repliesMatch =
-    /\b(?:reply|replies|respond(?:ing)?|response)\b[^.\n]{0,30}?\b(?:to\s+)?(?:at least\s+)?(\d{1,2}|one|two|three|four|five|six)\b/i.exec(source) ||
-    /\bat least\s+(\d{1,2}|one|two|three|four|five|six)\s+(?:replies|responses|classmates|peers|students|posts)\b/i.exec(source);
-  const minReplies = (repliesMatch && toCount(repliesMatch[1])) || 2;
-
-  const terms = extractPromptTerms(source);
-  const proxySignals: DiscussionSignal[] = [{ kind: "asks_question" }, { kind: "includes_source" }, { kind: "min_words_per_post", count: 50 }];
-  if (terms.length > 0) proxySignals.unshift({ kind: "keywords", terms });
-
-  const criteria: DiscussionCriterion[] = [
-    { criterion: "Participation", points: 10, signals: [{ kind: "initial_post" }, { kind: "min_replies", count: minReplies }, { kind: "min_words", count: minWords }] },
-    { criterion: "Timeliness", points: 10, signals: [{ kind: "posted_by_due" }, { kind: "distinct_days", count: 2 }] },
-    { criterion: "Engagement", points: 10, signals: [{ kind: "replies_to_peers", count: minReplies }, { kind: "mentions_peer" }] },
-    { criterion: "Quality proxies", points: 10, proxy: true, signals: proxySignals.slice(0, 4) },
+  const columns: Array<{ criterion: string; signals: DiscussionSignal[]; proxy?: boolean }> = [
+    { criterion: "Participation", signals: participation },
+    { criterion: "Timeliness", signals: timeliness },
+    { criterion: "Engagement", signals: engagement },
+    { criterion: "Quality proxies", signals: quality.slice(0, 4), proxy: true },
   ];
 
-  return {
-    criteria,
+  const criteria: DiscussionCriterion[] = columns
+    .filter((c) => c.signals.length > 0)
+    .map((c) => ({ criterion: c.criterion, points: 10, signals: c.signals, proxy: c.proxy }));
+
+  return { criteria, warnings: opts.warnings };
+}
+
+/**
+ * Build a discussion rubric from the prompt, grading ONLY what the prompt states:
+ * reply count and word/length floors are used when given; a multi-day requirement
+ * is added only when the prompt explicitly asks for one. Surface proxies (question,
+ * source, term coverage) always apply and are warned as proxies.
+ */
+export function buildDiscussionRubric(source: string): DiscussionRubric {
+  const text = (source ?? "").trim();
+  if (!text) return defaultDiscussionRubric();
+
+  const mentionsReplies = /\b(?:repl(?:y|ies)|respond(?:ing)?|responses?|classmates?|peers?|other students?)\b/i.test(text);
+
+  return assembleRubric({
+    repliesCount: mentionsReplies ? detectReplyCount(text) ?? 2 : null,
+    wordsTotal: detectWordCount(text),
+    wordsPerPost: detectWordsPerPost(text),
+    multiDayCount: detectMultiDay(text),
+    terms: extractPromptTerms(text),
     warnings: [
       proxyWarning(),
-      "This discussion rubric was generated from the prompt by rule-based parsing (reply and word thresholds detected). Review it before posting grades.",
+      "This discussion rubric was generated from the prompt by rule-based parsing; it grades only the requirements the prompt states (plus surface proxies). Review it before posting grades.",
     ],
-  };
+  });
 }
 
 /** One requirement phrase per criterion, for the full-credit checklist. */

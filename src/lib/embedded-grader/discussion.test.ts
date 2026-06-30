@@ -131,4 +131,23 @@ describe("buildDiscussionRubric", () => {
   it("always warns that the quality column is a proxy", () => {
     expect(buildDiscussionRubric("Write at least 100 words.").warnings.join(" ")).toContain("stand-in for content quality");
   });
+
+  it("does not invent a multi-day or word-count requirement the prompt never states", () => {
+    // The user's real prompt: a post + two replies, by the due date. No days, no word count.
+    const prompt = `Your posts in the discussion area should exhibit careful thought and logical reasoning and provide evidence for your position. The discussions must be completed by the due dates specified. You are also required to read and reply to other students in this discussion forum. Your grade will be based on your post as well as your required two replies to the posts of your classmates. Once you have posted, reply to two other students' posts.`;
+    const rubric = buildDiscussionRubric(prompt);
+    const kinds = rubric.criteria.flatMap((c) => c.signals.map((s) => s.kind));
+    expect(kinds).not.toContain("distinct_days");
+    expect(kinds).not.toContain("min_words");
+    // ...but it still grades what the prompt does state.
+    expect(kinds).toContain("initial_post");
+    expect(signalsOf(rubric, "Participation")).toContainEqual({ kind: "min_replies", count: 2 });
+    expect(signalsOf(rubric, "Engagement")).toContainEqual({ kind: "replies_to_peers", count: 2 });
+    expect(signalsOf(rubric, "Timeliness").map((s) => s.kind)).toEqual(["posted_by_due"]);
+  });
+
+  it("adds a multi-day signal only when the prompt explicitly asks for one", () => {
+    const rubric = buildDiscussionRubric("Post on at least 3 different days throughout the week. Reply to 2 peers.");
+    expect(signalsOf(rubric, "Timeliness")).toContainEqual({ kind: "distinct_days", count: 3 });
+  });
 });

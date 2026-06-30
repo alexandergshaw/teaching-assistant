@@ -106,10 +106,12 @@ Grading tab is affected; every other feature stays on Gemini.
 engine grades a Canvas discussion URL, it scores a few composite criteria built from
 the thread structure (which the Canvas pull now preserves: initial posts vs replies,
 timestamps, and who each reply targeted): **Participation** (initial post, reply
-count, word count), **Timeliness** (posted before the due date, active on multiple
-days), **Engagement** (replies to classmates, names a peer), and **Quality proxies**
-(asks a question, cites a source, covers the prompt's terms, post length). Reply and
-word thresholds are parsed from the prompt when stated. The quality column is an
+count), **Timeliness** (posted before the due date), **Engagement** (replies to
+classmates, names a peer), and **Quality proxies** (asks a question, cites a source,
+covers the prompt's terms). It grades only what the prompt actually states: reply
+and word-count thresholds, and any multiple-day participation requirement, are added
+only when the prompt asks for them, so students are never graded on a requirement
+the instructor never wrote. The quality column is an
 honest proxy, not a judgment of depth or correctness, and a warning says so; finish
 that part in SpeedGrader. Grades still post back via the discussion's linked assignment.
 

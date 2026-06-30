@@ -1,12 +1,17 @@
 import { describe, it, expect } from "vitest";
-import type { DiscussionActivity } from "@/lib/canvas";
 import {
   defaultDiscussionRubric,
+  buildDiscussionRubric,
   gradeDiscussion,
   discussionChecklist,
   type DiscussionStudent,
   type DiscussionContext,
+  type DiscussionSignal,
 } from "./discussion";
+
+function signalsOf(rubric: ReturnType<typeof buildDiscussionRubric>, column: string): DiscussionSignal[] {
+  return rubric.criteria.find((c) => c.criterion === column)?.signals ?? [];
+}
 
 const words = (n: number) => Array.from({ length: n }, () => "word").join(" ");
 
@@ -91,5 +96,39 @@ describe("discussionChecklist", () => {
     const list = discussionChecklist(defaultDiscussionRubric());
     expect(list.join(" ")).toContain("make an initial post");
     expect(list.join(" ")).toContain("reply to at least 2 classmates");
+  });
+});
+
+describe("buildDiscussionRubric", () => {
+  it("detects the reply count and word floor from the prompt", () => {
+    const rubric = buildDiscussionRubric(
+      "Post an initial response of at least 250 words and reply to at least 3 classmates by Friday."
+    );
+    const participation = signalsOf(rubric, "Participation");
+    expect(participation).toContainEqual({ kind: "min_replies", count: 3 });
+    expect(participation).toContainEqual({ kind: "min_words", count: 250 });
+    expect(signalsOf(rubric, "Engagement")).toContainEqual({ kind: "replies_to_peers", count: 3 });
+  });
+
+  it("understands written-out reply counts", () => {
+    const rubric = buildDiscussionRubric("Reply to at least two of your peers.");
+    expect(signalsOf(rubric, "Participation")).toContainEqual({ kind: "min_replies", count: 2 });
+  });
+
+  it("adds a keyword-coverage proxy from prompt terms", () => {
+    const rubric = buildDiscussionRubric('Discuss the role of "encapsulation" in your design. Reply to 2 peers.');
+    const quality = signalsOf(rubric, "Quality proxies");
+    const keywords = quality.find((s): s is Extract<DiscussionSignal, { kind: "keywords" }> => s.kind === "keywords");
+    expect(keywords?.terms).toContain("encapsulation");
+  });
+
+  it("falls back to defaults with a warning when no prompt is given", () => {
+    const rubric = buildDiscussionRubric("");
+    expect(signalsOf(rubric, "Participation")).toContainEqual({ kind: "min_replies", count: 2 });
+    expect(rubric.warnings.join(" ")).toContain("default participation thresholds");
+  });
+
+  it("always warns that the quality column is a proxy", () => {
+    expect(buildDiscussionRubric("Write at least 100 words.").warnings.join(" ")).toContain("stand-in for content quality");
   });
 });

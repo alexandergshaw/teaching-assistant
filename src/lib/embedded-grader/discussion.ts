@@ -231,6 +231,89 @@ export function proxyWarning(): string {
   return "The 'Quality proxies' column scores surface signals (a question, a cited source, term coverage, post length) as a stand-in for content quality. It does not judge depth, insight, or correctness; review those yourself.";
 }
 
+// ── Rubric generation from the prompt ────────────────────────────────────────
+
+const WORD_NUMBERS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
+
+function toCount(value: string): number | null {
+  const n = Number(value);
+  if (Number.isFinite(n)) return n;
+  return WORD_NUMBERS[value.toLowerCase()] ?? null;
+}
+
+const PROMPT_STOP = new Set([
+  "the", "and", "for", "with", "your", "you", "this", "that", "from", "into", "about",
+  "what", "how", "why", "when", "whether", "discuss", "explain", "analyze", "consider",
+  "describe", "reflect", "respond", "post", "reply", "classmates", "peers", "students",
+  "least", "words", "reading", "module", "question", "prompt", "topic", "initial", "response",
+]);
+
+/** Content terms the prompt asks students to address (quoted, or the object of an
+ *  analytic verb). Used for the optional keyword-coverage proxy. */
+function extractPromptTerms(text: string): string[] {
+  const terms = new Set<string>();
+
+  const quoted = /["'“”‘’]([A-Za-z][A-Za-z0-9 \-]{2,40})["'“”‘’]/g;
+  let match: RegExpExecArray | null;
+  while ((match = quoted.exec(text)) !== null) {
+    const term = match[1].trim().toLowerCase();
+    if (term && !PROMPT_STOP.has(term)) terms.add(term);
+  }
+
+  const verbRe =
+    /\b(?:discuss|analyze|analyse|explain|consider|describe|examine|evaluate|compare|address)\s+(?:the|a|an|how|why|what|whether)?\s*([A-Za-z][A-Za-z \-]{2,40})/gi;
+  while ((match = verbRe.exec(text)) !== null) {
+    const word = match[1].toLowerCase().split(/\s+/).find((w) => w.length > 3 && !PROMPT_STOP.has(w));
+    if (word) terms.add(word);
+  }
+
+  return [...terms].slice(0, 3);
+}
+
+/**
+ * Build a discussion rubric from the prompt: detect the reply count and word
+ * floor when stated, pull a few content terms for the coverage proxy, and fall
+ * back to sensible defaults otherwise. Always 4 composite criteria.
+ */
+export function buildDiscussionRubric(source: string): DiscussionRubric {
+  if (!source || !source.trim()) {
+    const base = defaultDiscussionRubric();
+    return {
+      ...base,
+      warnings: [...base.warnings, "No discussion prompt was provided, so default participation thresholds (1 post, 2 replies, 150 words) were used. Review before posting."],
+    };
+  }
+
+  const wordsMatch =
+    /\b(?:at least|minimum of|no fewer than)\s+(\d{2,5})\s*words?\b/i.exec(source) ||
+    /\b(\d{2,5})\s*(?:\+|or more)?\s*words?\b/i.exec(source);
+  const minWords = wordsMatch ? Number(wordsMatch[1]) : 150;
+
+  const repliesMatch =
+    /\b(?:reply|replies|respond(?:ing)?|response)\b[^.\n]{0,30}?\b(?:to\s+)?(?:at least\s+)?(\d{1,2}|one|two|three|four|five|six)\b/i.exec(source) ||
+    /\bat least\s+(\d{1,2}|one|two|three|four|five|six)\s+(?:replies|responses|classmates|peers|students|posts)\b/i.exec(source);
+  const minReplies = (repliesMatch && toCount(repliesMatch[1])) || 2;
+
+  const terms = extractPromptTerms(source);
+  const proxySignals: DiscussionSignal[] = [{ kind: "asks_question" }, { kind: "includes_source" }, { kind: "min_words_per_post", count: 50 }];
+  if (terms.length > 0) proxySignals.unshift({ kind: "keywords", terms });
+
+  const criteria: DiscussionCriterion[] = [
+    { criterion: "Participation", points: 10, signals: [{ kind: "initial_post" }, { kind: "min_replies", count: minReplies }, { kind: "min_words", count: minWords }] },
+    { criterion: "Timeliness", points: 10, signals: [{ kind: "posted_by_due" }, { kind: "distinct_days", count: 2 }] },
+    { criterion: "Engagement", points: 10, signals: [{ kind: "replies_to_peers", count: minReplies }, { kind: "mentions_peer" }] },
+    { criterion: "Quality proxies", points: 10, proxy: true, signals: proxySignals.slice(0, 4) },
+  ];
+
+  return {
+    criteria,
+    warnings: [
+      proxyWarning(),
+      "This discussion rubric was generated from the prompt by rule-based parsing (reply and word thresholds detected). Review it before posting grades.",
+    ],
+  };
+}
+
 /** One requirement phrase per criterion, for the full-credit checklist. */
 export function discussionChecklist(rubric: DiscussionRubric): string[] {
   return rubric.criteria.map((c) => `${c.criterion}: ${c.signals.map(signalPhrase).join(", ")}.`);

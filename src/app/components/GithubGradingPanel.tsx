@@ -463,8 +463,28 @@ export default function GithubGradingPanel() {
       </div>
 
       <button type="button" className={styles.submitButton} onClick={gradeAll} disabled={!!busy || queue.length === 0}>
-        {busy === "grade" ? `Grading ${queue.length} repo${queue.length === 1 ? "" : "s"}…` : `Grade all (${queue.length})`}
+        {busy === "grade" ? (
+          <>
+            <span className={styles.btnSpinner} aria-hidden="true" />
+            Grading {queue.length} repo{queue.length === 1 ? "" : "s"}…
+          </>
+        ) : (
+          `Grade all (${queue.length})`
+        )}
       </button>
+
+      {busy === "grade" && (
+        <div className={styles.loadingState} role="status" aria-live="polite">
+          <span className={styles.spinner} aria-hidden="true" />
+          <div>
+            <p className={styles.loadingTitle}>Grading In Progress</p>
+            <p className={styles.loadingText}>
+              Grading {queue.length} repositor{queue.length === 1 ? "y" : "ies"} against the rubric. This can take a
+              moment while each repo is fetched and reviewed.
+            </p>
+          </div>
+        </div>
+      )}
 
       {error && <p className={styles.error}>{error}</p>}
 

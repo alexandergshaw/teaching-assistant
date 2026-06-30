@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { StudentSubmissionEntry } from "@/lib/grade";
-import { buildEmbeddedRubric, gradeEntriesEmbedded } from "./index";
+import { buildEmbeddedRubric, gradeEntriesEmbedded, MAX_CRITERIA } from "./index";
 
 function entry(student: string, content: string, extensions: string[] = [], userId?: number): StudentSubmissionEntry {
   return {
@@ -37,6 +37,45 @@ describe("buildEmbeddedRubric precedence", () => {
     const rubric = buildEmbeddedRubric({});
     expect(rubric.checks).toHaveLength(0);
     expect(rubric.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe("buildEmbeddedRubric criteria cap", () => {
+  it(`caps a generated rubric at ${MAX_CRITERIA} criteria with a warning`, () => {
+    const rubric = buildEmbeddedRubric({
+      instructions:
+        "Submit a PDF and a .ipynb. Define a function named load_data and a function named plot_trends. " +
+        "You must use pandas and numpy. Write at least 500 words. Include at least 2 figures.",
+    });
+    expect(rubric.checks.length).toBe(MAX_CRITERIA);
+    expect(rubric.warnings.join(" ")).toContain(`at most ${MAX_CRITERIA} criteria`);
+  });
+
+  it("keeps the most concrete criteria (file types and code symbols) when capping", () => {
+    const rubric = buildEmbeddedRubric({
+      instructions:
+        "Submit a PDF and a .ipynb. Define a function named load_data and a function named plot_trends. " +
+        "You must use pandas and numpy. Write at least 500 words. Include at least 2 figures.",
+    });
+    const sig = rubric.checks.map((c) => `${c.checkType}:${c.target}`);
+    expect(sig).toEqual(
+      expect.arrayContaining(["file_type:pdf", "file_type:ipynb", "code_symbol:load_data", "code_symbol:plot_trends"])
+    );
+  });
+
+  it("caps a supplied check rubric too", () => {
+    const rubric = buildEmbeddedRubric({
+      rubricText: JSON.stringify(
+        Array.from({ length: 7 }, (_, i) => ({ criterion: `C${i}`, checkType: "keyword", target: `t${i}`, points: 10 }))
+      ),
+    });
+    expect(rubric.checks.length).toBe(MAX_CRITERIA);
+  });
+
+  it("does not warn or truncate when there are 4 or fewer", () => {
+    const rubric = buildEmbeddedRubric({ instructions: "Submit a PDF. Write at least 300 words." });
+    expect(rubric.checks.length).toBeLessThanOrEqual(MAX_CRITERIA);
+    expect(rubric.warnings.join(" ")).not.toContain("at most");
   });
 });
 

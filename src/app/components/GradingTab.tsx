@@ -174,7 +174,9 @@ export default function GradingTab({
           <div>
             <p className={styles.loadingTitle}>Grading In Progress</p>
             <p className={styles.loadingText}>
-              Reviewing submissions now. This can take a moment for larger archives.
+              {selectedProvider === "gemini"
+                ? "Reviewing submissions now. This can take a moment for larger archives."
+                : "Running the grading checks now. This usually only takes a moment."}
             </p>
           </div>
         </div>

@@ -183,13 +183,16 @@ function extractKeywordChecks(text: string): RubricCheck[] {
 
 export function buildRubricFromInstructions(instructions: string): EmbeddedRubric {
   idCounter = 0;
+  // Order most-concrete first so that, if the rubric is later capped, the kept
+  // criteria are the most objective (deliverable formats, required code symbols)
+  // before softer ones (length, content terms, file counts).
   const checks = dedupe(
     [
       ...extractFileTypeChecks(instructions),
-      ...extractLengthChecks(instructions),
-      ...extractFileCountChecks(instructions),
       ...extractCodeSymbolChecks(instructions),
+      ...extractLengthChecks(instructions),
       ...extractKeywordChecks(instructions),
+      ...extractFileCountChecks(instructions),
     ],
     (c) => `${c.checkType}:${c.target.toLowerCase()}`
   );

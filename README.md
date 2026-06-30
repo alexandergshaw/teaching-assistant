@@ -95,7 +95,8 @@ one pasted/uploaded); only when none is supplied is a rubric generated from the
 assignment instructions by rule-based parsing (shown in the auto-generated rubric
 panel for review). A supplied check-based rubric (JSON, or CSV with a `check_type`
 column) is graded exactly; a free-text / criteria rubric is mapped to checks
-heuristically (a warning says so). It requires no configuration and works on both the ZIP upload
+heuristically (a warning says so). The rubric is capped at 4 criteria (generation
+orders the most concrete checks first; a warning notes any that were dropped). It requires no configuration and works on both the ZIP upload
 and Single Assignment (Canvas) sources. Because it runs in-process it keeps each
 student's Canvas userId and files, so grades post back to Canvas and files preview
 from the results table. The engine lives in `src/lib/embedded-grader/`. Only the

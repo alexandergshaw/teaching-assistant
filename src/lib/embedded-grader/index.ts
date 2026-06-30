@@ -34,24 +34,43 @@ export interface BuildRubricInput {
   instructions?: string;
 }
 
-/**
- * Choose the rubric to grade against. A supplied rubric always wins; a rubric is
- * generated from the instructions only when none was supplied.
- */
-export function buildEmbeddedRubric(input: BuildRubricInput): EmbeddedRubric {
-  if (input.rubricText && input.rubricText.trim()) {
-    return buildRubricFromRubricText(input.rubricText, input.rubricFileName);
-  }
-  if (input.instructions && input.instructions.trim()) {
-    return buildRubricFromInstructions(input.instructions);
-  }
+/** The deterministic grader keeps a rubric focused: at most this many criteria. */
+export const MAX_CRITERIA = 4;
+
+// Keep the first MAX_CRITERIA checks (generation already orders them most-concrete
+// first), noting in a warning when extras are dropped.
+function capCriteria(rubric: EmbeddedRubric): EmbeddedRubric {
+  if (rubric.checks.length <= MAX_CRITERIA) return rubric;
+  const dropped = rubric.checks.length - MAX_CRITERIA;
   return {
-    checks: [],
-    origin: "instructions",
+    ...rubric,
+    checks: rubric.checks.slice(0, MAX_CRITERIA),
     warnings: [
-      "Provide a rubric or assignment instructions so the deterministic engine has requirements to grade against.",
+      ...rubric.warnings,
+      `The deterministic grader uses at most ${MAX_CRITERIA} criteria; ${dropped} additional criteri${dropped === 1 ? "on was" : "a were"} not included.`,
     ],
   };
+}
+
+/**
+ * Choose the rubric to grade against. A supplied rubric always wins; a rubric is
+ * generated from the instructions only when none was supplied. The result is
+ * always capped to {@link MAX_CRITERIA} criteria.
+ */
+export function buildEmbeddedRubric(input: BuildRubricInput): EmbeddedRubric {
+  const rubric: EmbeddedRubric =
+    input.rubricText && input.rubricText.trim()
+      ? buildRubricFromRubricText(input.rubricText, input.rubricFileName)
+      : input.instructions && input.instructions.trim()
+        ? buildRubricFromInstructions(input.instructions)
+        : {
+            checks: [],
+            origin: "instructions",
+            warnings: [
+              "Provide a rubric or assignment instructions so the deterministic engine has requirements to grade against.",
+            ],
+          };
+  return capCriteria(rubric);
 }
 
 function formatNumber(value: number): string {

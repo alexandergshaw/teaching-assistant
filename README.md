@@ -102,6 +102,17 @@ student's Canvas userId and files, so grades post back to Canvas and files previ
 from the results table. The engine lives in `src/lib/embedded-grader/`. Only the
 Grading tab is affected; every other feature stays on Gemini.
 
+**Discussion boards** are graded differently from file/code work. When the embedded
+engine grades a Canvas discussion URL, it scores a few composite criteria built from
+the thread structure (which the Canvas pull now preserves: initial posts vs replies,
+timestamps, and who each reply targeted): **Participation** (initial post, reply
+count, word count), **Timeliness** (posted before the due date, active on multiple
+days), **Engagement** (replies to classmates, names a peer), and **Quality proxies**
+(asks a question, cites a source, covers the prompt's terms, post length). Reply and
+word thresholds are parsed from the prompt when stated. The quality column is an
+honest proxy, not a judgment of depth or correctness, and a warning says so; finish
+that part in SpeedGrader. Grades still post back via the discussion's linked assignment.
+
 ### Canvas grading
 
 The Grading tab can grade Canvas **discussions and assignments** directly from a

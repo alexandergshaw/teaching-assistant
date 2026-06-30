@@ -25,6 +25,13 @@ import {
 
 export type { EmbeddedRubric } from "./types";
 export { renderRubricText, fullCreditChecklist } from "./rubric";
+export {
+  buildDiscussionRubric,
+  gradeDiscussion,
+  renderDiscussionRubric,
+  defaultDiscussionRubric,
+} from "./discussion";
+export type { DiscussionStudent, DiscussionContext, DiscussionRubric } from "./discussion";
 
 export interface BuildRubricInput {
   /** A supplied rubric (Canvas-provided, pasted, or uploaded). Preferred when present. */

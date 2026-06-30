@@ -17,7 +17,11 @@ import {
   buildEmbeddedRubric,
   gradeEntriesEmbedded,
   renderRubricText,
+  buildDiscussionRubric,
+  gradeDiscussion,
+  renderDiscussionRubric,
 } from "@/lib/embedded-grader";
+import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
   fetchCanvasWork,
   canvasWorkToZipBase64,
@@ -3123,6 +3127,31 @@ export async function gradeAction(
       // Embedded Deterministic Engine: grade in-process against the Canvas rubric
       // when one is present, otherwise a rubric generated from the instructions.
       if (provider === "embedded") {
+        // Discussions are graded on participation/engagement signals, not the
+        // generic file/keyword checks, so route them to the discussion grader.
+        if (detectCanvasUrlKind(canvasUrl) === "discussion") {
+          const [{ students, dueAt }, pointsPossible] = await Promise.all([
+            fetchCanvasWork(canvasUrl),
+            fetchAssignmentPointsPossible(canvasUrl),
+          ]);
+          const discussionStudents = students
+            .filter((s) => s.discussion)
+            .map((s) => ({ student: s.student, userId: s.userId, activity: s.discussion! }));
+          if (discussionStudents.length === 0) {
+            return { run: { results: [], rubricAreaNames: [], fullCreditChecklist: [], speedGraderUrl }, error: null };
+          }
+          const participants = students.map((s) => ({ userId: s.userId, name: s.student }));
+          const source = [assignmentInstructions, rubric].filter((t) => t.trim()).join("\n");
+          const discussionRubric = buildDiscussionRubric(source);
+          const run = gradeDiscussion(discussionStudents, discussionRubric, { dueAt, participants }, pointsPossible);
+          return {
+            run: { ...run, speedGraderUrl },
+            error: null,
+            warnings: discussionRubric.warnings,
+            generatedRubric: renderDiscussionRubric(discussionRubric),
+          };
+        }
+
         const { entries, pointsPossible } = await extractCanvasEntries(canvasUrl);
         if (entries.length === 0) {
           return { run: { results: [], rubricAreaNames: [], fullCreditChecklist: [], speedGraderUrl }, error: null };

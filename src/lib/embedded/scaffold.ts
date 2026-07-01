@@ -198,6 +198,67 @@ export function summarize(text: string, maxSentences = 2): string {
     .join(" ");
 }
 
+/** Lowercase the first character of a string. */
+function lowerFirst(text: string): string {
+  const t = text.trim();
+  return t ? t[0].toLowerCase() + t.slice(1) : t;
+}
+
+// Leading words that never begin a real glossary term (pronouns, articles, and
+// pedagogical nouns that show up in syllabus prose).
+const NON_TERM_LEAD = new Set([
+  "this", "that", "these", "those", "it", "they", "there", "here", "we", "you",
+  "i", "he", "she", "his", "her", "their", "our", "its", "the", "a", "an",
+  "students", "student", "learners", "assignment", "assignments", "homework",
+  "quiz", "exam", "midterm", "final", "lecture", "week", "grade", "grading",
+]);
+
+export interface Definition {
+  term: string;
+  /** A full sentence that defines the term. */
+  definition: string;
+}
+
+/**
+ * Extract term definitions from the text so a glossary can state what each key
+ * term means, the way an LLM would. Recognizes "Term is/are …", "Term refers to /
+ * means / is defined as …", and "Term: definition" lines. Every definition is a
+ * sentence taken (and lightly normalized) from the input, so nothing is invented.
+ */
+export function extractDefinitions(text: string, limit = 6): Definition[] {
+  const out: Definition[] = [];
+  const seen = new Set<string>();
+  const rejects = (term: string): boolean => {
+    const words = term.trim().split(/\s+/);
+    return words.length === 0 || words.length > 5 || NON_TERM_LEAD.has(words[0].toLowerCase());
+  };
+  const add = (term: string, definition: string) => {
+    const key = term.trim().toLowerCase();
+    if (!key || seen.has(key) || rejects(term)) return;
+    seen.add(key);
+    out.push({ term: term.trim(), definition: cleanText(definition) });
+  };
+
+  // "Term: definition" label lines.
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^([A-Za-z][A-Za-z0-9 /\-]{1,39}):\s+(.{6,})$/.exec(line.trim());
+    if (m && !/\bhttps?:/i.test(m[2])) {
+      add(m[1], ensureSentence(`${capitalizeFirst(m[1].trim())} is ${lowerFirst(m[2])}`));
+    }
+  }
+
+  // "Term is/are/refers to/means/is defined as … " sentences.
+  for (const sentence of splitSentences(text)) {
+    const m = /^([A-Za-z][A-Za-z0-9 /\-]{1,39}?)\s+(?:is|are|refers to|means|is defined as|describes)\s+(.{6,})$/i.exec(
+      sentence
+    );
+    if (!m) continue;
+    add(m[1], ensureSentence(capitalizeFirst(sentence)));
+  }
+
+  return out.slice(0, limit);
+}
+
 /** A single sentence summarizing what the objectives ask the learner to do. */
 export function summarizeObjectives(objectives: string, max = 3): string {
   const bullets = toBullets(objectives)

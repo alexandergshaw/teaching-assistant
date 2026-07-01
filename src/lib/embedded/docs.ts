@@ -10,6 +10,7 @@ import {
   capitalizeFirst,
   deriveTitle,
   ensureSentence,
+  extractDefinitions,
   summarize,
   summarizeObjectives,
   toBullets,
@@ -28,12 +29,20 @@ export function scaffoldDocument(prompt: string): string {
     .map((b) => `- ${b}`)
     .join("\n");
 
+  // A Key Terms section only when the prompt actually defines terms.
+  const definitions = extractDefinitions(prompt, 6);
+  const keyTermsSection =
+    definitions.length > 0
+      ? ["## Key Terms", definitions.map((d) => `- ${d.definition}`).join("\n")]
+      : [];
+
   return [
     `# ${title}`,
     "## Overview",
     overview,
     "## Details",
     detailBullets,
+    ...keyTermsSection,
     "## Summary",
     "Review the points above and add any specifics relevant to your course.",
   ].join("\n\n");

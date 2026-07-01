@@ -10,6 +10,7 @@ import {
   deriveTitle,
   deriveTopic,
   ensureSentence,
+  extractDefinitions,
   keyPhrases,
   summarize,
   summarizeObjectives,
@@ -39,7 +40,9 @@ export interface AssignmentScaffold {
 export function scaffoldModuleIntro(objectives: string, context = ""): ModuleIntroScaffold {
   const topic = deriveTopic(objectives, context);
   const summary = summarizeObjectives(objectives);
-  const terms = keyPhrases(`${objectives}\n${context}`, 5);
+  const source = `${objectives}\n${context}`;
+  const definitions = extractDefinitions(source, 3);
+  const terms = keyPhrases(source, 5);
 
   // A real summary of the supplied context, so the overview reflects the source
   // material instead of a fixed closing line.
@@ -53,14 +56,24 @@ export function scaffoldModuleIntro(objectives: string, context = ""): ModuleInt
     .filter(Boolean)
     .join(" ");
 
+  // Prefer real definitions pulled from the source; otherwise name the salient
+  // terms and note they are defined in the materials.
   const keyTerms =
-    terms.length > 0
+    definitions.length > 0
       ? [
-          ensureSentence(`As you work through this module, watch for key terms such as ${terms.join(", ")}`),
-          "Each one is introduced and defined in the materials as it comes up.",
-          "Keeping these straight will make the examples and activities easier to follow.",
-        ].join(" ")
-      : "The key terms for this module are introduced and defined in the materials as they come up. Note each one as you encounter it so the examples and activities are easier to follow.";
+          "A few key terms to know:",
+          ...definitions.map((d) => d.definition),
+          terms.length > 0 ? ensureSentence(`Also watch for ${terms.join(", ")}`) : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : terms.length > 0
+        ? [
+            ensureSentence(`As you work through this module, watch for key terms such as ${terms.join(", ")}`),
+            "Each one is introduced and defined in the materials as it comes up.",
+            "Keeping these straight will make the examples and activities easier to follow.",
+          ].join(" ")
+        : "The key terms for this module are introduced and defined in the materials as they come up. Note each one as you encounter it so the examples and activities are easier to follow.";
 
   return { overview, keyTerms };
 }

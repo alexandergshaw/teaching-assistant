@@ -25,6 +25,7 @@ import {
 import { detectMeetingRequestEmbedded } from "@/lib/embedded/meeting";
 import { scaffoldModuleIntro, scaffoldAssignment } from "@/lib/embedded/content";
 import { scaffoldLessonPlan, scaffoldExamples } from "@/lib/embedded/deck";
+import { scaffoldAnnouncement, scaffoldMessageReply } from "@/lib/embedded/communication";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
   fetchCanvasWork,
@@ -2659,6 +2660,12 @@ export async function draftMeetingReplyAction(
 
     const fallback = `Thanks for reaching out! I'd be glad to meet over a video call. Here are a few times that work on my end:\n\n${bulletedTimes}\n\nLet me know which one suits you and I'll send a Google Meet link.`;
 
+    // Embedded Deterministic Engine: the plain template already offers the exact
+    // open times; return it directly with no model call.
+    if (provider === "embedded") {
+      return { body: stripLongDashes(fallback) };
+    }
+
     const prompt = `You are an instructor replying to a student who asked to meet over a video call.
 
 CONVERSATION SO FAR (oldest message first):
@@ -2787,6 +2794,12 @@ export async function draftAnnouncementAction(
       return { error: "Describe what the announcement should say first." };
     }
 
+    // Embedded Deterministic Engine: template the announcement from the
+    // instruction with no model call.
+    if (provider === "embedded") {
+      return scaffoldAnnouncement(instruction);
+    }
+
     const prompt = `You are an instructor writing a course announcement for students.
 
 WHAT TO ANNOUNCE:
@@ -2849,6 +2862,12 @@ export async function draftMessageReplyAction(
     await requireOwner();
     if (!threadText.trim()) {
       return { error: "Open a conversation before drafting a reply." };
+    }
+
+    // Embedded Deterministic Engine: return a courteous, editable reply template
+    // with no model call.
+    if (provider === "embedded") {
+      return scaffoldMessageReply(threadText, instructions);
     }
 
     const steer = instructions.trim()

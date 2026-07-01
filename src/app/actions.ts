@@ -1955,6 +1955,12 @@ export async function revisePageWithAiAction(
       return { error: "Describe what to change first." };
     }
 
+    // Embedded Deterministic Engine: freeform HTML revision needs a model, so the
+    // page is returned unchanged rather than fabricating edits.
+    if (provider === "embedded") {
+      return { html };
+    }
+
     const prompt = `You are editing the HTML body of a course page in a learning management system (Canvas).
 
 CURRENT PAGE HTML:
@@ -2508,6 +2514,13 @@ export async function rewriteOfficeParagraphAction(
   try {
     await requireOwner();
     if (!paragraphText.trim()) return { error: "There is no text in this paragraph to rewrite." };
+
+    // Embedded Deterministic Engine: no model to rewrite prose, so normalize
+    // whitespace and return the paragraph otherwise intact.
+    if (provider === "embedded") {
+      return { text: paragraphText.replace(/\s+/g, " ").trim() };
+    }
+
     const prompt = `You are editing one paragraph of a document. Here is the full document for context:
 
 ---
@@ -4224,6 +4237,12 @@ export async function reviseLecturePlanTextAction(
     if (!instruction.trim()) return { error: "Describe the change you want first." };
     if (!currentText.trim()) return { error: "There is no document to revise yet." };
 
+    // Embedded Deterministic Engine: freeform revision needs a model, so the
+    // document is returned unchanged rather than fabricating edits.
+    if (provider === "embedded") {
+      return { text: currentText };
+    }
+
     const docKind = section === "intro" ? "module introduction" : "assignment instruction sheet";
     const prompt = `You are an expert educator revising a ${docKind} for a programming course.
 
@@ -4270,6 +4289,12 @@ export async function reviseLectureSlidesAction(
   try {
     await requireOwner();
     if (!instruction.trim()) return { error: "Describe the change you want first." };
+
+    // Embedded Deterministic Engine: freeform slide revision needs a model, so the
+    // deck is returned unchanged rather than fabricating edits.
+    if (provider === "embedded") {
+      return { slides: currentSlides };
+    }
 
     const prompt = `You are an expert educator revising a lecture slide deck titled "${presentationTitle}".
 

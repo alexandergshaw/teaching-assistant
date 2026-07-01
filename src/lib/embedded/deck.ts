@@ -22,6 +22,7 @@ import {
   type Definition,
   type LessonType,
 } from "./scaffold";
+import { findCaseStudies, findPracticeProblems, type PracticeProblemEntry } from "@/lib/research";
 
 export interface SlideScaffold {
   title: string;
@@ -76,9 +77,39 @@ function codeSlidePair(phrase: string, block: CodeBlock, fallbackLanguage: strin
 }
 
 /**
- * Build a lecture outline: a title slide, one slide per objective (with a real
- * definition from the source when one exists), Example/Walkthrough pairs showing
- * real code blocks found in the material, and a summary.
+ * Practice + Answer slide pair from a curated practice problem. Following the
+ * LLM slide contract, the Practice slide's code repeats the reference example
+ * (never the solution), and only the Answer slide shows the verified solution.
+ */
+function practiceSlidePair(
+  phrase: string,
+  problem: PracticeProblemEntry,
+  referenceCode: string,
+  referenceLanguage: string
+): SlideScaffold[] {
+  const title = titleCase(phrase.split(/\s+/).slice(0, 6).join(" "));
+  return [
+    {
+      title: `Practice: ${title}`,
+      bullets: [problem.prompt, "Use the reference code below as a worked example, then write your own solution."],
+      code: referenceCode,
+      codeLanguage: referenceLanguage,
+    },
+    {
+      title: `Answer: ${title}`,
+      bullets: ["One correct solution to the practice challenge."],
+      code: problem.solutionCode,
+      codeLanguage: problem.language,
+    },
+  ];
+}
+
+/**
+ * Build a lecture outline: a title slide, a real case study from the research
+ * library as the second slide (mirroring the LLM slide contract), one slide per
+ * objective (with a real definition from the source when one exists), Example/
+ * Walkthrough pairs showing real code, and Practice/Answer pairs drawn from the
+ * curated practice problems, then a summary.
  */
 export function scaffoldLessonPlan(objectives: string, context = ""): DeckScaffold {
   const source = `${objectives}\n${context}`;
@@ -93,7 +124,18 @@ export function scaffoldLessonPlan(objectives: string, context = ""): DeckScaffo
     bullets: (bullets.length > 0 ? bullets : ["Overview of this lesson"]).slice(0, 5).map(conceptTitle),
   };
 
+  // A real, documented case study as the second slide, when one matches the
+  // topic (the LLM contract's "Case Study:" slide). Off-topic decks get none.
+  const caseStudy = findCaseStudies(source, 1)[0];
+  const caseStudySlide: SlideScaffold | null = caseStudy
+    ? {
+        title: `Case Study: ${caseStudy.title}`,
+        bullets: [...caseStudy.summary, caseStudy.lesson],
+      }
+    : null;
+
   let blockIndex = 0;
+  const usedProblems = new Set<string>();
   const conceptSlides: SlideScaffold[] = [];
   for (const objective of bullets.slice(0, 8)) {
     const phrase = objective.replace(/[.:;,]+$/, "").trim().toLowerCase();
@@ -121,10 +163,27 @@ export function scaffoldLessonPlan(objectives: string, context = ""): DeckScaffo
       ],
     });
 
-    // Follow the concept with real code from the material, when available.
-    if (blockIndex < codeBlocks.length) {
-      conceptSlides.push(...codeSlidePair(phrase, codeBlocks[blockIndex], fallbackLanguage));
+    // Prefer real code from the course material for the Example/Walkthrough
+    // pair; otherwise fall back to a curated problem's worked example.
+    const problem = findPracticeProblems(phrase, 3).find((p) => !usedProblems.has(p.id));
+    const sourceBlock = blockIndex < codeBlocks.length ? codeBlocks[blockIndex] : null;
+
+    if (sourceBlock) {
+      conceptSlides.push(...codeSlidePair(phrase, sourceBlock, fallbackLanguage));
       blockIndex += 1;
+    } else if (problem) {
+      conceptSlides.push(
+        ...codeSlidePair(phrase, { code: problem.exampleCode, language: problem.language }, fallbackLanguage)
+      );
+    }
+
+    // Practice/Answer from the curated problem, completing the LLM contract's
+    // Example -> Walkthrough -> Practice -> Answer sequence for the concept.
+    if (problem) {
+      usedProblems.add(problem.id);
+      const referenceCode = sourceBlock?.code ?? problem.exampleCode;
+      const referenceLanguage = sourceBlock ? sourceBlock.language ?? fallbackLanguage : problem.language;
+      conceptSlides.push(...practiceSlidePair(phrase, problem, referenceCode, referenceLanguage));
     }
   }
 
@@ -136,9 +195,10 @@ export function scaffoldLessonPlan(objectives: string, context = ""): DeckScaffo
         : ["Recap the key ideas from this lesson"],
   };
 
+  const leadSlides = caseStudySlide ? [titleSlide, caseStudySlide] : [titleSlide];
   return {
     presentationTitle,
-    slides: conceptSlides.length > 0 ? [titleSlide, ...conceptSlides, summarySlide] : [titleSlide, summarySlide],
+    slides: conceptSlides.length > 0 ? [...leadSlides, ...conceptSlides, summarySlide] : [...leadSlides, summarySlide],
   };
 }
 
@@ -170,9 +230,10 @@ function exampleStub(lessonType: LessonType, concept: string, language: string):
 }
 
 /**
- * Build two examples per concept. For programming lessons, the first example per
- * concept uses a real code block extracted from the provided material when one is
- * available (consumed in document order); everything else is a clearly-marked
+ * Build two examples per concept. Real material fills the slots in priority
+ * order: a code block extracted from the provided text first, then a curated
+ * practice problem (its prompt plus verified solution) from the research
+ * library; only when neither exists does a slot fall back to a clearly-marked
  * placeholder, since deterministic templating cannot invent correct solutions.
  */
 export function scaffoldExamples(concepts: string[], text: string): ExamplesScaffold {
@@ -181,20 +242,41 @@ export function scaffoldExamples(concepts: string[], text: string): ExamplesScaf
   const language = detectLanguage(`${text}\n${cleanedConcepts.join("\n")}`);
   const codeBlocks = extractCodeBlocks(text);
   let blockIndex = 0;
+  const usedProblems = new Set<string>();
 
   const examples: ExampleItemScaffold[] = [];
   for (const concept of cleanedConcepts) {
+    // Real candidates for this concept, best first.
+    const candidates: ExampleItemScaffold[] = [];
+
+    if (lessonType === "programming" && blockIndex < codeBlocks.length) {
+      const block = codeBlocks[blockIndex];
+      blockIndex += 1;
+      candidates.push({
+        concept,
+        title: "",
+        content: block.code,
+        explanation: `Trace this example from the course material line by line to see how it demonstrates ${concept}.`,
+        language: block.language ?? language,
+      });
+    }
+
+    const problem = findPracticeProblems(concept, 3).find((p) => !usedProblems.has(p.id));
+    if (problem) {
+      usedProblems.add(problem.id);
+      candidates.push({
+        concept,
+        title: "",
+        content: problem.solutionCode,
+        explanation: `Practice problem: ${problem.prompt} The code above is one correct solution; trace it line by line.`,
+        language: problem.language,
+      });
+    }
+
     for (let i = 1; i <= 2; i += 1) {
-      if (lessonType === "programming" && i === 1 && blockIndex < codeBlocks.length) {
-        const block = codeBlocks[blockIndex];
-        blockIndex += 1;
-        examples.push({
-          concept,
-          title: `${concept} — Example ${i}`,
-          content: block.code,
-          explanation: `Trace this example from the course material line by line to see how it demonstrates ${concept}.`,
-          language: block.language ?? language,
-        });
+      const candidate = candidates.shift();
+      if (candidate) {
+        examples.push({ ...candidate, title: `${concept} — Example ${i}` });
         continue;
       }
       const { content, language: lang } = exampleStub(lessonType, concept, language);

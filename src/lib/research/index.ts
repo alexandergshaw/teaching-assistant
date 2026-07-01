@@ -31,9 +31,11 @@ const ALL_ENTRIES: KnowledgeEntry[] = [...CASE_STUDIES, ...PRACTICE_PROBLEMS];
 
 /**
  * Score one entry against the query terms: topic-tag matches count triple,
- * title/organization matches count single. Substring matching runs both ways
- * ("loop" matches the tag "loops", "integers" matches the query "integer"), but
- * tags shorter than four characters ("c", "sql", "dns") require an exact term
+ * title/organization matches count single. A tag matches when it contains the
+ * term ("for loop" matches "loop") or when the term is a plural-ish form of the
+ * tag (the term starts with the tag and extends it by at most two characters,
+ * so "loops" matches the tag "loop" but "selection" does not match "select").
+ * Tags shorter than four characters ("c", "sql", "dns") require an exact term
  * match so they never match by accident inside longer words.
  */
 function scoreEntry(entry: KnowledgeEntry, terms: string[]): number {
@@ -43,9 +45,11 @@ function scoreEntry(entry: KnowledgeEntry, terms: string[]): number {
 
   let score = 0;
   for (const term of terms) {
-    const topicHit = topicsLower.some((topic) =>
-      topic.length >= 4 ? topic.includes(term) || term.includes(topic) : topic === term
-    );
+    const topicHit = topicsLower.some((topic) => {
+      if (topic.length < 4) return topic === term;
+      if (topic.includes(term)) return true;
+      return term.startsWith(topic) && term.length - topic.length <= 2;
+    });
     if (topicHit) {
       score += 3;
     }

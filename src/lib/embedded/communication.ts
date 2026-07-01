@@ -5,7 +5,7 @@
  * without inventing facts (dates, links, grades) that were not provided.
  */
 
-import { capitalizeFirst, cleanText, copyedit, ensureSentence, splitSentences } from "./scaffold";
+import { capitalizeFirst, cleanText, copyedit, ensureSentence, pick, splitSentences } from "./scaffold";
 
 /** The account owner never wants long dashes in a draft; mirror the LLM path. */
 function stripLongDashes(text: string): string {
@@ -38,12 +38,17 @@ export interface AnnouncementScaffold {
 /** Wrap the instruction in a warm, professional announcement body. */
 export function scaffoldAnnouncement(instruction: string): AnnouncementScaffold {
   const core = copyedit(instruction.replace(ANNOUNCEMENT_DIRECTIVE, ""));
-  const message = [
-    "Hi everyone,",
-    core,
-    "If you have any questions, please reach out during office hours or by reply.",
-    "Thanks,\nYour instructor",
-  ].join("\n\n");
+  const greeting = pick(["Hi everyone,", "Hello everyone,", "Hi all,"], instruction);
+  const closer = pick(
+    [
+      "If you have any questions, please reach out during office hours or by reply.",
+      "Please reach out during office hours or by reply if anything is unclear.",
+      "Questions are welcome, by reply or during office hours.",
+    ],
+    instruction
+  );
+  const signoff = pick(["Thanks,\nYour instructor", "Best,\nYour instructor", "Thank you,\nYour instructor"], instruction);
+  const message = [greeting, core, closer, signoff].join("\n\n");
   return { title: announcementTitle(instruction), message: stripLongDashes(message) };
 }
 

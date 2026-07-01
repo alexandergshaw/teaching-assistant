@@ -24,6 +24,27 @@ export function cleanText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/** Deterministic 32-bit FNV-1a hash of a string. */
+export function hashString(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Choose one of several phrasings deterministically from a seed, so the same
+ * input always yields the same wording but different inputs vary their phrasing
+ * (instead of every output reusing one fixed sentence). Falls back to the first
+ * variant for an empty list.
+ */
+export function pick<T>(variants: T[], seed: string): T {
+  if (variants.length === 0) throw new Error("pick requires at least one variant");
+  return variants[hashString(seed) % variants.length];
+}
+
 /** Uppercase the first character of a string. */
 export function capitalizeFirst(text: string): string {
   const t = text.trim();

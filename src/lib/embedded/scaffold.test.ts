@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { copyedit, extractDefinitions, summarize } from "./scaffold";
+import { copyedit, extractDefinitions, pick, summarize } from "./scaffold";
 
 describe("summarize", () => {
   it("returns the input unchanged when it has few sentences", () => {
@@ -76,5 +76,24 @@ describe("copyedit", () => {
 
   it("returns empty for empty input", () => {
     expect(copyedit("   ")).toBe("");
+  });
+});
+
+describe("pick", () => {
+  const variants = ["a", "b", "c", "d"];
+
+  it("is deterministic for a given seed", () => {
+    expect(pick(variants, "recursion")).toBe(pick(variants, "recursion"));
+  });
+
+  it("varies across different seeds", () => {
+    const chosen = new Set(["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"].map((s) => pick(variants, s)));
+    expect(chosen.size).toBeGreaterThan(1);
+  });
+
+  it("always returns a member of the list", () => {
+    for (const seed of ["x", "y", "z", "topic 123"]) {
+      expect(variants).toContain(pick(variants, seed));
+    }
   });
 });

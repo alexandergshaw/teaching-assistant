@@ -12,6 +12,7 @@ import {
   ensureSentence,
   extractDefinitions,
   keyPhrases,
+  pick,
   summarize,
   summarizeObjectives,
   titleCase,
@@ -47,14 +48,25 @@ export function scaffoldModuleIntro(objectives: string, context = ""): ModuleInt
   // A real summary of the supplied context, so the overview reflects the source
   // material instead of a fixed closing line.
   const contextSummary = context.trim() ? capitalizeFirst(ensureSentence(summarize(context, 1))) : "";
-  const overview = [
-    ensureSentence(`This module focuses on ${topic}`),
-    summary,
-    contextSummary,
-    "These ideas build on what you have already seen and set up the work in the modules that follow.",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const opener = pick(
+    [
+      `This module focuses on ${topic}`,
+      `In this module, we turn to ${topic}`,
+      `This module introduces ${topic}`,
+      `Here we take a closer look at ${topic}`,
+    ],
+    topic
+  );
+  const closer = pick(
+    [
+      "These ideas build on what you have already seen and set up the work in the modules that follow.",
+      "Together these ideas connect to earlier material and prepare you for what comes next.",
+      "Keep these connections in mind, as they carry into the modules ahead.",
+      "This groundwork supports the work in the modules that follow.",
+    ],
+    topic
+  );
+  const overview = [ensureSentence(opener), summary, contextSummary, closer].filter(Boolean).join(" ");
 
   // Prefer real definitions pulled from the source; otherwise name the salient
   // terms and note they are defined in the materials.
@@ -102,13 +114,23 @@ export function scaffoldAssignment(objectives: string, context = ""): Assignment
   const topic = deriveTopic(objectives, context);
   const title = `${deriveTitle(objectives, context, "Module")}: Applied Assignment`;
 
-  const overview = [
-    ensureSentence(
-      `In this assignment you will apply what you learned about ${topic} to a practical, hands-on task`
-    ),
-    summarizeObjectives(objectives),
-    "Work through the steps below on your own, using only free tools.",
-  ]
+  const opener = pick(
+    [
+      `In this assignment you will apply what you learned about ${topic} to a practical, hands-on task`,
+      `This assignment puts ${topic} into practice with a hands-on task`,
+      `Here you will apply ${topic} to a realistic, hands-on task`,
+    ],
+    topic
+  );
+  const closer = pick(
+    [
+      "Work through the steps below on your own, using only free tools.",
+      "Complete the steps below independently; every tool you need is free.",
+      "Follow the steps below on your own, using only free tools.",
+    ],
+    topic
+  );
+  const overview = [ensureSentence(opener), summarizeObjectives(objectives), closer]
     .filter(Boolean)
     .join(" ");
 

@@ -6,7 +6,7 @@ describe("scaffoldAnnouncement", () => {
     const a = scaffoldAnnouncement("Tell students that the midterm is moved to Friday.");
     expect(a.title.toLowerCase()).toContain("midterm");
     expect(a.title.toLowerCase()).not.toContain("tell students");
-    expect(a.message).toContain("Hi everyone,");
+    expect(a.message).toMatch(/^(?:Hi|Hello) (?:everyone|all),/);
     expect(a.message).toContain("Friday");
     expect(a.message).toContain("Your instructor");
   });

@@ -12,6 +12,7 @@ import {
   scaleResultToPoints,
   type GradingRun,
   type StudentSubmissionEntry,
+  type SubmittedFileInfo,
 } from "@/lib/grade";
 import {
   buildEmbeddedRubric,
@@ -4854,6 +4855,32 @@ export interface RepoQueueItem {
 }
 
 /**
+ * Turn a repo digest into a gradable entry for the embedded engine. The digest's
+ * files become `submittedFiles` (so file-type / file-count checks are meaningful
+ * and each file can be previewed), while `content` stays the concatenated text
+ * that the keyword / code-symbol checks scan.
+ */
+function repoDigestToEmbeddedEntry(digest: RepoDigest, label?: string): StudentSubmissionEntry {
+  const submittedFiles: SubmittedFileInfo[] = digest.files.map((file) => {
+    const name = file.path.split("/").pop() || file.path;
+    const extension = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
+    return {
+      name: file.path,
+      extension,
+      previewContent: file.content,
+      previewTruncated: false,
+      mimeType: "text/plain",
+    };
+  });
+  return {
+    student: label?.trim() || digest.fullName,
+    content: digest.text,
+    mergedFileCount: digest.fileCount,
+    submittedFiles,
+  };
+}
+
+/**
  * Grade several student repos against one rubric in a single run, so the results
  * matrix shows every student as a row. Generates a rubric from the first repo
  * when none is supplied.
@@ -4866,20 +4893,36 @@ export async function gradeReposAction(
 ): Promise<{ run: GradingRun; rubric: string } | { error: string }> {
   try {
     await requireOwner();
-    const entries: StudentSubmissionEntry[] = [];
+    const digests: Array<{ label?: string; digest: RepoDigest }> = [];
     for (const item of repos) {
       const parsed = parseRepoRef(item.repoRef);
       if (!parsed) continue;
       const digest = await ingestRepo(parsed.owner, parsed.repo, {}, item.branch || undefined);
-      entries.push({
-        student: item.label?.trim() || digest.fullName,
-        content: digest.text,
-        mergedFileCount: digest.fileCount,
-        submittedFiles: [],
-      });
+      digests.push({ label: item.label, digest });
     }
-    if (entries.length === 0) return { error: "No valid repositories to grade." };
+    if (digests.length === 0) return { error: "No valid repositories to grade." };
     const instructions = assignmentInstructions.trim() || "Evaluate each student's repository.";
+
+    // Embedded Deterministic Engine: grade each repo in-process against the
+    // supplied rubric, or one generated from the instructions. No model call.
+    if (provider === "embedded") {
+      const builtRubric = buildEmbeddedRubric({ rubricText: rubric, instructions });
+      if (builtRubric.checks.length === 0) {
+        return { error: builtRubric.warnings[0] ?? "Provide a rubric or assignment instructions." };
+      }
+      const run = gradeEntriesEmbedded(
+        digests.map(({ label, digest }) => repoDigestToEmbeddedEntry(digest, label)),
+        builtRubric
+      );
+      return { run, rubric: renderRubricText(builtRubric) };
+    }
+
+    const entries: StudentSubmissionEntry[] = digests.map(({ label, digest }) => ({
+      student: label?.trim() || digest.fullName,
+      content: digest.text,
+      mergedFileCount: digest.fileCount,
+      submittedFiles: [],
+    }));
     const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${entries[0].content}`, provider));
     const run = await gradeEntries(entries, instructions, effectiveRubric, provider);
     return { run, rubric: effectiveRubric };
@@ -5103,6 +5146,18 @@ export async function gradeRepoAction(
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const digest = await ingestRepo(parsed.owner, parsed.repo, {}, branch);
     const instructions = assignmentInstructions.trim() || `Evaluate the repository "${digest.fullName}".`;
+
+    // Embedded Deterministic Engine: grade the repo in-process against the
+    // supplied rubric, or one generated from the instructions. No model call.
+    if (provider === "embedded") {
+      const builtRubric = buildEmbeddedRubric({ rubricText: rubric, instructions });
+      if (builtRubric.checks.length === 0) {
+        return { error: builtRubric.warnings[0] ?? "Provide a rubric or assignment instructions." };
+      }
+      const run = gradeEntriesEmbedded([repoDigestToEmbeddedEntry(digest)], builtRubric);
+      return { run, rubric: renderRubricText(builtRubric), fullName: digest.fullName };
+    }
+
     const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${digest.text}`, provider));
     const entry: StudentSubmissionEntry = {
       student: digest.fullName,

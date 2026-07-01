@@ -302,6 +302,12 @@ function pathRank(path: string): number {
   return 3;
 }
 
+/** One file included in a repo digest (its content is the post-truncation slice). */
+export interface RepoFile {
+  path: string;
+  content: string;
+}
+
 export interface RepoDigest {
   fullName: string;
   description: string;
@@ -309,6 +315,12 @@ export interface RepoDigest {
   /** Concatenated, bounded source text for the model. */
   text: string;
   truncated: boolean;
+  /**
+   * The individual files that make up {@link text}. Lets the deterministic grader
+   * check file types / counts and preview per-file content without re-parsing the
+   * concatenated digest.
+   */
+  files: RepoFile[];
 }
 
 /**
@@ -342,6 +354,7 @@ export async function ingestRepo(
     .sort((a, b) => pathRank(a.path) - pathRank(b.path) || a.path.localeCompare(b.path));
 
   const parts: string[] = [`# Repository: ${info.fullName}${info.description ? `\n\n${info.description}` : ""}`];
+  const files: RepoFile[] = [];
   let used = 0;
   let count = 0;
   let truncated = false;
@@ -360,10 +373,11 @@ export async function ingestRepo(
     const slice = body.slice(0, budget);
     if (slice.length < body.length) truncated = true;
     parts.push(`\n\n--- FILE: ${f.path} ---\n${slice}`);
+    files.push({ path: f.path, content: slice });
     used += slice.length;
     count += 1;
   }
-  return { fullName: info.fullName, description: info.description, fileCount: count, text: parts.join(""), truncated };
+  return { fullName: info.fullName, description: info.description, fileCount: count, text: parts.join(""), truncated, files };
 }
 
 /** Download a repo as a zip archive (GitHub's zipball) at `ref` / default branch. */

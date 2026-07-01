@@ -20,6 +20,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "messages is required" }, { status: 400 });
     }
 
+    // Embedded Deterministic Engine: open-ended chat needs a model; return a
+    // clear message instead of calling one.
+    if (provider === "embedded") {
+      return NextResponse.json({
+        reply:
+          "The embedded deterministic engine runs locally and cannot answer open-ended questions. Switch the provider toggle to an LLM (Gemini) to use chat.",
+      });
+    }
+
     const contents = messages.map((m) => ({
       role: m.role === "assistant" ? ("model" as const) : ("user" as const),
       parts: [{ text: m.text }],

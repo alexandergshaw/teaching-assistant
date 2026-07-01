@@ -27,6 +27,7 @@ import { scaffoldModuleIntro, scaffoldAssignment } from "@/lib/embedded/content"
 import { scaffoldLessonPlan, scaffoldExamples } from "@/lib/embedded/deck";
 import { scaffoldAnnouncement, scaffoldMessageReply } from "@/lib/embedded/communication";
 import { scaffoldDocument, scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
+import { deriveAltTextFromHtml, deriveLinkTextFromHtml } from "@/lib/embedded/accessibility";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
   fetchCanvasWork,
@@ -1520,6 +1521,11 @@ export async function suggestOfficeImageAltAction(
 ): Promise<{ text: string } | { error: string }> {
   try {
     await requireOwner();
+    // Embedded Deterministic Engine: alt text needs to see the image; there is no
+    // file name here, only pixels, so ask the instructor to switch providers.
+    if (provider === "embedded") {
+      return { error: "The embedded engine can't analyze image contents. Switch to an LLM provider to suggest alt text." };
+    }
     const image = await getOfficeFileImageData(courseUrl, fileId, imageId, acronym);
     if (!image) return { error: "This image can't be previewed for a suggestion (e.g. a vector image)." };
     const text = await generateImageAlt(image.mimeType, image.base64, provider);
@@ -1702,6 +1708,14 @@ export async function suggestAltTextAction(
 ): Promise<{ text: string } | { error: string }> {
   try {
     await requireOwner();
+    // Embedded Deterministic Engine: derive alt text from the image's file name.
+    if (provider === "embedded") {
+      const alt = deriveAltTextFromHtml(snippet);
+      return alt
+        ? { text: alt }
+        : { error: "The embedded engine couldn't infer alt text from the image's file name. Switch to an LLM provider for a description." };
+    }
+
     const prompt = `An image on a course item titled "${itemTitle}" needs better alt text for screen-reader users. Here is the image's HTML (use its file name and any context to infer the subject):
 
 ${snippet}
@@ -1727,6 +1741,14 @@ export async function suggestLinkTextAction(
 ): Promise<{ text: string } | { error: string }> {
   try {
     await requireOwner();
+    // Embedded Deterministic Engine: derive readable link text from the URL.
+    if (provider === "embedded") {
+      const linkText = deriveLinkTextFromHtml(snippet);
+      return linkText
+        ? { text: linkText }
+        : { error: "The embedded engine couldn't derive link text from the URL. Switch to an LLM provider." };
+    }
+
     const prompt = `A hyperlink on a course item titled "${itemTitle}" has unclear link text (e.g. "click here"). Here is the link's HTML:
 
 ${snippet}
@@ -3344,6 +3366,12 @@ export async function selectionChatAction(
   provider: LlmProvider = "gemini"
 ): Promise<string | { error: string }> {
   try {
+    // Embedded Deterministic Engine: open-ended chat needs a model; return a
+    // clear message instead of calling one.
+    if (provider === "embedded") {
+      return "The embedded deterministic engine runs locally and cannot answer open-ended questions. Switch the provider toggle to an LLM (Gemini) to chat about the highlighted text.";
+    }
+
     const systemPrompt = `You are a helpful teaching assistant. The user has highlighted the following text and has a question about it. Answer concisely and helpfully. Use plain prose only — do not use any markdown formatting, bold, italics, bullet points, headers, or special symbols.
 
 HIGHLIGHTED TEXT:

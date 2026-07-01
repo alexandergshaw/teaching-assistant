@@ -22,6 +22,7 @@ import {
   gradeDiscussion,
   renderDiscussionRubric,
 } from "@/lib/embedded-grader";
+import { detectMeetingRequestEmbedded } from "@/lib/embedded/meeting";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
   fetchCanvasWork,
@@ -2708,6 +2709,12 @@ export async function detectMeetingRequestAction(
   try {
     await requireOwner();
     if (!threadText.trim()) return { isMeetingRequest: false, confidence: 0 };
+
+    // Embedded Deterministic Engine: classify by rule-based meeting-intent
+    // signals in the latest message, no model call.
+    if (provider === "embedded") {
+      return detectMeetingRequestEmbedded(threadText);
+    }
 
     const prompt = `Decide whether the MOST RECENT message in this conversation is asking the instructor to meet live (a video call, phone call, Zoom/Meet, office hours, or "can we talk"). A general question that does not ask to meet is not a meeting request.
 

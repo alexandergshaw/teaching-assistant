@@ -10,7 +10,7 @@ import {
   capitalizeFirst,
   deriveTitle,
   ensureSentence,
-  splitSentences,
+  summarize,
   summarizeObjectives,
   toBullets,
 } from "./scaffold";
@@ -19,7 +19,9 @@ import {
 export function scaffoldDocument(prompt: string): string {
   const title = deriveTitle(prompt, "", "Course Document");
   const bullets = toBullets(prompt);
-  const overview = capitalizeFirst(ensureSentence(splitSentences(prompt)[0] ?? prompt));
+  const overview =
+    capitalizeFirst(ensureSentence(summarize(prompt, 2))) ||
+    capitalizeFirst(ensureSentence(prompt));
   const detailBullets = (
     bullets.length > 1 ? bullets : ["[Add the first key point here]", "[Add another key point here]"]
   )
@@ -43,9 +45,11 @@ export function scaffoldDocument(prompt: string): string {
  */
 export function scaffoldModuleIntroDoc(displayTitle: string, content: string): string {
   const summary = summarizeObjectives(content);
+  const contentSummary = content.trim() ? capitalizeFirst(ensureSentence(summarize(content, 1))) : "";
   const overview = [
     ensureSentence(`This module introduces ${displayTitle.toLowerCase()} and why it matters`),
     summary,
+    contentSummary,
   ]
     .filter(Boolean)
     .join(" ");

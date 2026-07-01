@@ -162,6 +162,42 @@ export function detectLanguage(text: string): string {
   return "python";
 }
 
+/** Significant-word frequencies (length >= 4, not a stopword), for scoring. */
+function termFrequencies(text: string): Map<string, number> {
+  const freq = new Map<string, number>();
+  for (const word of text.toLowerCase().split(/[^a-z0-9]+/)) {
+    if (word.length >= 4 && !STOPWORDS.has(word)) freq.set(word, (freq.get(word) ?? 0) + 1);
+  }
+  return freq;
+}
+
+/**
+ * Extractive summary: score each sentence by the frequency of the significant
+ * words it contains (length-normalized, with a small first-sentence bonus) and
+ * return the top {@link maxSentences} in their original order. This lets an
+ * overview reflect the actual source text the way an LLM summary would, without
+ * inventing anything — every sentence returned came from the input verbatim.
+ */
+export function summarize(text: string, maxSentences = 2): string {
+  const sentences = splitSentences(text);
+  if (sentences.length <= maxSentences) return sentences.join(" ");
+
+  const freq = termFrequencies(text);
+  const scored = sentences.map((sentence, index) => {
+    const words = sentence.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const raw = words.reduce((sum, word) => sum + (freq.get(word) ?? 0), 0);
+    const normalized = words.length > 0 ? raw / Math.sqrt(words.length) : 0;
+    return { sentence, index, score: normalized * (index === 0 ? 1.2 : 1) };
+  });
+
+  return [...scored]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxSentences)
+    .sort((a, b) => a.index - b.index)
+    .map((item) => item.sentence)
+    .join(" ");
+}
+
 /** A single sentence summarizing what the objectives ask the learner to do. */
 export function summarizeObjectives(objectives: string, max = 3): string {
   const bullets = toBullets(objectives)

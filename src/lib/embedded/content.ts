@@ -6,10 +6,12 @@
  */
 
 import {
+  capitalizeFirst,
   deriveTitle,
   deriveTopic,
   ensureSentence,
   keyPhrases,
+  summarize,
   summarizeObjectives,
   titleCase,
   toBullets,
@@ -39,9 +41,13 @@ export function scaffoldModuleIntro(objectives: string, context = ""): ModuleInt
   const summary = summarizeObjectives(objectives);
   const terms = keyPhrases(`${objectives}\n${context}`, 5);
 
+  // A real summary of the supplied context, so the overview reflects the source
+  // material instead of a fixed closing line.
+  const contextSummary = context.trim() ? capitalizeFirst(ensureSentence(summarize(context, 1))) : "";
   const overview = [
     ensureSentence(`This module focuses on ${topic}`),
     summary,
+    contextSummary,
     "These ideas build on what you have already seen and set up the work in the modules that follow.",
   ]
     .filter(Boolean)

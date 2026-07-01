@@ -23,6 +23,7 @@ import {
   renderDiscussionRubric,
 } from "@/lib/embedded-grader";
 import { detectMeetingRequestEmbedded } from "@/lib/embedded/meeting";
+import { scaffoldModuleIntro, scaffoldAssignment } from "@/lib/embedded/content";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
   fetchCanvasWork,
@@ -292,6 +293,12 @@ export async function generateModuleIntroAction(
   provider: LlmProvider = "gemini"
 ): Promise<ModuleIntroData | { error: string }> {
   try {
+    // Embedded Deterministic Engine: template the intro from the objectives with
+    // no model call.
+    if (provider === "embedded") {
+      return scaffoldModuleIntro(moduleObjectives, contextText);
+    }
+
     const prompt = `You are an expert educator writing a module introduction for students.
 
 MODULE OBJECTIVES:
@@ -483,6 +490,12 @@ export async function generateAssignmentAction(
   provider: LlmProvider = "gemini"
 ): Promise<AssignmentData | { error: string }> {
   try {
+    // Embedded Deterministic Engine: template the assignment from the objectives
+    // with no model call (attached files are not read in this mode).
+    if (provider === "embedded") {
+      return scaffoldAssignment(moduleObjectives, contextText);
+    }
+
     const filesSummary =
       files.length > 0
         ? `\n\nATTACHED FILES (${files.length}):\n${files.map((f) => `- ${f.name}`).join("\n")}`

@@ -28,6 +28,7 @@ import { scaffoldLessonPlan, scaffoldExamples } from "@/lib/embedded/deck";
 import { scaffoldAnnouncement, scaffoldMessageReply } from "@/lib/embedded/communication";
 import { scaffoldDocument, scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
 import { deriveAltTextFromHtml, deriveLinkTextFromHtml } from "@/lib/embedded/accessibility";
+import { scaffoldCourseProjectRubric, scaffoldCourseOutline } from "@/lib/embedded/course";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
   fetchCanvasWork,
@@ -1566,13 +1567,17 @@ export async function autoFixOfficeFileAction(
   try {
     await requireOwner();
 
-    // AI alt for every image missing it that we can actually render.
-    const images = await getOfficeFileImagesWithData(courseUrl, fileId, acronym);
+    // AI alt for every image missing it that we can actually render. The embedded
+    // engine can't see image contents, so it skips alt text and still applies the
+    // deterministic title/heading fixes below.
     const altEdits: Record<string, string> = {};
-    for (const im of images) {
-      if (im.alt.trim() || !im.base64 || !im.mimeType) continue;
-      const alt = await generateImageAlt(im.mimeType, im.base64, provider);
-      if (alt) altEdits[im.id] = alt;
+    if (provider !== "embedded") {
+      const images = await getOfficeFileImagesWithData(courseUrl, fileId, acronym);
+      for (const im of images) {
+        if (im.alt.trim() || !im.base64 || !im.mimeType) continue;
+        const alt = await generateImageAlt(im.mimeType, im.base64, provider);
+        if (alt) altEdits[im.id] = alt;
+      }
     }
 
     // Title + headings (docx only; getOfficeFileStructure returns null otherwise).
@@ -3646,6 +3651,11 @@ export async function generateCourseProjectRubricAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ rubric: string } | { error: string }> {
   try {
+    // Embedded Deterministic Engine: a fixed, broadly-applicable rubric, no model.
+    if (provider === "embedded") {
+      return { rubric: scaffoldCourseProjectRubric() };
+    }
+
     const prompt = `You are an expert educator. A teacher has provided a course schedule and wants a single universal grading rubric that can be applied consistently to every assignment in the course.
 
 FILE NAME: ${fileName}
@@ -5466,6 +5476,14 @@ export async function generateCourseFromRepoAction(
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const digest = await ingestRepo(parsed.owner, parsed.repo);
+
+    // Embedded Deterministic Engine: template the outline from the repo's
+    // structure with no model call.
+    if (provider === "embedded") {
+      const outline = scaffoldCourseOutline(digest.fullName, digest.files.map((f) => f.path), digest.truncated);
+      return { outline, fullName: digest.fullName, fileCount: digest.fileCount, truncated: digest.truncated };
+    }
+
     const prompt = `You are an instructional designer building a course that teaches the concepts, technologies, and skills demonstrated in the codebase below.
 
 Produce a course outline as clean Markdown with:

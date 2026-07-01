@@ -207,6 +207,15 @@ export function detectLanguage(text: string): string {
   return "python";
 }
 
+/** The distinct significant words of a text (min length, not a stopword). */
+export function significantWords(text: string, minLength = 4): string[] {
+  const seen = new Set<string>();
+  for (const word of text.toLowerCase().split(/[^a-z0-9]+/)) {
+    if (word.length >= minLength && !STOPWORDS.has(word)) seen.add(word);
+  }
+  return [...seen];
+}
+
 /** Significant-word frequencies (length >= 4, not a stopword), for scoring. */
 function termFrequencies(text: string): Map<string, number> {
   const freq = new Map<string, number>();

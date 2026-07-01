@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
+import { answerFromContext } from "@/lib/embedded/answer";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
 import type { ChatMessage } from "@/lib/chat/types";
@@ -20,38 +21,45 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "messages is required" }, { status: 400 });
     }
 
-    // Embedded Deterministic Engine: open-ended chat needs a model; return a
-    // clear message instead of calling one.
+    let reply: string;
     if (provider === "embedded") {
-      return NextResponse.json({
-        reply:
-          "The embedded deterministic engine runs locally and cannot answer open-ended questions. Switch the provider toggle to an LLM (Gemini) to use chat.",
-      });
-    }
+      // Embedded Deterministic Engine: answer extractively from material the user
+      // pasted earlier in the conversation, no model call. Without pasted text
+      // there is nothing to retrieve from, so say so plainly.
+      const lastUser = [...messages].reverse().find((m) => m.role === "user");
+      const corpus = messages
+        .filter((m) => m.role === "user" && m !== lastUser)
+        .map((m) => m.text)
+        .join("\n\n");
+      reply =
+        lastUser && corpus.trim().split(/\s+/).filter(Boolean).length >= 20
+          ? answerFromContext(lastUser.text, corpus)
+          : "The embedded deterministic engine runs locally and can only answer questions about text already in this conversation. Paste the material first and then ask about it, or switch the provider toggle to an LLM (Gemini).";
+    } else {
+      const contents = messages.map((m) => ({
+        role: m.role === "assistant" ? ("model" as const) : ("user" as const),
+        parts: [{ text: m.text }],
+      }));
 
-    const contents = messages.map((m) => ({
-      role: m.role === "assistant" ? ("model" as const) : ("user" as const),
-      parts: [{ text: m.text }],
-    }));
-
-    const result = await callLlm(
-      {
-        contents,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-        systemInstruction:
-          "Respond in plain text only. Never use markdown or any rich formatting: no asterisks, bold, italics, headings, bullet points, numbered lists, tables, code fences, or backticks. Write in plain sentences and paragraphs.",
-      },
-      provider
-    );
-
-    if (!result.ok) {
-      return NextResponse.json(
-        { error: `LLM API error: HTTP ${result.status} — ${result.body.slice(0, 200)}` },
-        { status: 502 }
+      const result = await callLlm(
+        {
+          contents,
+          generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+          systemInstruction:
+            "Respond in plain text only. Never use markdown or any rich formatting: no asterisks, bold, italics, headings, bullet points, numbered lists, tables, code fences, or backticks. Write in plain sentences and paragraphs.",
+        },
+        provider
       );
-    }
 
-    const reply = result.text || "No response from the model.";
+      if (!result.ok) {
+        return NextResponse.json(
+          { error: `LLM API error: HTTP ${result.status} — ${result.body.slice(0, 200)}` },
+          { status: 502 }
+        );
+      }
+
+      reply = result.text || "No response from the model.";
+    }
 
     // Identify the authenticated user for logging (may be null for anonymous sessions).
     let userId: string | undefined;

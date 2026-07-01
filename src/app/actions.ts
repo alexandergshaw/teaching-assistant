@@ -32,6 +32,7 @@ import { scaffoldCourseProjectRubric, scaffoldCourseOutline, scaffoldCopilotProm
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { copyedit } from "@/lib/embedded/scaffold";
+import { answerFromContext } from "@/lib/embedded/answer";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
   fetchCanvasWork,
@@ -3393,10 +3394,28 @@ export async function selectionChatAction(
   provider: LlmProvider = "gemini"
 ): Promise<string | { error: string }> {
   try {
-    // Embedded Deterministic Engine: open-ended chat needs a model; return a
-    // clear message instead of calling one.
+    // Embedded Deterministic Engine: answer extractively from the highlighted
+    // text (retrieval, summary, and definition intents), no model call. The
+    // exchange is logged the same way as the LLM path.
     if (provider === "embedded") {
-      return "The embedded deterministic engine runs locally and cannot answer open-ended questions. Switch the provider toggle to an LLM (Gemini) to chat about the highlighted text.";
+      const replyText = answerFromContext(question, selectedText);
+      let embeddedUserId: string | undefined;
+      try {
+        const supabase = await createClient();
+        const { data: session } = await supabase.auth.getUser();
+        embeddedUserId = session.user?.id;
+      } catch {
+        // Non-fatal — continue without a user ID.
+      }
+      void logChatExchange({
+        sessionId,
+        source: "selection",
+        userMessage: question,
+        assistantReply: replyText,
+        contextText: selectedText,
+        userId: embeddedUserId,
+      });
+      return replyText;
     }
 
     const systemPrompt = `You are a helpful teaching assistant. The user has highlighted the following text and has a question about it. Answer concisely and helpfully. Use plain prose only — do not use any markdown formatting, bold, italics, bullet points, headers, or special symbols.

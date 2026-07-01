@@ -33,6 +33,7 @@ import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { copyedit } from "@/lib/embedded/scaffold";
 import { answerFromContext } from "@/lib/embedded/answer";
+import { applyTextRevision, applySlidesRevision, applyHtmlRevision } from "@/lib/embedded/revise";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
   fetchCanvasWork,
@@ -379,11 +380,15 @@ export async function generateLessonPlanAction(
 ): Promise<GenerateLessonPlanResult | { error: string }> {
   try {
     // Embedded Deterministic Engine: template a deck outline from the objectives
-    // with no model call. A revision request keeps the current slides unchanged
-    // (deterministic templating cannot rewrite them from a freeform instruction).
+    // with no model call. A revision request applies concrete edit commands by
+    // rule (remove/add/rename slides, replace, shorten); an unparseable one keeps
+    // the current slides unchanged.
     if (provider === "embedded") {
       if (revisionPrompt && currentSlides) {
-        return { presentationTitle: "Lesson Plan", slides: currentSlides };
+        return {
+          presentationTitle: "Lesson Plan",
+          slides: applySlidesRevision(currentSlides, revisionPrompt).slides,
+        };
       }
       return scaffoldLessonPlan(moduleObjectives, contextText);
     }
@@ -1986,10 +1991,11 @@ export async function revisePageWithAiAction(
       return { error: "Describe what to change first." };
     }
 
-    // Embedded Deterministic Engine: freeform HTML revision needs a model, so the
-    // page is returned unchanged rather than fabricating edits.
+    // Embedded Deterministic Engine: apply concrete edit commands (find/replace,
+    // remove an element containing a phrase) by rule; an instruction the engine
+    // cannot parse leaves the page unchanged rather than fabricating edits.
     if (provider === "embedded") {
-      return { html };
+      return { html: applyHtmlRevision(html, instruction).html };
     }
 
     const prompt = `You are editing the HTML body of a course page in a learning management system (Canvas).
@@ -4328,10 +4334,11 @@ export async function reviseLecturePlanTextAction(
     if (!instruction.trim()) return { error: "Describe the change you want first." };
     if (!currentText.trim()) return { error: "There is no document to revise yet." };
 
-    // Embedded Deterministic Engine: freeform revision needs a model, so the
-    // document is returned unchanged rather than fabricating edits.
+    // Embedded Deterministic Engine: apply concrete edit commands (replace,
+    // remove/add sections and bullets, retitle, shorten) by rule; an instruction
+    // the engine cannot parse leaves the document unchanged.
     if (provider === "embedded") {
-      return { text: currentText };
+      return { text: applyTextRevision(currentText, instruction).text };
     }
 
     const docKind = section === "intro" ? "module introduction" : "assignment instruction sheet";
@@ -4381,10 +4388,11 @@ export async function reviseLectureSlidesAction(
     await requireOwner();
     if (!instruction.trim()) return { error: "Describe the change you want first." };
 
-    // Embedded Deterministic Engine: freeform slide revision needs a model, so the
-    // deck is returned unchanged rather than fabricating edits.
+    // Embedded Deterministic Engine: apply concrete edit commands (remove/add/
+    // rename slides, remove bullets, replace, shorten) by rule; an instruction
+    // the engine cannot parse leaves the deck unchanged.
     if (provider === "embedded") {
-      return { slides: currentSlides };
+      return { slides: applySlidesRevision(currentSlides, instruction).slides };
     }
 
     const prompt = `You are an expert educator revising a lecture slide deck titled "${presentationTitle}".

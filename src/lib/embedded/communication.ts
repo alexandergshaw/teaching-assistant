@@ -47,22 +47,58 @@ export function scaffoldAnnouncement(instruction: string): AnnouncementScaffold 
   return { title: announcementTitle(instruction), message: stripLongDashes(message) };
 }
 
+// Authors that are the instructor / system rather than a student to greet.
+const NON_STUDENT_AUTHOR = /^(?:instructor|professor|prof|teacher|ta|staff|me|admin|system)$/i;
+
+/** The most recent message in an "Author: body" thread (blocks split by blanks). */
+function latestMessage(threadText: string): { author?: string; body: string } {
+  const blocks = threadText
+    .split(/\n\s*\n/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  const last = blocks.length > 0 ? blocks[blocks.length - 1] : threadText.trim();
+  const m = /^([^:\n]{1,60}):\s*([\s\S]+)$/.exec(last);
+  return m ? { author: m[1].trim(), body: m[2].trim() } : { body: last };
+}
+
+/** A student's first name to greet, or undefined when it is the instructor/blank. */
+function greetName(author?: string): string | undefined {
+  if (!author) return undefined;
+  const first = author.split(/\s+/)[0].replace(/[^A-Za-z'-]/g, "");
+  if (!first || NON_STUDENT_AUTHOR.test(first)) return undefined;
+  return capitalizeFirst(first);
+}
+
+function quote(sentence: string): string {
+  return `"${sentence.replace(/^["'“”]|["'“”]$/g, "").trim()}"`;
+}
+
 /**
- * A courteous, editable reply template. Deterministic templating cannot compose a
- * specific answer from the thread, so it acknowledges the message and leaves a
- * clearly marked spot for the instructor's response (folding in a steer note when
- * one was given).
+ * A courteous, editable reply that reflects the actual thread: it greets the
+ * student by name and restates the specific question they asked, then leaves a
+ * clearly marked spot for the instructor's answer (folding in a steer note when
+ * one was given). Deterministic templating still cannot compose the answer, so
+ * that part stays an explicit placeholder.
  */
 export function scaffoldMessageReply(threadText: string, instructions = ""): { body: string } {
-  const steer = instructions.trim()
+  const { author, body } = latestMessage(threadText);
+  const name = greetName(author);
+  const questions = splitSentences(body)
+    .filter((s) => s.trim().endsWith("?"))
+    .slice(0, 2);
+
+  const answer = instructions.trim()
     ? `[Respond here. You noted: ${capitalizeFirst(ensureSentence(instructions.trim()))}]`
     : "[Add your response here.]";
-  const body = [
-    "Hi,",
-    "Thanks for reaching out. I've read your message and want to make sure I address it fully.",
-    steer,
-    "Please let me know if you have any other questions.",
-    "Best,\nYour instructor",
-  ].join("\n\n");
-  return { body: stripLongDashes(body) };
+
+  const lines: string[] = [name ? `Hi ${name},` : "Hi,"];
+  if (questions.length > 0) {
+    lines.push("Thanks for your message.");
+    lines.push(`You asked: ${questions.map(quote).join(" and ")}`);
+  } else {
+    lines.push("Thanks for your message. I've read it and want to make sure I address it fully.");
+  }
+  lines.push(answer, "Please let me know if you have any other questions.", "Best,\nYour instructor");
+
+  return { body: stripLongDashes(lines.join("\n\n")) };
 }

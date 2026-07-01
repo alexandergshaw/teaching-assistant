@@ -23,14 +23,29 @@ describe("scaffoldAnnouncement", () => {
 });
 
 describe("scaffoldMessageReply", () => {
-  it("produces a courteous template with a placeholder to fill in", () => {
-    const r = scaffoldMessageReply("Student: Can you clarify question 3?");
-    expect(r.body).toContain("Thanks for reaching out");
+  it("greets the student by name and restates their question", () => {
+    const r = scaffoldMessageReply("Alex Johnson: Can you clarify question 3?");
+    expect(r.body).toContain("Hi Alex,");
+    expect(r.body).toContain('You asked: "Can you clarify question 3?"');
     expect(r.body).toContain("[Add your response here.]");
   });
 
+  it("only judges the most recent message and skips instructor authors for the greeting", () => {
+    const thread = "Instructor: Let me know if you have questions.\n\nJamie Lee: When are office hours?";
+    const r = scaffoldMessageReply(thread);
+    expect(r.body).toContain("Hi Jamie,");
+    expect(r.body).toContain('You asked: "When are office hours?"');
+  });
+
+  it("falls back to a generic acknowledgment when there is no question", () => {
+    const r = scaffoldMessageReply("Sam: Thanks, that makes sense now.");
+    expect(r.body).toContain("Hi Sam,");
+    expect(r.body).toContain("want to make sure I address it fully");
+    expect(r.body).not.toContain("You asked");
+  });
+
   it("folds a steer note into a clearly marked placeholder", () => {
-    const r = scaffoldMessageReply("Student: I missed the deadline.", "let them resubmit by Friday");
+    const r = scaffoldMessageReply("Pat: I missed the deadline.", "let them resubmit by Friday");
     expect(r.body).toMatch(/\[Respond here\./);
     expect(r.body).toContain("resubmit by Friday");
   });

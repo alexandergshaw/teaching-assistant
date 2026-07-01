@@ -193,23 +193,33 @@ describe("presentation helpers", () => {
 });
 
 describe("generateEmbeddedRubricText", () => {
-  it("renders a rubric string from a brief with no model call", () => {
+  it("renders the LLM generator's weighted, three-tier format", () => {
     const text = generateEmbeddedRubricText(
       "Submit a PDF of at least 300 words. Define a function named clean_data."
     );
-    const lines = text.split("\n").filter(Boolean);
-    expect(lines.length).toBeGreaterThan(0);
-    expect(lines.every((line) => /\(\d+ pts\):/.test(line))).toBe(true);
+    const areaLines = text.split("\n").filter((line) => line && !/^\s/.test(line));
+    expect(areaLines.length).toBeGreaterThan(0);
+    expect(areaLines.every((line) => /\(\d+%\):/.test(line))).toBe(true);
     expect(text).toContain("clean_data");
+    expect(text).toContain("  Excellent (100%");
+    expect(text).toContain("  Meets Expectations (75%");
+    expect(text).toContain("  Needs Improvement (50%");
   });
 
-  it("caps the generated rubric at MAX_CRITERIA lines", () => {
+  it("caps the generated rubric at MAX_CRITERIA areas", () => {
     const text = generateEmbeddedRubricText(
       "Submit a PDF. Submit a DOCX. Define a function named a. Define a function named b. " +
         "Include alpha. Include beta. Write at least 200 words. Submit at least 3 files."
     );
-    const lines = text.split("\n").filter(Boolean);
-    expect(lines.length).toBeLessThanOrEqual(MAX_CRITERIA);
+    const areaLines = text.split("\n").filter((line) => line && !/^\s/.test(line));
+    expect(areaLines.length).toBeLessThanOrEqual(MAX_CRITERIA);
+  });
+
+  it("round-trips through the rubric parser like an LLM-authored rubric", () => {
+    const text = generateEmbeddedRubricText("Submit a PDF. Define a function named solve.");
+    const areaCount = text.split("\n").filter((line) => line && !/^\s/.test(line)).length;
+    const parsed = buildRubricFromRubricText(text);
+    expect(parsed.checks.length).toBe(areaCount);
   });
 
   it("still produces a completeness rubric when nothing concrete is present", () => {

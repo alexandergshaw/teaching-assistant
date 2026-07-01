@@ -627,13 +627,103 @@ export function renderRubricText(rubric: EmbeddedRubric): string {
     .join("\n");
 }
 
+/** Per-tier descriptions for one check, phrased around its concrete target. */
+function tierPhrases(check: RubricCheck): { excellent: string; meets: string; needs: string } {
+  switch (check.checkType) {
+    case "file_type": {
+      const ext = check.target.replace(/^\./, "");
+      return {
+        excellent: `A .${ext} file is included in the submission.`,
+        meets: `A related file is included, but not in the required .${ext} format.`,
+        needs: `No .${ext} file was submitted.`,
+      };
+    }
+    case "min_words": {
+      const count = check.count ?? check.target;
+      return {
+        excellent: `The submission meets or exceeds ${count} words.`,
+        meets: `The submission is somewhat under the required ${count} words.`,
+        needs: `The submission is well under the required ${count} words.`,
+      };
+    }
+    case "min_file_count": {
+      const count = check.count ?? 1;
+      return {
+        excellent: `At least ${count} files are submitted.`,
+        meets: `Fewer than ${count} files are submitted, but most are present.`,
+        needs: `Far fewer than the required ${count} files are submitted.`,
+      };
+    }
+    case "code_symbol":
+      return {
+        excellent: `${check.target} is defined and used in the submitted code.`,
+        meets: `${check.target} is present but incomplete or unused.`,
+        needs: `No definition of ${check.target} was found in the code.`,
+      };
+    case "all_keywords": {
+      const terms = (check.terms ?? [check.target]).join(", ");
+      return {
+        excellent: `All of the required topics are addressed (${terms}).`,
+        meets: `Most of the required topics are addressed; some are missing.`,
+        needs: `Few of the required topics are addressed (${terms}).`,
+      };
+    }
+    case "any_keywords": {
+      const terms = (check.terms ?? [check.target]).join(", ");
+      return {
+        excellent: `At least one required topic is clearly addressed (${terms}).`,
+        meets: `A required topic is mentioned only briefly or indirectly.`,
+        needs: `None of the required topics are addressed (${terms}).`,
+      };
+    }
+    case "regex":
+      return {
+        excellent: `The submission matches the required format for "${check.criterion}".`,
+        meets: `The submission partially matches the required format.`,
+        needs: `The submission does not match the required format.`,
+      };
+    case "keyword":
+    default:
+      return {
+        excellent: `The submission clearly addresses "${check.target}".`,
+        meets: `"${check.target}" is mentioned only briefly or indirectly.`,
+        needs: `"${check.target}" is missing or barely addressed.`,
+      };
+  }
+}
+
 /**
- * Generate a rubric from assignment instructions and render it as plain text.
- * This is the embedded counterpart to the LLM `generateRubric`: same input (a
- * brief) and output (a rubric string), but produced by rule-based checks with no
- * model call. Capped to {@link MAX_CRITERIA} criteria to match what the
- * deterministic grader will actually score.
+ * Render the rubric in the same shape the LLM generator produces: each area on
+ * its own line with an equal percentage weight and a short description, followed
+ * by three indented tier lines (Excellent / Meets Expectations / Needs
+ * Improvement with fixed deduction levels). This text round-trips through
+ * {@link buildRubricFromRubricText}: area lines parse as criteria and the
+ * indented tier lines are skipped, exactly like an LLM-authored rubric.
+ */
+export function renderTieredRubricText(rubric: EmbeddedRubric): string {
+  if (rubric.checks.length === 0) return "";
+  const pct = Math.round(100 / rubric.checks.length);
+  return rubric.checks
+    .map((check) => {
+      const tiers = tierPhrases(check);
+      return [
+        `${check.criterion} (${pct}%): ${requirementPhrase(check)}`,
+        `  Excellent (100% — no deductions): ${tiers.excellent}`,
+        `  Meets Expectations (75% — 25% deducted): ${tiers.meets}`,
+        `  Needs Improvement (50% — 50% deducted): ${tiers.needs}`,
+      ].join("\n");
+    })
+    .join("\n");
+}
+
+/**
+ * Generate a rubric from assignment instructions and render it as plain text in
+ * the LLM generator's weighted, three-tier format. This is the embedded
+ * counterpart to the LLM `generateRubric`: same input (a brief) and output (a
+ * rubric string), but produced by rule-based checks with no model call. Capped
+ * to {@link MAX_CRITERIA} criteria to match what the deterministic grader will
+ * actually score.
  */
 export function generateEmbeddedRubricText(instructions: string): string {
-  return renderRubricText(capCriteria(buildRubricFromInstructions(instructions)));
+  return renderTieredRubricText(capCriteria(buildRubricFromInstructions(instructions)));
 }

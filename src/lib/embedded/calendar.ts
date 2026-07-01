@@ -41,39 +41,110 @@ function defaultYear(text: string): number | null {
 
 interface DateHit {
   date: string;
+  /** Last day of a range (inclusive), present only when the line states one. */
+  endDate?: string;
   start: number;
   end: number;
 }
 
-/** Find the first date in a line, returning its ISO value and character span. */
+// Separators accepted between the two ends of a date range.
+const RANGE_SEP = "\\s*(?:-|\\u2013|\\u2014|to|through)\\s*";
+
+/** Add one year to an ISO date (for ranges that wrap the year, Dec 20 - Jan 5). */
+function bumpYear(iso: string): string {
+  return `${Number(iso.slice(0, 4)) + 1}${iso.slice(4)}`;
+}
+
+/**
+ * Find the first date or date range in a line, returning ISO value(s) and the
+ * character span. Range patterns are matched alongside single-date patterns; at
+ * the same position the longer (range) match wins, so "Mar 9-13" becomes one
+ * ranged event rather than a single date with "-13" left in the title.
+ */
 function findDate(line: string, fallbackYear: number | null): DateHit | null {
-  const patterns: Array<{ re: RegExp; build: (m: RegExpExecArray) => string | null }> = [
-    { re: /\b(\d{4})-(\d{1,2})-(\d{1,2})\b/, build: (m) => isoDate(+m[1], +m[2], +m[3]) },
+  type Candidate = { re: RegExp; build: (m: RegExpExecArray) => { date: string | null; endDate?: string | null } };
+
+  const candidates: Candidate[] = [
+    // ISO range: 2026-10-10 to 2026-10-14.
+    {
+      re: new RegExp(`\\b(\\d{4})-(\\d{1,2})-(\\d{1,2})${RANGE_SEP}(\\d{4})-(\\d{1,2})-(\\d{1,2})\\b`, "i"),
+      build: (m) => ({ date: isoDate(+m[1], +m[2], +m[3]), endDate: isoDate(+m[4], +m[5], +m[6]) }),
+    },
+    // Cross-month range: Nov 25 - Nov 27 / Dec 20 to Jan 5.
+    {
+      re: new RegExp(
+        `\\b(${MONTH_ALT})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?${RANGE_SEP}(${MONTH_ALT})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s*(\\d{4}))?\\b`,
+        "i"
+      ),
+      build: (m) => {
+        const year = m[5] ? +m[5] : fallbackYear ?? NaN;
+        return {
+          date: isoDate(year, MONTHS[m[1].toLowerCase()], +m[2]),
+          endDate: isoDate(year, MONTHS[m[3].toLowerCase()], +m[4]),
+        };
+      },
+    },
+    // Same-month range: Mar 9-13.
+    {
+      re: new RegExp(
+        `\\b(${MONTH_ALT})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?${RANGE_SEP}(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s*(\\d{4}))?\\b`,
+        "i"
+      ),
+      build: (m) => {
+        const year = m[4] ? +m[4] : fallbackYear ?? NaN;
+        const month = MONTHS[m[1].toLowerCase()];
+        return { date: isoDate(year, month, +m[2]), endDate: isoDate(year, month, +m[3]) };
+      },
+    },
+    // Numeric range: 10/10 - 10/14.
+    {
+      re: new RegExp(`\\b(\\d{1,2})\\/(\\d{1,2})(?:\\/(\\d{2,4}))?${RANGE_SEP}(\\d{1,2})\\/(\\d{1,2})(?:\\/(\\d{2,4}))?\\b`, "i"),
+      build: (m) => {
+        const year1 = m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : fallbackYear ?? NaN;
+        const year2 = m[6] ? (m[6].length === 2 ? 2000 + +m[6] : +m[6]) : year1;
+        return { date: isoDate(year1, +m[1], +m[2]), endDate: isoDate(year2, +m[4], +m[5]) };
+      },
+    },
+    // Single dates.
+    { re: /\b(\d{4})-(\d{1,2})-(\d{1,2})\b/, build: (m) => ({ date: isoDate(+m[1], +m[2], +m[3]) }) },
     {
       re: new RegExp(`\\b(${MONTH_ALT})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s*(\\d{4}))?\\b`, "i"),
-      build: (m) => isoDate(m[3] ? +m[3] : fallbackYear ?? NaN, MONTHS[m[1].toLowerCase()], +m[2]),
+      build: (m) => ({ date: isoDate(m[3] ? +m[3] : fallbackYear ?? NaN, MONTHS[m[1].toLowerCase()], +m[2]) }),
     },
     {
       re: new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MONTH_ALT})\\.?(?:,?\\s*(\\d{4}))?\\b`, "i"),
-      build: (m) => isoDate(m[3] ? +m[3] : fallbackYear ?? NaN, MONTHS[m[2].toLowerCase()], +m[1]),
+      build: (m) => ({ date: isoDate(m[3] ? +m[3] : fallbackYear ?? NaN, MONTHS[m[2].toLowerCase()], +m[1]) }),
     },
     {
       re: /\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/,
       build: (m) => {
         const year = m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : fallbackYear ?? NaN;
-        return isoDate(year, +m[1], +m[2]);
+        return { date: isoDate(year, +m[1], +m[2]) };
       },
     },
   ];
 
   let best: DateHit | null = null;
-  for (const { re, build } of patterns) {
+  for (const { re, build } of candidates) {
     const m = re.exec(line);
     if (!m || m.index === undefined) continue;
-    const date = build(m);
-    if (!date) continue;
-    if (!best || m.index < best.start) {
-      best = { date, start: m.index, end: m.index + m[0].length };
+    const built = build(m);
+    if (!built.date) continue;
+    let endDate = built.endDate ?? undefined;
+    if (endDate && endDate < built.date) {
+      // A wrap like "Dec 20 - Jan 5" with one inferred year spans into the next.
+      endDate = bumpYear(endDate);
+    }
+    if (endDate === built.date) endDate = undefined;
+    const hit: DateHit = {
+      date: built.date,
+      ...(endDate ? { endDate } : {}),
+      start: m.index,
+      end: m.index + m[0].length,
+    };
+    // Earliest position wins; at the same position the longer (range) match wins.
+    if (!best || hit.start < best.start || (hit.start === best.start && hit.end > best.end)) {
+      best = hit;
     }
   }
   return best;
@@ -134,10 +205,15 @@ export function parseCalendarEmbedded(text: string, options: CalendarParseOption
     const title = cleanTitle(line, hit);
     if (!title) continue;
     const type = classify(title);
-    const key = `${type}|${hit.date}|${title.toLowerCase()}`;
+    const key = `${type}|${hit.date}|${hit.endDate ?? ""}|${title.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    events.push({ title: title.slice(0, 200), date: hit.date, type });
+    events.push({
+      title: title.slice(0, 200),
+      date: hit.date,
+      ...(hit.endDate ? { endDate: hit.endDate } : {}),
+      type,
+    });
   }
 
   events.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));

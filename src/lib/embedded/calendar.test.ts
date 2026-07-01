@@ -39,4 +39,30 @@ describe("parseCalendarEmbedded", () => {
     expect(parseCalendarEmbedded("Just some prose with no dates.").events).toEqual([]);
     expect(parseCalendarEmbedded("").events).toEqual([]);
   });
+
+  it("parses same-month ranges into date + endDate", () => {
+    const result = parseCalendarEmbedded("Fall 2026\nSpring Break Mar 9-13");
+    expect(result.events[0]).toMatchObject({ date: "2026-03-09", endDate: "2026-03-13", type: "break" });
+    expect(result.events[0].title).toBe("Spring Break");
+  });
+
+  it("parses cross-month and numeric ranges", () => {
+    const text = "Year 2026\nThanksgiving Break Nov 25 to Nov 27\nProject window 10/10 - 10/14";
+    const result = parseCalendarEmbedded(text);
+    const thanksgiving = result.events.find((e) => e.title.includes("Thanksgiving"));
+    expect(thanksgiving).toMatchObject({ date: "2026-11-25", endDate: "2026-11-27" });
+    const project = result.events.find((e) => e.title.includes("Project"));
+    expect(project).toMatchObject({ date: "2026-10-10", endDate: "2026-10-14" });
+  });
+
+  it("wraps a range across the year boundary", () => {
+    const result = parseCalendarEmbedded("Fall 2026\nWinter Break Dec 20 to Jan 5");
+    expect(result.events[0]).toMatchObject({ date: "2026-12-20", endDate: "2027-01-05" });
+  });
+
+  it("still parses a plain single date followed by a dash and words", () => {
+    const result = parseCalendarEmbedded("Fall 2026\nSep 3 - Classes begin");
+    expect(result.events[0]).toMatchObject({ date: "2026-09-03", type: "term_start" });
+    expect(result.events[0].endDate).toBeUndefined();
+  });
 });

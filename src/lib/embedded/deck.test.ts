@@ -23,6 +23,34 @@ describe("scaffoldLessonPlan", () => {
     const deck = scaffoldLessonPlan("");
     expect(deck.slides.length).toBeGreaterThan(0);
   });
+
+  it("turns real code blocks from the material into Example/Walkthrough slide pairs", () => {
+    const context = [
+      "Recursion is when a function calls itself to solve a smaller version of the problem.",
+      "```python",
+      "def factorial(n):",
+      "    return 1 if n <= 1 else n * factorial(n - 1)",
+      "```",
+    ].join("\n");
+    const deck = scaffoldLessonPlan("- Recursion", context);
+    const example = deck.slides.find((s) => s.title.startsWith("Example:"));
+    const walkthrough = deck.slides.find((s) => s.title.startsWith("Walkthrough:"));
+    expect(example?.code).toContain("def factorial");
+    expect(example?.codeLanguage).toBe("python");
+    // Walkthrough shows the same code as the Example (mirrors the LLM contract).
+    expect(walkthrough?.code).toBe(example?.code);
+  });
+
+  it("uses a definition from the source as the concept slide's first bullet", () => {
+    const deck = scaffoldLessonPlan(
+      "- Recursion",
+      "Recursion is when a function calls itself to solve a smaller problem."
+    );
+    const hasDefinitionBullet = deck.slides.some((s) =>
+      /Recursion is when a function calls itself/.test(s.bullets[0] ?? "")
+    );
+    expect(hasDefinitionBullet).toBe(true);
+  });
 });
 
 describe("scaffoldExamples", () => {
@@ -42,5 +70,14 @@ describe("scaffoldExamples", () => {
 
   it("returns no examples for no concepts", () => {
     expect(scaffoldExamples([], "anything").examples).toEqual([]);
+  });
+
+  it("uses a real code block from the material as the first example when available", () => {
+    const text = "Learn python loops.\n```python\nfor i in range(3):\n    print(i)\n```";
+    const r = scaffoldExamples(["Loops"], text);
+    expect(r.examples[0].content).toContain("for i in range(3)");
+    expect(r.examples[0].language).toBe("python");
+    // The second example stays a clearly-marked stub.
+    expect(r.examples[1].content).toContain("Replace this stub");
   });
 });

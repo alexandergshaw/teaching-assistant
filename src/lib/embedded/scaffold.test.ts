@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { copyedit, extractDefinitions, pick, summarize } from "./scaffold";
+import { copyedit, extractCodeBlocks, extractDefinitions, pick, summarize } from "./scaffold";
 
 describe("summarize", () => {
   it("returns the input unchanged when it has few sentences", () => {
@@ -76,6 +76,22 @@ describe("copyedit", () => {
 
   it("returns empty for empty input", () => {
     expect(copyedit("   ")).toBe("");
+  });
+});
+
+describe("extractCodeBlocks", () => {
+  it("extracts fenced blocks with and without a language label", () => {
+    const text = "Intro\n```python\nprint('hi')\n```\nmore\n```\nplain code\n```";
+    const blocks = extractCodeBlocks(text);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toEqual({ code: "print('hi')", language: "python" });
+    expect(blocks[1].language).toBeUndefined();
+    expect(blocks[1].code).toBe("plain code");
+  });
+
+  it("skips empty blocks and returns none for prose", () => {
+    expect(extractCodeBlocks("```\n\n```")).toEqual([]);
+    expect(extractCodeBlocks("no code here")).toEqual([]);
   });
 });
 

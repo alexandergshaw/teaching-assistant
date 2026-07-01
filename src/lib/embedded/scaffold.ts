@@ -87,11 +87,11 @@ export function splitSentences(text: string): string[] {
  * lines and bullet markers first, falling back to sentences when it is one block.
  */
 export function toBullets(text: string): string[] {
-  const byLine = text
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^\s*(?:[-*•‣◦]|\d+[.)]|[a-z][.)])\s+/i, "").trim())
-    .filter(Boolean);
-  const items = byLine.length > 1 ? byLine : splitSentences(text);
+  const stripMarker = (value: string): string =>
+    value.replace(/^\s*(?:[-*•‣◦]|\d+[.)]|[a-z][.)])\s+/i, "").trim();
+  const byLine = text.split(/\r?\n/).map(stripMarker).filter(Boolean);
+  // Single-line input: fall back to sentences, still stripping a leading marker.
+  const items = byLine.length > 1 ? byLine : splitSentences(text).map(stripMarker).filter(Boolean);
   return dedupe(items);
 }
 
@@ -148,6 +148,30 @@ export function keyPhrases(text: string, limit = 6): string[] {
     .map(([word]) => word);
 
   return dedupe([...phrases, ...frequent]).slice(0, limit);
+}
+
+export interface CodeBlock {
+  code: string;
+  /** Language from the fence label ("```python"), when one was given. */
+  language?: string;
+}
+
+/**
+ * Extract fenced code blocks (``` ... ```) from markdown-ish text, so real code
+ * from a README or assignment brief can be shown on example slides instead of a
+ * placeholder stub. Blocks are returned in document order, fences stripped.
+ */
+export function extractCodeBlocks(text: string): CodeBlock[] {
+  const blocks: CodeBlock[] = [];
+  const re = /```([A-Za-z0-9+#-]*)\s*\n([\s\S]*?)```/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const code = match[2].replace(/\s+$/, "");
+    if (!code.trim()) continue;
+    const language = match[1].trim().toLowerCase();
+    blocks.push({ code, ...(language ? { language } : {}) });
+  }
+  return blocks;
 }
 
 export type LessonType = "math" | "programming" | "general";
@@ -312,8 +336,15 @@ export function extractDefinitions(text: string, limit = 6): Definition[] {
     }
   }
 
-  // "Term is/are/refers to/means/is defined as … " sentences.
-  for (const sentence of splitSentences(text)) {
+  // "Term is/are/refers to/means/is defined as … " sentences. Sentences are
+  // gathered per line (with bullet markers stripped) so a list item never glues
+  // onto the sentence that follows it.
+  const sentences = text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:[-*•‣◦]|\d+[.)])\s+/, "").trim())
+    .filter(Boolean)
+    .flatMap((line) => splitSentences(line));
+  for (const sentence of sentences) {
     const m = /^([A-Za-z][A-Za-z0-9 /\-]{1,39}?)\s+(?:is|are|refers to|means|is defined as|describes)\s+(.{6,})$/i.exec(
       sentence
     );

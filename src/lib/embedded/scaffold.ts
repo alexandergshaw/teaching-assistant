@@ -198,6 +198,50 @@ export function summarize(text: string, maxSentences = 2): string {
     .join(" ");
 }
 
+// Meaning-preserving plain-language substitutions (wordy phrase -> concise form).
+const WORDINESS: Array<[RegExp, string]> = [
+  [/\bin order to\b/gi, "to"],
+  [/\bfor the purpose of\b/gi, "to"],
+  [/\bdue to the fact that\b/gi, "because"],
+  [/\bin spite of the fact that\b/gi, "although"],
+  [/\bin the event that\b/gi, "if"],
+  [/\bat (?:this|the present) point in time\b/gi, "now"],
+  [/\bat the present time\b/gi, "now"],
+  [/\bin the near future\b/gi, "soon"],
+  [/\b(?:with|in) regard to\b/gi, "about"],
+  [/\ba large number of\b/gi, "many"],
+  [/\bthe majority of\b/gi, "most"],
+  [/\bon a daily basis\b/gi, "daily"],
+];
+
+// Empty intensifiers that add nothing; removed as leading words.
+const FILLER = /\b(?:very|really|basically|actually|simply|quite|extremely|totally|literally)\s+/gi;
+
+/**
+ * Light, meaning-preserving copy-edit of a paragraph: collapses whitespace, cuts
+ * wordy phrases and empty intensifiers, removes accidental repeated words, fixes
+ * punctuation spacing, and normalizes sentence capitalization and terminal
+ * punctuation. This is the embedded counterpart to an LLM "make this clearer"
+ * pass, applied by rule so the same paragraph always edits the same way.
+ */
+export function copyedit(text: string): string {
+  let out = cleanText(text);
+  if (!out) return out;
+
+  for (const [pattern, replacement] of WORDINESS) out = out.replace(pattern, replacement);
+  out = out.replace(FILLER, "");
+  // Collapse accidental repeated words ("the the" -> "the").
+  out = out.replace(/\b(\w+)(?:\s+\1\b)+/gi, "$1");
+  // No space before punctuation; one space after a comma/semicolon/colon that a
+  // letter follows directly (leaves numbers like 3,000 and 10:30 alone).
+  out = out.replace(/\s+([,.;:!?])/g, "$1").replace(/([,;:])(?=[A-Za-z])/g, "$1 ");
+  // Collapse repeated terminal punctuation.
+  out = out.replace(/([!?])\1+/g, "$1");
+  // Capitalize the first letter of each sentence.
+  out = out.replace(/(^\s*|[.!?]\s+)([a-z])/g, (_m, lead: string, ch: string) => lead + ch.toUpperCase());
+  return ensureSentence(cleanText(out));
+}
+
 /** Lowercase the first character of a string. */
 function lowerFirst(text: string): string {
   const t = text.trim();

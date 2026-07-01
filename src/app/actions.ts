@@ -31,6 +31,7 @@ import { deriveAltTextFromHtml, deriveLinkTextFromHtml } from "@/lib/embedded/ac
 import { scaffoldCourseProjectRubric, scaffoldCourseOutline, scaffoldCopilotPrompt } from "@/lib/embedded/course";
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
+import { copyedit } from "@/lib/embedded/scaffold";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
   fetchCanvasWork,
@@ -2563,10 +2564,10 @@ export async function rewriteOfficeParagraphAction(
     await requireOwner();
     if (!paragraphText.trim()) return { error: "There is no text in this paragraph to rewrite." };
 
-    // Embedded Deterministic Engine: no model to rewrite prose, so normalize
-    // whitespace and return the paragraph otherwise intact.
+    // Embedded Deterministic Engine: copy-edit the paragraph by rule (cut wordy
+    // phrases and filler, fix punctuation and casing) instead of a model rewrite.
     if (provider === "embedded") {
-      return { text: paragraphText.replace(/\s+/g, " ").trim() };
+      return { text: copyedit(paragraphText) };
     }
 
     const prompt = `You are editing one paragraph of a document. Here is the full document for context:

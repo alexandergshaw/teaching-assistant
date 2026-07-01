@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractDefinitions, summarize } from "./scaffold";
+import { copyedit, extractDefinitions, summarize } from "./scaffold";
 
 describe("summarize", () => {
   it("returns the input unchanged when it has few sentences", () => {
@@ -53,5 +53,28 @@ describe("extractDefinitions", () => {
   it("deduplicates by term", () => {
     const defs = extractDefinitions("Loops are used to repeat code. Loops are a control structure.");
     expect(defs.filter((d) => d.term.toLowerCase() === "loops")).toHaveLength(1);
+  });
+});
+
+describe("copyedit", () => {
+  it("cuts wordy phrases and empty intensifiers", () => {
+    const out = copyedit("In order to pass, you really must very carefully test the code.");
+    expect(out).toBe("To pass, you must carefully test the code.");
+  });
+
+  it("fixes punctuation spacing and repeated words", () => {
+    expect(copyedit("the the results are good ,really")).toBe("The results are good, really.");
+  });
+
+  it("leaves numbers with commas and colons alone", () => {
+    expect(copyedit("Revenue was 3,000 by 10:30")).toBe("Revenue was 3,000 by 10:30.");
+  });
+
+  it("capitalizes sentence starts and ensures terminal punctuation", () => {
+    expect(copyedit("hello world. this is fine")).toBe("Hello world. This is fine.");
+  });
+
+  it("returns empty for empty input", () => {
+    expect(copyedit("   ")).toBe("");
   });
 });

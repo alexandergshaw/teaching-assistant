@@ -5,7 +5,7 @@
  * without inventing facts (dates, links, grades) that were not provided.
  */
 
-import { capitalizeFirst, cleanText, ensureSentence, splitSentences } from "./scaffold";
+import { capitalizeFirst, cleanText, copyedit, ensureSentence, splitSentences } from "./scaffold";
 
 /** The account owner never wants long dashes in a draft; mirror the LLM path. */
 function stripLongDashes(text: string): string {
@@ -37,7 +37,7 @@ export interface AnnouncementScaffold {
 
 /** Wrap the instruction in a warm, professional announcement body. */
 export function scaffoldAnnouncement(instruction: string): AnnouncementScaffold {
-  const core = capitalizeFirst(ensureSentence(instruction.replace(ANNOUNCEMENT_DIRECTIVE, "")));
+  const core = copyedit(instruction.replace(ANNOUNCEMENT_DIRECTIVE, ""));
   const message = [
     "Hi everyone,",
     core,

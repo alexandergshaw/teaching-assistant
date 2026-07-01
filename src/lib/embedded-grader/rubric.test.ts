@@ -3,6 +3,8 @@ import {
   buildRubricFromInstructions,
   buildRubricFromRubricText,
   fullCreditChecklist,
+  generateEmbeddedRubricText,
+  MAX_CRITERIA,
   renderRubricText,
 } from "./rubric";
 
@@ -187,5 +189,31 @@ describe("presentation helpers", () => {
     const checklist = fullCreditChecklist(rubric);
     expect(checklist.length).toBe(rubric.checks.length);
     expect(checklist.join(" ")).toContain("Submit a .pdf file");
+  });
+});
+
+describe("generateEmbeddedRubricText", () => {
+  it("renders a rubric string from a brief with no model call", () => {
+    const text = generateEmbeddedRubricText(
+      "Submit a PDF of at least 300 words. Define a function named clean_data."
+    );
+    const lines = text.split("\n").filter(Boolean);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every((line) => /\(\d+ pts\):/.test(line))).toBe(true);
+    expect(text).toContain("clean_data");
+  });
+
+  it("caps the generated rubric at MAX_CRITERIA lines", () => {
+    const text = generateEmbeddedRubricText(
+      "Submit a PDF. Submit a DOCX. Define a function named a. Define a function named b. " +
+        "Include alpha. Include beta. Write at least 200 words. Submit at least 3 files."
+    );
+    const lines = text.split("\n").filter(Boolean);
+    expect(lines.length).toBeLessThanOrEqual(MAX_CRITERIA);
+  });
+
+  it("still produces a completeness rubric when nothing concrete is present", () => {
+    const text = generateEmbeddedRubricText("Do your best work.");
+    expect(text.trim().length).toBeGreaterThan(0);
   });
 });

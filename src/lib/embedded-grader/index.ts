@@ -20,11 +20,12 @@ import { runCheck } from "./checks";
 import {
   buildRubricFromInstructions,
   buildRubricFromRubricText,
+  capCriteria,
   fullCreditChecklist,
 } from "./rubric";
 
 export type { EmbeddedRubric } from "./types";
-export { renderRubricText, fullCreditChecklist } from "./rubric";
+export { renderRubricText, fullCreditChecklist, MAX_CRITERIA } from "./rubric";
 export {
   buildDiscussionRubric,
   gradeDiscussion,
@@ -41,28 +42,10 @@ export interface BuildRubricInput {
   instructions?: string;
 }
 
-/** The deterministic grader keeps a rubric focused: at most this many criteria. */
-export const MAX_CRITERIA = 4;
-
-// Keep the first MAX_CRITERIA checks (generation already orders them most-concrete
-// first), noting in a warning when extras are dropped.
-function capCriteria(rubric: EmbeddedRubric): EmbeddedRubric {
-  if (rubric.checks.length <= MAX_CRITERIA) return rubric;
-  const dropped = rubric.checks.length - MAX_CRITERIA;
-  return {
-    ...rubric,
-    checks: rubric.checks.slice(0, MAX_CRITERIA),
-    warnings: [
-      ...rubric.warnings,
-      `The deterministic grader uses at most ${MAX_CRITERIA} criteria; ${dropped} additional criteri${dropped === 1 ? "on was" : "a were"} not included.`,
-    ],
-  };
-}
-
 /**
  * Choose the rubric to grade against. A supplied rubric always wins; a rubric is
  * generated from the instructions only when none was supplied. The result is
- * always capped to {@link MAX_CRITERIA} criteria.
+ * always capped to MAX_CRITERIA criteria.
  */
 export function buildEmbeddedRubric(input: BuildRubricInput): EmbeddedRubric {
   const rubric: EmbeddedRubric =

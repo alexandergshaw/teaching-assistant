@@ -10,6 +10,26 @@ import type { CheckType, EmbeddedRubric, RubricCheck } from "./types";
 
 const POINTS_PER_CHECK = 10;
 
+/** The deterministic grader keeps a rubric focused: at most this many criteria. */
+export const MAX_CRITERIA = 4;
+
+/**
+ * Keep the first {@link MAX_CRITERIA} checks (generation already orders them
+ * most-concrete first), noting in a warning when extras are dropped.
+ */
+export function capCriteria(rubric: EmbeddedRubric): EmbeddedRubric {
+  if (rubric.checks.length <= MAX_CRITERIA) return rubric;
+  const dropped = rubric.checks.length - MAX_CRITERIA;
+  return {
+    ...rubric,
+    checks: rubric.checks.slice(0, MAX_CRITERIA),
+    warnings: [
+      ...rubric.warnings,
+      `The deterministic grader uses at most ${MAX_CRITERIA} criteria; ${dropped} additional criteri${dropped === 1 ? "on was" : "a were"} not included.`,
+    ],
+  };
+}
+
 const KNOWN_EXTENSIONS = [
   "pdf", "docx", "doc", "pptx", "ppt", "xlsx", "xls", "csv", "txt", "md",
   "ipynb", "py", "java", "js", "ts", "tsx", "jsx", "html", "css", "json",
@@ -605,4 +625,15 @@ export function renderRubricText(rubric: EmbeddedRubric): string {
   return rubric.checks
     .map((check) => `${check.criterion} (${check.points} pts): ${requirementPhrase(check)}`)
     .join("\n");
+}
+
+/**
+ * Generate a rubric from assignment instructions and render it as plain text.
+ * This is the embedded counterpart to the LLM `generateRubric`: same input (a
+ * brief) and output (a rubric string), but produced by rule-based checks with no
+ * model call. Capped to {@link MAX_CRITERIA} criteria to match what the
+ * deterministic grader will actually score.
+ */
+export function generateEmbeddedRubricText(instructions: string): string {
+  return renderRubricText(capCriteria(buildRubricFromInstructions(instructions)));
 }

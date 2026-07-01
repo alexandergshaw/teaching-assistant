@@ -13,6 +13,7 @@ import {
   getFileExtension,
 } from "./office-extract";
 import { fetchCanvasWork, fetchAssignmentPointsPossible, type CanvasStudentWork } from "./canvas";
+import { generateEmbeddedRubricText } from "./embedded-grader/rubric";
 
 const MAX_NESTED_ZIP_DEPTH = 3;
 
@@ -576,6 +577,12 @@ export async function generateRubric(
   assignmentInstructions: string,
   provider: LlmProvider = "gemini"
 ): Promise<string> {
+  // Embedded Deterministic Engine: derive the rubric from the instructions with
+  // rule-based checks, no model call. Same input/output shape as the LLM path.
+  if (provider === "embedded") {
+    return generateEmbeddedRubricText(assignmentInstructions);
+  }
+
   const prompt = `You are a teaching assistant creating a grading rubric.
 
 ASSIGNMENT INSTRUCTIONS:

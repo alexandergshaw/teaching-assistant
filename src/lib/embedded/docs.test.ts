@@ -24,16 +24,34 @@ describe("scaffoldModuleIntroDoc", () => {
     expect(md).toContain("## Real-World Applications");
     expect(md).toContain("## What You Will Learn");
   });
+
+  it("fills Real-World Applications with factual bullets for a detected technology", () => {
+    const md = scaffoldModuleIntroDoc("Python Basics", "Learn python loops and functions.");
+    expect(md).toContain("data science");
+    expect(md).not.toContain("Add two or three concrete examples");
+  });
 });
 
 describe("scaffoldAssignmentDoc", () => {
-  it("includes overview, instructions, requirements, and deliverables", () => {
+  it("includes overview, instructions, requirements, resources, and deliverables", () => {
     const md = scaffoldAssignmentDoc("Build a CLI", "- Parse args\n- Read a file\n- Print output");
     expect(md).toContain("# Build a CLI");
     expect(md).toContain("## Assignment Overview");
     expect(md).toContain("## Instructions");
     expect(md).toContain("## Requirements");
+    expect(md).toContain("## Helpful Free Resources");
     expect(md).toContain("## Deliverables");
     expect(md).toContain("- Parse args");
+  });
+
+  it("lists at least five real resources, technology-matched first", () => {
+    const md = scaffoldAssignmentDoc("Data Cleaning", "Use python and pandas to clean a dataset.");
+    const resourceLines = md
+      .split("## Helpful Free Resources")[1]
+      .split("## Deliverables")[0]
+      .split("\n")
+      .filter((line) => line.startsWith("- "));
+    expect(resourceLines.length).toBeGreaterThanOrEqual(5);
+    expect(md).toContain("https://docs.python.org/3/tutorial/");
   });
 });

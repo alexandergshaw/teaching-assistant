@@ -129,6 +129,39 @@ export function keyPhrases(text: string, limit = 6): string[] {
   return dedupe([...phrases, ...frequent]).slice(0, limit);
 }
 
+export type LessonType = "math" | "programming" | "general";
+
+const PROGRAMMING_SIGNALS =
+  /\b(?:python|java|javascript|typescript|c\+\+|code|coding|program(?:ming)?|function|variable|loop|array|class|method|api|algorithm|compile|syntax|sql|html|css|react|node|debug|data\s?structure)\b/i;
+const MATH_SIGNALS =
+  /\b(?:equation|theorem|derivative|integral|matrix|matrices|probability|statistic|statistics|calculus|algebra|geometry|proof|formula|solve\s+for|vector|polynomial|logarithm|trigonometry)\b/i;
+
+/** Classify a lesson as math, programming, or general from its text signals. */
+export function detectLessonType(text: string): LessonType {
+  if (PROGRAMMING_SIGNALS.test(text)) return "programming";
+  if (MATH_SIGNALS.test(text)) return "math";
+  return "general";
+}
+
+const LANGUAGE_SIGNALS: Array<{ test: RegExp; language: string }> = [
+  { test: /\btypescript\b/i, language: "typescript" },
+  { test: /\bjavascript\b|\bnode(?:\.js)?\b|\breact\b/i, language: "javascript" },
+  { test: /\bjava\b/i, language: "java" },
+  { test: /\bc\+\+\b|\bcpp\b/i, language: "cpp" },
+  { test: /\bc#\b|\bcsharp\b/i, language: "csharp" },
+  { test: /\bsql\b/i, language: "sql" },
+  { test: /\bhtml\b/i, language: "html" },
+  { test: /\bpython\b|\bpandas\b|\bnumpy\b/i, language: "python" },
+];
+
+/** Best-guess programming language label for code examples (defaults to python). */
+export function detectLanguage(text: string): string {
+  for (const signal of LANGUAGE_SIGNALS) {
+    if (signal.test.test(text)) return signal.language;
+  }
+  return "python";
+}
+
 /** A single sentence summarizing what the objectives ask the learner to do. */
 export function summarizeObjectives(objectives: string, max = 3): string {
   const bullets = toBullets(objectives)

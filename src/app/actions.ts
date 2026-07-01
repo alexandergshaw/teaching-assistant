@@ -24,6 +24,7 @@ import {
 } from "@/lib/embedded-grader";
 import { detectMeetingRequestEmbedded } from "@/lib/embedded/meeting";
 import { scaffoldModuleIntro, scaffoldAssignment } from "@/lib/embedded/content";
+import { scaffoldLessonPlan, scaffoldExamples } from "@/lib/embedded/deck";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
   fetchCanvasWork,
@@ -369,6 +370,16 @@ export async function generateLessonPlanAction(
   }
 ): Promise<GenerateLessonPlanResult | { error: string }> {
   try {
+    // Embedded Deterministic Engine: template a deck outline from the objectives
+    // with no model call. A revision request keeps the current slides unchanged
+    // (deterministic templating cannot rewrite them from a freeform instruction).
+    if (provider === "embedded") {
+      if (revisionPrompt && currentSlides) {
+        return { presentationTitle: "Lesson Plan", slides: currentSlides };
+      }
+      return scaffoldLessonPlan(moduleObjectives, contextText);
+    }
+
     const filesSummary =
       files.length > 0
         ? `\n\nATTACHED FILES (${files.length}):\n${files.map((f) => `- ${f.name}`).join("\n")}`
@@ -613,6 +624,11 @@ export async function generateExamplesAction(
   provider: LlmProvider = "gemini"
 ): Promise<ExamplesData | { error: string }> {
   try {
+    // Embedded Deterministic Engine: build typed example placeholders per concept
+    // with no model call (worked solutions are left for the instructor).
+    if (provider === "embedded") {
+      return scaffoldExamples(slides.map((s) => s.title), `${moduleObjectives}\n${contextText}`);
+    }
 
     const conceptList = slides
       .map((s, i) => `${i + 1}. ${s.title}`)

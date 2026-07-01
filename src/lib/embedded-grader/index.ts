@@ -16,6 +16,7 @@ import {
   type StudentSubmissionEntry,
 } from "@/lib/grade";
 import type { EmbeddedRubric } from "./types";
+import { pick } from "@/lib/embedded/scaffold";
 import { runCheck } from "./checks";
 import {
   buildRubricFromInstructions,
@@ -68,13 +69,32 @@ function formatNumber(value: number): string {
 }
 
 /** Factual, warm-but-professional overall comment. States what was met and, where
- *  points were lost, the concrete reason, without coaching the student to improve. */
-function buildOverallComment(passed: number, total: number, missing: string[]): string {
+ *  points were lost, the concrete reason, without coaching the student to improve.
+ *  Phrasing varies deterministically per student (seeded) so a class's comments
+ *  read naturally rather than stamped, while the factual core stays identical. */
+function buildOverallComment(passed: number, total: number, missing: string[], seed: string): string {
   if (total === 0) return "No rubric criteria were available to score this submission.";
+  const s = total === 1 ? "" : "s";
   if (missing.length === 0) {
-    return `Nice work: all ${total} requirement${total === 1 ? "" : "s"} were met.`;
+    return pick(
+      [
+        `Nice work: all ${total} requirement${s} were met.`,
+        `Great job: all ${total} requirement${s} were met.`,
+        `Strong submission: all ${total} requirement${s} were met.`,
+        `Well done: all ${total} requirement${s} were met.`,
+      ],
+      seed
+    );
   }
-  return `${passed} of ${total} requirements met. Not found in this submission: ${missing.join(", ")}.`;
+  const detail = `Not found in this submission: ${missing.join(", ")}.`;
+  return pick(
+    [
+      `${passed} of ${total} requirements met. ${detail}`,
+      `Good progress: ${passed} of ${total} requirements met. ${detail}`,
+      `${passed} of ${total} requirements met on this submission. ${detail}`,
+    ],
+    seed
+  );
 }
 
 /**
@@ -117,7 +137,12 @@ export function gradeEntriesEmbedded(
       userId: entry.userId,
       totalScore: scaled.totalScore,
       rubricAreas: scaled.rubricAreas,
-      overallComment: buildOverallComment(passedCount, rubric.checks.length, missing),
+      overallComment: buildOverallComment(
+        passedCount,
+        rubric.checks.length,
+        missing,
+        `${entry.student}|${missing.join(",")}`
+      ),
       feedback: "",
       mergedFileCount: entry.mergedFileCount,
       submittedFiles: entry.submittedFiles,

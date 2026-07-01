@@ -115,6 +115,18 @@ describe("gradeEntriesEmbedded", () => {
     expect(run.fullCreditChecklist.length).toBe(3);
   });
 
+  it("keeps comments deterministic per student while phrasing can vary between students", () => {
+    const students = [entry("Ada", "x", []), entry("Bo", "x", []), entry("Cy", "x", []), entry("Di", "x", [])];
+    const first = gradeEntriesEmbedded(students, rubric);
+    const second = gradeEntriesEmbedded(students, rubric);
+    // Same input, same output — always.
+    expect(first.results.map((r) => r.overallComment)).toEqual(second.results.map((r) => r.overallComment));
+    // Every comment keeps the same factual core.
+    for (const result of first.results) {
+      expect(result.overallComment).toContain("0 of 3 requirements met");
+    }
+  });
+
   it("re-bases the total onto a Canvas points_possible when provided", () => {
     const run = gradeEntriesEmbedded(
       [entry("Di", "import pandas\ndef clean(df): pass", ["py"])],

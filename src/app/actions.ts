@@ -26,6 +26,7 @@ import { detectMeetingRequestEmbedded } from "@/lib/embedded/meeting";
 import { scaffoldModuleIntro, scaffoldAssignment } from "@/lib/embedded/content";
 import { scaffoldLessonPlan, scaffoldExamples } from "@/lib/embedded/deck";
 import { scaffoldAnnouncement, scaffoldMessageReply } from "@/lib/embedded/communication";
+import { scaffoldDocument, scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
   fetchCanvasWork,
@@ -2009,6 +2010,13 @@ export async function generateDocumentTextAction(
     if (!prompt.trim()) {
       return { error: "Describe the document to generate first." };
     }
+
+    // Embedded Deterministic Engine: template a markdown document from the prompt
+    // with no model call.
+    if (provider === "embedded") {
+      return { text: scaffoldDocument(prompt) };
+    }
+
     const llmPrompt = `You are writing a polished course handout/document for students.
 
 TOPIC / INSTRUCTION:
@@ -2063,6 +2071,13 @@ export async function generateSlidesAction(
     if (!prompt.trim()) {
       return { error: "Describe the slides to generate first." };
     }
+
+    // Embedded Deterministic Engine: template a deck outline from the prompt with
+    // no model call.
+    if (provider === "embedded") {
+      return scaffoldLessonPlan(prompt);
+    }
+
     const llmPrompt = `You are an expert educator creating a clear, professional slide deck for students.
 
 TOPIC / INSTRUCTION:
@@ -3872,6 +3887,11 @@ async function generateSlidesForAssignment(
   lectureDurationMinutes: number,
   provider: LlmProvider
 ): Promise<{ presentationTitle: string; slides: SlideData[] } | { error: string }> {
+  // Embedded Deterministic Engine: template a deck outline from the content.
+  if (provider === "embedded") {
+    return scaffoldLessonPlan(content);
+  }
+
   const prompt = `You are an expert educator creating a lecture slide deck for a programming course assignment. The slides must be fully self-contained — students reading them after class must be able to understand every concept without relying on any verbal explanation from the instructor.
 
 ASSIGNMENT: ${assignmentName}
@@ -3962,6 +3982,11 @@ async function generateModuleIntroForAssignment(
   templateText = "",
   provider: LlmProvider = "gemini"
 ): Promise<{ text: string } | { error: string }> {
+  // Embedded Deterministic Engine: template the module-intro document.
+  if (provider === "embedded") {
+    return { text: scaffoldModuleIntroDoc(displayTitle, content) };
+  }
+
   const prompt = `You are an expert educator writing a module introduction document for a programming course.
 
 ASSIGNMENT / MODULE: ${displayTitle}
@@ -4007,6 +4032,11 @@ async function generateAssignmentInstructionsForAssignment(
   templateText = "",
   provider: LlmProvider = "gemini"
 ): Promise<{ text: string } | { error: string }> {
+  // Embedded Deterministic Engine: template the assignment instruction sheet.
+  if (provider === "embedded") {
+    return { text: scaffoldAssignmentDoc(displayTitle, readmeContent) };
+  }
+
   const prompt = `You are an expert educator writing a formal assignment instruction sheet for a programming course.
 
 ASSIGNMENT: ${displayTitle}

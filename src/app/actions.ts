@@ -28,8 +28,9 @@ import { scaffoldLessonPlan, scaffoldExamples } from "@/lib/embedded/deck";
 import { scaffoldAnnouncement, scaffoldMessageReply } from "@/lib/embedded/communication";
 import { scaffoldDocument, scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
 import { deriveAltTextFromHtml, deriveLinkTextFromHtml } from "@/lib/embedded/accessibility";
-import { scaffoldCourseProjectRubric, scaffoldCourseOutline } from "@/lib/embedded/course";
+import { scaffoldCourseProjectRubric, scaffoldCourseOutline, scaffoldCopilotPrompt } from "@/lib/embedded/course";
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
+import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
   fetchCanvasWork,
@@ -3512,6 +3513,12 @@ export async function generateCourseScheduleAction(
       return { rows: scheduleResponseToRows(resp, startingDate) };
     }
 
+    // Embedded Deterministic Engine: compute dates from the start date and
+    // sequence topics from the description, no model call.
+    if (provider === "embedded") {
+      return { rows: scaffoldCourseSchedule(courseDescription, startingDate, numberOfWeeks, numberOfTests) };
+    }
+
     const prompt = `You are an expert curriculum designer creating a weekly course schedule.
 
 COURSE DESCRIPTION:
@@ -3603,6 +3610,12 @@ export async function generateCopilotProjectPromptAction(
       return resp.prompt
         ? { prompt: resp.prompt }
         : { error: "Course Engine returned an empty prompt." };
+    }
+
+    // Embedded Deterministic Engine: template a Copilot prompt from the schedule
+    // with no model call.
+    if (provider === "embedded") {
+      return { prompt: scaffoldCopilotPrompt(fileContent, fileName) };
     }
 
     const prompt = `You are an expert software engineering educator. A teacher has provided a course schedule (as a CSV or text file) and wants to create a hands-on software project that gives students practice with every topic and assignment in the course.

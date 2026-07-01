@@ -8,6 +8,7 @@ import {
   type ParsedCalendarEvent,
   type ParsedCalendarResult,
 } from "./calendar-events";
+import { parseCalendarEmbedded } from "./embedded/calendar";
 
 // Hard cap on the amount of extracted text we send to the model. PDFs of
 // syllabi / academic calendars are typically well under this, but a defensive
@@ -197,6 +198,11 @@ export async function parseCalendarFromText(
 ): Promise<ParsedCalendarResult> {
   if (!text.trim()) {
     return { events: [] };
+  }
+
+  // Embedded Deterministic Engine: extract dated events by rule, no model call.
+  if (options.provider === "embedded") {
+    return parseCalendarEmbedded(text, { schoolHint: options.schoolHint });
   }
 
   const maxOutputTokens = Math.max(getGeminiMaxOutputTokens(), 2048);

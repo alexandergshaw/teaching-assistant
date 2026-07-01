@@ -6,7 +6,7 @@
  * technologies that are not there.
  */
 
-import { titleCase } from "./scaffold";
+import { detectLanguage, titleCase } from "./scaffold";
 
 interface ProjectCriterion {
   name: string;
@@ -148,4 +148,35 @@ export function scaffoldCourseOutline(fullName: string, paths: string[], truncat
   );
 
   return sections.join("\n\n");
+}
+
+/**
+ * Build a GitHub Copilot scaffolding prompt from a course schedule. The bulk of
+ * the prompt is the standard project structure (assignment0 onboarding, an
+ * assignments/ directory, one editable file per assignment with unit tests, a
+ * Vercel-deployed frontend that unlocks as students complete files); the schedule
+ * is embedded verbatim and the primary language is detected from it.
+ */
+export function scaffoldCopilotPrompt(fileContent: string, fileName: string): string {
+  const language = detectLanguage(fileContent);
+  return [
+    `Scaffold a complete, beginner-friendly software project for a course, based on the schedule below (from "${fileName}").`,
+    "",
+    "PRIMARY LANGUAGE (detected): " + language,
+    "",
+    "COURSE SCHEDULE:",
+    fileContent.trim(),
+    "",
+    "Build the project with this exact structure:",
+    "- A Next.js frontend deployed to Vercel out of the box, showcasing employer-relevant skills for the detected language and domain.",
+    "- A single root-level `assignments/` directory. Every assignment lives in its own folder (`assignments/assignment0/`, `assignments/assignment1/`, ...).",
+    "- `assignments/assignment0/` is an onboarding exercise that walks students, step by step and using the GitHub and GitHub Codespaces graphical interfaces (not the terminal), through: forking the repo, deploying to Vercel, creating a branch, opening it in Codespaces, making a simple change, running the tests via the Testing panel, committing and pushing via the Source Control panel, opening a pull request, verifying the Vercel preview, and merging.",
+    "- In each assignment folder, exactly ONE file is student-editable; every other file is read-only scaffolding. Name the editable file explicitly.",
+    "- Each assignment folder contains an `INSTRUCTIONS.md` with verbose, beginner-friendly instructions and worked examples that do NOT give away the solution, and unit tests that import only the student's editable file.",
+    "- Completing the one editable file (and nothing else) automatically unlocks the corresponding feature in the frontend; specify the exact import/read path and what the frontend checks.",
+    "- Create a `reviewN` folder for each review week and an `examN` folder for each test/exam week identified in the schedule, each with the same INSTRUCTIONS.md + editable file + tests + frontend-unlock structure.",
+    "- Cover every topic and assignment in the schedule, in roughly the same order, evolving the project week by week.",
+    "",
+    "Return the scaffolded project. Keep everything free and deployable with only GitHub and Vercel.",
+  ].join("\n");
 }

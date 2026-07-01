@@ -29,6 +29,7 @@ import { scaffoldAnnouncement, scaffoldMessageReply } from "@/lib/embedded/commu
 import { scaffoldDocument, scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
 import { deriveAltTextFromHtml, deriveLinkTextFromHtml } from "@/lib/embedded/accessibility";
 import { scaffoldCourseProjectRubric, scaffoldCourseOutline } from "@/lib/embedded/course";
+import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
   fetchCanvasWork,
@@ -2331,6 +2332,19 @@ export async function analyzeSyllabusInputsAction(
       return { error: "Could not read any text from that file. Upload the former syllabus as a Word .docx." };
     }
     const codebaseSummary = zipBase64 ? await summarizeCodebaseZip(zipBase64) : "(no codebase provided)";
+
+    // Embedded Deterministic Engine: detect fields by matching "Label: value"
+    // lines, pre-filling from the provided course facts. No model call, and no
+    // weekly-schedule rewrite (out of reach for rule-based templating).
+    if (provider === "embedded") {
+      return {
+        fields: scaffoldSyllabusFields(paragraphs, courseInfo),
+        scheduleReplacements: {},
+        paragraphs,
+        codebaseSummary,
+      };
+    }
+
     const paraList = paragraphs.map((p) => `[${p.id}] ${p.text}`).join("\n");
     const byId = new Map(paragraphs.map((p) => [p.id, p.text]));
 
@@ -2491,6 +2505,12 @@ export async function regenerateSyllabusFieldAction(
 ): Promise<{ text: string } | { error: string }> {
   try {
     await requireOwner();
+    // Embedded Deterministic Engine: no model to rewrite a field, so keep the
+    // current text; the instructor edits it directly.
+    if (provider === "embedded") {
+      return { text: field.currentText };
+    }
+
     const prompt = `You are writing the replacement text for ONE field of a course syllabus being adapted for a new offering.
 
 CODEBASE SUMMARY:

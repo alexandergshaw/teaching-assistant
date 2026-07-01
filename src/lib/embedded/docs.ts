@@ -15,6 +15,7 @@ import {
   summarizeObjectives,
   toBullets,
 } from "./scaffold";
+import { toProse } from "@/lib/prose";
 
 // ── Curated free resources ───────────────────────────────────────────────────
 // Real, stable, free references keyed by technology signals in the content. The
@@ -135,16 +136,24 @@ function realWorldApplications(content: string): string[] | null {
 
 /** A general handout/document scaffold built from a freeform prompt. */
 export function scaffoldDocument(prompt: string): string {
-  const title = deriveTitle(prompt, "", "Course Document");
-  const bullets = toBullets(prompt);
+  // Structured input (JSON, a table, key-value lines, a bare list) is rendered
+  // as natural-language prose via the prose library before templating, so the
+  // document body reads as sentences rather than echoing raw data.
+  const converted = toProse(prompt);
+  const structured = converted.format !== "prose";
+  const basis = structured ? converted.prose : prompt;
+
+  const title = deriveTitle(basis, "", "Course Document");
   const overview =
-    capitalizeFirst(ensureSentence(summarize(prompt, 2))) ||
-    capitalizeFirst(ensureSentence(prompt));
-  const detailBullets = (
-    bullets.length > 1 ? bullets : ["[Add the first key point here]", "[Add another key point here]"]
-  )
-    .map((b) => `- ${b}`)
-    .join("\n");
+    capitalizeFirst(ensureSentence(summarize(basis, 2))) ||
+    capitalizeFirst(ensureSentence(basis));
+
+  const bullets = toBullets(prompt);
+  const details = structured
+    ? converted.prose
+    : (bullets.length > 1 ? bullets : ["[Add the first key point here]", "[Add another key point here]"])
+        .map((b) => `- ${b}`)
+        .join("\n");
 
   // A Key Terms section only when the prompt actually defines terms.
   const definitions = extractDefinitions(prompt, 6);
@@ -158,7 +167,7 @@ export function scaffoldDocument(prompt: string): string {
     "## Overview",
     overview,
     "## Details",
-    detailBullets,
+    details,
     ...keyTermsSection,
     "## Summary",
     "Review the points above and add any specifics relevant to your course.",

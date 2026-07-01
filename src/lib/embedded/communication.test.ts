@@ -20,6 +20,12 @@ describe("scaffoldAnnouncement", () => {
     const a = scaffoldAnnouncement("Announce that:");
     expect(a.title.length).toBeGreaterThan(0);
   });
+
+  it("renders a bulleted instruction as flowing prose, not a raw list", () => {
+    const a = scaffoldAnnouncement("Tell students:\n- the exam is Friday\n- bring a calculator");
+    expect(a.message).toContain("the exam is Friday and bring a calculator");
+    expect(a.message).not.toMatch(/^- /m);
+  });
 });
 
 describe("scaffoldMessageReply", () => {

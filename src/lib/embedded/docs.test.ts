@@ -15,6 +15,20 @@ describe("scaffoldDocument", () => {
     const h1 = md.split("\n").filter((l) => /^# /.test(l));
     expect(h1.length).toBe(1);
   });
+
+  it("renders structured input as prose in the Details section", () => {
+    const md = scaffoldDocument("Course: Databases\nRoom: 204\nInstructor: Dr. Shaw");
+    expect(md).toContain("The course is Databases.");
+    expect(md).toContain("The room is 204.");
+    // The structured lines are narrated, not echoed as raw "Label: value" bullets.
+    expect(md).not.toContain("- Course: Databases");
+  });
+
+  it("narrates a pasted CSV table row by row", () => {
+    const md = scaffoldDocument("name,score\nAda,95\nBo,82");
+    expect(md).toContain("The table has 2 rows with columns name and score.");
+    expect(md).toContain("For Ada, score is 95.");
+  });
 });
 
 describe("scaffoldModuleIntroDoc", () => {

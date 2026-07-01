@@ -6,15 +6,17 @@
  */
 
 import { capitalizeFirst, cleanText, copyedit, ensureSentence, pick, splitSentences } from "./scaffold";
+import { toProse } from "@/lib/prose";
 
 /** The account owner never wants long dashes in a draft; mirror the LLM path. */
 function stripLongDashes(text: string): string {
   return text.replace(/\s+[—–]\s+/g, ", ").replace(/[—–]/g, "-");
 }
 
-// Directive lead-ins ("tell students that …") that front an announcement request.
+// Directive lead-ins ("tell students that …", "tell students:") that front an
+// announcement request; a trailing colon or comma is consumed with them.
 const ANNOUNCEMENT_DIRECTIVE =
-  /^(?:please\s+)?(?:tell|let|inform|notify|remind|announce|advise|update)\s+(?:the\s+)?(?:students?|class|everyone)\s*(?:know\s+)?(?:that|about|to|of)?\s*/i;
+  /^(?:please\s+)?(?:tell|let|inform|notify|remind|announce|advise|update)\s+(?:the\s+)?(?:students?|class|everyone)\s*(?:know\s+)?(?:that|about|to|of)?\s*[:,]?\s*/i;
 
 /** Derive a short subject line from an announcement instruction. */
 function announcementTitle(instruction: string): string {
@@ -37,7 +39,11 @@ export interface AnnouncementScaffold {
 
 /** Wrap the instruction in a warm, professional announcement body. */
 export function scaffoldAnnouncement(instruction: string): AnnouncementScaffold {
-  const core = copyedit(instruction.replace(ANNOUNCEMENT_DIRECTIVE, ""));
+  // Structured instructions (a bullet list, key-value lines, a table) are
+  // rendered as natural-language prose; plain instructions are copy-edited.
+  const stripped = instruction.replace(ANNOUNCEMENT_DIRECTIVE, "");
+  const converted = toProse(stripped);
+  const core = converted.format === "prose" ? copyedit(stripped) : converted.prose;
   const greeting = pick(["Hi everyone,", "Hello everyone,", "Hi all,"], instruction);
   const closer = pick(
     [

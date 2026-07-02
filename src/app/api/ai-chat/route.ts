@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
-import { answerFromContext } from "@/lib/embedded/answer";
+import { routeRequest, GUIDANCE_REPLY } from "@/lib/embedded/router";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
 import type { ChatMessage } from "@/lib/chat/types";
@@ -23,18 +23,14 @@ export async function POST(req: NextRequest) {
 
     let reply: string;
     if (provider === "embedded") {
-      // Embedded Deterministic Engine: answer extractively from material the user
-      // pasted earlier in the conversation, no model call. Without pasted text
-      // there is nothing to retrieve from, so say so plainly.
+      // Embedded Deterministic Engine: the ask-anything router classifies the
+      // request (announcement, rubric, quiz, practice problems, case study,
+      // define, summarize, or Q&A over pasted material) and dispatches it to
+      // the engine's deterministic capabilities. No model call, no external web.
       const lastUser = [...messages].reverse().find((m) => m.role === "user");
-      const corpus = messages
-        .filter((m) => m.role === "user" && m !== lastUser)
-        .map((m) => m.text)
-        .join("\n\n");
-      reply =
-        lastUser && corpus.trim().split(/\s+/).filter(Boolean).length >= 20
-          ? answerFromContext(lastUser.text, corpus, messages.slice(0, -1))
-          : "The embedded deterministic engine runs locally and can only answer questions about text already in this conversation. Paste the material first and then ask about it, or switch the provider toggle to an LLM (Gemini).";
+      reply = lastUser
+        ? (await routeRequest(lastUser.text, messages.slice(0, -1))).reply
+        : GUIDANCE_REPLY;
     } else {
       const contents = messages.map((m) => ({
         role: m.role === "assistant" ? ("model" as const) : ("user" as const),

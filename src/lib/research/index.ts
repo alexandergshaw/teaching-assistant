@@ -108,8 +108,16 @@ function rowToResult(row: KnowledgeRow): ResearchResult {
 /**
  * Search the stored knowledge base (database-first). When the database is
  * unavailable or has no match, the in-repo curated entries answer instead, so
- * this always resolves and never throws.
+ * this always resolves and never throws. Unlike research(), this never touches
+ * the external web — safe for the embedded engine's no-web guarantee.
  */
+export async function searchStoredKnowledge(
+  topic: string,
+  options: ResearchOptions = {}
+): Promise<ResearchResult[]> {
+  return searchKnowledgeBase(topic, options);
+}
+
 async function searchKnowledgeBase(topic: string, options: ResearchOptions = {}): Promise<ResearchResult[]> {
   const rows = await searchKnowledgeRows(topic, {
     kind: options.kind as KnowledgeRow["kind"] | undefined,

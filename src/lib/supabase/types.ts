@@ -105,6 +105,32 @@ export interface Database {
           scanned_at?: string;
         };
       };
+      rubric_bank: {
+        Row: {
+          id: string;
+          topics: string[];
+          instructions_excerpt: string;
+          rubric_text: string;
+          source: string;
+          created_at: string;
+        };
+        Insert: {
+          id: string;
+          topics?: string[];
+          instructions_excerpt?: string;
+          rubric_text: string;
+          source?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          topics?: string[];
+          instructions_excerpt?: string;
+          rubric_text?: string;
+          source?: string;
+          created_at?: string;
+        };
+      };
       glossary_terms: {
         Row: {
           id: string;

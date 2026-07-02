@@ -14,6 +14,7 @@ import {
 } from "./office-extract";
 import { fetchCanvasWork, fetchAssignmentPointsPossible, type CanvasStudentWork } from "./canvas";
 import { generateEmbeddedRubricText } from "./embedded-grader/rubric";
+import { findRubricForTopic } from "./research/rubric-bank";
 
 const MAX_NESTED_ZIP_DEPTH = 3;
 
@@ -577,9 +578,13 @@ export async function generateRubric(
   assignmentInstructions: string,
   provider: LlmProvider = "gemini"
 ): Promise<string> {
-  // Embedded Deterministic Engine: derive the rubric from the instructions with
-  // rule-based checks, no model call. Same input/output shape as the LLM path.
+  // Embedded Deterministic Engine: prefer a rubric the instructor has already
+  // authored for this topic (the rubric bank grows as real rubrics pass through
+  // grading); otherwise derive one from the instructions with rule-based
+  // checks. No model call either way.
   if (provider === "embedded") {
+    const banked = await findRubricForTopic(assignmentInstructions);
+    if (banked) return banked;
     return generateEmbeddedRubricText(assignmentInstructions);
   }
 

@@ -34,6 +34,7 @@ import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { copyedit } from "@/lib/embedded/scaffold";
 import { answerFromContext, NO_MATCH_REPLY } from "@/lib/embedded/answer";
 import { answerFromGlossary } from "@/lib/research/glossary";
+import { rememberRubric } from "@/lib/research/rubric-bank";
 import { applyTextRevision, applySlidesRevision, applyHtmlRevision } from "@/lib/embedded/revise";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
@@ -3301,6 +3302,8 @@ export async function gradeAction(
         if (builtRubric.checks.length === 0) {
           return { run: null, error: builtRubric.warnings[0] ?? "Provide a rubric or assignment instructions." };
         }
+        // Grow the rubric bank from human-authored rubrics (fire-and-forget).
+        if (rubric.trim()) void rememberRubric(assignmentInstructions, rubric);
         const run = gradeEntriesEmbedded(entries, builtRubric, pointsPossible);
         return {
           run: { ...run, speedGraderUrl },
@@ -3349,6 +3352,8 @@ export async function gradeAction(
       if (builtRubric.checks.length === 0) {
         return { run: null, error: builtRubric.warnings[0] ?? "Provide a rubric or assignment instructions." };
       }
+      // Grow the rubric bank from human-authored rubrics (fire-and-forget).
+      if (rubricText.trim()) void rememberRubric(assignmentInstructions, rubricText);
       const run = gradeEntriesEmbedded(entries, builtRubric);
       return {
         run,
@@ -5126,6 +5131,8 @@ export async function gradeReposAction(
       if (builtRubric.checks.length === 0) {
         return { error: builtRubric.warnings[0] ?? "Provide a rubric or assignment instructions." };
       }
+      // Grow the rubric bank from human-authored rubrics (fire-and-forget).
+      if (rubric.trim()) void rememberRubric(instructions, rubric);
       const run = gradeEntriesEmbedded(
         digests.map(({ label, digest }) => repoDigestToEmbeddedEntry(digest, label)),
         builtRubric
@@ -5370,6 +5377,8 @@ export async function gradeRepoAction(
       if (builtRubric.checks.length === 0) {
         return { error: builtRubric.warnings[0] ?? "Provide a rubric or assignment instructions." };
       }
+      // Grow the rubric bank from human-authored rubrics (fire-and-forget).
+      if (rubric.trim()) void rememberRubric(instructions, rubric);
       const run = gradeEntriesEmbedded([repoDigestToEmbeddedEntry(digest)], builtRubric);
       return { run, rubric: renderRubricText(builtRubric), fullName: digest.fullName };
     }

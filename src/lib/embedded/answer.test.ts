@@ -40,6 +40,20 @@ describe("answerFromContext", () => {
   });
 });
 
+describe("calibrated confidence", () => {
+  it("answers directly when the passage covers the whole question", () => {
+    const answer = answerFromContext("When is the midterm exam?", CORPUS);
+    expect(answer).not.toMatch(/partly answer|only touches/);
+    expect(answer).toContain("The midterm exam is on October 12 in room 204.");
+  });
+
+  it("hedges when the passage covers only part of the question", () => {
+    const answer = answerFromContext("When is the midterm potluck celebration?", CORPUS);
+    expect(answer).toMatch(/partly answer|only touches/);
+    expect(answer).toContain("The midterm exam is on October 12 in room 204.");
+  });
+});
+
 describe("conversational follow-ups", () => {
   it("expands a terse follow-up with the earlier turns' subject terms", () => {
     const expanded = expandQuestionWithHistory("when is it?", [

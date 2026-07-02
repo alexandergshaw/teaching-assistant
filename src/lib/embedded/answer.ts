@@ -56,14 +56,22 @@ export function expandQuestionWithHistory(question: string, history: ChatTurn[])
   return inherited.length > 0 ? `${question} ${inherited.join(" ")}` : question;
 }
 
+interface Retrieval {
+  sentences: string[];
+  /** 0..1 — fraction of the question's terms the selected passages contain.
+   *  This is the engine's calibration signal: low values mean the passages only
+   *  partly address the question, so the answer should be hedged. */
+  confidence: number;
+}
+
 /** Sentences of `corpus` ranked by overlap with the question's significant words,
  *  weighting rarer words higher. Returns the top `max` in original order. */
-function retrieveSentences(question: string, corpus: string, max: number): string[] {
+function retrieveSentences(question: string, corpus: string, max: number): Retrieval {
   const sentences = splitSentences(corpus);
-  if (sentences.length === 0) return [];
-
   const queryTerms = significantWords(question, 3);
-  if (queryTerms.length === 0) return [];
+  if (sentences.length === 0 || queryTerms.length === 0) {
+    return { sentences: [], confidence: 0 };
+  }
 
   // Inverse sentence frequency: a term appearing in fewer sentences says more.
   const sentenceLower = sentences.map((s) => s.toLowerCase());
@@ -82,12 +90,19 @@ function retrieveSentences(question: string, corpus: string, max: number): strin
     return { sentence, index, score };
   });
 
-  return scored
+  const selected = scored
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .slice(0, max)
-    .sort((a, b) => a.index - b.index)
-    .map((item) => item.sentence);
+    .sort((a, b) => a.index - b.index);
+
+  const selectedLower = selected.map((item) => item.sentence.toLowerCase()).join(" ");
+  const covered = queryTerms.filter((term) => selectedLower.includes(term)).length;
+
+  return {
+    sentences: selected.map((item) => item.sentence),
+    confidence: covered / queryTerms.length,
+  };
 }
 
 /**
@@ -117,12 +132,23 @@ export function answerFromContext(question: string, corpus: string, history: Cha
   }
 
   const retrievalQuery = expandQuestionWithHistory(q, history);
-  const relevant = retrieveSentences(retrievalQuery, text, 2);
-  if (relevant.length === 0) return NO_MATCH_REPLY;
+  const retrieval = retrieveSentences(retrievalQuery, text, 2);
+  if (retrieval.sentences.length === 0) return NO_MATCH_REPLY;
 
-  const leadIn = pick(
-    ["Here is what the text says about that:", "From the text:", "The relevant part of the text:"],
-    q
-  );
-  return `${leadIn} ${relevant.join(" ")}`;
+  // Calibrated hedging: when the best passages cover only part of the question,
+  // say so instead of presenting a partial match as a direct answer.
+  const leadIn =
+    retrieval.confidence >= 0.5
+      ? pick(
+          ["Here is what the text says about that:", "From the text:", "The relevant part of the text:"],
+          q
+        )
+      : pick(
+          [
+            "This may only partly answer that; the closest passage is:",
+            "The text only touches on that. The closest passage:",
+          ],
+          q
+        );
+  return `${leadIn} ${retrieval.sentences.join(" ")}`;
 }

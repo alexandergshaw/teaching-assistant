@@ -24,6 +24,7 @@ import {
 } from "./scaffold";
 import { findCaseStudyMaterial, findPracticeProblems, type PracticeProblemEntry } from "@/lib/research";
 import { maybeLearnInBackground } from "@/lib/research/gap";
+import { rememberDefinitions, lookupDefinitionsForPhrases } from "@/lib/research/glossary";
 
 export interface SlideScaffold {
   title: string;
@@ -141,6 +142,15 @@ export async function scaffoldLessonPlan(objectives: string, context = ""): Prom
       }
     : null;
 
+  // Grow the glossary from this material, and pull instructor-authored
+  // definitions back out of it for concepts the current material never defines.
+  void rememberDefinitions(definitions);
+  const phrasesNeedingDefs = bullets
+    .slice(0, 8)
+    .map((objective) => objective.replace(/[.:;,]+$/, "").trim().toLowerCase())
+    .filter((phrase) => !definitionFor(phrase, definitions));
+  const glossaryDefs = await lookupDefinitionsForPhrases(phrasesNeedingDefs);
+
   let blockIndex = 0;
   const usedProblems = new Set<string>();
   const conceptSlides: SlideScaffold[] = [];
@@ -150,7 +160,7 @@ export async function scaffoldLessonPlan(objectives: string, context = ""): Prom
     conceptSlides.push({
       title: conceptTitle(objective),
       bullets: [
-        definition ? definition.definition : `Key idea: ${phrase}`,
+        definition ? definition.definition : glossaryDefs.get(phrase) ?? `Key idea: ${phrase}`,
         pick(
           [
             "Why it matters: connect this to prior topics and a real-world example students recognize",

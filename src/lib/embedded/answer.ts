@@ -11,10 +11,14 @@ import { extractDefinitions, pick, significantWords, splitSentences, summarize }
 
 const SUMMARY_INTENT = /\b(?:summari[sz]e|summary|overview|tl;?dr|main (?:points|ideas)|key (?:points|takeaways)|gist)\b/i;
 
-const DEFINE_INTENT =
+/** Whether a question asks for a definition (exported so callers can decide to
+ *  consult the accumulated course glossary when the text has no answer). */
+export const DEFINE_INTENT =
   /\b(?:define|definition of|what (?:is|are|does)|meaning of|what do(?:es)? .{1,30} mean)\b/i;
 
-const NO_MATCH_REPLY =
+/** The honest no-answer reply (exported so callers can detect it and try other
+ *  knowledge layers before giving up). */
+export const NO_MATCH_REPLY =
   "The provided text doesn't appear to address that directly. Try rephrasing the question, or switch to an LLM provider for a broader answer.";
 
 /** Sentences of `corpus` ranked by overlap with the question's significant words,

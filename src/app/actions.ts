@@ -32,7 +32,8 @@ import { scaffoldCourseProjectRubric, scaffoldCourseOutline, scaffoldCopilotProm
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { copyedit } from "@/lib/embedded/scaffold";
-import { answerFromContext } from "@/lib/embedded/answer";
+import { answerFromContext, NO_MATCH_REPLY } from "@/lib/embedded/answer";
+import { answerFromGlossary } from "@/lib/research/glossary";
 import { applyTextRevision, applySlidesRevision, applyHtmlRevision } from "@/lib/embedded/revise";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
@@ -3401,10 +3402,16 @@ export async function selectionChatAction(
 ): Promise<string | { error: string }> {
   try {
     // Embedded Deterministic Engine: answer extractively from the highlighted
-    // text (retrieval, summary, and definition intents), no model call. The
+    // text (retrieval, summary, and definition intents), no model call. When
+    // the text has no answer to a "what is X" question, the accumulated course
+    // glossary (built from the instructor's own materials) is consulted. The
     // exchange is logged the same way as the LLM path.
     if (provider === "embedded") {
-      const replyText = answerFromContext(question, selectedText);
+      let replyText = answerFromContext(question, selectedText);
+      if (replyText === NO_MATCH_REPLY) {
+        const fromGlossary = await answerFromGlossary(question);
+        if (fromGlossary) replyText = fromGlossary;
+      }
       let embeddedUserId: string | undefined;
       try {
         const supabase = await createClient();

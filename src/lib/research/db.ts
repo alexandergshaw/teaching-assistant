@@ -251,3 +251,8 @@ export async function countKnowledgeMatches(topic: string): Promise<number | nul
 export async function isKnowledgeStoreAvailable(): Promise<boolean> {
   return (await getClient()) !== null;
 }
+
+/** The shared service client (null when unconfigured) for sibling data layers. */
+export function getDbClient(): Promise<ServiceClient | null> {
+  return getClient();
+}

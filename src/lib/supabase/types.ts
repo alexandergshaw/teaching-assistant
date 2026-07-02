@@ -105,6 +105,29 @@ export interface Database {
           scanned_at?: string;
         };
       };
+      glossary_terms: {
+        Row: {
+          id: string;
+          term: string;
+          definition: string;
+          source: string;
+          created_at: string;
+        };
+        Insert: {
+          id: string;
+          term: string;
+          definition: string;
+          source?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          term?: string;
+          definition?: string;
+          source?: string;
+          created_at?: string;
+        };
+      };
       knowledge_entries: {
         Row: {
           id: string;

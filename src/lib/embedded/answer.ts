@@ -21,6 +21,41 @@ export const DEFINE_INTENT =
 export const NO_MATCH_REPLY =
   "The provided text doesn't appear to address that directly. Try rephrasing the question, or switch to an LLM provider for a broader answer.";
 
+/** One prior turn of a conversation (any assistant/model role naming works). */
+export interface ChatTurn {
+  role: string;
+  text: string;
+}
+
+// Signals that a question leans on earlier turns: a continuation lead-in, a
+// pronoun standing in for something named before, or too few content words to
+// retrieve with on its own.
+const FOLLOW_UP_CUE =
+  /^(?:and|also|what about|how about|ok(?:ay)?|so|then)\b|\b(?:it|its|that|this|these|those|they|them|their|the (?:first|second|third|last) one)\b/i;
+
+/**
+ * Resolve a terse follow-up against the conversation: when the question leans
+ * on earlier turns, append the most recent user turns' significant terms so
+ * retrieval sees the full subject ("when is it due?" after a midterm question
+ * retrieves the midterm sentence). Self-contained questions pass through
+ * unchanged; the expansion is used for retrieval only, never echoed back.
+ */
+export function expandQuestionWithHistory(question: string, history: ChatTurn[]): string {
+  const ownTerms = significantWords(question, 3);
+  const isFollowUp = FOLLOW_UP_CUE.test(question.trim()) || ownTerms.length < 2;
+  if (!isFollowUp || history.length === 0) return question;
+
+  const inherited: string[] = [];
+  for (let i = history.length - 1; i >= 0 && inherited.length < 6; i -= 1) {
+    if (history[i].role !== "user") continue;
+    for (const term of significantWords(history[i].text, 3)) {
+      if (!ownTerms.includes(term) && !inherited.includes(term)) inherited.push(term);
+      if (inherited.length >= 6) break;
+    }
+  }
+  return inherited.length > 0 ? `${question} ${inherited.join(" ")}` : question;
+}
+
 /** Sentences of `corpus` ranked by overlap with the question's significant words,
  *  weighting rarer words higher. Returns the top `max` in original order. */
 function retrieveSentences(question: string, corpus: string, max: number): string[] {
@@ -59,8 +94,10 @@ function retrieveSentences(question: string, corpus: string, max: number): strin
  * Answer a question from the given text extractively. Handles three intents:
  * summarize (extractive summary), define X (a definition sentence when the text
  * contains one), and general retrieval (the most relevant sentences, quoted).
+ * When conversation history is provided, terse follow-ups are expanded with the
+ * earlier turns' subject terms before retrieval.
  */
-export function answerFromContext(question: string, corpus: string): string {
+export function answerFromContext(question: string, corpus: string, history: ChatTurn[] = []): string {
   const q = question.trim();
   const text = corpus.trim();
   if (!q || !text) return NO_MATCH_REPLY;
@@ -79,7 +116,8 @@ export function answerFromContext(question: string, corpus: string): string {
     if (hit) return hit.definition;
   }
 
-  const relevant = retrieveSentences(q, text, 2);
+  const retrievalQuery = expandQuestionWithHistory(q, history);
+  const relevant = retrieveSentences(retrievalQuery, text, 2);
   if (relevant.length === 0) return NO_MATCH_REPLY;
 
   const leadIn = pick(

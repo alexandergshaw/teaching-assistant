@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
         .join("\n\n");
       reply =
         lastUser && corpus.trim().split(/\s+/).filter(Boolean).length >= 20
-          ? answerFromContext(lastUser.text, corpus)
+          ? answerFromContext(lastUser.text, corpus, messages.slice(0, -1))
           : "The embedded deterministic engine runs locally and can only answer questions about text already in this conversation. Paste the material first and then ask about it, or switch the provider toggle to an LLM (Gemini).";
     } else {
       const contents = messages.map((m) => ({

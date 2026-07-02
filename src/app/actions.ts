@@ -3412,7 +3412,7 @@ export async function selectionChatAction(
     // glossary (built from the instructor's own materials) is consulted. The
     // exchange is logged the same way as the LLM path.
     if (provider === "embedded") {
-      let replyText = answerFromContext(question, selectedText);
+      let replyText = answerFromContext(question, selectedText, history);
       if (replyText === NO_MATCH_REPLY) {
         const fromGlossary = await answerFromGlossary(question);
         if (fromGlossary) replyText = fromGlossary;

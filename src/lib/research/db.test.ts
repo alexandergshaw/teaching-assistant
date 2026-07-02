@@ -19,6 +19,8 @@ function row(overrides: Partial<KnowledgeRow>): KnowledgeRow {
     solution_code: null,
     url: null,
     verified: true,
+    times_served: 0,
+    last_served_at: null,
     created_at: "",
     updated_at: "",
     ...overrides,

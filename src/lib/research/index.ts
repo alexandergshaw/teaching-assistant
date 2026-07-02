@@ -18,7 +18,13 @@ import { CASE_STUDIES, type CaseStudyEntry } from "./case-studies";
 import { PRACTICE_PROBLEMS, type PracticeProblemEntry } from "./practice-problems";
 import { searchWikipedia, searchStackExchange, type ExternalResult } from "./external";
 import { scoreFields } from "./scoring";
-import { searchKnowledgeRows, rowToCaseStudy, rowToPracticeProblem, type KnowledgeRow } from "./db";
+import {
+  recordServed,
+  rowToCaseStudy,
+  rowToPracticeProblem,
+  searchKnowledgeRows,
+  type KnowledgeRow,
+} from "./db";
 
 export type { CaseStudyEntry } from "./case-studies";
 export type { PracticeProblemEntry } from "./practice-problems";
@@ -110,6 +116,7 @@ async function searchKnowledgeBase(topic: string, options: ResearchOptions = {})
     limit: options.limit,
   });
   if (rows && rows.length > 0) {
+    void recordServed(rows.map((row) => row.id));
     return rows.map(rowToResult);
   }
   return searchCurated(topic, options).map(curatedToResult);
@@ -236,7 +243,10 @@ export async function findCaseStudyMaterial(topic: string): Promise<CaseStudyMat
   if (rows) {
     for (const row of rows) {
       const material = caseStudyMaterialFromRow(row);
-      if (material) return material;
+      if (material) {
+        void recordServed([row.id]);
+        return material;
+      }
     }
   }
   const curated = searchCurated(topic, { kind: "case_study", limit: 1 }) as CaseStudyEntry[];
@@ -258,7 +268,10 @@ export async function findPracticeProblems(topic: string, limit = 1): Promise<Pr
       .map(rowToPracticeProblem)
       .filter((entry): entry is PracticeProblemEntry => entry !== null)
       .slice(0, limit);
-    if (mapped.length > 0) return mapped;
+    if (mapped.length > 0) {
+      void recordServed(mapped.map((entry) => entry.id));
+      return mapped;
+    }
   }
   return searchCurated(topic, { kind: "practice_problem", limit }) as PracticeProblemEntry[];
 }

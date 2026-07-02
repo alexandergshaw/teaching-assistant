@@ -146,6 +146,8 @@ export interface Database {
           solution_code: string | null;
           url: string | null;
           verified: boolean;
+          times_served: number;
+          last_served_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -166,6 +168,8 @@ export interface Database {
           solution_code?: string | null;
           url?: string | null;
           verified?: boolean;
+          times_served?: number;
+          last_served_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -186,6 +190,8 @@ export interface Database {
           solution_code?: string | null;
           url?: string | null;
           verified?: boolean;
+          times_served?: number;
+          last_served_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };

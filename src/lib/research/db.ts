@@ -217,6 +217,8 @@ export async function searchKnowledgeRows(
         (a, b) =>
           b.score - a.score ||
           Number(b.row.verified) - Number(a.row.verified) ||
+          // Usage-informed ranking: entries that keep proving useful win ties.
+          (b.row.times_served ?? 0) - (a.row.times_served ?? 0) ||
           a.row.id.localeCompare(b.row.id)
       )
       .slice(0, limit)
@@ -250,6 +252,23 @@ export async function countKnowledgeMatches(topic: string): Promise<number | nul
 /** Whether the knowledge store is configured (learning has somewhere to write). */
 export async function isKnowledgeStoreAvailable(): Promise<boolean> {
   return (await getClient()) !== null;
+}
+
+/**
+ * Record that entries were actually served into a deck, example set, or API
+ * response (atomic increment via the bump_knowledge_served SQL function).
+ * Fire-and-forget by design: failures are swallowed and nothing blocks on it.
+ */
+export async function recordServed(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const client = await getClient();
+  if (!client) return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (client as any).rpc("bump_knowledge_served", { entry_ids: ids });
+  } catch {
+    // Usage tracking must never affect the caller.
+  }
 }
 
 /** The shared service client (null when unconfigured) for sibling data layers. */

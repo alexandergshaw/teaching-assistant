@@ -22,7 +22,8 @@ import {
   type Definition,
   type LessonType,
 } from "./scaffold";
-import { findCaseStudies, findPracticeProblems, type PracticeProblemEntry } from "@/lib/research";
+import { findCaseStudyMaterial, findPracticeProblems, type PracticeProblemEntry } from "@/lib/research";
+import { maybeLearnInBackground } from "@/lib/research/gap";
 
 export interface SlideScaffold {
   title: string;
@@ -119,6 +120,11 @@ export async function scaffoldLessonPlan(objectives: string, context = ""): Prom
   const codeBlocks = extractCodeBlocks(source);
   const fallbackLanguage = detectLanguage(source);
 
+  // Usage-driven learning: schedule the research loop for this topic in the
+  // background when the knowledge base has a gap. This deck neither waits on
+  // nor uses the result — future decks on the topic get richer.
+  void maybeLearnInBackground(source);
+
   const titleSlide: SlideScaffold = {
     title: presentationTitle,
     bullets: (bullets.length > 0 ? bullets : ["Overview of this lesson"]).slice(0, 5).map(conceptTitle),
@@ -126,11 +132,12 @@ export async function scaffoldLessonPlan(objectives: string, context = ""): Prom
 
   // A real, documented case study as the second slide, when one matches the
   // topic (the LLM contract's "Case Study:" slide). Off-topic decks get none.
-  const caseStudy = (await findCaseStudies(source, 1))[0];
+  // Learned (research-loop) material carries its source attribution.
+  const caseStudy = await findCaseStudyMaterial(source);
   const caseStudySlide: SlideScaffold | null = caseStudy
     ? {
         title: `Case Study: ${caseStudy.title}`,
-        bullets: [...caseStudy.summary, caseStudy.lesson],
+        bullets: caseStudy.bullets,
       }
     : null;
 
@@ -238,6 +245,8 @@ function exampleStub(lessonType: LessonType, concept: string, language: string):
  */
 export async function scaffoldExamples(concepts: string[], text: string): Promise<ExamplesScaffold> {
   const cleanedConcepts = concepts.map((c) => c.trim()).filter(Boolean);
+  // Schedule background learning for this topic (never awaited or used here).
+  void maybeLearnInBackground(`${text}\n${cleanedConcepts.join("\n")}`);
   const lessonType = detectLessonType(`${text}\n${cleanedConcepts.join("\n")}`);
   const language = detectLanguage(`${text}\n${cleanedConcepts.join("\n")}`);
   const codeBlocks = extractCodeBlocks(text);

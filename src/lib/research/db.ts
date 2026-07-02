@@ -246,3 +246,8 @@ export async function countKnowledgeMatches(topic: string): Promise<number | nul
   const rows = await searchKnowledgeRows(topic, { limit: 20 });
   return rows === null ? null : rows.length;
 }
+
+/** Whether the knowledge store is configured (learning has somewhere to write). */
+export async function isKnowledgeStoreAvailable(): Promise<boolean> {
+  return (await getClient()) !== null;
+}

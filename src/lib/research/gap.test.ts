@@ -3,18 +3,26 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("./db", () => ({
   searchKnowledgeRows: vi.fn(),
   upsertKnowledge: vi.fn(),
+  isKnowledgeStoreAvailable: vi.fn(),
 }));
 vi.mock("./external", () => ({
   searchWikipedia: vi.fn(),
   searchStackExchange: vi.fn(),
 }));
 
-import { measureCoverage, ensureTopicKnowledge, gapThreshold } from "./gap";
-import { searchKnowledgeRows, upsertKnowledge, type KnowledgeRow } from "./db";
+import {
+  measureCoverage,
+  ensureTopicKnowledge,
+  gapThreshold,
+  maybeLearnInBackground,
+  resetBackgroundLearning,
+} from "./gap";
+import { searchKnowledgeRows, upsertKnowledge, isKnowledgeStoreAvailable, type KnowledgeRow } from "./db";
 import { searchWikipedia, searchStackExchange } from "./external";
 
 const mockSearchRows = vi.mocked(searchKnowledgeRows);
 const mockUpsert = vi.mocked(upsertKnowledge);
+const mockAvailable = vi.mocked(isKnowledgeStoreAvailable);
 const mockWiki = vi.mocked(searchWikipedia);
 const mockStack = vi.mocked(searchStackExchange);
 
@@ -47,9 +55,11 @@ const FIVE_COVERING = Array.from({ length: 5 }, (_, i) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetBackgroundLearning();
   mockWiki.mockResolvedValue([]);
   mockStack.mockResolvedValue([]);
   mockUpsert.mockResolvedValue(0);
+  mockAvailable.mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -153,5 +163,34 @@ describe("ensureTopicKnowledge", () => {
     const report = await ensureTopicKnowledge("topic that stays uncovered");
     expect(report.rounds).toBe(2);
     expect(report.loopRan).toBe(true);
+  });
+});
+
+describe("maybeLearnInBackground", () => {
+  it("runs the research loop for an uncovered topic when the store is available", async () => {
+    mockSearchRows.mockResolvedValue([]);
+    await maybeLearnInBackground("brand new topic material");
+    expect(mockWiki).toHaveBeenCalled();
+  });
+
+  it("skips entirely when the knowledge store is unavailable", async () => {
+    mockAvailable.mockResolvedValue(false);
+    mockSearchRows.mockResolvedValue([]);
+    await maybeLearnInBackground("another new topic");
+    expect(mockWiki).not.toHaveBeenCalled();
+  });
+
+  it("learns each topic at most once per process", async () => {
+    mockSearchRows.mockResolvedValue([]);
+    await maybeLearnInBackground("repeated topic here");
+    const callsAfterFirst = mockWiki.mock.calls.length;
+    await maybeLearnInBackground("repeated topic here");
+    expect(mockWiki.mock.calls.length).toBe(callsAfterFirst);
+  });
+
+  it("never throws even when learning fails", async () => {
+    mockSearchRows.mockResolvedValue([]);
+    mockWiki.mockRejectedValue(new Error("boom"));
+    await expect(maybeLearnInBackground("failing topic lookup")).resolves.toBeUndefined();
   });
 });

@@ -13,7 +13,7 @@
  *   hand-verified code solutions for its Practice/Answer slides.
  */
 
-import { significantWords } from "@/lib/embedded/scaffold";
+import { significantWords, splitSentences } from "@/lib/embedded/scaffold";
 import { CASE_STUDIES, type CaseStudyEntry } from "./case-studies";
 import { PRACTICE_PROBLEMS, type PracticeProblemEntry } from "./practice-problems";
 import { searchWikipedia, searchStackExchange, type ExternalResult } from "./external";
@@ -198,6 +198,51 @@ export async function findCaseStudies(topic: string, limit = 1): Promise<CaseStu
     if (mapped.length > 0) return mapped;
   }
   return searchCurated(topic, { kind: "case_study", limit }) as CaseStudyEntry[];
+}
+
+/** What a deck's Case Study slide needs, whichever layer supplied it. */
+export interface CaseStudyMaterial {
+  title: string;
+  bullets: string[];
+  url?: string;
+}
+
+/**
+ * Turn one stored case-study row into slide material. Fully-shaped (curated)
+ * rows keep their two factual bullets plus the lesson connection; rows learned
+ * by the research loop use the first sentences of their extract plus a source
+ * attribution, so live-web knowledge is always presented with its provenance.
+ */
+export function caseStudyMaterialFromRow(row: KnowledgeRow): CaseStudyMaterial | null {
+  if (row.kind !== "case_study") return null;
+  const strict = rowToCaseStudy(row);
+  if (strict) {
+    return { title: strict.title, bullets: [...strict.summary, strict.lesson] };
+  }
+  const sentences = splitSentences(row.summary).slice(0, 2);
+  if (sentences.length === 0) return null;
+  const bullets = [...sentences];
+  if (row.url) bullets.push(`Read more: ${row.url}`);
+  return { title: row.title, bullets: bullets.slice(0, 3), ...(row.url ? { url: row.url } : {}) };
+}
+
+/**
+ * Case-study material for a deck, database-first: the best stored row that can
+ * make a slide (curated shape or learned extract), falling back to the in-repo
+ * curated entries. No external web calls.
+ */
+export async function findCaseStudyMaterial(topic: string): Promise<CaseStudyMaterial | null> {
+  const rows = await searchKnowledgeRows(topic, { kind: "case_study", limit: 5 });
+  if (rows) {
+    for (const row of rows) {
+      const material = caseStudyMaterialFromRow(row);
+      if (material) return material;
+    }
+  }
+  const curated = searchCurated(topic, { kind: "case_study", limit: 1 }) as CaseStudyEntry[];
+  return curated[0]
+    ? { title: curated[0].title, bullets: [...curated[0].summary, curated[0].lesson] }
+    : null;
 }
 
 /**

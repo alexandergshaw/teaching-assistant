@@ -17,7 +17,13 @@
 
 import { significantWords } from "@/lib/embedded/scaffold";
 import { scoreFields } from "./scoring";
-import { searchKnowledgeRows, upsertKnowledge, type KnowledgeInsert, type KnowledgeRow } from "./db";
+import {
+  isKnowledgeStoreAvailable,
+  searchKnowledgeRows,
+  upsertKnowledge,
+  type KnowledgeInsert,
+  type KnowledgeRow,
+} from "./db";
 import { searchWikipedia, searchStackExchange, type ExternalResult } from "./external";
 
 /** How many matching entries count as "deep enough" coverage of a topic. */
@@ -167,4 +173,35 @@ export async function ensureTopicKnowledge(topic: string): Promise<ResearchLoopR
     return { before, after: before, loopRan: false, rounds: 0, stored: 0 };
   }
   return runResearchLoop(topic, before);
+}
+
+// Topics this process has already scheduled learning for, so repeated deck
+// generations on the same subject don't re-run the loop.
+const learnedTopicKeys = new Set<string>();
+const MAX_TRACKED_TOPICS = 200;
+
+/** Test hook: forget which topics this process has already studied. */
+export function resetBackgroundLearning(): void {
+  learnedTopicKeys.clear();
+}
+
+/**
+ * Usage-driven learning: called (fire-and-forget) by content generators with
+ * the topic they are producing material for. When the knowledge store is
+ * available and the topic's gap is above the threshold, the research loop runs
+ * so FUTURE requests on this topic are richer. The caller never waits on this
+ * and its output is never affected by it; errors are swallowed.
+ */
+export async function maybeLearnInBackground(topic: string): Promise<void> {
+  const key = significantWords(topic, 3).sort().join("|");
+  if (!key || learnedTopicKeys.has(key)) return;
+  if (learnedTopicKeys.size >= MAX_TRACKED_TOPICS) learnedTopicKeys.clear();
+  learnedTopicKeys.add(key);
+
+  try {
+    if (!(await isKnowledgeStoreAvailable())) return;
+    await ensureTopicKnowledge(topic);
+  } catch {
+    // Background learning must never affect the caller.
+  }
 }

@@ -1,5 +1,12 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { research, findCaseStudies, findPracticeProblems } from "./index";
+import {
+  research,
+  findCaseStudies,
+  findPracticeProblems,
+  findCaseStudyMaterial,
+  caseStudyMaterialFromRow,
+} from "./index";
+import type { KnowledgeRow } from "./db";
 import { CASE_STUDIES } from "./case-studies";
 import { PRACTICE_PROBLEMS } from "./practice-problems";
 
@@ -130,6 +137,73 @@ describe("knowledge lookups (database-first, in-repo fallback)", () => {
     expect((await findCaseStudies("integer overflow", 2)).map((r) => r.id)).toContain("gangnam-style-counter");
     expect((await findPracticeProblems("loops", 1))[0].topics.join(" ")).toContain("loops");
     expect(await findCaseStudies("medieval poetry appreciation", 2)).toEqual([]);
+  });
+});
+
+// ── Case-study slide material ────────────────────────────────────────────────
+
+function learnedRow(overrides: Partial<KnowledgeRow>): KnowledgeRow {
+  return {
+    id: "wikipedia:x",
+    kind: "case_study",
+    source: "wikipedia",
+    title: "Integer overflow",
+    topics: ["integers", "overflow"],
+    summary: "An integer overflow occurs when a value exceeds its type. It wraps or saturates. More detail here.",
+    lesson: null,
+    organization: null,
+    year: null,
+    language: null,
+    difficulty: null,
+    prompt: null,
+    example_code: null,
+    solution_code: null,
+    url: "https://en.wikipedia.org/wiki/Integer_overflow",
+    verified: false,
+    created_at: "",
+    updated_at: "",
+    ...overrides,
+  };
+}
+
+describe("caseStudyMaterialFromRow", () => {
+  it("uses extract sentences plus a source attribution for learned rows", () => {
+    const material = caseStudyMaterialFromRow(learnedRow({}));
+    expect(material).not.toBeNull();
+    expect(material!.bullets).toHaveLength(3);
+    expect(material!.bullets[2]).toBe("Read more: https://en.wikipedia.org/wiki/Integer_overflow");
+    expect(material!.url).toContain("wikipedia.org");
+  });
+
+  it("returns null for rows with nothing usable", () => {
+    expect(caseStudyMaterialFromRow(learnedRow({ summary: "" }))).toBeNull();
+    expect(caseStudyMaterialFromRow(learnedRow({ kind: "reference" }))).toBeNull();
+  });
+
+  it("keeps the curated shape (summary bullets + lesson) when present", () => {
+    const material = caseStudyMaterialFromRow(
+      learnedRow({
+        source: "curated",
+        summary: "First fact.\nSecond fact.",
+        lesson: "The lesson.",
+        organization: "Org",
+        year: 2001,
+        verified: true,
+      })
+    );
+    expect(material!.bullets).toEqual(["First fact.", "Second fact.", "The lesson."]);
+  });
+});
+
+describe("findCaseStudyMaterial (fallback path)", () => {
+  it("serves curated material when the database is unavailable", async () => {
+    const material = await findCaseStudyMaterial("integer overflow and data types");
+    expect(material).not.toBeNull();
+    expect(material!.bullets.length).toBe(3);
+  });
+
+  it("returns null for an off-topic request", async () => {
+    expect(await findCaseStudyMaterial("medieval poetry appreciation")).toBeNull();
   });
 });
 

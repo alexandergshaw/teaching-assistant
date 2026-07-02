@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { scaffoldLessonPlan, scaffoldExamples } from "./deck";
 
 describe("scaffoldLessonPlan", () => {
-  it("builds a title slide, a slide per objective, and a summary for topics with no knowledge matches", () => {
-    const deck = scaffoldLessonPlan("- Watercolor blending\n- Brush care\n- Paper selection");
+  it("builds a title slide, a slide per objective, and a summary for topics with no knowledge matches", async () => {
+    const deck = await scaffoldLessonPlan("- Watercolor blending\n- Brush care\n- Paper selection");
     expect(deck.slides.length).toBe(5); // title + 3 concepts + summary
     expect(deck.slides[0].title).toBe(deck.presentationTitle);
     expect(deck.slides[deck.slides.length - 1].title).toBe("Summary");
@@ -13,16 +13,16 @@ describe("scaffoldLessonPlan", () => {
     }
   });
 
-  it("inserts a real case study as the second slide when the topic matches", () => {
-    const deck = scaffoldLessonPlan("- Integer overflow and data types");
+  it("inserts a real case study as the second slide when the topic matches", async () => {
+    const deck = await scaffoldLessonPlan("- Integer overflow and data types");
     const caseStudy = deck.slides[1];
     expect(caseStudy.title).toMatch(/^Case Study: /);
     expect(caseStudy.bullets.length).toBe(3);
     expect(caseStudy.code).toBeUndefined();
   });
 
-  it("adds the full Example/Walkthrough/Practice/Answer sequence from a curated problem", () => {
-    const deck = scaffoldLessonPlan("- Recursion");
+  it("adds the full Example/Walkthrough/Practice/Answer sequence from a curated problem", async () => {
+    const deck = await scaffoldLessonPlan("- Recursion");
     const titles = deck.slides.map((s) => s.title);
     const example = deck.slides.find((s) => s.title.startsWith("Example:"));
     const walkthrough = deck.slides.find((s) => s.title.startsWith("Walkthrough:"));
@@ -37,19 +37,19 @@ describe("scaffoldLessonPlan", () => {
     expect(practice?.code).not.toContain("def factorial(");
   });
 
-  it("caps concept slides at eight", () => {
+  it("caps concept slides at eight", async () => {
     const objectives = Array.from({ length: 15 }, (_, i) => `- Objective ${i + 1}`).join("\n");
-    const deck = scaffoldLessonPlan(objectives);
+    const deck = await scaffoldLessonPlan(objectives);
     // title + 8 concepts + summary (no knowledge matches for generic objectives)
     expect(deck.slides.length).toBe(10);
   });
 
-  it("keeps producing a deck when objectives are empty", () => {
-    const deck = scaffoldLessonPlan("");
+  it("keeps producing a deck when objectives are empty", async () => {
+    const deck = await scaffoldLessonPlan("");
     expect(deck.slides.length).toBeGreaterThan(0);
   });
 
-  it("prefers real code blocks from the material for Example/Walkthrough slides", () => {
+  it("prefers real code blocks from the material for Example/Walkthrough slides", async () => {
     const context = [
       "Recursion is when a function calls itself to solve a smaller version of the problem.",
       "```python",
@@ -57,7 +57,7 @@ describe("scaffoldLessonPlan", () => {
       "    return 1 if n <= 1 else n * factorial(n - 1)",
       "```",
     ].join("\n");
-    const deck = scaffoldLessonPlan("- Recursion", context);
+    const deck = await scaffoldLessonPlan("- Recursion", context);
     const example = deck.slides.find((s) => s.title.startsWith("Example:"));
     const walkthrough = deck.slides.find((s) => s.title.startsWith("Walkthrough:"));
     expect(example?.code).toContain("def factorial");
@@ -66,8 +66,8 @@ describe("scaffoldLessonPlan", () => {
     expect(walkthrough?.code).toBe(example?.code);
   });
 
-  it("uses a definition from the source as the concept slide's first bullet", () => {
-    const deck = scaffoldLessonPlan(
+  it("uses a definition from the source as the concept slide's first bullet", async () => {
+    const deck = await scaffoldLessonPlan(
       "- Recursion",
       "Recursion is when a function calls itself to solve a smaller problem."
     );
@@ -79,27 +79,27 @@ describe("scaffoldLessonPlan", () => {
 });
 
 describe("scaffoldExamples", () => {
-  it("produces two examples per concept", () => {
-    const r = scaffoldExamples(["Binary Search", "Hash Tables"], "data structures in python");
+  it("produces two examples per concept", async () => {
+    const r = await scaffoldExamples(["Binary Search", "Hash Tables"], "data structures in python");
     expect(r.examples.length).toBe(4);
     expect(r.lessonType).toBe("programming");
     expect(r.examples.every((e) => e.language === "python")).toBe(true);
   });
 
-  it("detects a math lesson and omits a language", () => {
-    const r = scaffoldExamples(["Derivatives"], "calculus: compute the derivative of a polynomial");
+  it("detects a math lesson and omits a language", async () => {
+    const r = await scaffoldExamples(["Derivatives"], "calculus: compute the derivative of a polynomial");
     expect(r.lessonType).toBe("math");
     expect(r.examples[0].language).toBeUndefined();
     expect(r.examples[0].content.toLowerCase()).toContain("problem");
   });
 
-  it("returns no examples for no concepts", () => {
-    expect(scaffoldExamples([], "anything").examples).toEqual([]);
+  it("returns no examples for no concepts", async () => {
+    expect((await scaffoldExamples([], "anything")).examples).toEqual([]);
   });
 
-  it("fills slots with real material: source code first, curated problem second", () => {
+  it("fills slots with real material: source code first, curated problem second", async () => {
     const text = "Learn python loops.\n```python\nfor i in range(3):\n    print(i)\n```";
-    const r = scaffoldExamples(["Loops"], text);
+    const r = await scaffoldExamples(["Loops"], text);
     // First example: the real code block from the material.
     expect(r.examples[0].content).toContain("for i in range(3)");
     expect(r.examples[0].language).toBe("python");
@@ -108,8 +108,8 @@ describe("scaffoldExamples", () => {
     expect(r.examples[1].content).not.toContain("Replace this stub");
   });
 
-  it("uses a curated problem for the first slot when the material has no code", () => {
-    const r = scaffoldExamples(["Recursion"], "an introductory python lesson on recursion");
+  it("uses a curated problem for the first slot when the material has no code", async () => {
+    const r = await scaffoldExamples(["Recursion"], "an introductory python lesson on recursion");
     expect(r.examples[0].explanation).toContain("Practice problem:");
     expect(r.examples[0].content).toContain("def ");
     // The second slot falls back to a clearly-marked stub.

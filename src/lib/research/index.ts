@@ -182,12 +182,38 @@ export async function research(topic: string, options: ResearchOptions = {}): Pr
   return [...external, ...stored].slice(0, limit);
 }
 
-/** The most relevant curated case studies (sync, offline; used by the embedded engine). */
-export function findCaseStudies(topic: string, limit = 1): CaseStudyEntry[] {
+/**
+ * The most relevant case studies for a topic, database-first: the stored
+ * knowledge base answers when reachable (so decks benefit from everything the
+ * research loop has learned), the in-repo curated entries otherwise. Only rows
+ * with the full case-study shape are returned. No external web calls.
+ */
+export async function findCaseStudies(topic: string, limit = 1): Promise<CaseStudyEntry[]> {
+  const rows = await searchKnowledgeRows(topic, { kind: "case_study", limit: limit + 4 });
+  if (rows) {
+    const mapped = rows
+      .map(rowToCaseStudy)
+      .filter((entry): entry is CaseStudyEntry => entry !== null)
+      .slice(0, limit);
+    if (mapped.length > 0) return mapped;
+  }
   return searchCurated(topic, { kind: "case_study", limit }) as CaseStudyEntry[];
 }
 
-/** The most relevant curated practice problems (sync, offline; used by the embedded engine). */
-export function findPracticeProblems(topic: string, limit = 1): PracticeProblemEntry[] {
+/**
+ * The most relevant practice problems for a topic, database-first with the
+ * in-repo curated entries as fallback. Only verified rows with the complete
+ * example/prompt/solution triple are returned, so Practice/Answer material is
+ * always hand-checked. No external web calls.
+ */
+export async function findPracticeProblems(topic: string, limit = 1): Promise<PracticeProblemEntry[]> {
+  const rows = await searchKnowledgeRows(topic, { kind: "practice_problem", limit: limit + 4 });
+  if (rows) {
+    const mapped = rows
+      .map(rowToPracticeProblem)
+      .filter((entry): entry is PracticeProblemEntry => entry !== null)
+      .slice(0, limit);
+    if (mapped.length > 0) return mapped;
+  }
   return searchCurated(topic, { kind: "practice_problem", limit }) as PracticeProblemEntry[];
 }

@@ -115,21 +115,21 @@ describe("research (external-first)", () => {
 
 // ── Curated sync lookups (used by the embedded engine; never touch the network) ──
 
-describe("curated lookups", () => {
-  it("findCaseStudies and findPracticeProblems never call fetch", () => {
+describe("knowledge lookups (database-first, in-repo fallback)", () => {
+  it("findCaseStudies and findPracticeProblems never call fetch", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    const studies = findCaseStudies("integer overflow and data types", 2);
-    const problems = findPracticeProblems("loops and iteration", 2);
+    const studies = await findCaseStudies("integer overflow and data types", 2);
+    const problems = await findPracticeProblems("loops and iteration", 2);
     expect(studies.length).toBeGreaterThan(0);
     expect(problems.length).toBeGreaterThan(0);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("returns topically relevant entries and nothing for off-topic queries", () => {
-    expect(findCaseStudies("integer overflow", 2).map((r) => r.id)).toContain("gangnam-style-counter");
-    expect(findPracticeProblems("loops", 1)[0].topics.join(" ")).toContain("loops");
-    expect(findCaseStudies("medieval poetry appreciation", 2)).toEqual([]);
+  it("returns topically relevant entries and nothing for off-topic queries", async () => {
+    expect((await findCaseStudies("integer overflow", 2)).map((r) => r.id)).toContain("gangnam-style-counter");
+    expect((await findPracticeProblems("loops", 1))[0].topics.join(" ")).toContain("loops");
+    expect(await findCaseStudies("medieval poetry appreciation", 2)).toEqual([]);
   });
 });
 

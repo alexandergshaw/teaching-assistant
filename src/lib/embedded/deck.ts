@@ -111,7 +111,7 @@ function practiceSlidePair(
  * Walkthrough pairs showing real code, and Practice/Answer pairs drawn from the
  * curated practice problems, then a summary.
  */
-export function scaffoldLessonPlan(objectives: string, context = ""): DeckScaffold {
+export async function scaffoldLessonPlan(objectives: string, context = ""): Promise<DeckScaffold> {
   const source = `${objectives}\n${context}`;
   const presentationTitle = deriveTitle(objectives, context, "Lesson Plan");
   const bullets = toBullets(objectives);
@@ -126,7 +126,7 @@ export function scaffoldLessonPlan(objectives: string, context = ""): DeckScaffo
 
   // A real, documented case study as the second slide, when one matches the
   // topic (the LLM contract's "Case Study:" slide). Off-topic decks get none.
-  const caseStudy = findCaseStudies(source, 1)[0];
+  const caseStudy = (await findCaseStudies(source, 1))[0];
   const caseStudySlide: SlideScaffold | null = caseStudy
     ? {
         title: `Case Study: ${caseStudy.title}`,
@@ -165,7 +165,7 @@ export function scaffoldLessonPlan(objectives: string, context = ""): DeckScaffo
 
     // Prefer real code from the course material for the Example/Walkthrough
     // pair; otherwise fall back to a curated problem's worked example.
-    const problem = findPracticeProblems(phrase, 3).find((p) => !usedProblems.has(p.id));
+    const problem = (await findPracticeProblems(phrase, 3)).find((p) => !usedProblems.has(p.id));
     const sourceBlock = blockIndex < codeBlocks.length ? codeBlocks[blockIndex] : null;
 
     if (sourceBlock) {
@@ -236,7 +236,7 @@ function exampleStub(lessonType: LessonType, concept: string, language: string):
  * library; only when neither exists does a slot fall back to a clearly-marked
  * placeholder, since deterministic templating cannot invent correct solutions.
  */
-export function scaffoldExamples(concepts: string[], text: string): ExamplesScaffold {
+export async function scaffoldExamples(concepts: string[], text: string): Promise<ExamplesScaffold> {
   const cleanedConcepts = concepts.map((c) => c.trim()).filter(Boolean);
   const lessonType = detectLessonType(`${text}\n${cleanedConcepts.join("\n")}`);
   const language = detectLanguage(`${text}\n${cleanedConcepts.join("\n")}`);
@@ -261,7 +261,7 @@ export function scaffoldExamples(concepts: string[], text: string): ExamplesScaf
       });
     }
 
-    const problem = findPracticeProblems(concept, 3).find((p) => !usedProblems.has(p.id));
+    const problem = (await findPracticeProblems(concept, 3)).find((p) => !usedProblems.has(p.id));
     if (problem) {
       usedProblems.add(problem.id);
       candidates.push({

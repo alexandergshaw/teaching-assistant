@@ -61,6 +61,13 @@ function pastedMaterial(history: ChatTurn[]): string {
     .join("\n\n");
 }
 
+export interface RouteOptions {
+  /** Text the surface already has in view (e.g. the user's highlighted
+   *  selection). Treated as primary material: Q&A and quizzes read it even when
+   *  it is short, since the user deliberately pointed at it. */
+  contextText?: string;
+}
+
 function renderPracticeProblems(problems: Awaited<ReturnType<typeof findPracticeProblems>>): string {
   return problems
     .map((p) =>
@@ -79,10 +86,15 @@ function renderPracticeProblems(problems: Awaited<ReturnType<typeof findPractice
 }
 
 /** Classify a freeform request and dispatch it to the engine's capabilities. */
-export async function routeRequest(message: string, history: ChatTurn[] = []): Promise<RoutedReply> {
+export async function routeRequest(
+  message: string,
+  history: ChatTurn[] = [],
+  options: RouteOptions = {}
+): Promise<RoutedReply> {
   const trimmed = message.trim();
   if (!trimmed) return { intent: "guidance", reply: GUIDANCE_REPLY };
-  const corpus = pastedMaterial(history);
+  const context = (options.contextText ?? "").trim();
+  const corpus = [context, pastedMaterial(history)].filter(Boolean).join("\n\n");
 
   if (IS_ANNOUNCEMENT.test(trimmed)) {
     const content = topicOf(trimmed, /\bannouncements?\b/);
@@ -160,8 +172,9 @@ export async function routeRequest(message: string, history: ChatTurn[] = []): P
 
   // Definition questions: the pasted material answers first (inside the QA path
   // below), the glossary second — checked here so a define question without
-  // pasted material still gets the instructor's own definition.
-  const hasCorpus = corpus.trim().split(/\s+/).filter(Boolean).length >= 20;
+  // pasted material still gets the instructor's own definition. Explicit
+  // context (a highlighted selection) counts as material at any length.
+  const hasCorpus = context.length > 0 || corpus.trim().split(/\s+/).filter(Boolean).length >= 20;
   if (DEFINE_INTENT.test(trimmed) && !hasCorpus) {
     const fromGlossary = await answerFromGlossary(trimmed);
     if (fromGlossary) return { intent: "define", reply: fromGlossary };

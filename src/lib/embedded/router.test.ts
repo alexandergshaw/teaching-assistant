@@ -98,3 +98,31 @@ describe("routeRequest intents", () => {
     expect(r.reply).toBe(GUIDANCE_REPLY);
   });
 });
+
+describe("routeRequest with explicit context (selection chat)", () => {
+  it("answers questions about a short selection, no 20-word minimum", async () => {
+    const r = await routeRequest("when is the exam?", [], {
+      contextText: "The midterm exam is on October 12.",
+    });
+    expect(r.intent).toBe("qa");
+    expect(r.reply).toContain("October 12");
+  });
+
+  it("quizzes over the selection when it carries enough facts", async () => {
+    const context =
+      "Recursion is when a function calls itself to solve a smaller version of the problem. " +
+      "A base case is the condition that stops the recursion. " +
+      "A stack frame is the memory allocated for one function call.";
+    const r = await routeRequest("quiz me on this", [], { contextText: context });
+    expect(r.intent).toBe("quiz");
+    expect(r.reply).toContain("Answer key:");
+  });
+
+  it("still dispatches non-QA intents while a selection is present", async () => {
+    const r = await routeRequest("give me practice problems on loops", [], {
+      contextText: "Some highlighted sentence about the course.",
+    });
+    expect(r.intent).toBe("practice_problems");
+    expect(r.reply).toContain("Solution:");
+  });
+});

@@ -17,14 +17,16 @@ import { significantWords } from "@/lib/embedded/scaffold";
 import { CASE_STUDIES, type CaseStudyEntry } from "./case-studies";
 import { PRACTICE_PROBLEMS, type PracticeProblemEntry } from "./practice-problems";
 import { searchWikipedia, searchStackExchange, type ExternalResult } from "./external";
+import { scoreFields } from "./scoring";
+import { searchKnowledgeRows, rowToCaseStudy, rowToPracticeProblem, type KnowledgeRow } from "./db";
 
 export type { CaseStudyEntry } from "./case-studies";
 export type { PracticeProblemEntry } from "./practice-problems";
 export type { ExternalResult } from "./external";
 
 export type KnowledgeEntry = CaseStudyEntry | PracticeProblemEntry;
-export type KnowledgeKind = KnowledgeEntry["kind"];
-export type ResearchSource = "wikipedia" | "stackexchange" | "curated";
+export type KnowledgeKind = KnowledgeEntry["kind"] | "reference";
+export type ResearchSource = "wikipedia" | "stackexchange" | "curated" | "manual";
 
 /** One normalized research result, whichever source produced it. */
 export interface ResearchResult {
@@ -41,7 +43,7 @@ export interface ResearchResult {
 }
 
 export interface ResearchOptions {
-  /** Restrict results to one kind; both kinds are searched when omitted. */
+  /** Restrict results to one kind; every kind is searched when omitted. */
   kind?: KnowledgeKind;
   /** Maximum results (default 3). */
   limit?: number;
@@ -50,54 +52,67 @@ export interface ResearchOptions {
 const ALL_ENTRIES: KnowledgeEntry[] = [...CASE_STUDIES, ...PRACTICE_PROBLEMS];
 
 /**
- * Score one entry against the query terms: topic-tag matches count triple,
- * title/organization matches count single. A tag matches when it contains the
- * term ("for loop" matches "loop") or when the term is a plural-ish form of the
- * tag (the term starts with the tag and extends it by at most two characters,
- * so "loops" matches the tag "loop" but "selection" does not match "select").
- * Tags shorter than four characters ("c", "sql", "dns") require an exact term
- * match so they never match by accident inside longer words.
- */
-function scoreEntry(entry: KnowledgeEntry, terms: string[]): number {
-  const topicsLower = entry.topics.map((t) => t.toLowerCase());
-  const titleLower =
-    `${entry.title} ${entry.kind === "case_study" ? entry.organization : entry.language}`.toLowerCase();
-
-  let score = 0;
-  for (const term of terms) {
-    const topicHit = topicsLower.some((topic) => {
-      if (topic.length < 4) return topic === term;
-      if (topic.includes(term)) return true;
-      return term.startsWith(topic) && term.length - topic.length <= 2;
-    });
-    if (topicHit) {
-      score += 3;
-    }
-    if (titleLower.includes(term)) {
-      score += 1;
-    }
-  }
-  return score;
-}
-
-/**
- * Retrieve the most relevant curated entries for a topic. Only entries with a
- * positive match score are returned — an off-topic query returns an empty list
- * rather than padding with unrelated material. Deterministic: ties break by id.
+ * Retrieve the most relevant in-repo curated entries for a topic. Only entries
+ * with a positive match score are returned — an off-topic query returns an
+ * empty list rather than padding with unrelated material. Deterministic: ties
+ * break by id. This is the offline fallback behind the database-backed search.
  */
 function searchCurated(topic: string, options: ResearchOptions = {}): KnowledgeEntry[] {
   const limit = Math.max(1, Math.min(options.limit ?? 3, 20));
   const terms = significantWords(topic, 3);
   if (terms.length === 0) return [];
 
-  const pool = options.kind ? ALL_ENTRIES.filter((e) => e.kind === options.kind) : ALL_ENTRIES;
+  const pool =
+    options.kind && options.kind !== "reference"
+      ? ALL_ENTRIES.filter((e) => e.kind === options.kind)
+      : options.kind === "reference"
+        ? []
+        : ALL_ENTRIES;
 
   return pool
-    .map((entry) => ({ entry, score: scoreEntry(entry, terms) }))
+    .map((entry) => ({
+      entry,
+      score: scoreFields(
+        {
+          topics: entry.topics,
+          haystack: `${entry.title} ${entry.kind === "case_study" ? entry.organization : entry.language}`,
+        },
+        terms
+      ),
+    }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || a.entry.id.localeCompare(b.entry.id))
     .slice(0, limit)
     .map((item) => item.entry);
+}
+
+function rowToResult(row: KnowledgeRow): ResearchResult {
+  const entry = rowToCaseStudy(row) ?? rowToPracticeProblem(row) ?? undefined;
+  return {
+    kind: row.kind,
+    source: row.source,
+    id: row.id,
+    title: row.title,
+    summary: row.summary.replace(/\n/g, " "),
+    ...(row.url ? { url: row.url } : {}),
+    ...(entry ? { entry } : {}),
+  };
+}
+
+/**
+ * Search the stored knowledge base (database-first). When the database is
+ * unavailable or has no match, the in-repo curated entries answer instead, so
+ * this always resolves and never throws.
+ */
+async function searchKnowledgeBase(topic: string, options: ResearchOptions = {}): Promise<ResearchResult[]> {
+  const rows = await searchKnowledgeRows(topic, {
+    kind: options.kind as KnowledgeRow["kind"] | undefined,
+    limit: options.limit,
+  });
+  if (rows && rows.length > 0) {
+    return rows.map(rowToResult);
+  }
+  return searchCurated(topic, options).map(curatedToResult);
 }
 
 function curatedToResult(entry: KnowledgeEntry): ResearchResult {
@@ -155,15 +170,16 @@ export async function research(topic: string, options: ResearchOptions = {}): Pr
     stack.map((r) => externalToResult(r, "practice_problem"))
   );
 
-  // Curated entries supplement the external results (and fully replace them
-  // when the network yields nothing). Dedupe on normalized title so a curated
-  // entry does not repeat an external page about the same thing.
+  // Stored knowledge supplements the external results (and fully replaces them
+  // when the network yields nothing). Dedupe on id and normalized title so a
+  // stored copy of an external page does not repeat the live result.
   const seenTitles = new Set(external.map((r) => r.title.toLowerCase()));
-  const curated = searchCurated(topic, options)
-    .map(curatedToResult)
-    .filter((r) => !seenTitles.has(r.title.toLowerCase()));
+  const seenIds = new Set(external.map((r) => r.id));
+  const stored = (await searchKnowledgeBase(topic, options)).filter(
+    (r) => !seenTitles.has(r.title.toLowerCase()) && !seenIds.has(r.id)
+  );
 
-  return [...external, ...curated].slice(0, limit);
+  return [...external, ...stored].slice(0, limit);
 }
 
 /** The most relevant curated case studies (sync, offline; used by the embedded engine). */

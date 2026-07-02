@@ -105,6 +105,68 @@ export interface Database {
           scanned_at?: string;
         };
       };
+      knowledge_entries: {
+        Row: {
+          id: string;
+          kind: "case_study" | "practice_problem" | "reference";
+          source: "curated" | "wikipedia" | "stackexchange" | "manual";
+          title: string;
+          topics: string[];
+          summary: string;
+          lesson: string | null;
+          organization: string | null;
+          year: number | null;
+          language: string | null;
+          difficulty: string | null;
+          prompt: string | null;
+          example_code: string | null;
+          solution_code: string | null;
+          url: string | null;
+          verified: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          kind: "case_study" | "practice_problem" | "reference";
+          source?: "curated" | "wikipedia" | "stackexchange" | "manual";
+          title: string;
+          topics?: string[];
+          summary?: string;
+          lesson?: string | null;
+          organization?: string | null;
+          year?: number | null;
+          language?: string | null;
+          difficulty?: string | null;
+          prompt?: string | null;
+          example_code?: string | null;
+          solution_code?: string | null;
+          url?: string | null;
+          verified?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          kind?: "case_study" | "practice_problem" | "reference";
+          source?: "curated" | "wikipedia" | "stackexchange" | "manual";
+          title?: string;
+          topics?: string[];
+          summary?: string;
+          lesson?: string | null;
+          organization?: string | null;
+          year?: number | null;
+          language?: string | null;
+          difficulty?: string | null;
+          prompt?: string | null;
+          example_code?: string | null;
+          solution_code?: string | null;
+          url?: string | null;
+          verified?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       ai_chat_messages: {
         Row: {
           id: string;

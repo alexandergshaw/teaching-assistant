@@ -19,7 +19,9 @@ const MAX_TOPIC_CHARS = 2_000;
 export const runtime = "nodejs";
 
 function coerceKind(value: unknown): KnowledgeKind | undefined {
-  return value === "case_study" || value === "practice_problem" ? value : undefined;
+  return value === "case_study" || value === "practice_problem" || value === "reference"
+    ? value
+    : undefined;
 }
 
 export async function POST(req: NextRequest) {
@@ -51,7 +53,7 @@ export async function POST(req: NextRequest) {
     const kind = coerceKind(body.kind);
     if (body.kind !== undefined && !kind) {
       return NextResponse.json(
-        { error: "Invalid 'kind'. Use \"case_study\" or \"practice_problem\", or omit it." },
+        { error: "Invalid 'kind'. Use \"case_study\", \"practice_problem\", or \"reference\", or omit it." },
         { status: 400 }
       );
     }

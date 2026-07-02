@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { research, type KnowledgeKind } from "@/lib/research";
+import { ensureTopicKnowledge, gapThreshold } from "@/lib/research/gap";
 
 /**
  * Research API: returns the most useful knowledge for a topic area, pulling
@@ -63,8 +64,27 @@ export async function POST(req: NextRequest) {
         ? Math.floor(body.limit)
         : undefined;
 
+    // Measure the gap between what the app knows and the requested topic;
+    // above the threshold, the research loop retrieves and stores more
+    // knowledge before answering, so the response already benefits from it.
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const knowledge = await ensureTopicKnowledge(topic);
+
     const results = await research(topic, { kind, limit });
-    return NextResponse.json({ topic, count: results.length, results });
+    return NextResponse.json({
+      topic,
+      count: results.length,
+      results,
+      knowledge: {
+        coverage: round2(knowledge.before.coverage),
+        coverageAfter: round2(knowledge.after.coverage),
+        gap: round2(knowledge.before.gap),
+        threshold: gapThreshold(),
+        loopRan: knowledge.loopRan,
+        rounds: knowledge.rounds,
+        stored: knowledge.stored,
+      },
+    });
   } catch (err) {
     console.error("[research] Error:", err);
     const message = err instanceof Error ? err.message : "Research lookup failed.";

@@ -35,11 +35,14 @@ type ServiceClient = ReturnType<typeof import("@/lib/supabase/server").createSer
 interface KnowledgeTable {
   select(columns: string, options?: { count: "exact"; head: boolean }): KnowledgeQuery;
   upsert(rows: KnowledgeInsert[], options: { onConflict: string }): Promise<{ error: unknown }>;
+  update(values: Record<string, unknown>): { eq(column: string, value: string): Promise<{ error: unknown }> };
+  delete(): { eq(column: string, value: string): Promise<{ error: unknown }> };
 }
 
 interface KnowledgeQuery extends Promise<{ data: KnowledgeRow[] | null; error: unknown; count?: number | null }> {
-  eq(column: string, value: string): KnowledgeQuery;
+  eq(column: string, value: string | number | boolean): KnowledgeQuery;
   textSearch(column: string, query: string): KnowledgeQuery;
+  order(column: string, options: { ascending: boolean }): KnowledgeQuery;
   limit(n: number): KnowledgeQuery;
 }
 
@@ -274,4 +277,62 @@ export async function recordServed(ids: string[]): Promise<void> {
 /** The shared service client (null when unconfigured) for sibling data layers. */
 export function getDbClient(): Promise<ServiceClient | null> {
   return getClient();
+}
+
+// ── Owner curation ───────────────────────────────────────────────────────────
+
+/** Unverified entries awaiting review, newest first; null when the database is
+ *  unavailable. These are what the research loop has learned but no human has
+ *  checked — the raw material for promotion to deck-grade knowledge. */
+export async function listUnverifiedKnowledge(limit = 100): Promise<KnowledgeRow[] | null> {
+  const client = await getClient();
+  if (!client) return null;
+  try {
+    await ensureSeeded();
+    const { data, error } = await knowledgeTable(client)
+      .select("*")
+      .eq("verified", false)
+      .order("created_at", { ascending: false })
+      .limit(Math.max(1, Math.min(limit, 200)));
+    if (error || !data) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export interface KnowledgeReviewEdits {
+  /** The lesson connection a case study needs to become deck-grade. */
+  lesson?: string;
+  organization?: string;
+  year?: number;
+}
+
+/** Promote an entry to verified, applying the reviewer's edits. A case study
+ *  becomes deck-grade once it carries organization, year, and a lesson. */
+export async function verifyKnowledgeEntry(id: string, edits: KnowledgeReviewEdits = {}): Promise<boolean> {
+  const client = await getClient();
+  if (!client) return false;
+  try {
+    const values: Record<string, unknown> = { verified: true, updated_at: new Date().toISOString() };
+    if (edits.lesson?.trim()) values.lesson = edits.lesson.trim();
+    if (edits.organization?.trim()) values.organization = edits.organization.trim();
+    if (typeof edits.year === "number" && Number.isFinite(edits.year)) values.year = Math.floor(edits.year);
+    const { error } = await knowledgeTable(client).update(values).eq("id", id);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+/** Discard a learned entry the reviewer judged not worth keeping. */
+export async function deleteKnowledgeEntry(id: string): Promise<boolean> {
+  const client = await getClient();
+  if (!client) return false;
+  try {
+    const { error } = await knowledgeTable(client).delete().eq("id", id);
+    return !error;
+  } catch {
+    return false;
+  }
 }

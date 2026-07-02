@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { rowToCaseStudy, rowToPracticeProblem, searchKnowledgeRows, upsertKnowledge, type KnowledgeRow } from "./db";
+import {
+  rowToCaseStudy,
+  rowToPracticeProblem,
+  searchKnowledgeRows,
+  upsertKnowledge,
+  listUnverifiedKnowledge,
+  verifyKnowledgeEntry,
+  deleteKnowledgeEntry,
+  type KnowledgeRow,
+} from "./db";
 
 function row(overrides: Partial<KnowledgeRow>): KnowledgeRow {
   return {
@@ -64,5 +73,11 @@ describe("database unavailability (vitest blanks the Supabase env)", () => {
   it("reads return null and writes report zero, without throwing", async () => {
     expect(await searchKnowledgeRows("loops")).toBeNull();
     expect(await upsertKnowledge([{ id: "a", kind: "reference", title: "t" }])).toBe(0);
+  });
+
+  it("curation functions degrade the same way", async () => {
+    expect(await listUnverifiedKnowledge()).toBeNull();
+    expect(await verifyKnowledgeEntry("some-id", { lesson: "L" })).toBe(false);
+    expect(await deleteKnowledgeEntry("some-id")).toBe(false);
   });
 });

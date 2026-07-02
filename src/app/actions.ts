@@ -34,6 +34,12 @@ import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { copyedit } from "@/lib/embedded/scaffold";
 import { routeRequest } from "@/lib/embedded/router";
 import { rememberRubric } from "@/lib/research/rubric-bank";
+import {
+  listUnverifiedKnowledge,
+  verifyKnowledgeEntry,
+  deleteKnowledgeEntry,
+  type KnowledgeRow,
+} from "@/lib/research/db";
 import { applyTextRevision, applySlidesRevision, applyHtmlRevision } from "@/lib/embedded/revise";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
@@ -5578,5 +5584,42 @@ ${digest.text}`;
     return { outline, fullName: digest.fullName, fileCount: digest.fileCount, truncated: digest.truncated };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate the course." };
+  }
+}
+
+// ── Knowledge curation ───────────────────────────────────────────────────────
+
+/** Unverified research-loop entries awaiting the owner's review, newest first. */
+export async function listUnverifiedKnowledgeAction(): Promise<
+  { entries: KnowledgeRow[] } | { error: string }
+> {
+  try {
+    await requireOwner();
+    const entries = await listUnverifiedKnowledge(100);
+    if (entries === null) {
+      return { error: "The knowledge database isn't configured. Set the Supabase env vars and apply the migrations." };
+    }
+    return { entries };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load knowledge entries." };
+  }
+}
+
+/**
+ * Review one learned knowledge entry: verify (promote toward deck-grade,
+ * applying the reviewer's edits) or discard it.
+ */
+export async function reviewKnowledgeEntryAction(
+  id: string,
+  decision: "verify" | "discard",
+  edits?: { lesson?: string; organization?: string; year?: number }
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const ok =
+      decision === "verify" ? await verifyKnowledgeEntry(id, edits ?? {}) : await deleteKnowledgeEntry(id);
+    return ok ? { ok: true } : { error: "The update didn't apply. Check the knowledge database configuration." };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not review the entry." };
   }
 }

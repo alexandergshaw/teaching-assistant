@@ -249,6 +249,14 @@ function SettingsMenu() {
           </div>
           <InstitutionsSection open={open} />
           <Link
+            href="/knowledge"
+            className={styles.menuItem}
+            role="menuitem"
+            onClick={() => setOpen(false)}
+          >
+            Knowledge review
+          </Link>
+          <Link
             href="/account/integrations"
             className={styles.menuItem}
             role="menuitem"

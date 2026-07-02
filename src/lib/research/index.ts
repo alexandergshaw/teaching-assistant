@@ -1,24 +1,44 @@
 /**
- * The research library: deterministic knowledge retrieval over a curated,
- * factual knowledge base. Where an LLM recalls case studies and composes
- * practice problems from its training data, this ranks vetted entries by
- * topic-term overlap and serves them verbatim — so every fact, event, and code
- * solution returned was authored and checked by hand, and the same query always
- * returns the same results.
+ * The research library: returns the most useful knowledge for a topic area,
+ * pulling primarily from external sources — Wikipedia for case studies and
+ * background knowledge, Stack Overflow for the questions practitioners actually
+ * hit — with the curated in-repo knowledge base filling the remaining slots and
+ * serving as the offline fallback when external sources fail or return nothing.
  *
- * Used in-app to give the Embedded Deterministic Engine real case-study slides
- * and Practice/Answer material; exposed to other clients via POST /api/research.
+ * Two layers with different guarantees:
+ * - research() (async): external-first, used by POST /api/research. Live
+ *   results carry a source and URL; curated results carry the full vetted entry.
+ * - findCaseStudies()/findPracticeProblems() (sync): curated-only, used by the
+ *   Embedded Deterministic Engine, which promises no network calls and needs
+ *   hand-verified code solutions for its Practice/Answer slides.
  */
 
 import { significantWords } from "@/lib/embedded/scaffold";
 import { CASE_STUDIES, type CaseStudyEntry } from "./case-studies";
 import { PRACTICE_PROBLEMS, type PracticeProblemEntry } from "./practice-problems";
+import { searchWikipedia, searchStackExchange, type ExternalResult } from "./external";
 
 export type { CaseStudyEntry } from "./case-studies";
 export type { PracticeProblemEntry } from "./practice-problems";
+export type { ExternalResult } from "./external";
 
 export type KnowledgeEntry = CaseStudyEntry | PracticeProblemEntry;
 export type KnowledgeKind = KnowledgeEntry["kind"];
+export type ResearchSource = "wikipedia" | "stackexchange" | "curated";
+
+/** One normalized research result, whichever source produced it. */
+export interface ResearchResult {
+  kind: KnowledgeKind;
+  source: ResearchSource;
+  id: string;
+  title: string;
+  /** Prose summary: the page extract, question excerpt, or curated summary. */
+  summary: string;
+  /** Link to the external source; absent for curated entries. */
+  url?: string;
+  /** The full vetted entry (including verified code) for curated results. */
+  entry?: KnowledgeEntry;
+}
 
 export interface ResearchOptions {
   /** Restrict results to one kind; both kinds are searched when omitted. */
@@ -61,11 +81,11 @@ function scoreEntry(entry: KnowledgeEntry, terms: string[]): number {
 }
 
 /**
- * Retrieve the most relevant knowledge entries for a topic. Only entries with a
+ * Retrieve the most relevant curated entries for a topic. Only entries with a
  * positive match score are returned — an off-topic query returns an empty list
  * rather than padding with unrelated material. Deterministic: ties break by id.
  */
-export function research(topic: string, options: ResearchOptions = {}): KnowledgeEntry[] {
+function searchCurated(topic: string, options: ResearchOptions = {}): KnowledgeEntry[] {
   const limit = Math.max(1, Math.min(options.limit ?? 3, 20));
   const terms = significantWords(topic, 3);
   if (terms.length === 0) return [];
@@ -80,12 +100,78 @@ export function research(topic: string, options: ResearchOptions = {}): Knowledg
     .map((item) => item.entry);
 }
 
-/** The most relevant case studies for a topic (empty when nothing matches). */
-export function findCaseStudies(topic: string, limit = 1): CaseStudyEntry[] {
-  return research(topic, { kind: "case_study", limit }) as CaseStudyEntry[];
+function curatedToResult(entry: KnowledgeEntry): ResearchResult {
+  return {
+    kind: entry.kind,
+    source: "curated",
+    id: entry.id,
+    title: entry.title,
+    summary: entry.kind === "case_study" ? entry.summary.join(" ") : entry.prompt,
+    entry,
+  };
 }
 
-/** The most relevant practice problems for a topic (empty when nothing matches). */
+function externalToResult(result: ExternalResult, kind: KnowledgeKind): ResearchResult {
+  return {
+    kind,
+    source: result.source,
+    id: result.id,
+    title: result.title,
+    summary: result.summary,
+    url: result.url,
+  };
+}
+
+/** Alternate two lists (a0, b0, a1, b1, ...) so both kinds surface early. */
+function interleave<T>(a: T[], b: T[]): T[] {
+  const out: T[] = [];
+  const max = Math.max(a.length, b.length);
+  for (let i = 0; i < max; i += 1) {
+    if (i < a.length) out.push(a[i]);
+    if (i < b.length) out.push(b[i]);
+  }
+  return out;
+}
+
+/**
+ * Retrieve the most useful knowledge for a topic, external sources first:
+ * Wikipedia serves case studies / background knowledge, Stack Overflow serves
+ * practice-problem material. Curated entries fill any remaining slots and take
+ * over entirely when the external sources fail or return nothing, so the call
+ * always succeeds and never throws.
+ */
+export async function research(topic: string, options: ResearchOptions = {}): Promise<ResearchResult[]> {
+  const limit = Math.max(1, Math.min(options.limit ?? 3, 20));
+  const wantCaseStudies = !options.kind || options.kind === "case_study";
+  const wantPracticeProblems = !options.kind || options.kind === "practice_problem";
+
+  const [wiki, stack] = await Promise.all([
+    wantCaseStudies ? searchWikipedia(topic, limit) : Promise.resolve([]),
+    wantPracticeProblems ? searchStackExchange(topic, limit) : Promise.resolve([]),
+  ]);
+
+  const external = interleave(
+    wiki.map((r) => externalToResult(r, "case_study")),
+    stack.map((r) => externalToResult(r, "practice_problem"))
+  );
+
+  // Curated entries supplement the external results (and fully replace them
+  // when the network yields nothing). Dedupe on normalized title so a curated
+  // entry does not repeat an external page about the same thing.
+  const seenTitles = new Set(external.map((r) => r.title.toLowerCase()));
+  const curated = searchCurated(topic, options)
+    .map(curatedToResult)
+    .filter((r) => !seenTitles.has(r.title.toLowerCase()));
+
+  return [...external, ...curated].slice(0, limit);
+}
+
+/** The most relevant curated case studies (sync, offline; used by the embedded engine). */
+export function findCaseStudies(topic: string, limit = 1): CaseStudyEntry[] {
+  return searchCurated(topic, { kind: "case_study", limit }) as CaseStudyEntry[];
+}
+
+/** The most relevant curated practice problems (sync, offline; used by the embedded engine). */
 export function findPracticeProblems(topic: string, limit = 1): PracticeProblemEntry[] {
-  return research(topic, { kind: "practice_problem", limit }) as PracticeProblemEntry[];
+  return searchCurated(topic, { kind: "practice_problem", limit }) as PracticeProblemEntry[];
 }

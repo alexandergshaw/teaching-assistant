@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { research, type KnowledgeKind } from "@/lib/research";
 
 /**
- * Research API: returns the most useful curated knowledge for a topic area.
- * Deterministic retrieval over a vetted knowledge base (real case studies and
- * hand-authored practice problems) — no model call, no fabrication.
+ * Research API: returns the most useful knowledge for a topic area, pulling
+ * primarily from external sources (Wikipedia for case studies and background
+ * knowledge, Stack Overflow for practice-problem material), with the curated
+ * in-repo knowledge base filling remaining slots and serving as the offline
+ * fallback. No model call, no fabrication: external results link to their
+ * source, curated results carry the full vetted entry.
  *
  * POST { topic: string, kind?: "case_study" | "practice_problem", limit?: number }
- * -> { topic, count, results: KnowledgeEntry[] }
+ * -> { topic, count, results: ResearchResult[] }
  */
 
 // Hard cap on topic length; retrieval only needs a phrase, not a document.
@@ -58,7 +61,7 @@ export async function POST(req: NextRequest) {
         ? Math.floor(body.limit)
         : undefined;
 
-    const results = research(topic, { kind, limit });
+    const results = await research(topic, { kind, limit });
     return NextResponse.json({ topic, count: results.length, results });
   } catch (err) {
     console.error("[research] Error:", err);

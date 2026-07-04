@@ -60,7 +60,6 @@ import DocStructureEditor from "./DocStructureEditor";
 import type { RunSpan } from "@/lib/office-edit";
 import { spansEqual, spansToPlainText } from "./RichTextEditor";
 import { RichTextSectionEditor } from "./RichTextSectionEditor";
-import { useAccessibility } from "./AccessibilityProvider";
 import type {
   CanvasModule,
   CanvasModuleItem,
@@ -107,71 +106,12 @@ import {
   toLocalInput,
   base64ToBlobUrl,
   bestModuleIdFor,
-  a11yRefForItem,
   uploadFileToModule,
 } from "./content-tab/utils";
+import { ItemA11yBadge } from "./content-tab/ItemA11yBadge";
+import { PublishToggle } from "./content-tab/PublishToggle";
 
 
-// A small badge on a module item row showing its accessibility error/warning
-// tally; click opens the Accessibility Center. Renders nothing when clean or
-// not yet scanned (the TopBar pill shows overall scan progress).
-function ItemA11yBadge({ item }: { item: CanvasModuleItem }) {
-  const a11y = useAccessibility();
-  const ref = a11yRefForItem(item);
-  const scan = ref ? a11y.getItem(ref.type, ref.id) : undefined;
-  if (!scan) return null;
-  const issues = scan.errorCount + scan.warningCount;
-  if (issues === 0) return null;
-  const color = scan.errorCount > 0 ? "#dc2626" : "#d97706";
-  return (
-    <button
-      type="button"
-      onClick={() => a11y.setCenterOpen(true)}
-      title={`${issues} accessibility issue${issues === 1 ? "" : "s"} — open Accessibility Center`}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        height: 24,
-        padding: "0 7px",
-        borderRadius: 6,
-        border: `1px solid ${color}`,
-        background: "#fff",
-        color,
-        fontSize: "0.74rem",
-        fontWeight: 700,
-        lineHeight: 1,
-        cursor: "pointer",
-      }}
-    >
-      <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: color }} />
-      {issues}
-    </button>
-  );
-}
-
-// A subtle pill that shows (and toggles) the published state of a module or item.
-function PublishToggle({
-  published,
-  disabled,
-  onClick,
-}: {
-  published: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`${styles.ccPublish} ${published ? styles.ccPublishOn : styles.ccPublishOff}`}
-      onClick={onClick}
-      disabled={disabled}
-      title={published ? "Published — click to unpublish" : "Unpublished — click to publish"}
-    >
-      {published ? "Published" : "Unpublished"}
-    </button>
-  );
-}
 
 // ── Page editor modal ─────────────────────────────────────────────────────────
 

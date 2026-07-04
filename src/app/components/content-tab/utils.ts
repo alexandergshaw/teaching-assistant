@@ -1,9 +1,16 @@
 import type React from "react";
 import type { AccessibleItemType } from "@/lib/accessibility/types";
-import type { CanvasModule, CanvasModuleItem, CourseFile, FileUploadTicket } from "@/lib/canvas-modules";
+import type {
+  CanvasModule,
+  CanvasModuleItem,
+  CourseFile,
+  FileUploadTicket,
+  QuizQuestionInput,
+  QuizQuestionType,
+} from "@/lib/canvas-modules";
 import { requestFileUploadAction, addFileToModuleAction } from "../../actions";
 import { ROW_INTERACTIVE } from "./constants";
-import type { DuplicateGroup, SlideDeck } from "./types";
+import type { DuplicateGroup, EditableQuestion, EditCriterion, SlideDeck } from "./types";
 
 // Format a Canvas ISO timestamp for display; blank when absent.
 export function formatWhen(iso: string | null): string {
@@ -222,4 +229,73 @@ export function a11yRefForItem(item: CanvasModuleItem): { type: AccessibleItemTy
   if (item.type === "Quiz") return { type: "quiz", id: String(item.contentId) };
   if (item.type === "Discussion") return { type: "discussion", id: String(item.contentId) };
   return null;
+}
+
+// ── Quiz question helpers ─────────────────────────────────────────────────────
+
+let quizKeySeq = 0;
+export const nextQuizKey = () => `qq${++quizKeySeq}`;
+
+export function defaultQuizAnswers(type: QuizQuestionType): Array<{ text: string; correct: boolean }> {
+  if (type === "true_false_question") return [{ text: "True", correct: true }, { text: "False", correct: false }];
+  if (type === "multiple_choice_question") return [{ text: "", correct: true }, { text: "", correct: false }];
+  if (type === "short_answer_question") return [{ text: "", correct: true }];
+  return [];
+}
+
+// An editable draft question reduced to the shape Canvas accepts.
+export function quizQuestionToInput(q: EditableQuestion): QuizQuestionInput {
+  return {
+    name: q.name,
+    text: q.text,
+    type: q.type,
+    points: Number.isFinite(q.points) ? q.points : 0,
+    answers: q.answers,
+  };
+}
+
+// A blank question to seed the editors with.
+export function newDraftQuestion(): EditableQuestion {
+  return {
+    key: nextQuizKey(),
+    id: 0,
+    name: "",
+    text: "",
+    type: "multiple_choice_question",
+    points: 1,
+    answers: defaultQuizAnswers("multiple_choice_question"),
+  };
+}
+
+// ── Rubric criterion helpers ──────────────────────────────────────────────────
+
+let rubricKeySeq = 0;
+export const nextRubricKey = () => `rb${++rubricKeySeq}`;
+
+export function defaultCriterion(mode: "percent" | "points"): EditCriterion {
+  if (mode === "percent") {
+    // Five tiers at 100/75/50/25/0% of the criterion's percentage weight.
+    const base = 20;
+    return {
+      key: nextRubricKey(),
+      description: "",
+      points: base,
+      ratings: [100, 75, 50, 25, 0].map((pct) => ({
+        key: nextRubricKey(),
+        description: `${pct}%`,
+        longDescription: "",
+        points: Math.round((base * pct) / 100),
+      })),
+    };
+  }
+  return {
+    key: nextRubricKey(),
+    description: "",
+    points: 5,
+    ratings: [
+      { key: nextRubricKey(), description: "Full marks", longDescription: "", points: 5 },
+      { key: nextRubricKey(), description: "Partial", longDescription: "", points: 3 },
+      { key: nextRubricKey(), description: "No marks", longDescription: "", points: 0 },
+    ],
+  };
 }

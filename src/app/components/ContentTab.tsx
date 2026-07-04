@@ -48,7 +48,6 @@ import type {
   BulkKind,
   CanvasRubric,
   GradableKind,
-  QuizQuestionInput,
   QuizQuestionType,
   RubricCriterionInput,
 } from "@/lib/canvas-modules";
@@ -64,8 +63,10 @@ import {
   MAX_INDENT,
   DATED_TYPES,
   POINTS_EDITABLE,
+  QUIZ_TYPE_LABELS,
+  QUIZ_TYPES,
 } from "./content-tab/constants";
-import type { LoadState } from "./content-tab/types";
+import type { LoadState, EditableQuestion, EditRating, EditCriterion } from "./content-tab/types";
 import {
   itemKey,
   rowBlankClick,
@@ -75,6 +76,12 @@ import {
   toLocalInput,
   base64ToBlobUrl,
   uploadFileToModule,
+  nextQuizKey,
+  nextRubricKey,
+  defaultQuizAnswers,
+  quizQuestionToInput,
+  newDraftQuestion,
+  defaultCriterion,
 } from "./content-tab/utils";
 import { ItemA11yBadge } from "./content-tab/ItemA11yBadge";
 import { PublishToggle } from "./content-tab/PublishToggle";
@@ -390,58 +397,6 @@ function GradableEditorModal({
 }
 
 // ── Quiz questions editor ─────────────────────────────────────────────────────
-
-const QUIZ_TYPE_LABELS: Record<QuizQuestionType, string> = {
-  multiple_choice_question: "Multiple choice",
-  true_false_question: "True / False",
-  short_answer_question: "Fill in the blank",
-  essay_question: "Essay",
-};
-const QUIZ_TYPES = Object.keys(QUIZ_TYPE_LABELS) as QuizQuestionType[];
-
-type EditableQuestion = {
-  key: string;
-  id: number; // 0 until created in Canvas
-  name: string;
-  text: string;
-  type: QuizQuestionType;
-  points: number;
-  answers: Array<{ text: string; correct: boolean }>;
-};
-
-let quizKeySeq = 0;
-const nextQuizKey = () => `qq${++quizKeySeq}`;
-
-function defaultQuizAnswers(type: QuizQuestionType): Array<{ text: string; correct: boolean }> {
-  if (type === "true_false_question") return [{ text: "True", correct: true }, { text: "False", correct: false }];
-  if (type === "multiple_choice_question") return [{ text: "", correct: true }, { text: "", correct: false }];
-  if (type === "short_answer_question") return [{ text: "", correct: true }];
-  return [];
-}
-
-// An editable draft question reduced to the shape Canvas accepts.
-function quizQuestionToInput(q: EditableQuestion): QuizQuestionInput {
-  return {
-    name: q.name,
-    text: q.text,
-    type: q.type,
-    points: Number.isFinite(q.points) ? q.points : 0,
-    answers: q.answers,
-  };
-}
-
-// A blank question to seed the editors with.
-function newDraftQuestion(): EditableQuestion {
-  return {
-    key: nextQuizKey(),
-    id: 0,
-    name: "",
-    text: "",
-    type: "multiple_choice_question",
-    points: 1,
-    answers: defaultQuizAnswers("multiple_choice_question"),
-  };
-}
 
 function QuizQuestionsEditor({
   courseUrl,
@@ -867,40 +822,6 @@ function BulkQuestionsModal({
 }
 
 // ── Rubric builder ────────────────────────────────────────────────────────────
-
-type EditRating = { key: string; description: string; longDescription: string; points: number };
-type EditCriterion = { key: string; description: string; points: number; ratings: EditRating[] };
-
-let rubricKeySeq = 0;
-const nextRubricKey = () => `rb${++rubricKeySeq}`;
-
-function defaultCriterion(mode: "percent" | "points"): EditCriterion {
-  if (mode === "percent") {
-    // Five tiers at 100/75/50/25/0% of the criterion's percentage weight.
-    const base = 20;
-    return {
-      key: nextRubricKey(),
-      description: "",
-      points: base,
-      ratings: [100, 75, 50, 25, 0].map((pct) => ({
-        key: nextRubricKey(),
-        description: `${pct}%`,
-        longDescription: "",
-        points: Math.round((base * pct) / 100),
-      })),
-    };
-  }
-  return {
-    key: nextRubricKey(),
-    description: "",
-    points: 5,
-    ratings: [
-      { key: nextRubricKey(), description: "Full marks", longDescription: "", points: 5 },
-      { key: nextRubricKey(), description: "Partial", longDescription: "", points: 3 },
-      { key: nextRubricKey(), description: "No marks", longDescription: "", points: 0 },
-    ],
-  };
-}
 
 function RubricBuilderModal({
   courseUrl,

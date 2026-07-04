@@ -1,4 +1,4 @@
-import type { CourseFile } from "@/lib/canvas-modules";
+import type { CourseFile, QuizQuestionType } from "@/lib/canvas-modules";
 
 export type LoadState = { status: "idle" | "loading" | "error"; message: string };
 
@@ -16,3 +16,16 @@ export interface DuplicateGroup {
   keep: CourseFile;
   strays: CourseFile[];
 }
+
+export type EditableQuestion = {
+  key: string;
+  id: number; // 0 until created in Canvas
+  name: string;
+  text: string;
+  type: QuizQuestionType;
+  points: number;
+  answers: Array<{ text: string; correct: boolean }>;
+};
+
+export type EditRating = { key: string; description: string; longDescription: string; points: number };
+export type EditCriterion = { key: string; description: string; points: number; ratings: EditRating[] };

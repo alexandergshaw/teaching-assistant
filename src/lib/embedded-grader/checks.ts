@@ -7,6 +7,7 @@
 
 import type { StudentSubmissionEntry } from "@/lib/grade";
 import type { RubricCheck } from "./types";
+import { roundTo2 } from "./format";
 
 export interface CheckOutcome {
   passed: boolean;
@@ -67,7 +68,6 @@ function codeSymbolPatterns(symbol: string): RegExp[] {
   ];
 }
 
-const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 export function runCheck(check: RubricCheck, entry: StudentSubmissionEntry): CheckOutcome {
   const possible = check.points;
@@ -95,7 +95,7 @@ export function runCheck(check: RubricCheck, entry: StudentSubmissionEntry): Che
       if (missing.length === 0) {
         return pass(`Met: all required terms are present (${terms.join(", ")}).`);
       }
-      const earned = round2(possible * (present.length / terms.length));
+      const earned = roundTo2(possible * (present.length / terms.length));
       return {
         passed: false,
         earned,

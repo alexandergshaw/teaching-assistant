@@ -9,6 +9,7 @@ import {
 import type { KnowledgeRow } from "./db";
 import { CASE_STUDIES } from "./case-studies";
 import { PRACTICE_PROBLEMS } from "./practice-problems";
+import { makeKnowledgeRow } from "./test-support";
 
 // ── Fetch stubs ──────────────────────────────────────────────────────────────
 
@@ -143,29 +144,17 @@ describe("knowledge lookups (database-first, in-repo fallback)", () => {
 // ── Case-study slide material ────────────────────────────────────────────────
 
 function learnedRow(overrides: Partial<KnowledgeRow>): KnowledgeRow {
-  return {
+  return makeKnowledgeRow({
     id: "wikipedia:x",
     kind: "case_study",
     source: "wikipedia",
     title: "Integer overflow",
     topics: ["integers", "overflow"],
     summary: "An integer overflow occurs when a value exceeds its type. It wraps or saturates. More detail here.",
-    lesson: null,
-    organization: null,
-    year: null,
-    language: null,
-    difficulty: null,
-    prompt: null,
-    example_code: null,
-    solution_code: null,
     url: "https://en.wikipedia.org/wiki/Integer_overflow",
     verified: false,
-    times_served: 0,
-    last_served_at: null,
-    created_at: "",
-    updated_at: "",
     ...overrides,
-  };
+  });
 }
 
 describe("caseStudyMaterialFromRow", () => {

@@ -19,6 +19,7 @@ import {
 } from "./gap";
 import { searchKnowledgeRows, upsertKnowledge, isKnowledgeStoreAvailable, type KnowledgeRow } from "./db";
 import { searchWikipedia, searchStackExchange } from "./external";
+import { makeKnowledgeRow } from "./test-support";
 
 const mockSearchRows = vi.mocked(searchKnowledgeRows);
 const mockUpsert = vi.mocked(upsertKnowledge);
@@ -27,28 +28,12 @@ const mockWiki = vi.mocked(searchWikipedia);
 const mockStack = vi.mocked(searchStackExchange);
 
 function coveringRow(id: string, topics: string[]): KnowledgeRow {
-  return {
+  return makeKnowledgeRow({
     id,
-    kind: "case_study",
-    source: "curated",
     title: id,
     topics,
     summary: "s",
-    lesson: null,
-    organization: null,
-    year: null,
-    language: null,
-    difficulty: null,
-    prompt: null,
-    example_code: null,
-    solution_code: null,
-    url: null,
-    verified: true,
-    times_served: 0,
-    last_served_at: null,
-    created_at: "",
-    updated_at: "",
-  };
+  });
 }
 
 const FIVE_COVERING = Array.from({ length: 5 }, (_, i) =>

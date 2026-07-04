@@ -31,7 +31,7 @@ import { deriveAltTextFromHtml, deriveLinkTextFromHtml } from "@/lib/embedded/ac
 import { scaffoldCourseProjectRubric, scaffoldCourseOutline, scaffoldCopilotPrompt } from "@/lib/embedded/course";
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
-import { copyedit } from "@/lib/embedded/scaffold";
+import { copyedit, stripLongDashes } from "@/lib/embedded/scaffold";
 import { routeRequest } from "@/lib/embedded/router";
 import { rememberRubric } from "@/lib/research/rubric-bank";
 import {
@@ -350,16 +350,12 @@ Requirements:
 
     const raw = result.text;
 
-    const trimmed = raw.trim();
-    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
+    const jsonText = jsonObjectSlice(raw);
+    if (!jsonText) {
       return { error: "Could not parse module intro from the model response." };
     }
 
-    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+    const parsed = JSON.parse(jsonText) as {
       overview?: string;
       keyTerms?: string;
     };
@@ -481,16 +477,12 @@ Requirements:
 
     const raw = result.text;
 
-    const trimmed = raw.trim();
-    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
+    const jsonText = jsonObjectSlice(raw);
+    if (!jsonText) {
       return { error: "Could not parse slide data from the model response." };
     }
 
-    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+    const parsed = JSON.parse(jsonText) as {
       presentationTitle?: string;
       slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
     };
@@ -580,16 +572,12 @@ Requirements:
 
     const raw = result.text;
 
-    const trimmed = raw.trim();
-    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
+    const jsonText = jsonObjectSlice(raw);
+    if (!jsonText) {
       return { error: "Could not parse assignment data from the model response." };
     }
 
-    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+    const parsed = JSON.parse(jsonText) as {
       title?: string;
       overview?: string;
       steps?: Array<{ stepTitle?: string; description?: string }>;
@@ -714,16 +702,12 @@ Requirements:
 
     const raw = result.text;
 
-    const trimmed = raw.trim();
-    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
+    const jsonText = jsonObjectSlice(raw);
+    if (!jsonText) {
       return { error: "Could not parse examples from the model response." };
     }
 
-    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+    const parsed = JSON.parse(jsonText) as {
       lessonType?: string;
       examples?: Array<{ concept?: string; title?: string; content?: string; explanation?: string; language?: string }>;
     };
@@ -2159,18 +2143,14 @@ Requirements:
       return { error: `Slide generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const trimmed = result.text.trim();
-    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
+    const jsonText = jsonObjectSlice(result.text);
+    if (!jsonText) {
       return { error: "Could not parse slide data from the model response." };
     }
 
     let parsed: { presentationTitle?: unknown; slides?: unknown };
     try {
-      parsed = JSON.parse(candidate.slice(start, end + 1));
+      parsed = JSON.parse(jsonText);
     } catch {
       return { error: "The model returned invalid slide JSON." };
     }
@@ -2304,16 +2284,26 @@ async function summarizeCodebaseZip(zipBase64: string): Promise<string> {
   return `TOP-LEVEL ENTRIES (in order — each is typically one weekly assignment):\n${topLevel.join("\n")}\n\nFILE TREE (truncated):\n${tree}\n\nKEY FILES:${keyContents || "\n(none found)"}`;
 }
 
-/** Parse the first JSON object out of an LLM response (strips a ``` fence). */
-function extractJsonObject(text: string): Record<string, unknown> | null {
+/**
+ * Extract the first JSON object from a text string, handling optional ```json fence.
+ * Returns the substring from the first '{' to the last '}', or null if not found.
+ */
+function jsonObjectSlice(text: string): string | null {
   const trimmed = text.trim();
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fenced?.[1]?.trim() ?? trimmed;
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
   const start = candidate.indexOf("{");
   const end = candidate.lastIndexOf("}");
   if (start === -1 || end === -1 || end <= start) return null;
+  return candidate.slice(start, end + 1);
+}
+
+/** Parse the first JSON object out of an LLM response (strips a ``` fence). */
+function extractJsonObject(text: string): Record<string, unknown> | null {
+  const jsonText = jsonObjectSlice(text);
+  if (!jsonText) return null;
   try {
-    return JSON.parse(candidate.slice(start, end + 1)) as Record<string, unknown>;
+    return JSON.parse(jsonText) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -2719,14 +2709,6 @@ export async function getAvailableSlotsAction(
   }
 }
 
-/**
- * Remove long dashes from a generated inbox message. The account owner never
- * wants em or en dashes in a drafted reply: a dash between spaces becomes a
- * comma, and any remaining (e.g. a number range) becomes a plain hyphen.
- */
-function stripLongDashes(text: string): string {
-  return text.replace(/\s+[—–]\s+/g, ", ").replace(/[—–]/g, "-");
-}
 
 /**
  * Draft a warm inbox reply that offers the given open times. Falls back to a
@@ -2920,16 +2902,12 @@ Requirements:
       return { error: `Draft failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const trimmed = result.text.trim();
-    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
+    const jsonText = jsonObjectSlice(result.text);
+    if (!jsonText) {
       return { error: "Could not parse the draft from the model response." };
     }
 
-    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+    const parsed = JSON.parse(jsonText) as {
       title?: string;
       message?: string;
     };
@@ -3607,16 +3585,13 @@ Requirements:
     }
 
     const raw = result.text;
-    const trimmed = raw.trim();
-    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
+
+    const jsonText = jsonObjectSlice(raw);
+    if (!jsonText) {
       return { error: "Could not parse the schedule from the model response." };
     }
 
-    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+    const parsed = JSON.parse(jsonText) as {
       rows?: Array<{ week?: unknown; dates?: unknown; topics?: unknown; assignment?: unknown }>;
     };
 
@@ -3787,15 +3762,12 @@ Rules:
     }
 
     // Extract JSON
-    const fencedMatch = raw.trim().match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fencedMatch?.[1]?.trim() ?? raw.trim();
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
+    const jsonText = jsonObjectSlice(raw);
+    if (!jsonText) {
       return { error: "Could not parse rubric from the model response." };
     }
 
-    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+    const parsed = JSON.parse(jsonText) as {
       rubric?: {
         criteria?: Array<{
           name?: string;
@@ -4069,16 +4041,13 @@ Requirements:
   }
 
   const raw = result.text;
-  const trimmed = raw.trim();
-  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
+
+  const jsonText = jsonObjectSlice(raw);
+  if (!jsonText) {
     return { error: `Could not parse slide data for "${assignmentName}".` };
   }
 
-  const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+  const parsed = JSON.parse(jsonText) as {
     presentationTitle?: string;
     slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
   };
@@ -4437,15 +4406,11 @@ Requirements:
       return { error: `Revision failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    const trimmed = result.text.trim();
-    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fenced?.[1]?.trim() ?? trimmed;
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
+    const jsonText = jsonObjectSlice(result.text);
+    if (!jsonText) {
       return { error: "Could not parse slides from the model response." };
     }
-    const parsed = JSON.parse(candidate.slice(start, end + 1)) as {
+    const parsed = JSON.parse(jsonText) as {
       slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
     };
     if (!parsed.slides || !Array.isArray(parsed.slides)) {

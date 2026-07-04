@@ -9,31 +9,17 @@ import {
   deleteKnowledgeEntry,
   type KnowledgeRow,
 } from "./db";
+import { makeKnowledgeRow } from "./test-support";
 
 function row(overrides: Partial<KnowledgeRow>): KnowledgeRow {
-  return {
-    id: "x",
-    kind: "case_study",
-    source: "curated",
-    title: "T",
+  return makeKnowledgeRow({
     topics: ["testing"],
     summary: "First bullet.\nSecond bullet.",
     lesson: "The lesson.",
     organization: "Org",
     year: 2001,
-    language: null,
-    difficulty: null,
-    prompt: null,
-    example_code: null,
-    solution_code: null,
-    url: null,
-    verified: true,
-    times_served: 0,
-    last_served_at: null,
-    created_at: "",
-    updated_at: "",
     ...overrides,
-  };
+  });
 }
 
 describe("row mapping", () => {

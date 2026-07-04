@@ -51,6 +51,14 @@ export function capitalizeFirst(text: string): string {
   return t ? t[0].toUpperCase() + t.slice(1) : t;
 }
 
+/**
+ * Remove long dashes from text. A dash between spaces becomes a comma,
+ * and any remaining (e.g. in number ranges) becomes a plain hyphen.
+ */
+export function stripLongDashes(text: string): string {
+  return text.replace(/\s+[—–]\s+/g, ", ").replace(/[—–]/g, "-");
+}
+
 /** Ensure the text ends with sentence-terminating punctuation. */
 export function ensureSentence(text: string): string {
   const t = cleanText(text);

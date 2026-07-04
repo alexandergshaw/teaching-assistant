@@ -5,13 +5,8 @@
  * without inventing facts (dates, links, grades) that were not provided.
  */
 
-import { capitalizeFirst, cleanText, copyedit, ensureSentence, pick, splitSentences } from "./scaffold";
+import { capitalizeFirst, cleanText, copyedit, ensureSentence, pick, splitSentences, stripLongDashes } from "./scaffold";
 import { toProse } from "@/lib/prose";
-
-/** The account owner never wants long dashes in a draft; mirror the LLM path. */
-function stripLongDashes(text: string): string {
-  return text.replace(/\s+[—–]\s+/g, ", ").replace(/[—–]/g, "-");
-}
 
 // Directive lead-ins ("tell students that …", "tell students:") that front an
 // announcement request; a trailing colon or comma is consumed with them.

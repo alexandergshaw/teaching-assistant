@@ -15,6 +15,7 @@ import {
   type RubricAreaResult,
 } from "@/lib/grade";
 import type { DiscussionActivity, DiscussionPost } from "@/lib/canvas";
+import { roundTo2, formatNumber } from "./format";
 
 // ── Model ────────────────────────────────────────────────────────────────────
 
@@ -59,9 +60,6 @@ export interface DiscussionContext {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-const round2 = (n: number): number => Math.round(n * 100) / 100;
-const formatNumber = (n: number): string => (Number.isInteger(n) ? String(n) : String(round2(n)));
 
 function wordCount(text: string): number {
   const matches = text.trim().match(/\S+/g);
@@ -197,7 +195,7 @@ function scoreCriterion(
     earned += per * fraction;
     labels.push(label);
   }
-  earned = round2(earned);
+  earned = roundTo2(earned);
   const detail = labels.join("; ");
   return {
     area: criterion.criterion,
@@ -445,7 +443,7 @@ export function gradeDiscussion(
       if (match) earned += Number(match[1]);
     }
 
-    const totalScore = possible > 0 ? `${formatNumber(round2(earned))}/${formatNumber(possible)}` : "";
+    const totalScore = possible > 0 ? `${formatNumber(roundTo2(earned))}/${formatNumber(possible)}` : "";
     const scaled = scaleResultToPoints(rawAreas, totalScore, pointsPossible);
 
     const postsText = [...student.activity.initialPosts, ...student.activity.replies]

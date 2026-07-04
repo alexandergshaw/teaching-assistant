@@ -18,6 +18,7 @@ import {
 import type { EmbeddedRubric } from "./types";
 import { pick } from "@/lib/embedded/scaffold";
 import { runCheck } from "./checks";
+import { formatNumber } from "./format";
 import {
   buildRubricFromInstructions,
   buildRubricFromRubricText,
@@ -64,9 +65,6 @@ export function buildEmbeddedRubric(input: BuildRubricInput): EmbeddedRubric {
   return capCriteria(rubric);
 }
 
-function formatNumber(value: number): string {
-  return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
-}
 
 /** Factual, warm-but-professional overall comment. States what was met and, where
  *  points were lost, the concrete reason, without coaching the student to improve.

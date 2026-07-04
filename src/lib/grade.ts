@@ -14,6 +14,7 @@ import {
 } from "./office-extract";
 import { fetchCanvasWork, fetchAssignmentPointsPossible, type CanvasStudentWork } from "./canvas";
 import { generateEmbeddedRubricText } from "./embedded-grader/rubric";
+import { roundTo2 } from "./embedded-grader/format";
 import { findRubricForTopic } from "./research/rubric-bank";
 
 const MAX_NESTED_ZIP_DEPTH = 3;
@@ -859,18 +860,17 @@ export function scaleResultToPoints(
   }
 
   const factor = pointsPossible / parsedTotal.possible;
-  const round2 = (n: number) => Math.round(n * 100) / 100;
 
   const scaledAreas = rubricAreas.map((area) => {
     const parsed = parseEarnedPossibleScore(area.score);
     if (!parsed) return area;
     return {
       ...area,
-      score: `${formatScoreNumber(round2(parsed.earned * factor))}/${formatScoreNumber(round2(parsed.possible * factor))}`,
+      score: `${formatScoreNumber(roundTo2(parsed.earned * factor))}/${formatScoreNumber(roundTo2(parsed.possible * factor))}`,
     };
   });
 
-  const scaledTotal = `${formatScoreNumber(round2(parsedTotal.earned * factor))}/${formatScoreNumber(pointsPossible)}`;
+  const scaledTotal = `${formatScoreNumber(roundTo2(parsedTotal.earned * factor))}/${formatScoreNumber(pointsPossible)}`;
   return { rubricAreas: scaledAreas, totalScore: scaledTotal };
 }
 

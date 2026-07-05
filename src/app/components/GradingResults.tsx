@@ -78,9 +78,9 @@ function parseScoreValue(value: string): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-// Editable grade, overall comment, and per-criterion scores/comments per student
+// Editable grade, overall comment, and per-criterion scores per student
 // (keyed by student name, then by rubric area name).
-type AreaEdit = { score: string; comment: string };
+type AreaEdit = { score: string };
 type RowEdit = { total: string; overall: string; areas: Record<string, AreaEdit> };
 
 function seedEdits(run: GradingRun): Record<string, RowEdit> {
@@ -88,7 +88,7 @@ function seedEdits(run: GradingRun): Record<string, RowEdit> {
   for (const result of run.results) {
     const areas: Record<string, AreaEdit> = {};
     for (const area of result.rubricAreas) {
-      areas[area.area] = { score: area.score, comment: area.comment };
+      areas[area.area] = { score: area.score };
     }
     seeded[result.student] = {
       total: result.totalScore,
@@ -158,7 +158,6 @@ function buildCsvContent(run: GradingRun, edits: Record<string, RowEdit>): strin
   const header = ["Student"];
   for (const area of run.rubricAreaNames) {
     header.push(`${area} Score`);
-    header.push(`${area} Comment`);
   }
   header.push("Total Score");
   header.push("Overall Comment");
@@ -175,7 +174,6 @@ function buildCsvContent(run: GradingRun, edits: Record<string, RowEdit>): strin
       const area = areaMap.get(areaName);
       const areaEdit = edit?.areas?.[areaName];
       row.push(areaEdit?.score ?? area?.score ?? "");
-      row.push(areaEdit?.comment ?? area?.comment ?? "");
     }
     row.push(edit?.total ?? result.totalScore);
     row.push(edit?.overall ?? result.overallComment);
@@ -252,7 +250,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   const updateArea = (student: string, areaName: string, patch: Partial<AreaEdit>) =>
     setEdits((prev) => {
       const row = prev[student] ?? { total: "", overall: "", areas: {} };
-      const area = row.areas[areaName] ?? { score: "", comment: "" };
+      const area = row.areas[areaName] ?? { score: "" };
       const areas = { ...row.areas, [areaName]: { ...area, ...patch } };
       // Editing a criterion's points re-totals the student automatically.
       const total =
@@ -288,8 +286,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         grade: parseEarnedPoints(edit.total),
         comment: edit.overall,
         rubricAreas: r.rubricAreas.map((a) => {
-          const ae = edit.areas[a.area] ?? { score: a.score, comment: a.comment };
-          return { area: a.area, score: ae.score, comment: ae.comment };
+          const ae = edit.areas[a.area] ?? { score: a.score };
+          return { area: a.area, score: ae.score, comment: "" };
         }),
       };
     });
@@ -351,8 +349,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         grade: parseEarnedPoints(edit.total),
         comment: edit.overall,
         rubricAreas: row.rubricAreas.map((a) => {
-          const ae = edit.areas[a.area] ?? { score: a.score, comment: a.comment };
-          return { area: a.area, score: ae.score, comment: ae.comment };
+          const ae = edit.areas[a.area] ?? { score: a.score };
+          return { area: a.area, score: ae.score, comment: "" };
         }),
       },
     ];
@@ -403,7 +401,6 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         } else {
           comparison = compareText(aArea?.score ?? "", bArea?.score ?? "");
         }
-        if (comparison === 0) comparison = compareText(aArea?.comment ?? "", bArea?.comment ?? "");
       }
       if (column.kind === "total") {
         const aNum = parseScoreValue(a.totalScore);
@@ -662,46 +659,19 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                   {run.rubricAreaNames.map((areaName) => {
                     const area = areaMap.get(areaName);
                     const areaEdit = area
-                      ? edit.areas[areaName] ?? { score: area.score, comment: area.comment }
+                      ? edit.areas[areaName] ?? { score: area.score }
                       : null;
                     return (
                       <td key={`${result.student}-${areaName}`}>
                         {area && areaEdit ? (
-                          <div className={styles.matrixCellDetail}>
-                            <button
-                              type="button"
-                              className={styles.copyIconButton}
-                              title={copiedKey === `${result.student}-${areaName}-comment` ? "Copied" : "Copy Feedback"}
-                              aria-label={
-                                copiedKey === `${result.student}-${areaName}-comment`
-                                  ? "Copied"
-                                  : `Copy feedback for ${result.student} - ${areaName}`
-                              }
-                              onClick={() =>
-                                onCopy(
-                                  `${result.student}-${areaName}-comment`,
-                                  formatFeedback(areaEdit.comment || "No feedback provided.")
-                                )
-                              }
-                            >
-                              <CopyIcon />
-                            </button>
-                            <input
-                              type="text"
-                              className={styles.textInput}
-                              style={{ minWidth: "64px", marginBottom: "4px" }}
-                              aria-label={`${areaName} score for ${result.student}`}
-                              value={areaEdit.score}
-                              onChange={(e) => updateArea(result.student, areaName, { score: e.target.value })}
-                            />
-                            <textarea
-                              aria-label={`${areaName} feedback for ${result.student}`}
-                              className={styles.feedbackText}
-                              style={{ minHeight: "104px", width: "100%" }}
-                              value={areaEdit.comment}
-                              onChange={(e) => updateArea(result.student, areaName, { comment: e.target.value })}
-                            />
-                          </div>
+                          <input
+                            type="text"
+                            className={styles.textInput}
+                            style={{ minWidth: "64px" }}
+                            aria-label={`${areaName} score for ${result.student}`}
+                            value={areaEdit.score}
+                            onChange={(e) => updateArea(result.student, areaName, { score: e.target.value })}
+                          />
                         ) : (
                           "-"
                         )}

@@ -98,6 +98,7 @@ describe("gradeEntriesEmbedded", () => {
     expect(result.overallComment).toContain("all 3 requirements were met");
     expect(result.userId).toBe(42); // userId preserved for Canvas write-back
     expect(result.submittedFiles).toHaveLength(1); // files preserved for previews
+    expect(result.overallComment).not.toContain("resubmit");
   });
 
   it("awards partial totals and names the missing criteria", () => {
@@ -107,6 +108,7 @@ describe("gradeEntriesEmbedded", () => {
     expect(result.overallComment).toContain("1 of 3 requirements met");
     expect(result.overallComment).toContain("Defines clean");
     expect(result.overallComment).toContain("Submitted .py");
+    expect(result.overallComment).toContain("resubmit");
   });
 
   it("exposes the rubric area names and a deterministic full-credit checklist", () => {

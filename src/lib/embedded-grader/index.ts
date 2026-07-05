@@ -11,6 +11,7 @@
 
 import {
   scaleResultToPoints,
+  RESUBMIT_NOTICE,
   type GradingRun,
   type RubricAreaResult,
   type StudentSubmissionEntry,
@@ -119,7 +120,7 @@ export function gradeEntriesEmbedded(
       rawAreas.push({
         area: check.criterion,
         score: `${formatNumber(outcome.earned)}/${formatNumber(outcome.possible)}`,
-        comment: outcome.detail,
+        comment: "",
       });
       earned += outcome.earned;
       possible += outcome.possible;
@@ -130,17 +131,23 @@ export function gradeEntriesEmbedded(
     const totalScore = possible > 0 ? `${formatNumber(earned)}/${formatNumber(possible)}` : "";
     const scaled = scaleResultToPoints(rawAreas, totalScore, pointsPossible);
 
+    const baseComment = buildOverallComment(
+      passedCount,
+      rubric.checks.length,
+      missing,
+      `${entry.student}|${missing.join(",")}`
+    );
+    // A failed/partial check always lands in `missing` (a passing check earns full
+    // points), so `missing.length > 0` is exactly when points were deducted.
+    const overallComment =
+      missing.length > 0 ? `${baseComment} ${RESUBMIT_NOTICE}` : baseComment;
+
     return {
       student: entry.student,
       userId: entry.userId,
       totalScore: scaled.totalScore,
       rubricAreas: scaled.rubricAreas,
-      overallComment: buildOverallComment(
-        passedCount,
-        rubric.checks.length,
-        missing,
-        `${entry.student}|${missing.join(",")}`
-      ),
+      overallComment,
       feedback: "",
       mergedFileCount: entry.mergedFileCount,
       submittedFiles: entry.submittedFiles,

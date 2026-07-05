@@ -11,6 +11,7 @@
 
 import {
   scaleResultToPoints,
+  RESUBMIT_NOTICE,
   type GradingRun,
   type RubricAreaResult,
 } from "@/lib/grade";
@@ -183,31 +184,36 @@ function scoreCriterion(
   stats: StudentStats,
   student: DiscussionStudent,
   ctx: DiscussionContext
-): RubricAreaResult {
+): { area: RubricAreaResult; shortfalls: string[] } {
   if (criterion.signals.length === 0) {
-    return { area: criterion.criterion, score: `0/${formatNumber(criterion.points)}`, comment: "No signals defined." };
+    return {
+      area: { area: criterion.criterion, score: `0/${formatNumber(criterion.points)}`, comment: "" },
+      shortfalls: [],
+    };
   }
   const per = criterion.points / criterion.signals.length;
   let earned = 0;
-  const labels: string[] = [];
+  const shortfalls: string[] = [];
   for (const signal of criterion.signals) {
     const { fraction, label } = evalSignal(signal, stats, student, ctx);
     earned += per * fraction;
-    labels.push(label);
+    if (fraction < 1) shortfalls.push(label);
   }
   earned = roundTo2(earned);
-  const detail = labels.join("; ");
   return {
-    area: criterion.criterion,
-    score: `${formatNumber(earned)}/${formatNumber(criterion.points)}`,
-    comment: detail.charAt(0).toUpperCase() + detail.slice(1) + ".",
+    area: { area: criterion.criterion, score: `${formatNumber(earned)}/${formatNumber(criterion.points)}`, comment: "" },
+    shortfalls,
   };
 }
 
-function buildOverall(stats: StudentStats): string {
+function buildOverall(stats: StudentStats, shortfalls: string[]): string {
   const posts = `${stats.initialCount} initial ${stats.initialCount === 1 ? "response" : "responses"}`;
   const replies = `${stats.replyCount} ${stats.replyCount === 1 ? "reply" : "replies"}`;
-  return `Posted ${posts} and ${replies} (${stats.totalWords} words total).`;
+  let comment = `Posted ${posts} and ${replies} (${stats.totalWords} words total).`;
+  if (shortfalls.length > 0) {
+    comment += ` Points were reduced for: ${shortfalls.join(", ")}. ${RESUBMIT_NOTICE}`;
+  }
+  return comment;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -431,7 +437,9 @@ export function gradeDiscussion(
 
   const results = students.map((student) => {
     const stats = computeStats(student);
-    const rawAreas = rubric.criteria.map((criterion) => scoreCriterion(criterion, stats, student, ctx));
+    const scored = rubric.criteria.map((criterion) => scoreCriterion(criterion, stats, student, ctx));
+    const rawAreas = scored.map((s) => s.area);
+    const shortfalls = scored.flatMap((s) => s.shortfalls);
 
     let earned = 0;
     let possible = 0;
@@ -455,7 +463,7 @@ export function gradeDiscussion(
       userId: student.userId,
       totalScore: scaled.totalScore,
       rubricAreas: scaled.rubricAreas,
-      overallComment: buildOverall(stats),
+      overallComment: buildOverall(stats, shortfalls),
       feedback: "",
       mergedFileCount: stats.initialCount + stats.replyCount,
       submittedFiles: postsText

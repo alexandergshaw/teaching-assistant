@@ -21,7 +21,7 @@ const MAX_NESTED_ZIP_DEPTH = 3;
 
 // Appended to overall feedback whenever a student lost points, so every graded
 // student is offered a penalty-free resubmission in identical wording.
-const RESUBMIT_NOTICE =
+export const RESUBMIT_NOTICE =
   "You are welcome to resubmit this assignment, and I will regrade it with no late penalty.";
 
 async function extractTextFromFile(

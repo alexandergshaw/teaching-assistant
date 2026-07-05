@@ -75,10 +75,16 @@ describe("gradeDiscussion with the default rubric", () => {
     expect(earned).toBeLessThan(15);
   });
 
-  it("reports who is late via the Timeliness detail", () => {
+  it("reports who is late in the overall comment", () => {
     const run = gradeDiscussion([weak], rubric, ctx);
-    const timeliness = run.results[0].rubricAreas.find((a) => a.area === "Timeliness");
-    expect(timeliness?.comment).toMatch(/late/i);
+    expect(run.results[0].overallComment).toMatch(/late/i);
+  });
+
+  it("offers a penalty-free resubmit only when points were deducted", () => {
+    const weakRun = gradeDiscussion([weak], rubric, ctx);
+    expect(weakRun.results[0].overallComment).toContain("resubmit");
+    const strongRun = gradeDiscussion([strong], rubric, ctx);
+    expect(strongRun.results[0].overallComment).not.toContain("resubmit");
   });
 
   it("re-bases the total onto a Canvas points_possible", () => {

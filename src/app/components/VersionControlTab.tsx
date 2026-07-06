@@ -9,6 +9,7 @@ import {
   type StudentRepoResult,
 } from "../actions";
 import type { GithubRepo } from "@/lib/github";
+import OrgManagementPanel from "./OrgManagementPanel";
 import styles from "../page.module.css";
 
 /**
@@ -341,6 +342,8 @@ export default function VersionControlTab() {
           </div>
         </div>
       )}
+
+      {selectedOrg && <OrgManagementPanel org={selectedOrg} repos={repos} />}
     </div>
   );
 }

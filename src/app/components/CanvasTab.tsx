@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 import {
   listAnnouncementsAction,
   createAnnouncementAction,
@@ -221,23 +224,24 @@ function AnnouncementsPanel() {
 
       <div className={styles.field}>
         <label htmlFor="canvas-ann-draft">Draft with AI (optional)</label>
-        <input
+        <TextField
           id="canvas-ann-draft"
           type="text"
-          className={styles.textInput}
+          size="small"
+          fullWidth
           placeholder="e.g. Remind students project 2 is due Friday and office hours moved to 3pm"
           value={draftPrompt}
           onChange={(e) => setDraftPrompt(e.target.value)}
         />
-        <button
-          type="button"
-          className={styles.downloadButton}
+        <Button
+          variant="outlined"
+          size="small"
           onClick={handleDraft}
           disabled={drafting || !draftPrompt.trim()}
-          style={{ alignSelf: "flex-start" }}
+          sx={{ alignSelf: "flex-start", marginTop: 1 }}
         >
           {drafting ? "Drafting…" : "Draft with AI"}
-        </button>
+        </Button>
         <p className={styles.fieldHint}>
           Generates a title and message you can edit below. Nothing is posted until you click Post.
         </p>
@@ -245,10 +249,11 @@ function AnnouncementsPanel() {
 
       <div className={styles.field}>
         <label htmlFor="canvas-ann-title">Title</label>
-        <input
+        <TextField
           id="canvas-ann-title"
           type="text"
-          className={styles.textInput}
+          size="small"
+          fullWidth
           placeholder="Announcement title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -257,8 +262,11 @@ function AnnouncementsPanel() {
 
       <div className={styles.field}>
         <label htmlFor="canvas-ann-message">Message</label>
-        <textarea
+        <TextField
           id="canvas-ann-message"
+          multiline
+          minRows={4}
+          fullWidth
           placeholder="Write the announcement students will see."
           value={message}
           onChange={(e) => setMessage(e.target.value)}
@@ -267,22 +275,28 @@ function AnnouncementsPanel() {
 
       <div className={styles.field}>
         <label htmlFor="canvas-ann-visible">Visible to students (optional)</label>
-        <input
+        <TextField
           id="canvas-ann-visible"
           type="datetime-local"
-          className={styles.textInput}
+          size="small"
+          fullWidth
           value={visibleAt}
-          min={toDatetimeLocalValue(new Date())}
           onChange={(e) => setVisibleAt(e.target.value)}
+          slotProps={{
+            htmlInput: {
+              min: toDatetimeLocalValue(new Date()),
+            },
+            inputLabel: { shrink: true },
+          }}
         />
         <p className={styles.fieldHint}>
           Leave blank to post immediately. Pick a future date and time to schedule when students can see it.
           {visibleAt && (
             <>
               {" "}
-              <button type="button" className={styles.clearFileButton} onClick={() => setVisibleAt("")}>
+              <Button size="small" onClick={() => setVisibleAt("")}>
                 Clear
-              </button>
+              </Button>
             </>
           )}
         </p>
@@ -298,9 +312,9 @@ function AnnouncementsPanel() {
         </div>
       )}
 
-      <button
-        type="button"
-        className={styles.submitButton}
+      <Button
+        variant="contained"
+        size="small"
         onClick={handlePost}
         disabled={posting || !courseId || !title.trim() || !message.trim()}
       >
@@ -311,7 +325,7 @@ function AnnouncementsPanel() {
           : willSchedule
             ? "Schedule announcement"
             : "Post announcement"}
-      </button>
+      </Button>
 
       {postNote && (
         <p className={postNote.kind === "error" ? styles.error : styles.fieldHint}>
@@ -681,9 +695,9 @@ function InboxPanel() {
       <div style={{ flex: "1 1 300px", minWidth: 260, maxWidth: 460, display: "flex", flexDirection: "column", gap: 10 }}>
         <div className={styles.resultsHeader} style={{ paddingTop: 0 }}>
           <h2>Inbox</h2>
-          <button
-            type="button"
-            className={styles.downloadButton}
+          <Button
+            variant="outlined"
+            size="small"
             onClick={() => {
               void loadInbox();
               refreshUnread();
@@ -691,29 +705,30 @@ function InboxPanel() {
             disabled={inboxState.status === "loading"}
           >
             {inboxState.status === "loading" ? "Refreshing…" : "Refresh"}
-          </button>
+          </Button>
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <input
+          <TextField
             type="search"
-            className={styles.textInput}
+            size="small"
             style={{ flex: "1 1 160px", minWidth: 0 }}
             placeholder="Search messages"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <select
-            className={styles.textInput}
-            style={{ maxWidth: 130 }}
+          <TextField
+            select
+            size="small"
+            sx={{ minWidth: 130 }}
             value={readFilter}
             onChange={(e) => setReadFilter(e.target.value as "all" | "unread" | "read")}
             aria-label="Filter by read state"
           >
-            <option value="all">All</option>
-            <option value="unread">Unread</option>
-            <option value="read">Read</option>
-          </select>
+            <MenuItem value="all">All</MenuItem>
+            <MenuItem value="unread">Unread</MenuItem>
+            <MenuItem value="read">Read</MenuItem>
+          </TextField>
         </div>
 
         {inboxState.status === "loading" && (
@@ -757,20 +772,20 @@ function InboxPanel() {
                 </span>
               </button>
               <div className={styles.inboxItemActions}>
-                <button
-                  type="button"
-                  className={styles.clearFileButton}
+                <Button
+                  size="small"
+                  variant="text"
                   onClick={() => void changeState(c.id, unread ? "read" : "unread")}
                 >
                   {unread ? "Mark read" : "Mark unread"}
-                </button>
-                <button
-                  type="button"
-                  className={styles.clearFileButton}
+                </Button>
+                <Button
+                  size="small"
+                  variant="text"
                   onClick={() => void changeState(c.id, "archived")}
                 >
                   Archive
-                </button>
+                </Button>
               </div>
             </div>
           );
@@ -839,19 +854,23 @@ function InboxPanel() {
                     </span>
                   )}
                 </div>
-                <textarea
+                <TextField
                   id="canvas-reply-body"
+                  multiline
+                  minRows={4}
+                  fullWidth
                   placeholder="Write your reply, or use an assist below."
                   value={replyBody}
-                  onChange={(e) => setReplyBody(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setReplyBody(e.target.value)}
                 />
               </div>
 
               {(showSteer || replyInstr) && (
-                <input
+                <TextField
                   type="text"
-                  className={styles.textInput}
-                  style={{ marginBottom: 8 }}
+                  size="small"
+                  fullWidth
+                  sx={{ marginBottom: 1 }}
                   placeholder="Guidance for the draft, e.g. be encouraging and point them to office hours"
                   value={replyInstr}
                   onChange={(e) => setReplyInstr(e.target.value)}
@@ -860,41 +879,41 @@ function InboxPanel() {
 
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    className={styles.downloadButton}
+                  <Button
+                    variant="outlined"
+                    size="small"
                     onClick={handleDraftReply}
                     disabled={drafting}
                   >
                     {drafting ? "Drafting…" : "Draft with AI"}
-                  </button>
+                  </Button>
                   {!showSteer && !replyInstr && (
-                    <button
-                      type="button"
-                      className={styles.clearFileButton}
+                    <Button
+                      size="small"
+                      variant="text"
                       onClick={() => setShowSteer(true)}
                     >
                       Add guidance
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    type="button"
-                    className={styles.downloadButton}
+                  <Button
+                    variant="outlined"
+                    size="small"
                     onClick={handleSuggestTimes}
                     disabled={suggesting}
-                    style={meetingHint ? { borderColor: "#2563eb", color: "#2563eb" } : undefined}
+                    sx={meetingHint ? { borderColor: "#2563eb", color: "#2563eb" } : {}}
                   >
                     {suggesting ? "Finding times…" : "Schedule a call"}
-                  </button>
+                  </Button>
                 </div>
-                <button
-                  type="button"
-                  className={styles.submitButton}
+                <Button
+                  variant="contained"
+                  size="small"
                   onClick={handleSendReply}
                   disabled={sending || !replyBody.trim()}
                 >
                   {sending ? "Sending…" : "Send reply"}
-                </button>
+                </Button>
               </div>
 
               {replyNote && (
@@ -922,20 +941,20 @@ function InboxPanel() {
             <div className={styles.previewHeader}>
               <h3>{studentName && studentName !== "student" ? `Schedule a call with ${studentName}` : "Schedule a call"}</h3>
               <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                <button
-                  type="button"
-                  className={styles.clearFileButton}
+                <Button
+                  size="small"
+                  variant="text"
                   onClick={() => setShowCalendar(true)}
                 >
                   Open full calendar
-                </button>
-                <button
-                  type="button"
-                  className={styles.previewCloseButton}
+                </Button>
+                <Button
+                  size="small"
+                  variant="text"
                   onClick={() => setPlannerOpen(false)}
                 >
                   Close
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -946,19 +965,21 @@ function InboxPanel() {
 
             <div className={styles.field} style={{ marginBottom: 10, maxWidth: 280 }}>
               <label htmlFor="canvas-schedule-tz">Time zone</label>
-              <select
+              <TextField
                 id="canvas-schedule-tz"
-                className={styles.textInput}
+                select
+                size="small"
+                fullWidth
                 value={scheduleTz}
                 disabled={suggesting}
                 onChange={(e) => handleTzChange(e.target.value)}
               >
                 {SCHEDULING_TIME_ZONES.map((tz) => (
-                  <option key={tz.value || "default"} value={tz.value}>
+                  <MenuItem key={tz.value || "default"} value={tz.value}>
                     {tz.label}
-                  </option>
+                  </MenuItem>
                 ))}
-              </select>
+              </TextField>
             </div>
 
             <WeekCalendar
@@ -975,10 +996,11 @@ function InboxPanel() {
             {selectedSlot && (
               <div className={styles.field} style={{ marginTop: 12 }}>
                 <label htmlFor="canvas-student-email">Student email to invite (optional)</label>
-                <input
+                <TextField
                   id="canvas-student-email"
                   type="email"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   placeholder="name@example.com"
                   value={studentEmail}
                   onChange={(e) => setStudentEmail(e.target.value)}
@@ -997,30 +1019,30 @@ function InboxPanel() {
                 flexWrap: "wrap",
               }}
             >
-              <button
-                type="button"
-                className={styles.submitButton}
+              <Button
+                variant="contained"
+                size="small"
                 onClick={handleOfferAll}
                 disabled={offering || booking}
               >
                 {offering ? "Drafting…" : `Offer these times to ${offerTarget}`}
-              </button>
+              </Button>
               {selectedSlot ? (
-                <button
-                  type="button"
-                  className={styles.downloadButton}
+                <Button
+                  variant="outlined"
+                  size="small"
                   onClick={handleBookSelected}
                   disabled={booking || offering}
-                  style={{ borderColor: "#2563eb", color: "#2563eb" }}
+                  sx={{ borderColor: "#2563eb", color: "#2563eb" }}
                 >
                   {booking ? "Booking…" : `Book ${selectedLabel}`}
-                </button>
+                </Button>
               ) : (
                 <span className={styles.fieldHint}>or click a highlighted time to book it directly</span>
               )}
-              <button type="button" className={styles.clearFileButton} onClick={() => setPlannerOpen(false)}>
+              <Button size="small" variant="text" onClick={() => setPlannerOpen(false)}>
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1040,13 +1062,13 @@ function InboxPanel() {
           >
             <div className={styles.previewHeader}>
               <h3>Your calendar</h3>
-              <button
-                type="button"
-                className={styles.previewCloseButton}
+              <Button
+                size="small"
+                variant="text"
                 onClick={() => setShowCalendar(false)}
               >
                 Close
-              </button>
+              </Button>
             </div>
             {calendarEmbedUrl ? (
               <iframe

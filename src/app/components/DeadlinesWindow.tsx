@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 import styles from "../page.module.css";
 import {
   CALENDAR_EVENT_TYPE_LABELS,
@@ -395,30 +398,33 @@ export default function DeadlinesWindow({
       {/* Paste text form */}
       {showTextForm && (
         <div className={styles.deadlinesAddForm}>
-          <textarea
-            className={`${styles.deadlinesInput} ${styles.deadlinesTextarea}`}
+          <TextField
+            multiline
+            minRows={6}
+            fullWidth
             placeholder="Paste syllabus or calendar text here…"
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
-            rows={6}
           />
           <div className={styles.deadlinesFormActions}>
-            <button
-              className={styles.deadlinesCancelBtn}
+            <Button
+              size="small"
+              variant="text"
               onClick={() => {
                 setShowTextForm(false);
                 setPasteText("");
               }}
             >
               Cancel
-            </button>
-            <button
-              className={styles.deadlinesAddBtn}
+            </Button>
+            <Button
+              size="small"
+              variant="contained"
               onClick={handleTextParse}
               disabled={!pasteText.trim()}
             >
               Parse
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -426,52 +432,58 @@ export default function DeadlinesWindow({
       {/* Add event form */}
       {showAddForm && (
         <div className={styles.deadlinesAddForm}>
-          <input
-            className={styles.deadlinesInput}
+          <TextField
+            fullWidth
+            size="small"
             placeholder="Title *"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
           />
           <div className={styles.deadlinesInputRow}>
-            <input
-              className={styles.deadlinesInput}
+            <TextField
               type="date"
+              size="small"
               value={newDate}
               onChange={(e) => setNewDate(e.target.value)}
-              style={{ flex: 1 }}
+              sx={{ flex: 1 }}
+              slotProps={{ inputLabel: { shrink: true } }}
             />
-            <select
-              className={styles.deadlinesInput}
+            <TextField
+              select
+              size="small"
               value={newType}
               onChange={(e) =>
                 setNewType(e.target.value as "deadline" | "event")
               }
-              style={{ flex: 1 }}
+              sx={{ flex: 1 }}
             >
-              <option value="deadline">Deadline</option>
-              <option value="event">Event</option>
-            </select>
+              <MenuItem value="deadline">Deadline</MenuItem>
+              <MenuItem value="event">Event</MenuItem>
+            </TextField>
           </div>
-          <input
-            className={styles.deadlinesInput}
+          <TextField
+            fullWidth
+            size="small"
             placeholder="Description (optional)"
             value={newDescription}
             onChange={(e) => setNewDescription(e.target.value)}
           />
           <div className={styles.deadlinesFormActions}>
-            <button
-              className={styles.deadlinesCancelBtn}
+            <Button
+              size="small"
+              variant="text"
               onClick={() => setShowAddForm(false)}
             >
               Cancel
-            </button>
-            <button
-              className={styles.deadlinesAddBtn}
+            </Button>
+            <Button
+              size="small"
+              variant="contained"
               onClick={handleAdd}
               disabled={!newTitle.trim() || !newDate}
             >
               Add
-            </button>
+            </Button>
           </div>
         </div>
       )}

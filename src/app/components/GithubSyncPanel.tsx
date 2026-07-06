@@ -7,6 +7,8 @@ import {
   syncAssignmentFromRepoAction,
 } from "../actions";
 import GithubRepoPicker from "./GithubRepoPicker";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
 import styles from "../page.module.css";
 
 type Loaded = { title: string; canvasMarkdown: string; repoMarkdown: string | null; path: string };
@@ -79,12 +81,12 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
 
       <div className={styles.field}>
         <label>Canvas assignment URL</label>
-        <input
-          type="text"
+        <TextField
+          size="small"
+          fullWidth
           value={assignmentUrl}
           placeholder="https://…/courses/123/assignments/456"
           onChange={(e) => setAssignmentUrl(e.target.value)}
-          style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem" }}
         />
       </div>
       <div className={styles.field}>
@@ -93,18 +95,18 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
       </div>
       <div className={styles.field}>
         <label>Repo file path</label>
-        <input
-          type="text"
+        <TextField
+          size="small"
+          fullWidth
           value={path}
           placeholder="assignments/<slug>/README.md (auto if blank)"
           onChange={(e) => setPath(e.target.value)}
-          style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem" }}
         />
       </div>
 
-      <button type="button" className={styles.submitButton} onClick={load} disabled={!ready || busy === "load"}>
+      <Button type="button" variant="contained" size="small" onClick={load} disabled={!ready || busy === "load"}>
         {busy === "load" ? "Loading…" : "Load both sides"}
-      </button>
+      </Button>
 
       {error && <p className={styles.error}>{error}</p>}
       {note && <p style={{ fontSize: "0.85rem", color: "#16a34a" }}>{note}</p>}
@@ -114,30 +116,34 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
             <div style={{ flex: "1 1 280px", minWidth: 0 }}>
               <label style={{ fontSize: "0.82rem", fontWeight: 600 }}>Canvas — {loaded.title}</label>
-              <textarea
-                readOnly
+              <TextField
+                multiline
+                minRows={16}
+                fullWidth
+                slotProps={{ input: { readOnly: true } }}
                 value={loaded.canvasMarkdown}
-                rows={16}
-                style={{ width: "100%", fontFamily: "monospace", fontSize: "0.8rem", padding: 10, border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8 }}
+                sx={{ fontFamily: "monospace" }}
               />
             </div>
             <div style={{ flex: "1 1 280px", minWidth: 0 }}>
               <label style={{ fontSize: "0.82rem", fontWeight: 600 }}>Repo — {loaded.path}</label>
-              <textarea
-                readOnly
+              <TextField
+                multiline
+                minRows={16}
+                fullWidth
+                slotProps={{ input: { readOnly: true } }}
                 value={loaded.repoMarkdown ?? "(file does not exist yet)"}
-                rows={16}
-                style={{ width: "100%", fontFamily: "monospace", fontSize: "0.8rem", padding: 10, border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, color: loaded.repoMarkdown == null ? "#94a3b8" : undefined }}
+                sx={{ fontFamily: "monospace" }}
               />
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-            <button type="button" className={styles.submitButton} onClick={push} disabled={!!busy}>
+            <Button type="button" variant="contained" size="small" onClick={push} disabled={!!busy}>
               {busy === "push" ? "Pushing…" : "Push Canvas → Repo"}
-            </button>
-            <button type="button" className={styles.submitButton} onClick={pull} disabled={!!busy || loaded.repoMarkdown == null}>
+            </Button>
+            <Button type="button" variant="contained" size="small" onClick={pull} disabled={!!busy || loaded.repoMarkdown == null}>
               {busy === "pull" ? "Pulling…" : "Pull Repo → Canvas"}
-            </button>
+            </Button>
           </div>
         </>
       )}

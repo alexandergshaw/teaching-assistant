@@ -15,6 +15,10 @@ import {
 import { useLlmProvider } from "@/lib/llm-provider";
 import GithubRepoPicker from "./GithubRepoPicker";
 import GradingResults from "./GradingResults";
+import Typeahead from "./ui/Typeahead";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 import styles from "../page.module.css";
 
 type GradingRun = NonNullable<GradeActionState["run"]>;
@@ -291,16 +295,16 @@ export default function GithubGradingPanel() {
         <label>Add a student repository</label>
         <GithubRepoPicker value={pickRepo} onChange={setPickRepo} branch={pickBranch} onBranchChange={setPickBranch} disabled={!!busy} />
         <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-          <input
-            type="text"
+          <TextField
+            size="small"
             value={pickLabel}
             placeholder="Student name (optional)"
             onChange={(e) => setPickLabel(e.target.value)}
-            style={{ flex: "1 1 200px", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem" }}
+            sx={{ flex: "1 1 200px" }}
           />
-          <button type="button" className={styles.submitButton} onClick={addToQueue} disabled={!pickRepo.trim()}>
+          <Button type="button" variant="contained" size="small" onClick={addToQueue} disabled={!pickRepo.trim()}>
             Add to queue
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -308,30 +312,26 @@ export default function GithubGradingPanel() {
         <div className={styles.field}>
           <label>Or import every repo from an organization</label>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <select
-              value={selectedOrg}
-              onChange={(e) => setSelectedOrg(e.target.value)}
-              disabled={importing}
-              style={{ flex: "1 1 200px", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem", background: "#fff", color: "#334155" }}
-            >
-              <option value="">Choose an organization…</option>
-              {orgs.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
+            <div style={{ flex: "1 1 200px" }}>
+              <Typeahead
+                options={orgs.map((o) => ({ value: o, label: o }))}
+                value={selectedOrg}
+                onChange={(v) => setSelectedOrg(v)}
+                placeholder="Choose an organization…"
+                disabled={importing}
+              />
+            </div>
+            <TextField
+              size="small"
               value={orgPrefix}
               placeholder="name prefix (optional, e.g. lab1-)"
               onChange={(e) => setOrgPrefix(e.target.value)}
               disabled={importing}
-              style={{ flex: "1 1 180px", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem" }}
+              sx={{ flex: "1 1 180px" }}
             />
-            <button type="button" className={styles.submitButton} onClick={importFromOrg} disabled={importing || !selectedOrg}>
+            <Button type="button" variant="contained" size="small" onClick={importFromOrg} disabled={importing || !selectedOrg}>
               {importing ? "Importing…" : "Import"}
-            </button>
+            </Button>
           </div>
           <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", margin: "6px 0 0" }}>
             With a prefix, the student label is taken from the rest of the repo name (e.g. <code>lab1-jsmith</code> → <code>jsmith</code>).
@@ -345,9 +345,9 @@ export default function GithubGradingPanel() {
         <div className={styles.field}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <label style={{ margin: 0 }}>Queue ({queue.length})</label>
-            <button type="button" className={styles.submitButton} onClick={runAllTests}>
+            <Button type="button" variant="contained" size="small" onClick={runAllTests}>
               Run all tests
-            </button>
+            </Button>
           </div>
           <div style={{ border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8, marginTop: 6 }}>
             {queue.map((row, i) => (
@@ -367,33 +367,36 @@ export default function GithubGradingPanel() {
                 <div style={{ flex: "0 0 auto" }}>
                   <TestStatusCell test={row.test} />
                 </div>
-                <button
+                <Button
                   type="button"
-                  className={styles.ccBtn}
+                  variant="outlined"
+                  size="small"
                   onClick={() => void runTests(row)}
                   disabled={row.test.status === "running"}
-                  style={{ flexShrink: 0 }}
+                  sx={{ flexShrink: 0 }}
                 >
                   {row.test.status === "running" ? "Running…" : "Run tests"}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="outlined"
+                  size="small"
                   onClick={() => removeRow(row.id)}
-                  style={{ flexShrink: 0, border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: "0.8rem", color: "#334155", cursor: "pointer" }}
+                  sx={{ flexShrink: 0 }}
                 >
                   Remove
-                </button>
+                </Button>
               </div>
             ))}
           </div>
           <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", marginTop: 6 }}>
             Workflow file to run (optional, applies to all):{" "}
-            <input
-              type="text"
+            <TextField
+              size="small"
               value={workflowFile}
               placeholder="e.g. tests.yml (defaults to the repo's first workflow)"
               onChange={(e) => setWorkflowFile(e.target.value)}
-              style={{ padding: "4px 8px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 6, fontSize: "0.8rem", minWidth: 240 }}
+              sx={{ width: 240 }}
             />
           </p>
 
@@ -403,28 +406,30 @@ export default function GithubGradingPanel() {
               report) into every queued repo. Needs the token&apos;s <code>workflow</code> scope.
             </p>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <select
+              <TextField
+                select
+                size="small"
                 value={setupTemplate}
                 onChange={(e) => setSetupTemplate(e.target.value)}
-                style={{ padding: "6px 8px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 6, fontSize: "0.8rem", background: "#fff", color: "#334155" }}
+                sx={{ minWidth: 140 }}
               >
-                <option value="python">Python (pytest)</option>
-                <option value="node">Node (npm test)</option>
-                <option value="java">Java (Maven)</option>
-                <option value="custom">Custom command</option>
-              </select>
+                <MenuItem value="python">Python (pytest)</MenuItem>
+                <MenuItem value="node">Node (npm test)</MenuItem>
+                <MenuItem value="java">Java (Maven)</MenuItem>
+                <MenuItem value="custom">Custom command</MenuItem>
+              </TextField>
               {setupTemplate === "custom" && (
-                <input
-                  type="text"
+                <TextField
+                  size="small"
                   value={setupCommand}
                   placeholder="test command, e.g. make test"
                   onChange={(e) => setSetupCommand(e.target.value)}
-                  style={{ flex: "1 1 200px", padding: "6px 8px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 6, fontSize: "0.8rem" }}
+                  sx={{ flex: "1 1 200px" }}
                 />
               )}
-              <button type="button" className={styles.submitButton} onClick={setupAll} disabled={busy === "setup"}>
+              <Button type="button" variant="contained" size="small" onClick={setupAll} disabled={busy === "setup"}>
                 {busy === "setup" ? "Adding…" : "Add test workflow to all repos"}
-              </button>
+              </Button>
             </div>
             {setupNote && <p style={{ fontSize: "0.8rem", color: "#16a34a", marginTop: 6 }}>{setupNote}</p>}
           </div>
@@ -434,35 +439,38 @@ export default function GithubGradingPanel() {
       {/* Rubric */}
       <div className={styles.field}>
         <label>Assignment instructions (optional)</label>
-        <textarea
+        <TextField
+          multiline
+          minRows={3}
+          fullWidth
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
-          rows={3}
           placeholder="What the assignment asked for. Used to focus the rubric and grading."
-          style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem" }}
         />
       </div>
 
       <div className={styles.field}>
         <label>Reference repo for the rubric (optional)</label>
         <GithubRepoPicker value={rubricRepo} onChange={setRubricRepo} branch={rubricBranch} onBranchChange={setRubricBranch} disabled={!!busy} />
-        <button type="button" className={styles.submitButton} style={{ marginTop: 8 }} onClick={genRubric} disabled={!!busy || !rubricRepo.trim()}>
+        <Button type="button" variant="contained" size="small" sx={{ mt: 1 }} onClick={genRubric} disabled={!!busy || !rubricRepo.trim()}>
           {busy === "rubric" ? "Generating rubric…" : "Generate rubric from reference code"}
-        </button>
+        </Button>
       </div>
 
       <div className={styles.field}>
         <label>Rubric (generated or pasted; auto-generated from the first repo if blank)</label>
-        <textarea
+        <TextField
+          multiline
+          minRows={8}
+          fullWidth
           value={rubric}
           onChange={(e) => setRubric(e.target.value)}
-          rows={8}
           placeholder="Leave blank to auto-generate at grading time."
-          style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.85rem", fontFamily: "monospace" }}
+          sx={{ fontFamily: "monospace" }}
         />
       </div>
 
-      <button type="button" className={styles.submitButton} onClick={gradeAll} disabled={!!busy || queue.length === 0}>
+      <Button type="button" variant="contained" size="small" onClick={gradeAll} disabled={!!busy || queue.length === 0}>
         {busy === "grade" ? (
           <>
             <span className={styles.btnSpinner} aria-hidden="true" />
@@ -471,7 +479,7 @@ export default function GithubGradingPanel() {
         ) : (
           `Grade all (${queue.length})`
         )}
-      </button>
+      </Button>
 
       {busy === "grade" && (
         <div className={styles.loadingState} role="status" aria-live="polite">

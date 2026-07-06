@@ -19,6 +19,8 @@ import {
   listRunJobsAction,
   rerunWorkflowRunAction,
   cancelWorkflowRunAction,
+  createRepoAction,
+  createCopilotRepoAction,
 } from "../actions";
 import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo } from "@/lib/github";
 import RepoSettingsPanel from "./RepoSettingsPanel";
@@ -29,6 +31,8 @@ import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import CircularProgress from "@mui/material/CircularProgress";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import styles from "../page.module.css";
 
 export default function RepoDetail() {
@@ -87,6 +91,17 @@ export default function RepoDetail() {
   const [expandedRun, setExpandedRun] = useState<number | null>(null);
   const [jobsByRun, setJobsByRun] = useState<Record<number, WorkflowJobInfo[]>>({});
   const [jobsLoadingRun, setJobsLoadingRun] = useState<number | null>(null);
+
+  // Create repo state
+  const [showCreate, setShowCreate] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createDescription, setCreateDescription] = useState("");
+  const [createPrivate, setCreatePrivate] = useState(true);
+  const [createTemplate, setCreateTemplate] = useState(false);
+  const [createPrompt, setCreatePrompt] = useState("");
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createMsg, setCreateMsg] = useState<string | null>(null);
+  const [createResult, setCreateResult] = useState<{ fullName: string; htmlUrl: string } | null>(null);
 
   // Load repos on mount
   useEffect(() => {
@@ -440,6 +455,32 @@ export default function RepoDetail() {
     }
   };
 
+  const handleCreateRepo = async () => {
+    const name = createName.trim();
+    if (!name) return;
+    setCreateBusy(true);
+    setCreateMsg(null);
+    setCreateResult(null);
+    const r = createPrompt.trim()
+      ? await createCopilotRepoAction(name, createPrompt, createPrivate, undefined, createTemplate, createDescription)
+      : await createRepoAction(name, createDescription, createPrivate, createTemplate);
+    setCreateBusy(false);
+    if ("error" in r) {
+      setCreateMsg(`Error: ${r.error}`);
+      return;
+    }
+    const fullName = "repo" in r ? r.repo.fullName : r.fullName;
+    const htmlUrl = "repo" in r ? r.repo.htmlUrl : r.htmlUrl;
+    setCreateResult({ fullName, htmlUrl });
+    const list = await listGithubReposAction();
+    if (!("error" in list)) setRepos(list.repos);
+    setRepoRef(fullName);
+    setCreateName("");
+    setCreateDescription("");
+    setCreatePrompt("");
+    setShowCreate(false);
+  };
+
   const repoOptions = repos.map((r) => ({
     value: r.fullName,
     label: r.fullName,
@@ -491,9 +532,72 @@ export default function RepoDetail() {
             />
           </div>
         )}
+        <Button variant="outlined" size="small" onClick={() => setShowCreate((v) => !v)}>
+          {showCreate ? "Cancel" : "New repository"}
+        </Button>
       </div>
 
       {!repoRef && <p className={styles.fieldHint}>Pick a repository to browse its files, branches, pull requests, and actions.</p>}
+
+      {showCreate && (
+        <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="Repository name"
+            value={createName}
+            onChange={(e) => setCreateName(e.target.value)}
+          />
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="Description (optional)"
+            value={createDescription}
+            onChange={(e) => setCreateDescription(e.target.value)}
+          />
+          <div style={{ display: "flex", gap: 16 }}>
+            <FormControlLabel
+              control={<Checkbox size="small" checked={createPrivate} onChange={(e) => setCreatePrivate(e.target.checked)} />}
+              label="Private"
+            />
+            <FormControlLabel
+              control={<Checkbox size="small" checked={createTemplate} onChange={(e) => setCreateTemplate(e.target.checked)} />}
+              label="Template"
+            />
+          </div>
+          <TextField
+            size="small"
+            fullWidth
+            multiline
+            minRows={4}
+            placeholder="GitHub Copilot prompt (optional)"
+            value={createPrompt}
+            onChange={(e) => setCreatePrompt(e.target.value)}
+            sx={{ "& textarea": { fontFamily: "monospace", fontSize: "0.82rem" } }}
+          />
+          <Button
+            variant="contained"
+            size="small"
+            disabled={createBusy || !createName.trim()}
+            onClick={handleCreateRepo}
+          >
+            {createBusy ? "Creating..." : (createPrompt.trim() ? "Create repo with Copilot prompt" : "Create repository")}
+          </Button>
+          {createMsg && (
+            <p style={{ fontSize: "0.85rem", color: createMsg.startsWith("Error") ? "#dc2626" : "var(--text-secondary)", marginTop: 4 }}>
+              {createMsg}
+            </p>
+          )}
+          {createResult && (
+            <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: 4 }}>
+              Created{" "}
+              <a href={createResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                {createResult.fullName}
+              </a>
+            </p>
+          )}
+        </div>
+      )}
 
       {repoRef && (
         <>

@@ -5121,6 +5121,30 @@ export async function ingestRepoAction(repoRef: string, branch?: string): Promis
   }
 }
 
+/** Create a new personal repo (auto-initialized). */
+export async function createRepoAction(
+  name: string,
+  description: string,
+  isPrivate: boolean,
+  isTemplate: boolean
+): Promise<{ repo: GithubRepo } | { error: string }> {
+  try {
+    await requireOwner();
+    const clean = name.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
+    if (!clean) return { error: "Enter a repository name." };
+    return {
+      repo: await createRepo(clean, {
+        description: description.trim(),
+        private: isPrivate,
+        autoInit: true,
+        isTemplate,
+      }),
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the repository." };
+  }
+}
+
 /**
  * Create a new GitHub repo seeded with a generated Copilot prompt, so the page
  * that used to only produce the prompt can hand back a ready-to-build repo. The
@@ -5132,7 +5156,8 @@ export async function createCopilotRepoAction(
   prompt: string,
   isPrivate = true,
   org?: string,
-  isTemplate = false
+  isTemplate = false,
+  description?: string
 ): Promise<{ fullName: string; htmlUrl: string } | { error: string }> {
   try {
     await requireOwner();
@@ -5140,7 +5165,7 @@ export async function createCopilotRepoAction(
     if (!clean) return { error: "Enter a repository name." };
     if (!prompt.trim()) return { error: "Generate the Copilot prompt first." };
     const opts = {
-      description: "Project scaffold generated from a Copilot prompt.",
+      description: description?.trim() || "Project scaffold generated from a Copilot prompt.",
       private: isPrivate,
       autoInit: true,
       isTemplate,

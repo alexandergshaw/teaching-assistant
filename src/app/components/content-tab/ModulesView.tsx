@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Button, IconButton, TextField, MenuItem, Checkbox, FormControlLabel } from "@mui/material";
 import {
   bulkAssociateRubricAction,
   bulkDeleteAction,
@@ -1766,16 +1767,15 @@ export function ModulesView({
   };
 
   const arrowBtn = (label: string, onClick: () => void, disabled: boolean) => (
-    <button
-      type="button"
-      className={styles.ccIconBtn}
+    <IconButton
+      size="small"
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
       title={label}
     >
       {label === "Move up" ? "↑" : "↓"}
-    </button>
+    </IconButton>
   );
 
   return (
@@ -1790,39 +1790,40 @@ export function ModulesView({
           <h2 className={styles.ccCourseTitle}>{courseName || "Course content"}</h2>
           <div className={styles.ccBarGroup}>
             <span className={styles.ccBarLabel}>Course copy</span>
-            <button
-              type="button"
-              className={styles.ccBarBtn}
+            <Button
+              variant="outlined"
+              size="small"
               onClick={onExport}
               disabled={!canCopy}
               title="Copy this course's content into other courses"
             >
               Copy to…
-            </button>
-            <button
-              type="button"
-              className={styles.ccBarBtn}
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
               onClick={onImport}
               disabled={!canCopy}
               title="Import another course's content into this one"
             >
               Import from…
-            </button>
+            </Button>
             <span className={styles.ccBarDivider} aria-hidden="true" />
-            <button
-              type="button"
-              className={styles.ccBarBtn}
+            <Button
+              variant="outlined"
+              size="small"
               onClick={reload}
               disabled={busy || refreshing}
               title="Reload this course's content"
             >
               {refreshing ? "Refreshing…" : "Refresh"}
-            </button>
+            </Button>
           </div>
         </div>
-        <input
+        <TextField
           type="search"
-          className={styles.textInput}
+          size="small"
+          fullWidth
           placeholder="Search modules and their items by name…"
           value={moduleSearch}
           onChange={(e) => setModuleSearch(e.target.value)}
@@ -1830,88 +1831,85 @@ export function ModulesView({
       <div className={styles.ccBar}>
         <div className={styles.ccBarGroup}>
           <span className={styles.ccBarLabel}>Select</span>
-          <label className={styles.ccBarCheck}>
-            <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={allKeys.length === 0} />
-            Items
-          </label>
-          <label className={styles.ccBarCheck}>
-            <input
-              type="checkbox"
-              checked={allModulesSelected}
-              onChange={toggleAllModules}
-              disabled={visibleModules.length === 0}
-            />
-            Modules
-          </label>
-          <select
-            className={styles.ccBarSelect}
-            style={{ maxWidth: 150 }}
+          <FormControlLabel
+            control={<Checkbox checked={allSelected} onChange={toggleAll} disabled={allKeys.length === 0} size="small" />}
+            label="Items"
+          />
+          <FormControlLabel
+            control={<Checkbox checked={allModulesSelected} onChange={toggleAllModules} disabled={visibleModules.length === 0} size="small" />}
+            label="Modules"
+          />
+          <TextField
+            select
+            size="small"
+            sx={{ maxWidth: 150 }}
             value=""
             disabled={visibleModules.length === 0}
             onChange={(e) => selectByKind(e.target.value)}
             aria-label="Select all items of a type"
           >
-            <option value="">By type…</option>
-            <option value="Graded">Graded items</option>
-            <option value="Assignment">Assignments</option>
-            <option value="Quiz">Quizzes</option>
-            <option value="Discussion">Discussions</option>
-            <option value="Page">Pages</option>
-            <option value="File">Files</option>
-          </select>
+            <MenuItem value="">By type…</MenuItem>
+            <MenuItem value="Graded">Graded items</MenuItem>
+            <MenuItem value="Assignment">Assignments</MenuItem>
+            <MenuItem value="Quiz">Quizzes</MenuItem>
+            <MenuItem value="Discussion">Discussions</MenuItem>
+            <MenuItem value="Page">Pages</MenuItem>
+            <MenuItem value="File">Files</MenuItem>
+          </TextField>
         </div>
 
         <span className={styles.ccBarDivider} aria-hidden="true" />
 
         <div className={styles.ccBarGroup}>
           <span className={styles.ccBarLabel}>Files</span>
-          <button type="button" className={styles.ccBarBtn} onClick={() => setBulkUploadOpen(true)} disabled={busy || modules.length === 0}>
+          <Button variant="outlined" size="small" onClick={() => setBulkUploadOpen(true)} disabled={busy || modules.length === 0}>
             Bulk upload
-          </button>
+          </Button>
         </div>
 
         <span className={styles.ccBarDivider} aria-hidden="true" />
 
         <div className={styles.ccBarGroup}>
           <span className={styles.ccBarLabel}>Modules</span>
-          <button type="button" className={styles.ccBarBtn} onClick={() => setRenameOpen(true)} disabled={busy || modules.length === 0}>
+          <Button variant="outlined" size="small" onClick={() => setRenameOpen(true)} disabled={busy || modules.length === 0}>
             Rename
-          </button>
-          <button type="button" className={styles.ccBarBtn} onClick={() => setScheduleOpen(true)} disabled={busy || modules.length === 0}>
+          </Button>
+          <Button variant="outlined" size="small" onClick={() => setScheduleOpen(true)} disabled={busy || modules.length === 0}>
             Schedule due dates
-          </button>
+          </Button>
         </div>
 
         <span className={styles.ccBarDivider} aria-hidden="true" />
 
         <div className={styles.ccBarGroup}>
           <span className={styles.ccBarLabel}>Rubrics</span>
-          <button type="button" className={styles.ccBarBtn} onClick={() => setRubricBuilder({ assignments: [] })}>
+          <Button variant="outlined" size="small" onClick={() => setRubricBuilder({ assignments: [] })}>
             New
-          </button>
-          <select
-            className={styles.ccBarSelect}
-            style={{ maxWidth: 180 }}
+          </Button>
+          <TextField
+            select
+            size="small"
+            sx={{ maxWidth: 180 }}
             value={editRubricId}
             disabled={rubrics.length === 0}
             onChange={(e) => setEditRubricId(e.target.value === "" ? "" : Number(e.target.value))}
             aria-label="Rubric to edit"
           >
-            <option value="">{rubrics.length === 0 ? "No rubrics" : "Edit…"}</option>
+            <MenuItem value="">{rubrics.length === 0 ? "No rubrics" : "Edit…"}</MenuItem>
             {rubrics.map((r) => (
-              <option key={r.id} value={r.id}>
+              <MenuItem key={r.id} value={r.id}>
                 {r.title}
-              </option>
+              </MenuItem>
             ))}
-          </select>
-          <button
-            type="button"
-            className={styles.ccBarBtn}
+          </TextField>
+          <Button
+            variant="outlined"
+            size="small"
             disabled={editRubricId === ""}
             onClick={() => editRubricId !== "" && setRubricBuilder({ assignments: [], editRubricId: Number(editRubricId) })}
           >
             Edit
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -1929,35 +1927,37 @@ export function ModulesView({
                 .join(", ")}{" "}
               selected
             </span>
-            <button type="button" className={styles.bulkClear} onClick={clearSelection}>
+            <Button variant="outlined" size="small" onClick={clearSelection}>
               Clear
-            </button>
+            </Button>
           </div>
 
           {selectedModules.size > 0 && (
             <>
               <div className={styles.bulkRow}>
                 <span className={styles.bulkLabel}>Modules</span>
-                <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={() => bulkPublishModules(true)}>
+                <Button variant="outlined" size="small" disabled={opBusy} onClick={() => bulkPublishModules(true)}>
                   Publish
-                </button>
-                <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={() => bulkPublishModules(false)}>
+                </Button>
+                <Button variant="outlined" size="small" disabled={opBusy} onClick={() => bulkPublishModules(false)}>
                   Unpublish
-                </button>
-                <button
-                  type="button"
-                  className={styles.bulkBtnDanger}
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  color="error"
                   disabled={opBusy}
                   onClick={bulkDeleteModules}
                   title="Delete the selected modules"
                 >
                   {confirmDeleteModules ? "Confirm delete" : "Delete"}
-                </button>
+                </Button>
               </div>
               <div className={styles.bulkRow}>
                 <span className={styles.bulkLabel}>Add to each</span>
-                <select
-                  className={styles.bulkSelect}
+                <TextField
+                  select
+                  size="small"
                   value={bulkAddType}
                   onChange={(e) => {
                     const t = e.target.value;
@@ -1966,17 +1966,16 @@ export function ModulesView({
                   }}
                   aria-label="Type of item to add to each selected module"
                 >
-                  <option value="Assignment">Assignment</option>
-                  <option value="Quiz">Quiz</option>
-                  <option value="Discussion">Discussion</option>
-                  <option value="Page">Page</option>
-                  <option value="File">File</option>
-                  <option value="SubHeader">Text header</option>
-                </select>
-                <input
-                  type="text"
-                  className={styles.bulkInput}
-                  style={{ flex: "1 1 200px", minWidth: 170 }}
+                  <MenuItem value="Assignment">Assignment</MenuItem>
+                  <MenuItem value="Quiz">Quiz</MenuItem>
+                  <MenuItem value="Discussion">Discussion</MenuItem>
+                  <MenuItem value="Page">Page</MenuItem>
+                  <MenuItem value="File">File</MenuItem>
+                  <MenuItem value="SubHeader">Text header</MenuItem>
+                </TextField>
+                <TextField
+                  size="small"
+                  sx={{ flex: "1 1 200px", minWidth: 170 }}
                   placeholder={
                     bulkAddType === "File"
                       ? "File name pattern (for an AI-generated file)"
@@ -1986,9 +1985,9 @@ export function ModulesView({
                   onChange={(e) => setBulkAddPattern(e.target.value)}
                   aria-label="Name pattern for the new items"
                 />
-                <button
-                  type="button"
-                  className={styles.bulkBtnPrimary}
+                <Button
+                  variant="contained"
+                  size="small"
                   disabled={
                     opBusy ||
                     bulkAiBusy ||
@@ -2001,7 +2000,7 @@ export function ModulesView({
                   title="Add one new item to each selected module"
                 >
                   Add
-                </button>
+                </Button>
                 <span className={styles.bulkHint}>
                   {"{module}"} = module name, {"{n}"} = week/module number from the title (e.g. &quot;Week 5&quot; -&gt; 5). New items are unpublished.
                 </span>
@@ -2011,35 +2010,37 @@ export function ModulesView({
                   <span className={styles.bulkLabel}>File</span>
                   <span className={styles.bulkField}>
                     <span className={styles.bulkFieldLabel}>New file</span>
-                    <select
-                      className={styles.bulkSelect}
+                    <TextField
+                      select
+                      size="small"
                       value={bulkAddFileFormat}
                       onChange={(e) => setBulkAddFileFormat(e.target.value === "pptx" ? "pptx" : "docx")}
                       aria-label="Format of the generated file"
                     >
-                      <option value="docx">Word (.docx)</option>
-                      <option value="pptx">PowerPoint (.pptx)</option>
-                    </select>
+                      <MenuItem value="docx">Word (.docx)</MenuItem>
+                      <MenuItem value="pptx">PowerPoint (.pptx)</MenuItem>
+                    </TextField>
                   </span>
-                  <select
-                    className={styles.bulkSelect}
-                    style={{ flex: "1 1 200px", maxWidth: 300 }}
+                  <TextField
+                    select
+                    size="small"
+                    sx={{ flex: "1 1 200px", maxWidth: 300 }}
                     value={bulkAddFileId}
                     disabled={opBusy || bulkAddFileContent.trim() !== "" || optionsFor("File").length === 0}
                     onChange={(e) => setBulkAddFileId(e.target.value === "" ? "" : Number(e.target.value))}
                     aria-label="Existing file to add to each module"
                   >
-                    <option value="">{`or pick existing — ${contentPlaceholder("File")}`}</option>
+                    <MenuItem value="">{`or pick existing — ${contentPlaceholder("File")}`}</MenuItem>
                     {optionsFor("File").map((o) => (
-                      <option key={o.value} value={o.value}>
+                      <MenuItem key={o.value} value={o.value}>
                         {o.label}
-                      </option>
+                      </MenuItem>
                     ))}
-                  </select>
+                  </TextField>
                   {bulkAddFileContent.trim() !== "" && (
-                    <button type="button" className={styles.bulkBtn} onClick={() => setBulkAddFileContent("")}>
+                    <Button variant="outlined" size="small" onClick={() => setBulkAddFileContent("")}>
                       Discard AI file
-                    </button>
+                    </Button>
                   )}
                   <span className={styles.bulkHint}>
                     Add an existing course file to every selected module, or generate a new{" "}
@@ -2053,42 +2054,44 @@ export function ModulesView({
                   <span className={styles.bulkLabel}>Details</span>
                   <span className={styles.bulkField}>
                     <span className={styles.bulkFieldLabel}>Due</span>
-                    <input
+                    <TextField
                       type="datetime-local"
-                      className={styles.bulkInput}
-                      style={{ width: 188 }}
+                      size="small"
+                      sx={{ width: 188 }}
                       value={bulkAddDue}
                       onChange={(e) => setBulkAddDue(e.target.value)}
                       aria-label="First due date for the new items"
+                      slotProps={{ htmlInput: { } }}
                     />
                   </span>
                   <span className={styles.bulkField}>
                     <span className={styles.bulkFieldLabel}>then every</span>
-                    <input
+                    <TextField
                       type="number"
-                      min={0}
-                      className={styles.bulkInput}
-                      style={{ width: 52 }}
+                      size="small"
+                      slotProps={{ htmlInput: { min: 0 } }}
+                      sx={{ width: 52 }}
                       value={bulkAddStaggerOffset}
                       onChange={(e) => setBulkAddStaggerOffset(Number(e.target.value))}
                       aria-label="Stagger interval between modules"
                     />
-                    <select
-                      className={styles.bulkSelect}
+                    <TextField
+                      select
+                      size="small"
                       value={bulkAddStaggerUnit}
                       onChange={(e) => setBulkAddStaggerUnit(e.target.value === "days" ? "days" : "weeks")}
                       aria-label="Stagger interval unit"
                     >
-                      <option value="weeks">weeks</option>
-                      <option value="days">days</option>
-                    </select>
+                      <MenuItem value="weeks">weeks</MenuItem>
+                      <MenuItem value="days">days</MenuItem>
+                    </TextField>
                   </span>
                   {["Assignment", "Quiz"].includes(bulkAddType) && (
                     <span className={styles.bulkField}>
-                      <input
+                      <TextField
                         type="number"
-                        className={styles.bulkInput}
-                        style={{ width: 74 }}
+                        size="small"
+                        sx={{ width: 74 }}
                         placeholder="points"
                         value={bulkAddPoints}
                         onChange={(e) => setBulkAddPoints(e.target.value)}
@@ -2098,21 +2101,22 @@ export function ModulesView({
                   )}
                   {bulkAddType === "Assignment" && (
                     <span className={styles.bulkField}>
-                      <select
-                        className={styles.bulkSelect}
-                        style={{ maxWidth: 170 }}
+                      <TextField
+                        select
+                        size="small"
+                        sx={{ maxWidth: 170 }}
                         value={bulkAddRubricId}
                         disabled={rubrics.length === 0}
                         onChange={(e) => setBulkAddRubricId(e.target.value === "" ? "" : Number(e.target.value))}
                         aria-label="Rubric for the new items"
                       >
-                        <option value="">{rubrics.length === 0 ? "No rubrics" : "Rubric…"}</option>
+                        <MenuItem value="">{rubrics.length === 0 ? "No rubrics" : "Rubric…"}</MenuItem>
                         {rubrics.map((r) => (
-                          <option key={r.id} value={r.id}>
+                          <MenuItem key={r.id} value={r.id}>
                             {r.title}
-                          </option>
+                          </MenuItem>
                         ))}
-                      </select>
+                      </TextField>
                     </span>
                   )}
                   <span className={styles.bulkHint}>
@@ -2132,7 +2136,10 @@ export function ModulesView({
                           : "File content"
                         : "Description"}
                   </span>
-                  <textarea
+                  <TextField
+                    multiline
+                    minRows={4}
+                    fullWidth
                     value={bulkAddType === "File" ? bulkAddFileContent : bulkAddDescription}
                     onChange={(e) =>
                       bulkAddType === "File"
@@ -2148,33 +2155,22 @@ export function ModulesView({
                             : "Document text (use # Title, ## Section, - bullets) — generate with AI below or write it here; built into a .docx. Leave empty to use the picked file"
                           : "Description (HTML allowed) — written to every new item"
                     }
-                    spellCheck
+                    slotProps={{ htmlInput: { spellCheck: true } }}
                     aria-label={bulkAddType === "File" ? "File content for the new files" : "Description for the new items"}
-                    style={{
-                      flexBasis: "100%",
-                      width: "100%",
-                      minHeight: 72,
-                      padding: "8px 10px",
-                      border: "1px solid var(--field-border)",
-                      borderRadius: 8,
-                      background: "var(--field-background)",
-                      color: "var(--text-primary)",
-                      font: "inherit",
-                      fontSize: "0.83rem",
-                    }}
+                    size="small"
                   />
                 </div>
               )}
               {bulkAddType === "Quiz" && (
                 <div className={styles.bulkRow}>
                   <span className={styles.bulkLabel}>Questions</span>
-                  <button type="button" className={styles.bulkBtn} onClick={() => setBulkQuestionsOpen(true)}>
+                  <Button variant="outlined" size="small" onClick={() => setBulkQuestionsOpen(true)}>
                     Edit questions{bulkAddQuestions.length > 0 ? ` (${bulkAddQuestions.length})` : ""}
-                  </button>
+                  </Button>
                   {bulkAddQuestions.length > 0 && (
-                    <button type="button" className={styles.bulkBtn} onClick={() => setBulkAddQuestions([])}>
+                    <Button variant="outlined" size="small" onClick={() => setBulkAddQuestions([])}>
                       Clear
-                    </button>
+                    </Button>
                   )}
                   <span className={styles.bulkHint}>
                     Composed once here and created in every new quiz.
@@ -2184,10 +2180,9 @@ export function ModulesView({
               {bulkAddType !== "SubHeader" && (
                 <div className={styles.bulkRow}>
                   <span className={styles.bulkLabel}>AI</span>
-                  <input
-                    type="text"
-                    className={styles.bulkInput}
-                    style={{ flex: "1 1 260px", minWidth: 200 }}
+                  <TextField
+                    size="small"
+                    sx={{ flex: "1 1 260px", minWidth: 200 }}
                     placeholder={
                       bulkAddType === "File"
                         ? bulkAddFileFormat === "pptx"
@@ -2199,14 +2194,14 @@ export function ModulesView({
                     onChange={(e) => setBulkAiPrompt(e.target.value)}
                     aria-label="AI prompt for the new content"
                   />
-                  <button
-                    type="button"
-                    className={styles.bulkBtn}
+                  <Button
+                    variant="outlined"
+                    size="small"
                     disabled={bulkAiBusy || opBusy || !bulkAiPrompt.trim()}
                     onClick={() => void bulkAiGenerate()}
                   >
                     {bulkAiBusy ? "Generating…" : "Generate with AI"}
-                  </button>
+                  </Button>
                   <span className={styles.bulkHint}>
                     {bulkAddType === "File"
                       ? bulkAddFileFormat === "pptx"
@@ -2223,12 +2218,12 @@ export function ModulesView({
             <>
               <div className={styles.bulkRow}>
                 <span className={styles.bulkLabel}>Items</span>
-                <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={() => bulkPublish(true)}>
+                <Button variant="outlined" size="small" disabled={opBusy} onClick={() => bulkPublish(true)}>
                   Publish
-                </button>
-                <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={() => bulkPublish(false)}>
+                </Button>
+                <Button variant="outlined" size="small" disabled={opBusy} onClick={() => bulkPublish(false)}>
                   Unpublish
-                </button>
+                </Button>
                 {selected.size === 1 &&
                   (() => {
                     const one = selectedItems()[0];
@@ -2236,16 +2231,16 @@ export function ModulesView({
                     const it = one.item;
                     if (["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null) {
                       return (
-                        <button type="button" className={styles.bulkBtn} onClick={() => setEditingItem(it)} title="Edit every attribute of this item">
+                        <Button variant="outlined" size="small" onClick={() => setEditingItem(it)} title="Edit every attribute of this item">
                           Edit in detail
-                        </button>
+                        </Button>
                       );
                     }
                     if (it.type === "Page" && it.pageUrl) {
                       return (
-                        <button type="button" className={styles.bulkBtn} onClick={() => onEditPage(it.pageUrl!)} title="Edit this page">
+                        <Button variant="outlined" size="small" onClick={() => onEditPage(it.pageUrl!)} title="Edit this page">
                           Edit page
-                        </button>
+                        </Button>
                       );
                     }
                     return null;
@@ -2262,35 +2257,27 @@ export function ModulesView({
                 {descSharedState === "mixed" && (
                   <span className={styles.bulkFieldLabel}>Selected items have different descriptions; typing replaces them all.</span>
                 )}
-                <textarea
+                <TextField
+                  multiline
+                  minRows={4}
+                  fullWidth
                   value={bulkItemsDescription}
                   onChange={(e) => setBulkItemsDescription(e.target.value)}
                   placeholder="Description (HTML allowed) — replaces the description on selected items / the body of selected pages"
-                  spellCheck
+                  slotProps={{ htmlInput: { spellCheck: true } }}
                   aria-label="Description to set on the selected items"
-                  style={{
-                    flexBasis: "100%",
-                    width: "100%",
-                    minHeight: 64,
-                    padding: "8px 10px",
-                    border: "1px solid var(--field-border)",
-                    borderRadius: 8,
-                    background: "var(--field-background)",
-                    color: "var(--text-primary)",
-                    font: "inherit",
-                    fontSize: "0.83rem",
-                  }}
+                  size="small"
                 />
-                <button type="button" className={styles.bulkBtnPrimary} disabled={opBusy} onClick={bulkSetDescription}>
+                <Button variant="contained" size="small" disabled={opBusy} onClick={bulkSetDescription}>
                   Set description
-                </button>
+                </Button>
                 <span className={styles.bulkField}>
-                  <button type="button" className={styles.bulkBtn} onClick={() => setBulkItemsQuestionsOpen(true)}>
+                  <Button variant="outlined" size="small" onClick={() => setBulkItemsQuestionsOpen(true)}>
                     Edit questions{bulkItemsQuestions.length > 0 ? ` (${bulkItemsQuestions.length})` : ""}
-                  </button>
-                  <button type="button" className={styles.bulkBtn} disabled={opBusy || bulkItemsQuestions.length === 0} onClick={bulkAddQuestionsToQuizzes}>
+                  </Button>
+                  <Button variant="outlined" size="small" disabled={opBusy || bulkItemsQuestions.length === 0} onClick={bulkAddQuestionsToQuizzes}>
                     Add to selected quizzes
-                  </button>
+                  </Button>
                 </span>
                 <span className={styles.bulkHint}>
                   Set description overwrites the description on selected assignments, quizzes, and discussions (and
@@ -2299,52 +2286,54 @@ export function ModulesView({
               </div>
               <div className={styles.bulkRow}>
                 <span className={styles.bulkLabel}>Due dates</span>
-                <input
+                <TextField
                   type="datetime-local"
-                  className={styles.bulkInput}
-                  style={{ width: 188 }}
+                  size="small"
+                  sx={{ width: 188 }}
                   value={bulkDue}
                   onChange={(e) => setBulkDue(e.target.value)}
                   aria-label="Due date"
+                  slotProps={{ htmlInput: { } }}
                 />
-                <button type="button" className={styles.bulkBtnPrimary} disabled={opBusy} onClick={bulkSetDue} title="Set this due date on all selected gradables">
+                <Button variant="contained" size="small" disabled={opBusy} onClick={bulkSetDue} title="Set this due date on all selected gradables">
                   Set
-                </button>
+                </Button>
                 <span className={styles.bulkField}>
-                  <input
+                  <TextField
                     type="number"
-                    className={styles.bulkInput}
-                    style={{ width: 56 }}
+                    size="small"
+                    sx={{ width: 56 }}
                     value={bulkShift}
                     onChange={(e) => setBulkShift(Number(e.target.value))}
                     aria-label="Days to shift"
                   />
-                  <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={bulkShiftDue}>
+                  <Button variant="outlined" size="small" disabled={opBusy} onClick={bulkShiftDue}>
                     Shift days
-                  </button>
+                  </Button>
                 </span>
                 <span className={styles.bulkField}>
-                  <input
+                  <TextField
                     type="number"
-                    min={0}
-                    className={styles.bulkInput}
-                    style={{ width: 52 }}
+                    size="small"
+                    slotProps={{ htmlInput: { min: 0 } }}
+                    sx={{ width: 52 }}
                     value={bulkStaggerOffset}
                     onChange={(e) => setBulkStaggerOffset(Number(e.target.value))}
                     aria-label="Stagger interval"
                   />
-                  <select
-                    className={styles.bulkSelect}
+                  <TextField
+                    select
+                    size="small"
                     value={bulkStaggerUnit}
                     onChange={(e) => setBulkStaggerUnit(e.target.value === "days" ? "days" : "weeks")}
                     aria-label="Stagger interval unit"
                   >
-                    <option value="weeks">weeks</option>
-                    <option value="days">days</option>
-                  </select>
-                  <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={bulkStaggerDue}>
+                    <MenuItem value="weeks">weeks</MenuItem>
+                    <MenuItem value="days">days</MenuItem>
+                  </TextField>
+                  <Button variant="outlined" size="small" disabled={opBusy} onClick={bulkStaggerDue}>
                     Stagger
-                  </button>
+                  </Button>
                 </span>
                 <span className={styles.bulkHint}>
                   Stagger gives the earliest selected module the date above, then adds the interval for each later module.
@@ -2353,96 +2342,98 @@ export function ModulesView({
               <div className={styles.bulkRow}>
                 <span className={styles.bulkLabel}>Grading</span>
                 <span className={styles.bulkField}>
-                  <input
+                  <TextField
                     type="number"
-                    className={styles.bulkInput}
-                    style={{ width: 74 }}
+                    size="small"
+                    sx={{ width: 74 }}
                     placeholder="points"
                     value={bulkPoints}
                     onChange={(e) => setBulkPoints(e.target.value)}
                     aria-label="Points"
                   />
-                  <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={bulkSetPoints}>
+                  <Button variant="outlined" size="small" disabled={opBusy} onClick={bulkSetPoints}>
                     Set points
-                  </button>
+                  </Button>
                 </span>
                 <span className={styles.bulkField}>
-                  <select
-                    className={styles.bulkSelect}
-                    style={{ maxWidth: 170 }}
+                  <TextField
+                    select
+                    size="small"
+                    sx={{ maxWidth: 170 }}
                     value={bulkRubricId}
                     disabled={rubrics.length === 0}
                     onChange={(e) => setBulkRubricId(e.target.value === "" ? "" : Number(e.target.value))}
                     aria-label="Rubric"
                   >
-                    <option value="">{rubrics.length === 0 ? "No rubrics" : "Rubric…"}</option>
+                    <MenuItem value="">{rubrics.length === 0 ? "No rubrics" : "Rubric…"}</MenuItem>
                     {rubrics.map((r) => (
-                      <option key={r.id} value={r.id}>
+                      <MenuItem key={r.id} value={r.id}>
                         {r.title}
-                      </option>
+                      </MenuItem>
                     ))}
-                  </select>
-                  <button type="button" className={styles.bulkBtn} disabled={opBusy || bulkRubricId === ""} onClick={bulkRubric}>
+                  </TextField>
+                  <Button variant="outlined" size="small" disabled={opBusy || bulkRubricId === ""} onClick={bulkRubric}>
                     Associate
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.bulkBtn}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
                     disabled={opBusy || bulkRubricId === ""}
                     onClick={() => bulkRubricId !== "" && setRubricBuilder({ assignments: [], editRubricId: Number(bulkRubricId) })}
                   >
                     Edit
-                  </button>
+                  </Button>
                 </span>
-                <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={openRubricBuilder}>
+                <Button variant="outlined" size="small" disabled={opBusy} onClick={openRubricBuilder}>
                   New rubric
-                </button>
+                </Button>
               </div>
               <div className={styles.bulkRow}>
                 <span className={styles.bulkLabel}>Move</span>
                 <span className={styles.bulkField}>
-                  <input
+                  <TextField
                     type="number"
-                    min={1}
-                    className={styles.bulkInput}
-                    style={{ width: 56 }}
+                    size="small"
+                    slotProps={{ htmlInput: { min: 1 } }}
+                    sx={{ width: 56 }}
                     value={bulkModuleShift}
                     onChange={(e) => setBulkModuleShift(Number(e.target.value))}
                     aria-label="Modules to shift by"
                   />
-                  <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={() => bulkShiftModules(-1)}>
+                  <Button variant="outlined" size="small" disabled={opBusy} onClick={() => bulkShiftModules(-1)}>
                     Shift up
-                  </button>
-                  <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={() => bulkShiftModules(1)}>
+                  </Button>
+                  <Button variant="outlined" size="small" disabled={opBusy} onClick={() => bulkShiftModules(1)}>
                     Shift down
-                  </button>
+                  </Button>
                 </span>
                 <span className={styles.bulkField}>
-                  <select
-                    className={styles.bulkSelect}
-                    style={{ maxWidth: 190 }}
+                  <TextField
+                    select
+                    size="small"
+                    sx={{ maxWidth: 190 }}
                     value={bulkTargetModule}
                     disabled={modules.length === 0}
                     onChange={(e) => setBulkTargetModule(e.target.value === "" ? "" : Number(e.target.value))}
                     aria-label="Module to move items into"
                   >
-                    <option value="">{modules.length === 0 ? "No modules" : "Move to module…"}</option>
+                    <MenuItem value="">{modules.length === 0 ? "No modules" : "Move to module…"}</MenuItem>
                     {modules.map((mod) => (
-                      <option key={mod.id} value={mod.id}>
+                      <MenuItem key={mod.id} value={mod.id}>
                         {mod.name}
-                      </option>
+                      </MenuItem>
                     ))}
-                  </select>
-                  <button type="button" className={styles.bulkBtn} disabled={opBusy || bulkTargetModule === ""} onClick={bulkMoveToModule} title="Move selected items into this module">
+                  </TextField>
+                  <Button variant="outlined" size="small" disabled={opBusy || bulkTargetModule === ""} onClick={bulkMoveToModule} title="Move selected items into this module">
                     Move
-                  </button>
+                  </Button>
                 </span>
-                <button type="button" className={styles.bulkBtn} disabled={opBusy} onClick={bulkRemoveFromModule} title="Remove selected items from their module">
+                <Button variant="outlined" size="small" disabled={opBusy} onClick={bulkRemoveFromModule} title="Remove selected items from their module">
                   Remove
-                </button>
-                <button type="button" className={styles.bulkBtnDanger} disabled={opBusy} onClick={bulkDeleteContent}>
+                </Button>
+                <Button variant="outlined" size="small" color="error" disabled={opBusy} onClick={bulkDeleteContent}>
                   {confirmDeleteContent ? "Confirm delete" : "Delete from Canvas"}
-                </button>
+                </Button>
               </div>
             </>
           )}
@@ -2462,11 +2453,10 @@ export function ModulesView({
       <div className={styles.field}>
         <label htmlFor="content-new-module">Add a module</label>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <input
+          <TextField
             id="content-new-module"
-            type="text"
-            className={styles.textInput}
-            style={{ flex: "1 1 240px" }}
+            size="small"
+            sx={{ flex: "1 1 240px" }}
             placeholder="New module name"
             value={newModuleName}
             onChange={(e) => setNewModuleName(e.target.value)}
@@ -2474,14 +2464,14 @@ export function ModulesView({
               if (e.key === "Enter") void handleAddModule();
             }}
           />
-          <button
-            type="button"
-            className={styles.downloadButton}
+          <Button
+            variant="contained"
+            size="small"
             onClick={handleAddModule}
             disabled={busy || !newModuleName.trim()}
           >
             Add module
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -2559,34 +2549,32 @@ export function ModulesView({
               >
                 ⠿
               </span>
-              <input
-                type="checkbox"
-                className={styles.ccCheckbox}
+              <Checkbox
                 checked={selectedModules.has(m.id)}
                 onChange={() => toggleModuleSelected(m.id)}
                 aria-label={`Select module ${m.name}`}
                 title="Select this module"
+                size="small"
               />
-              <button
-                type="button"
-                className={styles.ccIconBtn}
+              <IconButton
+                size="small"
                 onClick={() => onToggleExpand(m.id)}
                 aria-expanded={open}
                 aria-label={open ? "Collapse module" : "Expand module"}
               >
                 {open ? "▾" : "▸"}
-              </button>
-              <button
-                type="button"
-                className={`${styles.ccBtn} ${styles.ccBtnGhost}`}
+              </IconButton>
+              <Button
+                variant="outlined"
+                size="small"
                 onClick={() => toggleModuleItems(m)}
                 disabled={m.items.length === 0}
                 title={moduleItemsSelected ? "Deselect every item in this module" : "Select every item in this module"}
               >
                 {moduleItemsSelected ? "Deselect items" : "Select items"}
-              </button>
-              <input
-                type="text"
+              </Button>
+              <TextField
+                size="small"
                 className={styles.ccName}
                 title={m.name}
                 value={drafts[`m${m.id}`] ?? m.name}
@@ -2602,24 +2590,26 @@ export function ModulesView({
               {arrowBtn("Move up", () => moveModule(mi, -1), busy || mi === 0)}
               {arrowBtn("Move down", () => moveModule(mi, 1), busy || mi === modules.length - 1)}
               <PublishToggle published={m.published} disabled={busy} onClick={() => toggleModule(m)} />
-              <a
+              <IconButton
+                size="small"
+                component="a"
                 href={`${courseBase}/modules#context_module_${m.id}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={styles.ccIconBtn}
                 title="Open on Canvas"
                 aria-label="Open module on Canvas"
               >
                 ↗
-              </a>
-              <button
-                type="button"
-                className={`${styles.ccBtn} ${styles.ccBtnDanger}`}
+              </IconButton>
+              <Button
+                variant="outlined"
+                size="small"
+                color="error"
                 onClick={() => void removeModule(m)}
                 disabled={busy}
               >
                 {confirmId === `m${m.id}` ? "Confirm delete" : "Delete"}
-              </button>
+              </Button>
             </div>
 
             {open && (
@@ -2690,45 +2680,46 @@ export function ModulesView({
                     >
                       ⠿
                     </span>
-                    <input
-                      type="checkbox"
-                      className={styles.ccCheckbox}
+                    <Checkbox
                       checked={selected.has(itemKey(m.id, it.id))}
                       onChange={() => toggleItemSelected(m.id, it.id)}
                       aria-label={`Select ${it.title}`}
+                      size="small"
                     />
                     {["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null ? (
                       typeEdit === it.id ? (
-                        <select
-                          className={styles.ccType}
+                        <TextField
+                          select
+                          size="small"
                           autoFocus
-                          style={{ cursor: "pointer", fontFamily: "inherit" }}
+                          className={styles.ccType}
                           value={it.type}
                           onChange={(e) => changeItemType(m, it, e.target.value as GradableKind)}
                           onBlur={() => setTypeEdit(null)}
                           aria-label="Change item type"
                         >
-                          <option value="Assignment">ASSIGNMENT</option>
-                          <option value="Quiz">QUIZ</option>
-                          <option value="Discussion">DISCUSSION</option>
-                        </select>
+                          <MenuItem value="Assignment">ASSIGNMENT</MenuItem>
+                          <MenuItem value="Quiz">QUIZ</MenuItem>
+                          <MenuItem value="Discussion">DISCUSSION</MenuItem>
+                        </TextField>
                       ) : (
-                        <button
-                          type="button"
+                        <Button
+                          variant="outlined"
+                          size="small"
                           className={styles.ccType}
-                          style={{ cursor: "pointer", border: 0, fontFamily: "inherit" }}
                           onClick={() => setTypeEdit(it.id)}
                           disabled={busy}
                           title="Click to change type"
+                          sx={{ textTransform: "none", fontFamily: "inherit", cursor: "pointer", border: 0 }}
                         >
                           {it.type}
-                        </button>
+                        </Button>
                       )
                     ) : (
                       <span className={styles.ccType}>{it.type || "Item"}</span>
                     )}
-                    <input
-                      type="text"
+                    <TextField
+                      size="small"
                       className={styles.ccItemName}
                       title={it.title}
                       value={drafts[`i${it.id}`] ?? it.title}
@@ -2741,10 +2732,11 @@ export function ModulesView({
                     <span className={styles.ccDueSlot}>
                       {DATED_TYPES.includes(it.type) &&
                         (dueEdit?.id === it.id ? (
-                          <input
+                          <TextField
                             type="datetime-local"
-                            className={styles.ccDueInput}
+                            size="small"
                             autoFocus
+                            className={styles.ccDueInput}
                             value={dueEdit.value}
                             onChange={(e) => setDueEdit({ id: it.id, value: e.target.value })}
                             onBlur={() => saveDueEdit(m, it)}
@@ -2753,36 +2745,40 @@ export function ModulesView({
                               if (e.key === "Escape") setDueEdit(null);
                             }}
                             aria-label="Due date"
+                            slotProps={{ htmlInput: { } }}
                           />
                         ) : it.dueAt ? (
-                          <button
-                            type="button"
+                          <Button
+                            variant="outlined"
+                            size="small"
                             className={`${styles.ccDue} ${new Date(it.dueAt).getTime() < Date.now() ? styles.ccDueOverdue : ""}`}
                             onClick={() => setDueEdit({ id: it.id, value: toLocalInput(it.dueAt) })}
                             disabled={busy || it.contentId == null}
                             title={`Due ${new Date(it.dueAt).toLocaleString()} — click to edit`}
                           >
                             Due {formatDueDate(it.dueAt)}
-                          </button>
+                          </Button>
                         ) : (
-                          <button
-                            type="button"
+                          <Button
+                            variant="outlined"
+                            size="small"
                             className={`${styles.ccDue} ${styles.ccDueEmpty}`}
                             onClick={() => setDueEdit({ id: it.id, value: "" })}
                             disabled={busy || it.contentId == null}
                             title="Click to set a due date"
                           >
                             No due date
-                          </button>
+                          </Button>
                         ))}
                     </span>
                     <span className={styles.ccPointsSlot}>
                       {DATED_TYPES.includes(it.type) &&
                         (pointsEdit?.id === it.id ? (
-                          <input
+                          <TextField
                             type="number"
-                            className={styles.ccDueInput}
+                            size="small"
                             autoFocus
+                            className={styles.ccDueInput}
                             value={pointsEdit.value}
                             onChange={(e) => setPointsEdit({ id: it.id, value: e.target.value })}
                             onBlur={() => savePointsEdit(m, it)}
@@ -2793,8 +2789,9 @@ export function ModulesView({
                             aria-label="Points"
                           />
                         ) : (
-                          <button
-                            type="button"
+                          <Button
+                            variant="outlined"
+                            size="small"
                             className={`${styles.ccDue} ${it.pointsPossible == null ? styles.ccDueEmpty : ""}`}
                             onClick={() =>
                               setPointsEdit({ id: it.id, value: it.pointsPossible != null ? String(it.pointsPossible) : "" })
@@ -2807,80 +2804,80 @@ export function ModulesView({
                             }
                           >
                             {it.pointsPossible != null ? `${it.pointsPossible} pts` : "No points"}
-                          </button>
+                          </Button>
                         ))}
                     </span>
                     <div className={styles.ccItemActions}>
                       {arrowBtn("Move up", () => moveItem(m, ii, -1), busy || ii === 0)}
                       {arrowBtn("Move down", () => moveItem(m, ii, 1), busy || ii === m.items.length - 1)}
-                      <button
-                        type="button"
-                        className={styles.ccIconBtn}
+                      <IconButton
+                        size="small"
                         onClick={() => indentItem(m, it, -1)}
                         disabled={busy || it.indent === 0}
                         title="Outdent"
                         aria-label="Outdent"
                       >
                         &lt;
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.ccIconBtn}
+                      </IconButton>
+                      <IconButton
+                        size="small"
                         onClick={() => indentItem(m, it, 1)}
                         disabled={busy || it.indent >= MAX_INDENT}
                         title="Indent"
                         aria-label="Indent"
                       >
                         &gt;
-                      </button>
+                      </IconButton>
                       <span className={styles.ccActionsSep} aria-hidden="true" />
                       <ItemA11yBadge item={it} />
                       <PublishToggle published={it.published} disabled={busy} onClick={() => toggleItem(m, it)} />
                       {it.type === "Page" && it.pageUrl && (
-                        <button type="button" className={styles.ccBtn} onClick={() => onEditPage(it.pageUrl!)}>
+                        <Button variant="outlined" size="small" onClick={() => onEditPage(it.pageUrl!)}>
                           Edit page
-                        </button>
+                        </Button>
                       )}
                       {it.type === "Assignment" && it.contentId != null && (
-                        <button type="button" className={styles.ccBtn} onClick={() => setPreviewAssignment(it)}>
+                        <Button variant="outlined" size="small" onClick={() => setPreviewAssignment(it)}>
                           Preview
-                        </button>
+                        </Button>
                       )}
                       {["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null && (
-                        <button type="button" className={styles.ccBtn} onClick={() => setEditingItem(it)}>
+                        <Button variant="outlined" size="small" onClick={() => setEditingItem(it)}>
                           Edit
-                        </button>
+                        </Button>
                       )}
                       {it.type === "File" && it.contentId != null && (
-                        <button type="button" className={styles.ccBtn} onClick={() => void openFilePreview(it)}>
+                        <Button variant="outlined" size="small" onClick={() => void openFilePreview(it)}>
                           Preview
-                        </button>
+                        </Button>
                       )}
                       {it.type === "File" && it.contentId != null && /\.(docx|pptx)$/i.test(it.title) && (
-                        <button type="button" className={styles.ccBtn} onClick={() => setEditingFile(it)}>
+                        <Button variant="outlined" size="small" onClick={() => setEditingFile(it)}>
                           Edit
-                        </button>
+                        </Button>
                       )}
                       {(it.htmlUrl || it.externalUrl) && (
-                        <a
+                        <IconButton
+                          size="small"
+                          component="a"
                           href={(it.htmlUrl || it.externalUrl) as string}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className={styles.ccIconBtn}
                           title="Open on Canvas"
                           aria-label="Open on Canvas"
                         >
                           ↗
-                        </a>
+                        </IconButton>
                       )}
-                      <button
-                        type="button"
-                        className={`${styles.ccBtn} ${styles.ccBtnDanger}`}
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        color="error"
                         onClick={() => void removeItem(m, it)}
                         disabled={busy}
                       >
                         {confirmId === `i${it.id}` ? "Confirm" : "Remove"}
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -2906,9 +2903,10 @@ export function ModulesView({
 
                 <div className={styles.ccAddRow}>
                   <span className={styles.ccCount}>Add item</span>
-                  <select
-                    className={styles.bulkSelect}
-                    style={{ maxWidth: 150 }}
+                  <TextField
+                    select
+                    size="small"
+                    sx={{ maxWidth: 150 }}
                     value={addType[m.id] ?? "Page"}
                     onChange={(e) => {
                       const t = e.target.value;
@@ -2919,19 +2917,20 @@ export function ModulesView({
                     disabled={busy}
                     aria-label="Item type"
                   >
-                    <option value="Page">Page</option>
-                    <option value="Assignment">Assignment</option>
-                    <option value="Quiz">Quiz</option>
-                    <option value="Discussion">Discussion</option>
-                    <option value="File">File</option>
-                    <option value="ExternalUrl">External URL</option>
-                    <option value="SubHeader">Text header</option>
-                  </select>
+                    <MenuItem value="Page">Page</MenuItem>
+                    <MenuItem value="Assignment">Assignment</MenuItem>
+                    <MenuItem value="Quiz">Quiz</MenuItem>
+                    <MenuItem value="Discussion">Discussion</MenuItem>
+                    <MenuItem value="File">File</MenuItem>
+                    <MenuItem value="ExternalUrl">External URL</MenuItem>
+                    <MenuItem value="SubHeader">Text header</MenuItem>
+                  </TextField>
 
                   {addType[m.id] === "File" && (
-                    <select
-                      className={styles.bulkSelect}
-                      style={{ maxWidth: 150 }}
+                    <TextField
+                      select
+                      size="small"
+                      sx={{ maxWidth: 150 }}
                       value={addFileFormat[m.id] ?? "docx"}
                       onChange={(e) =>
                         setAddFileFormat((p) => ({ ...p, [m.id]: e.target.value === "pptx" ? "pptx" : "docx" }))
@@ -2939,15 +2938,16 @@ export function ModulesView({
                       disabled={busy}
                       aria-label="Format of the generated file"
                     >
-                      <option value="docx">Word (.docx)</option>
-                      <option value="pptx">PowerPoint (.pptx)</option>
-                    </select>
+                      <MenuItem value="docx">Word (.docx)</MenuItem>
+                      <MenuItem value="pptx">PowerPoint (.pptx)</MenuItem>
+                    </TextField>
                   )}
 
                   {CONTENT_TYPES.includes(addType[m.id] ?? "Page") && (
-                    <select
-                      className={styles.bulkSelect}
-                      style={{ flex: "1 1 200px", maxWidth: 320 }}
+                    <TextField
+                      select
+                      size="small"
+                      sx={{ flex: "1 1 200px", maxWidth: 320 }}
                       value={addValue[m.id] ?? ""}
                       onChange={(e) => setAddValue((p) => ({ ...p, [m.id]: e.target.value }))}
                       disabled={
@@ -2957,25 +2957,24 @@ export function ModulesView({
                       }
                       aria-label="Content to add"
                     >
-                      <option value="">
+                      <MenuItem value="">
                         {addType[m.id] === "File"
                           ? `or pick existing — ${contentPlaceholder("File")}`
                           : contentPlaceholder(addType[m.id] ?? "Page")}
-                      </option>
+                      </MenuItem>
                       {optionsFor(addType[m.id] ?? "Page").map((o) => (
-                        <option key={o.value} value={o.value}>
+                        <MenuItem key={o.value} value={o.value}>
                           {o.label}
-                        </option>
+                        </MenuItem>
                       ))}
-                    </select>
+                    </TextField>
                   )}
 
                   {addType[m.id] === "File" && (
                     <>
-                      <input
-                        type="text"
-                        className={styles.bulkInput}
-                        style={{ flex: "1 1 200px", minWidth: 160 }}
+                      <TextField
+                        size="small"
+                        sx={{ flex: "1 1 200px", minWidth: 160 }}
                         placeholder={
                           (addFileFormat[m.id] ?? "docx") === "pptx"
                             ? "Describe a deck to generate with AI"
@@ -2985,41 +2984,33 @@ export function ModulesView({
                         onChange={(e) => setAddAiPrompt((p) => ({ ...p, [m.id]: e.target.value }))}
                         aria-label="AI prompt for the new file"
                       />
-                      <button
-                        type="button"
-                        className={styles.ccBtn}
+                      <Button
+                        variant="outlined"
+                        size="small"
                         disabled={busy || !!addAiBusy[m.id] || !(addAiPrompt[m.id] ?? "").trim()}
                         onClick={() => void addAiGenerate(m)}
                       >
                         {addAiBusy[m.id] ? "Generating…" : "Generate with AI"}
-                      </button>
+                      </Button>
                       {(addFileContent[m.id] ?? "").trim() !== "" && (
                         <>
-                          <textarea
+                          <TextField
+                            multiline
+                            minRows={4}
+                            fullWidth
                             value={addFileContent[m.id] ?? ""}
                             onChange={(e) => setAddFileContent((p) => ({ ...p, [m.id]: e.target.value }))}
-                            spellCheck
+                            slotProps={{ htmlInput: { spellCheck: true } }}
                             aria-label="Generated file content"
-                            style={{
-                              flexBasis: "100%",
-                              width: "100%",
-                              minHeight: 64,
-                              padding: "8px 10px",
-                              border: "1px solid var(--field-border)",
-                              borderRadius: 8,
-                              background: "var(--field-background)",
-                              color: "var(--text-primary)",
-                              font: "inherit",
-                              fontSize: "0.83rem",
-                            }}
+                            size="small"
                           />
-                          <button
-                            type="button"
-                            className={styles.ccBtn}
+                          <Button
+                            variant="outlined"
+                            size="small"
                             onClick={() => setAddFileContent((p) => ({ ...p, [m.id]: "" }))}
                           >
                             Discard
-                          </button>
+                          </Button>
                         </>
                       )}
                     </>
@@ -3027,18 +3018,17 @@ export function ModulesView({
 
                   {addType[m.id] === "ExternalUrl" && (
                     <>
-                      <input
+                      <TextField
                         type="url"
-                        className={styles.bulkInput}
-                        style={{ flex: "1 1 200px", maxWidth: 280 }}
+                        size="small"
+                        sx={{ flex: "1 1 200px", maxWidth: 280 }}
                         placeholder="https://example.com"
                         value={addUrl[m.id] ?? ""}
                         onChange={(e) => setAddUrl((p) => ({ ...p, [m.id]: e.target.value }))}
                       />
-                      <input
-                        type="text"
-                        className={styles.bulkInput}
-                        style={{ flex: "1 1 140px", maxWidth: 200 }}
+                      <TextField
+                        size="small"
+                        sx={{ flex: "1 1 140px", maxWidth: 200 }}
                         placeholder="Link text (optional)"
                         value={addTitle[m.id] ?? ""}
                         onChange={(e) => setAddTitle((p) => ({ ...p, [m.id]: e.target.value }))}
@@ -3047,24 +3037,23 @@ export function ModulesView({
                   )}
 
                   {addType[m.id] === "SubHeader" && (
-                    <input
-                      type="text"
-                      className={styles.bulkInput}
-                      style={{ flex: "1 1 200px", maxWidth: 280 }}
+                    <TextField
+                      size="small"
+                      sx={{ flex: "1 1 200px", maxWidth: 280 }}
                       placeholder="Header text"
                       value={addTitle[m.id] ?? ""}
                       onChange={(e) => setAddTitle((p) => ({ ...p, [m.id]: e.target.value }))}
                     />
                   )}
 
-                  <button
-                    type="button"
-                    className={styles.bulkBtnPrimary}
+                  <Button
+                    variant="contained"
+                    size="small"
                     onClick={() => void addItem(m)}
                     disabled={busy || !canAdd(m)}
                   >
                     Add
-                  </button>
+                  </Button>
                 </div>
 
                 <div

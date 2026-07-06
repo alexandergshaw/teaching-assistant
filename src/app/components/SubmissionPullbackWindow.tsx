@@ -15,6 +15,7 @@ import type { CanvasCourse, CanvasAssignmentBrief, CanvasPerson, CanvasSubmissio
 import FilePreviewModal, { type PreviewFile } from "./FilePreviewModal";
 import GradingResults from "./GradingResults";
 import Typeahead from "./ui/Typeahead";
+import Button from "@mui/material/Button";
 import styles from "../page.module.css";
 
 type GradingRun = NonNullable<GradeActionState["run"]>;
@@ -462,9 +463,10 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
             )}
           </div>
 
-          <button
+          <Button
             type="button"
-            className={styles.downloadButton}
+            variant="contained"
+            size="small"
             onClick={handlePullBack}
             disabled={!institution || !courseId || !assignmentId || !studentId || pulling}
             style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6 }}
@@ -477,7 +479,7 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
             ) : (
               "Pull back"
             )}
-          </button>
+          </Button>
 
           {pullError && <p className={styles.error}>{pullError}</p>}
 
@@ -564,22 +566,22 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
                             {file.name}
                           </span>
                           <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                            <button
+                            <Button
                               type="button"
-                              className={styles.downloadButton}
+                              variant="outlined"
+                              size="small"
                               onClick={() => openPreview(file)}
-                              style={{ padding: "5px 10px", fontSize: "0.8rem" }}
                             >
                               Preview
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
-                              className={styles.downloadButton}
+                              variant="outlined"
+                              size="small"
                               onClick={() => downloadFile(file)}
-                              style={{ padding: "5px 10px", fontSize: "0.8rem" }}
                             >
                               Download
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       ))}
@@ -588,9 +590,10 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
                 )}
 
                 <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
-                  <button
+                  <Button
                     type="button"
-                    className={styles.downloadButton}
+                    variant="contained"
+                    size="small"
                     disabled={grading}
                     onClick={async () => {
                       setGrading(true);
@@ -621,7 +624,7 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
                     ) : (
                       "Grade this submission"
                     )}
-                  </button>
+                  </Button>
                   {gradeError && <p className={styles.error} style={{ marginTop: 8 }}>{gradeError}</p>}
                 </div>
 

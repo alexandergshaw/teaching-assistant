@@ -13,6 +13,10 @@ import OrgManagementPanel from "./OrgManagementPanel";
 import RepoSettingsPanel from "./RepoSettingsPanel";
 import TabHeader from "./TabHeader";
 import Typeahead from "./ui/Typeahead";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import styles from "../page.module.css";
 
 /**
@@ -215,14 +219,15 @@ export default function VersionControlTab() {
               <a href="https://github.com/account/organizations/new" target="_blank" rel="noreferrer" style={{ fontSize: "0.82rem" }}>
                 Create org on GitHub
               </a>
-              <button
+              <Button
                 type="button"
+                variant="outlined"
+                size="small"
                 onClick={() => void refreshOrgs()}
                 disabled={busy}
-                style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "6px 10px", fontSize: "0.8rem", color: "#334155", cursor: "pointer" }}
               >
                 Refresh
-              </button>
+              </Button>
             </div>
             {orgsState === "ready" && orgs.length === 0 && (
               <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 4 }}>
@@ -237,35 +242,36 @@ export default function VersionControlTab() {
               Creates a repo in the selected org and commits the prompt to <code>.github/copilot-instructions.md</code>. Mark it a
               template to use it as the source above.
             </p>
-            <input
-              type="text"
-              className={styles.textInput}
+            <TextField
+              size="small"
+              fullWidth
               placeholder="Repository name"
               value={copilotName}
               onChange={(e) => setCopilotName(e.target.value)}
               disabled={copilotBusy}
             />
-            <textarea
-              className={styles.textInput}
-              rows={6}
+            <TextField
+              multiline
+              minRows={6}
+              fullWidth
               placeholder="Paste the GitHub Copilot prompt to seed the repo with…"
               value={copilotPrompt}
               onChange={(e) => setCopilotPrompt(e.target.value)}
               disabled={copilotBusy}
-              style={{ marginTop: 8, fontFamily: "monospace", fontSize: "0.85rem" }}
+              sx={{ marginTop: 1, fontFamily: "monospace" }}
             />
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-                <input type="checkbox" checked={copilotPrivate} onChange={(e) => setCopilotPrivate(e.target.checked)} disabled={copilotBusy} />
-                Private
-              </label>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-                <input type="checkbox" checked={copilotTemplate} onChange={(e) => setCopilotTemplate(e.target.checked)} disabled={copilotBusy} />
-                Template
-              </label>
-              <button type="button" className={styles.submitButton} onClick={createWithCopilot} disabled={copilotBusy || !selectedOrg}>
+              <FormControlLabel
+                control={<Checkbox checked={copilotPrivate} onChange={(e) => setCopilotPrivate(e.target.checked)} disabled={copilotBusy} size="small" />}
+                label="Private"
+              />
+              <FormControlLabel
+                control={<Checkbox checked={copilotTemplate} onChange={(e) => setCopilotTemplate(e.target.checked)} disabled={copilotBusy} size="small" />}
+                label="Template"
+              />
+              <Button type="button" variant="contained" size="small" onClick={createWithCopilot} disabled={copilotBusy || !selectedOrg}>
                 {copilotBusy ? "Creating…" : "Create repo"}
-              </button>
+              </Button>
             </div>
             {copilotError && <p className={styles.error}>{copilotError}</p>}
             {copilotResult && (
@@ -300,10 +306,10 @@ export default function VersionControlTab() {
 
           <div className={styles.field}>
             <label htmlFor="vc-prefix">Repository name prefix (optional)</label>
-            <input
+            <TextField
               id="vc-prefix"
-              type="text"
-              className={styles.textInput}
+              size="small"
+              fullWidth
               placeholder="e.g. project1 — repos become project1-<student>"
               value={prefix}
               onChange={(e) => setPrefix(e.target.value)}
@@ -313,25 +319,27 @@ export default function VersionControlTab() {
 
           <div className={styles.field}>
             <label htmlFor="vc-students">Students (one per line)</label>
-            <textarea
+            <TextField
               id="vc-students"
-              className={styles.textInput}
-              rows={8}
+              multiline
+              minRows={8}
+              fullWidth
               placeholder={"jsmith\nadoe\nmlee"}
               value={studentsText}
               onChange={(e) => setStudentsText(e.target.value)}
               disabled={busy}
-              style={{ fontFamily: "monospace" }}
+              sx={{ fontFamily: "monospace" }}
             />
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: 6 }}>
-              <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} disabled={busy} />
-              Private repositories
-            </label>
+            <FormControlLabel
+              sx={{ marginTop: 0.75 }}
+              control={<Checkbox checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} disabled={busy} size="small" />}
+              label="Private repositories"
+            />
           </div>
 
-          <button type="button" className={styles.submitButton} onClick={generate} disabled={busy || !selectedOrg || !templateRepo || students.length === 0}>
+          <Button type="button" variant="contained" size="small" onClick={generate} disabled={busy || !selectedOrg || !templateRepo || students.length === 0}>
             {busy ? `Generating ${students.length} repo${students.length === 1 ? "" : "s"}…` : `Generate ${students.length || ""} repo${students.length === 1 ? "" : "s"}`.trim()}
-          </button>
+          </Button>
 
           {error && <p className={styles.error}>{error}</p>}
 

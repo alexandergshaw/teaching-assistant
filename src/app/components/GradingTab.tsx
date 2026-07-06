@@ -16,6 +16,9 @@ import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import LiveFeedPanel from "./LiveFeedPanel";
 import GradingResults from "./GradingResults";
 import GithubGradingPanel from "./GithubGradingPanel";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 import styles from "../page.module.css";
 
 type GradingMode = "zip" | "canvas" | "livefeed" | "github";
@@ -136,10 +139,12 @@ export default function GradingTab({
     }
   }, [run]);
 
-  const handleAssignmentInstructionsChange = (e: ChangeEvent<HTMLTextAreaElement>) =>
-    setAssignmentInstructions(e.target.value);
+  const handleAssignmentInstructionsChange = (
+    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => setAssignmentInstructions(e.target.value);
 
-  const handleRubricChange = (e: ChangeEvent<HTMLTextAreaElement>) => setRubric(e.target.value);
+  const handleRubricChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setRubric(e.target.value);
 
   const showContextFields = source === "zip" || canvasRetrieved;
 
@@ -155,17 +160,19 @@ export default function GradingTab({
 
       <div className={styles.field}>
         <label htmlFor="grade-source">Grade from</label>
-        <select
+        <TextField
+          select
+          size="small"
           id="grade-source"
-          className={styles.textInput}
           value={source}
           onChange={(e) => selectSource(e.target.value as GradingMode)}
+          sx={{ minWidth: 160 }}
         >
-          <option value="zip">Upload ZIP</option>
-          <option value="canvas">Single Assignment</option>
-          <option value="livefeed">Live Feed{totalNeedsGrading > 0 ? ` (${totalNeedsGrading})` : ""}</option>
-          <option value="github">GitHub Repo</option>
-        </select>
+          <MenuItem value="zip">Upload ZIP</MenuItem>
+          <MenuItem value="canvas">Single Assignment</MenuItem>
+          <MenuItem value="livefeed">Live Feed{totalNeedsGrading > 0 ? ` (${totalNeedsGrading})` : ""}</MenuItem>
+          <MenuItem value="github">GitHub Repo</MenuItem>
+        </TextField>
       </div>
 
       {pending && (
@@ -226,12 +233,13 @@ export default function GradingTab({
         ) : (
           <div className={styles.field}>
             <label htmlFor="canvas-url">Canvas URL</label>
-            <input
+            <TextField
+              size="small"
+              fullWidth
               id="canvas-url"
               name="canvasUrl"
               type="url"
               required
-              className={styles.textInput}
               placeholder="Paste a discussion or assignment link (.../discussion_topics/… or .../assignments/…)"
               value={canvasUrl}
               onChange={(e) => {
@@ -240,15 +248,15 @@ export default function GradingTab({
                 setCanvasMeta({ status: "idle", message: "" });
               }}
             />
-            <button
-              type="button"
-              className={styles.downloadButton}
+            <Button
+              variant="outlined"
+              size="small"
               onClick={handleRetrieveCanvas}
               disabled={canvasMeta.status === "loading" || !canvasUrlKind}
-              style={{ alignSelf: "flex-start" }}
+              sx={{ alignSelf: "flex-start" }}
             >
               {canvasMeta.status === "loading" ? "Retrieving…" : "Retrieve from Canvas"}
-            </button>
+            </Button>
             <p className={styles.fieldHint}>
               {canvasUrlKind === "discussion"
                 ? `Detected: discussion board. Each student's posts and replies are pulled via the Canvas API and graded with the ${graderLabel}.`
@@ -273,11 +281,13 @@ export default function GradingTab({
           <>
             <div className={styles.field}>
               <label htmlFor="assignment-instructions">Assignment Instructions</label>
-              <textarea
+              <TextField
+                multiline
+                minRows={10}
+                fullWidth
                 id="assignment-instructions"
                 name="assignmentInstructions"
-                rows={10}
-                readOnly={source === "canvas"}
+                slotProps={{ input: { readOnly: source === "canvas" } }}
                 value={assignmentInstructions}
                 onChange={handleAssignmentInstructionsChange}
                 placeholder="Paste the assignment brief, requirements, and any special directions."
@@ -287,11 +297,13 @@ export default function GradingTab({
             {(source === "zip" || rubric.trim()) && (
               <div className={styles.field}>
                 <label htmlFor="rubric">Rubric</label>
-                <textarea
+                <TextField
+                  multiline
+                  minRows={10}
+                  fullWidth
                   id="rubric"
                   name="rubric"
-                  rows={10}
-                  readOnly={source === "canvas"}
+                  slotProps={{ input: { readOnly: source === "canvas" } }}
                   value={rubric}
                   onChange={handleRubricChange}
                   placeholder="Paste the grading rubric, expectations, and scoring guidance."
@@ -317,8 +329,9 @@ export default function GradingTab({
           </div>
         )}
 
-        <button
-          className={styles.submitButton}
+        <Button
+          variant="contained"
+          size="small"
           type="submit"
           disabled={pending || (source === "canvas" && !canvasRetrieved)}
         >
@@ -330,7 +343,7 @@ export default function GradingTab({
           ) : (
             "Start Review"
           )}
-        </button>
+        </Button>
       </form>
       )}
 

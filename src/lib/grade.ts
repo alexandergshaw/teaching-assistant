@@ -75,6 +75,9 @@ export interface GradingRun {
   // SpeedGrader base URL for the graded Canvas assignment (no student id), when
   // graded from a Canvas source. Per-row links append `&student_id=<userId>`.
   speedGraderUrl?: string | null;
+  // A full-credit model answer generated on the LLM grading path, shown to the
+  // instructor as a per-assignment reference. Never posted to Canvas.
+  sampleAnswer?: string;
 }
 
 interface InferredFileNameParts {
@@ -331,6 +334,7 @@ Rules:
 - Maintain at least a 2:1 positive-to-negative ratio in overallComment: for every negative point, include at least two distinct positive points.
 - Write overallComment in a warm, friendly, and conversational tone that still reads as overwhelmingly professional.
 - Mimic how a personable, encouraging professor would write feedback.
+- Use natural contractions (for example you're, don't, it's, that's, you've) to keep the tone conversational, while staying professional.
 - Don't use long dashes (—) or short dashes (–) in feedback, as they can cause formatting issues in some LMS platforms. Use colons, parentheses, or commas instead.
 - Write feedback in a direct, student-facing style with short concrete phrases like "Nice job with the formatting" and "Your logic here reads cleanly," and second-person words like "you", "your", "yours", and "you're" are allowed. Using the student's name is strictly prohibited.
 - Do not include suggestions for how the student could improve, next steps, advice for future work, or tips on how to push the work further. Focus only on describing what they did and, where points were lost, the specific rubric-tied reason. Do not coach the student on getting better.
@@ -679,6 +683,64 @@ export async function synthesizeFullCreditChecklist(
     return normalized;
   } catch {
     return fallback;
+  }
+}
+
+export async function generateSampleAnswer(
+  assignmentInstructions: string,
+  rubric: string,
+  provider: LlmProvider = "gemini"
+): Promise<string> {
+  try {
+    const prompt = `You are a teaching assistant writing a model answer key for an assignment.
+
+ASSIGNMENT INSTRUCTIONS:
+${assignmentInstructions}
+
+RUBRIC:
+${rubric}
+
+Write a single sample correct answer that would earn full credit against the rubric. It is a reference exemplar for the instructor, not feedback to any student.
+
+Return ONLY valid JSON in this exact shape:
+{
+  "sampleAnswer": "the full sample answer"
+}
+
+Rules:
+- The sample answer must satisfy every rubric area at the highest level.
+- Be concrete and complete but concise: show the actual answer, not a description of one.
+- For coding assignments include correct, runnable code; for written assignments write the actual prose response.
+- Do not wrap the whole answer in markdown fences.
+- Do not include any text outside the JSON object.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 1200 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return "";
+    }
+
+    const jsonText = extractJsonObject(result.text);
+    if (jsonText) {
+      try {
+        const parsed = JSON.parse(jsonText) as { sampleAnswer?: unknown };
+        if (typeof parsed.sampleAnswer === "string" && parsed.sampleAnswer.trim()) {
+          return parsed.sampleAnswer.trim();
+        }
+      } catch {
+        // fall through to raw text
+      }
+    }
+
+    return result.text.trim();
+  } catch {
+    return "";
   }
 }
 

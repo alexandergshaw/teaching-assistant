@@ -4,6 +4,7 @@ import {
   gradeSubmissions,
   gradeCanvasUrl,
   synthesizeFullCreditChecklist,
+  generateSampleAnswer,
   extractSubmissions,
   extractStudentEntries,
   extractCanvasEntries,
@@ -3301,11 +3302,12 @@ export async function gradeAction(
       }
       // No rubric synthesis on the Canvas path: grade with whatever rubric was
       // retrieved from Canvas (may be empty), using the instructions otherwise.
-      const [run, fullCreditChecklist] = await Promise.all([
+      const [run, fullCreditChecklist, sampleAnswer] = await Promise.all([
         gradeCanvasUrl(canvasUrl, assignmentInstructions, rubric, provider),
         synthesizeFullCreditChecklist(assignmentInstructions, rubric, provider),
+        generateSampleAnswer(assignmentInstructions, rubric, provider),
       ]);
-      return { run: { ...run, fullCreditChecklist, speedGraderUrl }, error: null };
+      return { run: { ...run, fullCreditChecklist, sampleAnswer, speedGraderUrl }, error: null };
     }
 
     if (!file || file.size === 0) {
@@ -3357,15 +3359,17 @@ export async function gradeAction(
     const generatedRubric = rubric.trim() ? undefined : effectiveRubric;
 
     const zipBuffer = await file.arrayBuffer();
-    const [run, fullCreditChecklist] = await Promise.all([
+    const [run, fullCreditChecklist, sampleAnswer] = await Promise.all([
       gradeSubmissions(zipBuffer, assignmentInstructions, effectiveRubric, provider),
       synthesizeFullCreditChecklist(assignmentInstructions, effectiveRubric, provider),
+      generateSampleAnswer(assignmentInstructions, effectiveRubric, provider),
     ]);
 
     return {
       run: {
         ...run,
         fullCreditChecklist,
+        sampleAnswer,
       },
       error: null,
       generatedRubric,

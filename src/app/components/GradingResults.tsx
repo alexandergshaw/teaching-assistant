@@ -39,6 +39,14 @@ function DownloadIcon() {
   );
 }
 
+function ExpandIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M3 3.75A.75.75 0 0 1 3.75 3h4a.75.75 0 0 1 0 1.5H5.56l3.22 3.22a.75.75 0 1 1-1.06 1.06L4.5 5.56v2.19a.75.75 0 0 1-1.5 0v-4Zm14 12.5a.75.75 0 0 1-.75.75h-4a.75.75 0 0 1 0-1.5h2.19l-3.22-3.22a.75.75 0 1 1 1.06-1.06l3.22 3.22V12.25a.75.75 0 0 1 1.5 0v4Z" />
+    </svg>
+  );
+}
+
 // ── Sort helpers ───────────────────────────────────────────────────────────
 
 type SortDirection = "asc" | "desc";
@@ -232,6 +240,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   const [postSummary, setPostSummary] = useState("");
   const [posting, setPosting] = useState(false);
   const [sortState, setSortState] = useState(DEFAULT_SORT);
+  const [expandedStudent, setExpandedStudent] = useState<string | null>(null);
 
   // Re-seed editable rows when a new run arrives (adjust-state-on-prop-change).
   if (run !== prevRun) {
@@ -239,6 +248,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     setEdits(seedEdits(run));
     setPostStatus({});
     setPostSummary("");
+    setExpandedStudent(null);
   }
 
   const updateEdit = (student: string, patch: Partial<RowEdit>) =>
@@ -509,6 +519,24 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         </section>
       )}
 
+      {run.sampleAnswer && run.sampleAnswer.trim() && (
+        <section className={styles.resultsChecklist}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
+            <h3 style={{ margin: 0 }}>Sample correct answer</h3>
+            <button
+              type="button"
+              className={styles.copyIconButton}
+              title={copiedKey === "sample-answer" ? "Copied" : "Copy sample answer"}
+              aria-label="Copy sample correct answer"
+              onClick={() => onCopy("sample-answer", run.sampleAnswer ?? "")}
+            >
+              <CopyIcon />
+            </button>
+          </div>
+          <div style={{ whiteSpace: "pre-wrap", marginTop: "0.5rem" }}>{run.sampleAnswer}</div>
+        </section>
+      )}
+
       <div className={styles.matrixWrap}>
         <table className={styles.matrix}>
           <thead>
@@ -708,6 +736,15 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                       >
                         <CopyIcon />
                       </button>
+                      <button
+                        type="button"
+                        className={styles.copyIconButton}
+                        title="Expand feedback"
+                        aria-label={`Expand overall feedback for ${result.student}`}
+                        onClick={() => setExpandedStudent(result.student)}
+                      >
+                        <ExpandIcon />
+                      </button>
                       <textarea
                         aria-label={`Overall feedback for ${result.student}`}
                         className={styles.feedbackText}
@@ -723,6 +760,39 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
           </tbody>
         </table>
       </div>
+
+      {expandedStudent && (
+        <div className={styles.previewBackdrop} onClick={() => setExpandedStudent(null)}>
+          <section
+            className={styles.previewModal}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Overall feedback for ${expandedStudent}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.previewHeader}>
+              <div>
+                <p className={styles.previewMeta}>Student: {expandedStudent}</p>
+                <h3>Overall Feedback</h3>
+              </div>
+              <button
+                type="button"
+                className={styles.previewCloseButton}
+                onClick={() => setExpandedStudent(null)}
+              >
+                Close
+              </button>
+            </div>
+            <textarea
+              aria-label={`Overall feedback for ${expandedStudent} (expanded)`}
+              className={styles.feedbackText}
+              style={{ width: "100%", minHeight: "50vh" }}
+              value={edits[expandedStudent]?.overall ?? ""}
+              onChange={(event) => updateEdit(expandedStudent, { overall: event.target.value })}
+            />
+          </section>
+        </div>
+      )}
     </section>
   );
 });

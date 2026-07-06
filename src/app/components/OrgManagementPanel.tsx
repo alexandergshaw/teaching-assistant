@@ -13,6 +13,11 @@ import {
 } from "../actions";
 import type { GithubRepo } from "@/lib/github";
 import Typeahead from "./ui/Typeahead";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import styles from "../page.module.css";
 
 type OrgMember = { login: string; role: "admin" | "member" };
@@ -298,46 +303,47 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
           members.map((member) => (
             <div key={member.login} style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
               <span style={{ fontWeight: 600, fontSize: "0.95rem", flex: 1 }}>{member.login}</span>
-              <select
+              <TextField
+                select
+                size="small"
                 value={roleLabel(member.role)}
                 onChange={(e) => handleMemberRoleChange(member.login, roleValue(e.target.value))}
-                className={styles.textInput}
-                style={{ width: 140, padding: "6px 10px", fontSize: "0.9rem" }}
+                sx={{ minWidth: 140 }}
               >
-                <option>Owner</option>
-                <option>Member</option>
-              </select>
+                <MenuItem value="Owner">Owner</MenuItem>
+                <MenuItem value="Member">Member</MenuItem>
+              </TextField>
             </div>
           ))}
         <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
-          <input
-            type="text"
-            className={styles.textInput}
+          <TextField
+            size="small"
+            fullWidth
             placeholder="GitHub username or email"
             value={inviteValue}
             onChange={(e) => setInviteValue(e.target.value)}
             disabled={inviteBusy}
-            style={{ flex: 1, padding: "8px 12px", fontSize: "0.9rem" }}
           />
-          <select
+          <TextField
+            select
+            size="small"
             value={roleLabel(inviteRole)}
             onChange={(e) => setInviteRole(roleValue(e.target.value))}
-            className={styles.textInput}
-            style={{ width: 120, padding: "6px 10px", fontSize: "0.9rem" }}
             disabled={inviteBusy}
+            sx={{ minWidth: 140 }}
           >
-            <option>Owner</option>
-            <option>Member</option>
-          </select>
-          <button
+            <MenuItem value="Owner">Owner</MenuItem>
+            <MenuItem value="Member">Member</MenuItem>
+          </TextField>
+          <Button
             type="button"
-            className={styles.submitButton}
+            variant="contained"
+            size="small"
             onClick={handleInvite}
             disabled={inviteBusy || !inviteValue.trim()}
-            style={{ padding: "8px 16px", fontSize: "0.85rem", minWidth: 90 }}
           >
             {inviteBusy ? "Inviting..." : "Invite"}
-          </button>
+          </Button>
         </div>
         {inviteMsg && (inviteMsg.startsWith("Error:") ? <p className={styles.error}>{inviteMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 6 }}>{inviteMsg}</p>)}
       </div>
@@ -360,7 +366,9 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
               collaborators.map((collab) => (
                 <div key={collab.login} style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
                   <span style={{ fontWeight: 600, fontSize: "0.95rem", flex: 1 }}>{collab.login}</span>
-                  <select
+                  <TextField
+                    select
+                    size="small"
                     value={permissionLabel(collab.permission)}
                     onChange={(e) => {
                       const newPerm = permissionValue(e.target.value);
@@ -371,50 +379,49 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
                         }
                       });
                     }}
-                    className={styles.textInput}
-                    style={{ width: 120, padding: "6px 10px", fontSize: "0.9rem" }}
+                    sx={{ minWidth: 140 }}
                   >
-                    <option>Read</option>
-                    <option>Triage</option>
-                    <option>Write</option>
-                    <option>Maintain</option>
-                    <option>Admin</option>
-                  </select>
+                    <MenuItem value="Read">Read</MenuItem>
+                    <MenuItem value="Triage">Triage</MenuItem>
+                    <MenuItem value="Write">Write</MenuItem>
+                    <MenuItem value="Maintain">Maintain</MenuItem>
+                    <MenuItem value="Admin">Admin</MenuItem>
+                  </TextField>
                 </div>
               ))}
 
             <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
-              <input
-                type="text"
-                className={styles.textInput}
+              <TextField
+                size="small"
+                fullWidth
                 placeholder="GitHub username"
                 value={accessUsername}
                 onChange={(e) => setAccessUsername(e.target.value)}
                 disabled={accessBusy}
-                style={{ flex: 1, padding: "8px 12px", fontSize: "0.9rem" }}
               />
-              <select
+              <TextField
+                select
+                size="small"
                 value={permissionLabel(accessPermission)}
                 onChange={(e) => setAccessPermission(permissionValue(e.target.value))}
-                className={styles.textInput}
-                style={{ width: 120, padding: "6px 10px", fontSize: "0.9rem" }}
                 disabled={accessBusy}
+                sx={{ minWidth: 140 }}
               >
-                <option>Read</option>
-                <option>Triage</option>
-                <option>Write</option>
-                <option>Maintain</option>
-                <option>Admin</option>
-              </select>
-              <button
+                <MenuItem value="Read">Read</MenuItem>
+                <MenuItem value="Triage">Triage</MenuItem>
+                <MenuItem value="Write">Write</MenuItem>
+                <MenuItem value="Maintain">Maintain</MenuItem>
+                <MenuItem value="Admin">Admin</MenuItem>
+              </TextField>
+              <Button
                 type="button"
-                className={styles.submitButton}
+                variant="contained"
+                size="small"
                 onClick={handleAccessApply}
                 disabled={accessBusy || !accessUsername.trim()}
-                style={{ padding: "8px 16px", fontSize: "0.85rem", minWidth: 80 }}
               >
                 {accessBusy ? "Applying..." : "Apply"}
-              </button>
+              </Button>
             </div>
             {accessMsg && (accessMsg.startsWith("Error:") ? <p className={styles.error}>{accessMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 6 }}>{accessMsg}</p>)}
           </>
@@ -455,35 +462,37 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
               </div>
             </div>
 
-            <input
-              type="text"
-              className={styles.textInput}
+            <TextField
+              size="small"
+              fullWidth
               placeholder="Pull request title"
               value={prTitle}
               onChange={(e) => setPrTitle(e.target.value)}
               disabled={prBusy}
-              style={{ marginBottom: 12, padding: "8px 12px", fontSize: "0.9rem" }}
+              sx={{ mb: 1.5 }}
             />
 
-            <textarea
-              className={styles.textInput}
+            <TextField
+              size="small"
+              fullWidth
+              multiline
               placeholder="Description (optional)"
               rows={4}
               value={prBody}
               onChange={(e) => setPrBody(e.target.value)}
               disabled={prBusy}
-              style={{ marginBottom: 12, padding: "8px 12px", fontSize: "0.9rem" }}
+              sx={{ mb: 1.5 }}
             />
 
-            <button
+            <Button
               type="button"
-              className={styles.submitButton}
+              variant="contained"
+              size="small"
               onClick={handleCreatePr}
               disabled={prBusy || !prHead || !prBase || !prTitle.trim()}
-              style={{ padding: "8px 16px", fontSize: "0.85rem", minWidth: 100 }}
             >
               {prBusy ? "Creating..." : "Create PR"}
-            </button>
+            </Button>
 
             {prMsg && (prMsg.startsWith("Error:") ? <p className={styles.error}>{prMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 8 }}>{prMsg}</p>)}
             {prResult && (
@@ -521,68 +530,68 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
             />
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--text-secondary)", fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
-                <input type="checkbox" checked={bpRequirePr} onChange={(e) => setBpRequirePr(e.target.checked)} disabled={bpBusy} />
-                Require pull request reviews
-              </label>
+              <FormControlLabel
+                control={<Checkbox checked={bpRequirePr} onChange={(e) => setBpRequirePr(e.target.checked)} disabled={bpBusy} size="small" />}
+                label="Require pull request reviews"
+              />
 
               {bpRequirePr && (
                 <div style={{ marginLeft: 24, display: "flex", alignItems: "center", gap: 8 }}>
                   <label style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>Required approvals:</label>
-                  <input
+                  <TextField
                     type="number"
-                    min="0"
+                    size="small"
                     value={bpApprovals}
                     onChange={(e) => setBpApprovals(Math.max(0, parseInt(e.target.value) || 0))}
                     disabled={bpBusy}
-                    style={{ width: 60, padding: "6px 8px", fontSize: "0.9rem", border: "1px solid var(--field-border)", borderRadius: 8 }}
+                    sx={{ width: 90 }}
+                    slotProps={{ htmlInput: { min: 0 } }}
                   />
                 </div>
               )}
 
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--text-secondary)", fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
-                <input type="checkbox" checked={bpRequireChecks} onChange={(e) => setBpRequireChecks(e.target.checked)} disabled={bpBusy} />
-                Require status checks
-              </label>
+              <FormControlLabel
+                control={<Checkbox checked={bpRequireChecks} onChange={(e) => setBpRequireChecks(e.target.checked)} disabled={bpBusy} size="small" />}
+                label="Require status checks"
+              />
 
               {bpRequireChecks && (
                 <div style={{ marginLeft: 24, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <input
-                    type="text"
-                    className={styles.textInput}
+                  <TextField
+                    size="small"
+                    fullWidth
                     placeholder="Required checks (comma-separated)"
                     value={bpContexts}
                     onChange={(e) => setBpContexts(e.target.value)}
                     disabled={bpBusy}
-                    style={{ padding: "8px 12px", fontSize: "0.9rem" }}
                   />
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--text-secondary)", fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
-                    <input type="checkbox" checked={bpStrict} onChange={(e) => setBpStrict(e.target.checked)} disabled={bpBusy} />
-                    Require branches up to date
-                  </label>
+                  <FormControlLabel
+                    control={<Checkbox checked={bpStrict} onChange={(e) => setBpStrict(e.target.checked)} disabled={bpBusy} size="small" />}
+                    label="Require branches up to date"
+                  />
                 </div>
               )}
 
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--text-secondary)", fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
-                <input type="checkbox" checked={bpEnforceAdmins} onChange={(e) => setBpEnforceAdmins(e.target.checked)} disabled={bpBusy} />
-                Include administrators
-              </label>
+              <FormControlLabel
+                control={<Checkbox checked={bpEnforceAdmins} onChange={(e) => setBpEnforceAdmins(e.target.checked)} disabled={bpBusy} size="small" />}
+                label="Include administrators"
+              />
 
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--text-secondary)", fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
-                <input type="checkbox" checked={bpLinear} onChange={(e) => setBpLinear(e.target.checked)} disabled={bpBusy} />
-                Require linear history
-              </label>
+              <FormControlLabel
+                control={<Checkbox checked={bpLinear} onChange={(e) => setBpLinear(e.target.checked)} disabled={bpBusy} size="small" />}
+                label="Require linear history"
+              />
             </div>
 
-            <button
+            <Button
               type="button"
-              className={styles.submitButton}
+              variant="contained"
+              size="small"
               onClick={handleBranchProtection}
               disabled={bpBusy || !bpBranch}
-              style={{ padding: "8px 16px", fontSize: "0.85rem", minWidth: 100 }}
             >
               {bpBusy ? "Applying..." : "Apply protection"}
-            </button>
+            </Button>
 
             {bpMsg && (bpMsg.startsWith("Error:") ? <p className={styles.error}>{bpMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 8 }}>{bpMsg}</p>)}
           </>

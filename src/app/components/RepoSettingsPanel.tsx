@@ -5,6 +5,10 @@ import { listPersonalReposAction, updateRepoAction } from "../actions";
 import type { GithubRepo } from "@/lib/github";
 import type { UpdateRepoPatch } from "@/lib/github";
 import Typeahead from "./ui/Typeahead";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import styles from "../page.module.css";
 
 export default function RepoSettingsPanel() {
@@ -114,33 +118,37 @@ export default function RepoSettingsPanel() {
       {selectedRepo && (
         <div className={styles.field} style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--text-secondary)", fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
-              <input
-                type="checkbox"
-                checked={editPrivate}
-                onChange={(e) => setEditPrivate(e.target.checked)}
-                disabled={saveBusy || isArchivedCurrent}
-              />
-              Private
-            </label>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={editPrivate}
+                  onChange={(e) => setEditPrivate(e.target.checked)}
+                  disabled={saveBusy || isArchivedCurrent}
+                  size="small"
+                />
+              }
+              label="Private"
+            />
 
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--text-secondary)", fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
-              <input
-                type="checkbox"
-                checked={editTemplate}
-                onChange={(e) => setEditTemplate(e.target.checked)}
-                disabled={saveBusy || isArchivedCurrent}
-              />
-              Template repository
-            </label>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={editTemplate}
+                  onChange={(e) => setEditTemplate(e.target.checked)}
+                  disabled={saveBusy || isArchivedCurrent}
+                  size="small"
+                />
+              }
+              label="Template repository"
+            />
 
             <div>
               <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", marginBottom: 4 }}>
                 Description
               </label>
-              <input
-                type="text"
-                className={styles.textInput}
+              <TextField
+                size="small"
+                fullWidth
                 value={editDescription}
                 onChange={(e) => setEditDescription(e.target.value)}
                 disabled={saveBusy || isArchivedCurrent}
@@ -148,30 +156,33 @@ export default function RepoSettingsPanel() {
               />
             </div>
 
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--text-secondary)", fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
-              <input
-                type="checkbox"
-                checked={editArchived}
-                onChange={(e) => setEditArchived(e.target.checked)}
-                disabled={saveBusy}
-              />
-              Archived
-            </label>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={editArchived}
+                  onChange={(e) => setEditArchived(e.target.checked)}
+                  disabled={saveBusy}
+                  size="small"
+                />
+              }
+              label="Archived"
+            />
 
             {isArchivedCurrent && (
               <p className={styles.fieldHint}>Unarchive and save to edit the other settings.</p>
             )}
           </div>
 
-          <button
+          <Button
             type="button"
-            className={styles.submitButton}
+            variant="contained"
+            size="small"
             onClick={handleSave}
             disabled={saveBusy}
-            style={{ marginTop: 12 }}
+            sx={{ mt: 1.5 }}
           >
             {saveBusy ? "Saving..." : "Save changes"}
-          </button>
+          </Button>
 
           {saveMsg && (
             saveMsg.startsWith("No changes") || saveMsg === "Saved." ? (

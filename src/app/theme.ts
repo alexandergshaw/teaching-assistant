@@ -28,6 +28,12 @@ const theme = createTheme({
   shape: { borderRadius: 8 },
   typography: { fontFamily: "inherit", fontSize: 14 },
   components: {
+    MuiButton: {
+      defaultProps: { disableElevation: true },
+      styleOverrides: {
+        root: { textTransform: "none", borderRadius: 8, fontWeight: 600 },
+      },
+    },
     MuiOutlinedInput: {
       styleOverrides: { root: { borderRadius: 8, fontSize: "0.9rem" } },
     },

@@ -21,6 +21,7 @@ import {
   cancelWorkflowRunAction,
 } from "../actions";
 import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo } from "@/lib/github";
+import RepoSettingsPanel from "./RepoSettingsPanel";
 import Typeahead from "./ui/Typeahead";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
@@ -37,7 +38,7 @@ export default function RepoDetail() {
   const [branch, setBranch] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
   const [defaultBranch, setDefaultBranch] = useState("");
-  const [tab, setTab] = useState<"files" | "branches" | "pulls" | "actions">("files");
+  const [tab, setTab] = useState<"files" | "branches" | "pulls" | "actions" | "settings">("files");
 
   // Files tab state
   const [tree, setTree] = useState<RepoTreeEntry[]>([]);
@@ -498,7 +499,7 @@ export default function RepoDetail() {
         <>
           <Tabs
             value={tab}
-            onChange={(_, v) => setTab(v as "files" | "branches" | "pulls" | "actions")}
+            onChange={(_, v) => setTab(v as "files" | "branches" | "pulls" | "actions" | "settings")}
             sx={{
               marginTop: 2,
               "& .MuiTab-root": {
@@ -510,6 +511,7 @@ export default function RepoDetail() {
             <Tab label="Branches" value="branches" disableRipple />
             <Tab label="Pull requests" value="pulls" disableRipple />
             <Tab label="Actions" value="actions" disableRipple />
+            <Tab label="Settings" value="settings" disableRipple />
           </Tabs>
 
           {tab === "files" && (
@@ -1087,6 +1089,18 @@ export default function RepoDetail() {
               </div>
             </div>
           )}
+
+          {tab === "settings" && (() => {
+            const selectedRepo = repos.find((r) => r.fullName === repoRef);
+            return selectedRepo ? (
+              <RepoSettingsPanel
+                repo={selectedRepo}
+                onUpdated={(u) => setRepos((prev) => prev.map((r) => (r.fullName === u.fullName ? u : r)))}
+              />
+            ) : (
+              <p className={styles.fieldHint}>Repository details unavailable.</p>
+            );
+          })()}
         </>
       )}
     </div>

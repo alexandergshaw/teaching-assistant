@@ -138,10 +138,15 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
   useEffect(() => {
     if (!courseId) return;
     let cancelled = false;
-    Promise.all([
-      listAssignmentsAction(institution, courseId),
-      listStudentsAction(institution, courseId),
-    ]).then(([assignResult, studentResult]) => {
+    (async () => {
+      setAssignments([]);
+      setStudents([]);
+      setAssignmentState("loading");
+      setStudentState("loading");
+      const [assignResult, studentResult] = await Promise.all([
+        listAssignmentsAction(institution, courseId),
+        listStudentsAction(institution, courseId),
+      ]);
       if (cancelled) return;
       if ("error" in assignResult) {
         setAssignments([]);
@@ -157,11 +162,22 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
         setStudents(studentResult.students);
         setStudentState("idle");
       }
-    });
+    })();
     return () => {
       cancelled = true;
     };
   }, [courseId, institution]);
+
+  // Reset assignments and students when no course is selected
+  useEffect(() => {
+    if (courseId) return;
+    (async () => {
+      setAssignments([]);
+      setStudents([]);
+      setAssignmentState("idle");
+      setStudentState("idle");
+    })();
+  }, [courseId]);
 
   const showPreview = useCallback((pf: PreviewFile) => {
     let blobUrl: string | null = null;
@@ -493,9 +509,16 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
             className={styles.downloadButton}
             onClick={handlePullBack}
             disabled={!institution || !courseId || !assignmentId || !studentId || pulling}
-            style={{ alignSelf: "flex-start" }}
+            style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6 }}
           >
-            {pulling ? "Pulling..." : "Pull back"}
+            {pulling ? (
+              <>
+                <span className={styles.btnSpinner} aria-hidden="true" />
+                Pulling...
+              </>
+            ) : (
+              "Pull back"
+            )}
           </button>
 
           {pullError && <p className={styles.error}>{pullError}</p>}
@@ -630,8 +653,16 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
                         setGradeCanvasUrl(result.canvasUrl);
                       }
                     }}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
                   >
-                    {grading ? "Grading..." : "Grade this submission"}
+                    {grading ? (
+                      <>
+                        <span className={styles.btnSpinner} aria-hidden="true" />
+                        Grading...
+                      </>
+                    ) : (
+                      "Grade this submission"
+                    )}
                   </button>
                   {gradeError && <p className={styles.error} style={{ marginTop: 8 }}>{gradeError}</p>}
                 </div>

@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { IconButton, TextField } from "@mui/material";
 import styles from "../page.module.css";
 import type { ChatMessage } from "@/lib/chat/types";
 
@@ -144,24 +145,24 @@ export default function AiChatWindow({
               }
             >
               {m.role === "assistant" ? (
-                <button
-                  className={styles.selectionChatMsgAction}
+                <IconButton
+                  size="small"
                   onClick={() => void copyMessage(m.text, i)}
                   title={copiedIndex === i ? "Copied" : "Copy response"}
                   aria-label={copiedIndex === i ? "Copied" : "Copy response"}
                 >
                   {copiedIndex === i ? <CheckIcon /> : <CopyIcon />}
-                </button>
+                </IconButton>
               ) : (
-                <button
-                  className={styles.selectionChatMsgAction}
+                <IconButton
+                  size="small"
                   onClick={() => resendMessage(m.text)}
                   title="Edit and resend"
                   aria-label="Edit and resend"
                   disabled={isLoading}
                 >
                   <ResendIcon />
-                </button>
+                </IconButton>
               )}
             </div>
           </div>
@@ -197,24 +198,26 @@ export default function AiChatWindow({
 
       {/* Input */}
       <div className={styles.selectionChatInputRow}>
-        <textarea
-          ref={inputRef}
-          className={styles.selectionChatInput}
+        <TextField
+          inputRef={inputRef}
+          multiline
+          maxRows={4}
+          size="small"
+          fullWidth
           placeholder="Type your message…"
           value={input}
-          rows={1}
           disabled={isLoading}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
+          slotProps={{ input: { onKeyDown: handleKeyDown } }}
         />
-        <button
-          className={styles.selectionChatSend}
+        <IconButton
+          size="small"
           onClick={handleSend}
           disabled={!input.trim() || isLoading}
           aria-label="Send"
         >
           <SendIcon />
-        </button>
+        </IconButton>
       </div>
     </div>
   );

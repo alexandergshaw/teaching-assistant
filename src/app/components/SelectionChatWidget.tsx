@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { IconButton } from "@mui/material";
 import { selectionChatAction } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
-import styles from "../page.module.css";
 import AiChatWindow from "./AiChatWindow";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
 import type { ChatMessage } from "@/lib/chat/types";
@@ -174,15 +174,15 @@ export default function SelectionChatWidget() {
   return (
     <div ref={widgetRef}>
       {icon && !chat && (
-        <button
-          className={styles.selectionAiButton}
+        <IconButton
+          size="small"
           style={iconStyle}
           onClick={openChat}
           title="Ask AI about selected text"
           aria-label="Ask AI about selected text"
         >
           <SparkleIcon />
-        </button>
+        </IconButton>
       )}
 
       {chat && dragPos && (

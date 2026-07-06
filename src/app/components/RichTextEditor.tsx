@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { useEffect, useRef } from "react";
+import { Button, TextField, MenuItem } from "@mui/material";
 import type { RunSpan } from "@/lib/office-edit";
 import styles from "../page.module.css";
 
@@ -221,17 +222,18 @@ export function FormattingToolbar({ style }: { style?: CSSProperties }) {
   };
 
   const btn = (label: string, command: string, title: string, labelStyle?: CSSProperties) => (
-    <button
-      type="button"
+    <Button
+      variant="outlined"
+      size="small"
       title={title}
-      className={styles.rteToolbarBtn}
       onMouseDown={(e) => {
         e.preventDefault();
         exec(command);
       }}
+      sx={{ minWidth: "auto", padding: "4px 8px" }}
     >
       <span style={labelStyle}>{label}</span>
-    </button>
+    </Button>
   );
 
   return (
@@ -240,8 +242,9 @@ export function FormattingToolbar({ style }: { style?: CSSProperties }) {
       {btn("I", "italic", "Italic (Ctrl+I)", { fontStyle: "italic" })}
       {btn("U", "underline", "Underline (Ctrl+U)", { textDecoration: "underline" })}
       <span className={styles.rteToolbarSep} aria-hidden="true" />
-      <select
-        className={styles.rteSizeSelect}
+      <TextField
+        select
+        size="small"
         defaultValue=""
         aria-label="Font size"
         title="Font size of the selected text"
@@ -252,19 +255,21 @@ export function FormattingToolbar({ style }: { style?: CSSProperties }) {
         onChange={(e) => {
           const v = e.target.value;
           if (v) applySize(v === "default" ? null : Number(v));
-          e.target.selectedIndex = 0;
+          const selectEl = document.querySelector('[aria-label="Font size"]') as HTMLSelectElement;
+          if (selectEl) selectEl.selectedIndex = 0;
         }}
+        sx={{ minWidth: "100px" }}
       >
-        <option value="" disabled>
+        <MenuItem value="" disabled>
           Size
-        </option>
+        </MenuItem>
         {FONT_SIZES.map((s) => (
-          <option key={s} value={s}>
+          <MenuItem key={s} value={s}>
             {s} pt
-          </option>
+          </MenuItem>
         ))}
-        <option value="default">Default</option>
-      </select>
+        <MenuItem value="default">Default</MenuItem>
+      </TextField>
     </div>
   );
 }

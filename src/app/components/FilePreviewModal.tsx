@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@mui/material";
 import styles from "../page.module.css";
 import { runSubmissionCodeAction } from "../actions";
 import type { CodeRunResult } from "@/lib/code-runner";
@@ -74,14 +75,14 @@ export default function FilePreviewModal({
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
             {isRunnable && (
-              <button
-                type="button"
-                className={styles.downloadButton}
+              <Button
+                variant="outlined"
+                size="small"
                 onClick={handleRun}
                 disabled={running}
               >
                 {running ? "Running..." : "Run"}
-              </button>
+              </Button>
             )}
             <button type="button" className={styles.previewCloseButton} onClick={onClose}>
               Close

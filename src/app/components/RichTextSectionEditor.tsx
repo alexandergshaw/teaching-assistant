@@ -2,6 +2,7 @@
 
 import type { CSSProperties, ReactNode } from "react";
 import { Fragment } from "react";
+import { Button, TextField, MenuItem } from "@mui/material";
 import type { RunSpan } from "@/lib/office-edit";
 import { RichTextEditor, FormattingToolbar } from "./RichTextEditor";
 import styles from "../page.module.css";
@@ -96,19 +97,21 @@ export function RichTextSectionEditor({
                 <div className={styles.rteSectionTop}>
                   {s.label && <span className={styles.rteSectionLabel}>{s.label}</span>}
                   {s.style && (
-                    <select
-                      className={styles.rteStyleSelect}
+                    <TextField
+                      select
+                      size="small"
                       value={s.style.value}
                       onChange={(e) => s.style!.onChange(e.target.value)}
                       title="Paragraph style"
                       aria-label="Paragraph style"
+                      sx={{ minWidth: "150px" }}
                     >
                       {HEADING_STYLES.map((h) => (
-                        <option key={h.value} value={h.value}>
+                        <MenuItem key={h.value} value={h.value}>
                           {h.label}
-                        </option>
+                        </MenuItem>
                       ))}
-                    </select>
+                    </TextField>
                   )}
                 </div>
               )}
@@ -123,17 +126,18 @@ export function RichTextSectionEditor({
             {s.actions && s.actions.length > 0 && (
               <div className={styles.rteSectionActions}>
                 {s.actions.map((a) => (
-                  <button
+                  <Button
                     key={a.key}
-                    type="button"
+                    variant="outlined"
+                    size="small"
                     title={a.title}
                     onClick={a.onClick}
                     disabled={a.disabled}
-                    className={`${styles.rteSectionActionBtn} ${TONE_CLASS[a.tone ?? "default"]}`.trim()}
+                    className={TONE_CLASS[a.tone ?? "default"]}
                     style={a.style}
                   >
                     {a.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
             )}

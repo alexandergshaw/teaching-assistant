@@ -188,6 +188,17 @@ import {
   setBranchProtection,
   listPersonalRepos,
   updateRepo,
+  forkRepo,
+  createBranch,
+  deleteBranch,
+  listCommits,
+  listPullRequests,
+  mergePullRequest,
+  listWorkflowRuns,
+  listRunJobs,
+  rerunWorkflowRun,
+  cancelWorkflowRun,
+  getRepoTree,
   type GithubRepo,
   type RepoDigest,
   type WorkflowRunInfo,
@@ -197,6 +208,10 @@ import {
   type RepoPermission,
   type BranchProtectionOptions,
   type UpdateRepoPatch,
+  type CommitInfo,
+  type PullRequestInfo,
+  type WorkflowJobInfo,
+  type RepoTreeEntry,
 } from "@/lib/github";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
 import { filesToLlmParts } from "@/lib/llm-files";
@@ -5814,6 +5829,170 @@ ${digest.text}`;
     return { outline, fullName: digest.fullName, fileCount: digest.fileCount, truncated: digest.truncated };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate the course." };
+  }
+}
+
+// ── Repository operations (fork, branches, commits, PRs, Actions) ───────────
+
+export async function forkRepoAction(repoRef: string, org?: string): Promise<{ repo: GithubRepo } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const repo = await forkRepo(parsed.owner, parsed.repo, org?.trim());
+    return { repo };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not fork the repository." };
+  }
+}
+
+export async function createBranchAction(repoRef: string, newBranch: string, fromBranch: string): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!newBranch.trim()) return { error: "Enter a new branch name." };
+    if (!fromBranch.trim()) return { error: "Select a source branch." };
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    await createBranch(parsed.owner, parsed.repo, newBranch.trim(), fromBranch.trim());
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the branch." };
+  }
+}
+
+export async function deleteBranchAction(repoRef: string, branch: string): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!branch.trim()) return { error: "Select a branch to delete." };
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    await deleteBranch(parsed.owner, parsed.repo, branch.trim());
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not delete the branch." };
+  }
+}
+
+export async function listCommitsAction(repoRef: string, ref?: string): Promise<{ commits: CommitInfo[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const commits = await listCommits(parsed.owner, parsed.repo, ref?.trim());
+    return { commits };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list commits." };
+  }
+}
+
+export async function listPullRequestsAction(repoRef: string, state: "open" | "closed" | "all" = "open"): Promise<{ pulls: PullRequestInfo[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const pulls = await listPullRequests(parsed.owner, parsed.repo, state);
+    return { pulls };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list pull requests." };
+  }
+}
+
+export async function mergePullRequestAction(repoRef: string, prNumber: number, method: "merge" | "squash" | "rebase" = "merge"): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    await mergePullRequest(parsed.owner, parsed.repo, prNumber, method);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not merge the pull request." };
+  }
+}
+
+export async function listWorkflowRunsAction(repoRef: string, branch?: string): Promise<{ runs: WorkflowRunInfo[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const runs = await listWorkflowRuns(parsed.owner, parsed.repo, { branch: branch?.trim() });
+    return { runs };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list workflow runs." };
+  }
+}
+
+export async function listRunJobsAction(repoRef: string, runId: number): Promise<{ jobs: WorkflowJobInfo[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const jobs = await listRunJobs(parsed.owner, parsed.repo, runId);
+    return { jobs };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list workflow jobs." };
+  }
+}
+
+export async function rerunWorkflowRunAction(repoRef: string, runId: number): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    await rerunWorkflowRun(parsed.owner, parsed.repo, runId);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not rerun the workflow." };
+  }
+}
+
+export async function cancelWorkflowRunAction(repoRef: string, runId: number): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    await cancelWorkflowRun(parsed.owner, parsed.repo, runId);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not cancel the workflow." };
+  }
+}
+
+export async function getRepoTreeAction(repoRef: string, ref?: string): Promise<{ tree: RepoTreeEntry[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const tree = await getRepoTree(parsed.owner, parsed.repo, ref?.trim());
+    return { tree };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not read the repository tree." };
+  }
+}
+
+export async function getFileTextAction(repoRef: string, path: string, ref?: string): Promise<{ content: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!path.trim()) return { error: "Enter a file path." };
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const content = await getFileText(parsed.owner, parsed.repo, path.trim(), ref?.trim());
+    return { content };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not read the file." };
+  }
+}
+
+export async function commitFileAction(repoRef: string, path: string, content: string, message: string, branch: string): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!path.trim()) return { error: "Enter a file path." };
+    if (!message.trim()) return { error: "Enter a commit message." };
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    await putFile(parsed.owner, parsed.repo, path.trim(), content, message.trim(), branch.trim() || undefined);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not commit the file." };
   }
 }
 

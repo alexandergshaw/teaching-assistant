@@ -15,6 +15,11 @@ import { base64ToBlobUrl, fileKindLabel, findDuplicateGroups, formatBytes } from
 import DocStructureEditor from "../DocStructureEditor";
 import FilePreviewModal, { type PreviewFile } from "../FilePreviewModal";
 import { OfficeEditorModal } from "./OfficeEditorModal";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 
 export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym?: string; modules: CanvasModule[] }) {
   const [files, setFiles] = useState<CourseFile[]>([]);
@@ -227,16 +232,16 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
             }}
           />
         </label>
-        <button type="button" className={styles.downloadButton} onClick={() => void reload()} disabled={busy}>
+        <Button variant="outlined" size="small" onClick={() => void reload()} disabled={busy}>
           Refresh
-        </button>
-        <input
+        </Button>
+        <TextField
+          size="small"
           type="search"
-          className={styles.textInput}
-          style={{ flex: "1 1 200px", maxWidth: 300 }}
           placeholder="Search files by name…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          sx={{ flex: "1 1 200px", maxWidth: 300 }}
         />
         <span className={styles.fieldHint} style={{ margin: 0 }}>
           {search.trim() ? `${shown.length} of ${files.length}` : files.length} file{files.length === 1 ? "" : "s"}
@@ -263,35 +268,36 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
             <span className={styles.bulkCount}>
               {selected.size} file{selected.size === 1 ? "" : "s"} selected
             </span>
-            <button type="button" className={styles.bulkClear} onClick={() => setSelected(new Set())}>
+            <Button variant="outlined" size="small" onClick={() => setSelected(new Set())}>
               Clear
-            </button>
+            </Button>
           </div>
           <div className={styles.bulkRow}>
             <span className={styles.bulkLabel}>Files</span>
             <span className={styles.bulkField}>
-              <select
-                className={styles.bulkSelect}
-                style={{ maxWidth: 200 }}
+              <TextField
+                select
+                size="small"
                 value={bulkModule}
                 disabled={modules.length === 0}
                 onChange={(e) => setBulkModule(e.target.value === "" ? "" : Number(e.target.value))}
                 aria-label="Module to add the files to"
+                sx={{ minWidth: 200 }}
               >
-                <option value="">{modules.length === 0 ? "No modules" : "Add to module…"}</option>
+                <MenuItem value="">{modules.length === 0 ? "No modules" : "Add to module…"}</MenuItem>
                 {modules.map((mod) => (
-                  <option key={mod.id} value={mod.id}>
+                  <MenuItem key={mod.id} value={mod.id}>
                     {mod.name}
-                  </option>
+                  </MenuItem>
                 ))}
-              </select>
-              <button type="button" className={styles.bulkBtn} disabled={busy || bulkModule === ""} onClick={() => void bulkAddToModule()}>
+              </TextField>
+              <Button variant="outlined" size="small" disabled={busy || bulkModule === ""} onClick={() => void bulkAddToModule()}>
                 Add
-              </button>
+              </Button>
             </span>
-            <button type="button" className={styles.bulkBtnDanger} disabled={busy} onClick={() => void bulkDelete()}>
+            <Button variant="outlined" size="small" color="error" disabled={busy} onClick={() => void bulkDelete()}>
               {confirmBulkDelete ? "Confirm delete" : "Delete"}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -316,9 +322,9 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
             {dupGroups.length} {dupGroups.length === 1 ? "file" : "files"} (e.g. &ldquo;{dupGroups[0].strays[0].displayName}&rdquo;).
             The newest copy of each is kept.
           </span>
-          <button type="button" className={styles.downloadButton} onClick={selectStrays} disabled={busy}>
+          <Button variant="outlined" size="small" onClick={selectStrays} disabled={busy}>
             Select {strayCount} older {strayCount === 1 ? "copy" : "copies"}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -335,10 +341,12 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
         <p className={styles.emptyState}>This course has no files yet.</p>
       ) : (
         <div className={styles.ccModule}>
-          <label className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0, padding: "8px 12px" }}>
-            <input type="checkbox" checked={allShownSelected} onChange={toggleSelectAll} disabled={shown.length === 0} />
-            Select all
-          </label>
+          <FormControlLabel
+            className={styles.fieldHint}
+            style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0, padding: "8px 12px" }}
+            control={<Checkbox size="small" checked={allShownSelected} onChange={toggleSelectAll} disabled={shown.length === 0} />}
+            label="Select all"
+          />
           <div className={styles.ccItems} style={{ borderTop: "1px solid var(--card-border)" }}>
             {shown.length === 0 && (
               <p className={styles.ccHint} style={{ padding: "4px 6px" }}>
@@ -347,8 +355,8 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
             )}
             {shown.map((f) => (
               <div key={f.id} className={styles.ccItem}>
-                <input
-                  type="checkbox"
+                <Checkbox
+                  size="small"
                   className={styles.ccCheckbox}
                   checked={selected.has(f.id)}
                   onChange={() => toggleSelected(f.id)}
@@ -357,7 +365,8 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
                 <span className={styles.ccType} title={f.contentType}>
                   {fileKindLabel(f.contentType, f.fileName)}
                 </span>
-                <input
+                <TextField
+                  size="small"
                   type="text"
                   className={styles.ccItemName}
                   title={f.displayName}
@@ -383,32 +392,32 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
                 <span className={styles.ccCount} style={{ width: 78, textAlign: "right", flexShrink: 0 }}>
                   {formatBytes(f.size)}
                 </span>
-                <button type="button" className={styles.ccBtn} onClick={() => void openPreview(f)}>
+                <Button variant="outlined" size="small" onClick={() => void openPreview(f)}>
                   Preview
-                </button>
+                </Button>
                 {f.url && (
                   <a className={styles.ccBtn} href={f.url} target="_blank" rel="noreferrer">
                     Download
                   </a>
                 )}
                 {/\.(docx|pptx)$/i.test(f.fileName || f.displayName) && (
-                  <button type="button" className={styles.ccBtn} onClick={() => setEditFile(f)}>
+                  <Button variant="outlined" size="small" onClick={() => setEditFile(f)}>
                     Edit
-                  </button>
+                  </Button>
                 )}
                 {/\.docx$/i.test(f.fileName || f.displayName) && (
-                  <button
-                    type="button"
-                    className={styles.ccBtn}
+                  <Button
+                    variant="outlined"
+                    size="small"
                     title="Set the document title and mark headings (accessibility)"
                     onClick={() => setStructureFile(f)}
                   >
                     Structure
-                  </button>
+                  </Button>
                 )}
-                <button type="button" className={`${styles.ccBtn} ${styles.ccBtnDanger}`} onClick={() => void removeFile(f)} disabled={busy}>
+                <Button variant="outlined" size="small" color="error" onClick={() => void removeFile(f)} disabled={busy}>
                   {confirmDelete === f.id ? "Confirm" : "Delete"}
-                </button>
+                </Button>
               </div>
             ))}
           </div>

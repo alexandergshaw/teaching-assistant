@@ -4,6 +4,7 @@ import type React from "react";
 import styles from "../../page.module.css";
 import type { EditableQuestion } from "./types";
 import { DraftQuizQuestions } from "./DraftQuizQuestions";
+import Button from "@mui/material/Button";
 
 export function BulkQuestionsModal({
   questions,
@@ -23,9 +24,9 @@ export function BulkQuestionsModal({
       >
         <div className={styles.previewHeader}>
           <h3>Questions for new quizzes</h3>
-          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+          <Button variant="outlined" size="small" className={styles.previewCloseButton} onClick={onClose}>
             Done
-          </button>
+          </Button>
         </div>
         <p className={styles.fieldHint} style={{ marginTop: 0 }}>
           These questions are written into every quiz created by &quot;Add to each&quot;. They are not saved

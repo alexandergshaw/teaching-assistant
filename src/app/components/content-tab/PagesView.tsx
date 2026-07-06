@@ -3,6 +3,7 @@
 import type { CanvasPageSummary } from "@/lib/canvas-modules";
 import styles from "../../page.module.css";
 import { formatWhen } from "./utils";
+import Button from "@mui/material/Button";
 
 // ── Pages list ─────────────────────────────────────────────────────────────---
 
@@ -21,9 +22,9 @@ export function PagesView({
         <p className={styles.fieldHint} style={{ margin: 0 }}>
           {pages.length} page{pages.length === 1 ? "" : "s"}
         </p>
-        <button type="button" className={styles.downloadButton} onClick={onNewPage}>
+        <Button variant="outlined" size="small" onClick={onNewPage}>
           New page
-        </button>
+        </Button>
       </div>
 
       {pages.length === 0 && <p className={styles.emptyState}>This course has no pages yet.</p>}
@@ -32,9 +33,9 @@ export function PagesView({
         <div key={p.url} className={styles.syllabusSectionCard}>
           <div className={styles.syllabusSectionTopRow}>
             <h3 className={styles.lessonSlideTitle}>{p.title}</h3>
-            <button type="button" className={styles.downloadButton} onClick={() => onEditPage(p.url)}>
+            <Button variant="outlined" size="small" onClick={() => onEditPage(p.url)}>
               Edit
-            </button>
+            </Button>
           </div>
           <p className={styles.fieldHint}>
             {[p.published ? "Published" : "Unpublished", p.updatedAt ? `Updated ${formatWhen(p.updatedAt)}` : ""]

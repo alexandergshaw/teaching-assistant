@@ -5,6 +5,7 @@ import { getGradableAction } from "../../actions";
 import type { CanvasModuleItem } from "@/lib/canvas-modules";
 import styles from "../../page.module.css";
 import { formatDueDate } from "./utils";
+import Button from "@mui/material/Button";
 
 // ── Assignment preview (read-only) ────────────────────────────────────────────
 
@@ -49,9 +50,9 @@ export function AssignmentPreviewModal({
                 Open in Canvas
               </a>
             )}
-            <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+            <Button variant="outlined" size="small" className={styles.previewCloseButton} onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
         </div>
 

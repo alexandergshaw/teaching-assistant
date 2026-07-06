@@ -2,6 +2,11 @@
 
 import type { ChangeEvent } from "react";
 import { useRef, useState, useEffect } from "react";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import {
   generateCourseScheduleAction,
   generateCopilotProjectPromptAction,
@@ -591,41 +596,41 @@ export default function CoursePlanningTab() {
 
           {/* Mode toggle */}
           <div className={styles.scheduleModeToggle}>
-            <button
-              type="button"
-              className={`${styles.scheduleModeBtn}${planningMode === "schedule" ? ` ${styles.active}` : ""}`}
+            <Button
+              variant={planningMode === "schedule" ? "contained" : "outlined"}
+              size="small"
               onClick={() => { setPlanningMode("schedule"); localStorage.setItem(LS_KEYS.planningMode, "schedule"); }}
             >
               Course Schedule
-            </button>
-            <button
-              type="button"
-              className={`${styles.scheduleModeBtn}${planningMode === "project" ? ` ${styles.active}` : ""}`}
+            </Button>
+            <Button
+              variant={planningMode === "project" ? "contained" : "outlined"}
+              size="small"
               onClick={() => { setPlanningMode("project"); localStorage.setItem(LS_KEYS.planningMode, "project"); }}
             >
               Course Project Planning
-            </button>
-            <button
-              type="button"
-              className={`${styles.scheduleModeBtn}${planningMode === "lecture" ? ` ${styles.active}` : ""}`}
+            </Button>
+            <Button
+              variant={planningMode === "lecture" ? "contained" : "outlined"}
+              size="small"
               onClick={() => { setPlanningMode("lecture"); localStorage.setItem(LS_KEYS.planningMode, "lecture"); }}
             >
               Lecture Planning
-            </button>
-            <button
-              type="button"
-              className={`${styles.scheduleModeBtn}${planningMode === "syllabus" ? ` ${styles.active}` : ""}`}
+            </Button>
+            <Button
+              variant={planningMode === "syllabus" ? "contained" : "outlined"}
+              size="small"
               onClick={() => { setPlanningMode("syllabus"); localStorage.setItem(LS_KEYS.planningMode, "syllabus"); }}
             >
               Syllabus
-            </button>
-            <button
-              type="button"
-              className={`${styles.scheduleModeBtn}${planningMode === "sync" ? ` ${styles.active}` : ""}`}
+            </Button>
+            <Button
+              variant={planningMode === "sync" ? "contained" : "outlined"}
+              size="small"
               onClick={() => { setPlanningMode("sync"); localStorage.setItem(LS_KEYS.planningMode, "sync"); }}
             >
               Assignment Sync
-            </button>
+            </Button>
           </div>
 
           {/* ── Syllabus mode: adapt an existing syllabus from a codebase ── */}
@@ -656,101 +661,112 @@ export default function CoursePlanningTab() {
               </div>
 
               <div className={styles.field}>
-                <label htmlFor="adaptCourseName">Course name</label>
-                <input
+                <TextField
                   id="adaptCourseName"
+                  label="Course name"
                   type="text"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   placeholder="e.g. Database Management"
                   value={adaptCourseName}
                   onChange={(e) => { setAdaptCourseName(e.target.value); localStorage.setItem(LS_KEYS.adaptCourseName, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="adaptCourseCode">Course code</label>
-                <input
+                <TextField
                   id="adaptCourseCode"
+                  label="Course code"
                   type="text"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   placeholder="e.g. BIT270"
                   value={adaptCourseCode}
                   onChange={(e) => { setAdaptCourseCode(e.target.value); localStorage.setItem(LS_KEYS.adaptCourseCode, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="adaptInstructorName">Instructor name</label>
-                <input
+                <TextField
                   id="adaptInstructorName"
+                  label="Instructor name"
                   type="text"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   placeholder="e.g. Alex Shaw"
                   value={adaptInstructorName}
                   onChange={(e) => { setAdaptInstructorName(e.target.value); localStorage.setItem(LS_KEYS.adaptInstructorName, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="adaptInstructorEmail">Instructor email</label>
-                <input
+                <TextField
                   id="adaptInstructorEmail"
+                  label="Instructor email"
                   type="email"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   placeholder="e.g. shaw@university.edu"
                   value={adaptInstructorEmail}
                   onChange={(e) => { setAdaptInstructorEmail(e.target.value); localStorage.setItem(LS_KEYS.adaptInstructorEmail, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="adaptDescription">Official course description</label>
-                <textarea
+                <TextField
                   id="adaptDescription"
-                  className={styles.textInput}
-                  rows={4}
+                  label="Official course description"
+                  multiline
+                  minRows={4}
+                  size="small"
+                  fullWidth
                   placeholder="Paste the official catalog description — used verbatim for the course description section."
                   value={adaptDescription}
                   onChange={(e) => { setAdaptDescription(e.target.value); localStorage.setItem(LS_KEYS.adaptDescription, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="adaptStartDate">Course start date</label>
-                <input
+                <TextField
                   id="adaptStartDate"
+                  label="Course start date"
                   type="date"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   value={adaptStartDate}
                   onChange={(e) => { setAdaptStartDate(e.target.value); localStorage.setItem(LS_KEYS.adaptStartDate, e.target.value); }}
+                  slotProps={{ inputLabel: { shrink: true } }}
                 />
                 <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 0" }}>
                   Include the year — used to compute the schedule. Not assumed from the old syllabus.
                 </p>
               </div>
               <div className={styles.field}>
-                <label htmlFor="adaptMeetingDays">Meeting days</label>
-                <input
+                <TextField
                   id="adaptMeetingDays"
+                  label="Meeting days"
                   type="text"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   placeholder="e.g. Mon / Wed / Fri"
                   value={adaptMeetingDays}
                   onChange={(e) => { setAdaptMeetingDays(e.target.value); localStorage.setItem(LS_KEYS.adaptMeetingDays, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="adaptMeetingTimes">Meeting times</label>
-                <input
+                <TextField
                   id="adaptMeetingTimes"
+                  label="Meeting times"
                   type="text"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   placeholder="e.g. 9:00–10:15am"
                   value={adaptMeetingTimes}
                   onChange={(e) => { setAdaptMeetingTimes(e.target.value); localStorage.setItem(LS_KEYS.adaptMeetingTimes, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="adaptLocation">Meeting location</label>
-                <input
+                <TextField
                   id="adaptLocation"
+                  label="Meeting location"
                   type="text"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   placeholder="e.g. Room 204, Science Hall"
                   value={adaptLocation}
                   onChange={(e) => { setAdaptLocation(e.target.value); localStorage.setItem(LS_KEYS.adaptLocation, e.target.value); }}
@@ -759,14 +775,14 @@ export default function CoursePlanningTab() {
 
               {adaptError && <p className={styles.error}>{adaptError}</p>}
 
-              <button
-                type="button"
-                className={styles.submitButton}
+              <Button
+                variant="contained"
+                size="small"
                 onClick={handleAnalyzeSyllabus}
                 disabled={adaptStatus !== "idle"}
               >
                 {adaptStatus === "analyzing" ? "Analyzing…" : adaptSections ? "Re-analyze" : "Analyze syllabus"}
-              </button>
+              </Button>
 
               {adaptSections && adaptSections.length > 0 && (
                 <>
@@ -774,14 +790,14 @@ export default function CoursePlanningTab() {
                     <p style={{ fontWeight: 600, margin: 0 }}>
                       {adaptSections.length} section{adaptSections.length === 1 ? "" : "s"} — edit, regenerate with AI, add, or delete any of them
                     </p>
-                    <button
-                      type="button"
-                      className={styles.submitButton}
+                    <Button
+                      variant="contained"
+                      size="small"
                       onClick={handleBuildAdaptedSyllabus}
                       disabled={adaptStatus !== "idle"}
                     >
                       {adaptStatus === "building" ? "Building…" : "Download adapted syllabus (.docx)"}
-                    </button>
+                    </Button>
                   </div>
 
                   {/* Place the generated syllabus directly into a Canvas module */}
@@ -789,56 +805,60 @@ export default function CoursePlanningTab() {
                     <p style={{ margin: "0 0 10px", fontWeight: 600 }}>Add to a Canvas module</p>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
                       <div className={styles.field} style={{ flex: "1 1 280px", margin: 0 }}>
-                        <label htmlFor="placeCourseUrl">Course URL</label>
-                        <input
+                        <TextField
                           id="placeCourseUrl"
+                          label="Course URL"
                           type="text"
-                          className={styles.textInput}
+                          size="small"
+                          fullWidth
                           placeholder="https://canvas.../courses/123"
                           value={placeCourseUrl}
                           onChange={(e) => setPlaceCourseUrl(e.target.value)}
                         />
                       </div>
-                      <button type="button" className={styles.submitButton} onClick={handleLoadPlaceModules} disabled={placeBusy !== "idle"}>
+                      <Button variant="contained" size="small" onClick={handleLoadPlaceModules} disabled={placeBusy !== "idle"}>
                         {placeBusy === "loading" ? "Loading…" : "Load modules"}
-                      </button>
+                      </Button>
                     </div>
                     {placeModules && (
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
                         <div className={styles.field} style={{ flex: "1 1 240px", margin: 0 }}>
-                          <label htmlFor="placeModule">Module</label>
-                          <select
+                          <TextField
                             id="placeModule"
-                            className={styles.textInput}
+                            label="Module"
+                            select
+                            size="small"
+                            fullWidth
                             value={placeModuleId}
                             onChange={(e) => setPlaceModuleId(Number(e.target.value))}
                           >
-                            {placeModules.length === 0 && <option value="">No modules in this course</option>}
+                            {placeModules.length === 0 && <MenuItem value="">No modules in this course</MenuItem>}
                             {placeModules.map((m) => (
-                              <option key={m.id} value={m.id}>{m.name}</option>
+                              <MenuItem key={m.id} value={m.id}>{m.name}</MenuItem>
                             ))}
-                          </select>
+                          </TextField>
                         </div>
                         <div className={styles.field} style={{ width: 110, margin: 0 }}>
-                          <label htmlFor="placePosition">Position</label>
-                          <input
+                          <TextField
                             id="placePosition"
+                            label="Position"
                             type="number"
-                            min={1}
-                            className={styles.textInput}
+                            size="small"
+                            fullWidth
+                            slotProps={{ htmlInput: { min: 1 } }}
                             placeholder="End"
                             value={placePosition}
                             onChange={(e) => setPlacePosition(e.target.value)}
                           />
                         </div>
-                        <button
-                          type="button"
-                          className={styles.submitButton}
+                        <Button
+                          variant="contained"
+                          size="small"
                           onClick={handleAddToModule}
                           disabled={placeBusy !== "idle" || placeModuleId === ""}
                         >
                           {placeBusy === "adding" ? "Adding…" : "Add to module"}
-                        </button>
+                        </Button>
                       </div>
                     )}
                     {placeNote && (
@@ -894,71 +914,77 @@ export default function CoursePlanningTab() {
           {planningMode === "schedule" && !scheduleGenerated && (
             <>
               <div className={styles.field}>
-                <label htmlFor="courseDescription">Course Description</label>
-                <textarea
+                <TextField
                   id="courseDescription"
-                  className={styles.textInput}
+                  label="Course Description"
+                  multiline
+                  minRows={4}
+                  size="small"
+                  fullWidth
                   placeholder="Describe the course — its topics, goals, and audience."
                   value={courseDescription}
                   onChange={(e) => { setCourseDescription(e.target.value); localStorage.setItem(LS_KEYS.courseDescription, e.target.value); }}
-                  rows={4}
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="scheduleTerm">Term</label>
-                <input
+                <TextField
                   id="scheduleTerm"
+                  label="Term"
                   type="text"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   placeholder="e.g. Fall 2026"
                   value={scheduleTerm}
                   onChange={(e) => { setScheduleTerm(e.target.value); localStorage.setItem(LS_KEYS.scheduleTerm, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="scheduleStartDate">Course Start Date</label>
-                <input
+                <TextField
                   id="scheduleStartDate"
+                  label="Course Start Date"
                   type="date"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   value={scheduleStartDate}
                   onChange={(e) => { setScheduleStartDate(e.target.value); localStorage.setItem(LS_KEYS.scheduleStartDate, e.target.value); }}
+                  slotProps={{ inputLabel: { shrink: true } }}
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="scheduleWeeks">Number of Weeks</label>
-                <input
+                <TextField
                   id="scheduleWeeks"
+                  label="Number of Weeks"
                   type="number"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   placeholder="e.g. 15"
-                  min={1}
-                  max={52}
+                  slotProps={{ htmlInput: { min: 1, max: 52 } }}
                   value={scheduleWeeks}
                   onChange={(e) => { setScheduleWeeks(e.target.value); localStorage.setItem(LS_KEYS.scheduleWeeks, e.target.value); }}
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="scheduleTests">Number of Tests</label>
-                <input
+                <TextField
                   id="scheduleTests"
+                  label="Number of Tests"
                   type="number"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   placeholder="e.g. 3"
-                  min={0}
+                  slotProps={{ htmlInput: { min: 0 } }}
                   value={scheduleTests}
                   onChange={(e) => { setScheduleTests(e.target.value); localStorage.setItem(LS_KEYS.scheduleTests, e.target.value); }}
                 />
               </div>
               {scheduleError && <p className={styles.error}>{scheduleError}</p>}
-              <button
-                type="button"
-                className={styles.submitButton}
+              <Button
+                variant="contained"
+                size="small"
                 onClick={handleGenerateSchedule}
                 disabled={isGeneratingSchedule || !courseDescription.trim() || !scheduleTerm.trim() || !scheduleStartDate || !scheduleWeeks || !scheduleTests}
               >
                 {isGeneratingSchedule ? "Generating schedule…" : "Generate Schedule"}
-              </button>
+              </Button>
             </>
           )}
 
@@ -988,29 +1014,29 @@ export default function CoursePlanningTab() {
                 </table>
               </div>
               <div className={styles.scheduleActions}>
-                <button
-                  type="button"
-                  className={styles.submitButton}
+                <Button
+                  variant="contained"
+                  size="small"
                   onClick={resetSchedule}
                 >
                   Edit &amp; Regenerate
-                </button>
-                <button
-                  type="button"
-                  className={styles.submitButton}
+                </Button>
+                <Button
+                  variant="contained"
+                  size="small"
                   onClick={handleExportScheduleCsv}
                 >
                   Export CSV
-                </button>
-                <button
-                  type="button"
-                  className={styles.submitButton}
+                </Button>
+                <Button
+                  variant="contained"
+                  size="small"
                   onClick={handleUseScheduleForProject}
                   disabled={isGeneratingProjectPrompt}
                   title="Use this schedule for Course Project Planning and generate the Copilot prompt"
                 >
                   {isGeneratingProjectPrompt ? "Generating prompt…" : "Use for Project Planning"}
-                </button>
+                </Button>
               </div>
             </>
           )}
@@ -1033,35 +1059,37 @@ export default function CoursePlanningTab() {
                 </div>
               </div>
               {projectError && <p className={styles.error}>{projectError}</p>}
-              <button
-                type="button"
-                className={styles.submitButton}
+              <Button
+                variant="contained"
+                size="small"
                 onClick={() => handleGenerateProjectPrompt()}
                 disabled={isGeneratingProjectPrompt || !projectFileContent}
               >
                 {isGeneratingProjectPrompt ? "Generating prompt…" : "Generate Copilot Prompt"}
-              </button>
+              </Button>
               {projectPrompt && (
                 <div className={styles.field}>
                   <label>GitHub Copilot Prompt</label>
                   <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: 8 }}>
                     Copy the prompt below and paste it into GitHub Copilot (Agent mode) to scaffold a project covering all schedule topics.
                   </p>
-                  <textarea
-                    className={styles.textInput}
+                  <TextField
                     value={projectPrompt}
-                    readOnly
-                    rows={20}
-                    style={{ fontFamily: "monospace", fontSize: "0.85rem" }}
+                    multiline
+                    minRows={20}
+                    size="small"
+                    fullWidth
+                    slotProps={{ htmlInput: { readOnly: true } }}
+                    sx={{ fontFamily: "monospace", fontSize: "0.85rem" }}
                   />
-                  <button
-                    type="button"
-                    className={styles.submitButton}
+                  <Button
+                    variant="contained"
+                    size="small"
                     style={{ marginTop: 8 }}
                     onClick={() => void navigator.clipboard.writeText(projectPrompt)}
                   >
                     Copy to Clipboard
-                  </button>
+                  </Button>
 
                   <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--card-border, #e2e8f0)" }}>
                     <label>Or create a GitHub repo with this prompt</label>
@@ -1071,52 +1099,58 @@ export default function CoursePlanningTab() {
 
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
                       <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>Owner</span>
-                      <select
+                      <TextField
+                        select
+                        size="small"
                         value={repoOrg}
                         onChange={(e) => setRepoOrg(e.target.value)}
                         disabled={creatingRepo}
-                        style={{ flex: "1 1 200px", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem", background: "#fff", color: "#334155" }}
+                        sx={{ flex: "1 1 200px" }}
                       >
-                        <option value="">Your personal account</option>
+                        <MenuItem value="">Your personal account</MenuItem>
                         {repoOrgs.map((o) => (
-                          <option key={o} value={o}>
+                          <MenuItem key={o} value={o}>
                             {o} (organization)
-                          </option>
+                          </MenuItem>
                         ))}
-                      </select>
+                      </TextField>
                       <a href="https://github.com/account/organizations/new" target="_blank" rel="noreferrer" style={{ fontSize: "0.82rem" }}>
                         Create org on GitHub
                       </a>
-                      <button
-                        type="button"
+                      <Button
+                        size="small"
+                        variant="outlined"
                         onClick={() => void loadRepoOrgs()}
                         disabled={creatingRepo}
-                        style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: "0.8rem", color: "#334155", cursor: "pointer" }}
                       >
                         Refresh
-                      </button>
+                      </Button>
                     </div>
 
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      <input
+                      <TextField
                         type="text"
+                        size="small"
                         value={repoName}
                         placeholder={projectFileName ? projectFileName.replace(/\.[^.]+$/, "") : "course-project"}
                         onChange={(e) => setRepoName(e.target.value)}
                         disabled={creatingRepo}
-                        style={{ flex: "1 1 220px", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem" }}
+                        sx={{ flex: "1 1 220px" }}
                       />
-                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-                        <input type="checkbox" checked={repoPrivate} onChange={(e) => setRepoPrivate(e.target.checked)} disabled={creatingRepo} />
-                        Private
-                      </label>
-                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }} title="Mark as a template so the Version Control Integration tab can generate one repo per student from it">
-                        <input type="checkbox" checked={repoTemplate} onChange={(e) => setRepoTemplate(e.target.checked)} disabled={creatingRepo} />
-                        Template
-                      </label>
-                      <button type="button" className={styles.submitButton} onClick={handleCreateRepo} disabled={creatingRepo}>
+                      <FormControlLabel
+                        control={<Checkbox size="small" checked={repoPrivate} onChange={(e) => setRepoPrivate(e.target.checked)} disabled={creatingRepo} />}
+                        label="Private"
+                        sx={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}
+                      />
+                      <FormControlLabel
+                        control={<Checkbox size="small" checked={repoTemplate} onChange={(e) => setRepoTemplate(e.target.checked)} disabled={creatingRepo} />}
+                        label="Template"
+                        title="Mark as a template so the Version Control Integration tab can generate one repo per student from it"
+                        sx={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}
+                      />
+                      <Button variant="contained" size="small" onClick={handleCreateRepo} disabled={creatingRepo}>
                         {creatingRepo ? "Creating repo…" : "Create GitHub repo"}
-                      </button>
+                      </Button>
                     </div>
                     {createRepoError && <p className={styles.error}>{createRepoError}</p>}
                     {createdRepo && (

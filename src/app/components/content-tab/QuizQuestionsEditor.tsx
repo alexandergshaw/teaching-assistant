@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Button, IconButton, TextField, MenuItem, Checkbox, FormControlLabel, Radio } from "@mui/material";
 import {
   createQuizQuestionAction,
   deleteQuizQuestionAction,
@@ -139,50 +140,60 @@ export function QuizQuestionsEditor({
                 <div key={q.key} style={{ border: "1px solid var(--card-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <span className={styles.ccCount}>Q{qi + 1}</span>
-                    <select
-                      className={styles.bulkSelect}
+                    <TextField
+                      select
+                      size="small"
+                      sx={{ minWidth: 160 }}
                       value={q.type}
                       onChange={(e) => changeType(q.key, e.target.value as QuizQuestionType)}
                       aria-label="Question type"
+                      slotProps={{ htmlInput: { "aria-label": "Question type" } }}
                     >
                       {QUIZ_TYPES.map((t) => (
-                        <option key={t} value={t}>
+                        <MenuItem key={t} value={t}>
                           {QUIZ_TYPE_LABELS[t]}
-                        </option>
+                        </MenuItem>
                       ))}
-                    </select>
+                    </TextField>
                     <span className={styles.bulkField}>
-                      <input
+                      <TextField
                         type="number"
-                        className={styles.bulkInput}
-                        style={{ width: 64 }}
+                        size="small"
+                        sx={{ width: 64 }}
                         value={q.points}
                         onChange={(e) => patch(q.key, { points: Number(e.target.value) })}
                         aria-label="Points"
+                        slotProps={{ htmlInput: { "aria-label": "Points" } }}
                       />
                       <span className={styles.ccCount}>pts</span>
                     </span>
                     <span style={{ flex: 1 }} />
-                    <button type="button" className={styles.bulkBtnPrimary} disabled={busyKey === q.key} onClick={() => void saveQuestion(q)}>
-                      {busyKey === q.key ? "Saving…" : q.id === 0 ? "Add" : "Save"}
-                    </button>
-                    <button type="button" className={`${styles.ccBtn} ${styles.ccBtnDanger}`} disabled={busyKey === q.key} onClick={() => void deleteQuestion(q)}>
+                    <Button variant="contained" size="small" disabled={busyKey === q.key} onClick={() => void saveQuestion(q)}>
+                      {busyKey === q.key ? "Saving..." : q.id === 0 ? "Add" : "Save"}
+                    </Button>
+                    <Button variant="outlined" size="small" color="error" disabled={busyKey === q.key} onClick={() => void deleteQuestion(q)}>
                       Delete
-                    </button>
+                    </Button>
                   </div>
-                  <input
-                    type="text"
-                    className={styles.textInput}
+                  <TextField
+                    fullWidth
+                    size="small"
                     placeholder="Question title (optional)"
                     value={q.name}
                     onChange={(e) => patch(q.key, { name: e.target.value })}
                   />
-                  <textarea
+                  <TextField
+                    fullWidth
+                    multiline
+                    minRows={4}
+                    placeholder="Question text"
                     value={q.text}
                     onChange={(e) => patch(q.key, { text: e.target.value })}
-                    placeholder="Question text"
-                    spellCheck
-                    style={{ minHeight: 70, width: "100%" }}
+                    slotProps={{
+                      input: {
+                        spellCheck: true,
+                      },
+                    }}
                   />
                   {showAnswers && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -190,35 +201,57 @@ export function QuizQuestionsEditor({
                       {q.answers.map((a, ai) => (
                         <div key={ai} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                           {q.type !== "short_answer_question" && (
-                            <input
-                              type={single ? "radio" : "checkbox"}
-                              name={`${q.key}-correct`}
-                              checked={a.correct}
-                              onChange={(e) => setAnswer(q.key, ai, { correct: e.target.checked }, single)}
-                              aria-label="Correct answer"
-                              title="Mark correct"
-                            />
+                            single ? (
+                              <Radio
+                                size="small"
+                                name={`${q.key}-correct`}
+                                checked={a.correct}
+                                onChange={(e) => setAnswer(q.key, ai, { correct: e.target.checked }, single)}
+                                value={ai}
+                                title="Mark correct"
+                                aria-label="Correct answer"
+                              />
+                            ) : (
+                              <FormControlLabel
+                                control={
+                                  <Checkbox
+                                    size="small"
+                                    checked={a.correct}
+                                    onChange={(e) => setAnswer(q.key, ai, { correct: e.target.checked }, single)}
+                                    name={`${q.key}-correct`}
+                                  />
+                                }
+                                label=""
+                                title="Mark correct"
+                                aria-label="Correct answer"
+                                sx={{ m: 0 }}
+                              />
+                            )
                           )}
-                          <input
-                            type="text"
-                            className={styles.bulkInput}
-                            style={{ flex: "1 1 220px", minWidth: 160 }}
+                          <TextField
+                            size="small"
+                            sx={{ flex: "1 1 220px", minWidth: 160 }}
                             value={a.text}
                             disabled={q.type === "true_false_question"}
                             placeholder={q.type === "short_answer_question" ? "An accepted answer" : "Answer choice"}
                             onChange={(e) => setAnswer(q.key, ai, { text: e.target.value }, single)}
                           />
                           {editableAnswers && q.answers.length > 1 && (
-                            <button type="button" className={styles.ccIconBtn} title="Remove answer" aria-label="Remove answer" onClick={() => removeAnswer(q.key, ai)}>
+                            <IconButton
+                              size="small"
+                              title="Remove answer"
+                              aria-label="Remove answer"
+                              onClick={() => removeAnswer(q.key, ai)}
+                            >
                               &times;
-                            </button>
+                            </IconButton>
                           )}
                         </div>
                       ))}
                       {editableAnswers && (
-                        <button type="button" className={styles.ccBtn} style={{ alignSelf: "flex-start" }} onClick={() => addAnswer(q.key)}>
+                        <Button variant="outlined" size="small" sx={{ alignSelf: "flex-start" }} onClick={() => addAnswer(q.key)}>
                           Add answer
-                        </button>
+                        </Button>
                       )}
                     </div>
                   )}
@@ -231,9 +264,9 @@ export function QuizQuestionsEditor({
               );
             })}
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <button type="button" className={styles.submitButton} onClick={addQuestion}>
+              <Button variant="contained" size="small" onClick={addQuestion}>
                 Add question
-              </button>
+              </Button>
               <span className={styles.fieldHint} style={{ margin: 0 }}>
                 Each question saves to Canvas on its own. Question text is edited as plain text.
               </span>

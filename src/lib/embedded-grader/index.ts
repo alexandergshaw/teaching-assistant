@@ -37,6 +37,10 @@ export {
 } from "./discussion";
 export type { DiscussionStudent, DiscussionContext, DiscussionRubric } from "./discussion";
 
+// Points awarded by the auto-run "Code runs" criterion when a submission's code
+// executes cleanly in the sandbox. Added before Canvas scaling like any criterion.
+const CODE_RUNS_POINTS = 10;
+
 export interface BuildRubricInput {
   /** A supplied rubric (Canvas-provided, pasted, or uploaded). Preferred when present. */
   rubricText?: string;
@@ -106,7 +110,11 @@ export function gradeEntriesEmbedded(
   rubric: EmbeddedRubric,
   pointsPossible: number | null = null
 ): GradingRun {
-  const rubricAreaNames = rubric.checks.map((check) => check.criterion);
+  const anyCodeRun = entries.some((e) => e.codeRun && !e.codeRun.error);
+  const rubricAreaNames = [
+    ...rubric.checks.map((check) => check.criterion),
+    ...(anyCodeRun ? ["Code runs"] : []),
+  ];
 
   const results = entries.map((entry) => {
     const rawAreas: RubricAreaResult[] = [];
@@ -126,6 +134,21 @@ export function gradeEntriesEmbedded(
       possible += outcome.possible;
       if (outcome.passed) passedCount += 1;
       else missing.push(check.criterion);
+    }
+
+    // Auto-run code criterion: add a scored area before scaling so it re-bases to
+    // Canvas points like any other. Skip when the runner errored (an outage must
+    // not penalize the student). Do NOT touch passedCount/missing so the overall
+    // comment keeps counting only the rubric's own checks.
+    if (entry.codeRun && !entry.codeRun.error) {
+      const runsClean = entry.codeRun.ran;
+      rawAreas.push({
+        area: "Code runs",
+        score: `${runsClean ? formatNumber(CODE_RUNS_POINTS) : "0"}/${formatNumber(CODE_RUNS_POINTS)}`,
+        comment: "",
+      });
+      earned += runsClean ? CODE_RUNS_POINTS : 0;
+      possible += CODE_RUNS_POINTS;
     }
 
     const totalScore = possible > 0 ? `${formatNumber(earned)}/${formatNumber(possible)}` : "";
@@ -151,6 +174,7 @@ export function gradeEntriesEmbedded(
       feedback: "",
       mergedFileCount: entry.mergedFileCount,
       submittedFiles: entry.submittedFiles,
+      codeExecution: entry.codeRun ?? undefined,
     };
   });
 

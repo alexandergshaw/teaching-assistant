@@ -16,6 +16,7 @@ import { fetchCanvasWork, fetchAssignmentPointsPossible, type CanvasStudentWork 
 import { generateEmbeddedRubricText } from "./embedded-grader/rubric";
 import { roundTo2 } from "./embedded-grader/format";
 import { findRubricForTopic } from "./research/rubric-bank";
+import { runSubmittedCode, type CodeRunResult } from "./code-runner";
 
 const MAX_NESTED_ZIP_DEPTH = 3;
 
@@ -66,6 +67,9 @@ export interface GradeResult {
   submittedFiles: SubmittedFileInfo[];
   // Canvas user id, present when graded from a Canvas URL; enables write-back.
   userId?: number;
+  // Result of running the submission's code in the sandbox, when it had runnable
+  // code. Display-only on the Gemini path; the embedded engine also scores it.
+  codeExecution?: CodeRunResult;
 }
 
 export interface GradingRun {
@@ -1192,6 +1196,24 @@ function groupSubmissionsByStudent(
   });
 }
 
+/** A compact, prompt-ready summary of a sandbox code run. */
+function buildCodeExecutionNote(codeRun: CodeRunResult): string {
+  const cap = (s: string) => (s.length > 4000 ? `${s.slice(0, 4000)}\n[truncated]` : s);
+  const lines = [
+    `\n\nAUTOMATED CODE EXECUTION (the student's ${codeRun.language} code was run in a sandbox):`,
+    `- Ran without errors: ${codeRun.ran ? "yes" : "no"}`,
+  ];
+  if (codeRun.compileOutput && codeRun.compileOutput.trim()) {
+    lines.push(`- Compiler output:\n${cap(codeRun.compileOutput)}`);
+  }
+  lines.push(`- Program output (stdout):\n${cap(codeRun.stdout) || "(none)"}`);
+  if (codeRun.stderr && codeRun.stderr.trim()) {
+    lines.push(`- Errors (stderr):\n${cap(codeRun.stderr)}`);
+  }
+  lines.push("Factor this execution result into your assessment where the rubric concerns whether the code works. Do not mention that the code was run automatically.");
+  return lines.join("\n");
+}
+
 /** Grade a single student submission. */
 async function gradeSubmission(
   systemPrompt: string,
@@ -1201,7 +1223,8 @@ async function gradeSubmission(
   imageFiles: Array<{ name: string; base64: string; mimeType: string }> = [],
   // When set (the Canvas path), re-base the total onto the assignment's real
   // points so the tool grades out of the same total Canvas shows.
-  pointsPossible: number | null = null
+  pointsPossible: number | null = null,
+  codeRun: CodeRunResult | null = null
 ): Promise<GradeResult> {
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
@@ -1212,9 +1235,11 @@ async function gradeSubmission(
           .join(", ")}. Treat them as part of the submission and evaluate them against the rubric.`
       : "";
 
+  const codeNote = codeRun && !codeRun.error ? buildCodeExecutionNote(codeRun) : "";
+
   const parts: LlmPart[] = [
     {
-      text: `${systemPrompt}\n\nStudent: ${studentName}\n\nSubmission:\n${content}${imageNote}`,
+      text: `${systemPrompt}\n\nStudent: ${studentName}\n\nSubmission:\n${content}${imageNote}${codeNote}`,
     },
     ...imageFiles.map((f) => ({
       inlineData: { mimeType: f.mimeType, data: f.base64 },
@@ -1339,6 +1364,9 @@ export interface StudentSubmissionEntry {
   submittedFiles: SubmittedFileInfo[];
   // Canvas user id, set on the Canvas path so grades can be posted back.
   userId?: number;
+  // Precomputed sandbox run of this entry's code (populated by the action before
+  // the deterministic engine grades, so the engine itself stays network-free).
+  codeRun?: CodeRunResult | null;
 }
 
 /**
@@ -1376,6 +1404,10 @@ async function gradeStudentEntries(
       )
       .map((f) => ({ name: f.name, base64: f.rawBase64!, mimeType: f.mimeType! }));
 
+    // Run any code the student submitted (returns null with no network when there
+    // is nothing runnable). Never throws.
+    const codeRun = await runSubmittedCode(submittedFiles);
+
     try {
       const result = await gradeSubmission(
         systemPrompt,
@@ -1383,9 +1415,10 @@ async function gradeStudentEntries(
         truncated,
         provider,
         imageFiles,
-        pointsPossible
+        pointsPossible,
+        codeRun
       );
-      results.push({ ...result, mergedFileCount, submittedFiles, userId });
+      results.push({ ...result, mergedFileCount, submittedFiles, userId, codeExecution: codeRun ?? undefined });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "An unexpected grading error occurred.";
@@ -1407,6 +1440,7 @@ async function gradeStudentEntries(
         submittedFiles,
         feedback: formatFeedback(overallComment, fallbackRubricAreas, ""),
         userId,
+        codeExecution: codeRun ?? undefined,
       });
     }
 

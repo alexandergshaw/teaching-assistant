@@ -137,4 +137,33 @@ describe("gradeEntriesEmbedded", () => {
     );
     expect(run.results[0].totalScore).toBe("20/20");
   });
+
+  it("adds a scored Code runs criterion when the entry's code ran cleanly", () => {
+    const base = entry("Eve", "import pandas\ndef clean(df): return df", ["py"], 7);
+    const withRun = { ...base, codeRun: { language: "python", files: ["Eve.py"], ran: true, exitCode: 0, stdout: "ok", stderr: "" } };
+    const run = gradeEntriesEmbedded([withRun], rubric);
+    expect(run.rubricAreaNames).toContain("Code runs");
+    const area = run.results[0].rubricAreas.find((a) => a.area === "Code runs");
+    expect(area?.score).toBe("10/10");
+    expect(run.results[0].totalScore).toBe("40/40"); // 30 rubric + 10 code
+    expect(run.results[0].codeExecution?.ran).toBe(true);
+  });
+
+  it("scores Code runs as zero when the code did not run cleanly", () => {
+    const base = entry("Fay", "import pandas\ndef clean(df): return df", ["py"]);
+    const withRun = { ...base, codeRun: { language: "python", files: ["Fay.py"], ran: false, exitCode: 1, stdout: "", stderr: "boom" } };
+    const run = gradeEntriesEmbedded([withRun], rubric);
+    const area = run.results[0].rubricAreas.find((a) => a.area === "Code runs");
+    expect(area?.score).toBe("0/10");
+    expect(run.results[0].totalScore).toBe("30/40");
+  });
+
+  it("does not add a Code runs criterion when the runner errored", () => {
+    const base = entry("Gus", "import pandas\ndef clean(df): return df", ["py"]);
+    const withRun = { ...base, codeRun: { language: "python", files: ["Gus.py"], ran: false, exitCode: null, stdout: "", stderr: "", error: "network down" } };
+    const run = gradeEntriesEmbedded([withRun], rubric);
+    expect(run.rubricAreaNames).not.toContain("Code runs");
+    expect(run.results[0].rubricAreas.find((a) => a.area === "Code runs")).toBeUndefined();
+    expect(run.results[0].totalScore).toBe("30/30");
+  });
 });

@@ -15,6 +15,7 @@ import {
   type StudentSubmissionEntry,
   type SubmittedFileInfo,
 } from "@/lib/grade";
+import { runSubmittedCode, type CodeRunResult } from "@/lib/code-runner";
 import {
   buildEmbeddedRubric,
   gradeEntriesEmbedded,
@@ -867,6 +868,13 @@ export async function postCanvasGradesAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post grades to Canvas." };
   }
+}
+
+/** Run one submission's code on demand (the results page Run button). */
+export async function runSubmissionCodeAction(
+  files: Array<{ name: string; extension: string; rawBase64?: string; previewContent?: string }>
+): Promise<CodeRunResult | null> {
+  return runSubmittedCode(files);
 }
 
 // ── Canvas announcements + inbox (the Canvas tab) ───────────────────────────
@@ -3208,6 +3216,15 @@ async function gradeZipViaEngine(
   return { run: gradingApiToRun(resp, pointsPossible), error: null, warnings };
 }
 
+/** Run every entry's code in the sandbox (sequential, to respect Piston rate
+ *  limits) and stash the result on the entry so the embedded engine can score it
+ *  without doing any network itself. Entries with no runnable code get null. */
+async function attachCodeRuns(entries: StudentSubmissionEntry[]): Promise<void> {
+  for (const entry of entries) {
+    entry.codeRun = await runSubmittedCode(entry.submittedFiles);
+  }
+}
+
 export async function gradeAction(
   _prev: GradeActionState,
   formData: FormData
@@ -3288,6 +3305,7 @@ export async function gradeAction(
         }
         // Grow the rubric bank from human-authored rubrics (fire-and-forget).
         if (rubric.trim()) void rememberRubric(assignmentInstructions, rubric);
+        await attachCodeRuns(entries);
         const run = gradeEntriesEmbedded(entries, builtRubric, pointsPossible);
         return {
           run: { ...run, speedGraderUrl },
@@ -3339,6 +3357,7 @@ export async function gradeAction(
       }
       // Grow the rubric bank from human-authored rubrics (fire-and-forget).
       if (rubricText.trim()) void rememberRubric(assignmentInstructions, rubricText);
+      await attachCodeRuns(entries);
       const run = gradeEntriesEmbedded(entries, builtRubric);
       return {
         run,

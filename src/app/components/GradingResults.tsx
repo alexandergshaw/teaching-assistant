@@ -2,8 +2,9 @@
 
 import type { ReactNode, Ref } from "react";
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useState } from "react";
-import { postCanvasGradesAction, type GradeActionState } from "../actions";
+import { postCanvasGradesAction, runSubmissionCodeAction, type GradeActionState } from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
+import type { CodeRunResult } from "@/lib/code-runner";
 import styles from "../page.module.css";
 
 // Derived from the action's run shape so this file needs no server-code import.
@@ -241,6 +242,9 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   const [posting, setPosting] = useState(false);
   const [sortState, setSortState] = useState(DEFAULT_SORT);
   const [expandedStudent, setExpandedStudent] = useState<string | null>(null);
+  const [codeRuns, setCodeRuns] = useState<Record<string, CodeRunResult | null>>({});
+  const [codeRunning, setCodeRunning] = useState<Record<string, boolean>>({});
+  const [codeOutputStudent, setCodeOutputStudent] = useState<string | null>(null);
 
   // Re-seed editable rows when a new run arrives (adjust-state-on-prop-change).
   if (run !== prevRun) {
@@ -249,6 +253,9 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     setPostStatus({});
     setPostSummary("");
     setExpandedStudent(null);
+    setCodeRuns({});
+    setCodeRunning({});
+    setCodeOutputStudent(null);
   }
 
   const updateEdit = (student: string, patch: Partial<RowEdit>) =>
@@ -378,6 +385,26 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     }));
     onPosted?.();
   };
+
+  // Run a single submission's code on demand via the sandbox server action.
+  const handleRunCode = async (row: GradeRow) => {
+    setCodeRunning((prev) => ({ ...prev, [row.student]: true }));
+    const res = await runSubmissionCodeAction(
+      row.submittedFiles.map((f) => ({
+        name: f.name,
+        extension: f.extension,
+        rawBase64: f.rawBase64,
+        previewContent: f.previewContent,
+      }))
+    );
+    setCodeRuns((prev) => ({ ...prev, [row.student]: res }));
+    setCodeRunning((prev) => ({ ...prev, [row.student]: false }));
+    setCodeOutputStudent(row.student);
+  };
+
+  // The run to show for a row: a fresh manual run wins, else the grading-time run.
+  const codeRunFor = (row: GradeRow): CodeRunResult | null =>
+    codeRuns[row.student] ?? row.codeExecution ?? null;
 
   // Deep link to a single student's submission in SpeedGrader, when the run came
   // from a Canvas source (so we have the assignment's SpeedGrader base + userId).
@@ -627,6 +654,49 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                             : `Failed: ${status.message ?? ""}`}
                       </div>
                     )}
+                    {(() => {
+                      const cr = codeRunFor(result);
+                      const label = !cr
+                        ? null
+                        : cr.error
+                          ? "Code: runner error"
+                          : cr.ran
+                            ? "Code: ran cleanly"
+                            : "Code: errors";
+                      return (
+                        <div style={{ marginTop: 6 }}>
+                          {label && (
+                            <div
+                              className={styles.fieldHint}
+                              style={{ color: cr && !cr.error && !cr.ran ? "var(--error, #b91c1c)" : undefined }}
+                            >
+                              {label}
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+                            <button
+                              type="button"
+                              className={styles.downloadButton}
+                              style={{ padding: "4px 10px" }}
+                              disabled={codeRunning[result.student]}
+                              onClick={() => handleRunCode(result)}
+                            >
+                              {codeRunning[result.student] ? "Running…" : "Run code"}
+                            </button>
+                            {cr && (
+                              <button
+                                type="button"
+                                className={styles.downloadButton}
+                                style={{ padding: "4px 10px" }}
+                                onClick={() => setCodeOutputStudent(result.student)}
+                              >
+                                View output
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td>
                     {result.submittedFiles.length > 0 ? (
@@ -793,6 +863,58 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
           </section>
         </div>
       )}
+      {codeOutputStudent && (() => {
+        const row = run.results.find((r) => r.student === codeOutputStudent);
+        const cr = codeRuns[codeOutputStudent] ?? row?.codeExecution ?? null;
+        return (
+          <div className={styles.previewBackdrop} onClick={() => setCodeOutputStudent(null)}>
+            <section
+              className={styles.previewModal}
+              role="dialog"
+              aria-modal="true"
+              aria-label={`Code output for ${codeOutputStudent}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className={styles.previewHeader}>
+                <div>
+                  <p className={styles.previewMeta}>Student: {codeOutputStudent}</p>
+                  <h3>Code execution{cr && !cr.error ? ` (${cr.language})` : ""}</h3>
+                </div>
+                <button
+                  type="button"
+                  className={styles.previewCloseButton}
+                  onClick={() => setCodeOutputStudent(null)}
+                >
+                  Close
+                </button>
+              </div>
+              {!cr ? (
+                <p className={styles.previewNotice}>No code was run for this submission.</p>
+              ) : cr.error ? (
+                <p className={styles.previewNotice}>The code runner could not execute this submission: {cr.error}</p>
+              ) : (
+                <>
+                  <p className={styles.previewMeta}>Ran without errors: {cr.ran ? "yes" : "no"}</p>
+                  {cr.compileOutput && cr.compileOutput.trim() && (
+                    <>
+                      <p className={styles.previewMeta}>Compiler output</p>
+                      <pre className={styles.previewContent}>{cr.compileOutput}</pre>
+                    </>
+                  )}
+                  <p className={styles.previewMeta}>Output (stdout)</p>
+                  <pre className={styles.previewContent}>{cr.stdout || "(none)"}</pre>
+                  {cr.stderr && cr.stderr.trim() && (
+                    <>
+                      <p className={styles.previewMeta}>Errors (stderr)</p>
+                      <pre className={styles.previewContent}>{cr.stderr}</pre>
+                    </>
+                  )}
+                </>
+              )}
+            </section>
+          </div>
+        );
+      })()}
     </section>
   );
 });

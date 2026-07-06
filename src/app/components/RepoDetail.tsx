@@ -13,8 +13,14 @@ import {
   listPullRequestsAction,
   createPullRequestAction,
   mergePullRequestAction,
+  listWorkflowsAction,
+  dispatchWorkflowAction,
+  listWorkflowRunsAction,
+  listRunJobsAction,
+  rerunWorkflowRunAction,
+  cancelWorkflowRunAction,
 } from "../actions";
-import type { GithubRepo, RepoTreeEntry, PullRequestInfo } from "@/lib/github";
+import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo } from "@/lib/github";
 import Typeahead from "./ui/Typeahead";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
@@ -68,6 +74,18 @@ export default function RepoDetail() {
   const [prMsg, setPrMsg] = useState<string | null>(null);
   const [mergeMethod, setMergeMethod] = useState<Record<number, "merge" | "squash" | "rebase">>({});
   const [mergingPr, setMergingPr] = useState<number | null>(null);
+
+  // Actions tab state
+  const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
+  const [runs, setRuns] = useState<WorkflowRunInfo[]>([]);
+  const [actionsState, setActionsState] = useState<"idle" | "loading" | "error">("idle");
+  const [actionsError, setActionsError] = useState<string | null>(null);
+  const [actionsMsg, setActionsMsg] = useState<string | null>(null);
+  const [dispatchingId, setDispatchingId] = useState<number | null>(null);
+  const [runBusyId, setRunBusyId] = useState<number | null>(null);
+  const [expandedRun, setExpandedRun] = useState<number | null>(null);
+  const [jobsByRun, setJobsByRun] = useState<Record<number, WorkflowJobInfo[]>>({});
+  const [jobsLoadingRun, setJobsLoadingRun] = useState<number | null>(null);
 
   // Load repos on mount
   useEffect(() => {
@@ -211,6 +229,45 @@ export default function RepoDetail() {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [repoRef, tab, prState]);
 
+  // Load workflows and runs when the actions tab is active
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (!repoRef || tab !== "actions") {
+      if (!repoRef) {
+        setWorkflows([]);
+        setRuns([]);
+      }
+      return;
+    }
+    let cancelled = false;
+    setActionsState("loading");
+    setActionsError(null);
+    (async () => {
+      const [wf, rr] = await Promise.all([
+        listWorkflowsAction(repoRef),
+        listWorkflowRunsAction(repoRef, branch),
+      ]);
+      if (cancelled) return;
+      if ("error" in wf) {
+        setActionsState("error");
+        setActionsError(wf.error);
+        return;
+      }
+      if ("error" in rr) {
+        setActionsState("error");
+        setActionsError(rr.error);
+        return;
+      }
+      setWorkflows(wf.workflows);
+      setRuns(rr.runs);
+      setActionsState("idle");
+    })();
+    return () => {
+      cancelled = true;
+    };
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [repoRef, tab, branch]);
+
   const handleCommit = async () => {
     if (!repoRef || !branch || !selectedPath || !commitMessage.trim()) {
       return;
@@ -325,6 +382,61 @@ export default function RepoDetail() {
     }
     setPrMsg(`Merged #${n}.`);
     await reloadPulls();
+  };
+
+  const reloadRuns = async () => {
+    const r = await listWorkflowRunsAction(repoRef, branch);
+    if (!("error" in r)) setRuns(r.runs);
+  };
+
+  const handleDispatch = async (w: WorkflowInfo) => {
+    setDispatchingId(w.id);
+    setActionsMsg(null);
+    const r = await dispatchWorkflowAction(repoRef, String(w.id), branch);
+    setDispatchingId(null);
+    if ("error" in r) {
+      setActionsMsg(`Error: ${r.error}`);
+      return;
+    }
+    setActionsMsg(`Dispatched ${w.name} on ${branch}. Give it a moment, then Refresh.`);
+  };
+
+  const handleRerun = async (id: number) => {
+    setRunBusyId(id);
+    setActionsMsg(null);
+    const r = await rerunWorkflowRunAction(repoRef, id);
+    setRunBusyId(null);
+    if ("error" in r) {
+      setActionsMsg(`Error: ${r.error}`);
+      return;
+    }
+    await reloadRuns();
+  };
+
+  const handleCancel = async (id: number) => {
+    setRunBusyId(id);
+    setActionsMsg(null);
+    const r = await cancelWorkflowRunAction(repoRef, id);
+    setRunBusyId(null);
+    if ("error" in r) {
+      setActionsMsg(`Error: ${r.error}`);
+      return;
+    }
+    await reloadRuns();
+  };
+
+  const toggleJobs = async (id: number) => {
+    if (expandedRun === id) {
+      setExpandedRun(null);
+      return;
+    }
+    setExpandedRun(id);
+    if (!jobsByRun[id]) {
+      setJobsLoadingRun(id);
+      const r = await listRunJobsAction(repoRef, id);
+      setJobsLoadingRun(null);
+      if (!("error" in r)) setJobsByRun((m) => ({ ...m, [id]: r.jobs }));
+    }
   };
 
   const repoOptions = repos.map((r) => ({
@@ -771,7 +883,210 @@ export default function RepoDetail() {
               </div>
             </div>
           )}
-          {tab === "actions" && <p className={styles.fieldHint}>Actions are coming next.</p>}
+          {tab === "actions" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 12 }}>
+                  Workflows
+                </label>
+                {actionsState === "loading" && (
+                  <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+                    <CircularProgress size={24} />
+                  </div>
+                )}
+                {actionsState === "error" && (
+                  <p className={styles.error}>{actionsError}</p>
+                )}
+                {actionsState === "idle" && workflows.length === 0 && (
+                  <p className={styles.fieldHint}>No workflows found.</p>
+                )}
+                {actionsState === "idle" &&
+                  workflows.map((w) => (
+                    <div
+                      key={w.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "6px 0",
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <span>{w.name}</span>
+                        <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 2 }}>
+                          <span style={{ marginRight: 12 }}>{w.state}</span>
+                          <span style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>{w.path}</span>
+                        </div>
+                      </div>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        disabled={dispatchingId === w.id}
+                        onClick={() => handleDispatch(w)}
+                      >
+                        {dispatchingId === w.id ? "Running..." : `Run on ${branch}`}
+                      </Button>
+                    </div>
+                  ))}
+                {actionsMsg && (
+                  <p
+                    style={{
+                      marginTop: 12,
+                      fontSize: "0.85rem",
+                      color: actionsMsg.startsWith("Error:") ? "#dc2626" : "var(--text-secondary)",
+                    }}
+                  >
+                    {actionsMsg}
+                  </p>
+                )}
+              </div>
+
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <label style={{ fontSize: "0.9rem", fontWeight: 500 }}>
+                    Recent runs
+                  </label>
+                  <Button variant="text" size="small" onClick={reloadRuns}>
+                    Refresh
+                  </Button>
+                </div>
+                {actionsState === "loading" && (
+                  <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+                    <CircularProgress size={24} />
+                  </div>
+                )}
+                {runs.length === 0 && actionsState === "idle" && (
+                  <p className={styles.fieldHint}>No runs yet.</p>
+                )}
+                {runs.map((run) => (
+                  <div
+                    key={run.id}
+                    style={{
+                      padding: "12px 0",
+                      borderTop: "1px solid var(--field-border)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: 8,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: "200px" }}>
+                        <span>{run.name}</span>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            alignItems: "center",
+                            fontSize: "0.85rem",
+                            marginTop: 4,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span
+                            style={{
+                              color:
+                                run.conclusion === "success"
+                                  ? "#16a34a"
+                                  : run.conclusion === "failure" || run.conclusion === "cancelled"
+                                    ? "var(--error, #b91c1c)"
+                                    : "var(--text-secondary)",
+                            }}
+                          >
+                            {run.conclusion ?? run.status}
+                          </span>
+                          <span style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
+                            {run.headBranch}
+                          </span>
+                          <span style={{ color: "var(--text-secondary)" }}>
+                            {new Date(run.createdAt).toLocaleString()}
+                          </span>
+                          <a
+                            href={run.htmlUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ color: "var(--accent)", textDecoration: "none", fontSize: "0.8rem" }}
+                          >
+                            logs
+                          </a>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <Button
+                          variant="text"
+                          size="small"
+                          onClick={() => toggleJobs(run.id)}
+                        >
+                          {expandedRun === run.id ? "Hide jobs" : "Jobs"}
+                        </Button>
+                        {run.status !== "completed" ? (
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            color="error"
+                            disabled={runBusyId === run.id}
+                            onClick={() => handleCancel(run.id)}
+                          >
+                            Cancel
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            disabled={runBusyId === run.id}
+                            onClick={() => handleRerun(run.id)}
+                          >
+                            Re-run
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    {expandedRun === run.id && (
+                      <div style={{ marginTop: 8, paddingLeft: 16 }}>
+                        {jobsLoadingRun === run.id && (
+                          <div style={{ display: "flex", justifyContent: "center", padding: 8 }}>
+                            <CircularProgress size={20} />
+                          </div>
+                        )}
+                        {jobsByRun[run.id] && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {jobsByRun[run.id].map((job) => (
+                              <div
+                                key={job.id}
+                                style={{
+                                  fontSize: "0.85rem",
+                                  padding: "4px 0",
+                                }}
+                              >
+                                <span>{job.name}</span>
+                                <span
+                                  style={{
+                                    marginLeft: 8,
+                                    color:
+                                      job.conclusion === "success"
+                                        ? "#16a34a"
+                                        : job.conclusion === "failure" || job.conclusion === "cancelled"
+                                          ? "var(--error, #b91c1c)"
+                                          : "var(--text-secondary)",
+                                  }}
+                                >
+                                  {job.conclusion ?? job.status}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

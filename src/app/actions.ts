@@ -5282,6 +5282,23 @@ export async function listWorkflowsAction(
   }
 }
 
+export async function dispatchWorkflowAction(
+  repoRef: string,
+  workflowRef: string,
+  ref: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    if (!workflowRef || !ref) return { error: "Choose a workflow and a branch to run." };
+    await dispatchWorkflow(parsed.owner, parsed.repo, workflowRef, ref);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not dispatch the workflow." };
+  }
+}
+
 /**
  * Trigger a repo's unit-test workflow (workflow_dispatch). `workflowRef` is a
  * workflow file name; when blank, the repo's first active workflow is used.

@@ -11,6 +11,7 @@ import {
   generateRubric,
   gradeEntries,
   scaleResultToPoints,
+  canvasWorkToEntry,
   type GradingRun,
   type StudentSubmissionEntry,
   type SubmittedFileInfo,
@@ -73,6 +74,7 @@ import {
   type CanvasAssignmentBrief,
   type CanvasPerson,
   type CanvasSubmissionDetail,
+  type CanvasStudentWork,
 } from "@/lib/canvas";
 import {
   listModules,
@@ -937,6 +939,55 @@ export async function pullSubmissionAction(
     return { submission: await fetchSubmissionDetail(code.trim().toUpperCase(), courseId, assignmentId, userId) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not pull the submission." };
+  }
+}
+
+/** Grade a single pulled-back submission, reusing the main grader. Returns a
+ *  one-row run plus the assignment URL so the results table can post back. */
+export async function gradeOneSubmissionAction(
+  code: string,
+  courseId: string,
+  assignmentId: string,
+  userId: number,
+  provider: LlmProvider = "gemini"
+): Promise<{ run: GradingRun; canvasUrl: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const c = code.trim().toUpperCase();
+    const submission = await fetchSubmissionDetail(c, courseId, assignmentId, userId);
+    const meta = await fetchCanvasMeta(submission.canvasUrl);
+    const instructions = meta.description || submission.assignmentName;
+
+    const work: CanvasStudentWork = {
+      student: submission.student,
+      userId: submission.userId,
+      text: submission.text,
+      files: submission.files,
+      contributionCount: Math.max(1, submission.files.length + (submission.text ? 1 : 0)),
+    };
+    const entry = await canvasWorkToEntry(work);
+    const speedGraderUrl = await getSpeedGraderUrl(submission.canvasUrl);
+    // The external "other" engine needs a zip; fall back to gemini for a single submission.
+    const gradeProvider: LlmProvider = provider === "other" ? "gemini" : provider;
+
+    let run: GradingRun;
+    if (gradeProvider === "embedded") {
+      const builtRubric = buildEmbeddedRubric({ rubricText: meta.rubricText, instructions });
+      if (builtRubric.checks.length === 0) {
+        return { error: "No rubric or instructions were available to grade this with the deterministic engine." };
+      }
+      await attachCodeRuns([entry]);
+      run = gradeEntriesEmbedded([entry], builtRubric, submission.pointsPossible);
+    } else {
+      const effectiveRubric = meta.rubricText.trim()
+        ? meta.rubricText
+        : await generateRubric(instructions, gradeProvider);
+      run = await gradeEntries([entry], instructions, effectiveRubric, gradeProvider, submission.pointsPossible);
+    }
+
+    return { run: { ...run, speedGraderUrl }, canvasUrl: submission.canvasUrl };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not grade the submission." };
   }
 }
 

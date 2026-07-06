@@ -6,11 +6,17 @@ import {
   listAssignmentsAction,
   listStudentsAction,
   pullSubmissionAction,
+  gradeOneSubmissionAction,
+  type GradeActionState,
 } from "../actions";
 import { useInstitutionSelection } from "@/lib/institutions";
+import { getStoredProvider } from "@/lib/llm-provider";
 import type { CanvasCourse, CanvasAssignmentBrief, CanvasPerson, CanvasSubmissionDetail } from "@/lib/canvas";
 import FilePreviewModal, { type PreviewFile } from "./FilePreviewModal";
+import GradingResults from "./GradingResults";
 import styles from "../page.module.css";
+
+type GradingRun = NonNullable<GradeActionState["run"]>;
 
 interface Size {
   width: number;
@@ -98,6 +104,12 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
 
+  const [gradeRun, setGradeRun] = useState<GradingRun | null>(null);
+  const [gradeCanvasUrl, setGradeCanvasUrl] = useState("");
+  const [grading, setGrading] = useState(false);
+  const [gradeError, setGradeError] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
   useEffect(() => {
     writeLS("pullback-size", size);
   }, [size]);
@@ -151,10 +163,27 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
     };
   }, [courseId, institution]);
 
+  const showPreview = useCallback((pf: PreviewFile) => {
+    let blobUrl: string | null = null;
+    if (pf.mimeType === "application/pdf" || pf.mimeType?.startsWith("image/")) {
+      try {
+        const bytes = Uint8Array.from(atob(pf.rawBase64 || ""), (c) => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: pf.mimeType });
+        blobUrl = URL.createObjectURL(blob);
+      } catch {
+        /* Fallback to text preview. */
+      }
+    }
+    setSelectedPreview(pf);
+    setPreviewBlobUrl(blobUrl);
+  }, []);
+
   const handlePullBack = useCallback(async () => {
     if (!institution || !courseId || !assignmentId || !studentId) return;
     setPulling(true);
     setPullError(null);
+    setGradeRun(null);
+    setGradeError(null);
     const result = await pullSubmissionAction(
       institution,
       courseId,
@@ -194,18 +223,7 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
       content = "Preview not available for this file type. Use Download.";
     }
 
-    let blobUrl: string | null = null;
-    if (file.mimeType === "application/pdf" || file.mimeType?.startsWith("image/")) {
-      try {
-        const bytes = Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0));
-        const blob = new Blob([bytes], { type: file.mimeType });
-        blobUrl = URL.createObjectURL(blob);
-      } catch {
-        /* Fallback to text preview. */
-      }
-    }
-
-    setSelectedPreview({
+    const pf: PreviewFile = {
       student: submission.student,
       name: file.name,
       extension,
@@ -213,9 +231,9 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
       truncated: false,
       rawBase64: file.base64,
       mimeType: file.mimeType,
-    });
-    setPreviewBlobUrl(blobUrl);
-  }, [submission]);
+    };
+    showPreview(pf);
+  }, [submission, showPreview]);
 
   const closePreview = useCallback(() => {
     if (previewBlobUrl) {
@@ -224,6 +242,16 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
     setSelectedPreview(null);
     setPreviewBlobUrl(null);
   }, [previewBlobUrl]);
+
+  const handleCopy = useCallback(async (key: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  }, []);
 
   const downloadFile = useCallback((file: CanvasSubmissionDetail["files"][0]) => {
     try {
@@ -349,6 +377,8 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
                   setAssignmentId("");
                   setStudentId("");
                   setSubmission(null);
+                  setGradeRun(null);
+                  setGradeError(null);
                 }}
               >
                 {institutions.map((code) => (
@@ -372,6 +402,8 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
                 setAssignmentId("");
                 setStudentId("");
                 setSubmission(null);
+                setGradeRun(null);
+                setGradeError(null);
               }}
             >
               <option value="">
@@ -402,6 +434,8 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
               onChange={(e) => {
                 setAssignmentId(e.target.value);
                 setSubmission(null);
+                setGradeRun(null);
+                setGradeError(null);
               }}
             >
               <option value="">
@@ -432,6 +466,8 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
               onChange={(e) => {
                 setStudentId(e.target.value);
                 setSubmission(null);
+                setGradeRun(null);
+                setGradeError(null);
               }}
             >
               <option value="">
@@ -570,7 +606,47 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
                   </div>
                 )}
 
-                {/* Stage C: grading UI (Grade this submission + GradingResults) mounts here */}
+                <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
+                  <button
+                    type="button"
+                    className={styles.downloadButton}
+                    disabled={grading}
+                    onClick={async () => {
+                      setGrading(true);
+                      setGradeError(null);
+                      setGradeRun(null);
+                      const result = await gradeOneSubmissionAction(
+                        institution,
+                        submission.courseId,
+                        submission.assignmentId,
+                        submission.userId,
+                        getStoredProvider()
+                      );
+                      setGrading(false);
+                      if ("error" in result) {
+                        setGradeError(result.error);
+                      } else {
+                        setGradeRun(result.run);
+                        setGradeCanvasUrl(result.canvasUrl);
+                      }
+                    }}
+                  >
+                    {grading ? "Grading..." : "Grade this submission"}
+                  </button>
+                  {gradeError && <p className={styles.error} style={{ marginTop: 8 }}>{gradeError}</p>}
+                </div>
+
+                {gradeRun && gradeRun.results.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <GradingResults
+                      run={gradeRun}
+                      canvasUrl={gradeCanvasUrl}
+                      copiedKey={copiedKey}
+                      onCopy={handleCopy}
+                      onOpenPreview={(_, pf) => showPreview(pf)}
+                    />
+                  </div>
+                )}
               </div>
             </>
           )}

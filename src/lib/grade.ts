@@ -1528,16 +1528,17 @@ export async function gradeEntries(
   entries: StudentSubmissionEntry[],
   assignmentInstructions: string,
   rubric: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  pointsPossible: number | null = null
 ): Promise<GradingRun> {
-  return gradeStudentEntries(entries, assignmentInstructions, rubric, provider);
+  return gradeStudentEntries(entries, assignmentInstructions, rubric, provider, pointsPossible);
 }
 
 // Turn one student's Canvas work (discussion text and/or uploaded files) into a
 // gradable entry: text and extracted file text go into `content`; image files
 // are attached with rawBase64 so the vision grader sees them (the same image
 // handling the zip path uses).
-async function canvasWorkToEntry(work: CanvasStudentWork): Promise<StudentSubmissionEntry> {
+export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<StudentSubmissionEntry> {
   const contentParts: string[] = [];
   const submittedFiles: SubmittedFileInfo[] = [];
 

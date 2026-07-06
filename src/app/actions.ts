@@ -62,11 +62,17 @@ import {
   getUnreadCount,
   listCourses,
   setConversationWorkflowState,
+  listAssignments,
+  listStudents,
+  fetchSubmissionDetail,
   type CanvasAnnouncement,
   type CanvasConversationSummary,
   type CanvasConversationDetail,
   type CanvasQueueItem,
   type CanvasCourse,
+  type CanvasAssignmentBrief,
+  type CanvasPerson,
+  type CanvasSubmissionDetail,
 } from "@/lib/canvas";
 import {
   listModules,
@@ -893,6 +899,44 @@ export async function listCoursesAction(
     return { courses: await listCourses(acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load courses." };
+  }
+}
+
+export async function listAssignmentsAction(
+  code: string,
+  courseId: string
+): Promise<{ assignments: CanvasAssignmentBrief[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return { assignments: await listAssignments(code.trim().toUpperCase(), courseId) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list assignments." };
+  }
+}
+
+export async function listStudentsAction(
+  code: string,
+  courseId: string
+): Promise<{ students: CanvasPerson[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return { students: await listStudents(code.trim().toUpperCase(), courseId) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list students." };
+  }
+}
+
+export async function pullSubmissionAction(
+  code: string,
+  courseId: string,
+  assignmentId: string,
+  userId: number
+): Promise<{ submission: CanvasSubmissionDetail } | { error: string }> {
+  try {
+    await requireOwner();
+    return { submission: await fetchSubmissionDetail(code.trim().toUpperCase(), courseId, assignmentId, userId) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not pull the submission." };
   }
 }
 

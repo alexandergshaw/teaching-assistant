@@ -12,6 +12,7 @@ import {
   listGithubBranchesAction,
 } from "../actions";
 import type { GithubRepo } from "@/lib/github";
+import Typeahead from "./ui/Typeahead";
 import styles from "../page.module.css";
 
 type OrgMember = { login: string; role: "admin" | "member" };
@@ -344,19 +345,13 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
       {/* Section 2: Repository Access */}
       <div className={styles.field} style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 16 }}>
         <label style={{ marginBottom: 8 }}>Repository access</label>
-        <select
+        <Typeahead
+          options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
           value={accessRepo}
-          onChange={(e) => setAccessRepo(e.target.value)}
-          className={styles.textInput}
-          style={{ marginBottom: 12, padding: "8px 12px", fontSize: "0.9rem" }}
-        >
-          <option value="">Select a repository...</option>
-          {repos.map((r) => (
-            <option key={r.fullName} value={r.fullName}>
-              {r.name}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => setAccessRepo(v)}
+          placeholder="Select a repository..."
+          noOptionsText="No repositories"
+        />
 
         {accessRepo && (
           <>
@@ -429,49 +424,35 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
       {/* Section 3: Create Pull Request */}
       <div className={styles.field} style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 16 }}>
         <label style={{ marginBottom: 8 }}>Create pull request</label>
-        <select
+        <Typeahead
+          options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
           value={prRepo}
-          onChange={(e) => setPrRepo(e.target.value)}
-          className={styles.textInput}
-          style={{ marginBottom: 12, padding: "8px 12px", fontSize: "0.9rem" }}
-        >
-          <option value="">Select a repository...</option>
-          {repos.map((r) => (
-            <option key={r.fullName} value={r.fullName}>
-              {r.name}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => setPrRepo(v)}
+          placeholder="Select a repository..."
+          noOptionsText="No repositories"
+        />
 
         {prRepo && (
           <>
             <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
-              <select
-                value={prHead}
-                onChange={(e) => setPrHead(e.target.value)}
-                className={styles.textInput}
-                style={{ flex: 1, padding: "8px 12px", fontSize: "0.9rem" }}
-              >
-                <option value="">Head branch...</option>
-                {prBranches.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={prBase}
-                onChange={(e) => setPrBase(e.target.value)}
-                className={styles.textInput}
-                style={{ flex: 1, padding: "8px 12px", fontSize: "0.9rem" }}
-              >
-                <option value="">Base branch...</option>
-                {prBranches.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
+              <div style={{ flex: 1 }}>
+                <Typeahead
+                  options={prBranches.map((b) => ({ value: b, label: b }))}
+                  value={prHead}
+                  onChange={(v) => setPrHead(v)}
+                  placeholder="Head branch..."
+                  noOptionsText="No branches"
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <Typeahead
+                  options={prBranches.map((b) => ({ value: b, label: b }))}
+                  value={prBase}
+                  onChange={(v) => setPrBase(v)}
+                  placeholder="Base branch..."
+                  noOptionsText="No branches"
+                />
+              </div>
             </div>
 
             <input
@@ -521,35 +502,23 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
       {/* Section 4: Branch Protection */}
       <div className={styles.field} style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 16 }}>
         <label style={{ marginBottom: 8 }}>Branch protection</label>
-        <select
+        <Typeahead
+          options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
           value={bpRepo}
-          onChange={(e) => setBpRepo(e.target.value)}
-          className={styles.textInput}
-          style={{ marginBottom: 12, padding: "8px 12px", fontSize: "0.9rem" }}
-        >
-          <option value="">Select a repository...</option>
-          {repos.map((r) => (
-            <option key={r.fullName} value={r.fullName}>
-              {r.name}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => setBpRepo(v)}
+          placeholder="Select a repository..."
+          noOptionsText="No repositories"
+        />
 
         {bpRepo && (
           <>
-            <select
+            <Typeahead
+              options={bpBranches.map((b) => ({ value: b, label: b }))}
               value={bpBranch}
-              onChange={(e) => setBpBranch(e.target.value)}
-              className={styles.textInput}
-              style={{ marginBottom: 12, padding: "8px 12px", fontSize: "0.9rem" }}
-            >
-              <option value="">Select a branch...</option>
-              {bpBranches.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setBpBranch(v)}
+              placeholder="Select a branch..."
+              noOptionsText="No branches"
+            />
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--text-secondary)", fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>

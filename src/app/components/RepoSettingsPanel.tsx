@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { listPersonalReposAction, updateRepoAction } from "../actions";
 import type { GithubRepo } from "@/lib/github";
 import type { UpdateRepoPatch } from "@/lib/github";
+import Typeahead from "./ui/Typeahead";
 import styles from "../page.module.css";
 
 export default function RepoSettingsPanel() {
@@ -97,21 +98,15 @@ export default function RepoSettingsPanel() {
       <p className={styles.fieldHint}>Manage the repositories you personally own.</p>
 
       <div className={styles.field}>
-        <select
+        <Typeahead
+          options={repos.map((repo) => ({ value: repo.fullName, label: repo.name }))}
           value={selectedFullName}
-          onChange={(e) => handleRepoSelect(e.target.value)}
-          className={styles.textInput}
+          onChange={(fullName) => handleRepoSelect(fullName)}
+          placeholder={reposState === "loading" ? "Loading repositories..." : "Select a repository..."}
           disabled={reposState !== "ready"}
-        >
-          <option value="">
-            {reposState === "loading" ? "Loading repositories..." : "Select a repository..."}
-          </option>
-          {repos.map((repo) => (
-            <option key={repo.fullName} value={repo.fullName}>
-              {repo.name}
-            </option>
-          ))}
-        </select>
+          loading={reposState === "loading"}
+          noOptionsText="No repositories"
+        />
       </div>
 
       {reposState === "error" && reposError && <p className={styles.error}>{reposError}</p>}

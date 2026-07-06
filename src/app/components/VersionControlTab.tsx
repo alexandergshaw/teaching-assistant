@@ -12,6 +12,7 @@ import type { GithubRepo } from "@/lib/github";
 import OrgManagementPanel from "./OrgManagementPanel";
 import RepoSettingsPanel from "./RepoSettingsPanel";
 import TabHeader from "./TabHeader";
+import Typeahead from "./ui/Typeahead";
 import styles from "../page.module.css";
 
 /**
@@ -200,20 +201,17 @@ export default function VersionControlTab() {
           <div className={styles.field}>
             <label>Organization</label>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <select
-                value={selectedOrg}
-                onChange={(e) => setSelectedOrg(e.target.value)}
-                disabled={busy || orgsState === "loading"}
-                className={styles.textInput}
-                style={{ flex: "1 1 220px" }}
-              >
-                <option value="">{orgsState === "loading" ? "Loading organizations…" : "Choose an organization…"}</option>
-                {orgs.map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
+              <div style={{ flex: "1 1 220px" }}>
+                <Typeahead
+                  options={orgs.map((o) => ({ value: o, label: o }))}
+                  value={selectedOrg}
+                  onChange={(o) => setSelectedOrg(o)}
+                  placeholder={orgsState === "loading" ? "Loading organizations..." : "Choose an organization..."}
+                  disabled={busy || orgsState === "loading"}
+                  loading={orgsState === "loading"}
+                  noOptionsText="No organizations"
+                />
+              </div>
               <a href="https://github.com/account/organizations/new" target="_blank" rel="noreferrer" style={{ fontSize: "0.82rem" }}>
                 Create org on GitHub
               </a>
@@ -283,20 +281,15 @@ export default function VersionControlTab() {
 
           <div className={styles.field}>
             <label>Template repository</label>
-            <select
+            <Typeahead
+              options={templateOptions.map((r) => ({ value: r.name, label: `${r.name}${r.isTemplate ? " (template)" : ""}` }))}
               value={templateRepo}
-              onChange={(e) => setTemplateRepo(e.target.value)}
+              onChange={(name) => setTemplateRepo(name)}
+              placeholder={reposLoading ? "Loading repositories..." : !selectedOrg ? "Choose an organization first" : "Choose a template repo..."}
               disabled={busy || !selectedOrg || reposLoading}
-              className={styles.textInput}
-            >
-              <option value="">{reposLoading ? "Loading repositories…" : !selectedOrg ? "Choose an organization first" : "Choose a template repo…"}</option>
-              {templateOptions.map((r) => (
-                <option key={r.fullName} value={r.name}>
-                  {r.name}
-                  {r.isTemplate ? " (template)" : ""}
-                </option>
-              ))}
-            </select>
+              loading={reposLoading}
+              noOptionsText="No repositories"
+            />
             {selectedOrg && !reposLoading && templates.length === 0 && repos.length > 0 && (
               <p style={{ fontSize: "0.8rem", color: "#d97706", marginTop: 4 }}>
                 No template repositories found in this org. Mark a repo as a template (Settings → Template repository), or

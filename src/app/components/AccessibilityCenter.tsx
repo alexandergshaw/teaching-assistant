@@ -2,6 +2,9 @@
 
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
+import Button from "@mui/material/Button";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import { useAccessibility } from "./AccessibilityProvider";
 import RemediationEditor, { isRemediable } from "./RemediationEditor";
 import OfficeAltEditor from "./OfficeAltEditor";
@@ -282,65 +285,40 @@ export default function AccessibilityCenter() {
               )}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
+              <Button
+                variant="outlined"
+                size="small"
                 onClick={() => a11y.checkLinks()}
                 disabled={a11y.linkStatus === "running"}
                 title="Run Canvas's link validator and merge broken links into this list"
-                style={{
-                  border: "1px solid var(--field-border, #cbd5e1)",
-                  background: "#fff",
-                  borderRadius: 8,
-                  padding: "5px 10px",
-                  fontSize: "0.82rem",
-                  cursor: a11y.linkStatus === "running" ? "default" : "pointer",
-                  color: "#334155",
-                }}
               >
-                {a11y.linkStatus === "running" ? "Checking links…" : a11y.linkStatus === "done" ? "Recheck links" : "Check links"}
-              </button>
-              <button
-                type="button"
+                {a11y.linkStatus === "running" ? "Checking links..." : a11y.linkStatus === "done" ? "Recheck links" : "Check links"}
+              </Button>
+              <Button
+                variant={reviewQueueNow.length === 0 ? "outlined" : "contained"}
+                size="small"
                 onClick={startReview}
                 disabled={reviewQueueNow.length === 0}
                 title="Step through every fixable issue; saving moves you to the next"
-                style={{
-                  border: "1px solid var(--accent, #2563eb)",
-                  background: reviewQueueNow.length === 0 ? "#fff" : "var(--accent, #2563eb)",
-                  color: reviewQueueNow.length === 0 ? "#94a3b8" : "#fff",
-                  borderRadius: 8,
-                  padding: "5px 10px",
-                  fontSize: "0.82rem",
-                  fontWeight: 600,
-                  cursor: reviewQueueNow.length === 0 ? "default" : "pointer",
-                }}
               >
                 {reviewQueueNow.length === 0 ? "Review all" : `Review all (${reviewQueueNow.length})`}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
                 onClick={() => a11y.rescanAll()}
                 disabled={a11y.status === "scanning"}
-                style={{
-                  border: "1px solid var(--field-border, #cbd5e1)",
-                  background: "#fff",
-                  borderRadius: 8,
-                  padding: "5px 10px",
-                  fontSize: "0.82rem",
-                  cursor: a11y.status === "scanning" ? "default" : "pointer",
-                  color: "#334155",
-                }}
               >
-                {a11y.status === "scanning" ? "Scanning…" : "Rescan"}
-              </button>
-              <button
-                type="button"
+                {a11y.status === "scanning" ? "Scanning..." : "Rescan"}
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
                 onClick={close}
                 aria-label="Close"
-                style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "5px 10px", fontSize: "0.82rem", cursor: "pointer", color: "#334155" }}
               >
                 Close
-              </button>
+              </Button>
             </div>
           </div>
           <div style={{ display: "flex", gap: 14, marginTop: 10, fontSize: "0.84rem", color: "#475569" }}>
@@ -357,19 +335,21 @@ export default function AccessibilityCenter() {
 
           {bulkItems.length > 0 && (
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--field-border, #eef2f7)" }}>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.8rem", color: "#334155", cursor: "pointer" }}>
-                <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} aria-label="Select all fixable items" />
-                {selectedCount > 0 ? `${selectedCount} selected` : `Select all (${bulkItems.length})`}
-              </label>
-              <button
-                type="button"
+              <FormControlLabel
+                control={<Checkbox checked={allSelected} onChange={toggleSelectAll} size="small" aria-label="Select all fixable items" />}
+                label={selectedCount > 0 ? `${selectedCount} selected` : `Select all (${bulkItems.length})`}
+                sx={{ fontSize: "0.8rem" }}
+              />
+              <Button
+                variant="contained"
+                size="small"
                 onClick={fixSelected}
                 disabled={selectedCount === 0 || !!fixing}
                 title="Auto-fix the selected items (AI alt/link text, headings, titles, language) and save to Canvas without opening an editor"
-                style={{ marginLeft: "auto", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: "0.8rem", fontWeight: 600, background: selectedCount === 0 || fixing ? "#cbd5e1" : "var(--accent, #2563eb)", color: "#fff", cursor: selectedCount === 0 || fixing ? "default" : "pointer" }}
+                sx={{ marginLeft: "auto", fontSize: "0.8rem" }}
               >
-                {fixing ? `Fixing ${fixing.done}/${fixing.total}…` : "Fix selected without preview"}
-              </button>
+                {fixing ? `Fixing ${fixing.done}/${fixing.total}...` : "Fix selected without preview"}
+              </Button>
             </div>
           )}
         </div>
@@ -479,12 +459,12 @@ function ItemBlock({
     <div style={{ marginBottom: 14, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 10, overflow: "hidden" }}>
       <div style={{ padding: "9px 12px", background: "#f8fafc", borderBottom: "1px solid var(--field-border, #eef2f7)", display: "flex", gap: 9, alignItems: "flex-start" }}>
         {onToggleSelect && (
-          <input
-            type="checkbox"
+          <Checkbox
             checked={!!selected}
             onChange={onToggleSelect}
-            aria-label={`Select ${item.title} for bulk fix`}
-            style={{ marginTop: 3, flexShrink: 0 }}
+            slotProps={{ input: { "aria-label": `Select ${item.title} for bulk fix` } }}
+            size="small"
+            sx={{ marginTop: 0.375, flexShrink: 0 }}
           />
         )}
         <div style={{ minWidth: 0 }}>
@@ -511,14 +491,15 @@ function ItemBlock({
               </div>
             </div>
             {remediable && issue.fixKind !== "flag" && (
-              <button
-                type="button"
+              <Button
+                variant="outlined"
+                size="small"
                 onClick={() => onFix(issue)}
                 title="Open an editor with this fix pre-applied"
-                style={{ flexShrink: 0, border: "1px solid var(--accent, #2563eb)", background: "#fff", color: "var(--accent, #2563eb)", borderRadius: 6, padding: "3px 10px", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer", alignSelf: "center" }}
+                sx={{ flexShrink: 0, fontSize: "0.78rem", alignSelf: "center" }}
               >
                 Fix
-              </button>
+              </Button>
             )}
           </li>
         ))}

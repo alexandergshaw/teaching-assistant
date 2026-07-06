@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
 import { getOfficeFileImagesAction, saveOfficeImageAltAction, suggestOfficeImageAltAction } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import type { Issue } from "@/lib/accessibility/types";
@@ -143,14 +145,15 @@ export default function OfficeAltEditor({
               Describe each image for screen-reader users, then save back to Canvas.
             </span>
             {images.length > 0 && missingCount > 0 && (
-              <button
-                type="button"
+              <Button
+                variant="outlined"
+                size="small"
                 onClick={suggestAllMissing}
                 disabled={suggestingAll || stage !== "ready"}
-                style={{ flexShrink: 0, border: "1px solid var(--accent, #2563eb)", background: "#fff", color: "var(--accent, #2563eb)", borderRadius: 8, padding: "5px 11px", fontSize: "0.8rem", fontWeight: 600, cursor: suggestingAll ? "default" : "pointer" }}
+                sx={{ flexShrink: 0, fontSize: "0.8rem" }}
               >
-                {suggestingAll ? "Suggesting…" : "Suggest missing with AI"}
-              </button>
+                {suggestingAll ? "Suggesting..." : "Suggest missing with AI"}
+              </Button>
             )}
           </div>
         </div>
@@ -184,25 +187,33 @@ export default function OfficeAltEditor({
                     {im.name}
                   </label>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <input
-                      type="text"
+                    <TextField
+                      fullWidth
+                      size="small"
                       value={value}
                       placeholder="Describe this image…"
-                      onChange={(e) => setAlts((prev) => ({ ...prev, [im.id]: e.target.value }))}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && stage === "ready") void save();
+                      onChange={(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setAlts((prev) => ({ ...prev, [im.id]: e.target.value }))}
+                      slotProps={{
+                        input: {
+                          onKeyDown: ((e: React.KeyboardEvent<HTMLInputElement>) => {
+                            if (e.key === "Enter" && stage === "ready") void save();
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                          }) as any,
+                        },
                       }}
-                      style={{ flex: 1, padding: "7px 10px", border: `1px solid ${missing ? "#d97706" : "var(--field-border, #cbd5e1)"}`, borderRadius: 8, fontSize: "0.88rem" }}
+                      error={missing}
+                      sx={{ "& .MuiOutlinedInput-root": { fontSize: "0.88rem" } }}
                     />
-                    <button
-                      type="button"
+                    <Button
+                      variant="outlined"
+                      size="small"
                       onClick={() => suggestOne(im.id)}
                       disabled={!!suggesting[im.id] || suggestingAll}
                       title="Suggest alt text with AI"
-                      style={{ flexShrink: 0, border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", color: "var(--accent, #2563eb)", borderRadius: 8, padding: "0 12px", fontSize: "0.8rem", fontWeight: 600, cursor: suggesting[im.id] ? "default" : "pointer" }}
+                      sx={{ flexShrink: 0, fontSize: "0.8rem" }}
                     >
-                      {suggesting[im.id] ? "…" : "Suggest"}
-                    </button>
+                      {suggesting[im.id] ? "..." : "Suggest"}
+                    </Button>
                   </div>
                   </div>
                 </div>
@@ -217,30 +228,30 @@ export default function OfficeAltEditor({
             {missingCount > 0 ? `${missingCount} image${missingCount === 1 ? "" : "s"} still missing alt text` : "All images have alt text"}
           </span>
           <div style={{ display: "flex", gap: 8 }}>
-            <button
-              type="button"
+            <Button
+              variant="outlined"
+              size="small"
               onClick={() => onClose()}
-              style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: "0.85rem", cursor: "pointer", color: "#334155" }}
             >
               Cancel
-            </button>
+            </Button>
             {onSkip && (
-              <button
-                type="button"
+              <Button
+                variant="outlined"
+                size="small"
                 onClick={onSkip}
-                style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: "0.85rem", cursor: "pointer", color: "#334155" }}
               >
                 Skip
-              </button>
+              </Button>
             )}
-            <button
-              type="button"
+            <Button
+              variant="contained"
+              size="small"
               onClick={save}
               disabled={stage !== "ready" || images.length === 0}
-              style={{ border: "none", background: "#2563eb", color: "#fff", borderRadius: 8, padding: "7px 16px", fontSize: "0.85rem", fontWeight: 600, cursor: stage === "ready" ? "pointer" : "default", opacity: stage === "ready" && images.length > 0 ? 1 : 0.6 }}
             >
-              {stage === "saving" ? "Saving…" : "Save to Canvas"}
-            </button>
+              {stage === "saving" ? "Saving..." : "Save to Canvas"}
+            </Button>
           </div>
         </div>
       </div>

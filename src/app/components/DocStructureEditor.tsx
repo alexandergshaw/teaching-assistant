@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import { getOfficeFileStructureAction, saveOfficeFileStructureAction } from "../actions";
 import { suggestHeadingLevels, titleFromFileName } from "@/lib/doc-headings";
 import type { OfficeParagraph, RunSpan } from "@/lib/office-edit";
@@ -161,35 +166,41 @@ export default function DocStructureEditor({
           ) : (
             <>
               <div style={{ marginBottom: 16 }}>
-                <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, color: "#334155", marginBottom: 4 }}>
-                  Document title
-                </label>
-                <input
-                  type="text"
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Document title"
                   value={docTitle}
                   placeholder="A short, descriptive title…"
-                  onChange={(e) => setDocTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && stage === "ready") void save();
+                  onChange={(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDocTitle(e.target.value)}
+                  slotProps={{
+                    input: {
+                      onKeyDown: ((e: React.KeyboardEvent<HTMLInputElement>) => {
+                        if (e.key === "Enter" && stage === "ready") void save();
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      }) as any as React.KeyboardEventHandler<HTMLInputElement>,
+                    },
                   }}
-                  style={{ width: "100%", padding: "8px 10px", border: `1px solid ${titleTrimmed ? "var(--field-border, #cbd5e1)" : "#d97706"}`, borderRadius: 8, fontSize: "0.9rem" }}
+                  error={!titleTrimmed}
+                  sx={{ "& .MuiOutlinedInput-root": { fontSize: "0.9rem" } }}
                 />
               </div>
 
               {paragraphs.length > 0 && (
                 <>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: "0.82rem", fontWeight: 600, color: "#334155", cursor: "pointer" }}>
-                      <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} aria-label="Select all lines" />
-                      Headings
-                    </label>
-                    <button
-                      type="button"
+                    <FormControlLabel
+                      control={<Checkbox checked={allSelected} onChange={toggleSelectAll} size="small" aria-label="Select all lines" />}
+                      label="Headings"
+                      sx={{ fontSize: "0.82rem", fontWeight: 600 }}
+                    />
+                    <Button
+                      variant="outlined"
+                      size="small"
                       onClick={applySuggestion}
-                      style={{ border: "1px solid var(--accent, #2563eb)", background: "#fff", color: "var(--accent, #2563eb)", borderRadius: 8, padding: "5px 11px", fontSize: "0.8rem", fontWeight: 600, cursor: "pointer" }}
                     >
                       Suggest headings
-                    </button>
+                    </Button>
                   </div>
 
                   {selected.size > 0 && (
@@ -198,22 +209,24 @@ export default function DocStructureEditor({
                         {selected.size} selected — set to
                       </span>
                       {LEVELS.map((l) => (
-                        <button
+                        <Button
                           key={l.value}
-                          type="button"
+                          variant="outlined"
+                          size="small"
                           onClick={() => applyToSelected(l.value)}
-                          style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", color: "#334155", borderRadius: 6, padding: "4px 10px", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer" }}
+                          sx={{ fontSize: "0.78rem" }}
                         >
                           {l.label}
-                        </button>
+                        </Button>
                       ))}
-                      <button
-                        type="button"
+                      <Button
+                        variant="text"
+                        size="small"
                         onClick={() => setSelected(new Set())}
-                        style={{ marginLeft: "auto", border: "none", background: "none", color: "var(--accent, #2563eb)", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer" }}
+                        sx={{ marginLeft: "auto", fontSize: "0.78rem" }}
                       >
                         Clear
-                      </button>
+                      </Button>
                     </div>
                   )}
 
@@ -227,12 +240,12 @@ export default function DocStructureEditor({
                           key={p.id}
                           style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 10px", borderTop: i === 0 ? "none" : "1px solid #f1f5f9", background: isSelected ? "#eff6ff" : undefined }}
                         >
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={isSelected}
                             onChange={() => toggleSelected(p.id)}
-                            aria-label={`Select "${p.text.slice(0, 40)}"`}
-                            style={{ flexShrink: 0 }}
+                            slotProps={{ input: { "aria-label": `Select "${p.text.slice(0, 40)}"` } }}
+                            size="small"
+                            sx={{ flexShrink: 0 }}
                           />
                           <span
                             title={p.text}
@@ -240,18 +253,20 @@ export default function DocStructureEditor({
                           >
                             {p.text}
                           </span>
-                          <select
+                          <TextField
+                            select
                             value={lvl}
-                            onChange={(e) => setLevels((prev) => ({ ...prev, [p.id]: e.target.value }))}
-                            aria-label={`Style for "${p.text.slice(0, 40)}"`}
-                            style={{ flexShrink: 0, padding: "4px 8px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 6, fontSize: "0.8rem", background: "#fff", color: "#334155" }}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setLevels((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                            size="small"
+                            slotProps={{ input: { "aria-label": `Style for "${p.text.slice(0, 40)}"` } }}
+                            sx={{ flexShrink: 0, minWidth: 140 }}
                           >
                             {LEVELS.map((l) => (
-                              <option key={l.value} value={l.value}>
+                              <MenuItem key={l.value} value={l.value}>
                                 {l.label}
-                              </option>
+                              </MenuItem>
                             ))}
-                          </select>
+                          </TextField>
                         </div>
                       );
                     })}
@@ -268,30 +283,30 @@ export default function DocStructureEditor({
             {headingCount > 0 ? `${headingCount} heading${headingCount === 1 ? "" : "s"} marked` : "No headings marked yet"}
           </span>
           <div style={{ display: "flex", gap: 8 }}>
-            <button
-              type="button"
+            <Button
+              variant="outlined"
+              size="small"
               onClick={() => onClose()}
-              style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: "0.85rem", cursor: "pointer", color: "#334155" }}
             >
               Cancel
-            </button>
+            </Button>
             {onSkip && (
-              <button
-                type="button"
+              <Button
+                variant="outlined"
+                size="small"
                 onClick={onSkip}
-                style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: "0.85rem", cursor: "pointer", color: "#334155" }}
               >
                 Skip
-              </button>
+              </Button>
             )}
-            <button
-              type="button"
+            <Button
+              variant="contained"
+              size="small"
               onClick={save}
               disabled={stage !== "ready"}
-              style={{ border: "none", background: "#2563eb", color: "#fff", borderRadius: 8, padding: "7px 16px", fontSize: "0.85rem", fontWeight: 600, cursor: stage === "ready" ? "pointer" : "default", opacity: stage === "ready" ? 1 : 0.6 }}
             >
-              {stage === "saving" ? "Saving…" : "Save to Canvas"}
-            </button>
+              {stage === "saving" ? "Saving..." : "Save to Canvas"}
+            </Button>
           </div>
         </div>
       </div>

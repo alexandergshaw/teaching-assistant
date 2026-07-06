@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 import { getPdfMetaAction, savePdfAccessibilityAction } from "../actions";
 import { titleFromFileName } from "@/lib/doc-headings";
 import type { Issue } from "@/lib/accessibility/types";
@@ -111,35 +114,40 @@ export default function PdfFixEditor({
           ) : (
             <>
               <div style={{ marginBottom: 16 }}>
-                <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, color: "#334155", marginBottom: 4 }}>
-                  Document language
-                </label>
-                <select
+                <TextField
+                  fullWidth
+                  select
+                  size="small"
+                  label="Document language"
                   value={lang}
-                  onChange={(e) => setLang(e.target.value)}
-                  style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem", background: "#fff", color: "#334155" }}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setLang(e.target.value)}
+                  sx={{ "& .MuiOutlinedInput-root": { fontSize: "0.9rem" } }}
                 >
                   {langOptions.map((l) => (
-                    <option key={l.value} value={l.value}>
+                    <MenuItem key={l.value} value={l.value}>
                       {l.label}
-                    </option>
+                    </MenuItem>
                   ))}
-                </select>
+                </TextField>
               </div>
 
               <div>
-                <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, color: "#334155", marginBottom: 4 }}>
-                  Document title
-                </label>
-                <input
-                  type="text"
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Document title"
                   value={docTitle}
                   placeholder="A short, descriptive title…"
-                  onChange={(e) => setDocTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && stage === "ready") void save();
+                  onChange={(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDocTitle(e.target.value)}
+                  slotProps={{
+                    input: {
+                      onKeyDown: ((e: React.KeyboardEvent<HTMLInputElement>) => {
+                        if (e.key === "Enter" && stage === "ready") void save();
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      }) as any,
+                    },
                   }}
-                  style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem" }}
+                  sx={{ "& .MuiOutlinedInput-root": { fontSize: "0.9rem" } }}
                 />
               </div>
 
@@ -153,30 +161,30 @@ export default function PdfFixEditor({
         </div>
 
         <div style={{ padding: "12px 18px", borderTop: "1px solid var(--field-border, #e2e8f0)", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button
-            type="button"
+          <Button
+            variant="outlined"
+            size="small"
             onClick={() => onClose()}
-            style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: "0.85rem", cursor: "pointer", color: "#334155" }}
           >
             Cancel
-          </button>
+          </Button>
           {onSkip && (
-            <button
-              type="button"
+            <Button
+              variant="outlined"
+              size="small"
               onClick={onSkip}
-              style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: "0.85rem", cursor: "pointer", color: "#334155" }}
             >
               Skip
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
+          <Button
+            variant="contained"
+            size="small"
             onClick={save}
             disabled={stage !== "ready"}
-            style={{ border: "none", background: "#2563eb", color: "#fff", borderRadius: 8, padding: "7px 16px", fontSize: "0.85rem", fontWeight: 600, cursor: stage === "ready" ? "pointer" : "default", opacity: stage === "ready" ? 1 : 0.6 }}
           >
-            {stage === "saving" ? "Saving…" : "Save to Canvas"}
-          </button>
+            {stage === "saving" ? "Saving..." : "Save to Canvas"}
+          </Button>
         </div>
       </div>
     </div>

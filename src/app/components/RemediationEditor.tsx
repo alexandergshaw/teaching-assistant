@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
 import {
   getAccessibilityItemHtmlAction,
   saveAccessibilityItemHtmlAction,
@@ -131,18 +133,33 @@ export default function RemediationEditor({
                     ? "Find the link below and update or remove it, then save."
                     : "Locate the highlighted issue in the HTML below, fix it, and save."}
               </p>
-              <textarea
+              <TextField
+                fullWidth
+                multiline
+                minRows={10}
                 value={body}
-                onChange={(e) => setBody(e.target.value)}
-                onKeyDown={(e) => {
-                  // Plain Enter edits the HTML; Ctrl/Cmd+Enter saves.
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && stage === "ready" && body.trim()) {
-                    e.preventDefault();
-                    void save();
-                  }
+                onChange={(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setBody(e.target.value)}
+                slotProps={{
+                  input: {
+                    onKeyDown: ((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                      // Plain Enter edits the HTML; Ctrl/Cmd+Enter saves.
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && stage === "ready" && body.trim()) {
+                        e.preventDefault();
+                        void save();
+                      }
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    }) as any,
+                    spellCheck: false,
+                  },
                 }}
-                spellCheck={false}
-                style={{ width: "100%", minHeight: 260, fontFamily: "ui-monospace, Menlo, monospace", fontSize: "0.8rem", lineHeight: 1.5, padding: 10, border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, resize: "vertical" }}
+                size="small"
+                sx={{
+                  "& .MuiOutlinedInput-root": {
+                    fontFamily: "ui-monospace, Menlo, monospace",
+                    fontSize: "0.8rem",
+                    lineHeight: 1.5,
+                  },
+                }}
               />
             </>
           )}
@@ -150,30 +167,30 @@ export default function RemediationEditor({
         </div>
 
         <div style={{ padding: "12px 18px", borderTop: "1px solid var(--field-border, #e2e8f0)", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button
-            type="button"
+          <Button
+            variant="outlined"
+            size="small"
             onClick={() => onClose(false)}
-            style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: "0.85rem", cursor: "pointer", color: "#334155" }}
           >
             Cancel
-          </button>
+          </Button>
           {onSkip && (
-            <button
-              type="button"
+            <Button
+              variant="outlined"
+              size="small"
               onClick={onSkip}
-              style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: "0.85rem", cursor: "pointer", color: "#334155" }}
             >
               Skip
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
+          <Button
+            variant="contained"
+            size="small"
             onClick={save}
             disabled={stage !== "ready" || !body.trim()}
-            style={{ border: "none", background: "#2563eb", color: "#fff", borderRadius: 8, padding: "7px 16px", fontSize: "0.85rem", fontWeight: 600, cursor: stage === "ready" ? "pointer" : "default", opacity: stage === "ready" ? 1 : 0.6 }}
           >
-            {stage === "saving" ? "Saving…" : "Save to Canvas"}
-          </button>
+            {stage === "saving" ? "Saving..." : "Save to Canvas"}
+          </Button>
         </div>
       </div>
     </div>

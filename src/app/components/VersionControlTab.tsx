@@ -11,6 +11,7 @@ import {
 import type { GithubRepo } from "@/lib/github";
 import OrgManagementPanel from "./OrgManagementPanel";
 import RepoSettingsPanel from "./RepoSettingsPanel";
+import RepoDetail from "./RepoDetail";
 import TabHeader from "./TabHeader";
 import Typeahead from "./ui/Typeahead";
 import Button from "@mui/material/Button";
@@ -378,7 +379,12 @@ export default function VersionControlTab() {
         </>
       )}
 
-      {subTab === "repos" && <RepoSettingsPanel />}
+      {subTab === "repos" && (
+        <>
+          <RepoDetail />
+          <RepoSettingsPanel />
+        </>
+      )}
     </div>
   );
 }

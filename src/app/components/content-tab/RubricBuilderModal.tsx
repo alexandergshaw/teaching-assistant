@@ -8,6 +8,7 @@ import {
   updateRubricAction,
 } from "../../actions";
 import type { RubricCriterionInput } from "@/lib/canvas-modules";
+import { Button, IconButton, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import type { EditCriterion, EditRating } from "./types";
 import { defaultCriterion, nextRubricKey } from "./utils";
@@ -208,7 +209,7 @@ export function RubricBuilderModal({
         <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "68vh", overflowY: "auto" }}>
           <div className={styles.field}>
             <label htmlFor="rubric-title">Title</label>
-            <input id="rubric-title" type="text" className={styles.textInput} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Essay rubric" />
+            <TextField id="rubric-title" type="text" size="small" fullWidth value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Essay rubric" />
           </div>
 
           {loading && <p className={styles.fieldHint} style={{ margin: 0 }}>Loading rubric…</p>}
@@ -217,12 +218,12 @@ export function RubricBuilderModal({
             <>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <span className={styles.bulkLabel} style={{ flex: "0 0 auto" }}>Mode</span>
-                <button type="button" className={mode === "percent" ? styles.bulkBtnPrimary : styles.bulkBtn} onClick={() => setMode("percent")}>
+                <Button variant={mode === "percent" ? "contained" : "outlined"} size="small" onClick={() => setMode("percent")}>
                   Percentage
-                </button>
-                <button type="button" className={mode === "points" ? styles.bulkBtnPrimary : styles.bulkBtn} onClick={() => setMode("points")}>
+                </Button>
+                <Button variant={mode === "points" ? "contained" : "outlined"} size="small" onClick={() => setMode("points")}>
                   Points
-                </button>
+                </Button>
               </div>
 
               <p className={styles.fieldHint} style={{ margin: 0 }}>
@@ -243,10 +244,10 @@ export function RubricBuilderModal({
                 <span className={styles.ccCount}>Criterion {ci + 1}</span>
                 <span style={{ flex: 1 }} />
                 <span className={styles.bulkField}>
-                  <input
+                  <TextField
                     type="number"
-                    className={styles.bulkInput}
-                    style={{ width: 72 }}
+                    size="small"
+                    slotProps={{ input: { style: { width: 72 } } }}
                     value={c.points}
                     onChange={(e) => patchCrit(c.key, { points: Number(e.target.value) })}
                     onBlur={() => {
@@ -257,14 +258,15 @@ export function RubricBuilderModal({
                   <span className={styles.ccCount}>{unit}</span>
                 </span>
                 {criteria.length > 1 && (
-                  <button type="button" className={`${styles.ccBtn} ${styles.ccBtnDanger}`} onClick={() => removeCriterion(c.key)}>
+                  <Button variant="outlined" size="small" color="error" onClick={() => removeCriterion(c.key)}>
                     Remove
-                  </button>
+                  </Button>
                 )}
               </div>
-              <input
+              <TextField
                 type="text"
-                className={styles.textInput}
+                size="small"
+                fullWidth
                 placeholder="What this criterion measures"
                 value={c.description}
                 onChange={(e) => patchCrit(c.key, { description: e.target.value })}
@@ -273,19 +275,19 @@ export function RubricBuilderModal({
               {c.ratings.map((r) => (
                 <div key={r.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <input
+                    <TextField
                       type="text"
-                      className={styles.bulkInput}
+                      size="small"
                       style={{ flex: "1 1 200px", minWidth: 150 }}
                       placeholder="Tier label (e.g. Excellent)"
                       value={r.description}
                       onChange={(e) => patchRating(c.key, r.key, { description: e.target.value })}
                     />
                     <span className={styles.bulkField}>
-                      <input
+                      <TextField
                         type="number"
-                        className={styles.bulkInput}
-                        style={{ width: 70 }}
+                        size="small"
+                        slotProps={{ input: { style: { width: 70 } } }}
                         value={r.points}
                         onChange={(e) => patchRating(c.key, r.key, { points: Number(e.target.value) })}
                         aria-label="Tier value"
@@ -293,14 +295,16 @@ export function RubricBuilderModal({
                       <span className={styles.ccCount}>{unit}</span>
                     </span>
                     {c.ratings.length > 1 && (
-                      <button type="button" className={styles.ccIconBtn} title="Remove tier" aria-label="Remove tier" onClick={() => removeRating(c.key, r.key)}>
+                      <IconButton size="small" title="Remove tier" aria-label="Remove tier" onClick={() => removeRating(c.key, r.key)}>
                         &times;
-                      </button>
+                      </IconButton>
                     )}
                   </div>
-                  <textarea
-                    className={styles.bulkInput}
-                    style={{ width: "100%", minHeight: 40, resize: "vertical", padding: "6px 10px" }}
+                  <TextField
+                    multiline
+                    minRows={3}
+                    fullWidth
+                    size="small"
                     placeholder="Tier description (optional — the detail shown to students for this level)"
                     value={r.longDescription}
                     onChange={(e) => patchRating(c.key, r.key, { longDescription: e.target.value })}
@@ -308,23 +312,23 @@ export function RubricBuilderModal({
                   />
                 </div>
               ))}
-              <button type="button" className={styles.ccBtn} style={{ alignSelf: "flex-start" }} onClick={() => addRating(c.key)}>
+              <Button variant="outlined" size="small" style={{ alignSelf: "flex-start" }} onClick={() => addRating(c.key)}>
                 Add tier
-              </button>
+              </Button>
             </div>
           ))}
 
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <button type="button" className={styles.ccBtn} onClick={addCriterion}>
+            <Button variant="outlined" size="small" onClick={addCriterion}>
               Add criterion
-            </button>
+            </Button>
             <span className={styles.fieldHint} style={{ margin: 0 }}>
               Overall rubric: {total}{unit}{mode === "percent" ? " (aim for 100%)" : " (sum of criteria)"}
             </span>
           </div>
 
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
-            <button type="button" className={styles.submitButton} onClick={() => void handleCreate()} disabled={saving || loading || !title.trim()}>
+            <Button variant="contained" size="small" onClick={() => void handleCreate()} disabled={saving || loading || !title.trim()}>
               {saving
                 ? "Saving…"
                 : editing
@@ -332,7 +336,7 @@ export function RubricBuilderModal({
                   : assignments.length > 0
                     ? "Create & associate"
                     : "Create rubric"}
-            </button>
+            </Button>
           </div>
           {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
         </div>

@@ -17,6 +17,7 @@ import {
 } from "../../actions";
 import type { BulkKind, SelectiveNode } from "@/lib/canvas-modules";
 import { COURSE_COPY_TYPES } from "@/lib/canvas-modules";
+import { Button, Checkbox, FormControlLabel, IconButton, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 
 // ── Course copy / import ──────────────────────────────────────────────────────
@@ -314,17 +315,22 @@ export function CourseCopyModal({
       <div key={node.property} style={{ marginLeft: depth * 16 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "2px 0" }}>
           {hasChildren ? (
-            <button type="button" className={styles.ccIconBtn} onClick={() => setExpanded((s) => toggleIn(s, node.property))} aria-label={open ? "Collapse" : "Expand"}>
+            <IconButton size="small" onClick={() => setExpanded((s) => toggleIn(s, node.property))} aria-label={open ? "Collapse" : "Expand"} sx={{ width: 28, height: 28 }}>
               {open ? "▾" : "▸"}
-            </button>
+            </IconButton>
           ) : (
             <span style={{ width: 28, flexShrink: 0 }} />
           )}
-          <label style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}>
-            <input type="checkbox" checked={props.has(node.property)} onChange={() => setProps((s) => toggleIn(s, node.property))} />
-            {node.title}
-            {typeof node.count === "number" && node.count > 0 && <span className={styles.ccCount}>({node.count})</span>}
-          </label>
+          <FormControlLabel
+            control={<Checkbox size="small" checked={props.has(node.property)} onChange={() => setProps((s) => toggleIn(s, node.property))} />}
+            label={
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {node.title}
+                {typeof node.count === "number" && node.count > 0 && <span className={styles.ccCount}>({node.count})</span>}
+              </span>
+            }
+            style={{ margin: 0 }}
+          />
         </div>
         {open && hasChildren && node.subItems.map((c) => renderNode(c, depth + 1))}
       </div>
@@ -345,9 +351,9 @@ export function CourseCopyModal({
           {phase === "done" ? (
             <>
               <p className={styles.fieldHint}>{statusText}</p>
-              <button type="button" className={styles.submitButton} style={{ alignSelf: "flex-start" }} onClick={onDone}>
+              <Button variant="contained" size="small" style={{ alignSelf: "flex-start" }} onClick={onDone}>
                 Done
-              </button>
+              </Button>
             </>
           ) : phase === "selecting" ? (
             <>
@@ -360,13 +366,13 @@ export function CourseCopyModal({
                 {nodes.length === 0 ? <p className={styles.fieldHint}>Canvas returned no selectable items.</p> : nodes.map((n) => renderNode(n, 0))}
               </div>
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
-                <button type="button" className={styles.submitButton} onClick={() => void submitItems()} disabled={running || props.size === 0 || purgeBlocked}>
+                <Button variant="contained" size="small" onClick={() => void submitItems()} disabled={running || props.size === 0 || purgeBlocked}>
                   {running
                     ? "Working…"
                     : isExport && selectedCourses.size > 1
                       ? `Copy ${props.size} item${props.size === 1 ? "" : "s"} to ${selectedCourses.size} courses`
                       : `Copy ${props.size} selected`}
-                </button>
+                </Button>
                 {statusText && <span className={styles.fieldHint} style={{ margin: 0 }}>{statusText}</span>}
               </div>
               {error && <p className={styles.error}>{error}</p>}
@@ -384,15 +390,12 @@ export function CourseCopyModal({
                 ) : (
                   <div style={{ maxHeight: 180, overflowY: "auto", border: "1px solid var(--field-border)", borderRadius: 10, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
                     {courses.map((c) => (
-                      <label key={c.id} style={{ display: "inline-flex", gap: 8, alignItems: "center", margin: 0 }}>
-                        <input
-                          type="checkbox"
-                          checked={selectedCourses.has(c.id)}
-                          onChange={() => setSelectedCourses((s) => toggleIn(s, c.id))}
-                          disabled={running}
-                        />
-                        {c.name}
-                      </label>
+                      <FormControlLabel
+                        key={c.id}
+                        control={<Checkbox size="small" checked={selectedCourses.has(c.id)} onChange={() => setSelectedCourses((s) => toggleIn(s, c.id))} disabled={running} />}
+                        label={c.name}
+                        style={{ margin: 0 }}
+                      />
                     ))}
                   </div>
                 )}
@@ -404,28 +407,32 @@ export function CourseCopyModal({
 
               <div className={styles.field}>
                 <label htmlFor="copy-granularity">What to copy</label>
-                <select
+                <TextField
                   id="copy-granularity"
-                  className={styles.textInput}
+                  select
+                  size="small"
+                  fullWidth
                   value={granularity}
                   onChange={(e) => setGranularity(e.target.value as "all" | "types" | "items")}
                   disabled={running}
                 >
-                  <option value="all">All content</option>
-                  <option value="types">Specific content types</option>
-                  <option value="items" disabled={!isExport && selectedCourses.size > 1}>
+                  <MenuItem value="all">All content</MenuItem>
+                  <MenuItem value="types">Specific content types</MenuItem>
+                  <MenuItem value="items" disabled={!isExport && selectedCourses.size > 1}>
                     Specific items{!isExport && selectedCourses.size > 1 ? " (one source only)" : ""}
-                  </option>
-                </select>
+                  </MenuItem>
+                </TextField>
               </div>
 
               {granularity === "types" && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                   {COURSE_COPY_TYPES.map((t) => (
-                    <label key={t.key} className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0, flex: "0 0 140px" }}>
-                      <input type="checkbox" checked={types.has(t.key)} onChange={() => setTypes((s) => toggleIn(s, t.key))} disabled={running} />
-                      {t.label}
-                    </label>
+                    <FormControlLabel
+                      key={t.key}
+                      control={<Checkbox size="small" checked={types.has(t.key)} onChange={() => setTypes((s) => toggleIn(s, t.key))} disabled={running} />}
+                      label={t.label}
+                      style={{ margin: 0, flex: "0 0 140px" }}
+                    />
                   ))}
                 </div>
               )}
@@ -439,43 +446,39 @@ export function CourseCopyModal({
               )}
 
               <div className={styles.field}>
-                <label style={{ display: "inline-flex", gap: 8, alignItems: "center", margin: 0 }}>
-                  <input
-                    type="checkbox"
-                    checked={purgeEnabled}
-                    onChange={(e) => setPurgeEnabled(e.target.checked)}
-                    disabled={running}
-                  />
-                  {isExport ? "Clear destination courses before copying" : "Clear this course before importing"}
-                </label>
+                <FormControlLabel
+                  control={<Checkbox size="small" checked={purgeEnabled} onChange={(e) => setPurgeEnabled(e.target.checked)} disabled={running} />}
+                  label={isExport ? "Clear destination courses before copying" : "Clear this course before importing"}
+                  style={{ margin: 0 }}
+                />
                 {purgeEnabled && (
                   <>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
                       {PURGE_TYPES.map((t) => (
-                        <label key={t.key} className={styles.fieldHint} style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0, flex: "0 0 130px" }}>
-                          <input type="checkbox" checked={purgeTypes.has(t.key)} onChange={() => setPurgeTypes((s) => toggleIn(s, t.key))} disabled={running} />
-                          {t.label}
-                        </label>
+                        <FormControlLabel
+                          key={t.key}
+                          control={<Checkbox size="small" checked={purgeTypes.has(t.key)} onChange={() => setPurgeTypes((s) => toggleIn(s, t.key))} disabled={running} />}
+                          label={t.label}
+                          style={{ margin: 0, flex: "0 0 130px" }}
+                        />
                       ))}
                     </div>
-                    <label style={{ display: "inline-flex", gap: 8, alignItems: "flex-start", marginTop: 8 }}>
-                      <input
-                        type="checkbox"
-                        checked={purgeConfirm}
-                        onChange={(e) => setPurgeConfirm(e.target.checked)}
-                        disabled={running}
-                      />
-                      <span className={styles.fieldHint} style={{ margin: 0, color: "#b91c1c" }}>
-                        Permanently delete the checked content from {isExport ? "each destination course" : "this course"}{" "}
-                        before copying. This cannot be undone.
-                      </span>
-                    </label>
+                    <FormControlLabel
+                      control={<Checkbox size="small" checked={purgeConfirm} onChange={(e) => setPurgeConfirm(e.target.checked)} disabled={running} />}
+                      label={
+                        <span className={styles.fieldHint} style={{ margin: 0, color: "#b91c1c" }}>
+                          Permanently delete the checked content from {isExport ? "each destination course" : "this course"}{" "}
+                          before copying. This cannot be undone.
+                        </span>
+                      }
+                      style={{ marginTop: 8, alignItems: "flex-start" }}
+                    />
                   </>
                 )}
               </div>
 
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
-                <button type="button" className={styles.submitButton} onClick={() => void start()} disabled={running || selectedCourses.size === 0 || purgeBlocked}>
+                <Button variant="contained" size="small" onClick={() => void start()} disabled={running || selectedCourses.size === 0 || purgeBlocked}>
                   {running
                     ? "Working…"
                     : granularity === "items"
@@ -483,7 +486,7 @@ export function CourseCopyModal({
                       : isExport
                         ? `Copy to ${selectedCourses.size} course${selectedCourses.size === 1 ? "" : "s"}`
                         : "Import to this course"}
-                </button>
+                </Button>
                 {running && statusText && <span className={styles.fieldHint} style={{ margin: 0 }}>{statusText}</span>}
               </div>
               {error && coursesState !== "error" && <p className={styles.error}>{error}</p>}

@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import type { ReactNode } from "react";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
 import type { AssignmentPlan, SlideData } from "../actions";
 import { reviseLecturePlanTextAction, reviseLectureSlidesAction } from "../actions";
 import type { LlmProvider } from "@/lib/llm";
@@ -244,31 +246,32 @@ export default function LecturePlanPreviewModal({
         <div className={styles.previewHeader}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className={styles.weekNav}>
-              <button
-                type="button"
-                className={styles.weekNavBtn}
+              <Button
+                variant="outlined"
+                size="small"
                 onClick={() => onIndexChange(index - 1)}
                 disabled={index === 0}
                 aria-label="Previous week"
               >
                 ‹
-              </button>
+              </Button>
               <span className={styles.weekNavLabel}>
                 {plan.label} · {index + 1} of {plans.length}
               </span>
-              <button
-                type="button"
-                className={styles.weekNavBtn}
+              <Button
+                variant="outlined"
+                size="small"
                 onClick={() => onIndexChange(index + 1)}
                 disabled={index === plans.length - 1}
                 aria-label="Next week"
               >
                 ›
-              </button>
+              </Button>
             </div>
             <p className={styles.previewMeta}>{plan.assignmentName}</p>
-            <input
+            <TextField
               className={styles.deckTitleInput}
+              size="small"
               value={plan.presentationTitle}
               onChange={(e) => onUpdatePlan(index, { presentationTitle: e.target.value })}
               aria-label="Deck title"
@@ -295,17 +298,16 @@ export default function LecturePlanPreviewModal({
         {/* Section toolbar: edit/preview (prose), revise with AI, reset, download */}
         <div className={styles.editorToolbar}>
           {activeTab !== "slides" && (
-            <button
-              type="button"
-              className={styles.downloadButton}
+            <Button
+              variant="outlined"
+              size="small"
               onClick={() => setEditing((e) => !e)}
             >
               {editing ? "Preview" : "Edit"}
-            </button>
+            </Button>
           )}
-          <input
-            type="text"
-            className={styles.textInput}
+          <TextField
+            size="small"
             style={{ flex: "1 1 220px", minWidth: 0 }}
             placeholder={
               activeTab === "slides"
@@ -315,30 +317,30 @@ export default function LecturePlanPreviewModal({
             value={reviseInstr}
             onChange={(e) => setReviseInstr(e.target.value)}
           />
-          <button
-            type="button"
-            className={styles.downloadButton}
+          <Button
+            variant="outlined"
+            size="small"
             onClick={activeTab === "slides" ? handleReviseSlides : handleReviseProse}
             disabled={reviseBusy || !reviseInstr.trim()}
           >
-            {reviseBusy ? "Revising…" : "Revise with AI"}
-          </button>
-          <button
-            type="button"
-            className={styles.downloadButton}
+            {reviseBusy ? "Revising..." : "Revise with AI"}
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
             onClick={() =>
               onResetSection(index, activeTab === "slides" ? "slides" : proseField)
             }
           >
             Reset
-          </button>
-          <button
-            type="button"
-            className={styles.downloadButton}
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
             onClick={() => void onDownloadDoc(index, activeTab)}
           >
             {activeTab === "slides" ? "Download .pptx" : "Download .docx"}
-          </button>
+          </Button>
         </div>
 
         {reviseError && <p className={styles.error}>{reviseError}</p>}
@@ -354,16 +356,20 @@ export default function LecturePlanPreviewModal({
             {plan.slides.map((slide, i) => (
               <li key={i} className={styles.lessonSlideCard}>
                 <span className={styles.lessonSlideNum}>Slide {i + 2}</span>
-                <input
+                <TextField
                   className={styles.deckTitleInput}
+                  size="small"
                   value={slide.title}
                   onChange={(e) => updateSlide(i, { title: e.target.value })}
                   aria-label={`Slide ${i + 2} title`}
                 />
                 <label className={styles.editorFieldLabel}>Bullets (one per line)</label>
-                <textarea
+                <TextField
                   className={styles.fieldEditArea}
-                  rows={Math.max(3, slide.bullets.length)}
+                  multiline
+                  minRows={Math.max(3, slide.bullets.length)}
+                  fullWidth
+                  size="small"
                   value={slide.bullets.join("\n")}
                   onChange={(e) => updateSlide(i, { bullets: e.target.value.split("\n") })}
                   aria-label={`Slide ${i + 2} bullets`}
@@ -373,9 +379,12 @@ export default function LecturePlanPreviewModal({
                     <label className={styles.editorFieldLabel}>
                       Code{slide.codeLanguage ? ` (${slide.codeLanguage})` : ""}
                     </label>
-                    <textarea
+                    <TextField
                       className={`${styles.fieldEditArea} ${styles.editorCodeArea}`}
-                      rows={Math.max(4, slide.code.split("\n").length)}
+                      multiline
+                      minRows={Math.max(4, slide.code.split("\n").length)}
+                      fullWidth
+                      size="small"
                       value={slide.code}
                       onChange={(e) => updateSlide(i, { code: e.target.value })}
                       aria-label={`Slide ${i + 2} code`}
@@ -391,8 +400,10 @@ export default function LecturePlanPreviewModal({
         {activeTab !== "slides" &&
           (editing ? (
             <div className={styles.docEditWrap}>
-              <textarea
+              <TextField
                 className={styles.docEditArea}
+                multiline
+                fullWidth
                 value={proseText}
                 onChange={(e) => onUpdatePlan(index, { [proseField]: e.target.value })}
                 aria-label="Document source"

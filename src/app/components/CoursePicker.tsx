@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
 import { listCoursesAction } from "../actions";
 import type { CanvasCourse } from "@/lib/canvas";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
@@ -143,14 +145,14 @@ export default function CoursePicker({
               noOptionsText="No courses found"
             />
           </div>
-          <button
-            type="button"
-            className={styles.downloadButton}
+          <Button
+            variant="outlined"
+            size="small"
             onClick={saveCurrentCourse}
             disabled={!courseId || isSaved}
           >
             {isSaved ? "Saved" : "Save course"}
-          </button>
+          </Button>
         </div>
         {coursesState === "error" && (
           <p className={styles.fieldHint}>Could not list courses for this school.</p>
@@ -163,55 +165,14 @@ export default function CoursePicker({
           <label>Saved courses</label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {savedCourses.map((c) => (
-              <span
+              <Chip
                 key={c.id}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  borderRadius: 999,
-                  border: "1px solid var(--field-border)",
-                  background: "var(--field-background)",
-                  paddingLeft: 4,
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => onSelect(c.url)}
-                  style={{
-                    font: "inherit",
-                    fontSize: "0.85rem",
-                    fontWeight: 600,
-                    color: "var(--text-primary)",
-                    background: "transparent",
-                    border: "none",
-                    borderRadius: 999,
-                    padding: "5px 8px",
-                    cursor: "pointer",
-                  }}
-                >
-                  {c.name}
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Remove ${c.name}`}
-                  title="Remove"
-                  onClick={() => removeSavedCourse(c.id)}
-                  style={{
-                    font: "inherit",
-                    fontSize: "1rem",
-                    lineHeight: 1,
-                    color: "var(--text-secondary)",
-                    background: "transparent",
-                    border: "none",
-                    borderRadius: 999,
-                    padding: "4px 9px 4px 2px",
-                    cursor: "pointer",
-                  }}
-                >
-                  ×
-                </button>
-              </span>
+                label={c.name}
+                onClick={() => onSelect(c.url)}
+                onDelete={() => removeSavedCourse(c.id)}
+                size="small"
+                sx={{ maxWidth: 260 }}
+              />
             ))}
           </div>
         </div>

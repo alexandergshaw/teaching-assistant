@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Autocomplete from "@mui/material/Autocomplete";
+import TextField from "@mui/material/TextField";
 import { githubConfiguredAction, listGithubReposAction, listGithubBranchesAction } from "../actions";
+import Typeahead from "./ui/Typeahead";
 import type { GithubRepo } from "@/lib/github";
 
 /**
@@ -104,43 +107,34 @@ export default function GithubRepoPicker({
 
   return (
     <div>
-      <input
-        type="text"
-        list="ta-github-repos"
+      <Autocomplete
+        freeSolo
+        options={repos.map((r) => r.fullName)}
         value={value}
+        onInputChange={(_, v) => onChange(v)}
         disabled={disabled || state === "loading"}
-        placeholder={state === "loading" ? "Loading repositories…" : placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.9rem" }}
+        size="small"
+        fullWidth
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            placeholder={state === "loading" ? "Loading repositories..." : placeholder}
+          />
+        )}
       />
-      <datalist id="ta-github-repos">
-        {repos.map((r) => (
-          <option key={r.fullName} value={r.fullName}>
-            {r.private ? "private" : "public"}
-            {r.description ? ` · ${r.description}` : ""}
-          </option>
-        ))}
-      </datalist>
       {state === "error" && error && <p style={{ fontSize: "0.8rem", color: "#dc2626", marginTop: 4 }}>{error}</p>}
 
       {onBranchChange && value.trim() && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
           <span style={{ fontSize: "0.8rem", color: "#475569" }}>Branch</span>
-          <select
+          <Typeahead
+            options={branches.map((b, i) => ({ value: b, label: i === 0 ? b + " (default)" : b }))}
             value={branch ?? ""}
+            onChange={(v) => onBranchChange(v)}
+            placeholder={branchState === "loading" ? "Loading branches..." : "Select a branch..."}
             disabled={disabled || branchState !== "ready"}
-            onChange={(e) => onBranchChange(e.target.value)}
-            style={{ flex: "0 1 240px", padding: "6px 8px", border: "1px solid var(--field-border, #cbd5e1)", borderRadius: 8, fontSize: "0.85rem", background: "#fff", color: "#334155" }}
-          >
-            {branchState === "loading" && <option value="">Loading branches…</option>}
-            {branchState === "ready" && branches.length === 0 && <option value="">(no branches)</option>}
-            {branches.map((b, i) => (
-              <option key={b} value={b}>
-                {b}
-                {i === 0 ? " (default)" : ""}
-              </option>
-            ))}
-          </select>
+            loading={branchState === "loading"}
+          />
         </div>
       )}
     </div>

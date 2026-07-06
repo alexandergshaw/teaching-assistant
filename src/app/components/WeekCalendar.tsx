@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Button from "@mui/material/Button";
 
 export interface CalendarEventBlock {
   startISO: string;
@@ -144,15 +145,15 @@ export default function WeekCalendar({
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <button type="button" onClick={() => setPageOverride(page - 1)} disabled={page <= 0}>
+        <Button variant="outlined" size="small" onClick={() => setPageOverride(page - 1)} disabled={page <= 0}>
           ‹ Earlier
-        </button>
+        </Button>
         <span style={{ fontSize: 13, color: BUSY_TEXT }}>
           Pick a highlighted time. Shaded blocks are existing events.
         </span>
-        <button type="button" onClick={() => setPageOverride(page + 1)} disabled={page >= maxPage}>
+        <Button variant="outlined" size="small" onClick={() => setPageOverride(page + 1)} disabled={page >= maxPage}>
           Later ›
-        </button>
+        </Button>
       </div>
 
       <div style={{ overflowX: "auto" }}>

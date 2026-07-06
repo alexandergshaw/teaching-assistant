@@ -2,6 +2,9 @@
 
 import type { ReactNode, Ref } from "react";
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useState } from "react";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import TextField from "@mui/material/TextField";
 import { postCanvasGradesAction, runSubmissionCodeAction, type GradeActionState } from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
 import type { CodeRunResult } from "@/lib/code-runner";
@@ -514,13 +517,13 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         <h2>Grading Results</h2>
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
           {canvasGradable && (
-            <button className={styles.submitButton} type="button" onClick={() => handlePostGrades()} disabled={posting}>
+            <Button variant="contained" size="small" onClick={() => handlePostGrades()} disabled={posting}>
               {posting ? "Posting…" : `Post ${gradableResults.length} grade(s) to Canvas`}
-            </button>
+            </Button>
           )}
-          <button className={styles.downloadButton} type="button" onClick={handleExportCsv}>
+          <Button variant="outlined" size="small" onClick={handleExportCsv}>
             Export CSV
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -550,15 +553,14 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         <section className={styles.resultsChecklist}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
             <h3 style={{ margin: 0 }}>Sample correct answer</h3>
-            <button
-              type="button"
-              className={styles.copyIconButton}
+            <IconButton
+              size="small"
               title={copiedKey === "sample-answer" ? "Copied" : "Copy sample answer"}
               aria-label="Copy sample correct answer"
               onClick={() => onCopy("sample-answer", run.sampleAnswer ?? "")}
             >
               <CopyIcon />
-            </button>
+            </IconButton>
           </div>
           <div style={{ whiteSpace: "pre-wrap", marginTop: "0.5rem" }}>{run.sampleAnswer}</div>
         </section>
@@ -569,35 +571,36 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
           <thead>
             <tr>
               <th>
-                <button type="button" className={styles.sortButton} onClick={() => handleSort({ kind: "student" })}>
+                <Button variant="text" size="small" onClick={() => handleSort({ kind: "student" })} sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}>
                   Student <span>{sortLabel({ kind: "student" })}</span>
-                </button>
+                </Button>
               </th>
               <th>
-                <button type="button" className={styles.sortButton} onClick={() => handleSort({ kind: "files" })}>
+                <Button variant="text" size="small" onClick={() => handleSort({ kind: "files" })} sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}>
                   Files <span>{sortLabel({ kind: "files" })}</span>
-                </button>
+                </Button>
               </th>
               {run.rubricAreaNames.map((area) => (
                 <th key={area}>
-                  <button
-                    type="button"
-                    className={styles.sortButton}
+                  <Button
+                    variant="text"
+                    size="small"
                     onClick={() => handleSort({ kind: "rubric", area })}
+                    sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}
                   >
                     {area} <span>{sortLabel({ kind: "rubric", area })}</span>
-                  </button>
+                  </Button>
                 </th>
               ))}
               <th>
-                <button type="button" className={styles.sortButton} onClick={() => handleSort({ kind: "total" })}>
+                <Button variant="text" size="small" onClick={() => handleSort({ kind: "total" })} sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}>
                   Total <span>{sortLabel({ kind: "total" })}</span>
-                </button>
+                </Button>
               </th>
               <th>
-                <button type="button" className={styles.sortButton} onClick={() => handleSort({ kind: "overall" })}>
+                <Button variant="text" size="small" onClick={() => handleSort({ kind: "overall" })} sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}>
                   Overall Feedback <span>{sortLabel({ kind: "overall" })}</span>
-                </button>
+                </Button>
               </th>
             </tr>
           </thead>
@@ -631,15 +634,14 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                     )}
                     {canPostRow && (
                       <div style={{ marginTop: 6 }}>
-                        <button
-                          type="button"
-                          className={styles.downloadButton}
-                          style={{ padding: "4px 10px" }}
+                        <Button
+                          variant="outlined"
+                          size="small"
                           onClick={() => handlePostOne(result)}
                           disabled={rowPosting}
                         >
                           {status?.status === "posted" ? "Re-post" : "Post to Canvas"}
-                        </button>
+                        </Button>
                       </div>
                     )}
                     {status && status.status !== "idle" && (
@@ -674,24 +676,22 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                             </div>
                           )}
                           <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
-                            <button
-                              type="button"
-                              className={styles.downloadButton}
-                              style={{ padding: "4px 10px" }}
+                            <Button
+                              variant="outlined"
+                              size="small"
                               disabled={codeRunning[result.student]}
                               onClick={() => handleRunCode(result)}
                             >
                               {codeRunning[result.student] ? "Running…" : "Run code"}
-                            </button>
+                            </Button>
                             {cr && (
-                              <button
-                                type="button"
-                                className={styles.downloadButton}
-                                style={{ padding: "4px 10px" }}
+                              <Button
+                                variant="outlined"
+                                size="small"
                                 onClick={() => setCodeOutputStudent(result.student)}
                               >
                                 View output
-                              </button>
+                              </Button>
                             )}
                           </div>
                         </div>
@@ -709,9 +709,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                                 : file.name}
                             </span>
                             <div className={styles.fileIconGroup}>
-                              <button
-                                type="button"
-                                className={styles.fileIconButton}
+                              <IconButton
+                                size="small"
                                 title={`Preview ${file.name}`}
                                 aria-label={`Preview ${file.name}`}
                                 onClick={() =>
@@ -727,11 +726,10 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                                 }
                               >
                                 <EyeIcon />
-                              </button>
+                              </IconButton>
                               {file.rawBase64 && (
-                                <button
-                                  type="button"
-                                  className={styles.fileIconButton}
+                                <IconButton
+                                  size="small"
                                   title={`Download ${file.name}`}
                                   aria-label={`Download ${file.name}`}
                                   onClick={() =>
@@ -744,7 +742,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                                   }
                                 >
                                   <DownloadIcon />
-                                </button>
+                                </IconButton>
                               )}
                             </div>
                           </li>
@@ -762,13 +760,13 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                     return (
                       <td key={`${result.student}-${areaName}`}>
                         {area && areaEdit ? (
-                          <input
-                            type="text"
-                            className={styles.textInput}
-                            style={{ minWidth: "64px" }}
-                            aria-label={`${areaName} score for ${result.student}`}
+                          <TextField
+                            size="small"
                             value={areaEdit.score}
                             onChange={(e) => updateArea(result.student, areaName, { score: e.target.value })}
+                            aria-label={`${areaName} score for ${result.student}`}
+                            sx={{ width: 84 }}
+                            slotProps={{ htmlInput: { style: { padding: "4px 8px" } } }}
                           />
                         ) : (
                           "-"
@@ -777,20 +775,19 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                     );
                   })}
                   <td>
-                    <input
-                      type="text"
-                      className={styles.textInput}
-                      style={{ minWidth: "72px" }}
-                      aria-label={`Grade for ${result.student}`}
+                    <TextField
+                      size="small"
                       value={edit.total}
                       onChange={(e) => updateEdit(result.student, { total: e.target.value })}
+                      aria-label={`Grade for ${result.student}`}
+                      sx={{ width: 92 }}
+                      slotProps={{ htmlInput: { style: { padding: "4px 8px" } } }}
                     />
                   </td>
                   <td>
                     <div className={styles.overallFeedbackWrap}>
-                      <button
-                        type="button"
-                        className={styles.copyIconButton}
+                      <IconButton
+                        size="small"
                         title={copiedKey === `${result.student}-overall-comment` ? "Copied" : "Copy Overall Feedback"}
                         aria-label={
                           copiedKey === `${result.student}-overall-comment`
@@ -805,22 +802,23 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                         }
                       >
                         <CopyIcon />
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.copyIconButton}
+                      </IconButton>
+                      <IconButton
+                        size="small"
                         title="Expand feedback"
                         aria-label={`Expand overall feedback for ${result.student}`}
                         onClick={() => setExpandedStudent(result.student)}
                       >
                         <ExpandIcon />
-                      </button>
-                      <textarea
-                        aria-label={`Overall feedback for ${result.student}`}
-                        className={styles.feedbackText}
-                        style={{ minHeight: "128px", width: "100%" }}
+                      </IconButton>
+                      <TextField
+                        multiline
                         value={edit.overall}
                         onChange={(e) => updateEdit(result.student, { overall: e.target.value })}
+                        aria-label={`Overall feedback for ${result.student}`}
+                        fullWidth
+                        size="small"
+                        minRows={3}
                       />
                     </div>
                   </td>
@@ -853,12 +851,14 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                 Close
               </button>
             </div>
-            <textarea
-              aria-label={`Overall feedback for ${expandedStudent} (expanded)`}
-              className={styles.feedbackText}
-              style={{ width: "100%", minHeight: "50vh" }}
+            <TextField
+              multiline
               value={edits[expandedStudent]?.overall ?? ""}
               onChange={(event) => updateEdit(expandedStudent, { overall: event.target.value })}
+              aria-label={`Overall feedback for ${expandedStudent} (expanded)`}
+              fullWidth
+              size="small"
+              minRows={12}
             />
           </section>
         </div>

@@ -179,10 +179,24 @@ import {
   listRunArtifacts,
   downloadArtifactZip,
   downloadRepoZipball,
+  listOrgMembers,
+  inviteOrgMember,
+  setOrgMemberRole,
+  listRepoCollaborators,
+  setRepoCollaborator,
+  createPullRequest,
+  setBranchProtection,
+  listPersonalRepos,
+  updateRepo,
   type GithubRepo,
   type RepoDigest,
   type WorkflowRunInfo,
   type WorkflowInfo,
+  type OrgMember,
+  type RepoCollaborator,
+  type RepoPermission,
+  type BranchProtectionOptions,
+  type UpdateRepoPatch,
 } from "@/lib/github";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
 import { filesToLlmParts } from "@/lib/llm-files";
@@ -5437,6 +5451,139 @@ export async function setupTestsWorkflowAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not add the test workflow." };
+  }
+}
+
+// ── Organization + Repo Management ──────────────────────────────────────────
+
+export async function listOrgMembersAction(org: string): Promise<{ members: OrgMember[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const trimmed = org.trim();
+    if (!trimmed) return { error: "Choose an organization." };
+    return { members: await listOrgMembers(trimmed) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list organization members." };
+  }
+}
+
+export async function inviteOrgMemberAction(
+  org: string,
+  invitee: string,
+  role: "admin" | "member"
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const trimmed = org.trim();
+    if (!trimmed) return { error: "Choose an organization." };
+    if (!invitee.trim()) return { error: "Enter a GitHub username or email to invite." };
+    await inviteOrgMember(trimmed, invitee, role);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not invite the member." };
+  }
+}
+
+export async function setOrgMemberRoleAction(
+  org: string,
+  username: string,
+  role: "admin" | "member"
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const trimmed = org.trim();
+    if (!trimmed) return { error: "Choose an organization." };
+    await setOrgMemberRole(trimmed, username, role);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the member role." };
+  }
+}
+
+export async function listRepoCollaboratorsAction(repoRef: string): Promise<{ collaborators: RepoCollaborator[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return { collaborators: await listRepoCollaborators(parsed.owner, parsed.repo) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list collaborators." };
+  }
+}
+
+export async function setRepoCollaboratorAction(
+  repoRef: string,
+  username: string,
+  permission: RepoPermission
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    await setRepoCollaborator(parsed.owner, parsed.repo, username, permission);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the collaborator." };
+  }
+}
+
+export async function createPullRequestAction(
+  repoRef: string,
+  title: string,
+  head: string,
+  base: string,
+  body: string
+): Promise<{ number: number; htmlUrl: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    if (!title.trim()) return { error: "Enter a pull request title." };
+    if (!head.trim()) return { error: "Enter the head branch." };
+    if (!base.trim()) return { error: "Enter the base branch." };
+    return await createPullRequest(parsed.owner, parsed.repo, { title, head, base, body });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the pull request." };
+  }
+}
+
+export async function setBranchProtectionAction(
+  repoRef: string,
+  branch: string,
+  opts: BranchProtectionOptions
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    await setBranchProtection(parsed.owner, parsed.repo, branch, opts);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not set branch protection." };
+  }
+}
+
+export async function listPersonalReposAction(): Promise<{ repos: GithubRepo[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return { repos: await listPersonalRepos() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list personal repositories." };
+  }
+}
+
+export async function updateRepoAction(
+  repoRef: string,
+  patch: UpdateRepoPatch
+): Promise<{ repo: GithubRepo } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const repo = await updateRepo(parsed.owner, parsed.repo, patch);
+    return { repo };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the repository." };
   }
 }
 

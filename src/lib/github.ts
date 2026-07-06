@@ -494,3 +494,182 @@ export async function downloadArtifactZip(owner: string, repo: string, artifactI
   const res = await ghFetch(`/repos/${owner}/${repo}/actions/artifacts/${artifactId}/zip`);
   return Buffer.from(await res.arrayBuffer());
 }
+
+// ── Org members ─────────────────────────────────────────────────────────────
+export interface OrgMember {
+  login: string;
+  role: "admin" | "member";
+}
+
+/** List an org's members with their org role (admin = owner). */
+export async function listOrgMembers(org: string): Promise<OrgMember[]> {
+  const collect = async (role: "admin" | "member"): Promise<OrgMember[]> => {
+    const out: OrgMember[] = [];
+    for (let page = 1; page <= 5; page += 1) {
+      const users = await ghJson<Array<{ login?: string }>>(
+        `/orgs/${org}/members?role=${role}&per_page=100&page=${page}`
+      );
+      for (const u of users) if (u.login) out.push({ login: u.login, role });
+      if (users.length < 100) break;
+    }
+    return out;
+  };
+  const [admins, members] = await Promise.all([collect("admin"), collect("member")]);
+  return [...admins, ...members].sort((a, b) => a.login.localeCompare(b.login));
+}
+
+/** Invite a user to the org by username or email. `role`: "admin" (owner) or "member". */
+export async function inviteOrgMember(org: string, invitee: string, role: "admin" | "member"): Promise<void> {
+  const invitationRole = role === "admin" ? "admin" : "direct_member";
+  const value = invitee.trim();
+  if (!value) throw new Error("Enter a GitHub username or email to invite.");
+  let body: Record<string, unknown>;
+  if (value.includes("@")) {
+    body = { email: value, role: invitationRole };
+  } else {
+    const user = await ghJson<{ id?: number }>(`/users/${encodeURIComponent(value)}`);
+    if (typeof user.id !== "number") throw new Error(`GitHub user "${value}" was not found.`);
+    body = { invitee_id: user.id, role: invitationRole };
+  }
+  await ghFetch(`/orgs/${org}/invitations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Set an existing member's org role. */
+export async function setOrgMemberRole(org: string, username: string, role: "admin" | "member"): Promise<void> {
+  await ghFetch(`/orgs/${org}/memberships/${encodeURIComponent(username)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+}
+
+// ── Per-repo collaborator access ────────────────────────────────────────────
+export type RepoPermission = "pull" | "triage" | "push" | "maintain" | "admin";
+export interface RepoCollaborator {
+  login: string;
+  permission: RepoPermission;
+}
+
+/** List a repo's direct collaborators with their effective permission. */
+export async function listRepoCollaborators(owner: string, repo: string): Promise<RepoCollaborator[]> {
+  const users = await ghJson<Array<{ login?: string; permissions?: Record<string, boolean> }>>(
+    `/repos/${owner}/${repo}/collaborators?affiliation=direct&per_page=100`
+  );
+  const rank = (p?: Record<string, boolean>): RepoPermission => {
+    if (!p) return "pull";
+    if (p.admin) return "admin";
+    if (p.maintain) return "maintain";
+    if (p.push) return "push";
+    if (p.triage) return "triage";
+    return "pull";
+  };
+  return users
+    .filter((u) => u.login)
+    .map((u) => ({ login: u.login as string, permission: rank(u.permissions) }))
+    .sort((a, b) => a.login.localeCompare(b.login));
+}
+
+/** Add or update a repo collaborator's permission. */
+export async function setRepoCollaborator(
+  owner: string,
+  repo: string,
+  username: string,
+  permission: RepoPermission
+): Promise<void> {
+  await ghFetch(`/repos/${owner}/${repo}/collaborators/${encodeURIComponent(username)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ permission }),
+  });
+}
+
+// ── Pull requests ───────────────────────────────────────────────────────────
+export async function createPullRequest(
+  owner: string,
+  repo: string,
+  opts: { title: string; head: string; base: string; body?: string }
+): Promise<{ number: number; htmlUrl: string }> {
+  const pr = await ghJson<{ number?: number; html_url?: string }>(`/repos/${owner}/${repo}/pulls`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: opts.title, head: opts.head, base: opts.base, body: opts.body ?? "" }),
+  });
+  return { number: pr.number ?? 0, htmlUrl: pr.html_url ?? "" };
+}
+
+// ── Branch protection ───────────────────────────────────────────────────────
+export interface BranchProtectionOptions {
+  requirePullRequestReviews: boolean;
+  requiredApprovingReviewCount: number;
+  requireStatusChecks: boolean;
+  statusCheckContexts: string[];
+  strictStatusChecks: boolean;
+  enforceAdmins: boolean;
+  requireLinearHistory: boolean;
+}
+
+/** Create/replace a branch protection rule. */
+export async function setBranchProtection(
+  owner: string,
+  repo: string,
+  branch: string,
+  opts: BranchProtectionOptions
+): Promise<void> {
+  const body = {
+    required_status_checks: opts.requireStatusChecks
+      ? { strict: opts.strictStatusChecks, contexts: opts.statusCheckContexts }
+      : null,
+    enforce_admins: opts.enforceAdmins,
+    required_pull_request_reviews: opts.requirePullRequestReviews
+      ? { required_approving_review_count: opts.requiredApprovingReviewCount }
+      : null,
+    restrictions: null,
+    required_linear_history: opts.requireLinearHistory,
+  };
+  await ghFetch(`/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}/protection`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// ── Personal repos + settings ───────────────────────────────────────────────
+/** Repos owned by the authenticated user (personal, not org), newest first. */
+export async function listPersonalRepos(): Promise<GithubRepo[]> {
+  const out: GithubRepo[] = [];
+  for (let page = 1; page <= 5; page += 1) {
+    const repos = await ghJson<RawRepo[]>(
+      `/user/repos?per_page=100&sort=updated&affiliation=owner&page=${page}`
+    );
+    for (const r of repos) if (r.name && r.owner?.login) out.push(mapRepo(r));
+    if (repos.length < 100) break;
+  }
+  return out;
+}
+
+export interface UpdateRepoPatch {
+  private?: boolean;
+  isTemplate?: boolean;
+  description?: string;
+  archived?: boolean;
+}
+
+/** Update a repo's settings (visibility, template flag, description, archived). */
+export async function updateRepo(owner: string, repo: string, patch: UpdateRepoPatch): Promise<GithubRepo> {
+  const body: Record<string, unknown> = {};
+  if (patch.private !== undefined) body.private = patch.private;
+  if (patch.isTemplate !== undefined) body.is_template = patch.isTemplate;
+  if (patch.description !== undefined) body.description = patch.description;
+  if (patch.archived !== undefined) body.archived = patch.archived;
+  return mapRepo(
+    await ghJson<RawRepo>(`/repos/${owner}/${repo}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
+}

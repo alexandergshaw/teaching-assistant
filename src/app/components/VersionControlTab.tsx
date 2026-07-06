@@ -13,6 +13,7 @@ import OrgManagementPanel from "./OrgManagementPanel";
 import RepoDetail from "./RepoDetail";
 import TabHeader from "./TabHeader";
 import Typeahead from "./ui/Typeahead";
+import { submitOnEnter } from "./ui/submitOnEnter";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Checkbox from "@mui/material/Checkbox";
@@ -248,6 +249,7 @@ export default function VersionControlTab() {
               placeholder="Repository name"
               value={copilotName}
               onChange={(e) => setCopilotName(e.target.value)}
+              onKeyDown={submitOnEnter(createWithCopilot)}
               disabled={copilotBusy}
             />
             <TextField

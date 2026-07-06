@@ -25,6 +25,7 @@ import {
 import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo } from "@/lib/github";
 import RepoSettingsPanel from "./RepoSettingsPanel";
 import Typeahead from "./ui/Typeahead";
+import { submitOnEnter } from "./ui/submitOnEnter";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
 import Button from "@mui/material/Button";
@@ -547,6 +548,7 @@ export default function RepoDetail() {
             placeholder="Repository name"
             value={createName}
             onChange={(e) => setCreateName(e.target.value)}
+            onKeyDown={submitOnEnter(handleCreateRepo)}
           />
           <TextField
             size="small"
@@ -554,6 +556,7 @@ export default function RepoDetail() {
             placeholder="Description (optional)"
             value={createDescription}
             onChange={(e) => setCreateDescription(e.target.value)}
+            onKeyDown={submitOnEnter(handleCreateRepo)}
           />
           <div style={{ display: "flex", gap: 16 }}>
             <FormControlLabel
@@ -699,6 +702,7 @@ export default function RepoDetail() {
                             placeholder="Commit message"
                             value={commitMessage}
                             onChange={(e) => setCommitMessage(e.target.value)}
+                            onKeyDown={submitOnEnter(handleCommit)}
                             disabled={committing}
                             sx={{ flex: "1 1 200px" }}
                           />
@@ -736,6 +740,7 @@ export default function RepoDetail() {
                     placeholder="Target org (optional, blank = your account)"
                     value={forkOrg}
                     onChange={(e) => setForkOrg(e.target.value)}
+                    onKeyDown={submitOnEnter(handleFork)}
                     sx={{ maxWidth: 320 }}
                   />
                   <Button
@@ -772,6 +777,7 @@ export default function RepoDetail() {
                     placeholder="new-branch-name"
                     value={newBranch}
                     onChange={(e) => setNewBranch(e.target.value)}
+                    onKeyDown={submitOnEnter(handleCreateBranch)}
                   />
                   <span style={{ paddingTop: 8 }}>from</span>
                   <div style={{ minWidth: 200 }}>
@@ -853,6 +859,7 @@ export default function RepoDetail() {
                   placeholder="Title"
                   value={prTitle}
                   onChange={(e) => setPrTitle(e.target.value)}
+                  onKeyDown={submitOnEnter(handleCreatePr)}
                   disabled={prBusy}
                   sx={{ marginBottom: 1 }}
                 />

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { updateModuleAction } from "../../actions";
 import type { CanvasModule } from "@/lib/canvas-modules";
+import { submitOnEnter } from "../ui/submitOnEnter";
 import styles from "../../page.module.css";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
@@ -85,6 +86,7 @@ export function RenameModulesModal({
               placeholder="Module"
               value={find}
               onChange={(e) => setFind(e.target.value)}
+              onKeyDown={submitOnEnter(handleApply)}
               fullWidth
             />
           </div>
@@ -97,6 +99,7 @@ export function RenameModulesModal({
               placeholder="Week"
               value={replace}
               onChange={(e) => setReplace(e.target.value)}
+              onKeyDown={submitOnEnter(handleApply)}
               fullWidth
             />
           </div>

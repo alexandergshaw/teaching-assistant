@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
+import { submitOnEnter } from "./ui/submitOnEnter";
 import styles from "../page.module.css";
 import {
   CALENDAR_EVENT_TYPE_LABELS,
@@ -438,6 +439,7 @@ export default function DeadlinesWindow({
             placeholder="Title *"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
+            onKeyDown={submitOnEnter(handleAdd)}
           />
           <div className={styles.deadlinesInputRow}>
             <TextField
@@ -467,6 +469,7 @@ export default function DeadlinesWindow({
             placeholder="Description (optional)"
             value={newDescription}
             onChange={(e) => setNewDescription(e.target.value)}
+            onKeyDown={submitOnEnter(handleAdd)}
           />
           <div className={styles.deadlinesFormActions}>
             <Button

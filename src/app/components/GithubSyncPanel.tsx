@@ -7,6 +7,7 @@ import {
   syncAssignmentFromRepoAction,
 } from "../actions";
 import GithubRepoPicker from "./GithubRepoPicker";
+import { submitOnEnter } from "./ui/submitOnEnter";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import styles from "../page.module.css";
@@ -87,6 +88,7 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
           value={assignmentUrl}
           placeholder="https://…/courses/123/assignments/456"
           onChange={(e) => setAssignmentUrl(e.target.value)}
+          onKeyDown={submitOnEnter(load)}
         />
       </div>
       <div className={styles.field}>
@@ -101,6 +103,7 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
           value={path}
           placeholder="assignments/<slug>/README.md (auto if blank)"
           onChange={(e) => setPath(e.target.value)}
+          onKeyDown={submitOnEnter(load)}
         />
       </div>
 

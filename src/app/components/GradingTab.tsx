@@ -13,6 +13,7 @@ import { parseGeneratedRubric } from "../utils/rubric";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionCounts } from "./InstitutionCounts";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
+import { submitOnEnter } from "./ui/submitOnEnter";
 import LiveFeedPanel from "./LiveFeedPanel";
 import GradingResults from "./GradingResults";
 import GithubGradingPanel from "./GithubGradingPanel";
@@ -247,6 +248,7 @@ export default function GradingTab({
                 setCanvasRetrieved(false);
                 setCanvasMeta({ status: "idle", message: "" });
               }}
+              onKeyDown={submitOnEnter(handleRetrieveCanvas)}
             />
             <Button
               variant="outlined"

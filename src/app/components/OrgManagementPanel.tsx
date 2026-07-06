@@ -13,6 +13,7 @@ import {
 } from "../actions";
 import type { GithubRepo } from "@/lib/github";
 import Typeahead from "./ui/Typeahead";
+import { submitOnEnter } from "./ui/submitOnEnter";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -322,6 +323,7 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
             placeholder="GitHub username or email"
             value={inviteValue}
             onChange={(e) => setInviteValue(e.target.value)}
+            onKeyDown={submitOnEnter(handleInvite)}
             disabled={inviteBusy}
           />
           <TextField
@@ -397,6 +399,7 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
                 placeholder="GitHub username"
                 value={accessUsername}
                 onChange={(e) => setAccessUsername(e.target.value)}
+                onKeyDown={submitOnEnter(handleAccessApply)}
                 disabled={accessBusy}
               />
               <TextField
@@ -468,6 +471,7 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
               placeholder="Pull request title"
               value={prTitle}
               onChange={(e) => setPrTitle(e.target.value)}
+              onKeyDown={submitOnEnter(handleCreatePr)}
               disabled={prBusy}
               sx={{ mb: 1.5 }}
             />
@@ -563,6 +567,7 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
                     placeholder="Required checks (comma-separated)"
                     value={bpContexts}
                     onChange={(e) => setBpContexts(e.target.value)}
+                    onKeyDown={submitOnEnter(handleBranchProtection)}
                     disabled={bpBusy}
                   />
                   <FormControlLabel

@@ -257,6 +257,15 @@ function AnnouncementsPanel() {
           placeholder="Announcement title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => {
+            // Inlined (not the shared submitOnEnter) because handlePost reads
+            // Date.now(); routing it through a render-time helper call trips the
+            // react-hooks/purity lint. An inline event handler reads clean.
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void handlePost();
+            }
+          }}
         />
       </div>
 

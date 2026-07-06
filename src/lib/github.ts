@@ -67,6 +67,7 @@ export interface GithubRepo {
   htmlUrl: string;
   /** Whether this repo is a template (can seed new repos via generate). */
   isTemplate: boolean;
+  archived: boolean;
 }
 
 interface RawRepo {
@@ -79,6 +80,7 @@ interface RawRepo {
   updated_at?: string | null;
   html_url?: string;
   is_template?: boolean;
+  archived?: boolean;
 }
 
 function mapRepo(r: RawRepo): GithubRepo {
@@ -92,6 +94,7 @@ function mapRepo(r: RawRepo): GithubRepo {
     updatedAt: r.updated_at ?? "",
     htmlUrl: r.html_url ?? "",
     isTemplate: !!r.is_template,
+    archived: !!r.archived,
   };
 }
 

@@ -10,6 +10,7 @@ import {
 } from "../actions";
 import type { GithubRepo } from "@/lib/github";
 import OrgManagementPanel from "./OrgManagementPanel";
+import RepoSettingsPanel from "./RepoSettingsPanel";
 import styles from "../page.module.css";
 
 /**
@@ -344,6 +345,8 @@ export default function VersionControlTab() {
       )}
 
       {selectedOrg && <OrgManagementPanel org={selectedOrg} repos={repos} />}
+
+      <RepoSettingsPanel />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { listCoursesAction } from "../actions";
 import type { CanvasCourse } from "@/lib/canvas";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
+import Typeahead from "./ui/Typeahead";
 import styles from "../page.module.css";
 
 const SAVED_COURSES_KEY = "ta-canvas-saved-courses";
@@ -129,33 +130,19 @@ export default function CoursePicker({
   return (
     <>
       <div className={styles.field}>
-        <label htmlFor="course-picker">Course</label>
+        <label>Course</label>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <select
-            id="course-picker"
-            className={styles.textInput}
-            style={{ flex: "1 1 260px" }}
-            value={courseId ?? ""}
-            disabled={coursesState === "loading" || courses.length === 0}
-            onChange={(e) => {
-              const id = e.target.value;
-              if (!id) return;
-              onSelect(`/courses/${id}`);
-            }}
-          >
-            <option value="">
-              {coursesState === "loading"
-                ? "Loading courses…"
-                : courses.length === 0
-                  ? "No courses found"
-                  : "Select a course…"}
-            </option>
-            {courses.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <div style={{ flex: "1 1 260px" }}>
+            <Typeahead
+              options={courses.map((c) => ({ value: c.id, label: c.name }))}
+              value={courseId ?? ""}
+              onChange={(id) => { if (id) onSelect(`/courses/${id}`); }}
+              placeholder={coursesState === "loading" ? "Loading courses..." : courses.length === 0 ? "No courses found" : "Select a course..."}
+              disabled={coursesState === "loading" || courses.length === 0}
+              loading={coursesState === "loading"}
+              noOptionsText="No courses found"
+            />
+          </div>
           <button
             type="button"
             className={styles.downloadButton}

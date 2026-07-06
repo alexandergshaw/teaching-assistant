@@ -14,6 +14,7 @@ import { getStoredProvider } from "@/lib/llm-provider";
 import type { CanvasCourse, CanvasAssignmentBrief, CanvasPerson, CanvasSubmissionDetail } from "@/lib/canvas";
 import FilePreviewModal, { type PreviewFile } from "./FilePreviewModal";
 import GradingResults from "./GradingResults";
+import Typeahead from "./ui/Typeahead";
 import styles from "../page.module.css";
 
 type GradingRun = NonNullable<GradeActionState["run"]>;
@@ -378,13 +379,12 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
         <div style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 16 }}>
           {institutions.length > 1 && (
             <div className={styles.field}>
-              <label htmlFor="pullback-institution">Institution</label>
-              <select
-                id="pullback-institution"
-                className={styles.textInput}
+              <label>Institution</label>
+              <Typeahead
+                options={institutions.map((code) => ({ value: code, label: code }))}
                 value={institution}
-                onChange={(e) => {
-                  setInstitution(e.target.value);
+                onChange={(code) => {
+                  setInstitution(code);
                   setCourseId("");
                   setAssignmentId("");
                   setStudentId("");
@@ -392,109 +392,71 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
                   setGradeRun(null);
                   setGradeError(null);
                 }}
-              >
-                {institutions.map((code) => (
-                  <option key={code} value={code}>
-                    {code}
-                  </option>
-                ))}
-              </select>
+                placeholder="Select an institution"
+              />
             </div>
           )}
 
           <div className={styles.field}>
-            <label htmlFor="pullback-course">Course</label>
-            <select
-              id="pullback-course"
-              className={styles.textInput}
+            <label>Course</label>
+            <Typeahead
+              options={courses.map((c) => ({ value: c.id, label: c.name }))}
               value={courseId}
-              disabled={courseState === "loading" || courses.length === 0}
-              onChange={(e) => {
-                setCourseId(e.target.value);
+              onChange={(id) => {
+                setCourseId(id);
                 setAssignmentId("");
                 setStudentId("");
                 setSubmission(null);
                 setGradeRun(null);
                 setGradeError(null);
               }}
-            >
-              <option value="">
-                {courseState === "loading"
-                  ? "Loading courses..."
-                  : courses.length === 0
-                    ? "No courses found"
-                    : "Select a course..."}
-              </option>
-              {courses.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              placeholder={courseState === "loading" ? "Loading courses..." : courses.length === 0 ? "No courses found" : "Select a course..."}
+              disabled={courseState === "loading" || courses.length === 0}
+              loading={courseState === "loading"}
+              noOptionsText="No courses found"
+            />
             {courseState === "error" && (
               <p className={styles.fieldHint}>Could not load courses.</p>
             )}
           </div>
 
           <div className={styles.field}>
-            <label htmlFor="pullback-assignment">Assignment</label>
-            <select
-              id="pullback-assignment"
-              className={styles.textInput}
+            <label>Assignment</label>
+            <Typeahead
+              options={assignments.map((a) => ({ value: a.id, label: a.name }))}
               value={assignmentId}
-              disabled={assignmentState === "loading" || assignments.length === 0 || !courseId}
-              onChange={(e) => {
-                setAssignmentId(e.target.value);
+              onChange={(id) => {
+                setAssignmentId(id);
                 setSubmission(null);
                 setGradeRun(null);
                 setGradeError(null);
               }}
-            >
-              <option value="">
-                {assignmentState === "loading"
-                  ? "Loading assignments..."
-                  : assignments.length === 0
-                    ? "No assignments found"
-                    : "Select an assignment..."}
-              </option>
-              {assignments.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+              placeholder={assignmentState === "loading" ? "Loading assignments..." : assignments.length === 0 ? "No assignments found" : "Select an assignment..."}
+              disabled={assignmentState === "loading" || assignments.length === 0 || !courseId}
+              loading={assignmentState === "loading"}
+              noOptionsText="No assignments found"
+            />
             {assignmentState === "error" && (
               <p className={styles.fieldHint}>Could not load assignments.</p>
             )}
           </div>
 
           <div className={styles.field}>
-            <label htmlFor="pullback-student">Student</label>
-            <select
-              id="pullback-student"
-              className={styles.textInput}
+            <label>Student</label>
+            <Typeahead
+              options={students.map((s) => ({ value: s.id, label: s.name }))}
               value={studentId}
-              disabled={studentState === "loading" || students.length === 0 || !courseId}
-              onChange={(e) => {
-                setStudentId(e.target.value);
+              onChange={(id) => {
+                setStudentId(id);
                 setSubmission(null);
                 setGradeRun(null);
                 setGradeError(null);
               }}
-            >
-              <option value="">
-                {studentState === "loading"
-                  ? "Loading students..."
-                  : students.length === 0
-                    ? "No students found"
-                    : "Select a student..."}
-              </option>
-              {students.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+              placeholder={studentState === "loading" ? "Loading students..." : students.length === 0 ? "No students found" : "Select a student..."}
+              disabled={studentState === "loading" || students.length === 0 || !courseId}
+              loading={studentState === "loading"}
+              noOptionsText="No students found"
+            />
             {studentState === "error" && (
               <p className={styles.fieldHint}>Could not load students.</p>
             )}

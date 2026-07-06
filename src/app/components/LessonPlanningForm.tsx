@@ -3,6 +3,8 @@
 import type { RefObject } from "react";
 import TabHeader from "./TabHeader";
 import styles from "../page.module.css";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
 
 type LessonPlanningFormProps = {
   moduleObjectives: string;
@@ -50,10 +52,11 @@ export default function LessonPlanningForm({
       {isCourseEngine && (
         <div className={styles.field}>
           <label htmlFor="moduleTitle">Module Title</label>
-          <input
+          <TextField
             id="moduleTitle"
             type="text"
-            className={styles.textInput}
+            size="small"
+            fullWidth
             placeholder="e.g. Introduction to Python"
             value={moduleTitle}
             onChange={(e) => onModuleTitleChange(e.target.value)}
@@ -67,20 +70,24 @@ export default function LessonPlanningForm({
       )}
       <div className={styles.field}>
         <label htmlFor="moduleObjectives">Module Objectives</label>
-        <textarea
+        <TextField
           id="moduleObjectives"
+          multiline
+          minRows={12}
+          fullWidth
           placeholder="Describe the learning objectives for this module…"
-          style={{ minHeight: "260px" }}
           value={moduleObjectives}
           onChange={(e) => onModuleObjectivesChange(e.target.value)}
         />
       </div>
       <div className={styles.field}>
         <label htmlFor="lessonContext">Context</label>
-        <textarea
+        <TextField
           id="lessonContext"
+          multiline
+          minRows={8}
+          fullWidth
           placeholder="Add any background context, notes, or relevant information…"
-          style={{ minHeight: "180px" }}
           value={lessonContext}
           onChange={(e) => onLessonContextChange(e.target.value)}
         />
@@ -95,10 +102,12 @@ export default function LessonPlanningForm({
       </div>
       <div className={styles.field}>
         <label htmlFor="homeworkAssignment">Homework Assignment (optional)</label>
-        <textarea
+        <TextField
           id="homeworkAssignment"
+          multiline
+          minRows={8}
+          fullWidth
           placeholder="Paste the homework assignment students will complete after this lecture…"
-          style={{ minHeight: "180px" }}
           value={homeworkText}
           onChange={(e) => onHomeworkTextChange(e.target.value)}
         />
@@ -113,14 +122,14 @@ export default function LessonPlanningForm({
         </p>
       </div>
       {lessonError && <p className={styles.error}>{lessonError}</p>}
-      <button
-        type="button"
-        className={styles.submitButton}
+      <Button
+        variant="contained"
+        size="small"
         onClick={onGenerate}
         disabled={isGeneratingLesson}
       >
         {isGeneratingLesson ? "Generating…" : "Generate"}
-      </button>
+      </Button>
     </section>
   );
 }

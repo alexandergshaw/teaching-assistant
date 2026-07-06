@@ -20,6 +20,9 @@ import { resolveDocumentAuthor } from "@/lib/author";
 import { useSupabase } from "@/context/SupabaseProvider";
 import styles from "../page.module.css";
 import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 
 const ZIP_FILE_KEY = "lecture-planning-zip";
 const INTRO_TEMPLATE_KEY = "lecture-planning-intro-template";
@@ -545,15 +548,14 @@ export default function LecturePlanningTab() {
 
       <div className={styles.field}>
         <label htmlFor="lectureDuration">Lecture Duration (minutes)</label>
-        <input
+        <TextField
           id="lectureDuration"
           type="number"
-          min={1}
-          max={300}
+          size="small"
           value={lectureDuration}
           onChange={(e) => setLectureDuration(e.target.value)}
           placeholder="e.g. 50"
-          style={{ maxWidth: 160 }}
+          sx={{ width: 160 }}
         />
       </div>
 
@@ -570,13 +572,14 @@ export default function LecturePlanningTab() {
           {zipFile && (
             <p className={styles.savedFileNote}>
               Saved: <strong>{zipFile.name}</strong>
-              <button
+              <Button
                 type="button"
-                className={styles.clearFileButton}
+                variant="outlined"
+                size="small"
                 onClick={() => handleClearFile(ZIP_FILE_KEY, setZipFile, zipFileRef)}
               >
                 Remove
-              </button>
+              </Button>
             </p>
           )}
           <p>
@@ -592,14 +595,14 @@ export default function LecturePlanningTab() {
             <div style={{ flex: "1 1 220px", minWidth: 0 }}>
               <GithubRepoPicker value={githubRepo} onChange={setGithubRepo} disabled={githubLoading} branch={githubBranch} onBranchChange={setGithubBranch} />
             </div>
-            <button
-              type="button"
-              className={styles.submitButton}
+            <Button
+              variant="contained"
+              size="small"
               onClick={loadRepoFromGithub}
               disabled={githubLoading || !githubRepo.trim()}
             >
               {githubLoading ? "Loading…" : "Load from GitHub"}
-            </button>
+            </Button>
           </div>
           {githubError && <p className={styles.error}>{githubError}</p>}
         </div>
@@ -618,13 +621,14 @@ export default function LecturePlanningTab() {
           {introTemplateFile && (
             <p className={styles.savedFileNote}>
               Saved: <strong>{introTemplateFile.name}</strong>
-              <button
+              <Button
                 type="button"
-                className={styles.clearFileButton}
+                variant="outlined"
+                size="small"
                 onClick={() => handleClearFile(INTRO_TEMPLATE_KEY, setIntroTemplateFile, introTemplateRef)}
               >
                 Remove
-              </button>
+              </Button>
             </p>
           )}
           <p>
@@ -647,13 +651,14 @@ export default function LecturePlanningTab() {
           {instructionsTemplateFile && (
             <p className={styles.savedFileNote}>
               Saved: <strong>{instructionsTemplateFile.name}</strong>
-              <button
+              <Button
                 type="button"
-                className={styles.clearFileButton}
+                variant="outlined"
+                size="small"
                 onClick={() => handleClearFile(INSTRUCTIONS_TEMPLATE_KEY, setInstructionsTemplateFile, instructionsTemplateRef)}
               >
                 Remove
-              </button>
+              </Button>
             </p>
           )}
           <p>
@@ -667,26 +672,15 @@ export default function LecturePlanningTab() {
         <label>Scope</label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {(["all", "single"] as const).map((opt) => (
-            <button
+            <Button
               key={opt}
               type="button"
+              variant={scope === opt ? "contained" : "outlined"}
+              size="small"
               onClick={() => setScope(opt)}
-              style={{
-                padding: "8px 16px",
-                borderRadius: 8,
-                border: scope === opt ? "1px solid var(--accent)" : "1px solid var(--field-border)",
-                background:
-                  scope === opt
-                    ? "color-mix(in srgb, var(--accent) 14%, transparent 86%)"
-                    : "var(--field-background)",
-                color: scope === opt ? "var(--accent)" : "var(--text-secondary)",
-                fontWeight: 600,
-                fontSize: "0.9rem",
-                cursor: "pointer",
-              }}
             >
               {opt === "all" ? "All assignments" : "Single assignment"}
-            </button>
+            </Button>
           ))}
         </div>
         {scope === "single" && (
@@ -698,18 +692,20 @@ export default function LecturePlanningTab() {
             ) : foldersError ? (
               <p className={styles.error}>{foldersError}</p>
             ) : folders.length > 0 ? (
-              <select
+              <TextField
+                select
+                size="small"
                 aria-label="Assignment to generate"
                 value={selectedSlug}
                 onChange={(e) => setSelectedSlug(e.target.value)}
-                style={{ maxWidth: 360 }}
+                sx={{ minWidth: 360 }}
               >
                 {folders.map((f) => (
-                  <option key={f.slug} value={f.slug}>
+                  <MenuItem key={f.slug} value={f.slug}>
                     {f.label}
-                  </option>
+                  </MenuItem>
                 ))}
-              </select>
+              </TextField>
             ) : (
               <p>No assignments found in the zip.</p>
             )}
@@ -719,9 +715,9 @@ export default function LecturePlanningTab() {
 
       {error && <p className={styles.error}>{error}</p>}
 
-      <button
-        type="button"
-        className={styles.submitButton}
+      <Button
+        variant="contained"
+        size="small"
         onClick={handleGenerate}
         disabled={status === "loading" || (scope === "single" && !selectedSlug)}
       >
@@ -730,7 +726,7 @@ export default function LecturePlanningTab() {
           : scope === "single"
             ? "Generate Module"
             : "Generate Lecture Plans"}
-      </button>
+      </Button>
 
       {status === "done" && plans.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 20, marginTop: 8 }}>
@@ -738,15 +734,14 @@ export default function LecturePlanningTab() {
             <p style={{ margin: 0, fontWeight: 600, color: "var(--text-primary)" }}>
               Generated {plans.length} lecture plan{plans.length !== 1 ? "s" : ""}
             </p>
-            <button
-              type="button"
-              className={styles.submitButton}
+            <Button
+              variant="contained"
+              size="small"
               onClick={handleDownloadAll}
               disabled={isDownloading}
-              style={{ width: "auto", padding: "10px 24px" }}
             >
               {isDownloading ? "Building ZIP…" : "Download All as ZIP"}
-            </button>
+            </Button>
           </div>
 
           {(() => {
@@ -843,8 +838,9 @@ export default function LecturePlanningTab() {
                       </span>
                     ))}
                   </div>
-                  <button
-                    type="button"
+                  <Button
+                    variant="outlined"
+                    size="small"
                     onClick={(e) => {
                       e.stopPropagation();
                       regenerateModule(i);
@@ -852,22 +848,14 @@ export default function LecturePlanningTab() {
                     onKeyDown={(e) => e.stopPropagation()}
                     disabled={regeneratingIndex !== null}
                     title="Regenerate this module from the uploaded zip"
-                    style={{
+                    sx={{
                       alignSelf: "flex-start",
-                      marginTop: 4,
-                      padding: "6px 14px",
-                      borderRadius: 8,
-                      border: "1px solid var(--field-border)",
-                      background: "var(--background)",
-                      color: "var(--text-primary)",
-                      fontWeight: 600,
-                      fontSize: "0.8rem",
-                      cursor: regeneratingIndex !== null ? "default" : "pointer",
+                      marginTop: 1,
                       opacity: regeneratingIndex !== null && regeneratingIndex !== i ? 0.5 : 1,
                     }}
                   >
                     {regeneratingIndex === i ? "Regenerating…" : "Regenerate"}
-                  </button>
+                  </Button>
                 </li>
               );
             })}
@@ -903,15 +891,15 @@ export default function LecturePlanningTab() {
         {rubricError && <p className={styles.error}>{rubricError}</p>}
 
         {provider !== "other" && (
-          <button
-            type="button"
-            className={styles.submitButton}
+          <Button
+            variant="contained"
+            size="small"
             onClick={handleGenerateRubric}
             disabled={rubricStatus === "loading"}
-            style={{ marginBottom: 16 }}
+            sx={{ marginBottom: 2 }}
           >
             {rubricStatus === "loading" ? "Generating Rubric…" : "Generate Course Rubric"}
-          </button>
+          </Button>
         )}
 
         {rubricStatus === "done" && generatedRubric && (() => {
@@ -923,20 +911,20 @@ export default function LecturePlanningTab() {
                   Generated rubric — applies to all assignments
                 </span>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    type="button"
-                    className={styles.downloadButton}
+                  <Button
+                    variant="outlined"
+                    size="small"
                     onClick={handleCopyRubric}
                   >
                     {rubricCopied ? "Copied!" : "Copy Rubric"}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.downloadButton}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
                     onClick={handleDownloadRubricCsv}
                   >
                     Download CSV
-                  </button>
+                  </Button>
                 </div>
               </div>
               {rows ? (

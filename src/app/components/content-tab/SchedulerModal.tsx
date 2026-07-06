@@ -4,6 +4,9 @@ import { useState } from "react";
 import { setModuleDueDatesAction } from "../../actions";
 import type { CanvasModule, CanvasModuleItem, DueDateUpdate } from "@/lib/canvas-modules";
 import styles from "../../page.module.css";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 
 // ── Due-date scheduler ───────────────────────────────────────────────────────
 
@@ -128,52 +131,57 @@ export function SchedulerModal({
 
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
           <div className={styles.field} style={{ flex: "1 1 220px" }}>
-            <label htmlFor="sched-anchor">Start from module</label>
-            <select
+            <TextField
               id="sched-anchor"
-              className={styles.textInput}
+              label="Start from module"
+              select
+              size="small"
               value={anchorId}
               onChange={(e) => setAnchorId(Number(e.target.value))}
+              sx={{ minWidth: 160, width: "100%" }}
             >
               {modules.map((m) => (
-                <option key={m.id} value={m.id}>
+                <MenuItem key={m.id} value={m.id}>
                   {m.name}
-                </option>
+                </MenuItem>
               ))}
-            </select>
+            </TextField>
           </div>
           <div className={styles.field} style={{ flex: "1 1 220px" }}>
-            <label htmlFor="sched-first">First due date</label>
-            <input
+            <TextField
               id="sched-first"
+              label="First due date"
               type="datetime-local"
-              className={styles.textInput}
+              size="small"
               value={firstDue}
               onChange={(e) => setFirstDue(e.target.value)}
+              fullWidth
+              slotProps={{ inputLabel: { shrink: true } }}
             />
           </div>
           <div className={styles.field} style={{ flex: "0 0 auto" }}>
-            <label htmlFor="sched-interval">Spacing</label>
+            <label htmlFor="sched-interval" style={{ display: "block", marginBottom: 8 }}>Spacing</label>
             <div style={{ display: "flex", gap: 8 }}>
-              <input
+              <TextField
                 id="sched-interval"
                 type="number"
-                min={1}
-                className={styles.textInput}
-                style={{ width: 80 }}
+                size="small"
                 value={intervalValue}
                 onChange={(e) => setIntervalValue(Number(e.target.value))}
+                slotProps={{ htmlInput: { min: 1 } }}
+                sx={{ width: 80 }}
               />
-              <select
-                className={styles.textInput}
-                style={{ width: 110 }}
+              <TextField
+                select
+                size="small"
                 value={unit}
                 onChange={(e) => setUnit(e.target.value as "weeks" | "days")}
                 aria-label="Interval unit"
+                sx={{ minWidth: 110 }}
               >
-                <option value="weeks">weeks</option>
-                <option value="days">days</option>
-              </select>
+                <MenuItem value="weeks">weeks</MenuItem>
+                <MenuItem value="days">days</MenuItem>
+              </TextField>
             </div>
           </div>
         </div>
@@ -220,14 +228,14 @@ export function SchedulerModal({
         </div>
 
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className={styles.submitButton}
+          <Button
+            variant="contained"
+            size="small"
             onClick={handleApply}
             disabled={applying || totalItems === 0}
           >
             {applying ? "Applying…" : `Apply to ${totalItems} item${totalItems === 1 ? "" : "s"}`}
-          </button>
+          </Button>
           <span className={styles.fieldHint} style={{ margin: 0 }}>
             Writes due dates to Canvas.
           </span>

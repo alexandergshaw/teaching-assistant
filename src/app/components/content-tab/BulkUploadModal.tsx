@@ -4,6 +4,9 @@ import { useState } from "react";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import styles from "../../page.module.css";
 import { bestModuleIdFor, uploadFileToModule } from "./utils";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 
 // ── Bulk upload (match files to modules) ──────────────────────────────────────
 
@@ -146,9 +149,9 @@ export function BulkUploadModal({
                   >
                     {f.name}
                   </span>
-                  <select
-                    className={styles.textInput}
-                    style={{ flex: "0 0 220px", maxWidth: 220 }}
+                  <TextField
+                    select
+                    size="small"
                     value={assign[i]}
                     disabled={uploading}
                     onChange={(e) =>
@@ -156,14 +159,15 @@ export function BulkUploadModal({
                         a.map((v, idx) => (idx === i ? (e.target.value === "" ? "" : Number(e.target.value)) : v))
                       )
                     }
+                    sx={{ flex: "0 0 220px", maxWidth: 220 }}
                   >
-                    <option value="">Skip</option>
+                    <MenuItem value="">Skip</MenuItem>
                     {modules.map((m) => (
-                      <option key={m.id} value={m.id}>
+                      <MenuItem key={m.id} value={m.id}>
                         {m.name}
-                      </option>
+                      </MenuItem>
                     ))}
-                  </select>
+                  </TextField>
                   <span
                     className={styles.fieldHint}
                     style={{ margin: 0, minWidth: 70, color: status[i] === "error" ? "var(--error, #b91c1c)" : undefined }}
@@ -183,14 +187,14 @@ export function BulkUploadModal({
         )}
 
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className={styles.submitButton}
+          <Button
+            variant="contained"
+            size="small"
             onClick={handleApply}
             disabled={uploading || matchedCount === 0}
           >
             {uploading ? "Uploading…" : `Upload ${matchedCount} file${matchedCount === 1 ? "" : "s"}`}
-          </button>
+          </Button>
         </div>
 
         {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}

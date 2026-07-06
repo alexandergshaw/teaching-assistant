@@ -4,6 +4,8 @@ import { useState } from "react";
 import { updateModuleAction } from "../../actions";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import styles from "../../page.module.css";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
 
 // ── Rename modules (find / replace) ───────────────────────────────────────────
 
@@ -75,25 +77,27 @@ export function RenameModulesModal({
 
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
           <div className={styles.field} style={{ flex: "1 1 200px" }}>
-            <label htmlFor="rename-find">Find</label>
-            <input
+            <TextField
               id="rename-find"
+              label="Find"
               type="text"
-              className={styles.textInput}
+              size="small"
               placeholder="Module"
               value={find}
               onChange={(e) => setFind(e.target.value)}
+              fullWidth
             />
           </div>
           <div className={styles.field} style={{ flex: "1 1 200px" }}>
-            <label htmlFor="rename-replace">Replace with</label>
-            <input
+            <TextField
               id="rename-replace"
+              label="Replace with"
               type="text"
-              className={styles.textInput}
+              size="small"
               placeholder="Week"
               value={replace}
               onChange={(e) => setReplace(e.target.value)}
+              fullWidth
             />
           </div>
         </div>
@@ -135,14 +139,14 @@ export function RenameModulesModal({
         </div>
 
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className={styles.submitButton}
+          <Button
+            variant="contained"
+            size="small"
             onClick={handleApply}
             disabled={applying || !find || changed.length === 0}
           >
             {applying ? "Renaming…" : `Rename ${changed.length} module${changed.length === 1 ? "" : "s"}`}
-          </button>
+          </Button>
           <span className={styles.fieldHint} style={{ margin: 0 }}>
             Writes module names to Canvas.
           </span>

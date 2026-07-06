@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import Button from "@mui/material/Button";
 import {
   listCourseContentAction,
   listAddableContentAction,
@@ -298,37 +299,37 @@ export default function ContentTab({
               <div className={styles.ccBar} style={{ padding: 0 }}>
                 <div className={styles.ccBarGroup}>
                   <span className={styles.ccBarLabel}>Course copy</span>
-                  <button
-                    type="button"
-                    className={styles.ccBarBtn}
+                  <Button
+                    variant="outlined"
+                    size="small"
                     onClick={() => setCopyMode("export")}
                     disabled={!courseId}
                     title="Copy this course's content into other courses"
                   >
                     Copy to…
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.ccBarBtn}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
                     onClick={() => setCopyMode("import")}
                     disabled={!courseId}
                     title="Import another course's content into this one"
                   >
                     Import from…
-                  </button>
+                  </Button>
                 </div>
 
                 <span className={styles.ccBarDivider} aria-hidden="true" />
 
-                <button
-                  type="button"
-                  className={styles.ccBarBtn}
+                <Button
+                  variant="outlined"
+                  size="small"
                   onClick={reload}
                   disabled={busy || loadState.status === "loading"}
                   title="Reload this course's content"
                 >
                   {loadState.status === "loading" ? "Refreshing…" : "Refresh"}
-                </button>
+                </Button>
               </div>
             </div>
           )}

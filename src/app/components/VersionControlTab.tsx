@@ -32,6 +32,7 @@ export default function VersionControlTab() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<StudentRepoResult[] | null>(null);
+  const [subTab, setSubTab] = useState<"orgs" | "repos">("orgs");
   // Create a repo with a Copilot prompt in the selected org.
   const [copilotName, setCopilotName] = useState("");
   const [copilotPrompt, setCopilotPrompt] = useState("");
@@ -173,185 +174,210 @@ export default function VersionControlTab() {
         subtitle="Generate per-student repos from a template, manage your organization's members and rules, and configure your own repositories."
       />
 
-      <div className={styles.field}>
-        <label>Organization</label>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <select
-            value={selectedOrg}
-            onChange={(e) => setSelectedOrg(e.target.value)}
-            disabled={busy || orgsState === "loading"}
-            className={styles.textInput}
-            style={{ flex: "1 1 220px" }}
-          >
-            <option value="">{orgsState === "loading" ? "Loading organizations…" : "Choose an organization…"}</option>
-            {orgs.map((o) => (
-              <option key={o} value={o}>
-                {o}
-              </option>
-            ))}
-          </select>
-          <a href="https://github.com/account/organizations/new" target="_blank" rel="noreferrer" style={{ fontSize: "0.82rem" }}>
-            Create org on GitHub
-          </a>
-          <button
-            type="button"
-            onClick={() => void refreshOrgs()}
-            disabled={busy}
-            style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "6px 10px", fontSize: "0.8rem", color: "#334155", cursor: "pointer" }}
-          >
-            Refresh
-          </button>
-        </div>
-        {orgsState === "ready" && orgs.length === 0 && (
-          <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 4 }}>
-            Your token doesn&apos;t own any organizations. Create one on GitHub (link above), then hit Refresh.
-          </p>
-        )}
-      </div>
-
-      <div className={styles.field} style={{ border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 10, padding: 12 }}>
-        <label>Create a repo with a Copilot prompt{selectedOrg ? ` in ${selectedOrg}` : ""}</label>
-        <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 8px" }}>
-          Creates a repo in the selected org and commits the prompt to <code>.github/copilot-instructions.md</code>. Mark it a
-          template to use it as the source above.
-        </p>
-        <input
-          type="text"
-          className={styles.textInput}
-          placeholder="Repository name"
-          value={copilotName}
-          onChange={(e) => setCopilotName(e.target.value)}
-          disabled={copilotBusy}
-        />
-        <textarea
-          className={styles.textInput}
-          rows={6}
-          placeholder="Paste the GitHub Copilot prompt to seed the repo with…"
-          value={copilotPrompt}
-          onChange={(e) => setCopilotPrompt(e.target.value)}
-          disabled={copilotBusy}
-          style={{ marginTop: 8, fontFamily: "monospace", fontSize: "0.85rem" }}
-        />
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-            <input type="checkbox" checked={copilotPrivate} onChange={(e) => setCopilotPrivate(e.target.checked)} disabled={copilotBusy} />
-            Private
-          </label>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-            <input type="checkbox" checked={copilotTemplate} onChange={(e) => setCopilotTemplate(e.target.checked)} disabled={copilotBusy} />
-            Template
-          </label>
-          <button type="button" className={styles.submitButton} onClick={createWithCopilot} disabled={copilotBusy || !selectedOrg}>
-            {copilotBusy ? "Creating…" : "Create repo"}
-          </button>
-        </div>
-        {copilotError && <p className={styles.error}>{copilotError}</p>}
-        {copilotResult && (
-          <p style={{ fontSize: "0.85rem", marginTop: 8 }}>
-            Created{" "}
-            <a href={copilotResult.htmlUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>
-              {copilotResult.fullName}
-            </a>
-            {copilotTemplate ? " — now selectable as a template below." : "."}
-          </p>
-        )}
-      </div>
-
-      <div className={styles.field}>
-        <label>Template repository</label>
-        <select
-          value={templateRepo}
-          onChange={(e) => setTemplateRepo(e.target.value)}
-          disabled={busy || !selectedOrg || reposLoading}
-          className={styles.textInput}
+      <div className={styles.lessonInnerTabs} role="tablist" aria-label="Version control sections" style={{ marginBottom: 4 }}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subTab === "orgs"}
+          className={`${styles.lessonInnerTab}${subTab === "orgs" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+          onClick={() => setSubTab("orgs")}
         >
-          <option value="">{reposLoading ? "Loading repositories…" : !selectedOrg ? "Choose an organization first" : "Choose a template repo…"}</option>
-          {templateOptions.map((r) => (
-            <option key={r.fullName} value={r.name}>
-              {r.name}
-              {r.isTemplate ? " (template)" : ""}
-            </option>
-          ))}
-        </select>
-        {selectedOrg && !reposLoading && templates.length === 0 && repos.length > 0 && (
-          <p style={{ fontSize: "0.8rem", color: "#d97706", marginTop: 4 }}>
-            No template repositories found in this org. Mark a repo as a template (Settings → Template repository), or
-            select one below — generation will fail if it isn&apos;t a template.
-          </p>
-        )}
+          <span className={styles.tabLabelWrap}>Orgs</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subTab === "repos"}
+          className={`${styles.lessonInnerTab}${subTab === "repos" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+          onClick={() => setSubTab("repos")}
+        >
+          <span className={styles.tabLabelWrap}>Repos</span>
+        </button>
       </div>
 
-      <div className={styles.field}>
-        <label htmlFor="vc-prefix">Repository name prefix (optional)</label>
-        <input
-          id="vc-prefix"
-          type="text"
-          className={styles.textInput}
-          placeholder="e.g. project1 — repos become project1-<student>"
-          value={prefix}
-          onChange={(e) => setPrefix(e.target.value)}
-          disabled={busy}
-        />
-      </div>
-
-      <div className={styles.field}>
-        <label htmlFor="vc-students">Students (one per line)</label>
-        <textarea
-          id="vc-students"
-          className={styles.textInput}
-          rows={8}
-          placeholder={"jsmith\nadoe\nmlee"}
-          value={studentsText}
-          onChange={(e) => setStudentsText(e.target.value)}
-          disabled={busy}
-          style={{ fontFamily: "monospace" }}
-        />
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: 6 }}>
-          <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} disabled={busy} />
-          Private repositories
-        </label>
-      </div>
-
-      <button type="button" className={styles.submitButton} onClick={generate} disabled={busy || !selectedOrg || !templateRepo || students.length === 0}>
-        {busy ? `Generating ${students.length} repo${students.length === 1 ? "" : "s"}…` : `Generate ${students.length || ""} repo${students.length === 1 ? "" : "s"}`.trim()}
-      </button>
-
-      {error && <p className={styles.error}>{error}</p>}
-
-      {results && (
-        <div className={styles.field}>
-          <label>Results</label>
-          <div style={{ border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8 }}>
-            {results.map((r, i) => (
-              <div
-                key={r.name}
-                style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 10px", borderTop: i === 0 ? "none" : "1px solid #f1f5f9" }}
+      {subTab === "orgs" && (
+        <>
+          <div className={styles.field}>
+            <label>Organization</label>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <select
+                value={selectedOrg}
+                onChange={(e) => setSelectedOrg(e.target.value)}
+                disabled={busy || orgsState === "loading"}
+                className={styles.textInput}
+                style={{ flex: "1 1 220px" }}
               >
-                <span style={{ flex: "1 1 200px", minWidth: 0, fontSize: "0.88rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {r.student} → <code>{r.name}</code>
-                </span>
-                {r.error ? (
-                  <span style={{ color: "#dc2626", fontSize: "0.82rem" }}>{r.error}</span>
-                ) : (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.82rem" }}>
-                    <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: "#16a34a" }} />
-                    <strong style={{ color: "#16a34a" }}>Created</strong>
-                    {r.htmlUrl && (
-                      <a href={r.htmlUrl} target="_blank" rel="noreferrer">
-                        open
-                      </a>
-                    )}
-                  </span>
-                )}
-              </div>
-            ))}
+                <option value="">{orgsState === "loading" ? "Loading organizations…" : "Choose an organization…"}</option>
+                {orgs.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+              <a href="https://github.com/account/organizations/new" target="_blank" rel="noreferrer" style={{ fontSize: "0.82rem" }}>
+                Create org on GitHub
+              </a>
+              <button
+                type="button"
+                onClick={() => void refreshOrgs()}
+                disabled={busy}
+                style={{ border: "1px solid var(--field-border, #cbd5e1)", background: "#fff", borderRadius: 8, padding: "6px 10px", fontSize: "0.8rem", color: "#334155", cursor: "pointer" }}
+              >
+                Refresh
+              </button>
+            </div>
+            {orgsState === "ready" && orgs.length === 0 && (
+              <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 4 }}>
+                Your token doesn&apos;t own any organizations. Create one on GitHub (link above), then hit Refresh.
+              </p>
+            )}
           </div>
-        </div>
+
+          <div className={styles.field} style={{ border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 10, padding: 12 }}>
+            <label>Create a repo with a Copilot prompt{selectedOrg ? ` in ${selectedOrg}` : ""}</label>
+            <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 8px" }}>
+              Creates a repo in the selected org and commits the prompt to <code>.github/copilot-instructions.md</code>. Mark it a
+              template to use it as the source above.
+            </p>
+            <input
+              type="text"
+              className={styles.textInput}
+              placeholder="Repository name"
+              value={copilotName}
+              onChange={(e) => setCopilotName(e.target.value)}
+              disabled={copilotBusy}
+            />
+            <textarea
+              className={styles.textInput}
+              rows={6}
+              placeholder="Paste the GitHub Copilot prompt to seed the repo with…"
+              value={copilotPrompt}
+              onChange={(e) => setCopilotPrompt(e.target.value)}
+              disabled={copilotBusy}
+              style={{ marginTop: 8, fontFamily: "monospace", fontSize: "0.85rem" }}
+            />
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                <input type="checkbox" checked={copilotPrivate} onChange={(e) => setCopilotPrivate(e.target.checked)} disabled={copilotBusy} />
+                Private
+              </label>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                <input type="checkbox" checked={copilotTemplate} onChange={(e) => setCopilotTemplate(e.target.checked)} disabled={copilotBusy} />
+                Template
+              </label>
+              <button type="button" className={styles.submitButton} onClick={createWithCopilot} disabled={copilotBusy || !selectedOrg}>
+                {copilotBusy ? "Creating…" : "Create repo"}
+              </button>
+            </div>
+            {copilotError && <p className={styles.error}>{copilotError}</p>}
+            {copilotResult && (
+              <p style={{ fontSize: "0.85rem", marginTop: 8 }}>
+                Created{" "}
+                <a href={copilotResult.htmlUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>
+                  {copilotResult.fullName}
+                </a>
+                {copilotTemplate ? " — now selectable as a template below." : "."}
+              </p>
+            )}
+          </div>
+
+          <div className={styles.field}>
+            <label>Template repository</label>
+            <select
+              value={templateRepo}
+              onChange={(e) => setTemplateRepo(e.target.value)}
+              disabled={busy || !selectedOrg || reposLoading}
+              className={styles.textInput}
+            >
+              <option value="">{reposLoading ? "Loading repositories…" : !selectedOrg ? "Choose an organization first" : "Choose a template repo…"}</option>
+              {templateOptions.map((r) => (
+                <option key={r.fullName} value={r.name}>
+                  {r.name}
+                  {r.isTemplate ? " (template)" : ""}
+                </option>
+              ))}
+            </select>
+            {selectedOrg && !reposLoading && templates.length === 0 && repos.length > 0 && (
+              <p style={{ fontSize: "0.8rem", color: "#d97706", marginTop: 4 }}>
+                No template repositories found in this org. Mark a repo as a template (Settings → Template repository), or
+                select one below — generation will fail if it isn&apos;t a template.
+              </p>
+            )}
+          </div>
+
+          <div className={styles.field}>
+            <label htmlFor="vc-prefix">Repository name prefix (optional)</label>
+            <input
+              id="vc-prefix"
+              type="text"
+              className={styles.textInput}
+              placeholder="e.g. project1 — repos become project1-<student>"
+              value={prefix}
+              onChange={(e) => setPrefix(e.target.value)}
+              disabled={busy}
+            />
+          </div>
+
+          <div className={styles.field}>
+            <label htmlFor="vc-students">Students (one per line)</label>
+            <textarea
+              id="vc-students"
+              className={styles.textInput}
+              rows={8}
+              placeholder={"jsmith\nadoe\nmlee"}
+              value={studentsText}
+              onChange={(e) => setStudentsText(e.target.value)}
+              disabled={busy}
+              style={{ fontFamily: "monospace" }}
+            />
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: 6 }}>
+              <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} disabled={busy} />
+              Private repositories
+            </label>
+          </div>
+
+          <button type="button" className={styles.submitButton} onClick={generate} disabled={busy || !selectedOrg || !templateRepo || students.length === 0}>
+            {busy ? `Generating ${students.length} repo${students.length === 1 ? "" : "s"}…` : `Generate ${students.length || ""} repo${students.length === 1 ? "" : "s"}`.trim()}
+          </button>
+
+          {error && <p className={styles.error}>{error}</p>}
+
+          {results && (
+            <div className={styles.field}>
+              <label>Results</label>
+              <div style={{ border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8 }}>
+                {results.map((r, i) => (
+                  <div
+                    key={r.name}
+                    style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 10px", borderTop: i === 0 ? "none" : "1px solid #f1f5f9" }}
+                  >
+                    <span style={{ flex: "1 1 200px", minWidth: 0, fontSize: "0.88rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.student} → <code>{r.name}</code>
+                    </span>
+                    {r.error ? (
+                      <span style={{ color: "#dc2626", fontSize: "0.82rem" }}>{r.error}</span>
+                    ) : (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.82rem" }}>
+                        <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: "#16a34a" }} />
+                        <strong style={{ color: "#16a34a" }}>Created</strong>
+                        {r.htmlUrl && (
+                          <a href={r.htmlUrl} target="_blank" rel="noreferrer">
+                            open
+                          </a>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selectedOrg && <OrgManagementPanel org={selectedOrg} repos={repos} />}
+        </>
       )}
 
-      {selectedOrg && <OrgManagementPanel org={selectedOrg} repos={repos} />}
-
-      <RepoSettingsPanel />
+      {subTab === "repos" && <RepoSettingsPanel />}
     </div>
   );
 }

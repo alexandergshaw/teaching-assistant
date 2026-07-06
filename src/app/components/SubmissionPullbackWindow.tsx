@@ -314,33 +314,28 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
   if (institutions.length === 0) {
     return (
       <div
+        className={styles.selectionChatWindow}
         style={{
-          position: "fixed",
           top: 12,
           right: 12,
-          zIndex: 9998,
+          left: "auto",
           width: size.width,
           height: size.height,
-          background: "var(--card-background)",
-          border: "1px solid var(--card-border)",
-          borderRadius: 12,
-          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
+          resize: "none",
         }}
       >
-        <div className={styles.previewHeader}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <span className={styles.eyebrow} style={{ fontSize: "0.7rem" }}>Pull back</span>
-            <h3 style={{ margin: 0 }}>Student submission</h3>
+        <div className={styles.selectionChatHeader} style={{ cursor: "default" }}>
+          <div className={styles.selectionChatHeaderLeft}>
+            <PullbackIcon />
+            <span>Pull back submission</span>
           </div>
           <button
             type="button"
-            className={styles.previewCloseButton}
+            className={styles.selectionChatClose}
             onClick={onClose}
+            aria-label="Close"
           >
-            Close
+            ×
           </button>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
@@ -355,33 +350,28 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
   return (
     <>
       <div
+        className={styles.selectionChatWindow}
         style={{
-          position: "fixed",
           top: 12,
           right: 12,
-          zIndex: 9998,
+          left: "auto",
           width: size.width,
           height: size.height,
-          background: "var(--card-background)",
-          border: "1px solid var(--card-border)",
-          borderRadius: 12,
-          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
+          resize: "none",
         }}
       >
-        <div className={styles.previewHeader}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <span className={styles.eyebrow} style={{ fontSize: "0.7rem" }}>Pull back</span>
-            <h3 style={{ margin: 0 }}>Student submission</h3>
+        <div className={styles.selectionChatHeader} style={{ cursor: "default" }}>
+          <div className={styles.selectionChatHeaderLeft}>
+            <PullbackIcon />
+            <span>Pull back submission</span>
           </div>
           <button
             type="button"
-            className={styles.previewCloseButton}
+            className={styles.selectionChatClose}
             onClick={onClose}
+            aria-label="Close"
           >
-            Close
+            ×
           </button>
         </div>
 
@@ -710,5 +700,13 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
         />
       )}
     </>
+  );
+}
+
+function PullbackIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+    </svg>
   );
 }

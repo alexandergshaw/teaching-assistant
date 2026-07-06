@@ -5,6 +5,7 @@ import SpeedDialAction from "@mui/material/SpeedDialAction";
 import SpeedDialIcon from "@mui/material/SpeedDialIcon";
 import AiChatWindow from "./AiChatWindow";
 import DeadlinesWindow from "./DeadlinesWindow";
+import SubmissionPullbackWindow from "./SubmissionPullbackWindow";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
 import type { ChatMessage } from "@/lib/chat/types";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -51,6 +52,7 @@ export default function AiChatFab() {
   // Restore open/closed state from localStorage.
   const [chatOpen, setChatOpen] = useState<boolean>(() => readLS("chat-open", false));
   const [deadlinesOpen, setDeadlinesOpen] = useState<boolean>(() => readLS("deadlines-open", false));
+  const [pullbackOpen, setPullbackOpen] = useState<boolean>(() => readLS("pullback-open", false));
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -102,6 +104,7 @@ export default function AiChatFab() {
   // Persist open/closed state to localStorage whenever it changes.
   useEffect(() => { writeLS("chat-open", chatOpen); }, [chatOpen]);
   useEffect(() => { writeLS("deadlines-open", deadlinesOpen); }, [deadlinesOpen]);
+  useEffect(() => { writeLS("pullback-open", pullbackOpen); }, [pullbackOpen]);
 
   // Persist position to localStorage whenever it changes.
   useEffect(() => { writeLS("chat-pos", chatPos); }, [chatPos]);
@@ -258,6 +261,14 @@ export default function AiChatFab() {
             }
           }}
         />
+        <SpeedDialAction
+          icon={<PullbackIcon />}
+          title="Pull back submission"
+          onClick={() => {
+            setDialOpen(false);
+            setPullbackOpen((v) => !v);
+          }}
+        />
       </SpeedDial>
 
       {chatOpen && (
@@ -283,6 +294,12 @@ export default function AiChatFab() {
           onClose={() => setDeadlinesOpen(false)}
         />
       )}
+
+      {pullbackOpen && (
+        <SubmissionPullbackWindow
+          onClose={() => setPullbackOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -303,6 +320,14 @@ function CalendarIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
       <path d="M19 4h-1V2h-2v2H8V2H6v2H5C3.89 2 3 2.9 3 4v16c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 18H5V8h14v14z" />
       <path d="M7 10h5v5H7z" />
+    </svg>
+  );
+}
+
+function PullbackIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
     </svg>
   );
 }

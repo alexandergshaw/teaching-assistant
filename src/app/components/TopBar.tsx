@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import TextField from "@mui/material/TextField";
 import ProviderToggle from "./ProviderToggle";
 import { useAccessibility } from "./AccessibilityProvider";
 import { useSupabase } from "@/context/SupabaseProvider";
@@ -49,9 +52,8 @@ function InstitutionsSection({ open }: { open: boolean }) {
     <div className={styles.menuSection}>
       <span className={styles.menuLabel}>Institutions</span>
       <div className={styles.instAddRow}>
-        <input
-          type="text"
-          className={styles.instInput}
+        <TextField
+          size="small"
           placeholder="Add acronym (e.g. MCC)"
           value={newAcronym}
           onChange={(e) => setNewAcronym(e.target.value)}
@@ -61,15 +63,16 @@ function InstitutionsSection({ open }: { open: boolean }) {
               addInstitution();
             }
           }}
+          sx={{ flex: 1 }}
         />
-        <button
-          type="button"
-          className={styles.instAddBtn}
+        <Button
+          variant="outlined"
+          size="small"
           onClick={addInstitution}
           disabled={!newAcronym.trim()}
         >
           Add
-        </button>
+        </Button>
       </div>
       {institutions.length === 0 ? (
         <span className={styles.menuHint}>
@@ -92,15 +95,14 @@ function InstitutionsSection({ open }: { open: boolean }) {
                 >
                   {st ? (st.canvasConfigured ? "Ready" : "Set env") : "…"}
                 </span>
-                <button
-                  type="button"
-                  className={styles.instRemove}
+                <IconButton
+                  size="small"
                   aria-label={`Remove ${code}`}
                   title="Remove"
                   onClick={() => writeInstitutions(institutions.filter((c) => c !== code))}
                 >
                   ×
-                </button>
+                </IconButton>
               </li>
             );
           })}
@@ -131,24 +133,28 @@ function AccessibilityPill() {
   const color = a11y.errorCount > 0 ? "#dc2626" : a11y.warningCount > 0 ? "#d97706" : "#16a34a";
   const label = scanning && issues === 0 ? "Scanning accessibility" : `${issues} accessibility issue${issues === 1 ? "" : "s"}`;
   return (
-    <button
-      type="button"
+    <Button
       onClick={() => a11y.setCenterOpen(true)}
       title={label}
       aria-label={label}
-      style={{
+      variant="outlined"
+      size="small"
+      sx={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 6,
+        gap: 0.75,
         height: 34,
         padding: "0 11px",
-        borderRadius: 9,
+        borderRadius: 1.125,
         border: "1px solid var(--field-border, #cbd5e1)",
         background: "#fff",
         color: "#334155",
         fontSize: "0.85rem",
         fontWeight: 600,
-        cursor: "pointer",
+        textTransform: "none",
+        "&:hover": {
+          backgroundColor: "#f8f9fa",
+        },
       }}
     >
       <AccessIcon color={color} />
@@ -159,7 +165,7 @@ function AccessibilityPill() {
       ) : (
         <span style={{ color: "#16a34a" }}>OK</span>
       )}
-    </button>
+    </Button>
   );
 }
 
@@ -231,16 +237,17 @@ function SettingsMenu() {
 
   return (
     <div className={styles.settings} ref={ref}>
-      <button
-        type="button"
-        className={styles.settingsButton}
+      <Button
+        variant="outlined"
+        size="small"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((prev) => !prev)}
+        sx={{ textTransform: "none" }}
       >
         <GearIcon />
         Settings
-      </button>
+      </Button>
       {open && (
         <div className={styles.menu} role="menu">
           <div className={styles.menuSection}>
@@ -298,9 +305,9 @@ export default function TopBar() {
         <AccessibilityPill />
         <SettingsMenu />
         {user && (
-          <button type="button" className={styles.signout} onClick={handleSignOut}>
+          <Button variant="outlined" size="small" onClick={handleSignOut} sx={{ textTransform: "none" }}>
             Sign out
-          </button>
+          </Button>
         )}
       </nav>
     </header>

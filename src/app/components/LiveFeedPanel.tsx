@@ -1,6 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import {
   listGradingQueueAction,
   listGradingDismissalsAction,
@@ -367,12 +372,22 @@ export default function LiveFeedPanel({
             <a href={row.speedGraderUrl} target="_blank" rel="noopener noreferrer" className={styles.lfLink}>
               SpeedGrader
             </a>
-            <button type="button" className={styles.lfLink} onClick={() => markSeen(row, !seen.has(row.assignmentId))}>
+            <Button
+              variant="text"
+              size="small"
+              onClick={() => markSeen(row, !seen.has(row.assignmentId))}
+              sx={{ textTransform: "none", color: "inherit" }}
+            >
               {seen.has(row.assignmentId) ? "Unmark seen" : "Mark seen"}
-            </button>
-            <button type="button" className={styles.lfLink} onClick={() => setWatched(row.courseId, isUnwatched)}>
+            </Button>
+            <Button
+              variant="text"
+              size="small"
+              onClick={() => setWatched(row.courseId, isUnwatched)}
+              sx={{ textTransform: "none", color: "inherit" }}
+            >
               {isUnwatched ? "Resume watching course" : "Stop watching course"}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -406,12 +421,12 @@ export default function LiveFeedPanel({
               onPosted={onPosted}
             />
             <div className={styles.lfFooter}>
-              <button type="button" className={styles.submitButton} onClick={handlePostAndNext}>
+              <Button variant="contained" size="small" onClick={handlePostAndNext} sx={{ textTransform: "none" }}>
                 Post &amp; next
-              </button>
-              <button type="button" className={styles.downloadButton} onClick={() => advance(inSequence)}>
+              </Button>
+              <Button variant="outlined" size="small" onClick={() => advance(inSequence)} sx={{ textTransform: "none" }}>
                 {inSequence ? "Skip to next" : "Next item"}
-              </button>
+              </Button>
               {inSequence && (
                 <span className={styles.lfSeq}>
                   Sequence: {(sequence?.indexOf(selectedKey ?? "") ?? 0) + 1} of {sequence?.length}
@@ -424,15 +439,15 @@ export default function LiveFeedPanel({
             <p className={styles.emptyState} style={{ margin: 0 }}>
               No submissions were found to grade for this item.
             </p>
-            <button type="button" className={styles.downloadButton} onClick={() => advance(inSequence)}>
+            <Button variant="outlined" size="small" onClick={() => advance(inSequence)} sx={{ textTransform: "none" }}>
               {inSequence ? "Skip to next" : "Next item"}
-            </button>
+            </Button>
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>
-            <button type="button" className={styles.submitButton} onClick={() => onAutoGrade(row)} disabled={pending}>
+            <Button variant="contained" size="small" onClick={() => onAutoGrade(row)} disabled={pending} sx={{ textTransform: "none" }}>
               {pending ? "Grading…" : "Auto Grade"}
-            </button>
+            </Button>
             <p className={styles.fieldHint} style={{ margin: 0 }}>
               Runs the {graderLabel} on every submission, then shows the editable results here to post back
               to Canvas.
@@ -452,21 +467,28 @@ export default function LiveFeedPanel({
             <div className={styles.lfRailHeader}>
               <h2>Needs grading</h2>
               <div className={styles.lfRailHeaderActions}>
-                <label className={styles.lfRailHint}>
-                  <input type="checkbox" checked={autoRefresh} onChange={toggleAutoRefresh} />
-                  Auto-refresh
-                </label>
-                <button
-                  type="button"
-                  className={styles.lfGhostBtn}
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={autoRefresh}
+                      onChange={toggleAutoRefresh}
+                    />
+                  }
+                  label="Auto-refresh"
+                />
+                <Button
+                  variant="outlined"
+                  size="small"
                   onClick={() => {
                     void loadQueue(active);
                     refreshCounts();
                   }}
                   disabled={queueState.status === "loading"}
+                  sx={{ textTransform: "none" }}
                 >
                   {queueState.status === "loading" ? "Refreshing…" : "Refresh"}
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -496,12 +518,13 @@ export default function LiveFeedPanel({
 
             {rows.length > 0 && (
               <>
-                <input
-                  type="search"
-                  className={styles.lfSearch}
+                <TextField
+                  size="small"
                   placeholder="Search assignment or course"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
+                  fullWidth
+                  sx={{ mb: 1.5 }}
                 />
                 <div className={styles.lfChips}>
                   <Chip
@@ -525,16 +548,18 @@ export default function LiveFeedPanel({
                   <Chip active={kindFilter === "discussion"} onClick={() => setKindFilter(kindFilter === "discussion" ? "all" : "discussion")}>
                     Discussions
                   </Chip>
-                  <select
-                    className={styles.lfSort}
+                  <TextField
+                    select
+                    size="small"
                     value={sort}
                     onChange={(e) => setSort(e.target.value as QueueSort)}
                     aria-label="Sort"
+                    sx={{ minWidth: 160 }}
                   >
-                    <option value="due">Sort: due soonest</option>
-                    <option value="count">Sort: most needing grading</option>
-                    <option value="course">Sort: course</option>
-                  </select>
+                    <MenuItem value="due">Sort: due soonest</MenuItem>
+                    <MenuItem value="count">Sort: most needing grading</MenuItem>
+                    <MenuItem value="course">Sort: course</MenuItem>
+                  </TextField>
                   {hiddenCount > 0 && (
                     <Chip active={showHidden} onClick={() => setShowHidden((v) => !v)}>
                       Hidden ({hiddenCount})
@@ -547,15 +572,15 @@ export default function LiveFeedPanel({
             {bulk.size > 0 && (
               <div className={styles.lfBulkBar}>
                 <span className={styles.lfBulkCount}>{bulk.size} selected</span>
-                <button type="button" className={styles.lfGradeBtn} onClick={startSequence}>
+                <Button variant="contained" size="small" onClick={startSequence} sx={{ textTransform: "none" }}>
                   Grade in sequence
-                </button>
-                <button type="button" className={styles.lfGhostBtn} onClick={() => void bulkMarkSeen()}>
+                </Button>
+                <Button variant="outlined" size="small" onClick={() => void bulkMarkSeen()} sx={{ textTransform: "none" }}>
                   Mark seen
-                </button>
-                <button type="button" className={styles.lfGhostBtn} onClick={() => setBulk(new Set())}>
+                </Button>
+                <Button variant="outlined" size="small" onClick={() => setBulk(new Set())} sx={{ textTransform: "none" }}>
                   Clear
-                </button>
+                </Button>
               </div>
             )}
 
@@ -599,9 +624,8 @@ export default function LiveFeedPanel({
                       }}
                       className={`${styles.lfCard}${selected ? ` ${styles.lfCardSelected}` : ""}`}
                     >
-                      <input
-                        type="checkbox"
-                        className={styles.lfCheckbox}
+                      <Checkbox
+                        size="small"
                         checked={bulk.has(key)}
                         onClick={(e) => e.stopPropagation()}
                         onChange={() => toggleBulk(key)}
@@ -622,18 +646,19 @@ export default function LiveFeedPanel({
                           <span>{row.needsGradingCount} to grade</span>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        className={styles.lfGradeBtn}
+                      <Button
+                        variant="contained"
+                        size="small"
                         onClick={(e) => {
                           e.stopPropagation();
                           selectRow(key);
                           onAutoGrade(row);
                         }}
                         disabled={pending}
+                        sx={{ textTransform: "none" }}
                       >
                         {isRowGrading ? "Grading…" : "Grade"}
-                      </button>
+                      </Button>
                     </div>
                   );
                 })}

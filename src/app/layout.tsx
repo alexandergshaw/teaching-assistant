@@ -6,6 +6,7 @@ import ContextMenu from "./components/ContextMenu";
 import { InstitutionCountsProvider } from "./components/InstitutionCounts";
 import { AccessibilityProvider } from "./components/AccessibilityProvider";
 import { SupabaseProvider } from "@/context/SupabaseProvider";
+import AppThemeProvider from "./components/AppThemeProvider";
 
 export const metadata: Metadata = {
   title: "Teaching Assistant",
@@ -20,14 +21,16 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <SupabaseProvider>
-          <InstitutionCountsProvider>
-            <AccessibilityProvider>{children}</AccessibilityProvider>
-          </InstitutionCountsProvider>
-          <SelectionChatWidget />
-          <AiChatFab />
-          <ContextMenu />
-        </SupabaseProvider>
+        <AppThemeProvider>
+          <SupabaseProvider>
+            <InstitutionCountsProvider>
+              <AccessibilityProvider>{children}</AccessibilityProvider>
+            </InstitutionCountsProvider>
+            <SelectionChatWidget />
+            <AiChatFab />
+            <ContextMenu />
+          </SupabaseProvider>
+        </AppThemeProvider>
       </body>
     </html>
   );

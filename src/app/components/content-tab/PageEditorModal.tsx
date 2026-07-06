@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import { getPageAction, revisePageWithAiAction, createPageAction, updatePageAction, deletePageAction } from "../../actions";
 import type { LlmProvider } from "@/lib/llm";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import styles from "../../page.module.css";
 import { previewDoc } from "./utils";
 
@@ -142,40 +146,44 @@ export function PageEditorModal({
         ) : (
           <>
             <div className={styles.field}>
-              <label htmlFor="content-page-title">Title</label>
-              <input
+              <TextField
                 id="content-page-title"
                 type="text"
-                className={styles.textInput}
+                size="small"
+                fullWidth
                 placeholder="Page title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
+                label="Title"
               />
             </div>
 
             <div className={styles.field}>
-              <label htmlFor="content-page-ai">Revise with AI (optional)</label>
-              <input
+              <TextField
                 id="content-page-ai"
                 type="text"
-                className={styles.textInput}
+                size="small"
+                fullWidth
                 placeholder="e.g. fix typos, add a section on submission steps, update the due date to Friday"
                 value={aiInstr}
                 onChange={(e) => setAiInstr(e.target.value)}
+                label="Revise with AI (optional)"
               />
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-                <button
+                <Button
                   type="button"
-                  className={styles.downloadButton}
+                  variant="outlined"
+                  size="small"
                   onClick={handleRevise}
                   disabled={aiBusy || !aiInstr.trim()}
                 >
                   {aiBusy ? "Revising…" : "Revise with AI"}
-                </button>
+                </Button>
                 {bodyBeforeAi !== null && (
-                  <button
+                  <Button
                     type="button"
-                    className={styles.clearFileButton}
+                    variant="outlined"
+                    size="small"
                     onClick={() => {
                       setBody(bodyBeforeAi);
                       setBodyBeforeAi(null);
@@ -183,7 +191,7 @@ export function PageEditorModal({
                     }}
                   >
                     Undo AI change
-                  </button>
+                  </Button>
                 )}
               </div>
               <p className={styles.fieldHint}>
@@ -193,13 +201,17 @@ export function PageEditorModal({
 
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
               <div className={styles.field} style={{ flex: "1 1 360px", minWidth: 280 }}>
-                <label htmlFor="content-page-body">HTML source</label>
-                <textarea
+                <TextField
                   id="content-page-body"
+                  multiline
+                  minRows={18}
+                  fullWidth
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
-                  spellCheck={false}
-                  style={{ fontFamily: "var(--font-mono, monospace)", minHeight: 360, width: "100%" }}
+                  slotProps={{ htmlInput: { spellCheck: false } }}
+                  label="HTML source"
+                  size="small"
+                  sx={{ "& .MuiInputBase-input": { fontFamily: "var(--font-mono, monospace)" } }}
                 />
               </div>
               <div className={styles.field} style={{ flex: "1 1 360px", minWidth: 280 }}>
@@ -230,32 +242,30 @@ export function PageEditorModal({
                 borderTop: "1px solid var(--field-border)",
               }}
             >
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: 0 }}>
-                <input
-                  type="checkbox"
-                  checked={published}
-                  onChange={(e) => setPublished(e.target.checked)}
-                />
-                Published (visible to students)
-              </label>
-              <button
+              <FormControlLabel
+                control={<Checkbox checked={published} onChange={(e) => setPublished(e.target.checked)} size="small" />}
+                label="Published (visible to students)"
+              />
+              <Button
                 type="button"
-                className={styles.submitButton}
+                variant="contained"
+                size="small"
                 onClick={handleSave}
                 disabled={busy || !title.trim()}
               >
                 {saving ? "Saving…" : isNew ? "Create page" : "Save to Canvas"}
-              </button>
+              </Button>
               {!isNew && (
-                <button
+                <Button
                   type="button"
-                  className={styles.clearFileButton}
+                  variant="outlined"
+                  size="small"
                   onClick={handleDelete}
                   disabled={busy}
-                  style={{ color: "#b91c1c", borderColor: "#fecaca" }}
+                  sx={{ color: "#b91c1c", borderColor: "#fecaca" }}
                 >
                   {deleting ? "Deleting…" : confirmDelete ? "Confirm delete" : "Delete page"}
-                </button>
+                </Button>
               )}
             </div>
 

@@ -12,6 +12,7 @@ import { useLlmProvider } from "@/lib/llm-provider";
 import type { RunSpan } from "@/lib/office-edit";
 import { spansEqual, spansToPlainText } from "../RichTextEditor";
 import { RichTextSectionEditor } from "../RichTextSectionEditor";
+import Button from "@mui/material/Button";
 import styles from "../../page.module.css";
 
 // ── Office file editor (.docx / .pptx, in place) ──────────────────────────────
@@ -250,9 +251,10 @@ export function OfficeEditorModal({
               }))}
             />
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <button
+              <Button
                 type="button"
-                className={styles.submitButton}
+                variant="contained"
+                size="small"
                 onClick={handleSave}
                 disabled={saving || changedCount === 0}
               >
@@ -261,7 +263,7 @@ export function OfficeEditorModal({
                   : changedCount > 0
                     ? `Save ${changedCount} change${changedCount === 1 ? "" : "s"} to Canvas`
                     : "Save to Canvas"}
-              </button>
+              </Button>
             </div>
             {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
           </>
@@ -294,27 +296,30 @@ export function OfficeEditorModal({
               <p style={{ color: "#64748b" }}>No other Word (.docx) files in this course.</p>
             ) : (
               moveFiles.map((f) => (
-                <button
+                <Button
                   key={f.id}
                   type="button"
+                  variant="outlined"
+                  size="small"
                   disabled={moveBusy}
                   onClick={() => moveTo(f.id)}
-                  style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", border: "1px solid var(--field-border)", borderRadius: 8, background: "#fff", marginBottom: 6, cursor: moveBusy ? "default" : "pointer", fontSize: "0.9rem", color: "#1f2933" }}
+                  sx={{ display: "block", width: "100%", textAlign: "left", marginBottom: 1 }}
                 >
                   {f.title}
-                </button>
+                </Button>
               ))
             )}
             {moveError && <p className={styles.error} style={{ marginTop: 8 }}>{moveError}</p>}
           </div>
           <div style={{ padding: "10px 18px", borderTop: "1px solid var(--field-border)", display: "flex", justifyContent: "flex-end" }}>
-            <button
+            <Button
               type="button"
+              variant="outlined"
+              size="small"
               onClick={() => setMovingSection(null)}
-              style={{ border: "1px solid var(--field-border)", background: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: "0.85rem", cursor: "pointer", color: "#334155" }}
             >
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       </div>

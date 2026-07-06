@@ -10,6 +10,9 @@ import {
   updateGradableAction,
 } from "../../actions";
 import type { BulkKind, CanvasModuleItem, GradableKind } from "@/lib/canvas-modules";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 import styles from "../../page.module.css";
 import { QuizQuestionsEditor } from "./QuizQuestionsEditor";
 import { toLocalInput } from "./utils";
@@ -187,54 +190,62 @@ export function GradableEditorModal({
         ) : (
           <>
             <div className={styles.field}>
-              <label htmlFor="gradable-title">Title</label>
-              <input
+              <TextField
                 id="gradable-title"
                 type="text"
-                className={styles.textInput}
+                size="small"
+                fullWidth
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
+                label="Title"
               />
             </div>
 
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
               <div className={styles.field} style={{ flex: "1 1 220px" }}>
-                <label htmlFor="gradable-due">Due date</label>
-                <input
+                <TextField
                   id="gradable-due"
                   type="datetime-local"
-                  className={styles.textInput}
+                  size="small"
+                  fullWidth
                   value={due}
                   onChange={(e) => setDue(e.target.value)}
+                  label="Due date"
+                  slotProps={{ inputLabel: { shrink: true } }}
                 />
                 {due && (
-                  <button type="button" className={styles.clearFileButton} style={{ alignSelf: "flex-start", marginTop: 6 }} onClick={() => setDue("")}>
+                  <Button type="button" size="small" variant="outlined" style={{ alignSelf: "flex-start", marginTop: 6 }} onClick={() => setDue("")}>
                     Clear due date
-                  </button>
+                  </Button>
                 )}
               </div>
               {showPoints && (
                 <div className={styles.field} style={{ flex: "0 0 140px" }}>
-                  <label htmlFor="gradable-points">Points</label>
-                  <input
+                  <TextField
                     id="gradable-points"
                     type="number"
-                    className={styles.textInput}
+                    size="small"
+                    fullWidth
                     value={points}
                     onChange={(e) => setPoints(e.target.value)}
+                    label="Points"
                   />
                 </div>
               )}
             </div>
 
             <div className={styles.field}>
-              <label htmlFor="gradable-desc">Description (HTML allowed)</label>
-              <textarea
+              <TextField
                 id="gradable-desc"
+                multiline
+                minRows={isQuiz ? 6 : 10}
+                fullWidth
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                spellCheck={false}
-                style={{ minHeight: isQuiz ? 120 : 200, width: "100%", fontFamily: "var(--font-mono, monospace)" }}
+                slotProps={{ htmlInput: { spellCheck: false } }}
+                label="Description (HTML allowed)"
+                size="small"
+                sx={{ "& .MuiInputBase-input": { fontFamily: "var(--font-mono, monospace)" } }}
               />
             </div>
 
@@ -248,9 +259,9 @@ export function GradableEditorModal({
             )}
 
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <button type="button" className={styles.submitButton} onClick={handleSave} disabled={busy || !title.trim()}>
+              <Button variant="contained" size="small" onClick={handleSave} disabled={busy || !title.trim()}>
                 {saving ? "Saving…" : "Save to Canvas"}
-              </button>
+              </Button>
             </div>
 
             <div
@@ -267,33 +278,35 @@ export function GradableEditorModal({
               <span className={styles.fieldHint} style={{ margin: 0 }}>
                 Change type to:
               </span>
-              <select
-                className={styles.textInput}
-                style={{ maxWidth: 160 }}
+              <TextField
+                select
+                size="small"
+                sx={{ minWidth: 160 }}
                 value={targetKind}
                 disabled={busy}
                 onChange={(e) => {
                   setTargetKind(e.target.value === "" ? "" : (e.target.value as GradableKind));
                   setConfirmChange(false);
                 }}
-                aria-label="Change type"
+                slotProps={{ htmlInput: { "aria-label": "Change type" } }}
               >
-                <option value="">Choose…</option>
+                <MenuItem value="">Choose…</MenuItem>
                 {otherKinds.map((k) => (
-                  <option key={k} value={k}>
+                  <MenuItem key={k} value={k}>
                     {k}
-                  </option>
+                  </MenuItem>
                 ))}
-              </select>
-              <button
+              </TextField>
+              <Button
                 type="button"
-                className={styles.clearFileButton}
+                variant="outlined"
+                size="small"
                 onClick={handleChangeType}
                 disabled={busy || targetKind === ""}
-                style={{ color: "#b91c1c", borderColor: "#fecaca" }}
+                sx={{ color: "#b91c1c", borderColor: "#fecaca" }}
               >
                 {changing ? "Changing…" : confirmChange ? "Confirm: recreate & delete original" : "Change type"}
-              </button>
+              </Button>
             </div>
             <p className={styles.fieldHint} style={{ margin: 0 }}>
               Recreates this as the new type with these fields and deletes the original. Submissions and

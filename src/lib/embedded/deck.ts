@@ -106,6 +106,26 @@ function practiceSlidePair(
   ];
 }
 
+/** Additional practice + answer pair (the end-of-deck review set), titled
+ *  "Additional Practice:" so it is distinct from the inline per-concept Practice. */
+function additionalPracticePair(phrase: string, problem: PracticeProblemEntry): SlideScaffold[] {
+  const title = titleCase(phrase.split(/\s+/).slice(0, 6).join(" "));
+  return [
+    {
+      title: `Additional Practice: ${title}`,
+      bullets: [problem.prompt, "Try this on your own, then check your work against the answer."],
+      code: problem.exampleCode,
+      codeLanguage: problem.language,
+    },
+    {
+      title: `Answer: ${title}`,
+      bullets: ["One correct solution to the additional practice challenge."],
+      code: problem.solutionCode,
+      codeLanguage: problem.language,
+    },
+  ];
+}
+
 /**
  * Build a lecture outline: a title slide, a real case study from the research
  * library as the second slide (mirroring the LLM slide contract), one slide per
@@ -212,10 +232,50 @@ export async function scaffoldLessonPlan(objectives: string, context = ""): Prom
         : ["Recap the key ideas from this lesson"],
   };
 
+  // Additional practice: 2-3 more curated problems per objective (skipping any
+  // already used inline above), each with its answer.
+  const additionalPracticeSlides: SlideScaffold[] = [];
+  for (const objective of bullets.slice(0, 8)) {
+    const phrase = objective.replace(/[.:;,]+$/, "").trim().toLowerCase();
+    const extras = (await findPracticeProblems(phrase, 5)).filter((p) => !usedProblems.has(p.id)).slice(0, 3);
+    for (const problem of extras) {
+      usedProblems.add(problem.id);
+      additionalPracticeSlides.push(...additionalPracticePair(phrase, problem));
+    }
+  }
+
+  // Documentation: a concept reference sheet from the definitions found in the source.
+  const conceptRefBullets = definitions.slice(0, 6).map((d) => `${d.term}: ${d.definition}`);
+  const documentationConceptsSlide: SlideScaffold = {
+    title: "Documentation: Key Concepts",
+    bullets: conceptRefBullets.length > 0 ? conceptRefBullets : bullets.slice(0, 5).map(conceptTitle),
+  };
+
+  // Documentation and references (deterministic - names resources, invents nothing).
+  const documentationReferencesSlide: SlideScaffold = {
+    title: "Documentation & References",
+    bullets: [
+      fallbackLanguage
+        ? `Consult the official ${fallbackLanguage} documentation for the language features used here.`
+        : "Consult the official documentation for the tools and libraries used in these examples.",
+      "Review your course textbook, lecture notes, and any assigned readings for these topics.",
+      "Look up each library or tool referenced in the examples in its own official documentation.",
+    ],
+  };
+
+  const closingSlides: SlideScaffold[] = [
+    ...additionalPracticeSlides,
+    documentationConceptsSlide,
+    documentationReferencesSlide,
+  ];
+
   const leadSlides = caseStudySlide ? [titleSlide, caseStudySlide] : [titleSlide];
   return {
     presentationTitle,
-    slides: conceptSlides.length > 0 ? [...leadSlides, ...conceptSlides, summarySlide] : [...leadSlides, summarySlide],
+    slides:
+      conceptSlides.length > 0
+        ? [...leadSlides, ...conceptSlides, summarySlide, ...closingSlides]
+        : [...leadSlides, summarySlide, ...closingSlides],
   };
 }
 

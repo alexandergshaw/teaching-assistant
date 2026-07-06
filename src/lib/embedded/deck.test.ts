@@ -4,9 +4,12 @@ import { scaffoldLessonPlan, scaffoldExamples } from "./deck";
 describe("scaffoldLessonPlan", () => {
   it("builds a title slide, a slide per objective, and a summary for topics with no knowledge matches", async () => {
     const deck = await scaffoldLessonPlan("- Watercolor blending\n- Brush care\n- Paper selection");
-    expect(deck.slides.length).toBe(5); // title + 3 concepts + summary
+    // title + 3 concepts + summary + Documentation: Key Concepts + Documentation & References
+    expect(deck.slides.length).toBe(7);
     expect(deck.slides[0].title).toBe(deck.presentationTitle);
-    expect(deck.slides[deck.slides.length - 1].title).toBe("Summary");
+    expect(deck.slides.some((s) => s.title === "Summary")).toBe(true);
+    expect(deck.slides.some((s) => s.title === "Documentation: Key Concepts")).toBe(true);
+    expect(deck.slides[deck.slides.length - 1].title).toBe("Documentation & References");
     expect(deck.slides.some((s) => s.title.startsWith("Case Study:"))).toBe(false);
     for (const slide of deck.slides) {
       expect(slide.bullets.length).toBeGreaterThan(0);
@@ -27,8 +30,9 @@ describe("scaffoldLessonPlan", () => {
     const example = deck.slides.find((s) => s.title.startsWith("Example:"));
     const walkthrough = deck.slides.find((s) => s.title.startsWith("Walkthrough:"));
     const practice = deck.slides.find((s) => s.title.startsWith("Practice:"));
-    const answer = deck.slides.find((s) => s.title.startsWith("Answer:"));
-    expect(titles.filter((t) => /^(Example|Walkthrough|Practice|Answer):/.test(t))).toHaveLength(4);
+    const answer = deck.slides.find((s) => s.title.startsWith("Answer:") && !s.title.includes("Additional Practice"));
+    // Inline Practice/Answer pair (4 slides) + potential Additional Practice (2+ more) = at least 4
+    expect(titles.filter((t) => /^(Example|Walkthrough|Practice|Answer):/.test(t)).length).toBeGreaterThanOrEqual(4);
     // Example and Walkthrough share the reference code; Practice repeats it
     // (never the solution); only the Answer shows the solution.
     expect(walkthrough?.code).toBe(example?.code);
@@ -40,8 +44,9 @@ describe("scaffoldLessonPlan", () => {
   it("caps concept slides at eight", async () => {
     const objectives = Array.from({ length: 15 }, (_, i) => `- Objective ${i + 1}`).join("\n");
     const deck = await scaffoldLessonPlan(objectives);
-    // title + 8 concepts + summary (no knowledge matches for generic objectives)
-    expect(deck.slides.length).toBe(10);
+    // title + 8 concepts + summary + Documentation: Key Concepts + Documentation & References
+    // (no knowledge matches for generic objectives, so no additional practice)
+    expect(deck.slides.length).toBe(12);
   });
 
   it("keeps producing a deck when objectives are empty", async () => {

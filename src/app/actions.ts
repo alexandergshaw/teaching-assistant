@@ -474,7 +474,11 @@ Create a complete set of lecture slides that fully address the module objectives
     { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
     { "title": "Walkthrough: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
     { "title": "Practice: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
-    { "title": "Answer: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" }
+    { "title": "Answer: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
+    { "title": "Additional Practice: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
+    { "title": "Answer: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
+    { "title": "Documentation: Key Concepts", "bullets": ["...", "..."] },
+    { "title": "Documentation & References", "bullets": ["...", "..."] }
   ]
 }
 
@@ -491,7 +495,11 @@ Requirements:
   2. Walkthrough slide — "title" begins with "Walkthrough:"; explain the example code line by line in "bullets" while showing the same code in the "code" field; use the exact code from the Example slide so students can read both the code and the explanation together.
   3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets" and set "codeLanguage". Its "code" field MUST repeat the SAME reference code shown on the Example/Walkthrough slide so the student has a worked example to reference — it must NOT contain the solution to the practice challenge or any code that gives away the answer.
   4. Answer slide — "title" begins with "Answer:"; give the correct, runnable solution to that exact practice challenge in "code" with "codeLanguage" set, plus at most one "bullets" caption.
-- All of Example, Walkthrough, Practice, and Answer slides must include "code"/"codeLanguage". Do not omit "code" on Walkthrough or Practice slides. If the module teaches no programming, omit code fields and the Example/Walkthrough/Practice/Answer slides entirely.${homeworkRequirement}
+- All of Example, Walkthrough, Practice, and Answer slides must include "code"/"codeLanguage". Do not omit "code" on Walkthrough or Practice slides. If the module teaches no programming, omit code fields and the Example/Walkthrough/Practice/Answer slides entirely.
+- CLOSING SECTIONS: after all the coverage slides above, ALWAYS append these closing sections at the very END of the deck, in this exact order:
+  A. ADDITIONAL PRACTICE: for EACH coding concept you introduced in this deck, add 2-3 NEW slides whose "title" begins with "Additional Practice:" that pose fresh, self-contained challenges on that concept (clearly different from the earlier inline Practice slide). IMMEDIATELY follow each "Additional Practice:" slide with its own "Answer:" slide giving the correct, runnable solution in "code" with "codeLanguage" set. The "Additional Practice:" slide states the task in its bullets and must NOT reveal the solution (it may include a short reference/starter snippet in "code", but never the answer). For a non-programming module, make these 2-3 additional conceptual practice questions per concept, each followed by an "Answer:" slide, with no code fields.
+  B. DOCUMENTATION - KEY CONCEPTS: one or more slides whose "title" begins with "Documentation:" that recap the key concepts, terms, and syntax taught in this deck as a concise study reference the student can revise from (use bullets; short code snippets are allowed).
+  C. DOCUMENTATION AND REFERENCES: a final slide titled exactly "Documentation & References" that lists authoritative resources for the topics: name the official documentation for each language, library, or tool used, plus 2-4 suggested further-reading resources. Name only real, well-known resources (official language/library documentation, MDN, the tool's own docs); do NOT fabricate specific URLs or invent facts.${homeworkRequirement}
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<
@@ -505,7 +513,7 @@ Requirements:
     const result = await callLlm(
       {
         contents: [{ role: "user", parts }],
-        generationConfig: { temperature: 0.6, maxOutputTokens: 4096 },
+        generationConfig: { temperature: 0.6, maxOutputTokens: 8192 },
       },
       provider
     );
@@ -2262,12 +2270,13 @@ Requirements:
 - 5-12 content slides, each with a short title and 3-6 concise bullet points.
 - Clear, well-organized, and professional.
 - Do not invent specific facts, dates, names, or links that were not provided.
+- If the deck teaches concepts, append these closing slides at the very END, in order: (a) 2-3 slides whose "title" begins with "Additional Practice:" posing review questions on the material, each immediately followed by an "Answer:" slide with the solution; (b) a slide whose "title" begins with "Documentation:" that recaps the key concepts and terms as a study reference; (c) a slide titled "Documentation & References" that names authoritative resources / official documentation for the tools or topics mentioned. Name only well-known resources; do not invent specific URLs or facts.
 - Do not include any text outside the JSON object.`;
 
     const result = await callLlm(
       {
         contents: [{ role: "user", parts: [{ text: llmPrompt }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 4096 },
+        generationConfig: { temperature: 0.5, maxOutputTokens: 8192 },
       },
       provider
     );
@@ -4154,7 +4163,11 @@ Return ONLY valid JSON:
     { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
     { "title": "Walkthrough: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
     { "title": "Practice: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
-    { "title": "Answer: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" }
+    { "title": "Answer: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
+    { "title": "Additional Practice: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
+    { "title": "Answer: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
+    { "title": "Documentation: Key Concepts", "bullets": ["...", "..."] },
+    { "title": "Documentation & References", "bullets": ["...", "..."] }
   ]
 }
 
@@ -4173,12 +4186,16 @@ Requirements:
   3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets" and set "codeLanguage". Its "code" field MUST repeat the SAME reference code shown on the Example/Walkthrough slide so the student has a worked example to reference — it must NOT contain the solution to the practice challenge or any code that gives away the answer.
   4. Answer slide — "title" begins with "Answer:"; give the correct, runnable solution to that exact practice challenge in "code" with "codeLanguage" set, plus at most one "bullets" caption.
 - All of Example, Walkthrough, Practice, and Answer slides must include "code"/"codeLanguage". Do not omit "code" on Walkthrough or Practice slides. Omit code only on conceptual slides.
+- CLOSING SECTIONS: after all the coverage slides above, ALWAYS append these closing sections at the very END of the deck, in this exact order:
+  A. ADDITIONAL PRACTICE: for EACH coding concept you introduced in this deck, add 2-3 NEW slides whose "title" begins with "Additional Practice:" that pose fresh, self-contained challenges on that concept (clearly different from the earlier inline Practice slide). IMMEDIATELY follow each "Additional Practice:" slide with its own "Answer:" slide giving the correct, runnable solution in "code" with "codeLanguage" set. The "Additional Practice:" slide states the task in its bullets and must NOT reveal the solution (it may include a short reference/starter snippet in "code", but never the answer). For a non-programming module, make these 2-3 additional conceptual practice questions per concept, each followed by an "Answer:" slide, with no code fields.
+  B. DOCUMENTATION - KEY CONCEPTS: one or more slides whose "title" begins with "Documentation:" that recap the key concepts, terms, and syntax taught in this deck as a concise study reference the student can revise from (use bullets; short code snippets are allowed).
+  C. DOCUMENTATION AND REFERENCES: a final slide titled exactly "Documentation & References" that lists authoritative resources for the topics: name the official documentation for each language, library, or tool used, plus 2-4 suggested further-reading resources. Name only real, well-known resources (official language/library documentation, MDN, the tool's own docs); do NOT fabricate specific URLs or invent facts.
 - Do not include any text outside the JSON object.`;
 
   const result = await callLlm(
     {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.6, maxOutputTokens: 8192 },
+      generationConfig: { temperature: 0.6, maxOutputTokens: 12288 },
     },
     provider
   );

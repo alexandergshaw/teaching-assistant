@@ -10,13 +10,17 @@ import {
   createBranchAction,
   deleteBranchAction,
   forkRepoAction,
+  listPullRequestsAction,
+  createPullRequestAction,
+  mergePullRequestAction,
 } from "../actions";
-import type { GithubRepo, RepoTreeEntry } from "@/lib/github";
+import type { GithubRepo, RepoTreeEntry, PullRequestInfo } from "@/lib/github";
 import Typeahead from "./ui/Typeahead";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 import CircularProgress from "@mui/material/CircularProgress";
 import styles from "../page.module.css";
 
@@ -50,6 +54,20 @@ export default function RepoDetail() {
   const [forkBusy, setForkBusy] = useState(false);
   const [forkResult, setForkResult] = useState<{ fullName: string; htmlUrl: string } | null>(null);
   const [forkMsg, setForkMsg] = useState<string | null>(null);
+
+  // Pull requests tab state
+  const [prState, setPrState] = useState<"open" | "closed" | "all">("open");
+  const [pulls, setPulls] = useState<PullRequestInfo[]>([]);
+  const [pullsState, setPullsState] = useState<"idle" | "loading" | "error">("idle");
+  const [pullsError, setPullsError] = useState<string | null>(null);
+  const [prTitle, setPrTitle] = useState("");
+  const [prHead, setPrHead] = useState("");
+  const [prBase, setPrBase] = useState("");
+  const [prBody, setPrBody] = useState("");
+  const [prBusy, setPrBusy] = useState(false);
+  const [prMsg, setPrMsg] = useState<string | null>(null);
+  const [mergeMethod, setMergeMethod] = useState<Record<number, "merge" | "squash" | "rebase">>({});
+  const [mergingPr, setMergingPr] = useState<number | null>(null);
 
   // Load repos on mount
   useEffect(() => {
@@ -165,6 +183,34 @@ export default function RepoDetail() {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [selectedPath, repoRef, branch]);
 
+  // Load PRs when the pulls tab is active
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (!repoRef || tab !== "pulls") {
+      if (!repoRef) {
+        setPulls([]);
+      }
+      return;
+    }
+    let cancelled = false;
+    setPullsState("loading");
+    (async () => {
+      const r = await listPullRequestsAction(repoRef, prState);
+      if (cancelled) return;
+      if ("error" in r) {
+        setPullsState("error");
+        setPullsError(r.error);
+        return;
+      }
+      setPulls(r.pulls);
+      setPullsState("idle");
+    })();
+    return () => {
+      cancelled = true;
+    };
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [repoRef, tab, prState]);
+
   const handleCommit = async () => {
     if (!repoRef || !branch || !selectedPath || !commitMessage.trim()) {
       return;
@@ -235,6 +281,50 @@ export default function RepoDetail() {
       return;
     }
     setForkResult({ fullName: r.repo.fullName, htmlUrl: r.repo.htmlUrl });
+  };
+
+  const reloadPulls = async () => {
+    setPullsState("loading");
+    const r = await listPullRequestsAction(repoRef, prState);
+    if ("error" in r) {
+      setPullsState("error");
+      setPullsError(r.error);
+      return;
+    }
+    setPulls(r.pulls);
+    setPullsState("idle");
+  };
+
+  const handleCreatePr = async () => {
+    const title = prTitle.trim();
+    const head = prHead || branch;
+    const base = prBase || defaultBranch;
+    if (!title || !head || !base) return;
+    setPrBusy(true);
+    setPrMsg(null);
+    const r = await createPullRequestAction(repoRef, title, head, base, prBody);
+    setPrBusy(false);
+    if ("error" in r) {
+      setPrMsg(`Error: ${r.error}`);
+      return;
+    }
+    setPrMsg(`Opened PR #${r.number}.`);
+    setPrTitle("");
+    setPrBody("");
+    await reloadPulls();
+  };
+
+  const handleMerge = async (n: number) => {
+    setMergingPr(n);
+    setPrMsg(null);
+    const r = await mergePullRequestAction(repoRef, n, mergeMethod[n] ?? "merge");
+    setMergingPr(null);
+    if ("error" in r) {
+      setPrMsg(`Error merging #${n}: ${r.error}`);
+      return;
+    }
+    setPrMsg(`Merged #${n}.`);
+    await reloadPulls();
   };
 
   const repoOptions = repos.map((r) => ({
@@ -533,7 +623,154 @@ export default function RepoDetail() {
               </div>
             </div>
           )}
-          {tab === "pulls" && <p className={styles.fieldHint}>Pull requests are coming next.</p>}
+          {tab === "pulls" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 12 }}>
+                  Open a pull request
+                </label>
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="Title"
+                  value={prTitle}
+                  onChange={(e) => setPrTitle(e.target.value)}
+                  disabled={prBusy}
+                  sx={{ marginBottom: 1 }}
+                />
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 1, flexWrap: "wrap" }}>
+                  <div style={{ minWidth: 180 }}>
+                    <Typeahead
+                      options={branches.map((b) => ({ value: b, label: b }))}
+                      value={prHead || branch}
+                      onChange={(v) => setPrHead(v)}
+                      placeholder="head (compare)"
+                    />
+                  </div>
+                  <span style={{ fontSize: "0.9rem" }}>into</span>
+                  <div style={{ minWidth: 180 }}>
+                    <Typeahead
+                      options={branches.map((b) => ({ value: b, label: b }))}
+                      value={prBase || defaultBranch}
+                      onChange={(v) => setPrBase(v)}
+                      placeholder="base"
+                    />
+                  </div>
+                </div>
+                <TextField
+                  size="small"
+                  fullWidth
+                  multiline
+                  minRows={3}
+                  placeholder="Description (optional)"
+                  value={prBody}
+                  onChange={(e) => setPrBody(e.target.value)}
+                  disabled={prBusy}
+                  sx={{ marginBottom: 1 }}
+                />
+                <Button
+                  variant="contained"
+                  size="small"
+                  disabled={prBusy || !prTitle.trim()}
+                  onClick={handleCreatePr}
+                >
+                  {prBusy ? "Opening..." : "Create pull request"}
+                </Button>
+                {prMsg && (
+                  <p
+                    style={{
+                      marginTop: 8,
+                      fontSize: "0.85rem",
+                      color: prMsg.startsWith("Error") ? "#dc2626" : "#16a34a",
+                    }}
+                  >
+                    {prMsg}
+                  </p>
+                )}
+              </div>
+
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <label style={{ fontSize: "0.9rem", fontWeight: 500 }}>
+                    Pull requests
+                  </label>
+                  <TextField
+                    select
+                    size="small"
+                    value={prState}
+                    onChange={(e) => setPrState(e.target.value as "open" | "closed" | "all")}
+                    sx={{ minWidth: 120 }}
+                  >
+                    <MenuItem value="open">Open</MenuItem>
+                    <MenuItem value="closed">Closed</MenuItem>
+                    <MenuItem value="all">All</MenuItem>
+                  </TextField>
+                </div>
+
+                {pullsState === "loading" && (
+                  <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+                    <CircularProgress size={24} />
+                  </div>
+                )}
+                {pullsState === "error" && <p className={styles.error}>{pullsError}</p>}
+                {pullsState === "idle" && pulls.length === 0 && (
+                  <p className={styles.fieldHint}>No pull requests.</p>
+                )}
+                {pullsState === "idle" &&
+                  pulls.map((p) => (
+                    <div
+                      key={p.number}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "8px 0",
+                        borderTop: "1px solid var(--field-border)",
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <a href={p.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                          #{p.number}
+                        </a>
+                        <span style={{ marginLeft: 8 }}>{p.title}</span>
+                        <div style={{ fontSize: "0.8rem", fontFamily: "monospace", marginTop: 4, color: "var(--text-secondary)" }}>
+                          {p.head} into {p.base}
+                        </div>
+                        <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                          {p.state}
+                          {p.draft ? " draft" : ""}
+                        </div>
+                      </div>
+                      {p.state.toLowerCase() === "open" && !p.draft && (
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <TextField
+                            select
+                            size="small"
+                            value={mergeMethod[p.number] ?? "merge"}
+                            onChange={(e) =>
+                              setMergeMethod((m) => ({ ...m, [p.number]: e.target.value as "merge" | "squash" | "rebase" }))
+                            }
+                            sx={{ minWidth: 110 }}
+                          >
+                            <MenuItem value="merge">Merge</MenuItem>
+                            <MenuItem value="squash">Squash</MenuItem>
+                            <MenuItem value="rebase">Rebase</MenuItem>
+                          </TextField>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            disabled={mergingPr === p.number}
+                            onClick={() => handleMerge(p.number)}
+                          >
+                            {mergingPr === p.number ? "Merging..." : "Merge"}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
           {tab === "actions" && <p className={styles.fieldHint}>Actions are coming next.</p>}
         </>
       )}

@@ -16,6 +16,7 @@ import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { useInstitutionCounts } from "./InstitutionCounts";
+import TabHeader from "./TabHeader";
 import styles from "../page.module.css";
 import {
   CONTENT_URL_KEY,
@@ -211,14 +212,11 @@ export default function ContentTab({
 
   return (
     <div className={styles.card}>
-      <header className={styles.header}>
-        <span className={styles.eyebrow}>LMS Integration</span>
-        <h1>Course content, grading &amp; communications</h1>
-        <p>
-          Manage a Canvas course&apos;s modules, pages, and files, grade submissions, and handle
-          announcements and messages — all in one place. Changes are written to Canvas when you save.
-        </p>
-      </header>
+      <TabHeader
+        eyebrow="LMS Integration"
+        title="Course content, grading & communications"
+        subtitle="Manage a Canvas course's modules, pages, and files, grade submissions, and handle announcements and messages, all in one place. Changes are written to Canvas when you save."
+      />
 
       <div className={styles.field}>
         <label>Institution</label>

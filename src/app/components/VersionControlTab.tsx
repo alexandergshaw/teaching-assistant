@@ -11,6 +11,7 @@ import {
 import type { GithubRepo } from "@/lib/github";
 import OrgManagementPanel from "./OrgManagementPanel";
 import RepoSettingsPanel from "./RepoSettingsPanel";
+import TabHeader from "./TabHeader";
 import styles from "../page.module.css";
 
 /**
@@ -150,7 +151,12 @@ export default function VersionControlTab() {
 
   if (orgsState === "unconfigured") {
     return (
-      <div className={styles.form}>
+      <div className={styles.card}>
+        <TabHeader
+          eyebrow="Version Control Integration"
+          title="Repositories & organizations"
+          subtitle="Generate per-student repos from a template, manage your organization's members and rules, and configure your own repositories."
+        />
         <p style={{ color: "var(--text-secondary)" }}>
           GitHub isn&apos;t configured. Set the <code>GITHUB_TOKEN</code> environment variable (a token that owns the
           target organizations) to use Version Control Integration.
@@ -160,13 +166,12 @@ export default function VersionControlTab() {
   }
 
   return (
-    <div className={styles.form}>
-      <div style={{ marginBottom: 8 }}>
-        <h2 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 700, color: "var(--text-primary, #0f172a)" }}>Version Control Integration</h2>
-        <p style={{ margin: "4px 0 0", color: "var(--text-secondary)" }}>
-          Generate one repository per student from a template repo in your class organization.
-        </p>
-      </div>
+    <div className={styles.card}>
+      <TabHeader
+        eyebrow="Version Control Integration"
+        title="Repositories & organizations"
+        subtitle="Generate per-student repos from a template, manage your organization's members and rules, and configure your own repositories."
+      />
 
       <div className={styles.field}>
         <label>Organization</label>

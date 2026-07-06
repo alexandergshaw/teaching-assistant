@@ -21,6 +21,7 @@ import GithubSyncPanel from "./GithubSyncPanel";
 import LecturePlanningTab from "./LecturePlanningTab";
 import { spansToPlainText } from "./RichTextEditor";
 import { RichTextSectionEditor } from "./RichTextSectionEditor";
+import TabHeader from "./TabHeader";
 import { useInstitutionSelection } from "@/lib/institutions";
 import type { RunSpan } from "@/lib/office-edit";
 import type { CanvasModule } from "@/lib/canvas-modules";
@@ -582,10 +583,11 @@ export default function CoursePlanningTab() {
 
   return (
     <section className={styles.card}>
-          <div className={styles.header}>
-            <h1>New Build Courses</h1>
-            <p>Build a syllabus or generate a weekly course schedule with the help of AI.</p>
-          </div>
+          <TabHeader
+            eyebrow="New Build Courses"
+            title="Build a new course"
+            subtitle="Build a syllabus or generate a weekly course schedule with the help of AI."
+          />
 
           {/* Mode toggle */}
           <div className={styles.scheduleModeToggle}>

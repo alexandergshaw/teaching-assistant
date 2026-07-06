@@ -1,6 +1,7 @@
 "use client";
 
 import type { RefObject } from "react";
+import TabHeader from "./TabHeader";
 import styles from "../page.module.css";
 
 type LessonPlanningFormProps = {
@@ -41,10 +42,11 @@ export default function LessonPlanningForm({
 }: LessonPlanningFormProps) {
   return (
     <section className={styles.card}>
-      <div className={styles.header}>
-        <h1>Pre Built Courses</h1>
-        <p>Plan and generate lesson content with AI assistance.</p>
-      </div>
+      <TabHeader
+        eyebrow="Pre Built Courses"
+        title="Plan a lesson"
+        subtitle="Plan and generate lesson content with AI assistance."
+      />
       {isCourseEngine && (
         <div className={styles.field}>
           <label htmlFor="moduleTitle">Module Title</label>

@@ -331,7 +331,10 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
         }}
       >
         <div className={styles.previewHeader}>
-          <h3>Pull back submission</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span className={styles.eyebrow} style={{ fontSize: "0.7rem" }}>Pull back</span>
+            <h3 style={{ margin: 0 }}>Student submission</h3>
+          </div>
           <button
             type="button"
             className={styles.previewCloseButton}
@@ -369,7 +372,10 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
         }}
       >
         <div className={styles.previewHeader}>
-          <h3>Pull back submission</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span className={styles.eyebrow} style={{ fontSize: "0.7rem" }}>Pull back</span>
+            <h3 style={{ margin: 0 }}>Student submission</h3>
+          </div>
           <button
             type="button"
             className={styles.previewCloseButton}

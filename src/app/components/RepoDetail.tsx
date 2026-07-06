@@ -7,6 +7,9 @@ import {
   getRepoTreeAction,
   getFileTextAction,
   commitFileAction,
+  createBranchAction,
+  deleteBranchAction,
+  forkRepoAction,
 } from "../actions";
 import type { GithubRepo, RepoTreeEntry } from "@/lib/github";
 import Typeahead from "./ui/Typeahead";
@@ -23,6 +26,7 @@ export default function RepoDetail() {
   const [repoRef, setRepoRef] = useState("");
   const [branch, setBranch] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
+  const [defaultBranch, setDefaultBranch] = useState("");
   const [tab, setTab] = useState<"files" | "branches" | "pulls" | "actions">("files");
 
   // Files tab state
@@ -36,6 +40,16 @@ export default function RepoDetail() {
   const [commitMessage, setCommitMessage] = useState("");
   const [committing, setCommitting] = useState(false);
   const [commitMsg, setCommitMsg] = useState("");
+
+  // Branches tab state
+  const [newBranch, setNewBranch] = useState("");
+  const [fromBranch, setFromBranch] = useState("");
+  const [branchBusy, setBranchBusy] = useState(false);
+  const [branchMsg, setBranchMsg] = useState<string | null>(null);
+  const [forkOrg, setForkOrg] = useState("");
+  const [forkBusy, setForkBusy] = useState(false);
+  const [forkResult, setForkResult] = useState<{ fullName: string; htmlUrl: string } | null>(null);
+  const [forkMsg, setForkMsg] = useState<string | null>(null);
 
   // Load repos on mount
   useEffect(() => {
@@ -61,6 +75,7 @@ export default function RepoDetail() {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (!repoRef) {
       setBranches([]);
+      setDefaultBranch("");
       setBranch("");
       setTree([]);
       setSelectedPath("");
@@ -76,10 +91,12 @@ export default function RepoDetail() {
       if (cancelled) return;
       if ("error" in r) {
         setBranches([]);
+        setDefaultBranch("");
         setBranch("");
         return;
       }
       setBranches(r.branches);
+      setDefaultBranch(r.defaultBranch);
       setBranch(r.defaultBranch);
       setTree([]);
       setSelectedPath("");
@@ -162,6 +179,62 @@ export default function RepoDetail() {
     setCommitMsg("Committed.");
     setFileContent(editContent);
     setCommitMessage("");
+  };
+
+  const reloadBranches = async () => {
+    if (!repoRef) return;
+    const r = await listGithubBranchesAction(repoRef);
+    if ("error" in r) return;
+    setBranches(r.branches);
+    setDefaultBranch(r.defaultBranch);
+    if (!r.branches.includes(branch)) {
+      setBranch(r.defaultBranch);
+    }
+  };
+
+  const handleCreateBranch = async () => {
+    const name = newBranch.trim();
+    const from = (fromBranch || branch || defaultBranch).trim();
+    if (!name || !from) return;
+    setBranchBusy(true);
+    setBranchMsg(null);
+    const r = await createBranchAction(repoRef, name, from);
+    setBranchBusy(false);
+    if ("error" in r) {
+      setBranchMsg(`Error: ${r.error}`);
+      return;
+    }
+    setBranchMsg(`Created ${name} from ${from}.`);
+    setNewBranch("");
+    await reloadBranches();
+  };
+
+  const handleDeleteBranch = async (b: string) => {
+    if (b === defaultBranch) return;
+    if (typeof window !== "undefined" && !window.confirm(`Delete branch "${b}"? This cannot be undone.`)) return;
+    setBranchBusy(true);
+    setBranchMsg(null);
+    const r = await deleteBranchAction(repoRef, b);
+    setBranchBusy(false);
+    if ("error" in r) {
+      setBranchMsg(`Error: ${r.error}`);
+      return;
+    }
+    setBranchMsg(`Deleted ${b}.`);
+    await reloadBranches();
+  };
+
+  const handleFork = async () => {
+    setForkBusy(true);
+    setForkMsg(null);
+    setForkResult(null);
+    const r = await forkRepoAction(repoRef, forkOrg.trim() || undefined);
+    setForkBusy(false);
+    if ("error" in r) {
+      setForkMsg(`Error: ${r.error}`);
+      return;
+    }
+    setForkResult({ fullName: r.repo.fullName, htmlUrl: r.repo.htmlUrl });
   };
 
   const repoOptions = repos.map((r) => ({
@@ -343,7 +416,123 @@ export default function RepoDetail() {
             </div>
           )}
 
-          {tab === "branches" && <p className={styles.fieldHint}>Branch management is coming next.</p>}
+          {tab === "branches" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 12 }}>
+                  Fork this repository
+                </label>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+                  <TextField
+                    size="small"
+                    placeholder="Target org (optional, blank = your account)"
+                    value={forkOrg}
+                    onChange={(e) => setForkOrg(e.target.value)}
+                    sx={{ maxWidth: 320 }}
+                  />
+                  <Button
+                    variant="contained"
+                    size="small"
+                    disabled={forkBusy}
+                    onClick={handleFork}
+                  >
+                    {forkBusy ? "Forking..." : "Fork"}
+                  </Button>
+                </div>
+                {forkMsg && (
+                  <p style={{ marginTop: 8, fontSize: "0.85rem", color: forkMsg.startsWith("Error:") ? "#dc2626" : "#16a34a" }}>
+                    {forkMsg}
+                  </p>
+                )}
+                {forkResult && (
+                  <p style={{ marginTop: 8, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                    Forked to{" "}
+                    <a href={forkResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                      {forkResult.fullName}
+                    </a>
+                  </p>
+                )}
+              </div>
+
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 12 }}>
+                  Create a branch
+                </label>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+                  <TextField
+                    size="small"
+                    placeholder="new-branch-name"
+                    value={newBranch}
+                    onChange={(e) => setNewBranch(e.target.value)}
+                  />
+                  <span style={{ paddingTop: 8 }}>from</span>
+                  <div style={{ minWidth: 200 }}>
+                    <Typeahead
+                      options={branches.map((b) => ({ value: b, label: b }))}
+                      value={fromBranch || branch || defaultBranch}
+                      onChange={(v) => setFromBranch(v)}
+                      placeholder="from branch"
+                    />
+                  </div>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    disabled={branchBusy || !newBranch.trim()}
+                    onClick={handleCreateBranch}
+                  >
+                    Create
+                  </Button>
+                </div>
+              </div>
+
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 12 }}>
+                  Branches
+                </label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {branches.length === 0 ? (
+                    <p className={styles.fieldHint}>No branches found.</p>
+                  ) : (
+                    branches.map((b) => (
+                      <div key={b} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
+                        <span style={{ fontFamily: "monospace", fontSize: "0.85rem", flex: 1 }}>
+                          {b}
+                        </span>
+                        {b === defaultBranch && (
+                          <span
+                            style={{
+                              fontSize: "0.7rem",
+                              fontWeight: 500,
+                              backgroundColor: "var(--accent)",
+                              color: "white",
+                              padding: "2px 8px",
+                              borderRadius: 4,
+                            }}
+                          >
+                            default
+                          </span>
+                        )}
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          color="error"
+                          disabled={branchBusy || b === defaultBranch}
+                          onClick={() => handleDeleteBranch(b)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                {branchMsg && (
+                  <p style={{ marginTop: 12, fontSize: "0.85rem", color: branchMsg.startsWith("Error:") ? "#dc2626" : "#16a34a" }}>
+                    {branchMsg}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
           {tab === "pulls" && <p className={styles.fieldHint}>Pull requests are coming next.</p>}
           {tab === "actions" && <p className={styles.fieldHint}>Actions are coming next.</p>}
         </>

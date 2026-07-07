@@ -626,18 +626,23 @@ interface CanvasAssignmentListItem {
   points_possible?: number | null;
 }
 
-/** List the active courses the token user teaches (for the course picker). */
-export async function listCourses(code: string): Promise<CanvasCourse[]> {
-  return listActiveTeacherCourses(resolveInstitutionByCode(code));
-}
-
-async function listActiveTeacherCourses(ctx: {
+type CanvasCourseCtx = {
   institution: CanvasInstitution;
   token: string;
   baseUrl: string;
-}): Promise<Array<{ id: string; name: string }>> {
+};
+
+/**
+ * Page through /api/v1/courses for the given query string, mapping each course
+ * to { id, name }. Shared by the narrow Live Feed scan and the broad picker list
+ * so the pagination/mapping lives in one place.
+ */
+async function fetchCoursesForQuery(
+  ctx: CanvasCourseCtx,
+  query: string
+): Promise<Array<{ id: string; name: string }>> {
   const { institution, token, baseUrl } = ctx;
-  let next: string | null = `${baseUrl}/api/v1/courses?enrollment_type=teacher&enrollment_state=active&per_page=100`;
+  let next: string | null = `${baseUrl}/api/v1/courses?${query}`;
   const courses: Array<{ id: string; name: string }> = [];
   while (next) {
     const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
@@ -653,6 +658,38 @@ async function listActiveTeacherCourses(ctx: {
     next = parseNextLink(response.headers.get("link"));
   }
   return courses;
+}
+
+/**
+ * Currently-active teacher courses only. Used by the Live Feed needs-grading
+ * scan, which should not fan out over unpublished or concluded courses.
+ */
+async function listActiveTeacherCourses(
+  ctx: CanvasCourseCtx
+): Promise<Array<{ id: string; name: string }>> {
+  return fetchCoursesForQuery(ctx, "enrollment_type=teacher&enrollment_state=active&per_page=100");
+}
+
+/**
+ * Every teacher course that is not deleted (unpublished, published, or
+ * concluded), sorted by name. Backs the pull-back and announcements course
+ * pickers so an instructor sees all their courses, not just active published
+ * ones. state[] uses raw brackets, matching the existing include[] usage.
+ */
+async function listTeacherCoursesForPicker(
+  ctx: CanvasCourseCtx
+): Promise<Array<{ id: string; name: string }>> {
+  const courses = await fetchCoursesForQuery(
+    ctx,
+    "enrollment_type=teacher&state[]=unpublished&state[]=available&state[]=completed&per_page=100"
+  );
+  courses.sort((a, b) => a.name.localeCompare(b.name));
+  return courses;
+}
+
+/** List the courses the token user teaches, for the course pickers. */
+export async function listCourses(code: string): Promise<CanvasCourse[]> {
+  return listTeacherCoursesForPicker(resolveInstitutionByCode(code));
 }
 
 interface CanvasAssignmentListItemBrief {

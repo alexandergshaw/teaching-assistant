@@ -126,6 +126,50 @@ function additionalPracticePair(phrase: string, problem: PracticeProblemEntry): 
   ];
 }
 
+/** A clearly-marked, instructor-completed additional-practice pair, used when the
+ *  curated library has no problem for a concept so the review set is never empty.
+ *  The engine never invents a verified solution, so the answer points the student
+ *  back to the deck's worked examples and leaves the model solution to the instructor. */
+function placeholderPracticePair(phrase: string, language: string): SlideScaffold[] {
+  const title = titleCase(phrase.split(/\s+/).slice(0, 6).join(" "));
+  if (language) {
+    return [
+      {
+        title: `Additional Practice: ${title}`,
+        bullets: [
+          `Write a short ${language} snippet that applies ${phrase}, then run it.`,
+          "Confirm the output matches what you expect.",
+        ],
+        code: `# Additional practice: ${phrase}\n# Write your solution below.\n`,
+        codeLanguage: language,
+      },
+      {
+        title: `Answer: ${title}`,
+        bullets: [
+          "Check your solution against the worked examples earlier in this deck.",
+          "Model solution to be added by the instructor.",
+        ],
+      },
+    ];
+  }
+  return [
+    {
+      title: `Additional Practice: ${title}`,
+      bullets: [
+        `Apply ${phrase} to a new problem and show each step of your reasoning.`,
+        "Explain why your approach works.",
+      ],
+    },
+    {
+      title: `Answer: ${title}`,
+      bullets: [
+        "Compare your reasoning with the concept slides earlier in this deck.",
+        "Model answer to be added by the instructor.",
+      ],
+    },
+  ];
+}
+
 /**
  * Build a lecture outline: a title slide, a real case study from the research
  * library as the second slide (mirroring the LLM slide contract), one slide per
@@ -233,14 +277,22 @@ export async function scaffoldLessonPlan(objectives: string, context = ""): Prom
   };
 
   // Additional practice: 2-3 more curated problems per objective (skipping any
-  // already used inline above), each with its answer.
+  // already used inline above), each with its answer. When no curated problem
+  // exists for a concept, include a clearly-marked placeholder so the review
+  // set is never empty.
   const additionalPracticeSlides: SlideScaffold[] = [];
   for (const objective of bullets.slice(0, 8)) {
     const phrase = objective.replace(/[.:;,]+$/, "").trim().toLowerCase();
     const extras = (await findPracticeProblems(phrase, 5)).filter((p) => !usedProblems.has(p.id)).slice(0, 3);
-    for (const problem of extras) {
-      usedProblems.add(problem.id);
-      additionalPracticeSlides.push(...additionalPracticePair(phrase, problem));
+    if (extras.length > 0) {
+      for (const problem of extras) {
+        usedProblems.add(problem.id);
+        additionalPracticeSlides.push(...additionalPracticePair(phrase, problem));
+      }
+    } else {
+      // No curated problem for this concept: always include one clearly-marked,
+      // instructor-completed pair so the review set is never empty.
+      additionalPracticeSlides.push(...placeholderPracticePair(phrase, fallbackLanguage));
     }
   }
 

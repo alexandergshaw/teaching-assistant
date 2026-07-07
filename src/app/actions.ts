@@ -88,6 +88,7 @@ import {
   getPage,
   updatePage,
   createPage,
+  createCodeFilePage,
   deletePage,
   listAddableContent,
   setDueDates,
@@ -1995,6 +1996,20 @@ export async function createPageAction(
     return { page: await createPage(courseUrl, fields, acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not create the page." };
+  }
+}
+
+/** Publish an opened GitHub code file's contents to a Canvas (LMS) page. */
+export async function copyFileToCanvasPageAction(
+  courseUrl: string,
+  opts: { filePath: string; content: string; title: string; published?: boolean },
+  acronym?: string
+): Promise<{ page: CanvasPage; htmlUrl: string } | { error: string }> {
+  try {
+    await requireOwner();
+    return await createCodeFilePage(courseUrl, opts, acronym);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not copy the file to a Canvas page." };
   }
 }
 

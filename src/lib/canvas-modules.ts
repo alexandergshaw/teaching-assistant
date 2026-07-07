@@ -544,6 +544,45 @@ export async function deletePage(
   );
 }
 
+/**
+ * Escape a code file's text and wrap it as an HTML code block for a Canvas page.
+ * Pure so it can be unit-tested. The file path becomes a heading; the body is a
+ * single <pre><code> block with all HTML-special characters escaped so the code
+ * renders literally and cannot inject markup.
+ */
+export function codeFileToPageHtml(filePath: string, content: string): string {
+  const escape = (s: string) =>
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  return `<h2>${escape(filePath)}</h2>\n<pre><code>${escape(content)}</code></pre>`;
+}
+
+/**
+ * Create a Canvas page whose body is a GitHub code file rendered as a code
+ * block. Returns the created page plus a direct link to view it in Canvas.
+ */
+export async function createCodeFilePage(
+  courseUrl: string,
+  opts: { filePath: string; content: string; title: string; published?: boolean },
+  code?: string
+): Promise<{ page: CanvasPage; htmlUrl: string }> {
+  const ctx = resolveCourse(courseUrl, code);
+  const page = await createPage(
+    courseUrl,
+    {
+      title: opts.title,
+      body: codeFileToPageHtml(opts.filePath, opts.content),
+      published: opts.published ?? false,
+    },
+    code
+  );
+  return { page, htmlUrl: `${ctx.baseUrl}/courses/${ctx.courseId}/pages/${page.url}` };
+}
+
 // ── Addable content (for the module-item picker) ──────────────────────────────
 
 interface RawAssignment {

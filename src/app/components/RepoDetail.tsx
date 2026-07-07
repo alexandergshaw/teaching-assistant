@@ -24,6 +24,7 @@ import {
 } from "../actions";
 import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo } from "@/lib/github";
 import RepoSettingsPanel from "./RepoSettingsPanel";
+import PublishToCanvasPage from "./PublishToCanvasPage";
 import Typeahead from "./ui/Typeahead";
 import { submitOnEnter } from "./ui/submitOnEnter";
 import Tabs from "@mui/material/Tabs";
@@ -720,6 +721,9 @@ export default function RepoDetail() {
                             {commitMsg}
                           </p>
                         )}
+                        <div style={{ marginTop: 12 }}>
+                          <PublishToCanvasPage filePath={selectedPath} content={editContent} />
+                        </div>
                       </>
                     )}
                   </>

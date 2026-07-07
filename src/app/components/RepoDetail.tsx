@@ -25,6 +25,7 @@ import {
 import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo } from "@/lib/github";
 import RepoSettingsPanel from "./RepoSettingsPanel";
 import PublishToCanvasPage from "./PublishToCanvasPage";
+import { buildBulkFolderNames } from "@/lib/bulk-folders";
 import Typeahead from "./ui/Typeahead";
 import { submitOnEnter } from "./ui/submitOnEnter";
 import Tabs from "@mui/material/Tabs";
@@ -76,6 +77,10 @@ export default function RepoDetail() {
   const [newFolderMsg, setNewFolderMsg] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderError, setNewFolderError] = useState<string | null>(null);
+  const [bulkFolders, setBulkFolders] = useState(false);
+  const [folderStart, setFolderStart] = useState("1");
+  const [folderCount, setFolderCount] = useState("4");
+  const [newFolderResult, setNewFolderResult] = useState<string | null>(null);
 
   // Branches tab state
   const [newBranch, setNewBranch] = useState("");
@@ -363,28 +368,42 @@ export default function RepoDetail() {
   };
 
   const handleCreateFolder = async () => {
-    const folder = normalizePath(newFolderPath);
-    if (!folder) {
-      setNewFolderError("Enter a folder path.");
-      return;
-    }
     if (!repoRef || !branch) {
       setNewFolderError("Pick a repository and branch first.");
       return;
     }
-    const message = newFolderMsg.trim() || `Add ${folder}/`;
-    setCreatingFolder(true);
-    setNewFolderError(null);
-    const r = await commitFileAction(repoRef, `${folder}/.gitkeep`, "", message, branch);
-    setCreatingFolder(false);
-    if ("error" in r) {
-      setNewFolderError(r.error);
+    const names = bulkFolders
+      ? buildBulkFolderNames(newFolderPath, Number.parseInt(folderStart, 10), Number.parseInt(folderCount, 10))
+      : (() => {
+          const f = normalizePath(newFolderPath);
+          return f ? [f] : [];
+        })();
+    if (names.length === 0) {
+      setNewFolderError(
+        bulkFolders ? "Enter a name pattern and a count of 1 to 100." : "Enter a folder path."
+      );
       return;
     }
-    setShowNewFolder(false);
+    setCreatingFolder(true);
+    setNewFolderError(null);
+    setNewFolderResult(null);
+    const failures: string[] = [];
+    let created = 0;
+    for (const name of names) {
+      const message = newFolderMsg.trim() || `Add ${name}/`;
+      const r = await commitFileAction(repoRef, `${name}/.gitkeep`, "", message, branch);
+      if ("error" in r) failures.push(name);
+      else created += 1;
+    }
+    setCreatingFolder(false);
+    setTreeNonce((n) => n + 1);
+    if (failures.length > 0) {
+      setNewFolderError(`Created ${created}. Failed: ${failures.join(", ")}.`);
+      return;
+    }
+    setNewFolderResult(`Created ${created} folder${created === 1 ? "" : "s"}.`);
     setNewFolderPath("");
     setNewFolderMsg("");
-    setTreeNonce((n) => n + 1);
   };
 
   const reloadBranches = async () => {
@@ -720,7 +739,7 @@ export default function RepoDetail() {
               <Button
                 variant="outlined"
                 size="small"
-                onClick={() => { setShowNewFolder((v) => !v); setShowNewFile(false); setNewFolderError(null); }}
+                onClick={() => { setShowNewFolder((v) => !v); setShowNewFile(false); setNewFolderError(null); setNewFolderResult(null); }}
               >
                 {showNewFolder ? "Cancel new folder" : "New folder"}
               </Button>
@@ -770,16 +789,44 @@ export default function RepoDetail() {
 
             {showNewFolder && (
               <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+                <FormControlLabel
+                  control={<Checkbox size="small" checked={bulkFolders} onChange={(e) => { setBulkFolders(e.target.checked); setNewFolderError(null); setNewFolderResult(null); }} />}
+                  label="Create multiple folders"
+                />
                 <TextField
                   size="small"
                   fullWidth
-                  placeholder="Folder path, e.g. docs/guides"
+                  placeholder={bulkFolders ? "Name pattern, e.g. Module {n}" : "Folder path, e.g. docs/guides"}
                   value={newFolderPath}
                   onChange={(e) => setNewFolderPath(e.target.value)}
                   onKeyDown={submitOnEnter(handleCreateFolder)}
                   disabled={creatingFolder}
                   sx={{ "& input": { fontFamily: "monospace", fontSize: "0.82rem" } }}
                 />
+                {bulkFolders && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <TextField
+                      size="small"
+                      type="number"
+                      label="Start"
+                      value={folderStart}
+                      onChange={(e) => setFolderStart(e.target.value)}
+                      disabled={creatingFolder}
+                      sx={{ width: 120 }}
+                      slotProps={{ inputLabel: { shrink: true } }}
+                    />
+                    <TextField
+                      size="small"
+                      type="number"
+                      label="Count"
+                      value={folderCount}
+                      onChange={(e) => setFolderCount(e.target.value)}
+                      disabled={creatingFolder}
+                      sx={{ width: 120 }}
+                      slotProps={{ inputLabel: { shrink: true } }}
+                    />
+                  </div>
+                )}
                 <TextField
                   size="small"
                   fullWidth
@@ -790,17 +837,20 @@ export default function RepoDetail() {
                   disabled={creatingFolder}
                 />
                 <p className={styles.fieldHint}>
-                  Git does not track empty folders, so a .gitkeep file is added inside the new folder.
+                  {bulkFolders
+                    ? "Use {n} in the pattern for the number (otherwise it is appended). Each folder gets a .gitkeep since Git does not track empty folders."
+                    : "Git does not track empty folders, so a .gitkeep file is added inside the new folder."}
                 </p>
                 <div style={{ display: "flex", gap: 8 }}>
                   <Button variant="contained" size="small" disabled={creatingFolder || !newFolderPath.trim()} onClick={handleCreateFolder}>
-                    {creatingFolder ? "Creating..." : `Create folder on ${branch}`}
+                    {creatingFolder ? "Creating..." : bulkFolders ? `Create folders on ${branch}` : `Create folder on ${branch}`}
                   </Button>
                   <Button variant="text" size="small" onClick={() => setShowNewFolder(false)}>
                     Cancel
                   </Button>
                 </div>
                 {newFolderError && <p className={styles.error}>{newFolderError}</p>}
+                {newFolderResult && <p className={styles.fieldHint}>{newFolderResult}</p>}
               </div>
             )}
 

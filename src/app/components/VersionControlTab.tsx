@@ -20,6 +20,8 @@ import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import styles from "../page.module.css";
 
+const VC_SUBTAB_KEY = "ta-vc-subtab";
+
 /**
  * Version Control Integration: pick a GitHub org and a template repo within it,
  * paste a list of students, and generate one repo per student from the template
@@ -38,7 +40,9 @@ export default function VersionControlTab() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<StudentRepoResult[] | null>(null);
-  const [subTab, setSubTab] = useState<"orgs" | "repos">("orgs");
+  const [subTab, setSubTab] = useState<"orgs" | "repos">(() =>
+    typeof window !== "undefined" && localStorage.getItem(VC_SUBTAB_KEY) === "repos" ? "repos" : "orgs"
+  );
   // Create a repo with a Copilot prompt in the selected org.
   const [copilotName, setCopilotName] = useState("");
   const [copilotPrompt, setCopilotPrompt] = useState("");
@@ -55,6 +59,10 @@ export default function VersionControlTab() {
       setOrgsState("ready");
     }
   };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem(VC_SUBTAB_KEY, subTab);
+  }, [subTab]);
 
   useEffect(() => {
     let cancelled = false;

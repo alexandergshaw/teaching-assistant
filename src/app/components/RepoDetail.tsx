@@ -37,10 +37,15 @@ import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import styles from "../page.module.css";
 
+const VC_REPO_KEY = "ta-vc-repo";
+const VC_BRANCH_KEY = "ta-vc-branch";
+
 export default function RepoDetail() {
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [reposState, setReposState] = useState<"loading" | "ready" | "error">("loading");
-  const [repoRef, setRepoRef] = useState("");
+  const [repoRef, setRepoRef] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem(VC_REPO_KEY) ?? "" : ""
+  );
   const [branch, setBranch] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
   const [defaultBranch, setDefaultBranch] = useState("");
@@ -138,6 +143,17 @@ export default function RepoDetail() {
     };
   }, []);
 
+  // Persist the selected repo + branch so the Repos subtab reopens where it was.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (repoRef) localStorage.setItem(VC_REPO_KEY, repoRef);
+    else localStorage.removeItem(VC_REPO_KEY);
+  }, [repoRef]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && branch) localStorage.setItem(VC_BRANCH_KEY, branch);
+  }, [branch]);
+
   // Load branches when repo changes
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
@@ -165,7 +181,8 @@ export default function RepoDetail() {
       }
       setBranches(r.branches);
       setDefaultBranch(r.defaultBranch);
-      setBranch(r.defaultBranch);
+      const storedBranch = typeof window !== "undefined" ? localStorage.getItem(VC_BRANCH_KEY) : null;
+      setBranch(storedBranch && r.branches.includes(storedBranch) ? storedBranch : r.defaultBranch);
       setTree([]);
       setSelectedPath("");
       setFileContent("");

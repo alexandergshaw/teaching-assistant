@@ -58,6 +58,20 @@ export default function RepoDetail() {
   const [committing, setCommitting] = useState(false);
   const [commitMsg, setCommitMsg] = useState("");
 
+  // Add file / folder (Files tab). treeNonce bumps to force a tree reload.
+  const [treeNonce, setTreeNonce] = useState(0);
+  const [showNewFile, setShowNewFile] = useState(false);
+  const [newFilePath, setNewFilePath] = useState("");
+  const [newFileContent, setNewFileContent] = useState("");
+  const [newFileMsg, setNewFileMsg] = useState("");
+  const [creatingFile, setCreatingFile] = useState(false);
+  const [newFileError, setNewFileError] = useState<string | null>(null);
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderPath, setNewFolderPath] = useState("");
+  const [newFolderMsg, setNewFolderMsg] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderError, setNewFolderError] = useState<string | null>(null);
+
   // Branches tab state
   const [newBranch, setNewBranch] = useState("");
   const [fromBranch, setFromBranch] = useState("");
@@ -187,7 +201,7 @@ export default function RepoDetail() {
       cancelled = true;
     };
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [repoRef, branch, tab]);
+  }, [repoRef, branch, tab, treeNonce]);
 
   // Load file content when selectedPath changes
   useEffect(() => {
@@ -300,6 +314,60 @@ export default function RepoDetail() {
     setCommitMsg("Committed.");
     setFileContent(editContent);
     setCommitMessage("");
+  };
+
+  const normalizePath = (p: string) => p.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+
+  const handleCreateFile = async () => {
+    const path = normalizePath(newFilePath);
+    if (!path) {
+      setNewFileError("Enter a file path.");
+      return;
+    }
+    if (!repoRef || !branch) {
+      setNewFileError("Pick a repository and branch first.");
+      return;
+    }
+    const message = newFileMsg.trim() || `Add ${path}`;
+    setCreatingFile(true);
+    setNewFileError(null);
+    const r = await commitFileAction(repoRef, path, newFileContent, message, branch);
+    setCreatingFile(false);
+    if ("error" in r) {
+      setNewFileError(r.error);
+      return;
+    }
+    setShowNewFile(false);
+    setNewFilePath("");
+    setNewFileContent("");
+    setNewFileMsg("");
+    setTreeNonce((n) => n + 1);
+    setSelectedPath(path);
+  };
+
+  const handleCreateFolder = async () => {
+    const folder = normalizePath(newFolderPath);
+    if (!folder) {
+      setNewFolderError("Enter a folder path.");
+      return;
+    }
+    if (!repoRef || !branch) {
+      setNewFolderError("Pick a repository and branch first.");
+      return;
+    }
+    const message = newFolderMsg.trim() || `Add ${folder}/`;
+    setCreatingFolder(true);
+    setNewFolderError(null);
+    const r = await commitFileAction(repoRef, `${folder}/.gitkeep`, "", message, branch);
+    setCreatingFolder(false);
+    if ("error" in r) {
+      setNewFolderError(r.error);
+      return;
+    }
+    setShowNewFolder(false);
+    setNewFolderPath("");
+    setNewFolderMsg("");
+    setTreeNonce((n) => n + 1);
   };
 
   const reloadBranches = async () => {
@@ -623,6 +691,102 @@ export default function RepoDetail() {
           </Tabs>
 
           {tab === "files" && (
+            <>
+            <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => { setShowNewFile((v) => !v); setShowNewFolder(false); setNewFileError(null); }}
+              >
+                {showNewFile ? "Cancel new file" : "New file"}
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => { setShowNewFolder((v) => !v); setShowNewFile(false); setNewFolderError(null); }}
+              >
+                {showNewFolder ? "Cancel new folder" : "New folder"}
+              </Button>
+            </div>
+
+            {showNewFile && (
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="File path, e.g. src/util/new.ts"
+                  value={newFilePath}
+                  onChange={(e) => setNewFilePath(e.target.value)}
+                  disabled={creatingFile}
+                  sx={{ "& input": { fontFamily: "monospace", fontSize: "0.82rem" } }}
+                />
+                <TextField
+                  multiline
+                  minRows={6}
+                  fullWidth
+                  placeholder="File contents (optional)"
+                  value={newFileContent}
+                  onChange={(e) => setNewFileContent(e.target.value)}
+                  disabled={creatingFile}
+                  sx={{ "& textarea": { fontFamily: "monospace", fontSize: "0.8rem" } }}
+                />
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="Commit message (optional)"
+                  value={newFileMsg}
+                  onChange={(e) => setNewFileMsg(e.target.value)}
+                  onKeyDown={submitOnEnter(handleCreateFile)}
+                  disabled={creatingFile}
+                />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Button variant="contained" size="small" disabled={creatingFile || !newFilePath.trim()} onClick={handleCreateFile}>
+                    {creatingFile ? "Creating..." : `Create file on ${branch}`}
+                  </Button>
+                  <Button variant="text" size="small" onClick={() => setShowNewFile(false)}>
+                    Cancel
+                  </Button>
+                </div>
+                {newFileError && <p className={styles.error}>{newFileError}</p>}
+              </div>
+            )}
+
+            {showNewFolder && (
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="Folder path, e.g. docs/guides"
+                  value={newFolderPath}
+                  onChange={(e) => setNewFolderPath(e.target.value)}
+                  onKeyDown={submitOnEnter(handleCreateFolder)}
+                  disabled={creatingFolder}
+                  sx={{ "& input": { fontFamily: "monospace", fontSize: "0.82rem" } }}
+                />
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="Commit message (optional)"
+                  value={newFolderMsg}
+                  onChange={(e) => setNewFolderMsg(e.target.value)}
+                  onKeyDown={submitOnEnter(handleCreateFolder)}
+                  disabled={creatingFolder}
+                />
+                <p className={styles.fieldHint}>
+                  Git does not track empty folders, so a .gitkeep file is added inside the new folder.
+                </p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Button variant="contained" size="small" disabled={creatingFolder || !newFolderPath.trim()} onClick={handleCreateFolder}>
+                    {creatingFolder ? "Creating..." : `Create folder on ${branch}`}
+                  </Button>
+                  <Button variant="text" size="small" onClick={() => setShowNewFolder(false)}>
+                    Cancel
+                  </Button>
+                </div>
+                {newFolderError && <p className={styles.error}>{newFolderError}</p>}
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: 16, marginTop: 16 }}>
               <div style={{ width: 320, borderRight: "1px solid var(--field-border)" }}>
                 <TextField
@@ -730,6 +894,7 @@ export default function RepoDetail() {
                 )}
               </div>
             </div>
+            </>
           )}
 
           {tab === "branches" && (

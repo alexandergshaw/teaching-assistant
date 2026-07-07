@@ -127,7 +127,7 @@ export default function RepoDetail() {
   const [createPrompt, setCreatePrompt] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
   const [createMsg, setCreateMsg] = useState<string | null>(null);
-  const [createResult, setCreateResult] = useState<{ fullName: string; htmlUrl: string } | null>(null);
+  const [createResult, setCreateResult] = useState<{ fullName: string; htmlUrl: string; issueUrl?: string; copilotNote?: string } | null>(null);
 
   // Load repos on mount
   useEffect(() => {
@@ -577,7 +577,9 @@ export default function RepoDetail() {
     }
     const fullName = "repo" in r ? r.repo.fullName : r.fullName;
     const htmlUrl = "repo" in r ? r.repo.htmlUrl : r.htmlUrl;
-    setCreateResult({ fullName, htmlUrl });
+    const issueUrl = "repo" in r ? undefined : r.issueUrl;
+    const copilotNote = "repo" in r ? undefined : r.copilotNote;
+    setCreateResult({ fullName, htmlUrl, issueUrl, copilotNote });
     const list = await listGithubReposAction();
     if (!("error" in list)) setRepos(list.repos);
     setRepoRef(fullName);
@@ -697,12 +699,26 @@ export default function RepoDetail() {
             </p>
           )}
           {createResult && (
-            <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: 4 }}>
-              Created{" "}
-              <a href={createResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
-                {createResult.fullName}
-              </a>
-            </p>
+            <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: 4 }}>
+              <p style={{ margin: 0 }}>
+                Created{" "}
+                <a href={createResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                  {createResult.fullName}
+                </a>
+              </p>
+              {createResult.issueUrl && (
+                <p style={{ margin: "4px 0 0" }}>
+                  Copilot is building it —{" "}
+                  <a href={createResult.issueUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                    view the issue
+                  </a>
+                  .
+                </p>
+              )}
+              {createResult.copilotNote && (
+                <p style={{ margin: "4px 0 0", color: "#d97706" }}>{createResult.copilotNote}</p>
+              )}
+            </div>
           )}
         </div>
       )}

@@ -285,6 +285,116 @@ export async function putFile(
   });
 }
 
+// ── Copilot coding agent ──────────────────────────────────────────────────────
+//
+// Kick off GitHub's Copilot coding agent to build a repo: open an issue with the
+// build prompt and assign it to Copilot, which then works and opens a PR. Copilot
+// appears in a repo's suggestedActors (capability CAN_BE_ASSIGNED) as the
+// "copilot-swe-agent" Bot when the account/org has the coding agent enabled.
+
+const GITHUB_GRAPHQL = "https://api.github.com/graphql";
+
+/** Minimal GitHub GraphQL POST using the same token as the REST client. */
+async function ghGraphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+  const res = await fetch(GITHUB_GRAPHQL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${githubToken()}`,
+      "Content-Type": "application/json",
+      Accept: "application/vnd.github+json",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!res.ok) {
+    throw new Error(ghError(res.status, await res.text().catch(() => "")));
+  }
+  const body = (await res.json()) as { data?: T; errors?: Array<{ message?: string }> };
+  if (body.errors && body.errors.length > 0) {
+    throw new Error(`GitHub GraphQL error: ${body.errors.map((e) => e.message).filter(Boolean).join("; ")}`);
+  }
+  if (!body.data) throw new Error("GitHub GraphQL returned no data.");
+  return body.data;
+}
+
+/**
+ * The Copilot coding agent's assignable actor id for a repo, or null when it is
+ * not available there (coding agent not enabled for the account/org).
+ */
+async function getCopilotActorId(owner: string, repo: string): Promise<string | null> {
+  const data = await ghGraphql<{
+    repository?: { suggestedActors?: { nodes?: Array<{ login?: string; id?: string }> } };
+  }>(
+    `query($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) {
+        suggestedActors(capabilities: [CAN_BE_ASSIGNED], first: 100) {
+          nodes { login __typename ... on Bot { id } ... on User { id } }
+        }
+      }
+    }`,
+    { owner, repo }
+  );
+  const nodes = data.repository?.suggestedActors?.nodes ?? [];
+  const copilot = nodes.find(
+    (n) => n?.login === "copilot-swe-agent" || n?.login?.toLowerCase() === "copilot"
+  );
+  return copilot?.id ?? null;
+}
+
+/** Create an issue and return its number, GraphQL node id, and URL. */
+async function createIssue(
+  owner: string,
+  repo: string,
+  title: string,
+  body: string
+): Promise<{ number: number; nodeId: string; htmlUrl: string }> {
+  const raw = await ghJson<{ number?: number; node_id?: string; html_url?: string }>(
+    `/repos/${owner}/${repo}/issues`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, body }) }
+  );
+  return { number: raw.number ?? 0, nodeId: raw.node_id ?? "", htmlUrl: raw.html_url ?? "" };
+}
+
+/** Assign a set of actors (e.g. the Copilot coding agent) to an issue by node id. */
+async function replaceAssignees(assignableId: string, actorIds: string[]): Promise<void> {
+  await ghGraphql(
+    `mutation($assignableId: ID!, $actorIds: [ID!]!) {
+      replaceActorsForAssignable(input: { assignableId: $assignableId, actorIds: $actorIds }) {
+        assignable { __typename }
+      }
+    }`,
+    { assignableId, actorIds }
+  );
+}
+
+/**
+ * Open a build issue from the prompt and assign it to Copilot, which builds the
+ * repo and opens a PR. Returns the issue URL/number. Throws a clear error when
+ * the Copilot coding agent is not available for the repo.
+ */
+export async function startCopilotBuild(
+  owner: string,
+  repo: string,
+  prompt: string
+): Promise<{ issueUrl: string; issueNumber: number }> {
+  const copilotId = await getCopilotActorId(owner, repo);
+  if (!copilotId) {
+    throw new Error(
+      "Copilot coding agent is not available for this repository. Enable Copilot coding agent for the account or organization, then assign the created issue to Copilot."
+    );
+  }
+  const issue = await createIssue(
+    owner,
+    repo,
+    "Build this project with Copilot",
+    `${prompt}\n\n---\n\nAssigned to the GitHub Copilot coding agent to scaffold this repository.`
+  );
+  if (!issue.nodeId) {
+    throw new Error("Could not read the created issue id from GitHub, so Copilot was not assigned.");
+  }
+  await replaceAssignees(issue.nodeId, [copilotId]);
+  return { issueUrl: issue.htmlUrl, issueNumber: issue.number };
+}
+
 // ── Codebase digest (for course / rubric generation and grading) ───────────────
 
 // Text/code file extensions worth feeding to a model.

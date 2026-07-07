@@ -169,6 +169,7 @@ import {
   parseRepoRef,
   createRepo,
   createOrgRepo,
+  startCopilotBuild,
   generateFromTemplate,
   putFile,
   getFileText,
@@ -5178,10 +5179,12 @@ export async function createRepoAction(
 }
 
 /**
- * Create a new GitHub repo seeded with a generated Copilot prompt, so the page
- * that used to only produce the prompt can hand back a ready-to-build repo. The
- * prompt is written to .github/copilot-instructions.md (Copilot Agent reads it)
- * and PROMPT.md for visibility.
+ * Create a new GitHub repo seeded with a generated Copilot prompt, then kick off
+ * GitHub's Copilot coding agent to build it: the prompt is written to
+ * .github/copilot-instructions.md and PROMPT.md, and an issue containing the
+ * prompt is opened and assigned to Copilot (which works and opens a PR). If the
+ * Copilot coding agent is not available for the account/org, the repo is still
+ * created and a note explains why Copilot did not start.
  */
 export async function createCopilotRepoAction(
   name: string,
@@ -5190,7 +5193,7 @@ export async function createCopilotRepoAction(
   org?: string,
   isTemplate = false,
   description?: string
-): Promise<{ fullName: string; htmlUrl: string } | { error: string }> {
+): Promise<{ fullName: string; htmlUrl: string; issueUrl?: string; copilotNote?: string } | { error: string }> {
   try {
     await requireOwner();
     const clean = name.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
@@ -5212,7 +5215,20 @@ export async function createCopilotRepoAction(
       "Add build prompt",
       repo.defaultBranch
     );
-    return { fullName: repo.fullName, htmlUrl: repo.htmlUrl };
+    // The repo is created and seeded. Kick off the Copilot coding agent to build
+    // it (open an issue with the prompt and assign Copilot). Repo creation has
+    // already succeeded, so a Copilot failure is surfaced as a note rather than
+    // failing the whole action.
+    let issueUrl: string | undefined;
+    let copilotNote: string | undefined;
+    try {
+      const build = await startCopilotBuild(repo.owner, repo.name, prompt);
+      issueUrl = build.issueUrl;
+    } catch (copilotErr) {
+      copilotNote =
+        copilotErr instanceof Error ? copilotErr.message : "Could not start the Copilot coding agent.";
+    }
+    return { fullName: repo.fullName, htmlUrl: repo.htmlUrl, issueUrl, copilotNote };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not create the repository." };
   }

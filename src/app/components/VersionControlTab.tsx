@@ -49,7 +49,7 @@ export default function VersionControlTab() {
   const [copilotPrivate, setCopilotPrivate] = useState(true);
   const [copilotTemplate, setCopilotTemplate] = useState(true);
   const [copilotBusy, setCopilotBusy] = useState(false);
-  const [copilotResult, setCopilotResult] = useState<{ fullName: string; htmlUrl: string } | null>(null);
+  const [copilotResult, setCopilotResult] = useState<{ fullName: string; htmlUrl: string; issueUrl?: string; copilotNote?: string } | null>(null);
   const [copilotError, setCopilotError] = useState<string | null>(null);
 
   const refreshOrgs = async () => {
@@ -285,13 +285,27 @@ export default function VersionControlTab() {
             </div>
             {copilotError && <p className={styles.error}>{copilotError}</p>}
             {copilotResult && (
-              <p style={{ fontSize: "0.85rem", marginTop: 8 }}>
-                Created{" "}
-                <a href={copilotResult.htmlUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>
-                  {copilotResult.fullName}
-                </a>
-                {copilotTemplate ? " — now selectable as a template below." : "."}
-              </p>
+              <div style={{ fontSize: "0.85rem", marginTop: 8 }}>
+                <p style={{ margin: 0 }}>
+                  Created{" "}
+                  <a href={copilotResult.htmlUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>
+                    {copilotResult.fullName}
+                  </a>
+                  {copilotTemplate ? " — now selectable as a template below." : "."}
+                </p>
+                {copilotResult.issueUrl && (
+                  <p style={{ margin: "4px 0 0" }}>
+                    Copilot is building it —{" "}
+                    <a href={copilotResult.issueUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>
+                      view the issue
+                    </a>
+                    .
+                  </p>
+                )}
+                {copilotResult.copilotNote && (
+                  <p style={{ margin: "4px 0 0", color: "#d97706" }}>{copilotResult.copilotNote}</p>
+                )}
+              </div>
             )}
           </div>
 

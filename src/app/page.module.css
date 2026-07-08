@@ -1020,6 +1020,69 @@ button.courseResourceValue:disabled {
   border-top: 1px solid var(--field-border);
 }
 
+/* Collapsible institution groups on the Courses tab. */
+.courseGroups {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.courseGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.courseGroupHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--field-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--field-background) 94%, var(--accent) 4%);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.courseGroupHeader:hover {
+  border-color: var(--accent);
+}
+
+.courseGroupHeader::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--text-secondary);
+  border-bottom: 2px solid var(--text-secondary);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+
+.courseGroupHeader[aria-expanded="true"]::before {
+  transform: rotate(45deg);
+}
+
+.courseGroupName {
+  font-weight: 700;
+  font-size: 0.98rem;
+  letter-spacing: -0.01em;
+}
+
+.courseGroupCount {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
 /* Read-only rendering of a syllabus .docx inside the preview modal. */
 .syllabusPreviewDoc {
   flex: 1;

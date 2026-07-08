@@ -110,6 +110,11 @@ function downloadDocx(base64: string, fileName: string): void {
 // silent background revalidate keeps it fresh, and mutations update it in place.
 let hubCache: { courses: Course[]; syllabi: FinalizedSyllabusMeta[]; orgs: string[] } | null = null;
 
+// Which institution groups are collapsed, keyed by institution ("__none__" for
+// courses without one). Persisted so the layout is stable across visits.
+const COLLAPSE_KEY = "ta-courses-collapsed";
+const NO_INSTITUTION = "__none__";
+
 export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-planning" | "version-control") => void }) {
   const institutions = useInstitutions();
   const [courses, setCourses] = useState<Course[]>(() => hubCache?.courses ?? []);
@@ -117,7 +122,8 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [orgs, setOrgs] = useState<string[]>(() => hubCache?.orgs ?? []);
   const [state, setState] = useState<"loading" | "idle" | "error">(hubCache ? "idle" : "loading");
   const [refreshing, setRefreshing] = useState(false);
-  const [filterInstitution, setFilterInstitution] = useState<string>("");
+  const [search, setSearch] = useState("");
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<CourseForm | null>(null);
   const [formNote, setFormNote] = useState<string | null>(null);
@@ -163,6 +169,32 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     /* eslint-disable-next-line react-hooks/set-state-in-effect */
     void load({ silent: hubCache != null });
   }, []);
+
+  useEffect(() => {
+    // Restore collapsed institution groups (client-only to avoid SSR mismatch).
+    try {
+      const saved = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "{}");
+      /* eslint-disable-next-line react-hooks/set-state-in-effect */
+      if (saved && typeof saved === "object") setCollapsed(saved as Record<string, boolean>);
+    } catch {
+      /* ignore malformed state */
+    }
+  }, []);
+
+  const toggleGroup = (key: string) =>
+    setCollapsed((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      localStorage.setItem(COLLAPSE_KEY, JSON.stringify(next));
+      return next;
+    });
+
+  const setAllCollapsed = (value: boolean, keys: string[]) =>
+    setCollapsed((prev) => {
+      const next = { ...prev };
+      for (const k of keys) next[k] = value;
+      localStorage.setItem(COLLAPSE_KEY, JSON.stringify(next));
+      return next;
+    });
 
   const reloadSyllabi = async () => {
     const s = await listFinalizedSyllabiAction();
@@ -342,18 +374,45 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     onNavigate("version-control");
   };
 
-  // Courses filtered by the institution dropdown, then grouped by institution
-  // (courses without one sort last).
-  const visibleCourses = (filterInstitution ? courses.filter((c) => (c.institution ?? "") === filterInstitution) : courses)
-    .slice()
+  // Full-text filter across a course's searchable fields.
+  const query = search.trim().toLowerCase();
+  const matchesQuery = (c: Course): boolean => {
+    if (!query) return true;
+    const hay = [
+      c.name,
+      c.courseCode,
+      c.term,
+      c.institution,
+      c.textbook,
+      c.notes,
+      c.githubOrg,
+      ...c.repos.map((r) => r.repo),
+      ...c.integrations.map((i) => i.name),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return hay.includes(query);
+  };
+  const filteredCourses = courses.filter(matchesQuery);
+
+  // Group the filtered courses by institution; named institutions sort first
+  // (alphabetically), courses without one go into a "No institution" group last.
+  const groupMap = new Map<string, Course[]>();
+  for (const c of filteredCourses) {
+    const key = (c.institution ?? "").trim() || NO_INSTITUTION;
+    (groupMap.get(key) ?? groupMap.set(key, []).get(key)!).push(c);
+  }
+  const groups = Array.from(groupMap.entries())
+    .map(([key, list]) => ({ key, label: key === NO_INSTITUTION ? "No institution" : key, courses: list }))
     .sort((a, b) => {
-      const ai = a.institution ?? "";
-      const bi = b.institution ?? "";
-      if (ai === bi) return 0;
-      if (!ai) return 1;
-      if (!bi) return -1;
-      return ai.localeCompare(bi);
+      if (a.key === b.key) return 0;
+      if (a.key === NO_INSTITUTION) return 1;
+      if (b.key === NO_INSTITUTION) return -1;
+      return a.label.localeCompare(b.label);
     });
+  const groupKeys = groups.map((g) => g.key);
+  const allExpanded = groupKeys.length > 0 && groupKeys.every((k) => !collapsed[k]);
 
   return (
     <section className={styles.card}>
@@ -371,22 +430,20 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
           <Button variant="text" size="small" onClick={() => void load({ silent: true })} disabled={refreshing}>
             {refreshing ? "Refreshing…" : "Refresh"}
           </Button>
-          {institutions.length > 0 && courses.length > 0 && (
+          {courses.length > 0 && (
             <TextField
-              select
               size="small"
-              label="Institution"
-              value={filterInstitution}
-              onChange={(e) => setFilterInstitution(e.target.value)}
-              sx={{ minWidth: 190, marginLeft: "auto" }}
-            >
-              <MenuItem value="">All institutions</MenuItem>
-              {institutions.map((i) => (
-                <MenuItem key={i} value={i}>
-                  {i}
-                </MenuItem>
-              ))}
-            </TextField>
+              type="search"
+              placeholder="Search courses, codes, repos, integrations…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              sx={{ flex: "1 1 220px" }}
+            />
+          )}
+          {!query && groups.length > 1 && (
+            <Button variant="text" size="small" onClick={() => setAllCollapsed(allExpanded, groupKeys)}>
+              {allExpanded ? "Collapse all" : "Expand all"}
+            </Button>
           )}
         </div>
       )}
@@ -630,15 +687,30 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       {state === "idle" && !form && courses.length === 0 && (
         <p className={styles.fieldHint}>No courses yet. Choose &ldquo;New course&rdquo; to bundle your first one.</p>
       )}
-      {state === "idle" && !form && courses.length > 0 && visibleCourses.length === 0 && (
-        <p className={styles.fieldHint}>No courses for {filterInstitution}.</p>
+      {state === "idle" && !form && courses.length > 0 && filteredCourses.length === 0 && (
+        <p className={styles.fieldHint}>No courses match &ldquo;{search.trim()}&rdquo;.</p>
       )}
 
-      {state === "idle" && visibleCourses.length > 0 && (
-        <div className={styles.courseGrid}>
-          {visibleCourses.map((c) => {
-            const sName = syllabusName(c.syllabusId);
+      {state === "idle" && filteredCourses.length > 0 && (
+        <div className={styles.courseGroups}>
+          {groups.map((g) => {
+            const open = query !== "" || !collapsed[g.key];
             return (
+              <div key={g.key} className={styles.courseGroup}>
+                <button
+                  type="button"
+                  className={styles.courseGroupHeader}
+                  aria-expanded={open}
+                  onClick={() => toggleGroup(g.key)}
+                >
+                  <span className={styles.courseGroupName}>{g.label}</span>
+                  <span className={styles.courseGroupCount}>{g.courses.length}</span>
+                </button>
+                {open && (
+                  <div className={styles.courseGrid}>
+                    {g.courses.map((c) => {
+                      const sName = syllabusName(c.syllabusId);
+                      return (
               <div key={c.id} className={styles.courseCard}>
                 <div className={styles.courseCardHead}>
                   <div style={{ minWidth: 0 }}>
@@ -757,6 +829,11 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                     Version control
                   </button>
                 </div>
+              </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}

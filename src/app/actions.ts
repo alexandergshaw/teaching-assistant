@@ -199,6 +199,9 @@ import {
   listCommits,
   listPullRequests,
   mergePullRequest,
+  listPullRequestReviews,
+  reviewPullRequest,
+  listPullRequestFiles,
   listWorkflowRuns,
   listRunJobs,
   rerunWorkflowRun,
@@ -222,6 +225,8 @@ import {
   type UpdateRepoPatch,
   type CommitInfo,
   type PullRequestInfo,
+  type PullRequestReviewInfo,
+  type PullRequestFileInfo,
   type WorkflowJobInfo,
   type RepoTreeEntry,
   type CopilotTask,
@@ -6546,6 +6551,57 @@ export async function mergePullRequestAction(repoRef: string, prNumber: number, 
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not merge the pull request." };
+  }
+}
+
+/** List the reviews submitted on a pull request. */
+export async function listPullRequestReviewsAction(
+  repoRef: string,
+  prNumber: number
+): Promise<{ reviews: PullRequestReviewInfo[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return { reviews: await listPullRequestReviews(parsed.owner, parsed.repo, prNumber) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load reviews." };
+  }
+}
+
+/** List the files a pull request changes, with their diffs. */
+export async function listPullRequestFilesAction(
+  repoRef: string,
+  prNumber: number
+): Promise<{ files: PullRequestFileInfo[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return { files: await listPullRequestFiles(parsed.owner, parsed.repo, prNumber) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the pull request's files." };
+  }
+}
+
+/** Submit a review on a pull request (approve or request changes). */
+export async function reviewPullRequestAction(
+  repoRef: string,
+  prNumber: number,
+  event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
+  body?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    if (event !== "APPROVE" && !body?.trim()) {
+      return { error: "Add a comment explaining the requested changes." };
+    }
+    await reviewPullRequest(parsed.owner, parsed.repo, prNumber, event, body);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not submit the review." };
   }
 }
 

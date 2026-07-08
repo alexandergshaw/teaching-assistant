@@ -13,6 +13,9 @@ import {
   listPullRequestsAction,
   createPullRequestAction,
   mergePullRequestAction,
+  listPullRequestReviewsAction,
+  listPullRequestFilesAction,
+  reviewPullRequestAction,
   listWorkflowsAction,
   dispatchWorkflowAction,
   listWorkflowRunsAction,
@@ -33,7 +36,7 @@ import {
   bulkDeletePathsAction,
   bulkMovePathsAction,
 } from "../actions";
-import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo, CopilotTask, ArtifactInfo, PendingDeployment } from "@/lib/github";
+import type { GithubRepo, RepoTreeEntry, PullRequestInfo, PullRequestReviewInfo, PullRequestFileInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo, CopilotTask, ArtifactInfo, PendingDeployment } from "@/lib/github";
 import RepoSettingsPanel from "./RepoSettingsPanel";
 import PublishToCanvasPage from "./PublishToCanvasPage";
 import CopilotChatPanel from "./CopilotChatPanel";
@@ -139,6 +142,11 @@ export default function RepoDetail() {
   const [prMsg, setPrMsg] = useState<string | null>(null);
   const [mergeMethod, setMergeMethod] = useState<Record<number, "merge" | "squash" | "rebase">>({});
   const [mergingPr, setMergingPr] = useState<number | null>(null);
+  const [reviewsByPr, setReviewsByPr] = useState<Record<number, PullRequestReviewInfo[]>>({});
+  const [filesByPr, setFilesByPr] = useState<Record<number, PullRequestFileInfo[]>>({});
+  const [expandedPr, setExpandedPr] = useState<number | null>(null);
+  const [filesLoadingPr, setFilesLoadingPr] = useState<number | null>(null);
+  const [reviewingPr, setReviewingPr] = useState<number | null>(null);
 
   // Actions tab state
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
@@ -326,6 +334,29 @@ export default function RepoDetail() {
     };
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [repoRef, tab, prState]);
+
+  // Load each listed PR's reviews so approval status shows inline.
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (tab !== "pulls" || pulls.length === 0) {
+      setReviewsByPr({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        pulls.map(async (p) => [p.number, await listPullRequestReviewsAction(repoRef, p.number)] as const)
+      );
+      if (cancelled) return;
+      const map: Record<number, PullRequestReviewInfo[]> = {};
+      for (const [num, r] of entries) if (!("error" in r)) map[num] = r.reviews;
+      setReviewsByPr(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [pulls, tab, repoRef]);
 
   // Load workflows and runs when the actions tab is active
   useEffect(() => {
@@ -672,6 +703,70 @@ export default function RepoDetail() {
     setPrMsg(`Merged #${n}.`);
     await reloadPulls();
   };
+
+  const reloadPrReviews = async (n: number) => {
+    const r = await listPullRequestReviewsAction(repoRef, n);
+    if (!("error" in r)) setReviewsByPr((m) => ({ ...m, [n]: r.reviews }));
+  };
+
+  // Submit an approve / request-changes review on a PR.
+  const handleReviewPr = async (n: number, event: "APPROVE" | "REQUEST_CHANGES") => {
+    let body: string | undefined;
+    if (event === "REQUEST_CHANGES") {
+      const input = typeof window !== "undefined" ? window.prompt("What changes are needed?") : null;
+      if (input === null) return; // cancelled
+      if (!input.trim()) {
+        setPrMsg("Error: add a comment explaining the requested changes.");
+        return;
+      }
+      body = input;
+    }
+    setReviewingPr(n);
+    setPrMsg(null);
+    const r = await reviewPullRequestAction(repoRef, n, event, body);
+    setReviewingPr(null);
+    if ("error" in r) {
+      setPrMsg(`Error reviewing #${n}: ${r.error}`);
+      return;
+    }
+    setPrMsg(event === "APPROVE" ? `Approved #${n}.` : `Requested changes on #${n}.`);
+    await reloadPrReviews(n);
+  };
+
+  // Expand/collapse a PR's changed files (loaded once, on first expand).
+  const togglePrFiles = async (n: number) => {
+    if (expandedPr === n) {
+      setExpandedPr(null);
+      return;
+    }
+    setExpandedPr(n);
+    if (!filesByPr[n]) {
+      setFilesLoadingPr(n);
+      const r = await listPullRequestFilesAction(repoRef, n);
+      setFilesLoadingPr(null);
+      if (!("error" in r)) setFilesByPr((m) => ({ ...m, [n]: r.files }));
+    }
+  };
+
+  // The effective (latest) review per reviewer, ignoring plain comments.
+  const latestReviews = (list: PullRequestReviewInfo[]): PullRequestReviewInfo[] => {
+    const byUser = new Map<string, PullRequestReviewInfo>();
+    for (const rv of list) {
+      if (rv.state === "COMMENTED" || rv.state === "PENDING") continue;
+      byUser.set(rv.user, rv);
+    }
+    return [...byUser.values()];
+  };
+
+  // Colour a unified-diff line by its leading marker.
+  const diffLineClass = (line: string): string =>
+    line.startsWith("@@")
+      ? styles.prDiffHunk
+      : line.startsWith("+")
+        ? styles.prDiffAdd
+        : line.startsWith("-")
+          ? styles.prDiffDel
+          : styles.prDiffCtx;
 
   const reloadRuns = async () => {
     const r = await listWorkflowRunsAction(repoRef, branch, {
@@ -1538,57 +1633,131 @@ export default function RepoDetail() {
                   <p className={styles.fieldHint}>No pull requests.</p>
                 )}
                 {pullsState === "idle" &&
-                  pulls.map((p) => (
-                    <div
-                      key={p.number}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "8px 0",
-                        borderTop: "1px solid var(--field-border)",
-                      }}
-                    >
-                      <div style={{ flex: 1 }}>
-                        <a href={p.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
-                          #{p.number}
-                        </a>
-                        <span style={{ marginLeft: 8 }}>{p.title}</span>
-                        <div style={{ fontSize: "0.8rem", fontFamily: "monospace", marginTop: 4, color: "var(--text-secondary)" }}>
-                          {p.head} into {p.base}
+                  pulls.map((p) => {
+                    const reviews = latestReviews(reviewsByPr[p.number] ?? []);
+                    const approvedBy = reviews.filter((rv) => rv.state === "APPROVED").map((rv) => rv.user);
+                    const changesBy = reviews.filter((rv) => rv.state === "CHANGES_REQUESTED").map((rv) => rv.user);
+                    const isOpen = p.state.toLowerCase() === "open";
+                    const files = filesByPr[p.number];
+                    return (
+                      <div key={p.number} style={{ padding: "10px 0", borderTop: "1px solid var(--field-border)" }}>
+                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+                          <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+                            <a href={p.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                              #{p.number}
+                            </a>
+                            <span style={{ marginLeft: 8 }}>{p.title}</span>
+                            <div style={{ fontSize: "0.8rem", fontFamily: "monospace", marginTop: 4, color: "var(--text-secondary)" }}>
+                              {p.head} into {p.base}
+                              {p.user ? ` · ${p.user}` : ""}
+                            </div>
+                            <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                              {p.state}
+                              {p.draft ? " · draft" : ""}
+                              {approvedBy.length > 0 && (
+                                <span style={{ color: "var(--success)", marginLeft: 8, fontWeight: 600 }}>
+                                  Approved{approvedBy.length ? ` by ${approvedBy.join(", ")}` : ""}
+                                </span>
+                              )}
+                              {changesBy.length > 0 && (
+                                <span style={{ color: "var(--warning)", marginLeft: 8, fontWeight: 600 }}>
+                                  Changes requested by {changesBy.join(", ")}
+                                </span>
+                              )}
+                              {isOpen && !p.draft && approvedBy.length === 0 && changesBy.length === 0 && (
+                                <span style={{ marginLeft: 8 }}>No reviews yet</span>
+                              )}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            <Button variant="text" size="small" onClick={() => togglePrFiles(p.number)}>
+                              {expandedPr === p.number ? "Hide changes" : "View changes"}
+                            </Button>
+                            {isOpen && !p.draft && (
+                              <>
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  color="success"
+                                  disabled={reviewingPr === p.number}
+                                  onClick={() => handleReviewPr(p.number, "APPROVE")}
+                                >
+                                  {reviewingPr === p.number ? "Working..." : "Approve"}
+                                </Button>
+                                <Button
+                                  variant="text"
+                                  size="small"
+                                  color="warning"
+                                  disabled={reviewingPr === p.number}
+                                  onClick={() => handleReviewPr(p.number, "REQUEST_CHANGES")}
+                                >
+                                  Request changes
+                                </Button>
+                                <TextField
+                                  select
+                                  size="small"
+                                  value={mergeMethod[p.number] ?? "merge"}
+                                  onChange={(e) =>
+                                    setMergeMethod((m) => ({ ...m, [p.number]: e.target.value as "merge" | "squash" | "rebase" }))
+                                  }
+                                  sx={{ minWidth: 100 }}
+                                >
+                                  <MenuItem value="merge">Merge</MenuItem>
+                                  <MenuItem value="squash">Squash</MenuItem>
+                                  <MenuItem value="rebase">Rebase</MenuItem>
+                                </TextField>
+                                <Button
+                                  variant="contained"
+                                  size="small"
+                                  disabled={mergingPr === p.number}
+                                  onClick={() => handleMerge(p.number)}
+                                >
+                                  {mergingPr === p.number ? "Merging..." : "Merge"}
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         </div>
-                        <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-                          {p.state}
-                          {p.draft ? " draft" : ""}
-                        </div>
+
+                        {expandedPr === p.number && (
+                          <div style={{ marginTop: 10 }}>
+                            {filesLoadingPr === p.number && (
+                              <div style={{ display: "flex", justifyContent: "center", padding: 12 }}>
+                                <CircularProgress size={20} />
+                              </div>
+                            )}
+                            {files && files.length === 0 && <p className={styles.fieldHint}>No file changes.</p>}
+                            {files &&
+                              files.map((f) => (
+                                <div key={f.filename} className={styles.prFile}>
+                                  <div className={styles.prFileHead}>
+                                    <span className={styles.prFileName}>{f.filename}</span>
+                                    <span className={styles.prFileStat}>
+                                      <span style={{ color: "var(--success)" }}>+{f.additions}</span>{" "}
+                                      <span style={{ color: "var(--danger)" }}>-{f.deletions}</span>{" "}
+                                      <span style={{ color: "var(--text-secondary)" }}>{f.status}</span>
+                                    </span>
+                                  </div>
+                                  {f.patch ? (
+                                    <pre className={styles.prDiff}>
+                                      {f.patch.split("\n").map((line, i) => (
+                                        <div key={i} className={diffLineClass(line)}>
+                                          {line || " "}
+                                        </div>
+                                      ))}
+                                    </pre>
+                                  ) : (
+                                    <p className={styles.fieldHint} style={{ margin: "6px 10px" }}>
+                                      No inline diff (binary or too large).
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                          </div>
+                        )}
                       </div>
-                      {p.state.toLowerCase() === "open" && !p.draft && (
-                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          <TextField
-                            select
-                            size="small"
-                            value={mergeMethod[p.number] ?? "merge"}
-                            onChange={(e) =>
-                              setMergeMethod((m) => ({ ...m, [p.number]: e.target.value as "merge" | "squash" | "rebase" }))
-                            }
-                            sx={{ minWidth: 110 }}
-                          >
-                            <MenuItem value="merge">Merge</MenuItem>
-                            <MenuItem value="squash">Squash</MenuItem>
-                            <MenuItem value="rebase">Rebase</MenuItem>
-                          </TextField>
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            disabled={mergingPr === p.number}
-                            onClick={() => handleMerge(p.number)}
-                          >
-                            {mergingPr === p.number ? "Merging..." : "Merge"}
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
               </div>
             </div>
           )}

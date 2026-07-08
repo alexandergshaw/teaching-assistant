@@ -1191,6 +1191,80 @@ export async function mergePullRequest(
   });
 }
 
+// ── Pull request reviews + files (view & approve) ───────────────────────────
+export interface PullRequestReviewInfo {
+  id: number;
+  user: string;
+  /** APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED | PENDING */
+  state: string;
+  submittedAt: string | null;
+}
+
+/** Reviews submitted on a PR, in chronological order. */
+export async function listPullRequestReviews(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<PullRequestReviewInfo[]> {
+  const data = await ghJson<
+    Array<{ id?: number; user?: { login?: string }; state?: string; submitted_at?: string | null }>
+  >(`/repos/${owner}/${repo}/pulls/${prNumber}/reviews?per_page=100`);
+  return data
+    .filter((r) => typeof r.id === "number")
+    .map((r) => ({
+      id: r.id as number,
+      user: r.user?.login ?? "",
+      state: r.state ?? "",
+      submittedAt: r.submitted_at ?? null,
+    }));
+}
+
+/** Submit a review on a PR (approve or request changes), optionally with a comment. */
+export async function reviewPullRequest(
+  owner: string,
+  repo: string,
+  prNumber: number,
+  event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
+  body?: string
+): Promise<void> {
+  // REQUEST_CHANGES / COMMENT require a body; APPROVE does not.
+  await ghFetch(`/repos/${owner}/${repo}/pulls/${prNumber}/reviews`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event, ...(body?.trim() ? { body: body.trim() } : {}) }),
+  });
+}
+
+export interface PullRequestFileInfo {
+  filename: string;
+  /** added | modified | removed | renamed | … */
+  status: string;
+  additions: number;
+  deletions: number;
+  /** Unified diff hunk for the file; null for binary or very large files. */
+  patch: string | null;
+}
+
+/** The files changed by a PR, with their unified-diff patches. */
+export async function listPullRequestFiles(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<PullRequestFileInfo[]> {
+  const data = await ghJson<
+    Array<{ filename?: string; status?: string; additions?: number; deletions?: number; patch?: string }>
+  >(`/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`);
+  return data
+    .filter((f) => typeof f.filename === "string")
+    .map((f) => ({
+      filename: f.filename as string,
+      status: f.status ?? "",
+      additions: f.additions ?? 0,
+      deletions: f.deletions ?? 0,
+      patch: f.patch ?? null,
+    }));
+}
+
 // ── Actions: runs, jobs, re-run, cancel (workflows/dispatch/artifacts exist) ─
 export async function listWorkflowRuns(
   owner: string,

@@ -1020,6 +1020,68 @@ button.courseResourceValue:disabled {
   border-top: 1px solid var(--field-border);
 }
 
+/* Pull-request changed-file diffs (Version Control > Repos > Pull requests). */
+.prFile {
+  margin-top: 10px;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.prFileHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--field-background) 92%, var(--accent) 4%);
+  font-size: 0.8rem;
+}
+
+.prFileName {
+  font-family: monospace;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.prFileStat {
+  font-family: monospace;
+  white-space: nowrap;
+  flex: none;
+}
+
+.prDiff {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  font-family: monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  background: var(--field-background);
+}
+
+.prDiff > div {
+  padding: 0 10px;
+  white-space: pre;
+}
+
+.prDiffAdd {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+}
+
+.prDiffDel {
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+}
+
+.prDiffHunk {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text-secondary);
+}
+
+.prDiffCtx {
+  color: var(--text-secondary);
+}
+
 /* Collapsible institution groups on the Courses tab. */
 .courseGroups {
   display: flex;

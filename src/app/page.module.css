@@ -838,6 +838,51 @@
   }
 }
 
+/* Library of saved finalized syllabi (the completed .docx outputs). */
+.finalizedList {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--field-border);
+  border-radius: 12px;
+  padding: 6px 14px;
+}
+
+.finalizedLoading {
+  display: flex;
+  justify-content: center;
+  padding: 14px;
+}
+
+.finalizedRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-top: 1px solid var(--field-border);
+}
+
+.finalizedRow:first-child {
+  border-top: none;
+}
+
+.finalizedRowMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.finalizedName {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.finalizedMeta {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-family: monospace;
+  word-break: break-all;
+}
+
 .checklistCard h2 {
   font-size: 1.05rem;
   font-weight: 700;

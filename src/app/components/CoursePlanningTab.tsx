@@ -18,11 +18,13 @@ import {
   buildAdaptedSyllabusAction,
   listCourseContentAction,
   placeSyllabusInModuleAction,
+  createFinalizedSyllabusAction,
   type CourseScheduleRow,
   type SyllabusCourseInfo,
 } from "../actions";
 import GithubRepoPicker from "./GithubRepoPicker";
 import SyllabusTemplateLibrary from "./SyllabusTemplateLibrary";
+import FinalizedSyllabusLibrary from "./FinalizedSyllabusLibrary";
 import GithubSyncPanel from "./GithubSyncPanel";
 import LecturePlanningTab from "./LecturePlanningTab";
 import { spansToPlainText } from "./RichTextEditor";
@@ -569,6 +571,50 @@ export default function CoursePlanningTab() {
     }
   };
 
+  // ── Save the finalized syllabus to the owner's library ──
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveNote, setSaveNote] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+  // Bumped after a successful save so the library reloads.
+  const [savedReloadToken, setSavedReloadToken] = useState(0);
+
+  const handleSaveFinalized = async () => {
+    setSaveBusy(true);
+    setSaveNote(null);
+    try {
+      const suggested =
+        [adaptCourseCode.trim(), adaptCourseName.trim()].filter(Boolean).join(" ") ||
+        adaptSyllabusName.replace(/\.docx$/i, "") ||
+        "Syllabus";
+      const name = typeof window !== "undefined" ? window.prompt("Name this finalized syllabus", suggested) : suggested;
+      if (name === null) return; // cancelled
+      if (!name.trim()) {
+        setSaveNote({ kind: "error", text: "Enter a name for the syllabus." });
+        return;
+      }
+      const base64 = await buildSyllabusBase64();
+      if (!base64) {
+        setSaveNote({ kind: "error", text: adaptError ?? "Could not build the syllabus." });
+        return;
+      }
+      const result = await createFinalizedSyllabusAction(
+        name.trim(),
+        adaptedFileName(),
+        base64,
+        adaptCourseCode.trim() || undefined
+      );
+      if ("error" in result) {
+        setSaveNote({ kind: "error", text: result.error });
+        return;
+      }
+      setSaveNote({ kind: "success", text: `Saved "${name.trim()}" to your finalized syllabi.` });
+      setSavedReloadToken((t) => t + 1);
+    } catch (err) {
+      setSaveNote({ kind: "error", text: err instanceof Error ? err.message : "Could not save the syllabus." });
+    } finally {
+      setSaveBusy(false);
+    }
+  };
+
   // ── Place the generated syllabus into a Canvas course module ──
   const { active: activeInstitution } = useInstitutionSelection();
   const [placeCourseUrl, setPlaceCourseUrl] = useState<string>(() =>
@@ -955,8 +1001,19 @@ export default function CoursePlanningTab() {
                     >
                       {adaptStatus === "building" ? "Building…" : "Download adapted syllabus (.docx)"}
                     </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={handleSaveFinalized}
+                      disabled={saveBusy || adaptStatus !== "idle"}
+                    >
+                      {saveBusy ? "Saving…" : "Save to library"}
+                    </Button>
                   </div>
 
+                  {saveNote && (
+                    <p className={saveNote.kind === "error" ? styles.error : styles.fieldHint}>{saveNote.text}</p>
+                  )}
                   {adaptError && <p className={styles.error}>{adaptError}</p>}
 
                   {/* Optional: place the generated syllabus directly into a Canvas module. */}
@@ -1030,6 +1087,17 @@ export default function CoursePlanningTab() {
                   </details>
                 </>
               )}
+
+              {/* Library of finalized syllabi (the saved .docx outputs) */}
+              <div className={styles.adaptPanel}>
+                <div className={styles.adaptPanelHeader}>
+                  <p className={styles.adaptPanelTitle}>Finalized syllabi</p>
+                  <p className={styles.adaptPanelSubtitle}>
+                    Your saved, completed syllabi. Download or remove them any time — use &ldquo;Save to library&rdquo; above to add the one you just built.
+                  </p>
+                </div>
+                <FinalizedSyllabusLibrary reloadToken={savedReloadToken} />
+              </div>
             </>
           )}
 

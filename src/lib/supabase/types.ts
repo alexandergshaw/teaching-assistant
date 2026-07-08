@@ -119,6 +119,38 @@ export interface Database {
           updated_at?: string;
         };
       };
+      course_syllabi: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          file_name: string;
+          course_code: string | null;
+          content: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          file_name: string;
+          course_code?: string | null;
+          content: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          file_name?: string;
+          course_code?: string | null;
+          content?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       accessibility_scans: {
         Row: {
           user_id: string;

@@ -274,6 +274,15 @@ import {
   type SyllabusTemplate,
 } from "@/lib/supabase/syllabus-templates";
 import {
+  listSyllabi,
+  getSyllabus,
+  createSyllabus,
+  renameSyllabus,
+  deleteSyllabus,
+  type FinalizedSyllabusMeta,
+  type FinalizedSyllabus,
+} from "@/lib/supabase/course-syllabi";
+import {
   queryFreeBusy,
   createCalendarEvent,
   listCalendarEvents,
@@ -3056,6 +3065,84 @@ export async function deleteSyllabusTemplateAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not delete the template." };
+  }
+}
+
+// ── Finalized syllabi library (the completed .docx outputs) ──────────────
+
+/** List the owner's saved finalized syllabi (metadata only). */
+export async function listFinalizedSyllabiAction(): Promise<
+  { syllabi: FinalizedSyllabusMeta[] } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    return { syllabi: await listSyllabi(user.id) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list your saved syllabi." };
+  }
+}
+
+/** Fetch one finalized syllabus including its base64 .docx content. */
+export async function getFinalizedSyllabusAction(
+  id: string
+): Promise<{ syllabus: FinalizedSyllabus } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!id.trim()) return { error: "Choose a syllabus." };
+    const syllabus = await getSyllabus(user.id, id);
+    if (!syllabus) return { error: "That syllabus no longer exists." };
+    return { syllabus };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not open the syllabus." };
+  }
+}
+
+/** Save a finalized syllabus (.docx base64) to the owner's library. */
+export async function createFinalizedSyllabusAction(
+  name: string,
+  fileName: string,
+  base64: string,
+  courseCode?: string
+): Promise<{ syllabus: FinalizedSyllabusMeta } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!name.trim()) return { error: "Enter a name for the syllabus." };
+    if (!/\.docx$/i.test(fileName.trim())) return { error: "The syllabus must be a Word .docx file." };
+    if (!base64) return { error: "Build the syllabus first." };
+    if (base64.length > MAX_TEMPLATE_BASE64) return { error: "That file is too large (limit ~6 MB)." };
+    return { syllabus: await createSyllabus(user.id, name.trim(), fileName.trim(), base64, courseCode?.trim() || undefined) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the syllabus." };
+  }
+}
+
+/** Rename a finalized syllabus. */
+export async function renameFinalizedSyllabusAction(
+  id: string,
+  name: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!id.trim()) return { error: "Choose a syllabus." };
+    if (!name.trim()) return { error: "Enter a name for the syllabus." };
+    await renameSyllabus(user.id, id, name.trim());
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not rename the syllabus." };
+  }
+}
+
+/** Delete a finalized syllabus. */
+export async function deleteFinalizedSyllabusAction(
+  id: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!id.trim()) return { error: "Choose a syllabus." };
+    await deleteSyllabus(user.id, id);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not delete the syllabus." };
   }
 }
 

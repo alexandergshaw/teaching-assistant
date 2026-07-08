@@ -182,7 +182,6 @@ import {
   listWorkflows,
   dispatchWorkflow,
   findWorkflowRunSince,
-  listRunArtifacts,
   downloadArtifactZip,
   downloadRepoZipball,
   listOrgMembers,
@@ -204,6 +203,13 @@ import {
   listRunJobs,
   rerunWorkflowRun,
   cancelWorkflowRun,
+  rerunFailedJobs,
+  setWorkflowEnabled,
+  listRunArtifacts,
+  getArtifactDownloadUrl,
+  getRunLogsDownloadUrl,
+  listPendingDeployments,
+  reviewPendingDeployments,
   getRepoTree,
   type GithubRepo,
   type RepoDigest,
@@ -219,6 +225,8 @@ import {
   type WorkflowJobInfo,
   type RepoTreeEntry,
   type CopilotTask,
+  type ArtifactInfo,
+  type PendingDeployment,
 } from "@/lib/github";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
 import { filesToLlmParts } from "@/lib/llm-files";
@@ -5439,14 +5447,15 @@ export async function listWorkflowsAction(
 export async function dispatchWorkflowAction(
   repoRef: string,
   workflowRef: string,
-  ref: string
+  ref: string,
+  inputs?: Record<string, string>
 ): Promise<{ ok: true } | { error: string }> {
   try {
     await requireOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     if (!workflowRef || !ref) return { error: "Choose a workflow and a branch to run." };
-    await dispatchWorkflow(parsed.owner, parsed.repo, workflowRef, ref);
+    await dispatchWorkflow(parsed.owner, parsed.repo, workflowRef, ref, inputs);
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not dispatch the workflow." };
@@ -6080,12 +6089,20 @@ export async function mergePullRequestAction(repoRef: string, prNumber: number, 
   }
 }
 
-export async function listWorkflowRunsAction(repoRef: string, branch?: string): Promise<{ runs: WorkflowRunInfo[] } | { error: string }> {
+export async function listWorkflowRunsAction(
+  repoRef: string,
+  branch?: string,
+  opts?: { status?: string; workflowId?: number }
+): Promise<{ runs: WorkflowRunInfo[] } | { error: string }> {
   try {
     await requireOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
-    const runs = await listWorkflowRuns(parsed.owner, parsed.repo, { branch: branch?.trim() });
+    const runs = await listWorkflowRuns(parsed.owner, parsed.repo, {
+      branch: branch?.trim() || undefined,
+      status: opts?.status,
+      workflowId: opts?.workflowId,
+    });
     return { runs };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not list workflow runs." };
@@ -6125,6 +6142,92 @@ export async function cancelWorkflowRunAction(repoRef: string, runId: number): P
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not cancel the workflow." };
+  }
+}
+
+export async function rerunFailedJobsAction(repoRef: string, runId: number): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    await rerunFailedJobs(parsed.owner, parsed.repo, runId);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not re-run the failed jobs." };
+  }
+}
+
+export async function setWorkflowEnabledAction(repoRef: string, workflowId: number, enabled: boolean): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    await setWorkflowEnabled(parsed.owner, parsed.repo, workflowId, enabled);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the workflow." };
+  }
+}
+
+export async function listRunArtifactsAction(repoRef: string, runId: number): Promise<{ artifacts: ArtifactInfo[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return { artifacts: await listRunArtifacts(parsed.owner, parsed.repo, runId) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list artifacts." };
+  }
+}
+
+export async function getArtifactDownloadUrlAction(repoRef: string, artifactId: number): Promise<{ url: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return { url: await getArtifactDownloadUrl(parsed.owner, parsed.repo, artifactId) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not get the artifact download link." };
+  }
+}
+
+export async function getRunLogsDownloadUrlAction(repoRef: string, runId: number): Promise<{ url: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return { url: await getRunLogsDownloadUrl(parsed.owner, parsed.repo, runId) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not get the logs download link." };
+  }
+}
+
+export async function listPendingDeploymentsAction(repoRef: string, runId: number): Promise<{ deployments: PendingDeployment[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return { deployments: await listPendingDeployments(parsed.owner, parsed.repo, runId) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list pending deployments." };
+  }
+}
+
+export async function reviewPendingDeploymentsAction(
+  repoRef: string,
+  runId: number,
+  environmentIds: number[],
+  state: "approved" | "rejected",
+  comment: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    await reviewPendingDeployments(parsed.owner, parsed.repo, runId, environmentIds, state, comment);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not submit the deployment review." };
   }
 }
 

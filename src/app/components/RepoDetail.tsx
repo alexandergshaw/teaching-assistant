@@ -19,6 +19,13 @@ import {
   listRunJobsAction,
   rerunWorkflowRunAction,
   cancelWorkflowRunAction,
+  rerunFailedJobsAction,
+  setWorkflowEnabledAction,
+  listRunArtifactsAction,
+  getArtifactDownloadUrlAction,
+  getRunLogsDownloadUrlAction,
+  listPendingDeploymentsAction,
+  reviewPendingDeploymentsAction,
   createRepoAction,
   createCopilotRepoAction,
   createCopilotTaskAction,
@@ -26,7 +33,7 @@ import {
   bulkDeletePathsAction,
   bulkMovePathsAction,
 } from "../actions";
-import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo, CopilotTask } from "@/lib/github";
+import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo, CopilotTask, ArtifactInfo, PendingDeployment } from "@/lib/github";
 import RepoSettingsPanel from "./RepoSettingsPanel";
 import PublishToCanvasPage from "./PublishToCanvasPage";
 import { buildBulkFolderNames } from "@/lib/bulk-folders";
@@ -132,6 +139,16 @@ export default function RepoDetail() {
   const [expandedRun, setExpandedRun] = useState<number | null>(null);
   const [jobsByRun, setJobsByRun] = useState<Record<number, WorkflowJobInfo[]>>({});
   const [jobsLoadingRun, setJobsLoadingRun] = useState<number | null>(null);
+  const [filterWorkflowId, setFilterWorkflowId] = useState<string>("");
+  const [filterStatus, setFilterStatus] = useState<string>("");
+  const [artifactsByRun, setArtifactsByRun] = useState<Record<number, ArtifactInfo[]>>({});
+  const [artifactsLoadingRun, setArtifactsLoadingRun] = useState<number | null>(null);
+  const [expandedArtifactsRun, setExpandedArtifactsRun] = useState<number | null>(null);
+  const [pendingByRun, setPendingByRun] = useState<Record<number, PendingDeployment[]>>({});
+  const [dispatchWorkflowId, setDispatchWorkflowId] = useState<string>("");
+  const [dispatchInputs, setDispatchInputs] = useState<Array<{ key: string; value: string }>>([]);
+  const [dispatchBusy, setDispatchBusy] = useState(false);
+  const [showRunWithInputs, setShowRunWithInputs] = useState(false);
 
   // Create repo state
   const [showCreate, setShowCreate] = useState(false);
@@ -314,7 +331,10 @@ export default function RepoDetail() {
     (async () => {
       const [wf, rr] = await Promise.all([
         listWorkflowsAction(repoRef),
-        listWorkflowRunsAction(repoRef, branch),
+        listWorkflowRunsAction(repoRef, branch, {
+          status: filterStatus || undefined,
+          workflowId: filterWorkflowId ? Number(filterWorkflowId) : undefined,
+        }),
       ]);
       if (cancelled) return;
       if ("error" in wf) {
@@ -335,7 +355,7 @@ export default function RepoDetail() {
       cancelled = true;
     };
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [repoRef, tab, branch]);
+  }, [repoRef, tab, branch, filterStatus, filterWorkflowId]);
 
   const handleCommit = async () => {
     if (!repoRef || !branch || !selectedPath || !commitMessage.trim()) {
@@ -625,8 +645,101 @@ export default function RepoDetail() {
   };
 
   const reloadRuns = async () => {
-    const r = await listWorkflowRunsAction(repoRef, branch);
+    const r = await listWorkflowRunsAction(repoRef, branch, {
+      status: filterStatus || undefined,
+      workflowId: filterWorkflowId ? Number(filterWorkflowId) : undefined,
+    });
     if (!("error" in r)) setRuns(r.runs);
+  };
+
+  const handleDispatchWithInputs = async () => {
+    if (!dispatchWorkflowId) {
+      setActionsMsg("Error: choose a workflow to run.");
+      return;
+    }
+    const inputs: Record<string, string> = {};
+    for (const { key, value } of dispatchInputs) {
+      if (key.trim()) inputs[key.trim()] = value;
+    }
+    setDispatchBusy(true);
+    setActionsMsg(null);
+    const r = await dispatchWorkflowAction(repoRef, dispatchWorkflowId, branch, Object.keys(inputs).length ? inputs : undefined);
+    setDispatchBusy(false);
+    if ("error" in r) {
+      setActionsMsg(`Error: ${r.error}`);
+      return;
+    }
+    setActionsMsg(`Dispatched on ${branch}. Give it a moment, then Refresh.`);
+    setDispatchInputs([]);
+  };
+
+  const handleRerunFailed = async (id: number) => {
+    setRunBusyId(id);
+    setActionsMsg(null);
+    const r = await rerunFailedJobsAction(repoRef, id);
+    setRunBusyId(null);
+    if ("error" in r) {
+      setActionsMsg(`Error: ${r.error}`);
+      return;
+    }
+    await reloadRuns();
+  };
+
+  const toggleArtifacts = async (id: number) => {
+    if (expandedArtifactsRun === id) {
+      setExpandedArtifactsRun(null);
+      return;
+    }
+    setExpandedArtifactsRun(id);
+    if (!artifactsByRun[id]) {
+      setArtifactsLoadingRun(id);
+      const r = await listRunArtifactsAction(repoRef, id);
+      setArtifactsLoadingRun(null);
+      if (!("error" in r)) setArtifactsByRun((m) => ({ ...m, [id]: r.artifacts }));
+    }
+  };
+
+  const openDownload = async (result: Promise<{ url: string } | { error: string }>) => {
+    const r = await result;
+    if ("error" in r) {
+      setActionsMsg(`Error: ${r.error}`);
+      return;
+    }
+    if (typeof window !== "undefined") window.open(r.url, "_blank", "noopener");
+  };
+
+  const handleToggleWorkflow = async (w: WorkflowInfo, enabled: boolean) => {
+    setActionsMsg(null);
+    const r = await setWorkflowEnabledAction(repoRef, w.id, enabled);
+    if ("error" in r) {
+      setActionsMsg(`Error: ${r.error}`);
+      return;
+    }
+    const list = await listWorkflowsAction(repoRef);
+    if (!("error" in list)) setWorkflows(list.workflows);
+  };
+
+  const loadPending = async (id: number) => {
+    setActionsMsg(null);
+    const r = await listPendingDeploymentsAction(repoRef, id);
+    if ("error" in r) {
+      setActionsMsg(`Error: ${r.error}`);
+      return;
+    }
+    setPendingByRun((m) => ({ ...m, [id]: r.deployments }));
+  };
+
+  const handleReview = async (id: number, envIds: number[], state: "approved" | "rejected") => {
+    setRunBusyId(id);
+    setActionsMsg(null);
+    const r = await reviewPendingDeploymentsAction(repoRef, id, envIds, state, "");
+    setRunBusyId(null);
+    if ("error" in r) {
+      setActionsMsg(`Error: ${r.error}`);
+      return;
+    }
+    setPendingByRun((m) => ({ ...m, [id]: [] }));
+    await reloadRuns();
   };
 
   const handleDispatch = async (w: WorkflowInfo) => {
@@ -1443,31 +1556,17 @@ export default function RepoDetail() {
           {tab === "actions" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
               <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
-                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 12 }}>
-                  Workflows
-                </label>
+                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 12 }}>Workflows</label>
                 {actionsState === "loading" && (
                   <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
                     <CircularProgress size={24} />
                   </div>
                 )}
-                {actionsState === "error" && (
-                  <p className={styles.error}>{actionsError}</p>
-                )}
-                {actionsState === "idle" && workflows.length === 0 && (
-                  <p className={styles.fieldHint}>No workflows found.</p>
-                )}
+                {actionsState === "error" && <p className={styles.error}>{actionsError}</p>}
+                {actionsState === "idle" && workflows.length === 0 && <p className={styles.fieldHint}>No workflows found.</p>}
                 {actionsState === "idle" &&
                   workflows.map((w) => (
-                    <div
-                      key={w.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "6px 0",
-                      }}
-                    >
+                    <div key={w.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
                       <div style={{ flex: 1 }}>
                         <span>{w.name}</span>
                         <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 2 }}>
@@ -1475,172 +1574,188 @@ export default function RepoDetail() {
                           <span style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>{w.path}</span>
                         </div>
                       </div>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        disabled={dispatchingId === w.id}
-                        onClick={() => handleDispatch(w)}
-                      >
+                      <Button variant="text" size="small" onClick={() => handleToggleWorkflow(w, w.state !== "active")}>
+                        {w.state === "active" ? "Disable" : "Enable"}
+                      </Button>
+                      <Button variant="outlined" size="small" disabled={dispatchingId === w.id || w.state !== "active"} onClick={() => handleDispatch(w)}>
                         {dispatchingId === w.id ? "Running..." : `Run on ${branch}`}
                       </Button>
                     </div>
                   ))}
+
+                <div style={{ marginTop: 8 }}>
+                  <Button variant="text" size="small" onClick={() => setShowRunWithInputs((v) => !v)}>
+                    {showRunWithInputs ? "Hide run with inputs" : "Run a workflow with inputs"}
+                  </Button>
+                </div>
+                {showRunWithInputs && (
+                  <div style={{ border: "1px solid var(--field-border)", borderRadius: 8, padding: 10, marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                    <TextField select size="small" label="Workflow" value={dispatchWorkflowId} onChange={(e) => setDispatchWorkflowId(e.target.value)} sx={{ maxWidth: 320 }} slotProps={{ inputLabel: { shrink: true } }}>
+                      {workflows.map((w) => (
+                        <MenuItem key={w.id} value={String(w.id)}>{w.name}</MenuItem>
+                      ))}
+                    </TextField>
+                    {dispatchInputs.map((inp, i) => (
+                      <div key={i} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <TextField size="small" placeholder="input name" value={inp.key} onChange={(e) => setDispatchInputs((rows) => rows.map((r, j) => (j === i ? { ...r, key: e.target.value } : r)))} />
+                        <TextField size="small" placeholder="value" value={inp.value} onChange={(e) => setDispatchInputs((rows) => rows.map((r, j) => (j === i ? { ...r, value: e.target.value } : r)))} />
+                        <Button variant="text" size="small" color="error" onClick={() => setDispatchInputs((rows) => rows.filter((_, j) => j !== i))}>Remove</Button>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Button variant="text" size="small" onClick={() => setDispatchInputs((rows) => [...rows, { key: "", value: "" }])}>Add input</Button>
+                      <Button variant="contained" size="small" disabled={dispatchBusy || !dispatchWorkflowId} onClick={handleDispatchWithInputs}>
+                        {dispatchBusy ? "Running..." : `Run on ${branch}`}
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 {actionsMsg && (
-                  <p
-                    style={{
-                      marginTop: 12,
-                      fontSize: "0.85rem",
-                      color: actionsMsg.startsWith("Error:") ? "#dc2626" : "var(--text-secondary)",
-                    }}
-                  >
-                    {actionsMsg}
-                  </p>
+                  <p style={{ marginTop: 12, fontSize: "0.85rem", color: actionsMsg.startsWith("Error:") ? "#dc2626" : "var(--text-secondary)" }}>{actionsMsg}</p>
                 )}
               </div>
 
               <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  <label style={{ fontSize: "0.9rem", fontWeight: 500 }}>
-                    Recent runs
-                  </label>
-                  <Button variant="text" size="small" onClick={reloadRuns}>
-                    Refresh
-                  </Button>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
+                  <label style={{ fontSize: "0.9rem", fontWeight: 500 }}>Runs</label>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <TextField select size="small" label="Workflow" value={filterWorkflowId} onChange={(e) => setFilterWorkflowId(e.target.value)} sx={{ minWidth: 150 }} slotProps={{ inputLabel: { shrink: true } }}>
+                      <MenuItem value="">All workflows</MenuItem>
+                      {workflows.map((w) => (
+                        <MenuItem key={w.id} value={String(w.id)}>{w.name}</MenuItem>
+                      ))}
+                    </TextField>
+                    <TextField select size="small" label="Status" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 130 }} slotProps={{ inputLabel: { shrink: true } }}>
+                      <MenuItem value="">All</MenuItem>
+                      <MenuItem value="queued">Queued</MenuItem>
+                      <MenuItem value="in_progress">In progress</MenuItem>
+                      <MenuItem value="completed">Completed</MenuItem>
+                      <MenuItem value="success">Success</MenuItem>
+                      <MenuItem value="failure">Failure</MenuItem>
+                      <MenuItem value="cancelled">Cancelled</MenuItem>
+                      <MenuItem value="waiting">Waiting</MenuItem>
+                    </TextField>
+                    <Button variant="text" size="small" onClick={reloadRuns}>Refresh</Button>
+                  </div>
                 </div>
                 {actionsState === "loading" && (
                   <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
                     <CircularProgress size={24} />
                   </div>
                 )}
-                {runs.length === 0 && actionsState === "idle" && (
-                  <p className={styles.fieldHint}>No runs yet.</p>
-                )}
-                {runs.map((run) => (
-                  <div
-                    key={run.id}
-                    style={{
-                      padding: "12px 0",
-                      borderTop: "1px solid var(--field-border)",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        marginBottom: 8,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: "200px" }}>
-                        <span>{run.name}</span>
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 8,
-                            alignItems: "center",
-                            fontSize: "0.85rem",
-                            marginTop: 4,
-                            flexWrap: "wrap",
-                          }}
-                        >
-                          <span
-                            style={{
-                              color:
-                                run.conclusion === "success"
-                                  ? "#16a34a"
-                                  : run.conclusion === "failure" || run.conclusion === "cancelled"
-                                    ? "var(--error, #b91c1c)"
-                                    : "var(--text-secondary)",
-                            }}
-                          >
-                            {run.conclusion ?? run.status}
+                {runs.length === 0 && actionsState === "idle" && <p className={styles.fieldHint}>No runs match.</p>}
+                {runs.map((run) => {
+                  const dur =
+                    run.runStartedAt && run.updatedAt
+                      ? Math.max(0, Math.round((new Date(run.updatedAt).getTime() - new Date(run.runStartedAt).getTime()) / 1000))
+                      : null;
+                  const durLabel = dur == null ? "" : dur >= 60 ? `${Math.floor(dur / 60)}m ${dur % 60}s` : `${dur}s`;
+                  const pending = pendingByRun[run.id];
+                  return (
+                    <div key={run.id} style={{ padding: "12px 0", borderTop: "1px solid var(--field-border)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                        <div style={{ flex: 1, minWidth: "200px" }}>
+                          <span>
+                            {run.displayTitle || run.name} <span style={{ color: "var(--text-secondary)" }}>#{run.runNumber}</span>
                           </span>
-                          <span style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
-                            {run.headBranch}
-                          </span>
-                          <span style={{ color: "var(--text-secondary)" }}>
-                            {new Date(run.createdAt).toLocaleString()}
-                          </span>
-                          <a
-                            href={run.htmlUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ color: "var(--accent)", textDecoration: "none", fontSize: "0.8rem" }}
-                          >
-                            logs
-                          </a>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: "0.85rem", marginTop: 4, flexWrap: "wrap" }}>
+                            <span style={{ color: run.conclusion === "success" ? "#16a34a" : run.conclusion === "failure" || run.conclusion === "cancelled" ? "var(--error, #b91c1c)" : "var(--text-secondary)" }}>
+                              {run.conclusion ?? run.status}
+                            </span>
+                            <span style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>{run.headBranch}</span>
+                            {run.event && <span style={{ color: "var(--text-secondary)" }}>{run.event}</span>}
+                            {run.actor && <span style={{ color: "var(--text-secondary)" }}>{run.actor}</span>}
+                            {durLabel && <span style={{ color: "var(--text-secondary)" }}>{durLabel}</span>}
+                            <span style={{ color: "var(--text-secondary)" }}>{new Date(run.createdAt).toLocaleString()}</span>
+                            <a href={run.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "none", fontSize: "0.8rem" }}>open</a>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <Button variant="text" size="small" onClick={() => toggleJobs(run.id)}>{expandedRun === run.id ? "Hide jobs" : "Jobs"}</Button>
+                          <Button variant="text" size="small" onClick={() => toggleArtifacts(run.id)}>{expandedArtifactsRun === run.id ? "Hide artifacts" : "Artifacts"}</Button>
+                          <Button variant="text" size="small" onClick={() => openDownload(getRunLogsDownloadUrlAction(repoRef, run.id))}>Logs</Button>
+                          {run.status !== "completed" ? (
+                            <>
+                              <Button variant="text" size="small" onClick={() => loadPending(run.id)}>Approvals</Button>
+                              <Button variant="outlined" size="small" color="error" disabled={runBusyId === run.id} onClick={() => handleCancel(run.id)}>Cancel</Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button variant="outlined" size="small" disabled={runBusyId === run.id} onClick={() => handleRerun(run.id)}>Re-run</Button>
+                              <Button variant="outlined" size="small" disabled={runBusyId === run.id} onClick={() => handleRerunFailed(run.id)}>Re-run failed</Button>
+                            </>
+                          )}
                         </div>
                       </div>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <Button
-                          variant="text"
-                          size="small"
-                          onClick={() => toggleJobs(run.id)}
-                        >
-                          {expandedRun === run.id ? "Hide jobs" : "Jobs"}
-                        </Button>
-                        {run.status !== "completed" ? (
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            color="error"
-                            disabled={runBusyId === run.id}
-                            onClick={() => handleCancel(run.id)}
-                          >
-                            Cancel
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            disabled={runBusyId === run.id}
-                            onClick={() => handleRerun(run.id)}
-                          >
-                            Re-run
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                    {expandedRun === run.id && (
-                      <div style={{ marginTop: 8, paddingLeft: 16 }}>
-                        {jobsLoadingRun === run.id && (
-                          <div style={{ display: "flex", justifyContent: "center", padding: 8 }}>
-                            <CircularProgress size={20} />
+
+                      {pending && pending.length > 0 && (
+                        <div style={{ marginTop: 8, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 6 }}>
+                          <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Waiting on: {pending.map((d) => d.environmentName).join(", ")}</span>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <Button variant="contained" size="small" disabled={runBusyId === run.id} onClick={() => handleReview(run.id, pending.map((d) => d.environmentId), "approved")}>Approve</Button>
+                            <Button variant="outlined" size="small" color="error" disabled={runBusyId === run.id} onClick={() => handleReview(run.id, pending.map((d) => d.environmentId), "rejected")}>Reject</Button>
                           </div>
-                        )}
-                        {jobsByRun[run.id] && (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                            {jobsByRun[run.id].map((job) => (
-                              <div
-                                key={job.id}
-                                style={{
-                                  fontSize: "0.85rem",
-                                  padding: "4px 0",
-                                }}
-                              >
-                                <span>{job.name}</span>
-                                <span
-                                  style={{
-                                    marginLeft: 8,
-                                    color:
-                                      job.conclusion === "success"
-                                        ? "#16a34a"
-                                        : job.conclusion === "failure" || job.conclusion === "cancelled"
-                                          ? "var(--error, #b91c1c)"
-                                          : "var(--text-secondary)",
-                                  }}
-                                >
-                                  {job.conclusion ?? job.status}
-                                </span>
+                        </div>
+                      )}
+
+                      {expandedRun === run.id && (
+                        <div style={{ marginTop: 8, paddingLeft: 16 }}>
+                          {jobsLoadingRun === run.id && (
+                            <div style={{ display: "flex", justifyContent: "center", padding: 8 }}>
+                              <CircularProgress size={20} />
+                            </div>
+                          )}
+                          {jobsByRun[run.id] && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                              {jobsByRun[run.id].map((job) => (
+                                <div key={job.id} style={{ fontSize: "0.85rem" }}>
+                                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                    <span>{job.name}</span>
+                                    <span style={{ color: job.conclusion === "success" ? "#16a34a" : job.conclusion === "failure" || job.conclusion === "cancelled" ? "var(--error, #b91c1c)" : "var(--text-secondary)" }}>{job.conclusion ?? job.status}</span>
+                                    {job.htmlUrl && <a href={job.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", fontSize: "0.78rem" }}>view</a>}
+                                  </div>
+                                  {job.steps.length > 0 && (
+                                    <div style={{ paddingLeft: 16, marginTop: 2, display: "flex", flexDirection: "column", gap: 2 }}>
+                                      {job.steps.map((s) => (
+                                        <div key={s.number} style={{ fontSize: "0.78rem", color: "var(--text-secondary)" }}>
+                                          <span>{s.name}</span>
+                                          <span style={{ marginLeft: 8, color: s.conclusion === "success" ? "#16a34a" : s.conclusion === "failure" ? "var(--error, #b91c1c)" : "var(--text-secondary)" }}>{s.conclusion ?? s.status}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {expandedArtifactsRun === run.id && (
+                        <div style={{ marginTop: 8, paddingLeft: 16 }}>
+                          {artifactsLoadingRun === run.id && (
+                            <div style={{ display: "flex", justifyContent: "center", padding: 8 }}>
+                              <CircularProgress size={20} />
+                            </div>
+                          )}
+                          {artifactsByRun[run.id] && artifactsByRun[run.id].length === 0 && <p className={styles.fieldHint}>No artifacts.</p>}
+                          {artifactsByRun[run.id] &&
+                            artifactsByRun[run.id].map((a) => (
+                              <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", padding: "3px 0" }}>
+                                <span style={{ flex: 1 }}>{a.name}</span>
+                                <span style={{ color: "var(--text-secondary)", fontSize: "0.78rem" }}>{Math.round(a.sizeInBytes / 1024)} KB</span>
+                                {a.expired ? (
+                                  <span style={{ color: "var(--text-secondary)", fontSize: "0.78rem" }}>expired</span>
+                                ) : (
+                                  <Button variant="text" size="small" onClick={() => openDownload(getArtifactDownloadUrlAction(repoRef, a.id))}>Download</Button>
+                                )}
                               </div>
                             ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

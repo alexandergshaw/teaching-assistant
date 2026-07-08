@@ -686,6 +686,14 @@ export interface WorkflowRunInfo {
   headBranch: string;
   htmlUrl: string;
   createdAt: string;
+  event: string;
+  actor: string;
+  runNumber: number;
+  runAttempt: number;
+  runStartedAt: string | null;
+  updatedAt: string | null;
+  headSha: string;
+  displayTitle: string;
 }
 
 interface RawRun {
@@ -696,6 +704,14 @@ interface RawRun {
   head_branch?: string;
   html_url?: string;
   created_at?: string;
+  event?: string;
+  actor?: { login?: string };
+  run_number?: number;
+  run_attempt?: number;
+  run_started_at?: string | null;
+  updated_at?: string | null;
+  head_sha?: string;
+  display_title?: string;
 }
 
 function mapRun(r: RawRun): WorkflowRunInfo {
@@ -707,6 +723,14 @@ function mapRun(r: RawRun): WorkflowRunInfo {
     headBranch: r.head_branch ?? "",
     htmlUrl: r.html_url ?? "",
     createdAt: r.created_at ?? "",
+    event: r.event ?? "",
+    actor: r.actor?.login ?? "",
+    runNumber: r.run_number ?? 0,
+    runAttempt: r.run_attempt ?? 1,
+    runStartedAt: r.run_started_at ?? null,
+    updatedAt: r.updated_at ?? null,
+    headSha: r.head_sha ?? "",
+    displayTitle: r.display_title ?? r.name ?? "",
   };
 }
 
@@ -743,11 +767,17 @@ export async function listWorkflows(owner: string, repo: string): Promise<Workfl
  * Returns 204 with no body, so the caller correlates the resulting run via
  * {@link findWorkflowRunSince}.
  */
-export async function dispatchWorkflow(owner: string, repo: string, workflowRef: string, ref: string): Promise<void> {
+export async function dispatchWorkflow(
+  owner: string,
+  repo: string,
+  workflowRef: string,
+  ref: string,
+  inputs?: Record<string, string>
+): Promise<void> {
   await ghFetch(`/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflowRef)}/dispatches`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ref }),
+    body: JSON.stringify(inputs && Object.keys(inputs).length > 0 ? { ref, inputs } : { ref }),
   });
 }
 
@@ -766,21 +796,6 @@ export async function findWorkflowRunSince(
   return run ? mapRun(run) : null;
 }
 
-/** List a completed run's uploaded artifacts (e.g. a JUnit test report). */
-export async function listRunArtifacts(owner: string, repo: string, runId: number): Promise<Array<{ id: number; name: string }>> {
-  const data = await ghJson<{ artifacts?: Array<{ id?: number; name?: string }> }>(
-    `/repos/${owner}/${repo}/actions/runs/${runId}/artifacts?per_page=100`
-  );
-  return (data.artifacts ?? [])
-    .filter((a): a is { id: number; name?: string } => typeof a.id === "number")
-    .map((a) => ({ id: a.id, name: a.name ?? "" }));
-}
-
-/** Download an artifact's zip bytes (the API 302-redirects to signed storage). */
-export async function downloadArtifactZip(owner: string, repo: string, artifactId: number): Promise<Buffer> {
-  const res = await ghFetch(`/repos/${owner}/${repo}/actions/artifacts/${artifactId}/zip`);
-  return Buffer.from(await res.arrayBuffer());
-}
 
 // ── Org members ─────────────────────────────────────────────────────────────
 export interface OrgMember {
@@ -1070,30 +1085,164 @@ export async function mergePullRequest(
 export async function listWorkflowRuns(
   owner: string,
   repo: string,
-  opts: { branch?: string; perPage?: number } = {}
+  opts: { branch?: string; perPage?: number; status?: string; workflowId?: number } = {}
 ): Promise<WorkflowRunInfo[]> {
-  const params = new URLSearchParams({ per_page: String(opts.perPage ?? 20) });
+  const params = new URLSearchParams({ per_page: String(opts.perPage ?? 30) });
   if (opts.branch) params.set("branch", opts.branch);
-  const data = await ghJson<{ workflow_runs?: RawRun[] }>(`/repos/${owner}/${repo}/actions/runs?${params.toString()}`);
+  if (opts.status) params.set("status", opts.status);
+  const base = opts.workflowId
+    ? `/repos/${owner}/${repo}/actions/workflows/${opts.workflowId}/runs`
+    : `/repos/${owner}/${repo}/actions/runs`;
+  const data = await ghJson<{ workflow_runs?: RawRun[] }>(`${base}?${params.toString()}`);
   return (data.workflow_runs ?? []).map(mapRun);
+}
+export interface WorkflowStepInfo {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  number: number;
 }
 export interface WorkflowJobInfo {
   id: number;
   name: string;
   status: string;
   conclusion: string | null;
+  htmlUrl: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  steps: WorkflowStepInfo[];
 }
 export async function listRunJobs(owner: string, repo: string, runId: number): Promise<WorkflowJobInfo[]> {
-  const data = await ghJson<{ jobs?: Array<{ id?: number; name?: string; status?: string; conclusion?: string | null }> }>(
-    `/repos/${owner}/${repo}/actions/runs/${runId}/jobs`
-  );
+  const data = await ghJson<{
+    jobs?: Array<{
+      id?: number;
+      name?: string;
+      status?: string;
+      conclusion?: string | null;
+      html_url?: string;
+      started_at?: string | null;
+      completed_at?: string | null;
+      steps?: Array<{ name?: string; status?: string; conclusion?: string | null; number?: number }>;
+    }>;
+  }>(`/repos/${owner}/${repo}/actions/runs/${runId}/jobs`);
   return (data.jobs ?? [])
     .filter((j) => typeof j.id === "number")
-    .map((j) => ({ id: j.id as number, name: j.name ?? "", status: j.status ?? "", conclusion: j.conclusion ?? null }));
+    .map((j) => ({
+      id: j.id as number,
+      name: j.name ?? "",
+      status: j.status ?? "",
+      conclusion: j.conclusion ?? null,
+      htmlUrl: j.html_url ?? "",
+      startedAt: j.started_at ?? null,
+      completedAt: j.completed_at ?? null,
+      steps: (j.steps ?? []).map((s) => ({ name: s.name ?? "", status: s.status ?? "", conclusion: s.conclusion ?? null, number: s.number ?? 0 })),
+    }));
 }
 export async function rerunWorkflowRun(owner: string, repo: string, runId: number): Promise<void> {
   await ghFetch(`/repos/${owner}/${repo}/actions/runs/${runId}/rerun`, { method: "POST" });
 }
 export async function cancelWorkflowRun(owner: string, repo: string, runId: number): Promise<void> {
   await ghFetch(`/repos/${owner}/${repo}/actions/runs/${runId}/cancel`, { method: "POST" });
+}
+
+/** Download an artifact's zip bytes (the API 302-redirects to signed storage). */
+export async function downloadArtifactZip(owner: string, repo: string, artifactId: number): Promise<Buffer> {
+  const res = await ghFetch(`/repos/${owner}/${repo}/actions/artifacts/${artifactId}/zip`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+export async function rerunFailedJobs(owner: string, repo: string, runId: number): Promise<void> {
+  await ghFetch(`/repos/${owner}/${repo}/actions/runs/${runId}/rerun-failed-jobs`, { method: "POST" });
+}
+
+export async function setWorkflowEnabled(owner: string, repo: string, workflowId: number, enabled: boolean): Promise<void> {
+  await ghFetch(`/repos/${owner}/${repo}/actions/workflows/${workflowId}/${enabled ? "enable" : "disable"}`, { method: "PUT" });
+}
+
+export interface ArtifactInfo {
+  id: number;
+  name: string;
+  sizeInBytes: number;
+  expired: boolean;
+  expiresAt: string | null;
+  createdAt: string | null;
+}
+
+/** List a run's build artifacts. */
+export async function listRunArtifacts(owner: string, repo: string, runId: number): Promise<ArtifactInfo[]> {
+  const data = await ghJson<{
+    artifacts?: Array<{ id?: number; name?: string; size_in_bytes?: number; expired?: boolean; expires_at?: string | null; created_at?: string | null }>;
+  }>(`/repos/${owner}/${repo}/actions/runs/${runId}/artifacts?per_page=100`);
+  return (data.artifacts ?? [])
+    .filter((a) => typeof a.id === "number")
+    .map((a) => ({
+      id: a.id as number,
+      name: a.name ?? "artifact",
+      sizeInBytes: a.size_in_bytes ?? 0,
+      expired: !!a.expired,
+      expiresAt: a.expires_at ?? null,
+      createdAt: a.created_at ?? null,
+    }));
+}
+
+// GitHub returns a 302 to a short-lived signed URL for artifact / log zip downloads.
+// Read the Location without following it (undici exposes it on a manual redirect).
+async function ghRedirectLocation(path: string): Promise<string> {
+  const res = await fetch(`${API}${path}`, {
+    headers: {
+      Authorization: `Bearer ${githubToken()}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+    redirect: "manual",
+  });
+  const loc = res.headers.get("location");
+  if (loc) return loc;
+  throw new Error(ghError(res.status, await res.text().catch(() => "")));
+}
+
+/** Resolve a short-lived download URL for one artifact's zip. */
+export async function getArtifactDownloadUrl(owner: string, repo: string, artifactId: number): Promise<string> {
+  return ghRedirectLocation(`/repos/${owner}/${repo}/actions/artifacts/${artifactId}/zip`);
+}
+
+/** Resolve a short-lived download URL for a run's full log zip. */
+export async function getRunLogsDownloadUrl(owner: string, repo: string, runId: number): Promise<string> {
+  return ghRedirectLocation(`/repos/${owner}/${repo}/actions/runs/${runId}/logs`);
+}
+
+export interface PendingDeployment {
+  environmentId: number;
+  environmentName: string;
+  currentUserCanApprove: boolean;
+}
+
+/** List a run's pending deployment approvals (protected environments). */
+export async function listPendingDeployments(owner: string, repo: string, runId: number): Promise<PendingDeployment[]> {
+  const data = await ghJson<Array<{ environment?: { id?: number; name?: string }; current_user_can_approve?: boolean }>>(
+    `/repos/${owner}/${repo}/actions/runs/${runId}/pending_deployments`
+  );
+  return (data ?? [])
+    .filter((d) => typeof d.environment?.id === "number")
+    .map((d) => ({
+      environmentId: d.environment!.id as number,
+      environmentName: d.environment?.name ?? "",
+      currentUserCanApprove: !!d.current_user_can_approve,
+    }));
+}
+
+/** Approve or reject pending deployments for the given environment ids. */
+export async function reviewPendingDeployments(
+  owner: string,
+  repo: string,
+  runId: number,
+  environmentIds: number[],
+  state: "approved" | "rejected",
+  comment: string
+): Promise<void> {
+  await ghFetch(`/repos/${owner}/${repo}/actions/runs/${runId}/pending_deployments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ environment_ids: environmentIds, state, comment }),
+  });
 }

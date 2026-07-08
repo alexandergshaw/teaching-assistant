@@ -93,6 +93,7 @@ const LS_KEYS = {
   adaptInstructorName: "adapt_instructorName",
   adaptInstructorEmail: "adapt_instructorEmail",
   adaptDescription: "adapt_description",
+  adaptTextbookText: "adapt_textbookText",
   adaptStartDate: "adapt_startDate",
   adaptMeetingDays: "adapt_meetingDays",
   adaptMeetingTimes: "adapt_meetingTimes",
@@ -198,6 +199,7 @@ export default function CoursePlanningTab() {
   // Textbook details the AI extracted from uploaded screenshots (kept so a later
   // field regeneration still has them).
   const [extractedTextbookInfo, setExtractedTextbookInfo] = useState("");
+  const [adaptTextbookText, setAdaptTextbookText] = useState("");
   const [adaptSyllabusName, setAdaptSyllabusName] = useState("");
   // The syllabus as an ordered, editable list of sections (paragraphs). Each
   // borrows the style/position of its `sourceId` paragraph; added sections clone
@@ -229,6 +231,7 @@ export default function CoursePlanningTab() {
     setAdaptInstructorName(localStorage.getItem(LS_KEYS.adaptInstructorName) || "");
     setAdaptInstructorEmail(localStorage.getItem(LS_KEYS.adaptInstructorEmail) || "");
     setAdaptDescription(localStorage.getItem(LS_KEYS.adaptDescription) || "");
+    setAdaptTextbookText(localStorage.getItem(LS_KEYS.adaptTextbookText) || "");
     setAdaptStartDate(localStorage.getItem(LS_KEYS.adaptStartDate) || "");
     setAdaptMeetingDays(localStorage.getItem(LS_KEYS.adaptMeetingDays) || "");
     setAdaptMeetingTimes(localStorage.getItem(LS_KEYS.adaptMeetingTimes) || "");
@@ -407,7 +410,7 @@ export default function CoursePlanningTab() {
       const result = await analyzeSyllabusInputsAction(
         { name: syllabusName, base64: syllabusBase64 },
         zipBase64,
-        adaptCourseInfo(),
+        { ...adaptCourseInfo(), textbookInfo: adaptTextbookText.trim() || undefined },
         getStoredProvider(),
         textbookImages
       );
@@ -461,7 +464,7 @@ export default function CoursePlanningTab() {
     meetingDays: adaptMeetingDays.trim() || undefined,
     meetingTimes: adaptMeetingTimes.trim() || undefined,
     location: adaptLocation.trim() || undefined,
-    textbookInfo: extractedTextbookInfo.trim() || undefined,
+    textbookInfo: [adaptTextbookText.trim(), extractedTextbookInfo.trim()].filter(Boolean).join("\n\n") || undefined,
   });
 
   const updateSection = (key: string, patch: Partial<AdaptSection>) =>
@@ -706,6 +709,20 @@ export default function CoursePlanningTab() {
                   <input id="adaptTextbookImages" type="file" accept="image/*" multiple ref={textbookImagesRef} />
                   <p>Optional. Upload one or more screenshots of the textbook / required-materials details; the AI reads them and fills the syllabus textbook section.</p>
                 </div>
+              </div>
+
+              <div className={styles.field}>
+                <TextField
+                  id="adaptTextbookText"
+                  label="Textbook info as text (optional)"
+                  multiline
+                  minRows={3}
+                  size="small"
+                  fullWidth
+                  placeholder="Optional. Paste or type the textbook / required-materials details; combined with any screenshot above and used for the syllabus textbook section."
+                  value={adaptTextbookText}
+                  onChange={(e) => { setAdaptTextbookText(e.target.value); localStorage.setItem(LS_KEYS.adaptTextbookText, e.target.value); }}
+                />
               </div>
 
               <div className={styles.field}>

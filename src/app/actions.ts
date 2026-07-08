@@ -2637,7 +2637,8 @@ export async function analyzeSyllabusInputsAction(
       textbookImages && textbookImages.length > 0
         ? await extractTextbookInfoFromImages(textbookImages, provider)
         : "";
-    const info: SyllabusCourseInfo = textbookInfo ? { ...courseInfo, textbookInfo } : courseInfo;
+    const combinedTextbook = [courseInfo.textbookInfo?.trim(), textbookInfo.trim()].filter(Boolean).join("\n\n");
+    const info: SyllabusCourseInfo = combinedTextbook ? { ...courseInfo, textbookInfo: combinedTextbook } : courseInfo;
 
     const paraList = paragraphs.map((p) => `[${p.id}] ${p.text}`).join("\n");
     const byId = new Map(paragraphs.map((p) => [p.id, p.text]));

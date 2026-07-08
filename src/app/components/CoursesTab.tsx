@@ -40,6 +40,7 @@ interface CourseForm {
   githubOrg: string;
   textbook: string;
   syllabusId: string;
+  integrations: Array<{ name: string; url: string }>;
   notes: string;
 }
 
@@ -54,6 +55,7 @@ const EMPTY_FORM: CourseForm = {
   githubOrg: "",
   textbook: "",
   syllabusId: "",
+  integrations: [],
   notes: "",
 };
 
@@ -69,6 +71,7 @@ function formFromCourse(c: Course): CourseForm {
     githubOrg: c.githubOrg ?? "",
     textbook: c.textbook ?? "",
     syllabusId: c.syllabusId ?? "",
+    integrations: c.integrations.map((i) => ({ name: i.name, url: i.url ?? "" })),
     notes: c.notes ?? "",
   };
 }
@@ -178,6 +181,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const addRepo = () => setForm((f) => (f ? { ...f, repos: [...f.repos, { repo: "", branch: "" }] } : f));
   const removeRepo = (i: number) => setForm((f) => (f ? { ...f, repos: f.repos.filter((_, idx) => idx !== i) } : f));
 
+  const updateIntegration = (i: number, patch: Partial<{ name: string; url: string }>) =>
+    setForm((f) => (f ? { ...f, integrations: f.integrations.map((x, idx) => (idx === i ? { ...x, ...patch } : x)) } : f));
+  const addIntegration = () => setForm((f) => (f ? { ...f, integrations: [...f.integrations, { name: "", url: "" }] } : f));
+  const removeIntegration = (i: number) =>
+    setForm((f) => (f ? { ...f, integrations: f.integrations.filter((_, idx) => idx !== i) } : f));
+
   const handleSave = async () => {
     if (!form) return;
     if (!form.name.trim()) {
@@ -196,6 +205,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       githubOrg: form.githubOrg,
       textbook: form.textbook,
       syllabusId: form.syllabusId,
+      integrations: form.integrations.map((i) => ({ name: i.name, url: i.url.trim() || null })),
       notes: form.notes,
     };
     const result = form.id ? await updateCourseHubAction(form.id, input) : await createCourseHubAction(input);
@@ -551,6 +561,40 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
             </div>
           </div>
 
+          <div className={styles.field}>
+            <label>Integrations</label>
+            {form.integrations.length === 0 && <p className={styles.fieldHint}>No integrations linked yet (e.g. Cengage, McGraw-Hill Connect, Pearson).</p>}
+            {form.integrations.map((it, i) => (
+              <div key={i} className={styles.courseRepoRow}>
+                <TextField
+                  size="small"
+                  label="Name"
+                  placeholder="e.g. Cengage"
+                  value={it.name}
+                  onChange={(e) => updateIntegration(i, { name: e.target.value })}
+                  sx={{ flex: "0 0 200px" }}
+                />
+                <TextField
+                  size="small"
+                  fullWidth
+                  label="Link"
+                  placeholder="https://…"
+                  value={it.url}
+                  onChange={(e) => updateIntegration(i, { url: e.target.value })}
+                  sx={{ flex: 1 }}
+                />
+                <Button variant="text" size="small" color="error" onClick={() => removeIntegration(i)} title="Remove this integration">
+                  Remove
+                </Button>
+              </div>
+            ))}
+            <div>
+              <Button variant="outlined" size="small" onClick={addIntegration}>
+                Add integration
+              </Button>
+            </div>
+          </div>
+
           <TextField
             label="Notes"
             size="small"
@@ -681,6 +725,23 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       <span className={styles.courseResourceValue}>{c.textbook}</span>
                     ) : (
                       <span className={styles.courseResourceEmpty}>Not set</span>
+                    )}
+                  </div>
+
+                  <div className={styles.courseResource}>
+                    <span className={styles.courseResourceLabel}>Integration{c.integrations.length > 1 ? "s" : ""}</span>
+                    {c.integrations.length > 0 ? (
+                      c.integrations.map((it, i) =>
+                        it.url ? (
+                          <a key={i} className={styles.courseResourceValue} href={it.url} target="_blank" rel="noreferrer">
+                            {it.name || it.url}
+                          </a>
+                        ) : (
+                          <span key={i} className={styles.courseResourceValue}>{it.name}</span>
+                        )
+                      )
+                    ) : (
+                      <span className={styles.courseResourceEmpty}>None</span>
                     )}
                   </div>
                 </div>

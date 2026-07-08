@@ -164,6 +164,7 @@ export interface Database {
           textbook: string | null;
           syllabus_id: string | null;
           institution: string | null;
+          integrations: Array<{ name: string; url: string | null }>;
           notes: string | null;
           created_at: string;
           updated_at: string;
@@ -180,6 +181,7 @@ export interface Database {
           textbook?: string | null;
           syllabus_id?: string | null;
           institution?: string | null;
+          integrations?: Array<{ name: string; url: string | null }>;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -196,6 +198,7 @@ export interface Database {
           textbook?: string | null;
           syllabus_id?: string | null;
           institution?: string | null;
+          integrations?: Array<{ name: string; url: string | null }>;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;

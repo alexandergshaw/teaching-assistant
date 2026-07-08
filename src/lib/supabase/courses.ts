@@ -15,6 +15,12 @@ export interface CourseRepo {
   branch: string | null;
 }
 
+/** A third-party integration linked to a course (e.g. Cengage) + its URL. */
+export interface CourseIntegration {
+  name: string;
+  url: string | null;
+}
+
 /** A course and the resources bundled with it. */
 export interface Course {
   id: string;
@@ -27,6 +33,7 @@ export interface Course {
   textbook: string | null;
   syllabusId: string | null;
   institution: string | null;
+  integrations: CourseIntegration[];
   notes: string | null;
   updatedAt: string;
 }
@@ -42,11 +49,12 @@ export interface CourseInput {
   textbook?: string | null;
   syllabusId?: string | null;
   institution?: string | null;
+  integrations?: CourseIntegration[];
   notes?: string | null;
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, notes, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, notes, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -67,6 +75,7 @@ interface CourseRow {
   textbook: string | null;
   syllabus_id: string | null;
   institution: string | null;
+  integrations: Array<{ name: string; url: string | null }> | null;
   notes: string | null;
   updated_at: string;
 }
@@ -83,6 +92,7 @@ function toCourse(r: CourseRow): Course {
     textbook: r.textbook,
     syllabusId: r.syllabus_id,
     institution: r.institution,
+    integrations: Array.isArray(r.integrations) ? r.integrations.filter((x) => x && x.name) : [],
     notes: r.notes,
     updatedAt: r.updated_at,
   };
@@ -98,6 +108,9 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
   const repos = (input.repos ?? [])
     .map((r) => ({ repo: (r.repo ?? "").trim(), branch: (r.branch ?? "").trim() || null }))
     .filter((r) => r.repo !== "");
+  const integrations = (input.integrations ?? [])
+    .map((i) => ({ name: (i.name ?? "").trim(), url: (i.url ?? "").trim() || null }))
+    .filter((i) => i.name !== "" || i.url !== null);
   return {
     name: input.name.trim(),
     course_code: clean(input.courseCode),
@@ -108,6 +121,7 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     textbook: clean(input.textbook),
     syllabus_id: clean(input.syllabusId),
     institution: clean(input.institution),
+    integrations,
     notes: clean(input.notes),
     updated_at: new Date().toISOString(),
   };

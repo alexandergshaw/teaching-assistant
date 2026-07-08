@@ -1166,58 +1166,68 @@ export default function RepoDetail() {
                   )}
                   {treeState === "error" && <p className={styles.error}>Failed to load files</p>}
                   {treeState === "ready" &&
-                    entryList.map((entry) => (
-                      <div
-                        key={entry.path}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 4,
-                          backgroundColor: selectedPath === entry.path ? "color-mix(in srgb, var(--accent) 10%, transparent)" : "transparent",
-                        }}
-                      >
-                        <Checkbox
-                          size="small"
-                          checked={selectedPaths.has(entry.path)}
-                          onChange={() => toggleSelected(entry.path)}
-                          sx={{ padding: "2px" }}
-                        />
-                        {entry.type === "blob" ? (
-                          <Button
-                            variant="text"
-                            onClick={() => setSelectedPath(entry.path)}
-                            sx={{
-                              justifyContent: "flex-start",
-                              textTransform: "none",
-                              flex: 1,
-                              minWidth: 0,
-                              fontFamily: "monospace",
-                              fontSize: "0.8rem",
-                            }}
-                          >
-                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", textAlign: "left" }}>
-                              {entry.path}
+                    entryList.map((entry) => {
+                      const depth = entry.path.split("/").length - 1;
+                      const name = entry.path.split("/").pop() || entry.path;
+                      const indent = depth * 14 + 8;
+                      return (
+                        <div
+                          key={entry.path}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
+                            backgroundColor: selectedPath === entry.path ? "color-mix(in srgb, var(--accent) 10%, transparent)" : "transparent",
+                          }}
+                        >
+                          <Checkbox
+                            size="small"
+                            checked={selectedPaths.has(entry.path)}
+                            onChange={() => toggleSelected(entry.path)}
+                            sx={{ padding: "2px" }}
+                          />
+                          {entry.type === "blob" ? (
+                            <Button
+                              variant="text"
+                              onClick={() => setSelectedPath(entry.path)}
+                              title={entry.path}
+                              sx={{
+                                justifyContent: "flex-start",
+                                textTransform: "none",
+                                flex: 1,
+                                minWidth: 0,
+                                fontFamily: "monospace",
+                                fontSize: "0.8rem",
+                                pl: `${indent}px`,
+                              }}
+                            >
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", textAlign: "left" }}>
+                                {name}
+                              </span>
+                            </Button>
+                          ) : (
+                            <span
+                              title={entry.path}
+                              style={{
+                                flex: 1,
+                                minWidth: 0,
+                                fontFamily: "monospace",
+                                fontSize: "0.8rem",
+                                fontWeight: 600,
+                                color: "var(--text-secondary)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                padding: "6px 8px",
+                                paddingLeft: indent,
+                              }}
+                            >
+                              {name}/
                             </span>
-                          </Button>
-                        ) : (
-                          <span
-                            style={{
-                              flex: 1,
-                              minWidth: 0,
-                              fontFamily: "monospace",
-                              fontSize: "0.8rem",
-                              color: "var(--text-secondary)",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                              padding: "6px 8px",
-                            }}
-                          >
-                            {entry.path}/
-                          </span>
-                        )}
-                      </div>
-                    ))}
+                          )}
+                        </div>
+                      );
+                    })}
                 </div>
               </div>
 
@@ -1761,8 +1771,8 @@ export default function RepoDetail() {
           )}
 
           {tab === "copilot" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+            <div style={{ display: "flex", gap: 16, marginTop: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, flex: "1 1 320px", minWidth: 280 }}>
                 <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 8 }}>
                   Assign a Copilot coding agent
                 </label>
@@ -1816,7 +1826,7 @@ export default function RepoDetail() {
                 )}
               </div>
 
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, flex: "1 1 320px", minWidth: 280 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                   <label style={{ fontSize: "0.9rem", fontWeight: 500 }}>Copilot tasks</label>
                   <Button variant="text" size="small" onClick={reloadCopilotTasks} disabled={copilotTasksState === "loading"}>

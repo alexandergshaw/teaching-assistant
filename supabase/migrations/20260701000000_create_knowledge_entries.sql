@@ -5,6 +5,19 @@
 -- insert/update policies, so anon/authenticated writes are refused and the
 -- service role bypasses RLS).
 
+-- The tsvector expression is wrapped in an IMMUTABLE function so it can be used
+-- in a STORED generated column. to_tsvector('english', ...) is otherwise treated
+-- as only STABLE (the text -> regconfig cast is stable), which Postgres refuses
+-- in a generated column (SQLSTATE 42P17). The 'english' config never changes, so
+-- asserting immutability here is safe.
+create or replace function public.knowledge_entries_fts(p_title text, p_topics text[], p_summary text)
+returns tsvector
+language sql
+immutable
+as $$
+  select to_tsvector('english', p_title || ' ' || array_to_string(p_topics, ' ') || ' ' || p_summary)
+$$;
+
 create table if not exists public.knowledge_entries (
   id            text primary key,
   kind          text not null check (kind in ('case_study', 'practice_problem', 'reference')),
@@ -31,7 +44,7 @@ create table if not exists public.knowledge_entries (
   -- Recall-oriented full-text index over title, tags, and summary. Precision
   -- comes from the application-side scorer over the returned candidates.
   fts tsvector generated always as (
-    to_tsvector('english', title || ' ' || array_to_string(topics, ' ') || ' ' || summary)
+    public.knowledge_entries_fts(title, topics, summary)
   ) stored
 );
 

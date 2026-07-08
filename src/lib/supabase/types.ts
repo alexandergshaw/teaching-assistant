@@ -61,6 +61,35 @@ export interface Database {
           updated_at?: string;
         };
       };
+      microsoft_credentials: {
+        Row: {
+          user_id: string;
+          institution: string;
+          access_token: string | null;
+          refresh_token: string | null;
+          expiry: string | null;
+          scope: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          institution: string;
+          access_token?: string | null;
+          refresh_token?: string | null;
+          expiry?: string | null;
+          scope?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          institution?: string;
+          access_token?: string | null;
+          refresh_token?: string | null;
+          expiry?: string | null;
+          scope?: string | null;
+          updated_at?: string;
+        };
+      };
       accessibility_scans: {
         Row: {
           user_id: string;

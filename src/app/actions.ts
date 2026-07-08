@@ -261,6 +261,10 @@ import {
   deleteCredentials,
 } from "@/lib/google-credentials";
 import {
+  listConnectedInstitutions,
+  deleteCredentials as deleteMicrosoftCredentials,
+} from "@/lib/microsoft-credentials";
+import {
   queryFreeBusy,
   createCalendarEvent,
   listCalendarEvents,
@@ -2829,6 +2833,32 @@ export async function disconnectGoogleCalendarAction(): Promise<
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not disconnect Google Calendar." };
+  }
+}
+
+/** The school (institution) codes the owner has connected Outlook for. */
+export async function getOutlookStatusAction(): Promise<
+  { connected: string[] } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    return { connected: await listConnectedInstitutions(user.id) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not check Outlook connections." };
+  }
+}
+
+/** Forget the owner's Outlook connection for one school. */
+export async function disconnectOutlookAction(
+  institution: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!institution.trim()) return { error: "Choose a school." };
+    await deleteMicrosoftCredentials(user.id, institution);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not disconnect Outlook." };
   }
 }
 

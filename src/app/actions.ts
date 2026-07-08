@@ -2441,7 +2441,8 @@ function computeWeekDates(startDate: string | undefined, weeks: number): string 
   return lines.join("\n");
 }
 
-/** Summarize a codebase zip (file tree + a few key files) as LLM context. */
+/** Summarize a codebase zip (file tree, per-week topics, key files, and any
+ *  explicit schedule/outline the repo contains) as LLM context. */
 async function summarizeCodebaseZip(zipBase64: string): Promise<string> {
   const JSZipMod = (await import("jszip")).default;
   const zip = await JSZipMod.loadAsync(Buffer.from(zipBase64, "base64"));
@@ -2450,11 +2451,63 @@ async function summarizeCodebaseZip(zipBase64: string): Promise<string> {
     if (!entry.dir) paths.push(relativePath);
   });
   const tree = paths.slice(0, 250).join("\n");
+
+  // Read a zip entry as bounded text, or "" if missing/unreadable.
+  const readText = async (p: string, max: number): Promise<string> => {
+    const entry = zip.file(p);
+    if (!entry) return "";
+    try {
+      return (await entry.async("string")).slice(0, max);
+    } catch {
+      return "";
+    }
+  };
+
   // Top-level entries (folders/files at the repo root), in natural order — these
   // are typically the per-week assignments, so list them so the AI can map them.
   const topLevel = Array.from(new Set(paths.map((p) => p.split("/")[0]).filter(Boolean))).sort((a, b) =>
     a.localeCompare(b, undefined, { numeric: true })
   );
+
+  // A one-line topic per top-level folder, from its README/intro heading — so the
+  // per-week entries carry real topics (course repos are often one folder = one
+  // week), not just folder names.
+  const firstHeading = (text: string): string => {
+    for (const line of text.split(/\r?\n/)) {
+      const t = line.replace(/^#+\s*/, "").trim();
+      if (t) return t.slice(0, 120);
+    }
+    return "";
+  };
+  const READMEISH = /^(readme|index|topic|overview)[^/]*\.(md|markdown|txt|rst)$/i;
+  const topicLines: string[] = [];
+  for (const dir of topLevel.slice(0, 20)) {
+    const readmePath = paths.find((p) => {
+      const parts = p.split("/");
+      return parts.length === 2 && parts[0] === dir && READMEISH.test(parts[1]);
+    });
+    if (!readmePath) continue;
+    const heading = firstHeading(await readText(readmePath, 800));
+    if (heading) topicLines.push(`${dir}: ${heading}`);
+  }
+
+  // Explicit schedule / course-outline files anywhere in the repo (by name). When
+  // present, these carry the real weekly + topic schedule for THIS offering, so
+  // pull them in with a generous budget as the authoritative schedule source.
+  const SCHEDULE_RE =
+    /(^|\/)[^/]*(schedule|weekly|outline|topics?|calendar|curriculum|agenda|course[-_]?plan|lesson[-_]?plan|syllabus)[^/]*\.(md|markdown|txt|rst|adoc|org|csv)$/i;
+  const schedulePaths = paths.filter((p) => SCHEDULE_RE.test(p)).slice(0, 6);
+  let scheduleContents = "";
+  let scheduleBudget = 16000;
+  for (const p of schedulePaths) {
+    if (scheduleBudget <= 0) break;
+    const text = await readText(p, Math.min(scheduleBudget, 8000));
+    if (text) {
+      scheduleContents += `\n--- ${p} ---\n${text}\n`;
+      scheduleBudget -= text.length;
+    }
+  }
+
   const KEY_RE =
     /(^|\/)(readme(\.[a-z]+)?|package\.json|pyproject\.toml|requirements\.txt|setup\.py|cargo\.toml|go\.mod|pom\.xml|composer\.json|gemfile|index\.(md|html|js|ts))$/i;
   const keyPaths = paths.filter((p) => KEY_RE.test(p)).slice(0, 8);
@@ -2462,17 +2515,20 @@ async function summarizeCodebaseZip(zipBase64: string): Promise<string> {
   let budget = 12000;
   for (const p of keyPaths) {
     if (budget <= 0) break;
-    const entry = zip.file(p);
-    if (!entry) continue;
-    try {
-      const text = (await entry.async("string")).slice(0, Math.min(budget, 4000));
+    const text = await readText(p, Math.min(budget, 4000));
+    if (text) {
       keyContents += `\n--- ${p} ---\n${text}\n`;
       budget -= text.length;
-    } catch {
-      // Skip binary / unreadable entries.
     }
   }
-  return `TOP-LEVEL ENTRIES (in order — each is typically one weekly assignment):\n${topLevel.join("\n")}\n\nFILE TREE (truncated):\n${tree}\n\nKEY FILES:${keyContents || "\n(none found)"}`;
+
+  const topicsBlock = topicLines.length
+    ? `\n\nPER-WEEK TOPICS (from each top-level folder's intro/readme):\n${topicLines.join("\n")}`
+    : "";
+  const scheduleBlock = scheduleContents
+    ? `\n\nCOURSE SCHEDULE / OUTLINE FILES FOUND IN THE REPO (verbatim — the real weekly + topic schedule for this offering):${scheduleContents}`
+    : "";
+  return `TOP-LEVEL ENTRIES (in order — each is typically one weekly assignment):\n${topLevel.join("\n")}${topicsBlock}\n\nFILE TREE (truncated):\n${tree}\n\nKEY FILES:${keyContents || "\n(none found)"}${scheduleBlock}`;
 }
 
 /**
@@ -2642,7 +2698,7 @@ DATES — ${weekDates
         ? "Use ONLY the EXACT WEEK DATES listed above: a paragraph for week k uses week k's dates, in the SAME date style the paragraph already uses."
         : "Compute consecutive weekly dates from the course start date (week 1 begins on the start date), one week apart."} The previous offering's dates MUST NOT appear anywhere — every old date (for example any January/February/March/April dates that are not in the list above) must be replaced.
 
-TOPICS — Each assignment in the codebase (the TOP-LEVEL ENTRIES in the summary) is one whole week, in order: week k's topic and description come from the k-th assignment. The previous offering's topics and descriptions MUST NOT appear anywhere — every old topic or description (anything not derived from THIS codebase) must be replaced.
+TOPICS — Use the codebase's real schedule for THIS offering, in this priority: (1) if a "COURSE SCHEDULE / OUTLINE FILES FOUND IN THE REPO" section is present, it is AUTHORITATIVE - take each week's topic, order, and description from it; (2) otherwise use the "PER-WEEK TOPICS" list (each top-level folder's topic), in order; (3) otherwise treat each TOP-LEVEL ENTRY as one week, in order. Week k's topic and description come from week k of that source. The previous offering's topics and descriptions MUST NOT appear anywhere - every old topic or description (anything not derived from THIS codebase) must be replaced.
 
 FORMAT — Preserve each paragraph's role and layout (a "Week N (dates): topic" line stays that shape; a separate dates cell stays a dates cell; a topic/description cell stays a topic/description cell) — only the content changes.
 

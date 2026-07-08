@@ -22,6 +22,7 @@ import {
   type SyllabusCourseInfo,
 } from "../actions";
 import GithubRepoPicker from "./GithubRepoPicker";
+import SyllabusTemplateLibrary from "./SyllabusTemplateLibrary";
 import GithubSyncPanel from "./GithubSyncPanel";
 import LecturePlanningTab from "./LecturePlanningTab";
 import { spansToPlainText } from "./RichTextEditor";
@@ -190,6 +191,9 @@ export default function CoursePlanningTab() {
   const adaptSyllabusRef = useRef<HTMLInputElement>(null);
   const adaptZipRef = useRef<HTMLInputElement>(null);
   const [adaptSyllabusBase64, setAdaptSyllabusBase64] = useState<string | null>(null);
+  // A saved template selected from the library, used as the syllabus base when no
+  // file is uploaded.
+  const [pickedTemplate, setPickedTemplate] = useState<{ id: string; name: string; fileName: string; base64: string } | null>(null);
   const [adaptSyllabusName, setAdaptSyllabusName] = useState("");
   // The syllabus as an ordered, editable list of sections (paragraphs). Each
   // borrows the style/position of its `sourceId` paragraph; added sections clone
@@ -362,11 +366,11 @@ export default function CoursePlanningTab() {
   // class-specific fields, each pre-filled with a suggested value.
   const handleAnalyzeSyllabus = async () => {
     const syllabusFile = adaptSyllabusRef.current?.files?.[0];
-    if (!syllabusFile) {
-      setAdaptError("Upload the former syllabus (.docx) first.");
+    if (!syllabusFile && !pickedTemplate) {
+      setAdaptError("Upload a former syllabus (.docx) or pick a saved template first.");
       return;
     }
-    if (!/\.docx$/i.test(syllabusFile.name)) {
+    if (syllabusFile && !/\.docx$/i.test(syllabusFile.name)) {
       setAdaptError("The former syllabus must be a Word .docx file.");
       return;
     }
@@ -375,7 +379,8 @@ export default function CoursePlanningTab() {
     setAdaptError(null);
     setAdaptSections(null);
     try {
-      const syllabusBase64 = await readFileBase64(syllabusFile);
+      const syllabusName = syllabusFile ? syllabusFile.name : pickedTemplate ? pickedTemplate.fileName : "";
+      const syllabusBase64 = syllabusFile ? await readFileBase64(syllabusFile) : pickedTemplate ? pickedTemplate.base64 : "";
       let zipBase64: string | null = null;
       if (adaptRepo.trim()) {
         const z = await getRepoZipAction(adaptRepo.trim(), adaptBranch || undefined);
@@ -388,9 +393,9 @@ export default function CoursePlanningTab() {
         zipBase64 = await readFileBase64(zipFile);
       }
       setAdaptSyllabusBase64(syllabusBase64);
-      setAdaptSyllabusName(syllabusFile.name);
+      setAdaptSyllabusName(syllabusName);
       const result = await analyzeSyllabusInputsAction(
-        { name: syllabusFile.name, base64: syllabusBase64 },
+        { name: syllabusName, base64: syllabusBase64 },
         zipBase64,
         adaptCourseInfo(),
         getStoredProvider()
@@ -643,9 +648,41 @@ export default function CoursePlanningTab() {
               </p>
 
               <div className={styles.field}>
-                <label htmlFor="adaptSyllabusFile">Former syllabus (.docx)</label>
+                <label>Syllabus template</label>
+                <SyllabusTemplateLibrary
+                  activeTemplateId={pickedTemplate?.id ?? null}
+                  onUse={(t) => {
+                    setPickedTemplate(t);
+                    if (adaptSyllabusRef.current) adaptSyllabusRef.current.value = "";
+                    setAdaptError(null);
+                  }}
+                />
+                {pickedTemplate && (
+                  <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "8px 0 0" }}>
+                    Using template: <strong>{pickedTemplate.name}</strong>{" "}
+                    <button
+                      type="button"
+                      onClick={() => setPickedTemplate(null)}
+                      style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", padding: 0, font: "inherit" }}
+                    >
+                      clear
+                    </button>
+                  </p>
+                )}
+              </div>
+
+              <div className={styles.field}>
+                <label htmlFor="adaptSyllabusFile">Or upload a former syllabus (.docx)</label>
                 <div className={styles.fileField}>
-                  <input id="adaptSyllabusFile" type="file" accept=".docx" ref={adaptSyllabusRef} />
+                  <input
+                    id="adaptSyllabusFile"
+                    type="file"
+                    accept=".docx"
+                    ref={adaptSyllabusRef}
+                    onChange={() => {
+                      if (adaptSyllabusRef.current?.files?.[0]) setPickedTemplate(null);
+                    }}
+                  />
                   <p>Word .docx only. The new syllabus keeps its exact formatting; only class-specific text changes.</p>
                 </div>
               </div>

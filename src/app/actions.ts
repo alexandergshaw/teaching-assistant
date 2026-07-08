@@ -265,6 +265,15 @@ import {
   deleteCredentials as deleteMicrosoftCredentials,
 } from "@/lib/microsoft-credentials";
 import {
+  listTemplates,
+  getTemplate,
+  createTemplate,
+  updateTemplate,
+  deleteTemplate,
+  type SyllabusTemplateMeta,
+  type SyllabusTemplate,
+} from "@/lib/supabase/syllabus-templates";
+import {
   queryFreeBusy,
   createCalendarEvent,
   listCalendarEvents,
@@ -2845,6 +2854,98 @@ export async function getOutlookStatusAction(): Promise<
     return { connected: await listConnectedInstitutions(user.id) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not check Outlook connections." };
+  }
+}
+
+// ── Syllabus template library ───────────────────────────────────────────────
+
+const MAX_TEMPLATE_BASE64 = 8 * 1024 * 1024; // ~6 MB .docx
+
+/** List the owner's saved syllabus templates (metadata only). */
+export async function listSyllabusTemplatesAction(): Promise<
+  { templates: SyllabusTemplateMeta[] } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    return { templates: await listTemplates(user.id) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list syllabus templates." };
+  }
+}
+
+/** Fetch one syllabus template including its base64 .docx content. */
+export async function getSyllabusTemplateAction(
+  id: string
+): Promise<{ template: SyllabusTemplate } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!id.trim()) return { error: "Choose a template." };
+    const template = await getTemplate(user.id, id);
+    if (!template) return { error: "That template no longer exists." };
+    return { template };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not open the template." };
+  }
+}
+
+/** Save a new syllabus template from an uploaded .docx (base64). */
+export async function createSyllabusTemplateAction(
+  name: string,
+  fileName: string,
+  base64: string
+): Promise<{ template: SyllabusTemplateMeta } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!name.trim()) return { error: "Enter a template name." };
+    if (!/\.docx$/i.test(fileName.trim())) return { error: "The template must be a Word .docx file." };
+    if (!base64) return { error: "Upload a .docx file." };
+    if (base64.length > MAX_TEMPLATE_BASE64) return { error: "That file is too large (limit ~6 MB)." };
+    return { template: await createTemplate(user.id, name.trim(), fileName.trim(), base64) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the template." };
+  }
+}
+
+/** Rename a syllabus template and/or replace its .docx file. */
+export async function updateSyllabusTemplateAction(
+  id: string,
+  fields: { name?: string; fileName?: string; base64?: string }
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!id.trim()) return { error: "Choose a template." };
+    const update: { name?: string; fileName?: string; content?: string } = {};
+    if (fields.name !== undefined) {
+      if (!fields.name.trim()) return { error: "Enter a template name." };
+      update.name = fields.name.trim();
+    }
+    if (fields.base64 !== undefined) {
+      if (!fields.fileName || !/\.docx$/i.test(fields.fileName.trim())) {
+        return { error: "The template must be a Word .docx file." };
+      }
+      if (fields.base64.length > MAX_TEMPLATE_BASE64) return { error: "That file is too large (limit ~6 MB)." };
+      update.fileName = fields.fileName.trim();
+      update.content = fields.base64;
+    }
+    if (Object.keys(update).length === 0) return { error: "Nothing to update." };
+    await updateTemplate(user.id, id, update);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the template." };
+  }
+}
+
+/** Delete a syllabus template. */
+export async function deleteSyllabusTemplateAction(
+  id: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!id.trim()) return { error: "Choose a template." };
+    await deleteTemplate(user.id, id);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not delete the template." };
   }
 }
 

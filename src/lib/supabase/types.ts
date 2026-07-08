@@ -90,6 +90,35 @@ export interface Database {
           updated_at?: string;
         };
       };
+      syllabus_templates: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          file_name: string;
+          content: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          file_name: string;
+          content: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          file_name?: string;
+          content?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       accessibility_scans: {
         Row: {
           user_id: string;

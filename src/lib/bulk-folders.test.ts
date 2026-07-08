@@ -2,38 +2,35 @@ import { describe, it, expect } from "vitest";
 import { buildBulkFolderNames } from "./bulk-folders";
 
 describe("buildBulkFolderNames", () => {
-  it("appends number when pattern has no {n}", () => {
-    const result = buildBulkFolderNames("Module", 1, 3);
-    expect(result).toEqual(["Module 1", "Module 2", "Module 3"]);
+  it("appends a zero-padded number when there is no {n}", () => {
+    expect(buildBulkFolderNames("Module", 1, 3)).toEqual(["Module 01", "Module 02", "Module 03"]);
   });
 
-  it("replaces {n} in the pattern", () => {
-    const result = buildBulkFolderNames("week-{n}-notes", 1, 2);
-    expect(result).toEqual(["week-1-notes", "week-2-notes"]);
+  it("substitutes {n} with a zero-padded number", () => {
+    expect(buildBulkFolderNames("week-{n}-notes", 1, 2)).toEqual(["week-01-notes", "week-02-notes"]);
   });
 
-  it("respects start offset", () => {
-    const result = buildBulkFolderNames("M{n}", 5, 2);
-    expect(result).toEqual(["M5", "M6"]);
+  it("honors the start offset", () => {
+    expect(buildBulkFolderNames("M{n}", 5, 2)).toEqual(["M05", "M06"]);
   });
 
-  it("returns empty array when count is 0", () => {
-    const result = buildBulkFolderNames("Module", 1, 0);
-    expect(result).toEqual([]);
+  it("pads single digits but leaves multi-digit numbers as-is", () => {
+    expect(buildBulkFolderNames("m{n}", 9, 2)).toEqual(["m09", "m10"]);
   });
 
-  it("returns empty array for empty pattern", () => {
-    const result = buildBulkFolderNames("", 1, 3);
-    expect(result).toEqual([]);
+  it("returns [] for a count below 1", () => {
+    expect(buildBulkFolderNames("Module", 1, 0)).toEqual([]);
   });
 
-  it("caps count at 100", () => {
-    const result = buildBulkFolderNames("f{n}", 1, 250);
-    expect(result).length(100);
+  it("returns [] for an empty pattern", () => {
+    expect(buildBulkFolderNames("", 1, 3)).toEqual([]);
+  });
+
+  it("caps the count at 100", () => {
+    expect(buildBulkFolderNames("f{n}", 1, 250)).toHaveLength(100);
   });
 
   it("trims surrounding slashes", () => {
-    const result = buildBulkFolderNames("/lib/{n}/", 1, 1);
-    expect(result).toEqual(["lib/1"]);
+    expect(buildBulkFolderNames("/lib/{n}/", 1, 1)).toEqual(["lib/01"]);
   });
 });

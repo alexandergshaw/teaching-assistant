@@ -190,10 +190,14 @@ export default function CoursePlanningTab() {
   // ── Adapt an existing syllabus from a codebase (the Syllabus subtab flow) ──
   const adaptSyllabusRef = useRef<HTMLInputElement>(null);
   const adaptZipRef = useRef<HTMLInputElement>(null);
+  const textbookImagesRef = useRef<HTMLInputElement>(null);
   const [adaptSyllabusBase64, setAdaptSyllabusBase64] = useState<string | null>(null);
   // A saved template selected from the library, used as the syllabus base when no
   // file is uploaded.
   const [pickedTemplate, setPickedTemplate] = useState<{ id: string; name: string; fileName: string; base64: string } | null>(null);
+  // Textbook details the AI extracted from uploaded screenshots (kept so a later
+  // field regeneration still has them).
+  const [extractedTextbookInfo, setExtractedTextbookInfo] = useState("");
   const [adaptSyllabusName, setAdaptSyllabusName] = useState("");
   // The syllabus as an ordered, editable list of sections (paragraphs). Each
   // borrows the style/position of its `sourceId` paragraph; added sections clone
@@ -394,16 +398,24 @@ export default function CoursePlanningTab() {
       }
       setAdaptSyllabusBase64(syllabusBase64);
       setAdaptSyllabusName(syllabusName);
+      const imageFiles = Array.from(textbookImagesRef.current?.files ?? []);
+      const textbookImages = imageFiles.length
+        ? await Promise.all(
+            imageFiles.map(async (f) => ({ base64: await readFileBase64(f), mimeType: f.type || "image/png" }))
+          )
+        : null;
       const result = await analyzeSyllabusInputsAction(
         { name: syllabusName, base64: syllabusBase64 },
         zipBase64,
         adaptCourseInfo(),
-        getStoredProvider()
+        getStoredProvider(),
+        textbookImages
       );
       if ("error" in result) {
         setAdaptError(result.error);
         return;
       }
+      if (result.textbookInfo) setExtractedTextbookInfo(result.textbookInfo);
       // Build the editable section list: each paragraph, with the AI field
       // suggestion or schedule replacement applied.
       const fieldById = new Map(result.fields.map((f) => [f.paragraphId, f]));
@@ -449,6 +461,7 @@ export default function CoursePlanningTab() {
     meetingDays: adaptMeetingDays.trim() || undefined,
     meetingTimes: adaptMeetingTimes.trim() || undefined,
     location: adaptLocation.trim() || undefined,
+    textbookInfo: extractedTextbookInfo.trim() || undefined,
   });
 
   const updateSection = (key: string, patch: Partial<AdaptSection>) =>
@@ -684,6 +697,14 @@ export default function CoursePlanningTab() {
                     }}
                   />
                   <p>Word .docx only. The new syllabus keeps its exact formatting; only class-specific text changes.</p>
+                </div>
+              </div>
+
+              <div className={styles.field}>
+                <label htmlFor="adaptTextbookImages">Textbook info screenshot (optional)</label>
+                <div className={styles.fileField}>
+                  <input id="adaptTextbookImages" type="file" accept="image/*" multiple ref={textbookImagesRef} />
+                  <p>Optional. Upload one or more screenshots of the textbook / required-materials details; the AI reads them and fills the syllabus textbook section.</p>
                 </div>
               </div>
 

@@ -158,7 +158,7 @@ import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
 import { suggestHeadingLevels, titleFromFileName } from "@/lib/doc-headings";
 import { buildOfficeIssues } from "@/lib/accessibility/office-issues";
 import { type AccessibleItemType, type Issue } from "@/lib/accessibility/types";
-import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
+import { callLlm, normalizeProvider, type LlmProvider, type LlmPart } from "@/lib/llm";
 import {
   githubConfigured,
   listRepos,
@@ -2401,6 +2401,8 @@ export interface SyllabusCourseInfo {
   meetingTimes?: string;
   /** Meeting location, e.g. "Room 204, Science Hall". */
   location?: string;
+  /** Required textbooks / materials (e.g. extracted from an uploaded screenshot). */
+  textbookInfo?: string;
 }
 
 /** Render the instructor's course facts as a prompt block (empty when none given). */
@@ -2415,6 +2417,7 @@ function courseInfoBlock(info: SyllabusCourseInfo): string {
     info.meetingDays ? `Meeting days: ${info.meetingDays}` : "",
     info.meetingTimes ? `Meeting times: ${info.meetingTimes}` : "",
     info.location ? `Meeting location: ${info.location}` : "",
+    info.textbookInfo ? `Required textbooks / materials (use this VERBATIM for the textbook/materials section): ${info.textbookInfo}` : "",
   ].filter(Boolean);
   return lines.length ? lines.join("\n") : "(none provided)";
 }
@@ -2557,6 +2560,33 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
 }
 
 /**
+ * Pull textbook / course-materials details out of uploaded screenshots using the
+ * vision model, as a plain-text block for the syllabus materials section. Returns
+ * "" when there are no images, the model fails, or nothing was found.
+ */
+async function extractTextbookInfoFromImages(
+  images: Array<{ base64: string; mimeType: string }>,
+  provider: LlmProvider
+): Promise<string> {
+  if (images.length === 0) return "";
+  const parts: LlmPart[] = [
+    {
+      text: `The image(s) are screenshots of textbook / course-materials information. Extract every relevant detail and return it as a concise plain-text block for a syllabus "Required textbooks and materials" section. Include, when present: title, author(s), edition, publisher, year, ISBN, format (print/ebook/online), and whether each item is required or optional. Omit any field that is absent. If there are several items, list each one. Return ONLY the extracted details as plain text with no preamble and no markdown headings. If the image contains no textbook or materials information, return exactly: NONE`,
+    },
+  ];
+  for (const img of images) {
+    if (img.base64 && img.mimeType) parts.push({ inlineData: { mimeType: img.mimeType, data: img.base64 } });
+  }
+  const r = await callLlm(
+    { contents: [{ role: "user", parts }], generationConfig: { temperature: 0.1, maxOutputTokens: 1024 } },
+    provider
+  );
+  if (!r.ok) return "";
+  const text = r.text.trim();
+  return !text || /^none$/i.test(text) ? "" : text;
+}
+
+/**
  * Read a former syllabus (.docx) and a codebase zip. Pass 1 identifies the
  * class-specific NON-schedule fields and the weekly-schedule block's bounds; pass
  * 2 produces a complete replacement for EVERY paragraph in that block, so the old
@@ -2567,13 +2597,15 @@ export async function analyzeSyllabusInputsAction(
   syllabus: { name: string; base64: string },
   zipBase64: string | null,
   courseInfo: SyllabusCourseInfo = {},
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  textbookImages: Array<{ base64: string; mimeType: string }> | null = null
 ): Promise<
   | {
       fields: SyllabusInputField[];
       scheduleReplacements: Record<string, string>;
       paragraphs: Array<{ id: string; text: string; runs: RunSpan[] }>;
       codebaseSummary: string;
+      textbookInfo: string;
     }
   | { error: string }
 > {
@@ -2595,8 +2627,17 @@ export async function analyzeSyllabusInputsAction(
         scheduleReplacements: {},
         paragraphs,
         codebaseSummary,
+        textbookInfo: "",
       };
     }
+
+    // Pull textbook details out of any uploaded screenshots, and fold them into
+    // the course facts so the textbook/materials field is filled from them.
+    const textbookInfo =
+      textbookImages && textbookImages.length > 0
+        ? await extractTextbookInfoFromImages(textbookImages, provider)
+        : "";
+    const info: SyllabusCourseInfo = textbookInfo ? { ...courseInfo, textbookInfo } : courseInfo;
 
     const paraList = paragraphs.map((p) => `[${p.id}] ${p.text}`).join("\n");
     const byId = new Map(paragraphs.map((p) => [p.id, p.text]));
@@ -2608,7 +2649,7 @@ CODEBASE SUMMARY:
 ${codebaseSummary}
 
 INSTRUCTOR-PROVIDED COURSE FACTS:
-${courseInfoBlock(courseInfo)}
+${courseInfoBlock(info)}
 
 The syllabus is a list of numbered paragraphs (id in brackets):
 ${paraList}
@@ -2687,7 +2728,7 @@ CODEBASE SUMMARY:
 ${codebaseSummary}
 
 INSTRUCTOR-PROVIDED COURSE FACTS:
-${courseInfoBlock(courseInfo)}
+${courseInfoBlock(info)}
 
 ${datesBlock}Here are the schedule paragraphs (id in brackets), in order:
 ${schedList}
@@ -2740,6 +2781,7 @@ ${SYLLABUS_STYLE_RULES}
       scheduleReplacements,
       paragraphs: paragraphs.map((p) => ({ id: p.id, text: p.text, runs: p.runs })),
       codebaseSummary,
+      textbookInfo,
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };

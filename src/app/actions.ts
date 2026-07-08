@@ -2657,7 +2657,7 @@ ${paraList}
 
 1) Identify the CLASS-SPECIFIC, NON-SCHEDULE paragraphs that need the instructor to provide or confirm a value — course title/number, instructor name, term/semester, meeting times and location, office hours, course description, learning objectives, textbooks/tools, grading breakdown, and similar. Leave generic boilerplate OUT (university policies, academic-integrity, accessibility/Title IX, etc.). Do NOT include weekly-schedule paragraphs here.
 
-2) Locate the WEEKLY SCHEDULE / course outline block — the consecutive run of paragraphs that list the weeks, dates, topics, and weekly descriptions (often a table). Return the id of its FIRST and LAST paragraph. If there is no weekly schedule, use null for both.
+2) Locate the WEEKLY SCHEDULE / course outline block — the consecutive run of paragraphs that list the weeks, dates, topics, and weekly descriptions (often a table). INCLUDE every week in the block, including rows for exams, tests, quizzes, reviews, breaks, holidays, and finals — the block's LAST paragraph is the last such weekly row (for example a final-exam or review week), NOT the last row that happens to be labeled "Week N". Return the id of its FIRST and LAST paragraph. If there is no weekly schedule, use null for both.
 
 Return ONLY valid JSON:
 {
@@ -2711,13 +2711,22 @@ ${SYLLABUS_STYLE_RULES}
     const scheduleReplacements: Record<string, string> = {};
     if (schedulePairs.length > 0) {
       const schedList = schedulePairs.map((p) => `[${p.id}] ${p.text}`).join("\n");
-      // How many weeks: the largest "Week N" in the schedule, else one per paragraph.
+      // How many weeks to compute dates for. Besides explicit "Week N" numbers,
+      // also count unnumbered term rows (exams, tests, quizzes, reviews, breaks,
+      // finals) so a schedule whose last weeks are labeled "Final Exam" or "Review"
+      // is not cut short. Overcounting is harmless (extra dates go unused);
+      // undercounting drops the tail weeks.
       let maxWeek = 0;
+      let specialWeeks = 0;
       for (const p of schedulePairs) {
         const wm = p.text.match(/week\s*(\d+)/i);
-        if (wm) maxWeek = Math.max(maxWeek, Number(wm[1]));
+        if (wm) {
+          maxWeek = Math.max(maxWeek, Number(wm[1]));
+        } else if (/\b(midterm|finals?|exams?|quiz(?:zes)?|test|review|break|holiday|reading\s*day|no\s*class)\b/i.test(p.text)) {
+          specialWeeks += 1;
+        }
       }
-      const weeks = maxWeek > 0 ? maxWeek : Math.min(20, schedulePairs.length);
+      const weeks = Math.max(maxWeek + specialWeeks, Math.min(24, schedulePairs.length));
       const weekDates = computeWeekDates(courseInfo.startDate, weeks);
       const datesBlock = weekDates
         ? `EXACT WEEK DATES — use these verbatim and never any other date:\n${weekDates}\n\n`
@@ -2741,6 +2750,8 @@ DATES — ${weekDates
         : "Compute consecutive weekly dates from the course start date (week 1 begins on the start date), one week apart."} The previous offering's dates MUST NOT appear anywhere — every old date (for example any January/February/March/April dates that are not in the list above) must be replaced.
 
 TOPICS — Use the codebase's real schedule for THIS offering, in this priority: (1) if a "COURSE SCHEDULE / OUTLINE FILES FOUND IN THE REPO" section is present, it is AUTHORITATIVE - take each week's topic, order, and description from it; (2) otherwise use the "PER-WEEK TOPICS" list (each top-level folder's topic), in order; (3) otherwise treat each TOP-LEVEL ENTRY as one week, in order. Week k's topic and description come from week k of that source. The previous offering's topics and descriptions MUST NOT appear anywhere - every old topic or description (anything not derived from THIS codebase) must be replaced.
+
+ALL WEEKS — The schedule may run longer than the last numbered "Week N": treat EVERY weekly row as one consecutive week, in order, INCLUDING rows for exams, tests, quizzes, reviews, breaks, and finals. Rewrite and KEEP every one of them (update their dates from the list above); never stop early or drop the exam/review/final weeks. For an exam/test/quiz/review/break/final row, keep it as that kind of week (do not replace it with a codebase topic); map codebase topics only to the instructional weeks, in order.
 
 FORMAT — Preserve each paragraph's role and layout (a "Week N (dates): topic" line stays that shape; a separate dates cell stays a dates cell; a topic/description cell stays a topic/description cell) — only the content changes.
 

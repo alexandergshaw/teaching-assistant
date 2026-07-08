@@ -51,6 +51,16 @@ type AdaptSection = {
 };
 type PlanningMode = "syllabus" | "schedule" | "project" | "lecture" | "sync";
 
+// The subtab toggle, in workflow order. "Syllabus" is first because it is the
+// default landing mode.
+const PLANNING_MODES: Array<{ key: PlanningMode; label: string }> = [
+  { key: "syllabus", label: "Syllabus" },
+  { key: "schedule", label: "Course Schedule" },
+  { key: "project", label: "Course Project Planning" },
+  { key: "lecture", label: "Lecture Planning" },
+  { key: "sync", label: "Assignment Sync" },
+];
+
 // Map an AI replacement string onto the paragraph's original formatting: if the
 // replacement still starts with the original's leading bold label, keep that
 // label bold and the rest plain; otherwise the whole replacement is plain. This
@@ -615,49 +625,24 @@ export default function CoursePlanningTab() {
             subtitle="Build a syllabus or generate a weekly course schedule with the help of AI."
           />
 
-          {/* Mode toggle */}
+          {/* Mode toggle — segmented control (see .scheduleModeBtn) */}
           <div className={styles.scheduleModeToggle}>
-            <Button
-              variant={planningMode === "schedule" ? "contained" : "outlined"}
-              size="small"
-              onClick={() => { setPlanningMode("schedule"); localStorage.setItem(LS_KEYS.planningMode, "schedule"); }}
-            >
-              Course Schedule
-            </Button>
-            <Button
-              variant={planningMode === "project" ? "contained" : "outlined"}
-              size="small"
-              onClick={() => { setPlanningMode("project"); localStorage.setItem(LS_KEYS.planningMode, "project"); }}
-            >
-              Course Project Planning
-            </Button>
-            <Button
-              variant={planningMode === "lecture" ? "contained" : "outlined"}
-              size="small"
-              onClick={() => { setPlanningMode("lecture"); localStorage.setItem(LS_KEYS.planningMode, "lecture"); }}
-            >
-              Lecture Planning
-            </Button>
-            <Button
-              variant={planningMode === "syllabus" ? "contained" : "outlined"}
-              size="small"
-              onClick={() => { setPlanningMode("syllabus"); localStorage.setItem(LS_KEYS.planningMode, "syllabus"); }}
-            >
-              Syllabus
-            </Button>
-            <Button
-              variant={planningMode === "sync" ? "contained" : "outlined"}
-              size="small"
-              onClick={() => { setPlanningMode("sync"); localStorage.setItem(LS_KEYS.planningMode, "sync"); }}
-            >
-              Assignment Sync
-            </Button>
+            {PLANNING_MODES.map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                className={`${styles.scheduleModeBtn}${planningMode === m.key ? ` ${styles.active}` : ""}`}
+                onClick={() => { setPlanningMode(m.key); localStorage.setItem(LS_KEYS.planningMode, m.key); }}
+              >
+                {m.label}
+              </button>
+            ))}
           </div>
 
           {/* ── Syllabus mode: adapt an existing syllabus from a codebase ── */}
           {planningMode === "syllabus" && (
             <>
-              <p style={{ marginTop: 0, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+              <p className={styles.adaptIntro}>
                 Upload a previous offering&apos;s syllabus and (optionally) a zip of the course&apos;s codebase.
                 The AI finds the class-specific parts that need your input, you confirm or edit them, and the new
                 syllabus is written back into the original Word file — so its formatting matches exactly.
@@ -674,13 +659,9 @@ export default function CoursePlanningTab() {
                   }}
                 />
                 {pickedTemplate && (
-                  <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "8px 0 0" }}>
+                  <p className={styles.adaptTemplateNote}>
                     Using template: <strong>{pickedTemplate.name}</strong>{" "}
-                    <button
-                      type="button"
-                      onClick={() => setPickedTemplate(null)}
-                      style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", padding: 0, font: "inherit" }}
-                    >
+                    <button type="button" className={styles.linkButton} onClick={() => setPickedTemplate(null)}>
                       clear
                     </button>
                   </p>
@@ -861,88 +842,11 @@ export default function CoursePlanningTab() {
 
               {adaptSections && adaptSections.length > 0 && (
                 <>
-                  <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", marginTop: 22 }}>
-                    <p style={{ fontWeight: 600, margin: 0 }}>
-                      {adaptSections.length} section{adaptSections.length === 1 ? "" : "s"} — edit, regenerate with AI, add, or delete any of them
-                    </p>
-                    <Button
-                      variant="contained"
-                      size="small"
-                      onClick={handleBuildAdaptedSyllabus}
-                      disabled={adaptStatus !== "idle"}
-                    >
-                      {adaptStatus === "building" ? "Building…" : "Download adapted syllabus (.docx)"}
-                    </Button>
-                  </div>
+                  <p className={styles.adaptSectionsHeading}>
+                    {adaptSections.length} section{adaptSections.length === 1 ? "" : "s"} — edit, regenerate with AI, add, or delete any of them
+                  </p>
 
-                  {/* Place the generated syllabus directly into a Canvas module */}
-                  <div style={{ marginTop: 12, padding: "14px 16px", border: "1px solid var(--field-border)", borderRadius: 12, background: "#ffffff" }}>
-                    <p style={{ margin: "0 0 10px", fontWeight: 600 }}>Add to a Canvas module</p>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-                      <div className={styles.field} style={{ flex: "1 1 280px", margin: 0 }}>
-                        <TextField
-                          id="placeCourseUrl"
-                          label="Course URL"
-                          type="text"
-                          size="small"
-                          fullWidth
-                          placeholder="https://canvas.../courses/123"
-                          value={placeCourseUrl}
-                          onChange={(e) => setPlaceCourseUrl(e.target.value)}
-                        />
-                      </div>
-                      <Button variant="contained" size="small" onClick={handleLoadPlaceModules} disabled={placeBusy !== "idle"}>
-                        {placeBusy === "loading" ? "Loading…" : "Load modules"}
-                      </Button>
-                    </div>
-                    {placeModules && (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
-                        <div className={styles.field} style={{ flex: "1 1 240px", margin: 0 }}>
-                          <TextField
-                            id="placeModule"
-                            label="Module"
-                            select
-                            size="small"
-                            fullWidth
-                            value={placeModuleId}
-                            onChange={(e) => setPlaceModuleId(Number(e.target.value))}
-                          >
-                            {placeModules.length === 0 && <MenuItem value="">No modules in this course</MenuItem>}
-                            {placeModules.map((m) => (
-                              <MenuItem key={m.id} value={m.id}>{m.name}</MenuItem>
-                            ))}
-                          </TextField>
-                        </div>
-                        <div className={styles.field} style={{ width: 110, margin: 0 }}>
-                          <TextField
-                            id="placePosition"
-                            label="Position"
-                            type="number"
-                            size="small"
-                            fullWidth
-                            slotProps={{ htmlInput: { min: 1 } }}
-                            placeholder="End"
-                            value={placePosition}
-                            onChange={(e) => setPlacePosition(e.target.value)}
-                          />
-                        </div>
-                        <Button
-                          variant="contained"
-                          size="small"
-                          onClick={handleAddToModule}
-                          disabled={placeBusy !== "idle" || placeModuleId === ""}
-                        >
-                          {placeBusy === "adding" ? "Adding…" : "Add to module"}
-                        </Button>
-                      </div>
-                    )}
-                    {placeNote && (
-                      <p className={placeNote.kind === "error" ? styles.error : styles.fieldHint} style={{ marginTop: 8 }}>
-                        {placeNote.text}
-                      </p>
-                    )}
-                  </div>
-
+                  {/* Review the generated sections first, then act on them below. */}
                   <RichTextSectionEditor
                     bordered
                     maxHeight="65vh"
@@ -980,6 +884,87 @@ export default function CoursePlanningTab() {
                       ],
                     }))}
                   />
+
+                  <div className={styles.adaptActionBar}>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={handleBuildAdaptedSyllabus}
+                      disabled={adaptStatus !== "idle"}
+                    >
+                      {adaptStatus === "building" ? "Building…" : "Download adapted syllabus (.docx)"}
+                    </Button>
+                  </div>
+
+                  {/* Optional: place the generated syllabus directly into a Canvas module. */}
+                  <details className={styles.adaptDisclosure}>
+                    <summary>Add to a Canvas module</summary>
+                    <div className={styles.adaptDisclosureBody}>
+                      <div className={styles.adaptRow}>
+                        <div className={styles.field} style={{ flex: "1 1 280px", margin: 0 }}>
+                          <TextField
+                            id="placeCourseUrl"
+                            label="Course URL"
+                            type="text"
+                            size="small"
+                            fullWidth
+                            placeholder="https://canvas.../courses/123"
+                            value={placeCourseUrl}
+                            onChange={(e) => setPlaceCourseUrl(e.target.value)}
+                          />
+                        </div>
+                        <Button variant="contained" size="small" onClick={handleLoadPlaceModules} disabled={placeBusy !== "idle"}>
+                          {placeBusy === "loading" ? "Loading…" : "Load modules"}
+                        </Button>
+                      </div>
+                      {placeModules && (
+                        <div className={styles.adaptRow}>
+                          <div className={styles.field} style={{ flex: "1 1 240px", margin: 0 }}>
+                            <TextField
+                              id="placeModule"
+                              label="Module"
+                              select
+                              size="small"
+                              fullWidth
+                              value={placeModuleId}
+                              onChange={(e) => setPlaceModuleId(Number(e.target.value))}
+                            >
+                              {placeModules.length === 0 && <MenuItem value="">No modules in this course</MenuItem>}
+                              {placeModules.map((m) => (
+                                <MenuItem key={m.id} value={m.id}>{m.name}</MenuItem>
+                              ))}
+                            </TextField>
+                          </div>
+                          <div className={styles.field} style={{ width: 110, margin: 0 }}>
+                            <TextField
+                              id="placePosition"
+                              label="Position"
+                              type="number"
+                              size="small"
+                              fullWidth
+                              slotProps={{ htmlInput: { min: 1 } }}
+                              placeholder="End"
+                              value={placePosition}
+                              onChange={(e) => setPlacePosition(e.target.value)}
+                            />
+                          </div>
+                          <Button
+                            variant="contained"
+                            size="small"
+                            onClick={handleAddToModule}
+                            disabled={placeBusy !== "idle" || placeModuleId === ""}
+                          >
+                            {placeBusy === "adding" ? "Adding…" : "Add to module"}
+                          </Button>
+                        </div>
+                      )}
+                      {placeNote && (
+                        <p className={placeNote.kind === "error" ? styles.error : styles.fieldHint} style={{ marginTop: 8 }}>
+                          {placeNote.text}
+                        </p>
+                      )}
+                    </div>
+                  </details>
                 </>
               )}
             </>

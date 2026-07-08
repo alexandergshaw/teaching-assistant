@@ -661,6 +661,103 @@
   color: var(--text-primary);
 }
 
+/* ── Syllabus adapter (Course Planning "Syllabus" subtab) ── */
+.adaptIntro {
+  margin-top: 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.adaptTemplateNote {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin: 8px 0 0;
+}
+
+/* An inline text button styled as a link (e.g. "clear"). */
+.linkButton {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.linkButton:hover {
+  text-decoration: underline;
+}
+
+.adaptSectionsHeading {
+  font-weight: 600;
+  margin: 22px 0 0;
+  color: var(--text-primary);
+}
+
+/* Action bar shown beneath the reviewed sections (download / save / etc.). */
+.adaptActionBar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 14px;
+}
+
+/* Collapsible panel (native <details>) for optional secondary actions such as
+   "Add to a Canvas module", so it doesn't crowd the review step. */
+.adaptDisclosure {
+  margin-top: 14px;
+  border: 1px solid var(--field-border);
+  border-radius: 12px;
+  background: var(--field-background);
+}
+
+.adaptDisclosure > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.adaptDisclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.adaptDisclosure > summary::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid var(--text-secondary);
+  border-bottom: 2px solid var(--text-secondary);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+
+.adaptDisclosure[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+.adaptDisclosureBody {
+  padding: 0 16px 16px;
+}
+
+/* A horizontal, wrapping row of inputs that bottom-align (the Canvas placement
+   controls). */
+.adaptRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.adaptRow + .adaptRow {
+  margin-top: 10px;
+}
+
 .checklistCard h2 {
   font-size: 1.05rem;
   font-weight: 700;

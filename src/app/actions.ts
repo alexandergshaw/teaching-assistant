@@ -172,6 +172,8 @@ import {
   startCopilotBuild,
   createCopilotAgentTask,
   listCopilotTasks,
+  deletePaths,
+  movePaths,
   generateFromTemplate,
   putFile,
   getFileText,
@@ -5265,6 +5267,51 @@ export async function listCopilotTasksAction(
     return { tasks: await listCopilotTasks(parsed.owner, parsed.repo) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not list Copilot tasks." };
+  }
+}
+
+/** Bulk delete files/folders (a folder deletes everything under it) in one commit. */
+export async function bulkDeletePathsAction(
+  repoRef: string,
+  branch: string,
+  paths: string[],
+  message?: string
+): Promise<{ deleted: number } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    if (!branch.trim()) return { error: "Pick a branch." };
+    if (!paths || paths.length === 0) return { error: "Select at least one file or folder." };
+    return await deletePaths(parsed.owner, parsed.repo, branch.trim(), paths, message?.trim() || `Delete ${paths.length} item(s)`);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not delete the selected items." };
+  }
+}
+
+/** Bulk move files/folders into a destination folder (blank = repo root) in one commit. */
+export async function bulkMovePathsAction(
+  repoRef: string,
+  branch: string,
+  paths: string[],
+  destination: string,
+  message?: string
+): Promise<{ moved: number } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    if (!branch.trim()) return { error: "Pick a branch." };
+    if (!paths || paths.length === 0) return { error: "Select at least one file or folder." };
+    const dest = destination.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+    const moves = paths.map((p) => {
+      const clean = p.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+      const base = clean.split("/").pop() || clean;
+      return { from: clean, to: dest ? `${dest}/${base}` : base };
+    });
+    return await movePaths(parsed.owner, parsed.repo, branch.trim(), moves, message?.trim() || `Move ${paths.length} item(s)`);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not move the selected items." };
   }
 }
 

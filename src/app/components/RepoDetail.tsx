@@ -23,6 +23,8 @@ import {
   createCopilotRepoAction,
   createCopilotTaskAction,
   listCopilotTasksAction,
+  bulkDeletePathsAction,
+  bulkMovePathsAction,
 } from "../actions";
 import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo, CopilotTask } from "@/lib/github";
 import RepoSettingsPanel from "./RepoSettingsPanel";
@@ -89,6 +91,11 @@ export default function RepoDetail() {
   const [folderStart, setFolderStart] = useState("1");
   const [folderCount, setFolderCount] = useState("4");
   const [newFolderResult, setNewFolderResult] = useState<string | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [showMove, setShowMove] = useState(false);
+  const [moveDest, setMoveDest] = useState("");
 
   // Branches tab state
   const [newBranch, setNewBranch] = useState("");
@@ -464,6 +471,59 @@ export default function RepoDetail() {
     await reloadCopilotTasks();
   };
 
+  const toggleSelected = (path: string) => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedPaths(new Set());
+    setShowMove(false);
+    setMoveDest("");
+  };
+
+  const affectsOpenFile = (paths: string[]) =>
+    !!selectedPath && paths.some((p) => selectedPath === p || selectedPath.startsWith(`${p}/`));
+
+  const handleBulkDelete = async () => {
+    const paths = [...selectedPaths];
+    if (paths.length === 0 || !repoRef || !branch) return;
+    if (typeof window !== "undefined" && !window.confirm(`Delete ${paths.length} selected item(s) from ${branch}? This cannot be undone.`)) return;
+    setBulkBusy(true);
+    setBulkMsg(null);
+    const r = await bulkDeletePathsAction(repoRef, branch, paths);
+    setBulkBusy(false);
+    if ("error" in r) {
+      setBulkMsg({ kind: "error", text: r.error });
+      return;
+    }
+    setBulkMsg({ kind: "success", text: `Deleted ${r.deleted} file(s).` });
+    if (affectsOpenFile(paths)) setSelectedPath("");
+    clearSelection();
+    setTreeNonce((n) => n + 1);
+  };
+
+  const handleBulkMove = async () => {
+    const paths = [...selectedPaths];
+    if (paths.length === 0 || !repoRef || !branch) return;
+    setBulkBusy(true);
+    setBulkMsg(null);
+    const r = await bulkMovePathsAction(repoRef, branch, paths, moveDest);
+    setBulkBusy(false);
+    if ("error" in r) {
+      setBulkMsg({ kind: "error", text: r.error });
+      return;
+    }
+    setBulkMsg({ kind: "success", text: `Moved ${r.moved} file(s).` });
+    if (affectsOpenFile(paths)) setSelectedPath("");
+    clearSelection();
+    setTreeNonce((n) => n + 1);
+  };
+
   const reloadBranches = async () => {
     if (!repoRef) return;
     const r = await listGithubBranchesAction(repoRef);
@@ -658,8 +718,8 @@ export default function RepoDetail() {
     label: b,
   }));
 
-  const fileList = tree
-    .filter((e) => e.type === "blob")
+  const entryList = tree
+    .filter((e) => e.type === "blob" || e.type === "tree")
     .filter((e) => {
       if (!filter) return true;
       return e.path.toLowerCase().includes(filter.toLowerCase());
@@ -929,6 +989,44 @@ export default function RepoDetail() {
               </div>
             )}
 
+            {selectedPaths.size > 0 && (
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>{selectedPaths.size} selected</span>
+                  <Button variant="outlined" size="small" color="error" disabled={bulkBusy} onClick={handleBulkDelete}>
+                    {bulkBusy ? "Working..." : "Delete"}
+                  </Button>
+                  <Button variant="outlined" size="small" disabled={bulkBusy} onClick={() => setShowMove((v) => !v)}>
+                    {showMove ? "Cancel move" : "Move to..."}
+                  </Button>
+                  <Button variant="text" size="small" onClick={clearSelection}>
+                    Clear
+                  </Button>
+                </div>
+                {showMove && (
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <TextField
+                      size="small"
+                      placeholder="Destination folder (blank = repo root)"
+                      value={moveDest}
+                      onChange={(e) => setMoveDest(e.target.value)}
+                      onKeyDown={submitOnEnter(handleBulkMove)}
+                      disabled={bulkBusy}
+                      sx={{ flex: "1 1 240px", "& input": { fontFamily: "monospace", fontSize: "0.82rem" } }}
+                    />
+                    <Button variant="contained" size="small" disabled={bulkBusy} onClick={handleBulkMove}>
+                      {bulkBusy ? "Moving..." : `Move ${selectedPaths.size} to ${moveDest.trim() ? moveDest.trim() : "root"}`}
+                    </Button>
+                  </div>
+                )}
+                {bulkMsg && (
+                  <p className={bulkMsg.kind === "error" ? styles.error : styles.fieldHint} style={{ margin: 0 }}>
+                    {bulkMsg.text}
+                  </p>
+                )}
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: 16, marginTop: 16 }}>
               <div style={{ width: 320, borderRight: "1px solid var(--field-border)" }}>
                 <TextField
@@ -955,22 +1053,57 @@ export default function RepoDetail() {
                   )}
                   {treeState === "error" && <p className={styles.error}>Failed to load files</p>}
                   {treeState === "ready" &&
-                    fileList.map((file) => (
-                      <Button
-                        key={file.path}
-                        variant="text"
-                        onClick={() => setSelectedPath(file.path)}
-                        sx={{
-                          justifyContent: "flex-start",
-                          textTransform: "none",
-                          width: "100%",
-                          fontFamily: "monospace",
-                          fontSize: "0.8rem",
-                          backgroundColor: selectedPath === file.path ? "color-mix(in srgb, var(--accent) 10%, transparent)" : "transparent",
+                    entryList.map((entry) => (
+                      <div
+                        key={entry.path}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
+                          backgroundColor: selectedPath === entry.path ? "color-mix(in srgb, var(--accent) 10%, transparent)" : "transparent",
                         }}
                       >
-                        {file.path}
-                      </Button>
+                        <Checkbox
+                          size="small"
+                          checked={selectedPaths.has(entry.path)}
+                          onChange={() => toggleSelected(entry.path)}
+                          sx={{ padding: "2px" }}
+                        />
+                        {entry.type === "blob" ? (
+                          <Button
+                            variant="text"
+                            onClick={() => setSelectedPath(entry.path)}
+                            sx={{
+                              justifyContent: "flex-start",
+                              textTransform: "none",
+                              flex: 1,
+                              minWidth: 0,
+                              fontFamily: "monospace",
+                              fontSize: "0.8rem",
+                            }}
+                          >
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", textAlign: "left" }}>
+                              {entry.path}
+                            </span>
+                          </Button>
+                        ) : (
+                          <span
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              fontFamily: "monospace",
+                              fontSize: "0.8rem",
+                              color: "var(--text-secondary)",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              padding: "6px 8px",
+                            }}
+                          >
+                            {entry.path}/
+                          </span>
+                        )}
+                      </div>
                     ))}
                 </div>
               </div>

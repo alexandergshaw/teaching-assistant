@@ -285,6 +285,126 @@ export async function putFile(
   });
 }
 
+// ── Bulk file operations (delete / move via the Git Data API) ─────────────────
+//
+// Deleting or moving many files one-by-one via the contents API would be one
+// commit per file. Instead build a single tree off the branch head and commit it
+// once, so a bulk delete or move is atomic and shows as one commit. Moves reuse
+// the existing blob sha (no content re-upload).
+
+interface TreeChange {
+  path: string;
+  mode: "100644";
+  type: "blob";
+  sha: string | null;
+}
+
+/** Commit a set of tree changes (move/add via blob sha, delete via sha null) in one commit on `branch`. */
+async function commitTreeChanges(
+  owner: string,
+  repo: string,
+  branch: string,
+  changes: TreeChange[],
+  message: string
+): Promise<void> {
+  const ref = await ghJson<{ object?: { sha?: string } }>(
+    `/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`
+  );
+  const baseSha = ref.object?.sha;
+  if (!baseSha) throw new Error(`Could not read the head of branch "${branch}".`);
+  const baseCommit = await ghJson<{ tree?: { sha?: string } }>(
+    `/repos/${owner}/${repo}/git/commits/${baseSha}`
+  );
+  const baseTree = baseCommit.tree?.sha;
+  if (!baseTree) throw new Error("Could not read the base tree for the commit.");
+  const newTree = await ghJson<{ sha?: string }>(`/repos/${owner}/${repo}/git/trees`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ base_tree: baseTree, tree: changes }),
+  });
+  if (!newTree.sha) throw new Error("GitHub did not return a new tree.");
+  const newCommit = await ghJson<{ sha?: string }>(`/repos/${owner}/${repo}/git/commits`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, tree: newTree.sha, parents: [baseSha] }),
+  });
+  if (!newCommit.sha) throw new Error("GitHub did not return a new commit.");
+  await ghFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sha: newCommit.sha }),
+  });
+}
+
+/** Trim surrounding slashes and whitespace from a repo path. */
+function cleanRepoPath(p: string): string {
+  return p.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+/**
+ * Delete files and folders in one commit. A path that names a folder deletes every
+ * blob beneath it. Returns how many blobs were removed.
+ */
+export async function deletePaths(
+  owner: string,
+  repo: string,
+  branch: string,
+  paths: string[],
+  message: string
+): Promise<{ deleted: number }> {
+  const tree = await getRepoTree(owner, repo, branch);
+  const blobs = tree.filter((e) => e.type === "blob");
+  const targets = new Set<string>();
+  for (const raw of paths) {
+    const p = cleanRepoPath(raw);
+    if (!p) continue;
+    for (const b of blobs) {
+      if (b.path === p || b.path.startsWith(`${p}/`)) targets.add(b.path);
+    }
+  }
+  if (targets.size === 0) return { deleted: 0 };
+  const changes: TreeChange[] = [...targets].map((path) => ({ path, mode: "100644", type: "blob", sha: null }));
+  await commitTreeChanges(owner, repo, branch, changes, message);
+  return { deleted: targets.size };
+}
+
+/**
+ * Move/rename files and folders in one commit. Each move rewrites a blob (or every
+ * blob under a folder prefix) from `from` to `to`, reusing the existing blob sha.
+ * Returns how many blobs were moved.
+ */
+export async function movePaths(
+  owner: string,
+  repo: string,
+  branch: string,
+  moves: Array<{ from: string; to: string }>,
+  message: string
+): Promise<{ moved: number }> {
+  const tree = await getRepoTree(owner, repo, branch);
+  const blobs = tree.filter((e) => e.type === "blob");
+  const changes: TreeChange[] = [];
+  const moved = new Set<string>();
+  for (const move of moves) {
+    const from = cleanRepoPath(move.from);
+    const to = cleanRepoPath(move.to);
+    if (!from || !to || from === to) continue;
+    for (const b of blobs) {
+      if (moved.has(b.path)) continue;
+      let newPath: string | null = null;
+      if (b.path === from) newPath = to;
+      else if (b.path.startsWith(`${from}/`)) newPath = `${to}${b.path.slice(from.length)}`;
+      if (newPath && b.sha) {
+        moved.add(b.path);
+        changes.push({ path: newPath, mode: "100644", type: "blob", sha: b.sha });
+        changes.push({ path: b.path, mode: "100644", type: "blob", sha: null });
+      }
+    }
+  }
+  if (changes.length === 0) return { moved: 0 };
+  await commitTreeChanges(owner, repo, branch, changes, message);
+  return { moved: moved.size };
+}
+
 // ── Copilot coding agent ──────────────────────────────────────────────────────
 //
 // Kick off GitHub's Copilot coding agent to build a repo: open an issue with the

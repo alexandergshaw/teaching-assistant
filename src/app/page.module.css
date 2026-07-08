@@ -758,6 +758,77 @@
   margin-top: 10px;
 }
 
+/* A titled stage of the syllabus form (Start from a base / Course details /
+   Supporting materials). */
+.adaptPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 24px;
+  border: 1px solid var(--field-border);
+  border-radius: 18px;
+  background: var(--field-background);
+}
+
+.adaptPanelHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.adaptPanelTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.adaptPanelStep {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.adaptPanelSubtitle {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* Multi-column rows that collapse to a single column on narrow viewports. */
+.adaptFieldGrid2,
+.adaptFieldGrid3 {
+  display: grid;
+  gap: 14px;
+}
+
+.adaptFieldGrid2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.adaptFieldGrid3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 640px) {
+  .adaptFieldGrid2,
+  .adaptFieldGrid3 {
+    grid-template-columns: 1fr;
+  }
+}
+
 .checklistCard h2 {
   font-size: 1.05rem;
   font-weight: 700;

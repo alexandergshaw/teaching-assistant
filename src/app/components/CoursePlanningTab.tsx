@@ -648,123 +648,111 @@ export default function CoursePlanningTab() {
                 syllabus is written back into the original Word file — so its formatting matches exactly.
               </p>
 
-              <div className={styles.field}>
-                <label>Syllabus template</label>
-                <SyllabusTemplateLibrary
-                  activeTemplateId={pickedTemplate?.id ?? null}
-                  onUse={(t) => {
-                    setPickedTemplate(t);
-                    if (adaptSyllabusRef.current) adaptSyllabusRef.current.value = "";
-                    setAdaptError(null);
-                  }}
-                />
-                {pickedTemplate && (
-                  <p className={styles.adaptTemplateNote}>
-                    Using template: <strong>{pickedTemplate.name}</strong>{" "}
-                    <button type="button" className={styles.linkButton} onClick={() => setPickedTemplate(null)}>
-                      clear
-                    </button>
+              {/* Stage 1 — start from a base */}
+              <div className={styles.adaptPanel}>
+                <div className={styles.adaptPanelHeader}>
+                  <p className={styles.adaptPanelTitle}>
+                    <span className={styles.adaptPanelStep}>1</span> Start from a base
                   </p>
-                )}
-              </div>
+                  <p className={styles.adaptPanelSubtitle}>
+                    Reuse a saved template or upload a former syllabus. Its exact formatting is preserved — only class-specific text changes.
+                  </p>
+                </div>
 
-              <div className={styles.field}>
-                <label htmlFor="adaptSyllabusFile">Or upload a former syllabus (.docx)</label>
-                <div className={styles.fileField}>
-                  <input
-                    id="adaptSyllabusFile"
-                    type="file"
-                    accept=".docx"
-                    ref={adaptSyllabusRef}
-                    onChange={() => {
-                      if (adaptSyllabusRef.current?.files?.[0]) setPickedTemplate(null);
+                <div className={styles.field}>
+                  <label>Syllabus template</label>
+                  <SyllabusTemplateLibrary
+                    activeTemplateId={pickedTemplate?.id ?? null}
+                    onUse={(t) => {
+                      setPickedTemplate(t);
+                      if (adaptSyllabusRef.current) adaptSyllabusRef.current.value = "";
+                      setAdaptError(null);
                     }}
                   />
-                  <p>Word .docx only. The new syllabus keeps its exact formatting; only class-specific text changes.</p>
+                  {pickedTemplate && (
+                    <p className={styles.adaptTemplateNote}>
+                      Using template: <strong>{pickedTemplate.name}</strong>{" "}
+                      <button type="button" className={styles.linkButton} onClick={() => setPickedTemplate(null)}>
+                        clear
+                      </button>
+                    </p>
+                  )}
+                </div>
+
+                <div className={styles.field}>
+                  <label htmlFor="adaptSyllabusFile">Or upload a former syllabus (.docx)</label>
+                  <div className={styles.fileField}>
+                    <input
+                      id="adaptSyllabusFile"
+                      type="file"
+                      accept=".docx"
+                      ref={adaptSyllabusRef}
+                      onChange={() => {
+                        if (adaptSyllabusRef.current?.files?.[0]) setPickedTemplate(null);
+                      }}
+                    />
+                    <p>Word .docx only. The new syllabus keeps its exact formatting; only class-specific text changes.</p>
+                  </div>
                 </div>
               </div>
 
-              <div className={styles.field}>
-                <label htmlFor="adaptTextbookImages">Textbook info screenshot (optional)</label>
-                <div className={styles.fileField}>
-                  <input id="adaptTextbookImages" type="file" accept="image/*" multiple ref={textbookImagesRef} />
-                  <p>Optional. Upload one or more screenshots of the textbook / required-materials details; the AI reads them and fills the syllabus textbook section.</p>
+              {/* Stage 2 — course details */}
+              <div className={styles.adaptPanel}>
+                <div className={styles.adaptPanelHeader}>
+                  <p className={styles.adaptPanelTitle}>
+                    <span className={styles.adaptPanelStep}>2</span> Course details
+                  </p>
+                  <p className={styles.adaptPanelSubtitle}>
+                    All optional — but the more you fill in, the less you&apos;ll need to edit afterward.
+                  </p>
                 </div>
-              </div>
 
-              <div className={styles.field}>
-                <TextField
-                  id="adaptTextbookText"
-                  label="Textbook info as text (optional)"
-                  multiline
-                  minRows={3}
-                  size="small"
-                  fullWidth
-                  placeholder="Optional. Paste or type the textbook / required-materials details; combined with any screenshot above and used for the syllabus textbook section."
-                  value={adaptTextbookText}
-                  onChange={(e) => { setAdaptTextbookText(e.target.value); localStorage.setItem(LS_KEYS.adaptTextbookText, e.target.value); }}
-                />
-              </div>
-
-              <div className={styles.field}>
-                <label htmlFor="adaptZipFile">Course codebase (optional)</label>
-                <div className={styles.fileField}>
-                  <input id="adaptZipFile" type="file" accept=".zip" ref={adaptZipRef} disabled={!!adaptRepo.trim()} />
-                  <p>Optional. A zip of the course&apos;s codebase so the AI can suggest accurate, class-specific values.</p>
+                <div className={styles.adaptFieldGrid2}>
+                  <TextField
+                    id="adaptCourseName"
+                    label="Course name"
+                    type="text"
+                    size="small"
+                    fullWidth
+                    placeholder="e.g. Database Management"
+                    value={adaptCourseName}
+                    onChange={(e) => { setAdaptCourseName(e.target.value); localStorage.setItem(LS_KEYS.adaptCourseName, e.target.value); }}
+                  />
+                  <TextField
+                    id="adaptCourseCode"
+                    label="Course code"
+                    type="text"
+                    size="small"
+                    fullWidth
+                    placeholder="e.g. BIT270"
+                    value={adaptCourseCode}
+                    onChange={(e) => { setAdaptCourseCode(e.target.value); localStorage.setItem(LS_KEYS.adaptCourseCode, e.target.value); }}
+                  />
                 </div>
-                <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "8px 0 4px" }}>or select one of your GitHub repositories:</p>
-                <GithubRepoPicker value={adaptRepo} onChange={setAdaptRepo} disabled={adaptStatus === "analyzing"} branch={adaptBranch} onBranchChange={setAdaptBranch} />
-              </div>
 
-              <div className={styles.field}>
-                <TextField
-                  id="adaptCourseName"
-                  label="Course name"
-                  type="text"
-                  size="small"
-                  fullWidth
-                  placeholder="e.g. Database Management"
-                  value={adaptCourseName}
-                  onChange={(e) => { setAdaptCourseName(e.target.value); localStorage.setItem(LS_KEYS.adaptCourseName, e.target.value); }}
-                />
-              </div>
-              <div className={styles.field}>
-                <TextField
-                  id="adaptCourseCode"
-                  label="Course code"
-                  type="text"
-                  size="small"
-                  fullWidth
-                  placeholder="e.g. BIT270"
-                  value={adaptCourseCode}
-                  onChange={(e) => { setAdaptCourseCode(e.target.value); localStorage.setItem(LS_KEYS.adaptCourseCode, e.target.value); }}
-                />
-              </div>
-              <div className={styles.field}>
-                <TextField
-                  id="adaptInstructorName"
-                  label="Instructor name"
-                  type="text"
-                  size="small"
-                  fullWidth
-                  placeholder="e.g. Alex Shaw"
-                  value={adaptInstructorName}
-                  onChange={(e) => { setAdaptInstructorName(e.target.value); localStorage.setItem(LS_KEYS.adaptInstructorName, e.target.value); }}
-                />
-              </div>
-              <div className={styles.field}>
-                <TextField
-                  id="adaptInstructorEmail"
-                  label="Instructor email"
-                  type="email"
-                  size="small"
-                  fullWidth
-                  placeholder="e.g. shaw@university.edu"
-                  value={adaptInstructorEmail}
-                  onChange={(e) => { setAdaptInstructorEmail(e.target.value); localStorage.setItem(LS_KEYS.adaptInstructorEmail, e.target.value); }}
-                />
-              </div>
-              <div className={styles.field}>
+                <div className={styles.adaptFieldGrid2}>
+                  <TextField
+                    id="adaptInstructorName"
+                    label="Instructor name"
+                    type="text"
+                    size="small"
+                    fullWidth
+                    placeholder="e.g. Alex Shaw"
+                    value={adaptInstructorName}
+                    onChange={(e) => { setAdaptInstructorName(e.target.value); localStorage.setItem(LS_KEYS.adaptInstructorName, e.target.value); }}
+                  />
+                  <TextField
+                    id="adaptInstructorEmail"
+                    label="Instructor email"
+                    type="email"
+                    size="small"
+                    fullWidth
+                    placeholder="e.g. shaw@university.edu"
+                    value={adaptInstructorEmail}
+                    onChange={(e) => { setAdaptInstructorEmail(e.target.value); localStorage.setItem(LS_KEYS.adaptInstructorEmail, e.target.value); }}
+                  />
+                </div>
+
                 <TextField
                   id="adaptDescription"
                   label="Official course description"
@@ -776,57 +764,96 @@ export default function CoursePlanningTab() {
                   value={adaptDescription}
                   onChange={(e) => { setAdaptDescription(e.target.value); localStorage.setItem(LS_KEYS.adaptDescription, e.target.value); }}
                 />
+
+                <div className={styles.field}>
+                  <TextField
+                    id="adaptStartDate"
+                    label="Course start date"
+                    type="date"
+                    size="small"
+                    fullWidth
+                    value={adaptStartDate}
+                    onChange={(e) => { setAdaptStartDate(e.target.value); localStorage.setItem(LS_KEYS.adaptStartDate, e.target.value); }}
+                    slotProps={{ inputLabel: { shrink: true } }}
+                  />
+                  <p className={styles.fieldHint}>
+                    Include the year — used to compute the schedule. Not assumed from the old syllabus.
+                  </p>
+                </div>
+
+                <div className={styles.adaptFieldGrid3}>
+                  <TextField
+                    id="adaptMeetingDays"
+                    label="Meeting days"
+                    type="text"
+                    size="small"
+                    fullWidth
+                    placeholder="e.g. Mon / Wed / Fri"
+                    value={adaptMeetingDays}
+                    onChange={(e) => { setAdaptMeetingDays(e.target.value); localStorage.setItem(LS_KEYS.adaptMeetingDays, e.target.value); }}
+                  />
+                  <TextField
+                    id="adaptMeetingTimes"
+                    label="Meeting times"
+                    type="text"
+                    size="small"
+                    fullWidth
+                    placeholder="e.g. 9:00–10:15am"
+                    value={adaptMeetingTimes}
+                    onChange={(e) => { setAdaptMeetingTimes(e.target.value); localStorage.setItem(LS_KEYS.adaptMeetingTimes, e.target.value); }}
+                  />
+                  <TextField
+                    id="adaptLocation"
+                    label="Meeting location"
+                    type="text"
+                    size="small"
+                    fullWidth
+                    placeholder="e.g. Room 204, Science Hall"
+                    value={adaptLocation}
+                    onChange={(e) => { setAdaptLocation(e.target.value); localStorage.setItem(LS_KEYS.adaptLocation, e.target.value); }}
+                  />
+                </div>
               </div>
-              <div className={styles.field}>
-                <TextField
-                  id="adaptStartDate"
-                  label="Course start date"
-                  type="date"
-                  size="small"
-                  fullWidth
-                  value={adaptStartDate}
-                  onChange={(e) => { setAdaptStartDate(e.target.value); localStorage.setItem(LS_KEYS.adaptStartDate, e.target.value); }}
-                  slotProps={{ inputLabel: { shrink: true } }}
-                />
-                <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 0" }}>
-                  Include the year — used to compute the schedule. Not assumed from the old syllabus.
-                </p>
-              </div>
-              <div className={styles.field}>
-                <TextField
-                  id="adaptMeetingDays"
-                  label="Meeting days"
-                  type="text"
-                  size="small"
-                  fullWidth
-                  placeholder="e.g. Mon / Wed / Fri"
-                  value={adaptMeetingDays}
-                  onChange={(e) => { setAdaptMeetingDays(e.target.value); localStorage.setItem(LS_KEYS.adaptMeetingDays, e.target.value); }}
-                />
-              </div>
-              <div className={styles.field}>
-                <TextField
-                  id="adaptMeetingTimes"
-                  label="Meeting times"
-                  type="text"
-                  size="small"
-                  fullWidth
-                  placeholder="e.g. 9:00–10:15am"
-                  value={adaptMeetingTimes}
-                  onChange={(e) => { setAdaptMeetingTimes(e.target.value); localStorage.setItem(LS_KEYS.adaptMeetingTimes, e.target.value); }}
-                />
-              </div>
-              <div className={styles.field}>
-                <TextField
-                  id="adaptLocation"
-                  label="Meeting location"
-                  type="text"
-                  size="small"
-                  fullWidth
-                  placeholder="e.g. Room 204, Science Hall"
-                  value={adaptLocation}
-                  onChange={(e) => { setAdaptLocation(e.target.value); localStorage.setItem(LS_KEYS.adaptLocation, e.target.value); }}
-                />
+
+              {/* Stage 3 — supporting materials (optional) */}
+              <div className={styles.adaptPanel}>
+                <div className={styles.adaptPanelHeader}>
+                  <p className={styles.adaptPanelTitle}>
+                    <span className={styles.adaptPanelStep}>3</span> Supporting materials
+                  </p>
+                  <p className={styles.adaptPanelSubtitle}>
+                    Optional. Give the AI the textbook details and the course codebase so its suggestions are accurate and class-specific.
+                  </p>
+                </div>
+
+                <div className={styles.field}>
+                  <label htmlFor="adaptTextbookImages">Textbook / required materials</label>
+                  <div className={styles.fileField}>
+                    <input id="adaptTextbookImages" type="file" accept="image/*" multiple ref={textbookImagesRef} />
+                    <p>Upload one or more screenshots of the textbook / required-materials details; the AI reads them and fills the syllabus textbook section.</p>
+                  </div>
+                  <TextField
+                    id="adaptTextbookText"
+                    label="…or paste the details as text"
+                    multiline
+                    minRows={3}
+                    size="small"
+                    fullWidth
+                    placeholder="Paste or type the textbook / required-materials details; combined with any screenshot above."
+                    value={adaptTextbookText}
+                    onChange={(e) => { setAdaptTextbookText(e.target.value); localStorage.setItem(LS_KEYS.adaptTextbookText, e.target.value); }}
+                  />
+                </div>
+
+                <div className={styles.field}>
+                  <label htmlFor="adaptZipFile">Course codebase</label>
+                  <div className={styles.fileField}>
+                    <input id="adaptZipFile" type="file" accept=".zip" ref={adaptZipRef} disabled={!!adaptRepo.trim()} />
+                    <p>A zip of the course&apos;s codebase so the AI can suggest accurate, class-specific values.</p>
+                  </div>
+                  <p className={styles.fieldHint} style={{ marginTop: 8 }}>or select one of your GitHub repositories:</p>
+                  <GithubRepoPicker value={adaptRepo} onChange={setAdaptRepo} disabled={adaptStatus === "analyzing"} branch={adaptBranch} onBranchChange={setAdaptBranch} />
+                </div>
               </div>
 
               {adaptError && <p className={styles.error}>{adaptError}</p>}

@@ -38,6 +38,7 @@ import RepoSettingsPanel from "./RepoSettingsPanel";
 import PublishToCanvasPage from "./PublishToCanvasPage";
 import CopilotChatPanel from "./CopilotChatPanel";
 import { buildBulkFolderNames } from "@/lib/bulk-folders";
+import { formatRelative } from "../utils/time";
 import dynamic from "next/dynamic";
 import Typeahead from "./ui/Typeahead";
 import { submitOnEnter } from "./ui/submitOnEnter";
@@ -78,6 +79,7 @@ export default function RepoDetail() {
   const [copilotTaskMsg, setCopilotTaskMsg] = useState<{ kind: "success" | "error"; text: string; url?: string } | null>(null);
   const [copilotTasks, setCopilotTasks] = useState<CopilotTask[]>([]);
   const [copilotTasksState, setCopilotTasksState] = useState<"idle" | "loading" | "error">("idle");
+  const [copilotLastLoaded, setCopilotLastLoaded] = useState<string | null>(null);
 
   // Files tab state
   const [tree, setTree] = useState<RepoTreeEntry[]>([]);
@@ -466,11 +468,27 @@ export default function RepoDetail() {
       }
       setCopilotTasks(r.tasks);
       setCopilotTasksState("idle");
+      setCopilotLastLoaded(new Date().toISOString());
     })();
     return () => {
       cancelled = true;
     };
     /* eslint-enable react-hooks/set-state-in-effect */
+  }, [repoRef, tab]);
+
+  // Keep the agent view live: poll for updates while the Copilot tab is open.
+  useEffect(() => {
+    if (!repoRef || tab !== "copilot") return;
+    const id = setInterval(() => {
+      (async () => {
+        const r = await listCopilotTasksAction(repoRef);
+        if (!("error" in r)) {
+          setCopilotTasks(r.tasks);
+          setCopilotLastLoaded(new Date().toISOString());
+        }
+      })();
+    }, 20000);
+    return () => clearInterval(id);
   }, [repoRef, tab]);
 
   const reloadCopilotTasks = async () => {
@@ -483,6 +501,7 @@ export default function RepoDetail() {
     }
     setCopilotTasks(r.tasks);
     setCopilotTasksState("idle");
+    setCopilotLastLoaded(new Date().toISOString());
   };
 
   const handleCreateCopilotTask = async () => {
@@ -1837,13 +1856,18 @@ export default function RepoDetail() {
               </div>
 
               <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, flex: "1 1 320px", minWidth: 280 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
                   <label className={styles.panelTitle}>Copilot tasks</label>
-                  <Button variant="text" size="small" onClick={reloadCopilotTasks} disabled={copilotTasksState === "loading"}>
-                    Refresh
-                  </Button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {copilotLastLoaded && (
+                      <span style={{ fontSize: "0.72rem", color: "var(--text-secondary)" }}>updated {formatRelative(copilotLastLoaded)}</span>
+                    )}
+                    <Button variant="text" size="small" onClick={reloadCopilotTasks} disabled={copilotTasksState === "loading"}>
+                      Refresh
+                    </Button>
+                  </div>
                 </div>
-                {copilotTasksState === "loading" && (
+                {copilotTasksState === "loading" && copilotTasks.length === 0 && (
                   <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
                     <CircularProgress size={24} />
                   </div>
@@ -1852,23 +1876,76 @@ export default function RepoDetail() {
                 {copilotTasksState === "idle" && copilotTasks.length === 0 && (
                   <p className={styles.fieldHint}>No Copilot tasks yet.</p>
                 )}
-                {copilotTasksState === "idle" &&
-                  copilotTasks.map((t) => (
-                    <div
-                      key={t.number}
-                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderTop: "1px solid var(--field-border)" }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <a href={t.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                {copilotTasks.map((t) => {
+                  const pr = t.pr;
+                  const prState = pr
+                    ? pr.state === "MERGED"
+                      ? { label: "Merged", color: "#8250df" }
+                      : pr.isDraft
+                        ? { label: "Draft", color: "var(--text-secondary)" }
+                        : pr.state === "OPEN"
+                          ? { label: "Open", color: "var(--success)" }
+                          : { label: "Closed", color: "var(--danger)" }
+                    : null;
+                  const checks = pr?.checks;
+                  const checkChip = checks
+                    ? checks === "SUCCESS"
+                      ? { label: "checks passing", color: "var(--success)" }
+                      : checks === "FAILURE" || checks === "ERROR"
+                        ? { label: "checks failing", color: "var(--danger)" }
+                        : { label: "checks running", color: "var(--warning)" }
+                    : null;
+                  const review = pr?.reviewDecision;
+                  const reviewLabel =
+                    review === "APPROVED"
+                      ? "approved"
+                      : review === "CHANGES_REQUESTED"
+                        ? "changes requested"
+                        : review === "REVIEW_REQUIRED"
+                          ? "review required"
+                          : "";
+                  return (
+                    <div key={t.number} style={{ padding: "10px 0", borderTop: "1px solid var(--field-border)" }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                        <a href={t.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", flexShrink: 0 }}>
                           #{t.number}
                         </a>
-                        <span style={{ marginLeft: 8 }}>{t.title}</span>
+                        <span style={{ flex: 1, minWidth: 0, fontWeight: 500 }}>{t.title}</span>
+                        <span style={{ fontSize: "0.72rem", fontWeight: 600, color: t.state === "OPEN" ? "var(--success)" : "var(--text-secondary)" }}>
+                          {t.state.toLowerCase()}
+                        </span>
                       </div>
-                      <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)", flexShrink: 0 }}>
-                        {t.isPullRequest ? "PR" : "issue"} · {t.state}
-                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 4, fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                        {t.createdAt && <span>opened {formatRelative(t.createdAt)}</span>}
+                        {t.updatedAt && <span>· updated {formatRelative(t.updatedAt)}</span>}
+                        {t.labels.map((l) => (
+                          <span key={l} style={{ border: "1px solid var(--field-border)", borderRadius: 999, padding: "0 8px", lineHeight: "1.6" }}>
+                            {l}
+                          </span>
+                        ))}
+                      </div>
+                      {pr ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6, fontSize: "0.78rem" }}>
+                          <a href={pr.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                            PR #{pr.number}
+                          </a>
+                          {prState && <span style={{ fontWeight: 600, color: prState.color }}>{prState.label}</span>}
+                          {checkChip && <span style={{ color: checkChip.color }}>{checkChip.label}</span>}
+                          <span style={{ color: "var(--text-secondary)" }}>
+                            <span style={{ color: "var(--success)" }}>+{pr.additions}</span>{" "}
+                            <span style={{ color: "var(--danger)" }}>-{pr.deletions}</span> · {pr.changedFiles} file{pr.changedFiles === 1 ? "" : "s"}
+                          </span>
+                          {reviewLabel && <span style={{ color: "var(--text-secondary)" }}>· {reviewLabel}</span>}
+                          {pr.updatedAt && <span style={{ color: "var(--text-secondary)" }}>· {formatRelative(pr.updatedAt)}</span>}
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 6, fontSize: "0.78rem", color: "var(--text-secondary)" }}>
+                          {t.state === "OPEN" ? "No pull request yet — the agent may still be working." : "No pull request."}
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  );
+                })}
               </div>
             </div>
           )}

@@ -529,44 +529,154 @@ export async function startCopilotBuild(
   );
 }
 
-/** One Copilot coding-agent task (a repo issue assigned to Copilot). */
+/** The pull request the Copilot coding agent opened for a task, with live status. */
+export interface CopilotTaskPr {
+  number: number;
+  url: string;
+  /** OPEN | CLOSED | MERGED. */
+  state: string;
+  /** True while Copilot is still working (a draft PR). */
+  isDraft: boolean;
+  /** CI rollup: SUCCESS | FAILURE | PENDING | ERROR | EXPECTED | null. */
+  checks: string | null;
+  /** APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | null. */
+  reviewDecision: string | null;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  updatedAt: string;
+}
+
+/** One Copilot coding-agent task (a repo issue assigned to Copilot), with details. */
 export interface CopilotTask {
   number: number;
   title: string;
+  /** Issue state: OPEN | CLOSED. */
   state: string;
   htmlUrl: string;
-  /** True when the item is a pull request rather than a plain issue. */
+  /** Kept for back-compat; task items are issues, so this is false. */
   isPullRequest: boolean;
   createdAt: string;
+  updatedAt: string;
+  labels: string[];
+  /** The pull request Copilot opened for this task, if any. */
+  pr: CopilotTaskPr | null;
 }
 
 /**
  * List a repo's issues assigned to the Copilot coding agent (its tasks), newest
- * first. Best-effort: one page of up to 100 issues, filtered by assignee login.
+ * first, each enriched with its linked pull request and that PR's live status
+ * (draft/open/merged, CI rollup, review decision, diff size). One GraphQL query.
  */
 export async function listCopilotTasks(owner: string, repo: string): Promise<CopilotTask[]> {
-  const raw = await ghJson<
-    Array<{
-      number?: number;
-      title?: string;
-      state?: string;
-      html_url?: string;
-      created_at?: string;
-      pull_request?: unknown;
-      assignees?: Array<{ login?: string }>;
-    }>
-  >(`/repos/${owner}/${repo}/issues?state=all&per_page=100`);
-  return raw
-    .filter((i) => (i.assignees ?? []).some((a) => /copilot/i.test(a?.login ?? "")))
-    .map((i) => ({
-      number: i.number ?? 0,
-      title: i.title ?? `#${i.number ?? 0}`,
-      state: i.state ?? "",
-      htmlUrl: i.html_url ?? "",
-      isPullRequest: !!i.pull_request,
-      createdAt: i.created_at ?? "",
-    }))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const data = await ghGraphql<{
+    repository?: {
+      issues?: {
+        nodes?: Array<{
+          number?: number;
+          title?: string;
+          url?: string;
+          state?: string;
+          createdAt?: string;
+          updatedAt?: string;
+          assignees?: { nodes?: Array<{ login?: string }> };
+          labels?: { nodes?: Array<{ name?: string }> };
+          timelineItems?: {
+            nodes?: Array<{
+              source?: {
+                __typename?: string;
+                number?: number;
+                url?: string;
+                state?: string;
+                isDraft?: boolean;
+                reviewDecision?: string | null;
+                additions?: number;
+                deletions?: number;
+                changedFiles?: number;
+                updatedAt?: string;
+                commits?: { nodes?: Array<{ commit?: { statusCheckRollup?: { state?: string } | null } }> };
+              };
+            }>;
+          };
+        }>;
+      };
+    };
+  }>(
+    `query($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) {
+        issues(first: 50, orderBy: { field: UPDATED_AT, direction: DESC }, states: [OPEN, CLOSED]) {
+          nodes {
+            number
+            title
+            url
+            state
+            createdAt
+            updatedAt
+            assignees(first: 5) { nodes { login } }
+            labels(first: 10) { nodes { name } }
+            timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 30) {
+              nodes {
+                ... on CrossReferencedEvent {
+                  source {
+                    __typename
+                    ... on PullRequest {
+                      number
+                      url
+                      state
+                      isDraft
+                      reviewDecision
+                      additions
+                      deletions
+                      changedFiles
+                      updatedAt
+                      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }`,
+    { owner, repo }
+  );
+
+  const nodes = data.repository?.issues?.nodes ?? [];
+  return nodes
+    .filter((n) => (n.assignees?.nodes ?? []).some((a) => /copilot/i.test(a?.login ?? "")))
+    .map((n) => {
+      const prs = (n.timelineItems?.nodes ?? [])
+        .map((t) => t?.source)
+        .filter((s): s is NonNullable<typeof s> => !!s && s.__typename === "PullRequest" && typeof s.number === "number")
+        .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+      const p = prs[0];
+      const pr: CopilotTaskPr | null = p
+        ? {
+            number: p.number ?? 0,
+            url: p.url ?? "",
+            state: p.state ?? "",
+            isDraft: !!p.isDraft,
+            checks: p.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ?? null,
+            reviewDecision: p.reviewDecision ?? null,
+            additions: p.additions ?? 0,
+            deletions: p.deletions ?? 0,
+            changedFiles: p.changedFiles ?? 0,
+            updatedAt: p.updatedAt ?? "",
+          }
+        : null;
+      return {
+        number: n.number ?? 0,
+        title: n.title ?? `#${n.number ?? 0}`,
+        state: n.state ?? "",
+        htmlUrl: n.url ?? "",
+        isPullRequest: false,
+        createdAt: n.createdAt ?? "",
+        updatedAt: n.updatedAt ?? "",
+        labels: (n.labels?.nodes ?? []).map((l) => l?.name ?? "").filter(Boolean),
+        pr,
+      };
+    });
 }
 
 // ── Codebase digest (for course / rubric generation and grading) ───────────────

@@ -151,6 +151,53 @@ export interface Database {
           updated_at?: string;
         };
       };
+      courses: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          course_code: string | null;
+          term: string | null;
+          canvas_url: string | null;
+          github_repo: string | null;
+          github_branch: string | null;
+          textbook: string | null;
+          syllabus_id: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          course_code?: string | null;
+          term?: string | null;
+          canvas_url?: string | null;
+          github_repo?: string | null;
+          github_branch?: string | null;
+          textbook?: string | null;
+          syllabus_id?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          course_code?: string | null;
+          term?: string | null;
+          canvas_url?: string | null;
+          github_repo?: string | null;
+          github_branch?: string | null;
+          textbook?: string | null;
+          syllabus_id?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       accessibility_scans: {
         Row: {
           user_id: string;

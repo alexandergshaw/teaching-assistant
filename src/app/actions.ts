@@ -283,6 +283,14 @@ import {
   type FinalizedSyllabus,
 } from "@/lib/supabase/course-syllabi";
 import {
+  listCourses as listCourseHubRows,
+  createCourse as createCourseRow,
+  updateCourse as updateCourseRow,
+  deleteCourse as deleteCourseRow,
+  type Course as CourseHub,
+  type CourseInput as CourseHubInput,
+} from "@/lib/supabase/courses";
+import {
   queryFreeBusy,
   createCalendarEvent,
   listCalendarEvents,
@@ -3143,6 +3151,57 @@ export async function deleteFinalizedSyllabusAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not delete the syllabus." };
+  }
+}
+
+// ── Course hub (bundle a course's resources: codebase, syllabus, textbook, Canvas) ──
+// Named "CourseHub" to avoid collision with the Canvas listCoursesAction above.
+
+/** List the owner's saved courses. */
+export async function listCourseHubAction(): Promise<{ courses: CourseHub[] } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    return { courses: await listCourseHubRows(user.id) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list your courses." };
+  }
+}
+
+/** Create a course. */
+export async function createCourseHubAction(input: CourseHubInput): Promise<{ course: CourseHub } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!input.name?.trim()) return { error: "Enter a course name." };
+    return { course: await createCourseRow(user.id, input) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the course." };
+  }
+}
+
+/** Update a course. */
+export async function updateCourseHubAction(
+  id: string,
+  input: CourseHubInput
+): Promise<{ course: CourseHub } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!id.trim()) return { error: "Choose a course." };
+    if (!input.name?.trim()) return { error: "Enter a course name." };
+    return { course: await updateCourseRow(user.id, id, input) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the course." };
+  }
+}
+
+/** Delete a course. */
+export async function deleteCourseHubAction(id: string): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!id.trim()) return { error: "Choose a course." };
+    await deleteCourseRow(user.id, id);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not delete the course." };
   }
 }
 

@@ -34,6 +34,30 @@ jobs:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
     steps:
+      - name: Fail early with a clear message if secrets are missing
+        run: |
+          missing=""
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then missing="$missing SUPABASE_ACCESS_TOKEN"; fi
+          if [ -z "$SUPABASE_PROJECT_ID" ]; then missing="$missing SUPABASE_PROJECT_ID"; fi
+          if [ -z "$SUPABASE_DB_PASSWORD" ]; then missing="$missing SUPABASE_DB_PASSWORD"; fi
+          if [ -n "$missing" ]; then
+            echo "::error::Migrations not applied - missing repository secret(s):$missing"
+            {
+              echo "## Supabase migrations were NOT applied"
+              echo ""
+              echo "Missing required repository secret(s):$missing"
+              echo ""
+              echo "Add them under Settings > Secrets and variables > Actions:"
+              echo "- SUPABASE_ACCESS_TOKEN  (supabase.com/dashboard/account/tokens)"
+              echo "- SUPABASE_PROJECT_ID    (Project Settings > General > Reference ID)"
+              echo "- SUPABASE_DB_PASSWORD   (Project Settings > Database)"
+              echo ""
+              echo "Until then, apply the SQL in supabase/migrations/ manually in the Supabase SQL editor."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "All required secrets are present."
+
       - name: Check out the repository
         uses: actions/checkout@v4
 

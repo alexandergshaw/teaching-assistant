@@ -19,6 +19,7 @@ import {
   listCourseContentAction,
   placeSyllabusInModuleAction,
   createFinalizedSyllabusAction,
+  createCourseHubAction,
   type CourseScheduleRow,
   type SyllabusCourseInfo,
 } from "../actions";
@@ -675,6 +676,54 @@ export default function CoursePlanningTab() {
     }
   };
 
+  // ── Bundle everything into a Course: save the built syllabus to the library
+  //    and create a Course (in the Courses tab) pre-filled from these fields. ──
+  const [savingCourse, setSavingCourse] = useState(false);
+
+  const handleSaveAsCourse = async () => {
+    setSavingCourse(true);
+    setSaveNote(null);
+    try {
+      const base64 = await buildSyllabusBase64();
+      if (!base64) {
+        setSaveNote({ kind: "error", text: adaptError ?? "Could not build the syllabus." });
+        return;
+      }
+      const courseName = adaptCourseName.trim() || adaptSyllabusName.replace(/\.docx$/i, "") || "Course";
+      const syllabusLabel =
+        [adaptCourseCode.trim(), adaptCourseName.trim()].filter(Boolean).join(" ") || courseName;
+      const saved = await createFinalizedSyllabusAction(
+        `${syllabusLabel} syllabus`,
+        adaptedFileName(),
+        base64,
+        adaptCourseCode.trim() || undefined
+      );
+      if ("error" in saved) {
+        setSaveNote({ kind: "error", text: saved.error });
+        return;
+      }
+      const textbook = [adaptTextbookText.trim(), extractedTextbookInfo.trim()].filter(Boolean).join("\n\n");
+      const created = await createCourseHubAction({
+        name: courseName,
+        courseCode: adaptCourseCode.trim() || undefined,
+        canvasUrl: placeCourseUrl.trim() || undefined,
+        repos: adaptRepo.trim() ? [{ repo: adaptRepo.trim(), branch: adaptBranch.trim() || null }] : [],
+        textbook: textbook || undefined,
+        syllabusId: saved.syllabus.id,
+      });
+      if ("error" in created) {
+        setSaveNote({ kind: "error", text: created.error });
+        return;
+      }
+      setSavedReloadToken((t) => t + 1);
+      setSaveNote({ kind: "success", text: `Saved "${courseName}" to your Courses, with the syllabus linked. Open the Courses tab to add its Canvas link, org, and more.` });
+    } catch (err) {
+      setSaveNote({ kind: "error", text: err instanceof Error ? err.message : "Could not save the course." });
+    } finally {
+      setSavingCourse(false);
+    }
+  };
+
   return (
     <section className={styles.card}>
           <TabHeader
@@ -1008,6 +1057,15 @@ export default function CoursePlanningTab() {
                       disabled={saveBusy || adaptStatus !== "idle"}
                     >
                       {saveBusy ? "Saving…" : "Save to library"}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={handleSaveAsCourse}
+                      disabled={savingCourse || adaptStatus !== "idle"}
+                      title="Save this syllabus and create a Course pre-filled from these fields"
+                    >
+                      {savingCourse ? "Saving…" : "Save as course"}
                     </Button>
                   </div>
 

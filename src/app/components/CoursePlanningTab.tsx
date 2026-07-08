@@ -32,6 +32,7 @@ import { spansToPlainText } from "./RichTextEditor";
 import { RichTextSectionEditor } from "./RichTextSectionEditor";
 import TabHeader from "./TabHeader";
 import { useInstitutionSelection } from "@/lib/institutions";
+import { takeCourseHandoff } from "@/lib/course-handoff";
 import type { RunSpan } from "@/lib/office-edit";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -261,6 +262,22 @@ export default function CoursePlanningTab() {
     setAdaptMeetingDays(localStorage.getItem(LS_KEYS.adaptMeetingDays) || "");
     setAdaptMeetingTimes(localStorage.getItem(LS_KEYS.adaptMeetingTimes) || "");
     setAdaptLocation(localStorage.getItem(LS_KEYS.adaptLocation) || "");
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  // Arriving from a course in the Courses hub: open in Syllabus mode with the
+  // course's fields prefilled. Runs after the hydration effects, so it wins.
+  useEffect(() => {
+    const h = takeCourseHandoff("syllabus");
+    if (!h) return;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setPlanningMode("syllabus");
+    localStorage.setItem(LS_KEYS.planningMode, "syllabus");
+    if (h.name) { setAdaptCourseName(h.name); localStorage.setItem(LS_KEYS.adaptCourseName, h.name); }
+    if (h.courseCode) { setAdaptCourseCode(h.courseCode); localStorage.setItem(LS_KEYS.adaptCourseCode, h.courseCode); }
+    if (h.textbook) { setAdaptTextbookText(h.textbook); localStorage.setItem(LS_KEYS.adaptTextbookText, h.textbook); }
+    if (h.repo) setAdaptRepo(h.repo);
+    if (h.branch) setAdaptBranch(h.branch);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 

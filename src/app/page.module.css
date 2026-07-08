@@ -1010,6 +1010,16 @@ button.courseResourceValue:disabled {
   align-items: center;
 }
 
+/* "Open in ..." row at the foot of a course card. */
+.courseOpenBar {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  border-top: 1px solid var(--field-border);
+}
+
 /* Read-only rendering of a syllabus .docx inside the preview modal. */
 .syllabusPreviewDoc {
   flex: 1;

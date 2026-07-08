@@ -12,6 +12,7 @@ import OrgManagementPanel from "./OrgManagementPanel";
 import RepoDetail from "./RepoDetail";
 import TabHeader from "./TabHeader";
 import Typeahead from "./ui/Typeahead";
+import { takeCourseHandoff } from "@/lib/course-handoff";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Checkbox from "@mui/material/Checkbox";
@@ -54,6 +55,18 @@ export default function VersionControlTab() {
   useEffect(() => {
     if (typeof window !== "undefined") localStorage.setItem(VC_SUBTAB_KEY, subTab);
   }, [subTab]);
+
+  // Arriving from a course in the Courses hub: open the Repos subtab with the
+  // course's GitHub org (and template repo) prefilled.
+  useEffect(() => {
+    const h = takeCourseHandoff("version-control");
+    if (!h) return;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setSubTab("repos");
+    if (h.githubOrg) setSelectedOrg(h.githubOrg);
+    if (h.repo) setTemplateRepo(h.repo);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

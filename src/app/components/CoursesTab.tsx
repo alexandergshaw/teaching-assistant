@@ -24,6 +24,8 @@ import GithubRepoPicker from "./GithubRepoPicker";
 import TabHeader from "./TabHeader";
 import SyllabusPreviewModal, { type SyllabusPreviewPara } from "./SyllabusPreviewModal";
 import { getStoredProvider } from "@/lib/llm-provider";
+import { useInstitutions } from "@/lib/institutions";
+import { setCourseHandoff } from "@/lib/course-handoff";
 import styles from "../page.module.css";
 
 // The editable form state (all strings; "" means "not set").
@@ -32,6 +34,7 @@ interface CourseForm {
   name: string;
   courseCode: string;
   term: string;
+  institution: string;
   canvasUrl: string;
   repos: Array<{ repo: string; branch: string }>;
   githubOrg: string;
@@ -45,6 +48,7 @@ const EMPTY_FORM: CourseForm = {
   name: "",
   courseCode: "",
   term: "",
+  institution: "",
   canvasUrl: "",
   repos: [],
   githubOrg: "",
@@ -59,6 +63,7 @@ function formFromCourse(c: Course): CourseForm {
     name: c.name,
     courseCode: c.courseCode ?? "",
     term: c.term ?? "",
+    institution: c.institution ?? "",
     canvasUrl: c.canvasUrl ?? "",
     repos: c.repos.map((r) => ({ repo: r.repo, branch: r.branch ?? "" })),
     githubOrg: c.githubOrg ?? "",
@@ -102,12 +107,14 @@ function downloadDocx(base64: string, fileName: string): void {
 // silent background revalidate keeps it fresh, and mutations update it in place.
 let hubCache: { courses: Course[]; syllabi: FinalizedSyllabusMeta[]; orgs: string[] } | null = null;
 
-export default function CoursesTab() {
+export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-planning" | "version-control") => void }) {
+  const institutions = useInstitutions();
   const [courses, setCourses] = useState<Course[]>(() => hubCache?.courses ?? []);
   const [syllabi, setSyllabi] = useState<FinalizedSyllabusMeta[]>(() => hubCache?.syllabi ?? []);
   const [orgs, setOrgs] = useState<string[]>(() => hubCache?.orgs ?? []);
   const [state, setState] = useState<"loading" | "idle" | "error">(hubCache ? "idle" : "loading");
   const [refreshing, setRefreshing] = useState(false);
+  const [filterInstitution, setFilterInstitution] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<CourseForm | null>(null);
   const [formNote, setFormNote] = useState<string | null>(null);
@@ -183,6 +190,7 @@ export default function CoursesTab() {
       name: form.name,
       courseCode: form.courseCode,
       term: form.term,
+      institution: form.institution,
       canvasUrl: form.canvasUrl,
       repos: form.repos.map((r) => ({ repo: r.repo, branch: r.branch.trim() || null })),
       githubOrg: form.githubOrg,
@@ -297,6 +305,46 @@ export default function CoursesTab() {
     setPreview({ name: r.name, paragraphs: r.paragraphs });
   };
 
+  // Hand this course's fields to another tab and switch to it.
+  const openInSyllabus = (c: Course) => {
+    const primary = c.repos[0];
+    setCourseHandoff({
+      target: "syllabus",
+      name: c.name,
+      courseCode: c.courseCode ?? undefined,
+      term: c.term ?? undefined,
+      institution: c.institution ?? undefined,
+      textbook: c.textbook ?? undefined,
+      repo: primary?.repo,
+      branch: primary?.branch ?? undefined,
+    });
+    onNavigate("course-planning");
+  };
+
+  const openInVersionControl = (c: Course) => {
+    const primary = c.repos[0];
+    setCourseHandoff({
+      target: "version-control",
+      githubOrg: c.githubOrg ?? undefined,
+      repo: primary?.repo,
+      branch: primary?.branch ?? undefined,
+    });
+    onNavigate("version-control");
+  };
+
+  // Courses filtered by the institution dropdown, then grouped by institution
+  // (courses without one sort last).
+  const visibleCourses = (filterInstitution ? courses.filter((c) => (c.institution ?? "") === filterInstitution) : courses)
+    .slice()
+    .sort((a, b) => {
+      const ai = a.institution ?? "";
+      const bi = b.institution ?? "";
+      if (ai === bi) return 0;
+      if (!ai) return 1;
+      if (!bi) return -1;
+      return ai.localeCompare(bi);
+    });
+
   return (
     <section className={styles.card}>
       <TabHeader
@@ -313,6 +361,23 @@ export default function CoursesTab() {
           <Button variant="text" size="small" onClick={() => void load({ silent: true })} disabled={refreshing}>
             {refreshing ? "Refreshing…" : "Refresh"}
           </Button>
+          {institutions.length > 0 && courses.length > 0 && (
+            <TextField
+              select
+              size="small"
+              label="Institution"
+              value={filterInstitution}
+              onChange={(e) => setFilterInstitution(e.target.value)}
+              sx={{ minWidth: 190, marginLeft: "auto" }}
+            >
+              <MenuItem value="">All institutions</MenuItem>
+              {institutions.map((i) => (
+                <MenuItem key={i} value={i}>
+                  {i}
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
         </div>
       )}
 
@@ -336,7 +401,7 @@ export default function CoursesTab() {
             onChange={(e) => update({ name: e.target.value })}
           />
 
-          <div className={styles.adaptFieldGrid2}>
+          <div className={styles.adaptFieldGrid3}>
             <TextField
               label="Course code"
               size="small"
@@ -352,6 +417,15 @@ export default function CoursesTab() {
               placeholder="e.g. Fall 2026"
               value={form.term}
               onChange={(e) => update({ term: e.target.value })}
+            />
+            <Autocomplete
+              freeSolo
+              options={institutions}
+              value={form.institution}
+              onInputChange={(_, v) => update({ institution: v })}
+              size="small"
+              fullWidth
+              renderInput={(params) => <TextField {...params} label="Institution" placeholder="e.g. MCC" />}
             />
           </div>
 
@@ -512,18 +586,21 @@ export default function CoursesTab() {
       {state === "idle" && !form && courses.length === 0 && (
         <p className={styles.fieldHint}>No courses yet. Choose &ldquo;New course&rdquo; to bundle your first one.</p>
       )}
+      {state === "idle" && !form && courses.length > 0 && visibleCourses.length === 0 && (
+        <p className={styles.fieldHint}>No courses for {filterInstitution}.</p>
+      )}
 
-      {state === "idle" && courses.length > 0 && (
+      {state === "idle" && visibleCourses.length > 0 && (
         <div className={styles.courseGrid}>
-          {courses.map((c) => {
+          {visibleCourses.map((c) => {
             const sName = syllabusName(c.syllabusId);
             return (
               <div key={c.id} className={styles.courseCard}>
                 <div className={styles.courseCardHead}>
                   <div style={{ minWidth: 0 }}>
                     <p className={styles.courseCardTitle}>{c.name}</p>
-                    {(c.courseCode || c.term) && (
-                      <p className={styles.courseCardSub}>{[c.courseCode, c.term].filter(Boolean).join(" · ")}</p>
+                    {(c.courseCode || c.term || c.institution) && (
+                      <p className={styles.courseCardSub}>{[c.institution, c.courseCode, c.term].filter(Boolean).join(" · ")}</p>
                     )}
                   </div>
                   <div className={styles.courseCardActions}>
@@ -609,6 +686,16 @@ export default function CoursesTab() {
                 </div>
 
                 {c.notes && <p className={styles.courseCardSub}>{c.notes}</p>}
+
+                <div className={styles.courseOpenBar}>
+                  <span className={styles.courseResourceLabel}>Open in</span>
+                  <button type="button" className={styles.linkButton} onClick={() => openInSyllabus(c)}>
+                    Syllabus builder
+                  </button>
+                  <button type="button" className={styles.linkButton} onClick={() => openInVersionControl(c)}>
+                    Version control
+                  </button>
+                </div>
               </div>
             );
           })}

@@ -163,6 +163,7 @@ export interface Database {
           github_org: string | null;
           textbook: string | null;
           syllabus_id: string | null;
+          institution: string | null;
           notes: string | null;
           created_at: string;
           updated_at: string;
@@ -178,6 +179,7 @@ export interface Database {
           github_org?: string | null;
           textbook?: string | null;
           syllabus_id?: string | null;
+          institution?: string | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -193,6 +195,7 @@ export interface Database {
           github_org?: string | null;
           textbook?: string | null;
           syllabus_id?: string | null;
+          institution?: string | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;

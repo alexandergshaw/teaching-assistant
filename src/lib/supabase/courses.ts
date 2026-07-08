@@ -26,6 +26,7 @@ export interface Course {
   githubOrg: string | null;
   textbook: string | null;
   syllabusId: string | null;
+  institution: string | null;
   notes: string | null;
   updatedAt: string;
 }
@@ -40,11 +41,12 @@ export interface CourseInput {
   githubOrg?: string | null;
   textbook?: string | null;
   syllabusId?: string | null;
+  institution?: string | null;
   notes?: string | null;
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, notes, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, notes, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -64,6 +66,7 @@ interface CourseRow {
   github_org: string | null;
   textbook: string | null;
   syllabus_id: string | null;
+  institution: string | null;
   notes: string | null;
   updated_at: string;
 }
@@ -79,6 +82,7 @@ function toCourse(r: CourseRow): Course {
     githubOrg: r.github_org,
     textbook: r.textbook,
     syllabusId: r.syllabus_id,
+    institution: r.institution,
     notes: r.notes,
     updatedAt: r.updated_at,
   };
@@ -103,6 +107,7 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     github_org: clean(input.githubOrg),
     textbook: clean(input.textbook),
     syllabus_id: clean(input.syllabusId),
+    institution: clean(input.institution),
     notes: clean(input.notes),
     updated_at: new Date().toISOString(),
   };

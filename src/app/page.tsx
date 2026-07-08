@@ -617,7 +617,7 @@ export default function Home() {
           <Tab label="Version Control Integration" value="version-control" disableRipple />
         </Tabs>
 
-        {activeTab === "courses" && <CoursesTab />}
+        {activeTab === "courses" && <CoursesTab onNavigate={(tab) => setActiveTab(tab)} />}
 
         {activeTab === "course-planning" && <CoursePlanningTab />}
 

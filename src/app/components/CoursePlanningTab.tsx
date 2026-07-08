@@ -231,6 +231,18 @@ export default function CoursePlanningTab() {
   // The full paragraph list + codebase summary, for the live preview and per-field regenerate.
   const [adaptCodebaseSummary, setAdaptCodebaseSummary] = useState("");
   const [adaptRegenKey, setAdaptRegenKey] = useState<string | null>(null);
+  // Round-robin cursor for the "Jump to next field" control.
+  const fieldCursorRef = useRef(0);
+
+  // Scroll the next AI-flagged field into view within the section editor,
+  // cycling back to the first once the end is reached.
+  const jumpToNextField = () => {
+    const keys = (adaptSections ?? []).filter((s) => s.isField).map((s) => s.key);
+    if (keys.length === 0) return;
+    const idx = fieldCursorRef.current % keys.length;
+    fieldCursorRef.current = idx + 1;
+    document.getElementById(`syllabus-field-${keys[idx]}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   // One-time hydration of the syllabus-adapter text inputs from localStorage
   // (client-only, to avoid an SSR mismatch — same reasoning as the effect above).
@@ -869,9 +881,16 @@ export default function CoursePlanningTab() {
 
               {adaptSections && adaptSections.length > 0 && (
                 <>
-                  <p className={styles.adaptSectionsHeading}>
-                    {adaptSections.length} section{adaptSections.length === 1 ? "" : "s"} — edit, regenerate with AI, add, or delete any of them
-                  </p>
+                  <div className={styles.adaptSectionsHeader}>
+                    <p className={styles.adaptSectionsHeading}>
+                      {adaptSections.length} section{adaptSections.length === 1 ? "" : "s"} — edit, regenerate with AI, add, or delete any of them
+                    </p>
+                    {adaptSections.some((s) => s.isField) && (
+                      <Button variant="outlined" size="small" onClick={jumpToNextField}>
+                        Jump to next field ({adaptSections.filter((s) => s.isField).length})
+                      </Button>
+                    )}
+                  </div>
 
                   {/* Review the generated sections first, then act on them below. */}
                   <RichTextSectionEditor
@@ -880,6 +899,7 @@ export default function CoursePlanningTab() {
                     onChange={(key, spans) => updateSection(key, { spans })}
                     sections={adaptSections.map((s) => ({
                       key: s.key,
+                      id: s.isField ? `syllabus-field-${s.key}` : undefined,
                       spans: s.spans,
                       changed: s.isField || spansToPlainText(s.spans) !== s.original,
                       placeholder: "(empty section)",

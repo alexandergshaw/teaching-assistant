@@ -37,6 +37,8 @@ export const HEADING_STYLES: Array<{ value: string; label: string }> = [
 export interface RichTextSection {
   /** Stable React key. */
   key: string;
+  /** Optional DOM id for the row, e.g. as a scroll-into-view target. */
+  id?: string;
   /** Current content as formatted spans. */
   spans: RunSpan[];
   /** Optional paragraph-style control (docx headings); shown left of the field. */
@@ -91,7 +93,7 @@ export function RichTextSectionEditor({
       {sections.map((s) => (
         <Fragment key={s.key}>
           {s.heading && <p className={styles.rteSectionHeading}>{s.heading}</p>}
-          <div className={styles.rteSectionRow}>
+          <div className={styles.rteSectionRow} id={s.id}>
             <div className={styles.rteSectionMain}>
               {(s.label || s.style) && (
                 <div className={styles.rteSectionTop}>

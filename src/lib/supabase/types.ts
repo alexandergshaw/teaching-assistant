@@ -159,8 +159,8 @@ export interface Database {
           course_code: string | null;
           term: string | null;
           canvas_url: string | null;
-          github_repo: string | null;
-          github_branch: string | null;
+          repos: Array<{ repo: string; branch: string | null }>;
+          github_org: string | null;
           textbook: string | null;
           syllabus_id: string | null;
           notes: string | null;
@@ -174,8 +174,8 @@ export interface Database {
           course_code?: string | null;
           term?: string | null;
           canvas_url?: string | null;
-          github_repo?: string | null;
-          github_branch?: string | null;
+          repos?: Array<{ repo: string; branch: string | null }>;
+          github_org?: string | null;
           textbook?: string | null;
           syllabus_id?: string | null;
           notes?: string | null;
@@ -189,8 +189,8 @@ export interface Database {
           course_code?: string | null;
           term?: string | null;
           canvas_url?: string | null;
-          github_repo?: string | null;
-          github_branch?: string | null;
+          repos?: Array<{ repo: string; branch: string | null }>;
+          github_org?: string | null;
           textbook?: string | null;
           syllabus_id?: string | null;
           notes?: string | null;

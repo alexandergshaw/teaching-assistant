@@ -9,6 +9,12 @@ import type { Database } from "./types";
 
 type CoursesTable = Database["public"]["Tables"]["courses"];
 
+/** One codebase associated with a course. */
+export interface CourseRepo {
+  repo: string;
+  branch: string | null;
+}
+
 /** A course and the resources bundled with it. */
 export interface Course {
   id: string;
@@ -16,8 +22,8 @@ export interface Course {
   courseCode: string | null;
   term: string | null;
   canvasUrl: string | null;
-  githubRepo: string | null;
-  githubBranch: string | null;
+  repos: CourseRepo[];
+  githubOrg: string | null;
   textbook: string | null;
   syllabusId: string | null;
   notes: string | null;
@@ -30,15 +36,15 @@ export interface CourseInput {
   courseCode?: string | null;
   term?: string | null;
   canvasUrl?: string | null;
-  githubRepo?: string | null;
-  githubBranch?: string | null;
+  repos?: CourseRepo[];
+  githubOrg?: string | null;
   textbook?: string | null;
   syllabusId?: string | null;
   notes?: string | null;
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, github_repo, github_branch, textbook, syllabus_id, notes, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, notes, updated_at";
 
 function table() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,8 +58,8 @@ interface CourseRow {
   course_code: string | null;
   term: string | null;
   canvas_url: string | null;
-  github_repo: string | null;
-  github_branch: string | null;
+  repos: Array<{ repo: string; branch: string | null }> | null;
+  github_org: string | null;
   textbook: string | null;
   syllabus_id: string | null;
   notes: string | null;
@@ -67,8 +73,8 @@ function toCourse(r: CourseRow): Course {
     courseCode: r.course_code,
     term: r.term,
     canvasUrl: r.canvas_url,
-    githubRepo: r.github_repo,
-    githubBranch: r.github_branch,
+    repos: Array.isArray(r.repos) ? r.repos.filter((x) => x && x.repo) : [],
+    githubOrg: r.github_org,
     textbook: r.textbook,
     syllabusId: r.syllabus_id,
     notes: r.notes,
@@ -76,19 +82,23 @@ function toCourse(r: CourseRow): Course {
   };
 }
 
-// Map the app-facing input onto the DB columns, coercing "" to null.
+// Map the app-facing input onto the DB columns, coercing "" to null and
+// dropping empty repo rows.
 function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "name"> & { name?: string } {
   const clean = (v: string | null | undefined) => {
     const t = (v ?? "").trim();
     return t === "" ? null : t;
   };
+  const repos = (input.repos ?? [])
+    .map((r) => ({ repo: (r.repo ?? "").trim(), branch: (r.branch ?? "").trim() || null }))
+    .filter((r) => r.repo !== "");
   return {
     name: input.name.trim(),
     course_code: clean(input.courseCode),
     term: clean(input.term),
     canvas_url: clean(input.canvasUrl),
-    github_repo: clean(input.githubRepo),
-    github_branch: clean(input.githubBranch),
+    repos,
+    github_org: clean(input.githubOrg),
     textbook: clean(input.textbook),
     syllabus_id: clean(input.syllabusId),
     notes: clean(input.notes),

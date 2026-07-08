@@ -2604,6 +2604,24 @@ async function extractTextbookInfoFromImages(
 }
 
 /**
+ * Standalone: extract textbook / course-materials details from one or more
+ * uploaded photos/screenshots, for use outside the syllabus flow (e.g. the
+ * Courses hub). Returns the extracted plain-text block, or "" if nothing found.
+ */
+export async function extractTextbookInfoAction(
+  images: Array<{ base64: string; mimeType: string }>,
+  provider: LlmProvider = "gemini"
+): Promise<{ text: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!images || images.length === 0) return { error: "Upload at least one image." };
+    return { text: await extractTextbookInfoFromImages(images, provider) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not read the textbook image." };
+  }
+}
+
+/**
  * Read a former syllabus (.docx) and a codebase zip. Pass 1 identifies the
  * class-specific NON-schedule fields and the weekly-schedule block's bounds; pass
  * 2 produces a complete replacement for EVERY paragraph in that block, so the old

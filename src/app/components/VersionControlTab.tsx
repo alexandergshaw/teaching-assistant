@@ -5,7 +5,6 @@ import {
   listMyOrgsAction,
   listOrgReposAction,
   generateStudentReposAction,
-  createCopilotRepoAction,
   type StudentRepoResult,
 } from "../actions";
 import type { GithubRepo } from "@/lib/github";
@@ -13,7 +12,6 @@ import OrgManagementPanel from "./OrgManagementPanel";
 import RepoDetail from "./RepoDetail";
 import TabHeader from "./TabHeader";
 import Typeahead from "./ui/Typeahead";
-import { submitOnEnter } from "./ui/submitOnEnter";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Checkbox from "@mui/material/Checkbox";
@@ -43,14 +41,7 @@ export default function VersionControlTab() {
   const [subTab, setSubTab] = useState<"orgs" | "repos">(() =>
     typeof window !== "undefined" && localStorage.getItem(VC_SUBTAB_KEY) === "repos" ? "repos" : "orgs"
   );
-  // Create a repo with a Copilot prompt in the selected org.
-  const [copilotName, setCopilotName] = useState("");
-  const [copilotPrompt, setCopilotPrompt] = useState("");
-  const [copilotPrivate, setCopilotPrivate] = useState(true);
-  const [copilotTemplate, setCopilotTemplate] = useState(true);
-  const [copilotBusy, setCopilotBusy] = useState(false);
-  const [copilotResult, setCopilotResult] = useState<{ fullName: string; htmlUrl: string; issueUrl?: string; copilotNote?: string } | null>(null);
-  const [copilotError, setCopilotError] = useState<string | null>(null);
+  // (Copilot repo creation was removed from the Orgs subtab.)
 
   const refreshOrgs = async () => {
     const r = await listMyOrgsAction();
@@ -136,34 +127,6 @@ export default function VersionControlTab() {
     setResults(r.results);
   };
 
-  const createWithCopilot = async () => {
-    if (!selectedOrg) {
-      setCopilotError("Choose an organization first.");
-      return;
-    }
-    if (!copilotName.trim()) {
-      setCopilotError("Enter a repository name.");
-      return;
-    }
-    if (!copilotPrompt.trim()) {
-      setCopilotError("Paste a Copilot prompt to seed the repo with.");
-      return;
-    }
-    setCopilotBusy(true);
-    setCopilotError(null);
-    setCopilotResult(null);
-    const r = await createCopilotRepoAction(copilotName.trim(), copilotPrompt, copilotPrivate, selectedOrg, copilotTemplate);
-    setCopilotBusy(false);
-    if ("error" in r) {
-      setCopilotError(r.error);
-      return;
-    }
-    setCopilotResult(r);
-    // Reload the org's repos so a newly-created template shows in the dropdown.
-    const repos = await listOrgReposAction(selectedOrg);
-    if (!("error" in repos)) setRepos(repos.repos);
-  };
-
   if (orgsState === "unconfigured") {
     return (
       <div className={styles.card}>
@@ -225,6 +188,9 @@ export default function VersionControlTab() {
                   noOptionsText="No organizations"
                 />
               </div>
+              <a href="https://github.com/settings/organizations" target="_blank" rel="noreferrer" style={{ fontSize: "0.82rem" }}>
+                Your GitHub organizations
+              </a>
               <a href="https://github.com/account/organizations/new" target="_blank" rel="noreferrer" style={{ fontSize: "0.82rem" }}>
                 Create org on GitHub
               </a>
@@ -242,70 +208,6 @@ export default function VersionControlTab() {
               <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 4 }}>
                 Your token doesn&apos;t own any organizations. Create one on GitHub (link above), then hit Refresh.
               </p>
-            )}
-          </div>
-
-          <div className={styles.field} style={{ border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 10, padding: 12 }}>
-            <label>Create a repo with a Copilot prompt{selectedOrg ? ` in ${selectedOrg}` : ""}</label>
-            <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "4px 0 8px" }}>
-              Creates a repo in the selected org and commits the prompt to <code>.github/copilot-instructions.md</code>. Mark it a
-              template to use it as the source above.
-            </p>
-            <TextField
-              size="small"
-              fullWidth
-              placeholder="Repository name"
-              value={copilotName}
-              onChange={(e) => setCopilotName(e.target.value)}
-              onKeyDown={submitOnEnter(createWithCopilot)}
-              disabled={copilotBusy}
-            />
-            <TextField
-              multiline
-              minRows={6}
-              fullWidth
-              placeholder="Paste the GitHub Copilot prompt to seed the repo with…"
-              value={copilotPrompt}
-              onChange={(e) => setCopilotPrompt(e.target.value)}
-              disabled={copilotBusy}
-              sx={{ marginTop: 1, fontFamily: "monospace" }}
-            />
-            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-              <FormControlLabel
-                control={<Checkbox checked={copilotPrivate} onChange={(e) => setCopilotPrivate(e.target.checked)} disabled={copilotBusy} size="small" />}
-                label="Private"
-              />
-              <FormControlLabel
-                control={<Checkbox checked={copilotTemplate} onChange={(e) => setCopilotTemplate(e.target.checked)} disabled={copilotBusy} size="small" />}
-                label="Template"
-              />
-              <Button type="button" variant="contained" size="small" onClick={createWithCopilot} disabled={copilotBusy || !selectedOrg}>
-                {copilotBusy ? "Creating…" : "Create repo"}
-              </Button>
-            </div>
-            {copilotError && <p className={styles.error}>{copilotError}</p>}
-            {copilotResult && (
-              <div style={{ fontSize: "0.85rem", marginTop: 8 }}>
-                <p style={{ margin: 0 }}>
-                  Created{" "}
-                  <a href={copilotResult.htmlUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>
-                    {copilotResult.fullName}
-                  </a>
-                  {copilotTemplate ? " — now selectable as a template below." : "."}
-                </p>
-                {copilotResult.issueUrl && (
-                  <p style={{ margin: "4px 0 0" }}>
-                    Copilot is building it —{" "}
-                    <a href={copilotResult.issueUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>
-                      view the issue
-                    </a>
-                    .
-                  </p>
-                )}
-                {copilotResult.copilotNote && (
-                  <p style={{ margin: "4px 0 0", color: "#d97706" }}>{copilotResult.copilotNote}</p>
-                )}
-              </div>
             )}
           </div>
 

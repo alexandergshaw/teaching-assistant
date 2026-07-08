@@ -3123,6 +3123,29 @@ export async function getFinalizedSyllabusAction(
   }
 }
 
+/** A finalized syllabus parsed into formatted paragraphs for a read-only preview. */
+export async function previewFinalizedSyllabusAction(
+  id: string
+): Promise<
+  | { name: string; paragraphs: Array<{ id: string; text: string; runs: RunSpan[]; style: string }> }
+  | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    if (!id.trim()) return { error: "Choose a syllabus." };
+    const syllabus = await getSyllabus(user.id, id);
+    if (!syllabus) return { error: "That syllabus no longer exists." };
+    const buffer = Buffer.from(syllabus.content, "base64");
+    const paragraphs = await parseOfficeParagraphs("docx", buffer);
+    return {
+      name: syllabus.name,
+      paragraphs: paragraphs.map((p) => ({ id: p.id, text: p.text, runs: p.runs, style: p.style })),
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not open the syllabus for preview." };
+  }
+}
+
 /** Save a finalized syllabus (.docx base64) to the owner's library. */
 export async function createFinalizedSyllabusAction(
   name: string,

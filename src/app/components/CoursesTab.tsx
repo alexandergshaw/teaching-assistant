@@ -13,6 +13,7 @@ import {
   deleteCourseHubAction,
   listFinalizedSyllabiAction,
   getFinalizedSyllabusAction,
+  previewFinalizedSyllabusAction,
   createFinalizedSyllabusAction,
   extractTextbookInfoAction,
   listMyOrgsAction,
@@ -21,6 +22,7 @@ import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import GithubRepoPicker from "./GithubRepoPicker";
 import TabHeader from "./TabHeader";
+import SyllabusPreviewModal, { type SyllabusPreviewPara } from "./SyllabusPreviewModal";
 import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
 
@@ -95,11 +97,17 @@ function downloadDocx(base64: string, fileName: string): void {
   URL.revokeObjectURL(url);
 }
 
+// Module-level cache of the tab's data, so switching away and back does not
+// refetch or flash a spinner. Survives unmount/remount within the session; a
+// silent background revalidate keeps it fresh, and mutations update it in place.
+let hubCache: { courses: Course[]; syllabi: FinalizedSyllabusMeta[]; orgs: string[] } | null = null;
+
 export default function CoursesTab() {
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [syllabi, setSyllabi] = useState<FinalizedSyllabusMeta[]>([]);
-  const [orgs, setOrgs] = useState<string[]>([]);
-  const [state, setState] = useState<"loading" | "idle" | "error">("loading");
+  const [courses, setCourses] = useState<Course[]>(() => hubCache?.courses ?? []);
+  const [syllabi, setSyllabi] = useState<FinalizedSyllabusMeta[]>(() => hubCache?.syllabi ?? []);
+  const [orgs, setOrgs] = useState<string[]>(() => hubCache?.orgs ?? []);
+  const [state, setState] = useState<"loading" | "idle" | "error">(hubCache ? "idle" : "loading");
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<CourseForm | null>(null);
   const [formNote, setFormNote] = useState<string | null>(null);
@@ -107,31 +115,51 @@ export default function CoursesTab() {
   const [uploadingSyllabus, setUploadingSyllabus] = useState(false);
   const [extractingTextbook, setExtractingTextbook] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ name: string; paragraphs: SyllabusPreviewPara[] } | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
 
-  const load = async () => {
-    setState("loading");
+  // Fetch everything and refresh the cache. `silent` skips the blocking spinner
+  // (used for background revalidation and post-mutation refreshes).
+  const load = async (opts?: { silent?: boolean }) => {
+    if (opts?.silent) setRefreshing(true);
+    else setState("loading");
     const [c, s, o] = await Promise.all([listCourseHubAction(), listFinalizedSyllabiAction(), listMyOrgsAction()]);
     if ("error" in c) {
-      setState("error");
-      setError(c.error);
+      setRefreshing(false);
+      if (!opts?.silent) {
+        setState("error");
+        setError(c.error);
+      }
       return;
     }
-    setCourses(c.courses);
-    setSyllabi("error" in s ? [] : s.syllabi);
-    setOrgs("error" in o ? [] : o.orgs);
+    const next = {
+      courses: c.courses,
+      syllabi: "error" in s ? [] : s.syllabi,
+      orgs: "error" in o ? [] : o.orgs,
+    };
+    hubCache = next;
+    setCourses(next.courses);
+    setSyllabi(next.syllabi);
+    setOrgs(next.orgs);
     setState("idle");
+    setRefreshing(false);
   };
 
   useEffect(() => {
+    // On first ever mount, load with a spinner. On later mounts (cache present),
+    // show cached data instantly and revalidate silently in the background.
     /* eslint-disable-next-line react-hooks/set-state-in-effect */
-    void load();
+    void load({ silent: hubCache != null });
   }, []);
 
   const reloadSyllabi = async () => {
     const s = await listFinalizedSyllabiAction();
-    if (!("error" in s)) setSyllabi(s.syllabi);
+    if (!("error" in s)) {
+      setSyllabi(s.syllabi);
+      if (hubCache) hubCache = { ...hubCache, syllabi: s.syllabi };
+    }
   };
 
   const syllabusName = (id: string | null): string | null =>
@@ -170,7 +198,7 @@ export default function CoursesTab() {
     }
     setForm(null);
     setFormNote(null);
-    await load();
+    await load({ silent: true });
   };
 
   // Upload a .docx straight onto the course: save it to the finalized library
@@ -240,7 +268,7 @@ export default function CoursesTab() {
       setError(result.error);
       return;
     }
-    await load();
+    await load({ silent: true });
   };
 
   const handleDownloadSyllabus = async (c: Course) => {
@@ -256,6 +284,19 @@ export default function CoursesTab() {
     downloadDocx(r.syllabus.content, r.syllabus.fileName);
   };
 
+  const handlePreviewSyllabus = async (c: Course) => {
+    if (!c.syllabusId) return;
+    setPreviewId(c.id);
+    setError(null);
+    const r = await previewFinalizedSyllabusAction(c.syllabusId);
+    setPreviewId(null);
+    if ("error" in r) {
+      setError(r.error);
+      return;
+    }
+    setPreview({ name: r.name, paragraphs: r.paragraphs });
+  };
+
   return (
     <section className={styles.card}>
       <TabHeader
@@ -268,6 +309,9 @@ export default function CoursesTab() {
         <div className={styles.adaptActionBar} style={{ marginTop: 0 }}>
           <Button variant="contained" size="small" onClick={() => { setForm({ ...EMPTY_FORM }); setFormNote(null); setError(null); }}>
             New course
+          </Button>
+          <Button variant="text" size="small" onClick={() => void load({ silent: true })} disabled={refreshing}>
+            {refreshing ? "Refreshing…" : "Refresh"}
           </Button>
         </div>
       )}
@@ -538,9 +582,17 @@ export default function CoursesTab() {
                   <div className={styles.courseResource}>
                     <span className={styles.courseResourceLabel}>Syllabus</span>
                     {sName ? (
-                      <button type="button" className={styles.courseResourceValue} onClick={() => handleDownloadSyllabus(c)} disabled={busyId === c.id}>
-                        {busyId === c.id ? "Downloading…" : `${sName} — download`}
-                      </button>
+                      <>
+                        <span className={styles.courseResourceValue}>{sName}</span>
+                        <div className={styles.courseResourceActions}>
+                          <button type="button" className={styles.linkButton} onClick={() => handlePreviewSyllabus(c)} disabled={previewId === c.id}>
+                            {previewId === c.id ? "Opening…" : "Preview"}
+                          </button>
+                          <button type="button" className={styles.linkButton} onClick={() => handleDownloadSyllabus(c)} disabled={busyId === c.id}>
+                            {busyId === c.id ? "Downloading…" : "Download"}
+                          </button>
+                        </div>
+                      </>
                     ) : (
                       <span className={styles.courseResourceEmpty}>Not linked</span>
                     )}
@@ -561,6 +613,10 @@ export default function CoursesTab() {
             );
           })}
         </div>
+      )}
+
+      {preview && (
+        <SyllabusPreviewModal name={preview.name} paragraphs={preview.paragraphs} onClose={() => setPreview(null)} />
       )}
     </section>
   );

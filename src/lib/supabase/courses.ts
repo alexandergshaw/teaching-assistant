@@ -7,7 +7,7 @@
 import { createServiceClient } from "./server";
 import type { Database } from "./types";
 
-type CoursesTable = Database["public"]["Tables"]["courses"];
+type CoursesTable = Database["public"]["Tables"]["course_hub"];
 
 /** One codebase associated with a course. */
 export interface CourseRepo {
@@ -47,8 +47,10 @@ const COLUMNS =
   "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, notes, updated_at";
 
 function table() {
+  // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
+  // unrelated `courses` table in this database.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (createServiceClient() as any).from("courses");
+  return (createServiceClient() as any).from("course_hub");
 }
 
 // Shape of a selected row (snake_case, from the DB).

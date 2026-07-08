@@ -151,7 +151,7 @@ export interface Database {
           updated_at?: string;
         };
       };
-      courses: {
+      course_hub: {
         Row: {
           id: string;
           user_id: string;

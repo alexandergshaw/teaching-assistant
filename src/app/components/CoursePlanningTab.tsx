@@ -868,7 +868,21 @@ export default function CoursePlanningTab() {
                 </div>
               </div>
 
-              {adaptError && <p className={styles.error}>{adaptError}</p>}
+              {/* Errors before analysis show here; post-analysis errors show by the
+                  action bar, next to where the user is working. */}
+              {adaptError && !adaptSections && <p className={styles.error}>{adaptError}</p>}
+
+              {adaptStatus === "analyzing" && (
+                <div className={styles.loadingState}>
+                  <div className={styles.spinner} />
+                  <div>
+                    <p className={styles.loadingTitle}>Analyzing your syllabus…</p>
+                    <p className={styles.loadingText}>
+                      Reading the document, scanning any codebase you provided, and drafting the class-specific fields. This can take a moment.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <Button
                 variant="contained"
@@ -942,6 +956,8 @@ export default function CoursePlanningTab() {
                       {adaptStatus === "building" ? "Building…" : "Download adapted syllabus (.docx)"}
                     </Button>
                   </div>
+
+                  {adaptError && <p className={styles.error}>{adaptError}</p>}
 
                   {/* Optional: place the generated syllabus directly into a Canvas module. */}
                   <details className={styles.adaptDisclosure}>

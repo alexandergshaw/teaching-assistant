@@ -223,7 +223,7 @@ export default function VersionControlTab() {
               noOptionsText="No repositories"
             />
             {selectedOrg && !reposLoading && templates.length === 0 && repos.length > 0 && (
-              <p style={{ fontSize: "0.8rem", color: "#d97706", marginTop: 4 }}>
+              <p style={{ fontSize: "0.8rem", color: "var(--warning)", marginTop: 4 }}>
                 No template repositories found in this org. Mark a repo as a template (Settings → Template repository), or
                 select one below — generation will fail if it isn&apos;t a template.
               </p>
@@ -282,11 +282,11 @@ export default function VersionControlTab() {
                       {r.student} → <code>{r.name}</code>
                     </span>
                     {r.error ? (
-                      <span style={{ color: "#dc2626", fontSize: "0.82rem" }}>{r.error}</span>
+                      <span style={{ color: "var(--danger)", fontSize: "0.82rem" }}>{r.error}</span>
                     ) : (
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.82rem" }}>
-                        <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: "#16a34a" }} />
-                        <strong style={{ color: "#16a34a" }}>Created</strong>
+                        <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: "var(--success)" }} />
+                        <strong style={{ color: "var(--success)" }}>Created</strong>
                         {r.htmlUrl && (
                           <a href={r.htmlUrl} target="_blank" rel="noreferrer">
                             open

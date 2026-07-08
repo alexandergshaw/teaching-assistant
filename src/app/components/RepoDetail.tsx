@@ -935,7 +935,7 @@ export default function RepoDetail() {
             {createBusy ? "Creating..." : (createPrompt.trim() ? "Create repo with Copilot prompt" : "Create repository")}
           </Button>
           {createMsg && (
-            <p style={{ fontSize: "0.85rem", color: createMsg.startsWith("Error") ? "#dc2626" : "var(--text-secondary)", marginTop: 4 }}>
+            <p style={{ fontSize: "0.85rem", color: createMsg.startsWith("Error") ? "var(--danger)" : "var(--text-secondary)", marginTop: 4 }}>
               {createMsg}
             </p>
           )}
@@ -957,7 +957,7 @@ export default function RepoDetail() {
                 </p>
               )}
               {createResult.copilotNote && (
-                <p style={{ margin: "4px 0 0", color: "#d97706" }}>{createResult.copilotNote}</p>
+                <p style={{ margin: "4px 0 0", color: "var(--warning)" }}>{createResult.copilotNote}</p>
               )}
             </div>
           )}
@@ -1283,7 +1283,7 @@ export default function RepoDetail() {
                           </Button>
                         </div>
                         {commitMsg && (
-                          <p style={{ marginTop: 8, fontSize: "0.85rem", color: commitMsg.startsWith("Committed") ? "#16a34a" : "#dc2626" }}>
+                          <p style={{ marginTop: 8, fontSize: "0.85rem", color: commitMsg.startsWith("Committed") ? "var(--success)" : "var(--danger)" }}>
                             {commitMsg}
                           </p>
                         )}
@@ -1308,7 +1308,7 @@ export default function RepoDetail() {
           {tab === "branches" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
               <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
-                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 12 }}>
+                <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>
                   Fork this repository
                 </label>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -1330,7 +1330,7 @@ export default function RepoDetail() {
                   </Button>
                 </div>
                 {forkMsg && (
-                  <p style={{ marginTop: 8, fontSize: "0.85rem", color: forkMsg.startsWith("Error:") ? "#dc2626" : "#16a34a" }}>
+                  <p style={{ marginTop: 8, fontSize: "0.85rem", color: forkMsg.startsWith("Error:") ? "var(--danger)" : "var(--success)" }}>
                     {forkMsg}
                   </p>
                 )}
@@ -1345,7 +1345,7 @@ export default function RepoDetail() {
               </div>
 
               <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
-                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 12 }}>
+                <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>
                   Create a branch
                 </label>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -1377,7 +1377,7 @@ export default function RepoDetail() {
               </div>
 
               <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
-                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 12 }}>
+                <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>
                   Branches
                 </label>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1417,7 +1417,7 @@ export default function RepoDetail() {
                   )}
                 </div>
                 {branchMsg && (
-                  <p style={{ marginTop: 12, fontSize: "0.85rem", color: branchMsg.startsWith("Error:") ? "#dc2626" : "#16a34a" }}>
+                  <p style={{ marginTop: 12, fontSize: "0.85rem", color: branchMsg.startsWith("Error:") ? "var(--danger)" : "var(--success)" }}>
                     {branchMsg}
                   </p>
                 )}
@@ -1427,7 +1427,7 @@ export default function RepoDetail() {
           {tab === "pulls" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
               <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
-                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 12 }}>
+                <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>
                   Open a pull request
                 </label>
                 <TextField
@@ -1483,7 +1483,7 @@ export default function RepoDetail() {
                     style={{
                       marginTop: 8,
                       fontSize: "0.85rem",
-                      color: prMsg.startsWith("Error") ? "#dc2626" : "#16a34a",
+                      color: prMsg.startsWith("Error") ? "var(--danger)" : "var(--success)",
                     }}
                   >
                     {prMsg}
@@ -1493,7 +1493,7 @@ export default function RepoDetail() {
 
               <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  <label style={{ fontSize: "0.9rem", fontWeight: 500 }}>
+                  <label className={styles.panelTitle}>
                     Pull requests
                   </label>
                   <TextField
@@ -1576,7 +1576,7 @@ export default function RepoDetail() {
           {tab === "actions" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
               <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
-                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 12 }}>Workflows</label>
+                <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>Workflows</label>
                 {actionsState === "loading" && (
                   <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
                     <CircularProgress size={24} />
@@ -1631,13 +1631,13 @@ export default function RepoDetail() {
                   </div>
                 )}
                 {actionsMsg && (
-                  <p style={{ marginTop: 12, fontSize: "0.85rem", color: actionsMsg.startsWith("Error:") ? "#dc2626" : "var(--text-secondary)" }}>{actionsMsg}</p>
+                  <p style={{ marginTop: 12, fontSize: "0.85rem", color: actionsMsg.startsWith("Error:") ? "var(--danger)" : "var(--text-secondary)" }}>{actionsMsg}</p>
                 )}
               </div>
 
               <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
-                  <label style={{ fontSize: "0.9rem", fontWeight: 500 }}>Runs</label>
+                  <label className={styles.panelTitle}>Runs</label>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <TextField select size="small" label="Workflow" value={filterWorkflowId} onChange={(e) => setFilterWorkflowId(e.target.value)} sx={{ minWidth: 150 }} slotProps={{ inputLabel: { shrink: true } }}>
                       <MenuItem value="">All workflows</MenuItem>
@@ -1679,7 +1679,7 @@ export default function RepoDetail() {
                             {run.displayTitle || run.name} <span style={{ color: "var(--text-secondary)" }}>#{run.runNumber}</span>
                           </span>
                           <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: "0.85rem", marginTop: 4, flexWrap: "wrap" }}>
-                            <span style={{ color: run.conclusion === "success" ? "#16a34a" : run.conclusion === "failure" || run.conclusion === "cancelled" ? "var(--error, #b91c1c)" : "var(--text-secondary)" }}>
+                            <span style={{ color: run.conclusion === "success" ? "var(--success)" : run.conclusion === "failure" || run.conclusion === "cancelled" ? "var(--danger)" : "var(--text-secondary)" }}>
                               {run.conclusion ?? run.status}
                             </span>
                             <span style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>{run.headBranch}</span>
@@ -1731,7 +1731,7 @@ export default function RepoDetail() {
                                 <div key={job.id} style={{ fontSize: "0.85rem" }}>
                                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                                     <span>{job.name}</span>
-                                    <span style={{ color: job.conclusion === "success" ? "#16a34a" : job.conclusion === "failure" || job.conclusion === "cancelled" ? "var(--error, #b91c1c)" : "var(--text-secondary)" }}>{job.conclusion ?? job.status}</span>
+                                    <span style={{ color: job.conclusion === "success" ? "var(--success)" : job.conclusion === "failure" || job.conclusion === "cancelled" ? "var(--danger)" : "var(--text-secondary)" }}>{job.conclusion ?? job.status}</span>
                                     {job.htmlUrl && <a href={job.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", fontSize: "0.78rem" }}>view</a>}
                                   </div>
                                   {job.steps.length > 0 && (
@@ -1739,7 +1739,7 @@ export default function RepoDetail() {
                                       {job.steps.map((s) => (
                                         <div key={s.number} style={{ fontSize: "0.78rem", color: "var(--text-secondary)" }}>
                                           <span>{s.name}</span>
-                                          <span style={{ marginLeft: 8, color: s.conclusion === "success" ? "#16a34a" : s.conclusion === "failure" ? "var(--error, #b91c1c)" : "var(--text-secondary)" }}>{s.conclusion ?? s.status}</span>
+                                          <span style={{ marginLeft: 8, color: s.conclusion === "success" ? "var(--success)" : s.conclusion === "failure" ? "var(--danger)" : "var(--text-secondary)" }}>{s.conclusion ?? s.status}</span>
                                         </div>
                                       ))}
                                     </div>
@@ -1783,7 +1783,7 @@ export default function RepoDetail() {
           {tab === "copilot" && (
             <div style={{ display: "flex", gap: 16, marginTop: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
               <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, flex: "1 1 320px", minWidth: 280 }}>
-                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 8 }}>
+                <label className={styles.panelTitle} style={{ display: "block", marginBottom: 8 }}>
                   Assign a Copilot coding agent
                 </label>
                 <p className={styles.fieldHint} style={{ marginTop: 0 }}>
@@ -1838,7 +1838,7 @@ export default function RepoDetail() {
 
               <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, flex: "1 1 320px", minWidth: 280 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  <label style={{ fontSize: "0.9rem", fontWeight: 500 }}>Copilot tasks</label>
+                  <label className={styles.panelTitle}>Copilot tasks</label>
                   <Button variant="text" size="small" onClick={reloadCopilotTasks} disabled={copilotTasksState === "loading"}>
                     Refresh
                   </Button>

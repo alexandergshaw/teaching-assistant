@@ -8,6 +8,9 @@
   --field-background: #ffffff;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
 
   display: flex;
   flex: 1;
@@ -59,6 +62,16 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--accent);
+}
+
+/* Section heading inside a panel: the app's tracked-uppercase label idiom,
+   applied consistently across the Version Control panels. */
+.panelTitle {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
 
 .header h1 {
@@ -431,7 +444,7 @@
 }
 
 .error {
-  color: #dc2626;
+  color: var(--danger);
   font-size: 0.95rem;
 }
 
@@ -3183,6 +3196,9 @@
     --field-background: rgba(15, 23, 42, 0.75);
     --accent: #60a5fa;
     --accent-hover: #3b82f6;
+    --success: #22c55e;
+    --warning: #f59e0b;
+    --danger: #f87171;
   }
 
   .selectionAiButton {

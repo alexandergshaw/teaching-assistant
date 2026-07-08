@@ -367,14 +367,15 @@ async function replaceAssignees(assignableId: string, actorIds: string[]): Promi
 }
 
 /**
- * Open a build issue from the prompt and assign it to Copilot, which builds the
- * repo and opens a PR. Returns the issue URL/number. Throws a clear error when
- * the Copilot coding agent is not available for the repo.
+ * Create an issue with the given title/body and assign it to the Copilot coding
+ * agent, which works on it and opens a PR. Returns the issue URL/number. Throws a
+ * clear error when the Copilot coding agent is not available for the repo.
  */
-export async function startCopilotBuild(
+export async function createCopilotAgentTask(
   owner: string,
   repo: string,
-  prompt: string
+  title: string,
+  body: string
 ): Promise<{ issueUrl: string; issueNumber: number }> {
   const copilotId = await getCopilotActorId(owner, repo);
   if (!copilotId) {
@@ -382,17 +383,70 @@ export async function startCopilotBuild(
       "Copilot coding agent is not available for this repository. Enable Copilot coding agent for the account or organization, then assign the created issue to Copilot."
     );
   }
-  const issue = await createIssue(
-    owner,
-    repo,
-    "Build this project with Copilot",
-    `${prompt}\n\n---\n\nAssigned to the GitHub Copilot coding agent to scaffold this repository.`
-  );
+  const issue = await createIssue(owner, repo, title, body);
   if (!issue.nodeId) {
     throw new Error("Could not read the created issue id from GitHub, so Copilot was not assigned.");
   }
   await replaceAssignees(issue.nodeId, [copilotId]);
   return { issueUrl: issue.htmlUrl, issueNumber: issue.number };
+}
+
+/**
+ * Open a build issue from the prompt and assign it to Copilot, which builds the
+ * repo and opens a PR. Thin wrapper over createCopilotAgentTask for the
+ * repo-creation flow.
+ */
+export async function startCopilotBuild(
+  owner: string,
+  repo: string,
+  prompt: string
+): Promise<{ issueUrl: string; issueNumber: number }> {
+  return createCopilotAgentTask(
+    owner,
+    repo,
+    "Build this project with Copilot",
+    `${prompt}\n\n---\n\nAssigned to the GitHub Copilot coding agent to scaffold this repository.`
+  );
+}
+
+/** One Copilot coding-agent task (a repo issue assigned to Copilot). */
+export interface CopilotTask {
+  number: number;
+  title: string;
+  state: string;
+  htmlUrl: string;
+  /** True when the item is a pull request rather than a plain issue. */
+  isPullRequest: boolean;
+  createdAt: string;
+}
+
+/**
+ * List a repo's issues assigned to the Copilot coding agent (its tasks), newest
+ * first. Best-effort: one page of up to 100 issues, filtered by assignee login.
+ */
+export async function listCopilotTasks(owner: string, repo: string): Promise<CopilotTask[]> {
+  const raw = await ghJson<
+    Array<{
+      number?: number;
+      title?: string;
+      state?: string;
+      html_url?: string;
+      created_at?: string;
+      pull_request?: unknown;
+      assignees?: Array<{ login?: string }>;
+    }>
+  >(`/repos/${owner}/${repo}/issues?state=all&per_page=100`);
+  return raw
+    .filter((i) => (i.assignees ?? []).some((a) => /copilot/i.test(a?.login ?? "")))
+    .map((i) => ({
+      number: i.number ?? 0,
+      title: i.title ?? `#${i.number ?? 0}`,
+      state: i.state ?? "",
+      htmlUrl: i.html_url ?? "",
+      isPullRequest: !!i.pull_request,
+      createdAt: i.created_at ?? "",
+    }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 // ── Codebase digest (for course / rubric generation and grading) ───────────────

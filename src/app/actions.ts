@@ -170,6 +170,8 @@ import {
   createRepo,
   createOrgRepo,
   startCopilotBuild,
+  createCopilotAgentTask,
+  listCopilotTasks,
   generateFromTemplate,
   putFile,
   getFileText,
@@ -214,6 +216,7 @@ import {
   type PullRequestInfo,
   type WorkflowJobInfo,
   type RepoTreeEntry,
+  type CopilotTask,
 } from "@/lib/github";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
 import { filesToLlmParts } from "@/lib/llm-files";
@@ -5231,6 +5234,37 @@ export async function createCopilotRepoAction(
     return { fullName: repo.fullName, htmlUrl: repo.htmlUrl, issueUrl, copilotNote };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not create the repository." };
+  }
+}
+
+/** Create a Copilot coding-agent task (an issue assigned to Copilot) on a repo. */
+export async function createCopilotTaskAction(
+  repoRef: string,
+  title: string,
+  body: string
+): Promise<{ issueUrl: string; issueNumber: number } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!title.trim()) return { error: "Enter a task title." };
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return await createCopilotAgentTask(parsed.owner, parsed.repo, title.trim(), body.trim());
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the Copilot task." };
+  }
+}
+
+/** List the Copilot coding-agent tasks (issues assigned to Copilot) on a repo. */
+export async function listCopilotTasksAction(
+  repoRef: string
+): Promise<{ tasks: CopilotTask[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    return { tasks: await listCopilotTasks(parsed.owner, parsed.repo) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list Copilot tasks." };
   }
 }
 

@@ -21,8 +21,10 @@ import {
   cancelWorkflowRunAction,
   createRepoAction,
   createCopilotRepoAction,
+  createCopilotTaskAction,
+  listCopilotTasksAction,
 } from "../actions";
-import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo } from "@/lib/github";
+import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo, CopilotTask } from "@/lib/github";
 import RepoSettingsPanel from "./RepoSettingsPanel";
 import PublishToCanvasPage from "./PublishToCanvasPage";
 import { buildBulkFolderNames } from "@/lib/bulk-folders";
@@ -50,7 +52,13 @@ export default function RepoDetail() {
   const [branch, setBranch] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
   const [defaultBranch, setDefaultBranch] = useState("");
-  const [tab, setTab] = useState<"files" | "branches" | "pulls" | "actions" | "settings">("files");
+  const [tab, setTab] = useState<"files" | "branches" | "pulls" | "actions" | "copilot" | "settings">("files");
+  const [copilotTaskTitle, setCopilotTaskTitle] = useState("");
+  const [copilotTaskBody, setCopilotTaskBody] = useState("");
+  const [copilotBusy, setCopilotBusy] = useState(false);
+  const [copilotTaskMsg, setCopilotTaskMsg] = useState<{ kind: "success" | "error"; text: string; url?: string } | null>(null);
+  const [copilotTasks, setCopilotTasks] = useState<CopilotTask[]>([]);
+  const [copilotTasksState, setCopilotTasksState] = useState<"idle" | "loading" | "error">("idle");
 
   // Files tab state
   const [tree, setTree] = useState<RepoTreeEntry[]>([]);
@@ -406,6 +414,56 @@ export default function RepoDetail() {
     setNewFolderMsg("");
   };
 
+  // Load the loaded repo's Copilot tasks when the Copilot tab is active.
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (!repoRef || tab !== "copilot") return;
+    let cancelled = false;
+    setCopilotTasksState("loading");
+    (async () => {
+      const r = await listCopilotTasksAction(repoRef);
+      if (cancelled) return;
+      if ("error" in r) {
+        setCopilotTasksState("error");
+        return;
+      }
+      setCopilotTasks(r.tasks);
+      setCopilotTasksState("idle");
+    })();
+    return () => {
+      cancelled = true;
+    };
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [repoRef, tab]);
+
+  const reloadCopilotTasks = async () => {
+    if (!repoRef) return;
+    setCopilotTasksState("loading");
+    const r = await listCopilotTasksAction(repoRef);
+    if ("error" in r) {
+      setCopilotTasksState("error");
+      return;
+    }
+    setCopilotTasks(r.tasks);
+    setCopilotTasksState("idle");
+  };
+
+  const handleCreateCopilotTask = async () => {
+    if (!repoRef || !copilotTaskTitle.trim()) return;
+    setCopilotBusy(true);
+    setCopilotTaskMsg(null);
+    const r = await createCopilotTaskAction(repoRef, copilotTaskTitle, copilotTaskBody);
+    setCopilotBusy(false);
+    if ("error" in r) {
+      setCopilotTaskMsg({ kind: "error", text: r.error });
+      return;
+    }
+    setCopilotTaskMsg({ kind: "success", text: `Created task #${r.issueNumber} and assigned Copilot.`, url: r.issueUrl });
+    setCopilotTaskTitle("");
+    setCopilotTaskBody("");
+    await reloadCopilotTasks();
+  };
+
   const reloadBranches = async () => {
     if (!repoRef) return;
     const r = await listGithubBranchesAction(repoRef);
@@ -727,7 +785,7 @@ export default function RepoDetail() {
         <>
           <Tabs
             value={tab}
-            onChange={(_, v) => setTab(v as "files" | "branches" | "pulls" | "actions" | "settings")}
+            onChange={(_, v) => setTab(v as "files" | "branches" | "pulls" | "actions" | "copilot" | "settings")}
             sx={{
               marginTop: 2,
               "& .MuiTab-root": {
@@ -739,6 +797,7 @@ export default function RepoDetail() {
             <Tab label="Branches" value="branches" disableRipple />
             <Tab label="Pull requests" value="pulls" disableRipple />
             <Tab label="Actions" value="actions" disableRipple />
+            <Tab label="Copilot" value="copilot" disableRipple />
             <Tab label="Settings" value="settings" disableRipple />
           </Tabs>
 
@@ -1449,6 +1508,99 @@ export default function RepoDetail() {
                     )}
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {tab === "copilot" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 500, marginBottom: 8 }}>
+                  Assign a Copilot coding agent
+                </label>
+                <p className={styles.fieldHint} style={{ marginTop: 0 }}>
+                  Describe a task. It is opened as an issue on {repoRef} and assigned to GitHub&apos;s Copilot coding
+                  agent, which works on it and opens a pull request.
+                </p>
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="Task title, e.g. Add input validation to the signup form"
+                  value={copilotTaskTitle}
+                  onChange={(e) => setCopilotTaskTitle(e.target.value)}
+                  disabled={copilotBusy}
+                  sx={{ marginBottom: 1 }}
+                />
+                <TextField
+                  size="small"
+                  fullWidth
+                  multiline
+                  minRows={4}
+                  placeholder="Details for Copilot (optional): acceptance criteria, files to touch, constraints..."
+                  value={copilotTaskBody}
+                  onChange={(e) => setCopilotTaskBody(e.target.value)}
+                  disabled={copilotBusy}
+                  sx={{ marginBottom: 1 }}
+                />
+                <Button
+                  variant="contained"
+                  size="small"
+                  disabled={copilotBusy || !copilotTaskTitle.trim()}
+                  onClick={handleCreateCopilotTask}
+                >
+                  {copilotBusy ? "Assigning..." : "Assign to Copilot"}
+                </Button>
+                {copilotTaskMsg && (
+                  <p
+                    className={copilotTaskMsg.kind === "error" ? styles.error : styles.fieldHint}
+                    style={{ marginTop: 8 }}
+                  >
+                    {copilotTaskMsg.text}
+                    {copilotTaskMsg.url && (
+                      <>
+                        {" "}
+                        <a href={copilotTaskMsg.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                          view the issue
+                        </a>
+                      </>
+                    )}
+                  </p>
+                )}
+              </div>
+
+              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <label style={{ fontSize: "0.9rem", fontWeight: 500 }}>Copilot tasks</label>
+                  <Button variant="text" size="small" onClick={reloadCopilotTasks} disabled={copilotTasksState === "loading"}>
+                    Refresh
+                  </Button>
+                </div>
+                {copilotTasksState === "loading" && (
+                  <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+                    <CircularProgress size={24} />
+                  </div>
+                )}
+                {copilotTasksState === "error" && <p className={styles.error}>Could not load Copilot tasks.</p>}
+                {copilotTasksState === "idle" && copilotTasks.length === 0 && (
+                  <p className={styles.fieldHint}>No Copilot tasks yet.</p>
+                )}
+                {copilotTasksState === "idle" &&
+                  copilotTasks.map((t) => (
+                    <div
+                      key={t.number}
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderTop: "1px solid var(--field-border)" }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <a href={t.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                          #{t.number}
+                        </a>
+                        <span style={{ marginLeft: 8 }}>{t.title}</span>
+                      </div>
+                      <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)", flexShrink: 0 }}>
+                        {t.isPullRequest ? "PR" : "issue"} · {t.state}
+                      </span>
+                    </div>
+                  ))}
               </div>
             </div>
           )}

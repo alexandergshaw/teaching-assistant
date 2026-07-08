@@ -7,6 +7,9 @@ name: Apply Supabase migrations
 #   SUPABASE_ACCESS_TOKEN  - personal access token (supabase.com/dashboard/account/tokens)
 #   SUPABASE_PROJECT_ID    - project Reference ID (Project Settings > General)
 #   SUPABASE_DB_PASSWORD   - database password (Project Settings > Database)
+#
+# Manually re-triggered to apply the pending microsoft_credentials and
+# syllabus_templates migrations.
 
 on:
   push:

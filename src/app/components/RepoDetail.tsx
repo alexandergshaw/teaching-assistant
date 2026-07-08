@@ -1579,7 +1579,7 @@ export default function RepoDetail() {
           )}
           {tab === "pulls" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+              <div className={styles.ghPanel}>
                 <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>
                   Open a pull request
                 </label>
@@ -1644,8 +1644,8 @@ export default function RepoDetail() {
                 )}
               </div>
 
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div className={styles.ghPanel}>
+                <div className={styles.ghPanelHead}>
                   <label className={styles.panelTitle}>
                     Pull requests
                   </label>
@@ -1679,36 +1679,41 @@ export default function RepoDetail() {
                     const isOpen = p.state.toLowerCase() === "open";
                     const files = filesByPr[p.number];
                     return (
-                      <div key={p.number} id={`pr-row-${p.number}`} style={{ padding: "10px 0", borderTop: "1px solid var(--field-border)" }}>
-                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
-                          <div style={{ flex: "1 1 240px", minWidth: 0 }}>
-                            <a href={p.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
-                              #{p.number}
-                            </a>
-                            <span style={{ marginLeft: 8 }}>{p.title}</span>
-                            <div style={{ fontSize: "0.8rem", fontFamily: "monospace", marginTop: 4, color: "var(--text-secondary)" }}>
-                              {p.head} into {p.base}
+                      <div key={p.number} id={`pr-row-${p.number}`} className={styles.ghRow}>
+                        <div className={styles.ghRowTop}>
+                          <div className={styles.ghRowTitle}>
+                            <div>
+                              <a href={p.htmlUrl} target="_blank" rel="noreferrer" className={styles.ghRowNum}>
+                                #{p.number}
+                              </a>
+                              <span style={{ marginLeft: 8 }} className={styles.ghRowName}>{p.title}</span>
+                            </div>
+                            <div className={`${styles.ghMeta} ${styles.ghMetaMono}`} style={{ marginTop: 4 }}>
+                              {p.head} → {p.base}
                               {p.user ? ` · ${p.user}` : ""}
                             </div>
-                            <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-                              {p.state}
-                              {p.draft ? " · draft" : ""}
+                            <div className={styles.ghBadges} style={{ marginTop: 8 }}>
+                              <span className={`${styles.ghBadge} ${p.draft ? styles.ghBadgeNeutral : isOpen ? styles.ghBadgeSuccess : styles.ghBadgeNeutral}`}>
+                                {p.draft ? "Draft" : isOpen ? "Open" : "Closed"}
+                              </span>
                               {approvedBy.length > 0 && (
-                                <span style={{ color: "var(--success)", marginLeft: 8, fontWeight: 600 }}>
-                                  Approved{approvedBy.length ? ` by ${approvedBy.join(", ")}` : ""}
+                                <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>
+                                  <span className={styles.ghDot} />
+                                  Approved by {approvedBy.join(", ")}
                                 </span>
                               )}
                               {changesBy.length > 0 && (
-                                <span style={{ color: "var(--warning)", marginLeft: 8, fontWeight: 600 }}>
+                                <span className={`${styles.ghBadge} ${styles.ghBadgeWarning}`}>
+                                  <span className={styles.ghDot} />
                                   Changes requested by {changesBy.join(", ")}
                                 </span>
                               )}
                               {isOpen && !p.draft && approvedBy.length === 0 && changesBy.length === 0 && (
-                                <span style={{ marginLeft: 8 }}>No reviews yet</span>
+                                <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>No reviews yet</span>
                               )}
                             </div>
                           </div>
-                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <div className={styles.ghActions}>
                             <Button variant="text" size="small" onClick={() => togglePrFiles(p.number)}>
                               {expandedPr === p.number ? "Hide changes" : "View changes"}
                             </Button>
@@ -2009,7 +2014,7 @@ export default function RepoDetail() {
 
           {tab === "copilot" && (
             <div style={{ display: "flex", gap: 16, marginTop: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, flex: "1 1 320px", minWidth: 280 }}>
+              <div className={styles.ghPanel} style={{ flex: "1 1 320px", minWidth: 280 }}>
                 <label className={styles.panelTitle} style={{ display: "block", marginBottom: 8 }}>
                   Assign a Copilot coding agent
                 </label>
@@ -2063,10 +2068,10 @@ export default function RepoDetail() {
                 )}
               </div>
 
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, flex: "1 1 320px", minWidth: 280 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
+              <div className={styles.ghPanel} style={{ flex: "1 1 320px", minWidth: 280 }}>
+                <div className={styles.ghPanelHead}>
                   <label className={styles.panelTitle}>Copilot tasks</label>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div className={styles.ghPanelHeadRight}>
                     {copilotLastLoaded && (
                       <span style={{ fontSize: "0.72rem", color: "var(--text-secondary)" }}>updated {formatRelative(copilotLastLoaded)}</span>
                     )}
@@ -2086,54 +2091,58 @@ export default function RepoDetail() {
                 )}
                 {copilotTasks.map((t) => {
                   const pr = t.pr;
-                  const prState = pr
+                  const prBadge = pr
                     ? pr.state === "MERGED"
-                      ? { label: "Merged", color: "#8250df" }
+                      ? { label: "Merged", cls: styles.ghBadgeMerged }
                       : pr.isDraft
-                        ? { label: "Draft", color: "var(--text-secondary)" }
+                        ? { label: "Draft", cls: styles.ghBadgeNeutral }
                         : pr.state === "OPEN"
-                          ? { label: "Open", color: "var(--success)" }
-                          : { label: "Closed", color: "var(--danger)" }
+                          ? { label: "Open", cls: styles.ghBadgeSuccess }
+                          : { label: "Closed", cls: styles.ghBadgeDanger }
                     : null;
                   const checks = pr?.checks;
-                  const checkChip = checks
+                  const checkBadge = checks
                     ? checks === "SUCCESS"
-                      ? { label: "checks passing", color: "var(--success)" }
+                      ? { label: "checks passing", cls: styles.ghBadgeSuccess }
                       : checks === "FAILURE" || checks === "ERROR"
-                        ? { label: "checks failing", color: "var(--danger)" }
-                        : { label: "checks running", color: "var(--warning)" }
+                        ? { label: "checks failing", cls: styles.ghBadgeDanger }
+                        : { label: "checks running", cls: styles.ghBadgeWarning }
                     : null;
                   const review = pr?.reviewDecision;
-                  const reviewLabel =
+                  const reviewBadge =
                     review === "APPROVED"
-                      ? "approved"
+                      ? { label: "approved", cls: styles.ghBadgeSuccess }
                       : review === "CHANGES_REQUESTED"
-                        ? "changes requested"
+                        ? { label: "changes requested", cls: styles.ghBadgeWarning }
                         : review === "REVIEW_REQUIRED"
-                          ? "review required"
-                          : "";
+                          ? { label: "review required", cls: styles.ghBadgeNeutral }
+                          : null;
                   return (
-                    <div key={t.number} style={{ padding: "10px 0", borderTop: "1px solid var(--field-border)" }}>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                        <a href={t.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", flexShrink: 0 }}>
-                          #{t.number}
-                        </a>
-                        <span style={{ flex: 1, minWidth: 0, fontWeight: 500 }}>{t.title}</span>
-                        <span style={{ fontSize: "0.72rem", fontWeight: 600, color: t.state === "OPEN" ? "var(--success)" : "var(--text-secondary)" }}>
+                    <div key={t.number} className={styles.ghRow}>
+                      <div className={styles.ghRowTop}>
+                        <div className={styles.ghRowTitle}>
+                          <a href={t.htmlUrl} target="_blank" rel="noreferrer" className={styles.ghRowNum}>
+                            #{t.number}
+                          </a>
+                          <span style={{ marginLeft: 8 }} className={styles.ghRowName}>{t.title}</span>
+                        </div>
+                        <span className={`${styles.ghBadge} ${t.state === "OPEN" ? styles.ghBadgeSuccess : styles.ghBadgeNeutral}`}>
                           {t.state.toLowerCase()}
                         </span>
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 4, fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                        {t.createdAt && <span>opened {formatRelative(t.createdAt)}</span>}
-                        {t.updatedAt && <span>· updated {formatRelative(t.updatedAt)}</span>}
-                        {t.labels.map((l) => (
-                          <span key={l} style={{ border: "1px solid var(--field-border)", borderRadius: 999, padding: "0 8px", lineHeight: "1.6" }}>
-                            {l}
-                          </span>
-                        ))}
+                      <div className={styles.ghMeta}>
+                        opened {formatRelative(t.createdAt)}
+                        {t.updatedAt ? ` · updated ${formatRelative(t.updatedAt)}` : ""}
                       </div>
+                      {t.labels.length > 0 && (
+                        <div className={styles.ghBadges}>
+                          {t.labels.map((l) => (
+                            <span key={l} className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>{l}</span>
+                          ))}
+                        </div>
+                      )}
                       {pr ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6, fontSize: "0.78rem" }}>
+                        <div className={styles.ghBadges}>
                           <button
                             type="button"
                             className={styles.linkButton}
@@ -2142,20 +2151,19 @@ export default function RepoDetail() {
                           >
                             PR #{pr.number}
                           </button>
-                          <a href={pr.url} target="_blank" rel="noreferrer" style={{ color: "var(--text-secondary)" }}>
-                            GitHub
-                          </a>
-                          {prState && <span style={{ fontWeight: 600, color: prState.color }}>{prState.label}</span>}
-                          {checkChip && <span style={{ color: checkChip.color }}>{checkChip.label}</span>}
-                          <span style={{ color: "var(--text-secondary)" }}>
+                          {prBadge && <span className={`${styles.ghBadge} ${prBadge.cls}`}>{prBadge.label}</span>}
+                          {checkBadge && <span className={`${styles.ghBadge} ${checkBadge.cls}`}>{checkBadge.label}</span>}
+                          {reviewBadge && <span className={`${styles.ghBadge} ${reviewBadge.cls}`}>{reviewBadge.label}</span>}
+                          <span className={styles.ghMeta}>
                             <span style={{ color: "var(--success)" }}>+{pr.additions}</span>{" "}
                             <span style={{ color: "var(--danger)" }}>-{pr.deletions}</span> · {pr.changedFiles} file{pr.changedFiles === 1 ? "" : "s"}
                           </span>
-                          {reviewLabel && <span style={{ color: "var(--text-secondary)" }}>· {reviewLabel}</span>}
-                          {pr.updatedAt && <span style={{ color: "var(--text-secondary)" }}>· {formatRelative(pr.updatedAt)}</span>}
+                          <a href={pr.url} target="_blank" rel="noreferrer" className={styles.ghMeta}>
+                            GitHub
+                          </a>
                         </div>
                       ) : (
-                        <div style={{ marginTop: 6, fontSize: "0.78rem", color: "var(--text-secondary)" }}>
+                        <div className={styles.ghMeta}>
                           {t.state === "OPEN" ? "No pull request yet — the agent may still be working." : "No pull request."}
                         </div>
                       )}

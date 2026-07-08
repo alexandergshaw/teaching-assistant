@@ -1082,6 +1082,135 @@ button.courseResourceValue:disabled {
   color: var(--text-secondary);
 }
 
+/* ── Shared GitHub panel / row / badge styling (Pull requests + Copilot) ── */
+.ghPanel {
+  border: 1px solid var(--field-border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: var(--field-background);
+}
+
+.ghPanelHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.ghPanelHeadRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ghRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 0;
+  border-top: 1px solid var(--field-border);
+}
+
+.ghRowTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ghRowTitle {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.ghRowNum {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.ghRowName {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ghMeta {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.ghMetaMono {
+  font-family: monospace;
+}
+
+.ghActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: none;
+}
+
+.ghBadges {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ghBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.ghBadgeNeutral {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+}
+
+.ghBadgeSuccess {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+}
+
+.ghBadgeDanger {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+}
+
+.ghBadgeWarning {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+}
+
+.ghBadgeAccent {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+
+/* GitHub's "merged" purple, the one status without an app token. */
+.ghBadgeMerged {
+  color: #8250df;
+  background: color-mix(in srgb, #8250df 15%, transparent);
+}
+
+.ghDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
 /* Collapsible institution groups on the Courses tab. */
 .courseGroups {
   display: flex;

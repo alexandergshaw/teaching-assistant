@@ -37,6 +37,7 @@ import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, Workflow
 import RepoSettingsPanel from "./RepoSettingsPanel";
 import PublishToCanvasPage from "./PublishToCanvasPage";
 import { buildBulkFolderNames } from "@/lib/bulk-folders";
+import dynamic from "next/dynamic";
 import Typeahead from "./ui/Typeahead";
 import { submitOnEnter } from "./ui/submitOnEnter";
 import Tabs from "@mui/material/Tabs";
@@ -51,6 +52,14 @@ import styles from "../page.module.css";
 
 const VC_REPO_KEY = "ta-vc-repo";
 const VC_BRANCH_KEY = "ta-vc-branch";
+
+// Monaco (the VS Code editor) is client-only; load it lazily with SSR disabled.
+const MonacoFileEditor = dynamic(() => import("./MonacoFileEditor"), {
+  ssr: false,
+  loading: () => (
+    <div style={{ padding: 16, fontSize: "0.85rem", color: "var(--text-secondary)" }}>Loading editor...</div>
+  ),
+});
 
 export default function RepoDetail() {
   const [repos, setRepos] = useState<GithubRepo[]>([]);
@@ -1245,18 +1254,11 @@ export default function RepoDetail() {
                       </div>
                     ) : (
                       <>
-                        <TextField
-                          multiline
-                          fullWidth
-                          minRows={16}
+                        <MonacoFileEditor
+                          path={selectedPath}
                           value={editContent}
-                          onChange={(e) => setEditContent(e.target.value)}
-                          sx={{
-                            "& textarea": {
-                              fontFamily: "monospace",
-                              fontSize: "0.8rem",
-                            },
-                          }}
+                          onChange={setEditContent}
+                          height="60vh"
                         />
                         <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 12, flexWrap: "wrap" }}>
                           <TextField

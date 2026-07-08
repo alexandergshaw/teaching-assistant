@@ -16,6 +16,13 @@ on:
       - ".github/workflows/supabase-migrations.yml"
   workflow_dispatch:
 
+# Serialize migration runs so two quick pushes never apply migrations at the same
+# time, and never cancel a run mid-apply (a half-applied migration is worse than a
+# queued one).
+concurrency:
+  group: supabase-migrations
+  cancel-in-progress: false
+
 jobs:
   migrate:
     runs-on: ubuntu-latest

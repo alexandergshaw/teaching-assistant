@@ -6,7 +6,7 @@
 --
 -- A partial/mismatched `courses` table (missing columns) was left behind by an
 -- earlier interrupted apply and never held data (every insert errored). Drop it
--- and recreate the correct, final schema so this migration is a reliable one-shot
+-- and recreate the correct schema so this migration is a reliable one-shot
 -- regardless of what partial state exists. (No-op DROP on a fresh database.)
 
 drop table if exists public.courses cascade;
@@ -18,9 +18,15 @@ create table public.courses (
   course_code text,
   term text,
   canvas_url text,
-  -- Multiple codebases: a jsonb array of { repo, branch }.
+  -- Multiple codebases: a jsonb array of { repo, branch } (current app).
   repos jsonb not null default '[]'::jsonb,
   github_org text,
+  -- Legacy single-repo columns, kept nullable so older app builds that still
+  -- write github_repo/github_branch keep working during a rolling deploy. The
+  -- current app reads/writes `repos`; these are superseded and can be dropped
+  -- once every client is on the new build.
+  github_repo text,
+  github_branch text,
   textbook text,
   -- The linked finalized syllabus; keep the course if the syllabus is deleted.
   syllabus_id uuid references public.course_syllabi (id) on delete set null,

@@ -147,6 +147,9 @@ export default function RepoDetail() {
   const [expandedPr, setExpandedPr] = useState<number | null>(null);
   const [filesLoadingPr, setFilesLoadingPr] = useState<number | null>(null);
   const [reviewingPr, setReviewingPr] = useState<number | null>(null);
+  // A PR to jump to (from the Copilot tab): switch to Pull requests, expand it,
+  // and scroll it into view once the list has loaded.
+  const [focusPr, setFocusPr] = useState<number | null>(null);
 
   // Actions tab state
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
@@ -357,6 +360,42 @@ export default function RepoDetail() {
     };
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [pulls, tab, repoRef]);
+
+  // Once the Pull requests list is loaded, jump to the PR a Copilot task linked
+  // to: expand its diff and scroll it into view.
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (focusPr == null || tab !== "pulls" || pullsState !== "idle") return;
+    if (!pulls.some((p) => p.number === focusPr)) return;
+    const n = focusPr;
+    setFocusPr(null);
+    setExpandedPr(n);
+    let cancelled = false;
+    (async () => {
+      if (!filesByPr[n]) {
+        setFilesLoadingPr(n);
+        const r = await listPullRequestFilesAction(repoRef, n);
+        if (cancelled) return;
+        setFilesLoadingPr(null);
+        if (!("error" in r)) setFilesByPr((m) => ({ ...m, [n]: r.files }));
+      }
+    })();
+    const timer = setTimeout(() => {
+      document.getElementById(`pr-row-${n}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [focusPr, tab, pullsState, pulls, repoRef, filesByPr]);
+
+  // Open a specific PR in the Pull requests tab (used from the Copilot tab).
+  const openPrInPullsTab = (n: number) => {
+    setPrState("all");
+    setFocusPr(n);
+    setTab("pulls");
+  };
 
   // Load workflows and runs when the actions tab is active
   useEffect(() => {
@@ -1640,7 +1679,7 @@ export default function RepoDetail() {
                     const isOpen = p.state.toLowerCase() === "open";
                     const files = filesByPr[p.number];
                     return (
-                      <div key={p.number} style={{ padding: "10px 0", borderTop: "1px solid var(--field-border)" }}>
+                      <div key={p.number} id={`pr-row-${p.number}`} style={{ padding: "10px 0", borderTop: "1px solid var(--field-border)" }}>
                         <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
                           <div style={{ flex: "1 1 240px", minWidth: 0 }}>
                             <a href={p.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
@@ -2095,8 +2134,16 @@ export default function RepoDetail() {
                       </div>
                       {pr ? (
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6, fontSize: "0.78rem" }}>
-                          <a href={pr.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            onClick={() => openPrInPullsTab(pr.number)}
+                            title="Review this pull request in the Pull requests tab"
+                          >
                             PR #{pr.number}
+                          </button>
+                          <a href={pr.url} target="_blank" rel="noreferrer" style={{ color: "var(--text-secondary)" }}>
+                            GitHub
                           </a>
                           {prState && <span style={{ fontWeight: 600, color: prState.color }}>{prState.label}</span>}
                           {checkChip && <span style={{ color: checkChip.color }}>{checkChip.label}</span>}

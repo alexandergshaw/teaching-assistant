@@ -36,6 +36,7 @@ import {
 import type { GithubRepo, RepoTreeEntry, PullRequestInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo, CopilotTask, ArtifactInfo, PendingDeployment } from "@/lib/github";
 import RepoSettingsPanel from "./RepoSettingsPanel";
 import PublishToCanvasPage from "./PublishToCanvasPage";
+import CopilotChatPanel from "./CopilotChatPanel";
 import { buildBulkFolderNames } from "@/lib/bulk-folders";
 import dynamic from "next/dynamic";
 import Typeahead from "./ui/Typeahead";
@@ -1240,7 +1241,8 @@ export default function RepoDetail() {
                 </div>
               </div>
 
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+                <div style={{ flex: "2 1 400px", minWidth: 320 }}>
                 {!selectedPath ? (
                   <p className={styles.fieldHint}>Select a file to view and edit it.</p>
                 ) : (
@@ -1291,6 +1293,12 @@ export default function RepoDetail() {
                       </>
                     )}
                   </>
+                )}
+                </div>
+                {selectedPath && (
+                  <div style={{ flex: "1 1 300px", minWidth: 280 }}>
+                    <CopilotChatPanel filePath={selectedPath} fileContent={editContent} />
+                  </div>
                 )}
               </div>
             </div>

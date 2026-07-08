@@ -228,6 +228,13 @@ import {
   type ArtifactInfo,
   type PendingDeployment,
 } from "@/lib/github";
+import {
+  listGithubModels,
+  chatWithGithubModel,
+  type GithubModel,
+  type ModelUsage,
+  type ChatMessage,
+} from "@/lib/github-models";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
 import { filesToLlmParts } from "@/lib/llm-files";
 import {
@@ -5320,6 +5327,31 @@ export async function bulkMovePathsAction(
     return await movePaths(parsed.owner, parsed.repo, branch.trim(), moves, message?.trim() || `Move ${paths.length} item(s)`);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not move the selected items." };
+  }
+}
+
+/** List the GitHub Models available to the account (for the file-editor chat). */
+export async function listGithubModelsAction(): Promise<{ models: GithubModel[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return { models: await listGithubModels() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list GitHub models." };
+  }
+}
+
+/** Run a Copilot (GitHub Models) chat completion for the file-editor chat panel. */
+export async function copilotChatAction(
+  model: string,
+  messages: ChatMessage[]
+): Promise<{ content: string; usage: ModelUsage } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!model.trim()) return { error: "Choose a model." };
+    if (!messages || messages.length === 0) return { error: "Enter a message." };
+    return await chatWithGithubModel(model, messages);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "The chat request failed." };
   }
 }
 

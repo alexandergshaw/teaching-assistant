@@ -6607,7 +6607,7 @@ export async function mergePullRequestAction(repoRef: string, prNumber: number, 
  */
 export async function getRepoAttentionAction(
   repoRef: string
-): Promise<{ openPrs: number; runsNeedingApproval: number } | { error: string }> {
+): Promise<{ openPrs: number; agentPrs: number; runsNeedingApproval: number } | { error: string }> {
   try {
     await requireOwner();
     const parsed = parseRepoRef(repoRef);
@@ -6617,8 +6617,12 @@ export async function getRepoAttentionAction(
       listWorkflowRuns(parsed.owner, parsed.repo, { status: "waiting", perPage: 50 }),
       listWorkflowRuns(parsed.owner, parsed.repo, { status: "action_required", perPage: 50 }),
     ]);
+    const ready = pulls.filter((p) => !p.draft);
     return {
-      openPrs: pulls.filter((p) => !p.draft).length,
+      openPrs: ready.length,
+      // Copilot coding-agent PRs work on copilot/* branches; a ready (non-draft)
+      // one means the agent finished and is waiting on review.
+      agentPrs: ready.filter((p) => p.head.startsWith("copilot/")).length,
       runsNeedingApproval: waiting.length + actionRequired.length,
     };
   } catch (err) {

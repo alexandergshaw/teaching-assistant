@@ -9,6 +9,8 @@ const VC_REPO_KEY = "ta-vc-repo";
 type VcCountsValue = {
   /** Open, non-draft pull requests (agent or human) awaiting review/merge. */
   openPrs: number;
+  /** Ready (non-draft) PRs opened by the Copilot coding agent. */
+  agentPrs: number;
   /** Workflow runs blocked on an approval (waiting / action_required). */
   runsNeedingApproval: number;
   total: number;
@@ -26,20 +28,20 @@ const VcCountsContext = createContext<VcCountsValue | null>(null);
  * after merges/reviews/run approvals.
  */
 export function VcCountsProvider({ children }: { children: React.ReactNode }) {
-  const [counts, setCounts] = useState({ openPrs: 0, runsNeedingApproval: 0 });
+  const [counts, setCounts] = useState({ openPrs: 0, agentPrs: 0, runsNeedingApproval: 0 });
   // Remember the last repo fetched so refresh() without an argument re-uses it.
   const repoRefRef = useRef<string>("");
 
   const fetchCounts = useCallback(async (repoRef: string) => {
     if (!repoRef.trim()) {
-      setCounts({ openPrs: 0, runsNeedingApproval: 0 });
+      setCounts({ openPrs: 0, agentPrs: 0, runsNeedingApproval: 0 });
       return;
     }
     repoRefRef.current = repoRef;
     const r = await getRepoAttentionAction(repoRef);
     // Ignore stale responses after a quick repo switch.
     if (repoRefRef.current !== repoRef || "error" in r) return;
-    setCounts({ openPrs: r.openPrs, runsNeedingApproval: r.runsNeedingApproval });
+    setCounts({ openPrs: r.openPrs, agentPrs: r.agentPrs, runsNeedingApproval: r.runsNeedingApproval });
   }, []);
 
   // Load on mount for the remembered repo (await-first so no sync setState).
@@ -51,7 +53,7 @@ export function VcCountsProvider({ children }: { children: React.ReactNode }) {
       repoRefRef.current = saved;
       const r = await getRepoAttentionAction(saved);
       if (cancelled || repoRefRef.current !== saved || "error" in r) return;
-      setCounts({ openPrs: r.openPrs, runsNeedingApproval: r.runsNeedingApproval });
+      setCounts({ openPrs: r.openPrs, agentPrs: r.agentPrs, runsNeedingApproval: r.runsNeedingApproval });
     })();
     return () => {
       cancelled = true;
@@ -77,6 +79,7 @@ export function useVcCounts(): VcCountsValue {
   return (
     useContext(VcCountsContext) ?? {
       openPrs: 0,
+      agentPrs: 0,
       runsNeedingApproval: 0,
       total: 0,
       refresh: () => {},

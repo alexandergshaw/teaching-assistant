@@ -70,7 +70,7 @@ const MonacoFileEditor = dynamic(() => import("./MonacoFileEditor"), {
 });
 
 export default function RepoDetail() {
-  const { openPrs: attentionPrs, runsNeedingApproval: attentionRuns, refresh: refreshVcCounts } = useVcCounts();
+  const { openPrs: attentionPrs, agentPrs: attentionAgents, runsNeedingApproval: attentionRuns, refresh: refreshVcCounts } = useVcCounts();
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [reposState, setReposState] = useState<"loading" | "ready" | "error">("loading");
   const [repoRef, setRepoRef] = useState(() =>
@@ -1322,7 +1322,16 @@ export default function RepoDetail() {
               value="actions"
               disableRipple
             />
-            <Tab label="Copilot" value="copilot" disableRipple />
+            <Tab
+              label={
+                <span className={styles.tabLabelWrap}>
+                  Copilot
+                  {attentionAgents > 0 && <span className={styles.navBadge}>{attentionAgents}</span>}
+                </span>
+              }
+              value="copilot"
+              disableRipple
+            />
             <Tab label="Settings" value="settings" disableRipple />
           </Tabs>
 
@@ -1783,10 +1792,9 @@ export default function RepoDetail() {
           )}
           {tab === "pulls" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
-              <div className={styles.ghPanel}>
-                <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>
-                  Open a pull request
-                </label>
+              <details className={styles.adaptDisclosure} style={{ marginTop: 0 }}>
+                <summary>Open a pull request</summary>
+                <div className={styles.adaptDisclosureBody}>
                 <TextField
                   size="small"
                   fullWidth
@@ -1835,23 +1843,26 @@ export default function RepoDetail() {
                 >
                   {prBusy ? "Opening..." : "Create pull request"}
                 </Button>
-                {prMsg && (
-                  <p
-                    style={{
-                      marginTop: 8,
-                      fontSize: "0.85rem",
-                      color: prMsg.startsWith("Error") ? "var(--danger)" : "var(--success)",
-                    }}
-                  >
-                    {prMsg}
-                  </p>
-                )}
-              </div>
+                </div>
+              </details>
+
+              {prMsg && (
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "0.85rem",
+                    color: prMsg.startsWith("Error") ? "var(--danger)" : "var(--success)",
+                  }}
+                >
+                  {prMsg}
+                </p>
+              )}
 
               <div className={styles.ghPanel}>
                 <div className={styles.ghPanelHead}>
                   <label className={styles.panelTitle}>
                     Pull requests
+                    {attentionPrs > 0 && <span className={styles.navBadge} style={{ marginLeft: 8 }}>{attentionPrs}</span>}
                   </label>
                   <TextField
                     select

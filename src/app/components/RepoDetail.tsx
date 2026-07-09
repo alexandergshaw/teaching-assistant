@@ -178,6 +178,7 @@ export default function RepoDetail() {
   const [expandedPr, setExpandedPr] = useState<number | null>(null);
   const [filesLoadingPr, setFilesLoadingPr] = useState<number | null>(null);
   const [reviewingPr, setReviewingPr] = useState<number | null>(null);
+  const [approveMergingPr, setApproveMergingPr] = useState<number | null>(null);
   // A PR to jump to (from the Copilot tab): switch to Pull requests, expand it,
   // and scroll it into view once the list has loaded.
   const [focusPr, setFocusPr] = useState<number | null>(null);
@@ -779,6 +780,33 @@ export default function RepoDetail() {
       return;
     }
     setPrMsg(`Merged #${n}.`);
+    await reloadPulls();
+    refreshVcCounts();
+  };
+
+  // Approve and merge a PR in one action. GitHub 422s on self-approval, so we skip approval
+  // silently for PRs authored by the current user and proceed to merge.
+  const handleApproveAndMerge = async (n: number) => {
+    setApproveMergingPr(n);
+    setPrMsg(null);
+    let approvalNote = "";
+    const rev = await reviewPullRequestAction(repoRef, n, "APPROVE");
+    if ("error" in rev) {
+      if (/own pull request/i.test(rev.error)) {
+        approvalNote = " (approval skipped: you authored this PR)";
+      } else {
+        setPrMsg(`Error approving #${n}: ${rev.error}`);
+        setApproveMergingPr(null);
+        return;
+      }
+    }
+    const r = await mergePullRequestAction(repoRef, n, mergeMethod[n] ?? "merge");
+    setApproveMergingPr(null);
+    if ("error" in r) {
+      setPrMsg(`Error merging #${n}: ${r.error}`);
+      return;
+    }
+    setPrMsg(approvalNote ? `Merged #${n}.${approvalNote}` : `Approved and merged #${n}.`);
     await reloadPulls();
     refreshVcCounts();
   };
@@ -1938,7 +1966,7 @@ export default function RepoDetail() {
                                   variant="outlined"
                                   size="small"
                                   color="success"
-                                  disabled={reviewingPr === p.number}
+                                  disabled={reviewingPr === p.number || approveMergingPr === p.number}
                                   onClick={() => handleReviewPr(p.number, "APPROVE")}
                                 >
                                   {reviewingPr === p.number ? "Working..." : "Approve"}
@@ -1947,7 +1975,7 @@ export default function RepoDetail() {
                                   variant="text"
                                   size="small"
                                   color="warning"
-                                  disabled={reviewingPr === p.number}
+                                  disabled={reviewingPr === p.number || approveMergingPr === p.number}
                                   onClick={() => handleReviewPr(p.number, "REQUEST_CHANGES")}
                                 >
                                   Request changes
@@ -1968,7 +1996,16 @@ export default function RepoDetail() {
                                 <Button
                                   variant="contained"
                                   size="small"
-                                  disabled={mergingPr === p.number}
+                                  color="success"
+                                  disabled={approveMergingPr === p.number || mergingPr === p.number || reviewingPr === p.number}
+                                  onClick={() => handleApproveAndMerge(p.number)}
+                                >
+                                  {approveMergingPr === p.number ? "Working..." : "Approve & merge"}
+                                </Button>
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  disabled={mergingPr === p.number || approveMergingPr === p.number}
                                   onClick={() => handleMerge(p.number)}
                                 >
                                   {mergingPr === p.number ? "Merging..." : "Merge"}

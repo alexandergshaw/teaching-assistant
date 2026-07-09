@@ -20,6 +20,13 @@ interface Take {
   createdAt: number;
 }
 
+interface Stroke {
+  tool: "pen" | "highlighter" | "eraser";
+  color: string;
+  size: number;
+  points: Array<{ x: number; y: number }>;
+}
+
 type RecState = "idle" | "recording" | "paused";
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -41,6 +48,13 @@ export default function RecordingTab() {
   // so changing a select (re)starts the stream - but nothing auto-starts on
   // mount from persisted choices.
   const userPickedRef = useRef(false);
+
+  // Canvas pipeline and annotation refs
+  const pipelineCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const pipelineRafRef = useRef<number | null>(null);
+  const strokesRef = useRef<Stroke[]>([]);
+  const drawingRef = useRef(false);
 
   const [devices, setDevices] = useState<{ cameras: Device[]; mics: Device[] }>({
     cameras: [],
@@ -83,6 +97,120 @@ export default function RecordingTab() {
   const [hasStream, setHasStream] = useState(false);
   // Whether the live stream carries an audio track (drives the meter hint).
   const [hasAudio, setHasAudio] = useState(true);
+
+  // Annotation state
+  const [tool, setTool] = useState<"off" | "pen" | "highlighter" | "eraser">("off");
+  const [penColor, setPenColor] = useState("#ef4444");
+  const [penSize, setPenSize] = useState(4);
+
+  const redrawOverlay = useCallback(() => {
+    const canvas = overlayCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    for (const stroke of strokesRef.current) {
+      ctx.save();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      if (stroke.tool === "eraser") {
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.lineWidth = stroke.size * 4;
+        ctx.strokeStyle = "rgba(0,0,0,1)";
+      } else if (stroke.tool === "pen") {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.lineWidth = stroke.size;
+        ctx.strokeStyle = stroke.color;
+      } else if (stroke.tool === "highlighter") {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.lineWidth = stroke.size * 4;
+        ctx.strokeStyle = stroke.color;
+        ctx.globalAlpha = 0.35;
+      }
+
+      if (stroke.points.length > 0) {
+        ctx.beginPath();
+        ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+        for (let i = 1; i < stroke.points.length; i++) {
+          ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+        }
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+  }, []);
+
+  const sizeCanvases = useCallback((w: number, h: number) => {
+    if (pipelineCanvasRef.current) {
+      pipelineCanvasRef.current.width = w;
+      pipelineCanvasRef.current.height = h;
+    }
+    if (overlayCanvasRef.current) {
+      overlayCanvasRef.current.width = w;
+      overlayCanvasRef.current.height = h;
+    }
+    strokesRef.current = [];
+    redrawOverlay();
+  }, [redrawOverlay]);
+
+  const initPipelineCanvas = useCallback(() => {
+    if (!pipelineCanvasRef.current) {
+      pipelineCanvasRef.current = document.createElement("canvas");
+    }
+  }, []);
+
+  const overlayPoint = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    const c = overlayCanvasRef.current!;
+    const r = c.getBoundingClientRect();
+    let x = ((e.clientX - r.left) / r.width) * c.width;
+    const y = ((e.clientY - r.top) / r.height) * c.height;
+    if (source === "camera" && mirror) {
+      x = c.width - x;
+    }
+    return { x, y };
+  }, [source, mirror]);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (tool === "off") return;
+    const c = overlayCanvasRef.current!;
+    c.setPointerCapture(e.pointerId);
+    drawingRef.current = true;
+    const point = overlayPoint(e);
+    strokesRef.current.push({
+      tool: tool as "pen" | "highlighter" | "eraser",
+      color: penColor,
+      size: penSize,
+      points: [point],
+    });
+    redrawOverlay();
+  }, [tool, penColor, penSize, overlayPoint, redrawOverlay]);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current) return;
+    const lastStroke = strokesRef.current[strokesRef.current.length - 1];
+    if (lastStroke) {
+      lastStroke.points.push(overlayPoint(e));
+      redrawOverlay();
+    }
+  }, [overlayPoint, redrawOverlay]);
+
+  const handlePointerUp = useCallback(() => {
+    drawingRef.current = false;
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    strokesRef.current.pop();
+    redrawOverlay();
+  }, [redrawOverlay]);
+
+  const handleClear = useCallback(() => {
+    strokesRef.current = [];
+    redrawOverlay();
+  }, [redrawOverlay]);
 
   const loadDevices = async () => {
     try {
@@ -170,6 +298,40 @@ export default function RecordingTab() {
     }
   };
 
+  const startPipeline = useCallback(() => {
+    const canvas = pipelineCanvasRef.current;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (source === "camera" && mirror) {
+        ctx.save();
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      }
+      const overlay = overlayCanvasRef.current;
+      if (overlay) {
+        ctx.drawImage(overlay, 0, 0, canvas.width, canvas.height);
+      }
+      pipelineRafRef.current = requestAnimationFrame(draw);
+    };
+    pipelineRafRef.current = requestAnimationFrame(draw);
+  }, [source, mirror]);
+
+  const stopPipeline = useCallback(() => {
+    if (pipelineRafRef.current !== null) {
+      cancelAnimationFrame(pipelineRafRef.current);
+      pipelineRafRef.current = null;
+    }
+  }, []);
+
   const stopMeter = () => {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
@@ -242,9 +404,10 @@ export default function RecordingTab() {
       videoRef.current.srcObject = null;
     }
     stopMeter();
+    stopPipeline();
     setRecState("idle");
     setHasStream(false);
-  }, []);
+  }, [stopPipeline]);
 
   const startPreview = useCallback(async () => {
     try {
@@ -300,6 +463,15 @@ export default function RecordingTab() {
       appliedCfgRef.current = `${source}|${cameraId}|${micId}|${resolution}|${noiseSuppression}|${echoCancellation}|${autoGain}`;
       setHasAudio(stream.getAudioTracks().length > 0);
       setMuted(false);
+
+      // Initialize canvas pipeline
+      initPipelineCanvas();
+      const vt = stream.getVideoTracks()[0];
+      const st = vt?.getSettings?.();
+      const w = st?.width ?? 1280;
+      const h = st?.height ?? 720;
+      sizeCanvases(w, h);
+
       setHasStream(true);
 
       await loadDevices();
@@ -321,7 +493,7 @@ export default function RecordingTab() {
       setError(message);
       await stopEverything();
     }
-  }, [cameraId, micId, resolution, source, noiseSuppression, echoCancellation, autoGain, stopEverything, startMeter]);
+  }, [cameraId, micId, resolution, source, noiseSuppression, echoCancellation, autoGain, stopEverything, startMeter, initPipelineCanvas, sizeCanvases]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -403,8 +575,19 @@ export default function RecordingTab() {
       setElapsed(0);
 
       const mimeType = pickMimeType();
+
+      let recStream: MediaStream = streamRef.current;
+      const canvas = pipelineCanvasRef.current;
+      if (canvas && typeof (canvas as HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream }).captureStream === "function") {
+        startPipeline();
+        const canvasStream = (canvas as HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream }).captureStream?.(30);
+        if (canvasStream) {
+          recStream = new MediaStream([...canvasStream.getVideoTracks(), ...streamRef.current.getAudioTracks()]);
+        }
+      }
+
       const recorder = new MediaRecorder(
-        streamRef.current,
+        recStream,
         mimeType ? { mimeType } : undefined
       );
 
@@ -419,6 +602,7 @@ export default function RecordingTab() {
       };
 
       recorder.onstop = () => {
+        stopPipeline();
         const actualMimeType = recorder.mimeType || mimeType || "video/webm";
         const blob = new Blob(chunksRef.current, { type: actualMimeType });
         const url = URL.createObjectURL(blob);
@@ -641,19 +825,135 @@ export default function RecordingTab() {
         <div className={styles.adaptPanelHeader}>
           <h2 className={styles.adaptPanelTitle}>Stage</h2>
         </div>
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          playsInline
-          style={{
-            width: "100%",
-            maxHeight: "48vh",
-            background: "#0f172a",
-            borderRadius: 12,
-            transform: source === "camera" && mirror ? "scaleX(-1)" : undefined,
-          }}
-        />
+        <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", background: "#0f172a" }}>
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            playsInline
+            style={{
+              display: "block",
+              width: "100%",
+              maxHeight: "48vh",
+              objectFit: "contain",
+              background: "#0f172a",
+              transform: source === "camera" && mirror ? "scaleX(-1)" : undefined,
+            }}
+          />
+          <canvas
+            ref={overlayCanvasRef}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              cursor: tool === "off" ? "default" : "crosshair",
+              pointerEvents: tool === "off" ? "none" : "auto",
+              touchAction: "none",
+            }}
+          />
+        </div>
+
+        {hasStream && tool !== "off" && (
+          <div className={styles.ghActions} style={{ marginBottom: 16 }}>
+            <Button
+              variant={tool === "pen" ? "contained" : "outlined"}
+              size="small"
+              onClick={() => setTool("pen")}
+            >
+              Draw
+            </Button>
+            <Button
+              variant={tool === "highlighter" ? "contained" : "outlined"}
+              size="small"
+              onClick={() => setTool("highlighter")}
+            >
+              Highlight
+            </Button>
+            <Button
+              variant={tool === "eraser" ? "contained" : "outlined"}
+              size="small"
+              onClick={() => setTool("eraser")}
+            >
+              Erase
+            </Button>
+            <Button
+              variant="contained"
+              size="small"
+              onClick={() => setTool("off")}
+            >
+              Done
+            </Button>
+            <input
+              type="color"
+              value={penColor}
+              onChange={(e) => setPenColor(e.target.value)}
+              style={{
+                width: 32,
+                height: 28,
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+              }}
+              aria-label="Annotation color"
+            />
+            <TextField
+              select
+              value={penSize}
+              onChange={(e) => setPenSize(Number(e.target.value))}
+              size="small"
+              sx={{ minWidth: 90 }}
+            >
+              <MenuItem value={2}>Thin</MenuItem>
+              <MenuItem value={4}>Medium</MenuItem>
+              <MenuItem value={8}>Thick</MenuItem>
+            </TextField>
+            <Button
+              variant="text"
+              size="small"
+              onClick={handleUndo}
+            >
+              Undo
+            </Button>
+            <Button
+              variant="text"
+              size="small"
+              onClick={handleClear}
+            >
+              Clear
+            </Button>
+          </div>
+        )}
+
+        {hasStream && tool === "off" && (
+          <div className={styles.ghActions} style={{ marginBottom: 16 }}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => setTool("pen")}
+            >
+              Draw
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => setTool("highlighter")}
+            >
+              Highlight
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => setTool("eraser")}
+            >
+              Erase
+            </Button>
+          </div>
+        )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

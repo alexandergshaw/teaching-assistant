@@ -992,6 +992,28 @@ button.courseResourceValue:disabled {
   color: var(--text-secondary);
 }
 
+/* Per-course notifications tile: a small stack of "sub-part: count" rows. */
+.courseNotif {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.notifSub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.notifZero {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* One repository row in the course form: the picker plus a Remove button. */
 .courseRepoRow {
   display: flex;

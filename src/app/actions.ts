@@ -61,6 +61,7 @@ import {
   listGradingQueue,
   getNeedsGradingCount,
   getUnreadCount,
+  getCourseNotifications,
   listCourses,
   setConversationWorkflowState,
   listAssignments,
@@ -3248,6 +3249,23 @@ export async function deleteCourseHubAction(id: string): Promise<{ ok: true } | 
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not delete the course." };
+  }
+}
+
+/** Per-course LMS notification counts (needs-grading + unread inbox) for its tile. */
+export async function getCourseNotificationsAction(
+  canvasUrl: string,
+  institution?: string
+): Promise<{ needsGrading: number; unread: number } | { error: string }> {
+  try {
+    await requireOwner();
+    const match = canvasUrl.match(/\/courses\/(\d+)/);
+    if (!match) return { error: "Course URL must look like .../courses/123." };
+    const code = institution?.trim();
+    if (!code) return { error: "Set this course's institution to load notifications." };
+    return await getCourseNotifications(code, match[1]);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load notifications." };
   }
 }
 

@@ -965,6 +965,43 @@ export async function getNeedsGradingCount(
   }, 0);
 }
 
+/**
+ * Per-course notification counts for a course's tile: how many submissions need
+ * grading and how many unread inbox conversations are scoped to the course. Two
+ * targeted Canvas calls (assignments needs_grading + course-filtered unread
+ * conversations), so it stays cheap per course.
+ */
+export async function getCourseNotifications(
+  code: string,
+  courseId: string
+): Promise<{ needsGrading: number; unread: number }> {
+  const { institution, token, baseUrl } = resolveInstitutionByCode(code);
+
+  let needsGrading = 0;
+  let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/assignments?bucket=ungraded&include[]=needs_grading_count&per_page=100`;
+  while (next) {
+    const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) throw canvasError(response.status, institution);
+    const page = (await response.json()) as Array<{ needs_grading_count?: number }>;
+    for (const a of page) {
+      if (typeof a.needs_grading_count === "number" && a.needs_grading_count > 0) needsGrading += a.needs_grading_count;
+    }
+    next = parseNextLink(response.headers.get("link"));
+  }
+
+  let unread = 0;
+  const convRes = await fetch(
+    `${baseUrl}/api/v1/conversations?scope=unread&filter[]=course_${courseId}&per_page=100`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (convRes.ok) {
+    const convs = (await convRes.json()) as unknown[];
+    if (Array.isArray(convs)) unread = convs.length;
+  }
+
+  return { needsGrading, unread };
+}
+
 /** Unread Canvas inbox conversation count for an institution (for badges). */
 export async function getUnreadCount(code: string): Promise<number> {
   const { institution, token, baseUrl } = resolveInbox(code);

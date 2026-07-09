@@ -606,7 +606,11 @@ export default function Home() {
             minHeight: 44,
           }}
         >
-          <Tab label="Courses" value="courses" disableRipple />
+          <Tab
+            label={<NavTabLabel text="Courses" count={totalNeedsGrading + totalUnread} />}
+            value="courses"
+            disableRipple
+          />
           <Tab label="New Build Courses" value="course-planning" disableRipple />
           <Tab label="Pre Built Courses" value="lesson-planning" disableRipple />
           <Tab

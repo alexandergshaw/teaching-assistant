@@ -17,6 +17,7 @@ import {
   createFinalizedSyllabusAction,
   extractTextbookInfoAction,
   listMyOrgsAction,
+  getCourseNotificationsAction,
 } from "../actions";
 import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
@@ -124,6 +125,8 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Per-course LMS notification counts, keyed by course id.
+  const [notifByCourse, setNotifByCourse] = useState<Record<string, { needsGrading: number; unread: number }>>({});
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<CourseForm | null>(null);
   const [formNote, setFormNote] = useState<string | null>(null);
@@ -180,6 +183,26 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       /* ignore malformed state */
     }
   }, []);
+
+  // Load per-course LMS notification counts for courses that have a Canvas URL
+  // and an institution. One targeted fetch per such course, in parallel.
+  useEffect(() => {
+    const targets = courses.filter((c) => c.canvasUrl && c.institution);
+    if (targets.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        targets.map(async (c) => [c.id, await getCourseNotificationsAction(c.canvasUrl as string, c.institution as string)] as const)
+      );
+      if (cancelled) return;
+      const map: Record<string, { needsGrading: number; unread: number }> = {};
+      for (const [id, r] of entries) if (!("error" in r)) map[id] = r;
+      setNotifByCourse(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [courses]);
 
   const toggleGroup = (key: string) =>
     setCollapsed((prev) => {
@@ -372,6 +395,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       branch: primary?.branch ?? undefined,
     });
     onNavigate("version-control");
+  };
+
+  // A course's total outstanding LMS notifications (unread inbox + needs grading).
+  const courseNotifTotal = (c: Course): number => {
+    const n = notifByCourse[c.id];
+    return n ? n.needsGrading + n.unread : 0;
   };
 
   // Full-text filter across a course's searchable fields.
@@ -695,6 +724,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         <div className={styles.courseGroups}>
           {groups.map((g) => {
             const open = query !== "" || !collapsed[g.key];
+            const groupNotif = g.courses.reduce((s, c) => s + courseNotifTotal(c), 0);
             return (
               <div key={g.key} className={styles.courseGroup}>
                 <button
@@ -704,17 +734,23 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   onClick={() => toggleGroup(g.key)}
                 >
                   <span className={styles.courseGroupName}>{g.label}</span>
+                  {groupNotif > 0 && <span className={styles.navBadge} title="Outstanding LMS notifications">{groupNotif}</span>}
                   <span className={styles.courseGroupCount}>{g.courses.length}</span>
                 </button>
                 {open && (
                   <div className={styles.courseGrid}>
                     {g.courses.map((c) => {
                       const sName = syllabusName(c.syllabusId);
+                      const notif = notifByCourse[c.id];
+                      const notifTotal = notif ? notif.needsGrading + notif.unread : 0;
                       return (
               <div key={c.id} className={styles.courseCard}>
                 <div className={styles.courseCardHead}>
                   <div style={{ minWidth: 0 }}>
-                    <p className={styles.courseCardTitle}>{c.name}</p>
+                    <p className={styles.courseCardTitle}>
+                      {c.name}
+                      {notifTotal > 0 && <span className={styles.navBadge} style={{ marginLeft: 8 }} title="Outstanding LMS notifications">{notifTotal}</span>}
+                    </p>
                     {(c.courseCode || c.term || c.institution) && (
                       <p className={styles.courseCardSub}>{[c.institution, c.courseCode, c.term].filter(Boolean).join(" · ")}</p>
                     )}
@@ -814,6 +850,36 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       )
                     ) : (
                       <span className={styles.courseResourceEmpty}>None</span>
+                    )}
+                  </div>
+
+                  <div className={styles.courseResource}>
+                    <span className={styles.courseResourceLabel}>Notifications</span>
+                    {c.canvasUrl && c.institution ? (
+                      <div className={styles.courseNotif}>
+                        <div className={styles.notifSub}>
+                          <span>LMS inbox</span>
+                          {!notif ? (
+                            <span className={styles.notifZero}>…</span>
+                          ) : notif.unread > 0 ? (
+                            <span className={styles.navBadge}>{notif.unread}</span>
+                          ) : (
+                            <span className={styles.notifZero}>0</span>
+                          )}
+                        </div>
+                        <div className={styles.notifSub}>
+                          <span>Grading</span>
+                          {!notif ? (
+                            <span className={styles.notifZero}>…</span>
+                          ) : notif.needsGrading > 0 ? (
+                            <span className={styles.navBadge}>{notif.needsGrading}</span>
+                          ) : (
+                            <span className={styles.notifZero}>0</span>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <span className={styles.courseResourceEmpty}>{c.canvasUrl ? "Set an institution" : "No Canvas link"}</span>
                     )}
                   </div>
                 </div>

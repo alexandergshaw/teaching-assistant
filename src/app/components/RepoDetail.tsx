@@ -1084,6 +1084,18 @@ export default function RepoDetail() {
     })
     .sort((a, b) => a.path.localeCompare(b.path));
 
+  // Select-all over the currently listed (filtered) files and folders.
+  const allEntriesSelected = entryList.length > 0 && entryList.every((e) => selectedPaths.has(e.path));
+  const someEntriesSelected = entryList.some((e) => selectedPaths.has(e.path));
+  const toggleSelectAll = () => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (allEntriesSelected) for (const e of entryList) next.delete(e.path);
+      else for (const e of entryList) next.add(e.path);
+      return next;
+    });
+  };
+
   return (
     <div className={styles.field}>
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -1423,6 +1435,26 @@ export default function RepoDetail() {
                   onChange={(e) => setFilter(e.target.value)}
                   disabled={treeState === "loading"}
                 />
+                {treeState === "ready" && entryList.length > 0 && (
+                  <FormControlLabel
+                    sx={{ marginTop: 0.5, marginLeft: "-4px" }}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={allEntriesSelected}
+                        indeterminate={someEntriesSelected && !allEntriesSelected}
+                        onChange={toggleSelectAll}
+                        sx={{ padding: "2px" }}
+                      />
+                    }
+                    label={
+                      <span className={styles.ghMeta}>
+                        {allEntriesSelected ? "Deselect all" : "Select all"}
+                        {filter.trim() ? " (filtered)" : ""} · {entryList.length}
+                      </span>
+                    }
+                  />
+                )}
                 <div className={styles.ghTreeList}>
                   {treeState === "loading" && (
                     <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>

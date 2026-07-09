@@ -40,6 +40,16 @@ type RecState = "idle" | "recording" | "paused";
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 export default function RecordingTab() {
+  const [recView, setRecView] = useState<"record" | "captions" | "slides">(() => {
+    if (typeof window === "undefined") return "record";
+    const v = localStorage.getItem("ta-rec-view");
+    return v === "captions" || v === "slides" ? v : "record";
+  });
+
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem("ta-rec-view", recView);
+  }, [recView]);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -1223,7 +1233,19 @@ export default function RecordingTab() {
         subtitle="Record video from any attached camera or your screen, preview it live, and download the takes."
       />
 
-      {error && <p className={styles.error}>{error}</p>}
+      <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
+        {([["record", "Record"], ["captions", "Caption a video"], ["slides", "Narrate a deck"]] as const).map(([key, label]) => (
+          <button key={key} type="button" role="tab" aria-selected={recView === key}
+            className={`${styles.lessonInnerTab}${recView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
+            onClick={() => setRecView(key)}>
+            <span className={styles.tabLabelWrap}>{label}</span>
+          </button>
+        ))}
+      </div>
+
+      {recView === "record" && (
+        <>
+          {error && <p className={styles.error}>{error}</p>}
 
       <div className={styles.adaptPanel}>
         <div className={styles.adaptPanelHeader}>
@@ -1291,86 +1313,6 @@ export default function RecordingTab() {
             <MenuItem value="720">720p</MenuItem>
             <MenuItem value="1080">1080p</MenuItem>
           </TextField>
-
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={mirror}
-                onChange={(e) => setMirror(e.target.checked)}
-                disabled={source === "screen"}
-              />
-            }
-            label="Mirror preview"
-          />
-          <FormControlLabel
-            control={<Checkbox size="small" checked={noiseSuppression} onChange={(e) => { userPickedRef.current = true; setNoiseSuppression(e.target.checked); }} />}
-            label="Noise suppression"
-          />
-          <FormControlLabel
-            control={<Checkbox size="small" checked={echoCancellation} onChange={(e) => { userPickedRef.current = true; setEchoCancellation(e.target.checked); }} />}
-            label="Echo cancellation"
-          />
-          <FormControlLabel
-            control={<Checkbox size="small" checked={autoGain} onChange={(e) => { userPickedRef.current = true; setAutoGain(e.target.checked); }} />}
-            label="Auto gain"
-          />
-          <TextField
-            select
-            size="small"
-            label="Background"
-            value={bgMode}
-            onChange={(e) => setBgMode(e.target.value as "none" | "blur" | "image")}
-            sx={{ minWidth: 140 }}
-            disabled={source !== "camera" || bgStatus === "failed"}
-          >
-            <MenuItem value="none">None</MenuItem>
-            <MenuItem value="blur">Blur</MenuItem>
-            <MenuItem value="image">Image</MenuItem>
-          </TextField>
-          {bgMode === "image" && (
-            <Button variant="outlined" size="small" onClick={() => bgFileRef.current?.click()}>
-              Choose image
-            </Button>
-          )}
-          <input
-            ref={bgFileRef}
-            type="file"
-            accept="image/*"
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (!f) return;
-              const img = new Image();
-              img.onload = () => { bgImageRef.current = img; };
-              img.src = URL.createObjectURL(f);
-              e.target.value = "";
-            }}
-          />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={pipEnabled}
-                onChange={(e) => setPipEnabled(e.target.checked)}
-                disabled={source !== "screen"}
-              />
-            }
-            label="Webcam bubble"
-          />
-          {pipEnabled && source === "screen" && (
-            <TextField
-              select
-              label="Bubble corner"
-              value={pipCorner}
-              onChange={(e) => setPipCorner(e.target.value as "br" | "bl" | "tr" | "tl")}
-              size="small"
-              sx={{ minWidth: 130 }}
-            >
-              <MenuItem value="br">Bottom right</MenuItem>
-              <MenuItem value="bl">Bottom left</MenuItem>
-              <MenuItem value="tr">Top right</MenuItem>
-              <MenuItem value="tl">Top left</MenuItem>
-            </TextField>
-          )}
         </div>
         {devices.cameras.length > 0 && (
           <p className={styles.fieldHint} style={{ margin: "8px 0 0" }}>
@@ -1380,9 +1322,6 @@ export default function RecordingTab() {
               : " - no camera selected yet"}
           </p>
         )}
-        {bgStatus === "loading" && <span className={styles.ghMeta}>Loading background model...</span>}
-        {bgStatus === "failed" && <span className={styles.ghMeta} style={{ color: "var(--warning)" }}>Background effects unavailable (model failed to load)</span>}
-        {bgMode !== "none" && bgStatus === "ready" && <span className={styles.ghMeta}>Effect is applied to the recording; the preview stays raw.</span>}
         {(devices.cameras.length === 0 || devices.mics.length === 0) && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
             <p className={styles.fieldHint} style={{ margin: 0 }}>
@@ -1394,215 +1333,315 @@ export default function RecordingTab() {
           </div>
         )}
 
-        <div className={styles.field} style={{ marginTop: 16 }}>
-          <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginBottom: 8 }}>Auto-stop</label>
-          <TextField
-            select
-            label="Auto-stop"
-            value={autoStopMin}
-            onChange={(e) => setAutoStopMin(e.target.value as "0" | "5" | "10" | "15" | "30")}
-            size="small"
-            sx={{ minWidth: 110 }}
-          >
-            <MenuItem value="0">Off</MenuItem>
-            <MenuItem value="5">5 min</MenuItem>
-            <MenuItem value="10">10 min</MenuItem>
-            <MenuItem value="15">15 min</MenuItem>
-            <MenuItem value="30">30 min</MenuItem>
-          </TextField>
-        </div>
-
-        <div className={styles.field} style={{ marginTop: 16 }}>
-          <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginBottom: 8 }}>Backup</label>
-          {!backupSupported() ? (
-            <p className={styles.fieldHint}>Automatic backup needs Chrome or Edge (File System Access API). Takes can still be downloaded manually.</p>
-          ) : backupDir ? (
-            <>
-              <span className={styles.ghMeta}>Backing up to: <strong>{backupDir.name}</strong></span>
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  onClick={async () => {
-                    try {
-                      const h = await pickBackupDir();
-                      if (h) setBackupDir(h);
-                    } catch {
-                      // user cancelled
-                    }
-                  }}
-                >
-                  Change
-                </Button>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  onClick={async () => {
-                    await clearBackupDir();
-                    setBackupDir(null);
-                  }}
-                >
-                  Clear
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={async () => {
-                  try {
-                    const h = await pickBackupDir();
-                    if (h) setBackupDir(h);
-                  } catch {
-                    // user cancelled
-                  }
-                }}
-              >
-                Choose backup folder
-              </Button>
-              <p className={styles.fieldHint} style={{ marginTop: 8 }}>Every finished recording is automatically saved there.</p>
-            </>
-          )}
-        </div>
-
-        <div className={styles.field} style={{ marginTop: 16 }}>
-          <FormControlLabel
-            control={<Checkbox checked={cardsOn} onChange={(e) => setCardsOn(e.target.checked)} size="small" />}
-            label="Add title and closing cards"
-          />
-          {cardsOn && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
-              <TextField
-                label="Title"
-                value={cardTitle}
-                onChange={(e) => setCardTitle(e.target.value)}
-                size="small"
-                sx={{ flex: "1 1 200px" }}
+        <details className={styles.adaptDisclosure} style={{ marginTop: 4 }}>
+          <summary>Recording options</summary>
+          <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={mirror}
+                    onChange={(e) => setMirror(e.target.checked)}
+                    disabled={source === "screen"}
+                    size="small"
+                  />
+                }
+                label="Mirror preview"
               />
-              <TextField
-                label="Subtitle"
-                value={cardSubtitle}
-                onChange={(e) => setCardSubtitle(e.target.value)}
-                size="small"
-                sx={{ flex: "1 1 200px" }}
+              <FormControlLabel
+                control={<Checkbox size="small" checked={noiseSuppression} onChange={(e) => { userPickedRef.current = true; setNoiseSuppression(e.target.checked); }} />}
+                label="Noise suppression"
               />
-              <TextField
-                label="Closing line"
-                value={cardClosing}
-                onChange={(e) => setCardClosing(e.target.value)}
-                size="small"
-                sx={{ flex: "1 1 200px" }}
+              <FormControlLabel
+                control={<Checkbox size="small" checked={echoCancellation} onChange={(e) => { userPickedRef.current = true; setEchoCancellation(e.target.checked); }} />}
+                label="Echo cancellation"
               />
+              <FormControlLabel
+                control={<Checkbox size="small" checked={autoGain} onChange={(e) => { userPickedRef.current = true; setAutoGain(e.target.checked); }} />}
+                label="Auto gain"
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={useCountdown}
+                    onChange={(e) => setUseCountdown(e.target.checked)}
+                    size="small"
+                  />
+                }
+                label="3-2-1 countdown"
+              />
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
               <TextField
                 select
-                label="Card length"
-                value={cardSeconds}
-                onChange={(e) => setCardSeconds(e.target.value as "2" | "3" | "5")}
                 size="small"
+                label="Auto-stop"
+                value={autoStopMin}
+                onChange={(e) => setAutoStopMin(e.target.value as "0" | "5" | "10" | "15" | "30")}
                 sx={{ minWidth: 110 }}
               >
-                <MenuItem value="2">2 s</MenuItem>
-                <MenuItem value="3">3 s</MenuItem>
-                <MenuItem value="5">5 s</MenuItem>
+                <MenuItem value="0">Off</MenuItem>
+                <MenuItem value="5">5 min</MenuItem>
+                <MenuItem value="10">10 min</MenuItem>
+                <MenuItem value="15">15 min</MenuItem>
+                <MenuItem value="30">30 min</MenuItem>
               </TextField>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className={styles.adaptPanel}>
-        <div className={styles.adaptPanelHeader}>
-          <h2 className={styles.adaptPanelTitle}>Lecture script</h2>
-          <p className={styles.adaptPanelSubtitle}>Draft a teleprompter-ready script with AI, edit it, then read it while you record.</p>
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
-          <TextField
-            label="Topic"
-            value={scriptTopic}
-            onChange={(e) => setScriptTopic(e.target.value)}
-            size="small"
-            sx={{ flex: "1 1 260px" }}
-          />
-          <TextField
-            select
-            label="Length"
-            value={scriptMinutes}
-            onChange={(e) => setScriptMinutes(e.target.value as "2" | "5" | "10" | "15")}
-            size="small"
-            sx={{ minWidth: 110 }}
-          >
-            <MenuItem value="2">2 min</MenuItem>
-            <MenuItem value="5">5 min</MenuItem>
-            <MenuItem value="10">10 min</MenuItem>
-            <MenuItem value="15">15 min</MenuItem>
-          </TextField>
-          <Button
-            variant="contained"
-            size="small"
-            disabled={scriptBusy || !scriptTopic.trim()}
-            onClick={() => void handleGenerateScript()}
-          >
-            {scriptBusy ? "Writing..." : script ? "Regenerate" : "Generate script"}
-          </Button>
-        </div>
-        <TextField
-          label="Objectives / notes (optional)"
-          value={scriptObjectives}
-          onChange={(e) => setScriptObjectives(e.target.value)}
-          multiline
-          minRows={2}
-          fullWidth
-          size="small"
-          sx={{ marginBottom: 12 }}
-        />
-        {scriptError && <p className={styles.error}>{scriptError}</p>}
-        {script && (
-          <>
-            <TextField
-              multiline
-              minRows={6}
-              fullWidth
-              value={script}
-              onChange={(e) => setScript(e.target.value)}
-              size="small"
-              sx={{ marginBottom: 12 }}
-            />
-            <div className={styles.ghActions} style={{ alignItems: "center", marginBottom: 16 }}>
-              <span className={styles.ghMeta}>{script.trim().split(/\s+/).length} words · ~{Math.max(1, Math.round(script.trim().split(/\s+/).length / 140))} min at speaking pace</span>
-              <Button
-                variant="text"
+              <TextField
+                select
                 size="small"
-                onClick={() => void navigator.clipboard.writeText(script)}
+                label="Background"
+                value={bgMode}
+                onChange={(e) => setBgMode(e.target.value as "none" | "blur" | "image")}
+                sx={{ minWidth: 140 }}
+                disabled={source !== "camera" || bgStatus === "failed"}
               >
-                Copy
-              </Button>
-              <Button
-                variant={prompterOn ? "contained" : "outlined"}
-                size="small"
-                onClick={() => setPrompterOn((v) => !v)}
-              >
-                {prompterOn ? "Hide teleprompter" : "Teleprompter"}
-              </Button>
-              {prompterOn && (
+                <MenuItem value="none">None</MenuItem>
+                <MenuItem value="blur">Blur</MenuItem>
+                <MenuItem value="image">Image</MenuItem>
+              </TextField>
+              {bgMode === "image" && (
+                <Button variant="outlined" size="small" onClick={() => bgFileRef.current?.click()}>
+                  Choose image
+                </Button>
+              )}
+              <input
+                ref={bgFileRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  const img = new Image();
+                  img.onload = () => { bgImageRef.current = img; };
+                  img.src = URL.createObjectURL(f);
+                  e.target.value = "";
+                }}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={pipEnabled}
+                    onChange={(e) => setPipEnabled(e.target.checked)}
+                    disabled={source !== "screen"}
+                    size="small"
+                  />
+                }
+                label="Webcam bubble"
+              />
+              {pipEnabled && source === "screen" && (
                 <TextField
                   select
+                  label="Bubble corner"
+                  value={pipCorner}
+                  onChange={(e) => setPipCorner(e.target.value as "br" | "bl" | "tr" | "tl")}
                   size="small"
-                  label="Text size"
-                  value={prompterSize}
-                  onChange={(e) => setPrompterSize(e.target.value as "sm" | "md" | "lg")}
-                  sx={{ minWidth: 110 }}
+                  sx={{ minWidth: 130 }}
                 >
-                  <MenuItem value="sm">Small</MenuItem>
-                  <MenuItem value="md">Medium</MenuItem>
-                  <MenuItem value="lg">Large</MenuItem>
+                  <MenuItem value="br">Bottom right</MenuItem>
+                  <MenuItem value="bl">Bottom left</MenuItem>
+                  <MenuItem value="tr">Top right</MenuItem>
+                  <MenuItem value="tl">Top left</MenuItem>
                 </TextField>
               )}
             </div>
-          </>
-        )}
+            {bgStatus === "loading" && <span className={styles.ghMeta}>Loading background model...</span>}
+            {bgStatus === "failed" && <span className={styles.ghMeta} style={{ color: "var(--warning)" }}>Background effects unavailable (model failed to load)</span>}
+            {bgMode !== "none" && bgStatus === "ready" && <span className={styles.ghMeta}>Effect is applied to the recording; the preview stays raw.</span>}
+
+            <div className={styles.field} style={{ marginTop: 16 }}>
+              <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginBottom: 8 }}>Backup</label>
+              {!backupSupported() ? (
+                <p className={styles.fieldHint}>Automatic backup needs Chrome or Edge (File System Access API). Takes can still be downloaded manually.</p>
+              ) : backupDir ? (
+                <>
+                  <span className={styles.ghMeta}>Backing up to: <strong>{backupDir.name}</strong></span>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={async () => {
+                        try {
+                          const h = await pickBackupDir();
+                          if (h) setBackupDir(h);
+                        } catch {
+                          // user cancelled
+                        }
+                      }}
+                    >
+                      Change
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={async () => {
+                        await clearBackupDir();
+                        setBackupDir(null);
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={async () => {
+                      try {
+                        const h = await pickBackupDir();
+                        if (h) setBackupDir(h);
+                      } catch {
+                        // user cancelled
+                      }
+                    }}
+                  >
+                    Choose backup folder
+                  </Button>
+                  <p className={styles.fieldHint} style={{ marginTop: 8 }}>Every finished recording is automatically saved there.</p>
+                </>
+              )}
+            </div>
+
+            <div className={styles.field} style={{ marginTop: 16 }}>
+              <FormControlLabel
+                control={<Checkbox checked={cardsOn} onChange={(e) => setCardsOn(e.target.checked)} size="small" />}
+                label="Add title and closing cards"
+              />
+              {cardsOn && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
+                  <TextField
+                    label="Title"
+                    value={cardTitle}
+                    onChange={(e) => setCardTitle(e.target.value)}
+                    size="small"
+                    sx={{ flex: "1 1 200px" }}
+                  />
+                  <TextField
+                    label="Subtitle"
+                    value={cardSubtitle}
+                    onChange={(e) => setCardSubtitle(e.target.value)}
+                    size="small"
+                    sx={{ flex: "1 1 200px" }}
+                  />
+                  <TextField
+                    label="Closing line"
+                    value={cardClosing}
+                    onChange={(e) => setCardClosing(e.target.value)}
+                    size="small"
+                    sx={{ flex: "1 1 200px" }}
+                  />
+                  <TextField
+                    select
+                    label="Card length"
+                    value={cardSeconds}
+                    onChange={(e) => setCardSeconds(e.target.value as "2" | "3" | "5")}
+                    size="small"
+                    sx={{ minWidth: 110 }}
+                  >
+                    <MenuItem value="2">2 s</MenuItem>
+                    <MenuItem value="3">3 s</MenuItem>
+                    <MenuItem value="5">5 s</MenuItem>
+                  </TextField>
+                </div>
+              )}
+            </div>
+          </div>
+        </details>
       </div>
+
+      <details className={styles.adaptDisclosure}>
+        <summary>Lecture script &amp; teleprompter</summary>
+        <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+          <p className={styles.adaptPanelSubtitle} style={{ marginBottom: 12 }}>Draft a teleprompter-ready script with AI, edit it, then read it while you record.</p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+            <TextField
+              label="Topic"
+              value={scriptTopic}
+              onChange={(e) => setScriptTopic(e.target.value)}
+              size="small"
+              sx={{ flex: "1 1 260px" }}
+            />
+            <TextField
+              select
+              label="Length"
+              value={scriptMinutes}
+              onChange={(e) => setScriptMinutes(e.target.value as "2" | "5" | "10" | "15")}
+              size="small"
+              sx={{ minWidth: 110 }}
+            >
+              <MenuItem value="2">2 min</MenuItem>
+              <MenuItem value="5">5 min</MenuItem>
+              <MenuItem value="10">10 min</MenuItem>
+              <MenuItem value="15">15 min</MenuItem>
+            </TextField>
+            <Button
+              variant="contained"
+              size="small"
+              disabled={scriptBusy || !scriptTopic.trim()}
+              onClick={() => void handleGenerateScript()}
+            >
+              {scriptBusy ? "Writing..." : script ? "Regenerate" : "Generate script"}
+            </Button>
+          </div>
+          <TextField
+            label="Objectives / notes (optional)"
+            value={scriptObjectives}
+            onChange={(e) => setScriptObjectives(e.target.value)}
+            multiline
+            minRows={2}
+            fullWidth
+            size="small"
+            sx={{ marginBottom: 12 }}
+          />
+          {scriptError && <p className={styles.error}>{scriptError}</p>}
+          {script && (
+            <>
+              <TextField
+                multiline
+                minRows={6}
+                fullWidth
+                value={script}
+                onChange={(e) => setScript(e.target.value)}
+                size="small"
+                sx={{ marginBottom: 12 }}
+              />
+              <div className={styles.ghActions} style={{ alignItems: "center", marginBottom: 16 }}>
+                <span className={styles.ghMeta}>{script.trim().split(/\s+/).length} words · ~{Math.max(1, Math.round(script.trim().split(/\s+/).length / 140))} min at speaking pace</span>
+                <Button
+                  variant="text"
+                  size="small"
+                  onClick={() => void navigator.clipboard.writeText(script)}
+                >
+                  Copy
+                </Button>
+                <Button
+                  variant={prompterOn ? "contained" : "outlined"}
+                  size="small"
+                  onClick={() => setPrompterOn((v) => !v)}
+                >
+                  {prompterOn ? "Hide teleprompter" : "Teleprompter"}
+                </Button>
+                {prompterOn && (
+                  <TextField
+                    select
+                    size="small"
+                    label="Text size"
+                    value={prompterSize}
+                    onChange={(e) => setPrompterSize(e.target.value as "sm" | "md" | "lg")}
+                    sx={{ minWidth: 110 }}
+                  >
+                    <MenuItem value="sm">Small</MenuItem>
+                    <MenuItem value="md">Medium</MenuItem>
+                    <MenuItem value="lg">Large</MenuItem>
+                  </TextField>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </details>
 
       <div className={styles.adaptPanel}>
         <div className={styles.adaptPanelHeader}>
@@ -1783,16 +1822,6 @@ export default function RecordingTab() {
               {muted ? "Unmute" : "Mute"}
             </Button>
           )}
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={useCountdown}
-                onChange={(e) => setUseCountdown(e.target.checked)}
-                size="small"
-              />
-            }
-            label="3-2-1 countdown"
-          />
           <span className={styles.ghMeta}>Mic level</span>
           <div
             title="Live microphone input level"
@@ -1856,70 +1885,72 @@ export default function RecordingTab() {
         </div>
       </div>
 
-      <div className={styles.ghPanel}>
-        <h3 className={styles.adaptPanelTitle}>Takes</h3>
-        {takes.length === 0 ? (
-          <p className={styles.fieldHint}>No takes yet - record something.</p>
-        ) : (
-          takes.map((take) => (
-            <div key={take.id} className={styles.ghRow}>
-              <div className={styles.ghRowTop}>
-                <div className={styles.ghRowTitle}>
-                  <div className={styles.ghRowName}>{take.name}</div>
+          <div className={styles.ghPanel}>
+            <h3 className={styles.adaptPanelTitle}>Takes</h3>
+            {takes.length === 0 ? (
+              <p className={styles.fieldHint}>No takes yet - record something.</p>
+            ) : (
+              takes.map((take) => (
+                <div key={take.id} className={styles.ghRow}>
+                  <div className={styles.ghRowTop}>
+                    <div className={styles.ghRowTitle}>
+                      <div className={styles.ghRowName}>{take.name}</div>
+                    </div>
+                    <div className={styles.ghActions}>
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        onClick={() => handleRename(take.id)}
+                      >
+                        Rename
+                      </button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => handleDownload(take)}
+                      >
+                        Download
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="error"
+                        onClick={() => handleDelete(take.id)}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                  <div className={styles.ghMeta}>
+                    {fmt(take.durationSec)} · {(take.sizeBytes / 1048576).toFixed(1)} MB · {new Date(take.createdAt).toLocaleString()}
+                  </div>
+                  {take.backup === "done" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Backed up</span>}
+                  {take.backup === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Backup failed</span>}
+                  {take.backup === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Backing up...</span>}
+                  <details style={{ marginTop: 8 }}>
+                    <summary style={{ cursor: "pointer", color: "var(--accent)", fontWeight: 600 }}>
+                      Play
+                    </summary>
+                    <video
+                      controls
+                      src={take.url}
+                      style={{
+                        maxWidth: "100%",
+                        borderRadius: 8,
+                        marginTop: 8,
+                        background: "#0f172a",
+                      }}
+                    />
+                  </details>
                 </div>
-                <div className={styles.ghActions}>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    onClick={() => handleRename(take.id)}
-                  >
-                    Rename
-                  </button>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={() => handleDownload(take)}
-                  >
-                    Download
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    color="error"
-                    onClick={() => handleDelete(take.id)}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </div>
-              <div className={styles.ghMeta}>
-                {fmt(take.durationSec)} · {(take.sizeBytes / 1048576).toFixed(1)} MB · {new Date(take.createdAt).toLocaleString()}
-              </div>
-              {take.backup === "done" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Backed up</span>}
-              {take.backup === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Backup failed</span>}
-              {take.backup === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Backing up...</span>}
-              <details style={{ marginTop: 8 }}>
-                <summary style={{ cursor: "pointer", color: "var(--accent)", fontWeight: 600 }}>
-                  Play
-                </summary>
-                <video
-                  controls
-                  src={take.url}
-                  style={{
-                    maxWidth: "100%",
-                    borderRadius: 8,
-                    marginTop: 8,
-                    background: "#0f172a",
-                  }}
-                />
-              </details>
-            </div>
-          ))
-        )}
-      </div>
+              ))
+            )}
+          </div>
+        </>
+      )}
 
-      <CaptionStudio />
-      <SlideStudio />
+      {recView === "captions" && <CaptionStudio />}
+      {recView === "slides" && <SlideStudio />}
     </section>
   );
 }

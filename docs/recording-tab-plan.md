@@ -115,8 +115,7 @@ Priority order:
   subtitles on the player, and export as .vtt. Slice 2 (next): burn captions
   into the video via the canvas pipeline and optionally record live mic
   narration during the re-encode.
-- Constraint (user directive): ALL voice and avatar generation must be done in
-  house - no ElevenLabs/HeyGen/Synthesia. Voice: XTTS/F5-TTS self-hosted;
-  avatar: SadTalker/EchoMimic/LivePortrait; both behind a local GPU sidecar
-  service the app calls via env URL. LLM text/vision providers already in the
-  app remain acceptable.
+- Constraint (user directive, clarified): voice and avatar generation happens
+  "in house" meaning THROUGH THE APP via third-party APIs (ElevenLabs voice,
+  HeyGen avatars - both shipped as server actions with env keys), never by
+  sending the user out to an external tool's own UI.

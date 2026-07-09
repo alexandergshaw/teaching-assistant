@@ -330,14 +330,30 @@ export default function VersionControlTab() {
       {subTab === "orgs" && (
         <>
           <div className={`${styles.ghPanel} ${styles.ghPanelStack}`}>
-          <label className={styles.panelTitle}>Generate student repositories</label>
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            Pick an organization and a template repo, paste your roster, and generate one repository per student.
-          </p>
-          <div className={styles.field}>
-            <label>Organization</label>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ flex: "1 1 220px" }}>
+            <div className={styles.ghPanelHead}>
+              <label className={styles.panelTitle}>Generate student repositories</label>
+              <div className={styles.ghPanelHeadRight}>
+                <a href="https://github.com/settings/organizations" target="_blank" rel="noreferrer" style={{ fontSize: "0.8rem" }}>
+                  Your orgs
+                </a>
+                <a href="https://github.com/account/organizations/new" target="_blank" rel="noreferrer" style={{ fontSize: "0.8rem" }}>
+                  Create org
+                </a>
+                <Button
+                  type="button"
+                  variant="outlined"
+                  size="small"
+                  onClick={() => void refreshOrgs()}
+                  disabled={busy}
+                >
+                  Refresh
+                </Button>
+              </div>
+            </div>
+
+            <div className={styles.adaptFieldGrid2}>
+              <div className={styles.field}>
+                <label>Organization</label>
                 <Typeahead
                   options={orgs.map((o) => ({ value: o, label: o }))}
                   value={selectedOrg}
@@ -347,143 +363,137 @@ export default function VersionControlTab() {
                   loading={orgsState === "loading"}
                   noOptionsText="No organizations"
                 />
+                {orgsState === "ready" && orgs.length === 0 && (
+                  <p className={styles.fieldHint} style={{ margin: "4px 0 0" }}>
+                    Your token doesn&apos;t own any organizations. Create one on GitHub (link above), then hit Refresh.
+                  </p>
+                )}
               </div>
-              <a href="https://github.com/settings/organizations" target="_blank" rel="noreferrer" style={{ fontSize: "0.82rem" }}>
-                Your GitHub organizations
-              </a>
-              <a href="https://github.com/account/organizations/new" target="_blank" rel="noreferrer" style={{ fontSize: "0.82rem" }}>
-                Create org on GitHub
-              </a>
-              <Button
-                type="button"
-                variant="outlined"
-                size="small"
-                onClick={() => void refreshOrgs()}
+
+              <div className={styles.field}>
+                <label>Template repository</label>
+                <Typeahead
+                  options={templateOptions.map((r) => ({ value: r.fullName, label: `${r.fullName}${r.isTemplate ? " (template)" : ""}` }))}
+                  value={templateRepo}
+                  onChange={(name) => setTemplateRepo(name)}
+                  placeholder={reposLoading ? "Loading repositories..." : !selectedOrg ? "Choose an organization first" : "Choose a template repo..."}
+                  disabled={busy || !selectedOrg || reposLoading}
+                  loading={reposLoading}
+                  noOptionsText="No repositories"
+                />
+                {selectedOrg && !reposLoading && templates.length === 0 && mergedRepos.length > 0 && (
+                  <p className={styles.fieldHint} style={{ margin: "4px 0 0", color: "var(--warning)" }}>
+                    No template repositories found in this org. Mark a repo as a template (Settings → Template repository), or
+                    select one below — generation will fail if it isn&apos;t a template.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className={styles.adaptFieldGrid2}>
+              <div className={styles.field}>
+                <label htmlFor="vc-prefix">Repository name prefix (optional)</label>
+                <TextField
+                  id="vc-prefix"
+                  size="small"
+                  fullWidth
+                  placeholder="e.g. project1 — repos become project1-<student>"
+                  value={prefix}
+                  onChange={(e) => setPrefix(e.target.value)}
+                  disabled={busy}
+                />
+              </div>
+
+              <div className={styles.field}>
+                <label>Options</label>
+                <FormControlLabel
+                  control={<Checkbox checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} disabled={busy} size="small" />}
+                  label="Private repositories"
+                />
+              </div>
+            </div>
+
+            <div className={styles.field}>
+              <label htmlFor="vc-students">Students (one per line)</label>
+              <TextField
+                id="vc-students"
+                multiline
+                minRows={4}
+                fullWidth
+                placeholder={"jsmith\nadoe\nmlee"}
+                value={studentsText}
+                onChange={(e) => setStudentsText(e.target.value)}
                 disabled={busy}
-              >
-                Refresh
+                sx={{ fontFamily: "monospace" }}
+              />
+              <details className={styles.adaptDisclosure} style={{ marginTop: 4 }}>
+                <summary>Import students from Canvas or a course tile</summary>
+                <div className={styles.adaptDisclosureBody}>
+                  {institutions.length > 0 && (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                      <span className={styles.fieldHint} style={{ margin: 0 }}>From Canvas:</span>
+                      {institutions.length > 1 && (
+                        <TextField select size="small" label="Institution" value={rosterInstitution || activeInstitution} onChange={(e) => setRosterInstitution(e.target.value)} sx={{ minWidth: 120 }}>
+                          {institutions.map((i) => (
+                            <MenuItem key={i} value={i}>{i}</MenuItem>
+                          ))}
+                        </TextField>
+                      )}
+                      <div style={{ flex: "1 1 220px", minWidth: 180 }}>
+                        <Typeahead
+                          options={rosterCourses.map((c) => ({ value: c.id, label: c.name }))}
+                          value={rosterCourseId}
+                          onChange={(v) => setRosterCourseId(v)}
+                          placeholder={rosterCoursesLoading ? "Loading courses..." : "Choose a course..."}
+                          disabled={rosterBusy || rosterCoursesLoading}
+                          loading={rosterCoursesLoading}
+                          noOptionsText="No courses"
+                        />
+                      </div>
+                      <TextField select size="small" label="Name format" value={rosterFormat} onChange={(e) => setRosterFormat(e.target.value as "sortable" | "firstlast" | "login" | "flast")} sx={{ minWidth: 150 }}>
+                        <MenuItem value="sortable">Last, First</MenuItem>
+                        <MenuItem value="firstlast">First Last</MenuItem>
+                        <MenuItem value="login">Login ID</MenuItem>
+                        <MenuItem value="flast">First initial_Last</MenuItem>
+                      </TextField>
+                      <Button variant="outlined" size="small" disabled={rosterBusy || !rosterCourseId} onClick={handleInsertRoster}>
+                        {rosterBusy ? "Loading..." : "Insert roster"}
+                      </Button>
+                    </div>
+                  )}
+                  {hubCourses.some((c) => (c.roster ?? "").trim()) && (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <span className={styles.fieldHint} style={{ margin: 0 }}>From a course tile:</span>
+                      <div style={{ flex: "1 1 220px", minWidth: 180 }}>
+                        <Typeahead
+                          options={hubCourses
+                            .filter((c) => (c.roster ?? "").trim())
+                            .map((c) => ({ value: c.id, label: `${c.name}${c.courseCode ? ` (${c.courseCode})` : ""}` }))}
+                          value={hubCourseId}
+                          onChange={(v) => setHubCourseId(v)}
+                          placeholder="Choose a course tile..."
+                          noOptionsText="No course tiles with rosters"
+                        />
+                      </div>
+                      <Button variant="outlined" size="small" disabled={!hubCourseId} onClick={handleInsertFromTile}>
+                        Insert from tile
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </details>
+              {rosterNote && (
+                <p className={rosterNote.startsWith("Error") ? styles.error : styles.fieldHint} style={{ margin: "4px 0 0" }}>{rosterNote}</p>
+              )}
+            </div>
+
+            <div>
+              <Button type="button" variant="contained" size="small" onClick={generate} disabled={busy || !selectedOrg || !templateRepo || students.length === 0}>
+                {busy ? `Generating ${students.length} repo${students.length === 1 ? "" : "s"}…` : `Generate ${students.length || ""} repo${students.length === 1 ? "" : "s"}`.trim()}
               </Button>
             </div>
-            {orgsState === "ready" && orgs.length === 0 && (
-              <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 4 }}>
-                Your token doesn&apos;t own any organizations. Create one on GitHub (link above), then hit Refresh.
-              </p>
-            )}
-          </div>
 
-          <div className={styles.field}>
-            <label>Template repository</label>
-            <Typeahead
-              options={templateOptions.map((r) => ({ value: r.fullName, label: `${r.fullName}${r.isTemplate ? " (template)" : ""}` }))}
-              value={templateRepo}
-              onChange={(name) => setTemplateRepo(name)}
-              placeholder={reposLoading ? "Loading repositories..." : !selectedOrg ? "Choose an organization first" : "Choose a template repo..."}
-              disabled={busy || !selectedOrg || reposLoading}
-              loading={reposLoading}
-              noOptionsText="No repositories"
-            />
-            {selectedOrg && !reposLoading && templates.length === 0 && mergedRepos.length > 0 && (
-              <p style={{ fontSize: "0.8rem", color: "var(--warning)", marginTop: 4 }}>
-                No template repositories found in this org. Mark a repo as a template (Settings → Template repository), or
-                select one below — generation will fail if it isn&apos;t a template.
-              </p>
-            )}
-          </div>
-
-          <div className={styles.field}>
-            <label htmlFor="vc-prefix">Repository name prefix (optional)</label>
-            <TextField
-              id="vc-prefix"
-              size="small"
-              fullWidth
-              placeholder="e.g. project1 — repos become project1-<student>"
-              value={prefix}
-              onChange={(e) => setPrefix(e.target.value)}
-              disabled={busy}
-            />
-          </div>
-
-          <div className={styles.field}>
-            <label htmlFor="vc-students">Students (one per line)</label>
-            <TextField
-              id="vc-students"
-              multiline
-              minRows={4}
-              fullWidth
-              placeholder={"jsmith\nadoe\nmlee"}
-              value={studentsText}
-              onChange={(e) => setStudentsText(e.target.value)}
-              disabled={busy}
-              sx={{ fontFamily: "monospace" }}
-            />
-            {institutions.length > 0 ? (
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-                <span className={styles.fieldHint} style={{ margin: 0 }}>Fill from a Canvas class:</span>
-                {institutions.length > 1 && (
-                  <TextField select size="small" label="Institution" value={rosterInstitution || activeInstitution} onChange={(e) => setRosterInstitution(e.target.value)} sx={{ minWidth: 120 }}>
-                    {institutions.map((i) => (
-                      <MenuItem key={i} value={i}>{i}</MenuItem>
-                    ))}
-                  </TextField>
-                )}
-                <div style={{ flex: "1 1 220px", minWidth: 180 }}>
-                  <Typeahead
-                    options={rosterCourses.map((c) => ({ value: c.id, label: c.name }))}
-                    value={rosterCourseId}
-                    onChange={(v) => setRosterCourseId(v)}
-                    placeholder={rosterCoursesLoading ? "Loading courses..." : "Choose a course..."}
-                    disabled={rosterBusy || rosterCoursesLoading}
-                    loading={rosterCoursesLoading}
-                    noOptionsText="No courses"
-                  />
-                </div>
-                <TextField select size="small" label="Name format" value={rosterFormat} onChange={(e) => setRosterFormat(e.target.value as "sortable" | "firstlast" | "login" | "flast")} sx={{ minWidth: 150 }}>
-                  <MenuItem value="sortable">Last, First</MenuItem>
-                  <MenuItem value="firstlast">First Last</MenuItem>
-                  <MenuItem value="login">Login ID</MenuItem>
-                  <MenuItem value="flast">First initial_Last</MenuItem>
-                </TextField>
-                <Button variant="outlined" size="small" disabled={rosterBusy || !rosterCourseId} onClick={handleInsertRoster}>
-                  {rosterBusy ? "Loading..." : "Insert roster"}
-                </Button>
-              </div>
-            ) : null}
-            {hubCourses.some((c) => (c.roster ?? "").trim()) && (
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-                <span className={styles.fieldHint} style={{ margin: 0 }}>From a course tile:</span>
-                <div style={{ flex: "1 1 220px", minWidth: 180 }}>
-                  <Typeahead
-                    options={hubCourses
-                      .filter((c) => (c.roster ?? "").trim())
-                      .map((c) => ({ value: c.id, label: `${c.name}${c.courseCode ? ` (${c.courseCode})` : ""}` }))}
-                    value={hubCourseId}
-                    onChange={(v) => setHubCourseId(v)}
-                    placeholder="Choose a course tile..."
-                    noOptionsText="No course tiles with rosters"
-                  />
-                </div>
-                <Button variant="outlined" size="small" disabled={!hubCourseId} onClick={handleInsertFromTile}>
-                  Insert from tile
-                </Button>
-              </div>
-            )}
-            {rosterNote && (
-              <p className={rosterNote.startsWith("Error") ? styles.error : styles.fieldHint} style={{ margin: "4px 0 0" }}>{rosterNote}</p>
-            )}
-            <FormControlLabel
-              sx={{ marginTop: 0.75 }}
-              control={<Checkbox checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} disabled={busy} size="small" />}
-              label="Private repositories"
-            />
-          </div>
-
-          <div>
-            <Button type="button" variant="contained" size="small" onClick={generate} disabled={busy || !selectedOrg || !templateRepo || students.length === 0}>
-              {busy ? `Generating ${students.length} repo${students.length === 1 ? "" : "s"}…` : `Generate ${students.length || ""} repo${students.length === 1 ? "" : "s"}`.trim()}
-            </Button>
-          </div>
-
-          {error && <p className={styles.error}>{error}</p>}
+            {error && <p className={styles.error}>{error}</p>}
           </div>
 
           {results && (

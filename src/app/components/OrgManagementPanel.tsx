@@ -326,391 +326,396 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
     <div style={{ marginTop: 20 }}>
       <h3 style={{ margin: "0 0 4px" }}>Manage {org}</h3>
 
-      {/* Section 1: Members */}
-      <div className={`${styles.field} ${styles.ghPanel}`} style={{ marginTop: 16 }}>
-        <label style={{ marginBottom: 8 }}>Members</label>
-        {membersState === "loading" && <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>Loading members...</p>}
-        {membersState === "error" && membersError && <p className={styles.error}>{membersError}</p>}
-        {membersState === "ready" && members.length === 0 && <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>No members.</p>}
-        {membersState === "ready" &&
-          members.map((member) => (
-            <div key={member.login} style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
-              <span style={{ fontWeight: 600, fontSize: "0.95rem", flex: 1 }}>{member.login}</span>
-              <TextField
-                select
-                size="small"
-                value={roleLabel(member.role)}
-                onChange={(e) => handleMemberRoleChange(member.login, roleValue(e.target.value))}
-                sx={{ minWidth: 140 }}
-              >
-                <MenuItem value="Owner">Owner</MenuItem>
-                <MenuItem value="Member">Member</MenuItem>
-              </TextField>
-            </div>
-          ))}
-        <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
-          <TextField
-            size="small"
-            fullWidth
-            placeholder="GitHub username or email"
-            value={inviteValue}
-            onChange={(e) => setInviteValue(e.target.value)}
-            onKeyDown={submitOnEnter(handleInvite)}
-            disabled={inviteBusy}
-          />
-          <TextField
-            select
-            size="small"
-            value={roleLabel(inviteRole)}
-            onChange={(e) => setInviteRole(roleValue(e.target.value))}
-            disabled={inviteBusy}
-            sx={{ minWidth: 140 }}
-          >
-            <MenuItem value="Owner">Owner</MenuItem>
-            <MenuItem value="Member">Member</MenuItem>
-          </TextField>
-          <Button
-            type="button"
-            variant="contained"
-            size="small"
-            onClick={handleInvite}
-            disabled={inviteBusy || !inviteValue.trim()}
-          >
-            {inviteBusy ? "Inviting..." : "Invite"}
-          </Button>
+      <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
+        <summary>Members</summary>
+        <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+          {membersState === "loading" && <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>Loading members...</p>}
+          {membersState === "error" && membersError && <p className={styles.error}>{membersError}</p>}
+          {membersState === "ready" && members.length === 0 && <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>No members.</p>}
+          {membersState === "ready" &&
+            members.map((member) => (
+              <div key={member.login} style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontWeight: 600, fontSize: "0.95rem", flex: 1 }}>{member.login}</span>
+                <TextField
+                  select
+                  size="small"
+                  value={roleLabel(member.role)}
+                  onChange={(e) => handleMemberRoleChange(member.login, roleValue(e.target.value))}
+                  sx={{ minWidth: 140 }}
+                >
+                  <MenuItem value="Owner">Owner</MenuItem>
+                  <MenuItem value="Member">Member</MenuItem>
+                </TextField>
+              </div>
+            ))}
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
+            <TextField
+              size="small"
+              fullWidth
+              placeholder="GitHub username or email"
+              value={inviteValue}
+              onChange={(e) => setInviteValue(e.target.value)}
+              onKeyDown={submitOnEnter(handleInvite)}
+              disabled={inviteBusy}
+            />
+            <TextField
+              select
+              size="small"
+              value={roleLabel(inviteRole)}
+              onChange={(e) => setInviteRole(roleValue(e.target.value))}
+              disabled={inviteBusy}
+              sx={{ minWidth: 140 }}
+            >
+              <MenuItem value="Owner">Owner</MenuItem>
+              <MenuItem value="Member">Member</MenuItem>
+            </TextField>
+            <Button
+              type="button"
+              variant="contained"
+              size="small"
+              onClick={handleInvite}
+              disabled={inviteBusy || !inviteValue.trim()}
+            >
+              {inviteBusy ? "Inviting..." : "Invite"}
+            </Button>
+          </div>
+          {inviteMsg && (inviteMsg.startsWith("Error:") ? <p className={styles.error}>{inviteMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 6 }}>{inviteMsg}</p>)}
         </div>
-        {inviteMsg && (inviteMsg.startsWith("Error:") ? <p className={styles.error}>{inviteMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 6 }}>{inviteMsg}</p>)}
-      </div>
+      </details>
 
-      {/* Section 2: Repository Access */}
-      <div className={`${styles.field} ${styles.ghPanel}`} style={{ marginTop: 16 }}>
-        <label style={{ marginBottom: 8 }}>Repository access</label>
-        <Typeahead
-          options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
-          value={accessRepo}
-          onChange={(v) => setAccessRepo(v)}
-          placeholder="Select a repository..."
-          noOptionsText="No repositories"
-        />
+      <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
+        <summary>Repository access</summary>
+        <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+          <Typeahead
+            options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
+            value={accessRepo}
+            onChange={(v) => setAccessRepo(v)}
+            placeholder="Select a repository..."
+            noOptionsText="No repositories"
+          />
 
-        {accessRepo && (
-          <>
-            {collaboratorsLoading && <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>Loading collaborators...</p>}
-            {!collaboratorsLoading &&
-              collaborators.map((collab) => (
-                <div key={collab.login} style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
-                  <span style={{ fontWeight: 600, fontSize: "0.95rem", flex: 1 }}>{collab.login}</span>
-                  <TextField
-                    select
-                    size="small"
-                    value={permissionLabel(collab.permission)}
-                    onChange={(e) => {
-                      const newPerm = permissionValue(e.target.value);
-                      setCollaborators(collaborators.map((c) => (c.login === collab.login ? { ...c, permission: newPerm } : c)));
-                      setRepoCollaboratorAction(accessRepo, collab.login, newPerm).then((r) => {
-                        if ("error" in r) {
-                          setAccessMsg(`Error updating ${collab.login}: ${r.error}`);
-                        }
-                      });
-                    }}
-                    sx={{ minWidth: 140 }}
-                  >
-                    <MenuItem value="Read">Read</MenuItem>
-                    <MenuItem value="Triage">Triage</MenuItem>
-                    <MenuItem value="Write">Write</MenuItem>
-                    <MenuItem value="Maintain">Maintain</MenuItem>
-                    <MenuItem value="Admin">Admin</MenuItem>
-                  </TextField>
+          {accessRepo && (
+            <>
+              {collaboratorsLoading && <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>Loading collaborators...</p>}
+              {!collaboratorsLoading &&
+                collaborators.map((collab) => (
+                  <div key={collab.login} style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontWeight: 600, fontSize: "0.95rem", flex: 1 }}>{collab.login}</span>
+                    <TextField
+                      select
+                      size="small"
+                      value={permissionLabel(collab.permission)}
+                      onChange={(e) => {
+                        const newPerm = permissionValue(e.target.value);
+                        setCollaborators(collaborators.map((c) => (c.login === collab.login ? { ...c, permission: newPerm } : c)));
+                        setRepoCollaboratorAction(accessRepo, collab.login, newPerm).then((r) => {
+                          if ("error" in r) {
+                            setAccessMsg(`Error updating ${collab.login}: ${r.error}`);
+                          }
+                        });
+                      }}
+                      sx={{ minWidth: 140 }}
+                    >
+                      <MenuItem value="Read">Read</MenuItem>
+                      <MenuItem value="Triage">Triage</MenuItem>
+                      <MenuItem value="Write">Write</MenuItem>
+                      <MenuItem value="Maintain">Maintain</MenuItem>
+                      <MenuItem value="Admin">Admin</MenuItem>
+                    </TextField>
+                  </div>
+                ))}
+
+              <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="GitHub username"
+                  value={accessUsername}
+                  onChange={(e) => setAccessUsername(e.target.value)}
+                  onKeyDown={submitOnEnter(handleAccessApply)}
+                  disabled={accessBusy}
+                />
+                <TextField
+                  select
+                  size="small"
+                  value={permissionLabel(accessPermission)}
+                  onChange={(e) => setAccessPermission(permissionValue(e.target.value))}
+                  disabled={accessBusy}
+                  sx={{ minWidth: 140 }}
+                >
+                  <MenuItem value="Read">Read</MenuItem>
+                  <MenuItem value="Triage">Triage</MenuItem>
+                  <MenuItem value="Write">Write</MenuItem>
+                  <MenuItem value="Maintain">Maintain</MenuItem>
+                  <MenuItem value="Admin">Admin</MenuItem>
+                </TextField>
+                <Button
+                  type="button"
+                  variant="contained"
+                  size="small"
+                  onClick={handleAccessApply}
+                  disabled={accessBusy || !accessUsername.trim()}
+                >
+                  {accessBusy ? "Applying..." : "Apply"}
+                </Button>
+              </div>
+              {accessMsg && (accessMsg.startsWith("Error:") ? <p className={styles.error}>{accessMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 6 }}>{accessMsg}</p>)}
+            </>
+          )}
+        </div>
+      </details>
+
+      <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
+        <summary>Create pull request</summary>
+        <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+          <Typeahead
+            options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
+            value={prRepo}
+            onChange={(v) => setPrRepo(v)}
+            placeholder="Select a repository..."
+            noOptionsText="No repositories"
+          />
+
+          {prRepo && (
+            <>
+              <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <Typeahead
+                    options={prBranches.map((b) => ({ value: b, label: b }))}
+                    value={prHead}
+                    onChange={(v) => setPrHead(v)}
+                    placeholder="Head branch..."
+                    noOptionsText="No branches"
+                  />
                 </div>
-              ))}
+                <div style={{ flex: 1 }}>
+                  <Typeahead
+                    options={prBranches.map((b) => ({ value: b, label: b }))}
+                    value={prBase}
+                    onChange={(v) => setPrBase(v)}
+                    placeholder="Base branch..."
+                    noOptionsText="No branches"
+                  />
+                </div>
+              </div>
 
-            <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
               <TextField
                 size="small"
                 fullWidth
-                placeholder="GitHub username"
-                value={accessUsername}
-                onChange={(e) => setAccessUsername(e.target.value)}
-                onKeyDown={submitOnEnter(handleAccessApply)}
-                disabled={accessBusy}
+                placeholder="Pull request title"
+                value={prTitle}
+                onChange={(e) => setPrTitle(e.target.value)}
+                onKeyDown={submitOnEnter(handleCreatePr)}
+                disabled={prBusy}
+                sx={{ mb: 1.5 }}
               />
+
               <TextField
-                select
                 size="small"
-                value={permissionLabel(accessPermission)}
-                onChange={(e) => setAccessPermission(permissionValue(e.target.value))}
-                disabled={accessBusy}
-                sx={{ minWidth: 140 }}
-              >
-                <MenuItem value="Read">Read</MenuItem>
-                <MenuItem value="Triage">Triage</MenuItem>
-                <MenuItem value="Write">Write</MenuItem>
-                <MenuItem value="Maintain">Maintain</MenuItem>
-                <MenuItem value="Admin">Admin</MenuItem>
-              </TextField>
+                fullWidth
+                multiline
+                placeholder="Description (optional)"
+                rows={4}
+                value={prBody}
+                onChange={(e) => setPrBody(e.target.value)}
+                disabled={prBusy}
+                sx={{ mb: 1.5 }}
+              />
+
               <Button
                 type="button"
                 variant="contained"
                 size="small"
-                onClick={handleAccessApply}
-                disabled={accessBusy || !accessUsername.trim()}
+                onClick={handleCreatePr}
+                disabled={prBusy || !prHead || !prBase || !prTitle.trim()}
               >
-                {accessBusy ? "Applying..." : "Apply"}
+                {prBusy ? "Creating..." : "Create PR"}
               </Button>
-            </div>
-            {accessMsg && (accessMsg.startsWith("Error:") ? <p className={styles.error}>{accessMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 6 }}>{accessMsg}</p>)}
-          </>
-        )}
-      </div>
 
-      {/* Section 3: Create Pull Request */}
-      <div className={`${styles.field} ${styles.ghPanel}`} style={{ marginTop: 16 }}>
-        <label style={{ marginBottom: 8 }}>Create pull request</label>
-        <Typeahead
-          options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
-          value={prRepo}
-          onChange={(v) => setPrRepo(v)}
-          placeholder="Select a repository..."
-          noOptionsText="No repositories"
-        />
-
-        {prRepo && (
-          <>
-            <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
-              <div style={{ flex: 1 }}>
-                <Typeahead
-                  options={prBranches.map((b) => ({ value: b, label: b }))}
-                  value={prHead}
-                  onChange={(v) => setPrHead(v)}
-                  placeholder="Head branch..."
-                  noOptionsText="No branches"
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <Typeahead
-                  options={prBranches.map((b) => ({ value: b, label: b }))}
-                  value={prBase}
-                  onChange={(v) => setPrBase(v)}
-                  placeholder="Base branch..."
-                  noOptionsText="No branches"
-                />
-              </div>
-            </div>
-
-            <TextField
-              size="small"
-              fullWidth
-              placeholder="Pull request title"
-              value={prTitle}
-              onChange={(e) => setPrTitle(e.target.value)}
-              onKeyDown={submitOnEnter(handleCreatePr)}
-              disabled={prBusy}
-              sx={{ mb: 1.5 }}
-            />
-
-            <TextField
-              size="small"
-              fullWidth
-              multiline
-              placeholder="Description (optional)"
-              rows={4}
-              value={prBody}
-              onChange={(e) => setPrBody(e.target.value)}
-              disabled={prBusy}
-              sx={{ mb: 1.5 }}
-            />
-
-            <Button
-              type="button"
-              variant="contained"
-              size="small"
-              onClick={handleCreatePr}
-              disabled={prBusy || !prHead || !prBase || !prTitle.trim()}
-            >
-              {prBusy ? "Creating..." : "Create PR"}
-            </Button>
-
-            {prMsg && (prMsg.startsWith("Error:") ? <p className={styles.error}>{prMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 8 }}>{prMsg}</p>)}
-            {prResult && (
-              <p style={{ fontSize: "0.85rem", marginTop: 8, color: "var(--text-secondary)" }}>
-                PR{" "}
-                <a href={prResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", fontWeight: 600 }}>
-                  #{prResult.number}
-                </a>{" "}
-                created.
-              </p>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Section 4: Branch Protection */}
-      <div className={`${styles.field} ${styles.ghPanel}`} style={{ marginTop: 16 }}>
-        <label style={{ marginBottom: 8 }}>Branch protection</label>
-        <Typeahead
-          options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
-          value={bpRepo}
-          onChange={(v) => setBpRepo(v)}
-          placeholder="Select a repository..."
-          noOptionsText="No repositories"
-        />
-
-        {bpRepo && (
-          <>
-            <Typeahead
-              options={bpBranches.map((b) => ({ value: b, label: b }))}
-              value={bpBranch}
-              onChange={(v) => setBpBranch(v)}
-              placeholder="Select a branch..."
-              noOptionsText="No branches"
-            />
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
-              <FormControlLabel
-                control={<Checkbox checked={bpRequirePr} onChange={(e) => setBpRequirePr(e.target.checked)} disabled={bpBusy} size="small" />}
-                label="Require pull request reviews"
-              />
-
-              {bpRequirePr && (
-                <div style={{ marginLeft: 24, display: "flex", alignItems: "center", gap: 8 }}>
-                  <label style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>Required approvals:</label>
-                  <TextField
-                    type="number"
-                    size="small"
-                    value={bpApprovals}
-                    onChange={(e) => setBpApprovals(Math.max(0, parseInt(e.target.value) || 0))}
-                    disabled={bpBusy}
-                    sx={{ width: 90 }}
-                    slotProps={{ htmlInput: { min: 0 } }}
-                  />
-                </div>
-              )}
-
-              <FormControlLabel
-                control={<Checkbox checked={bpRequireChecks} onChange={(e) => setBpRequireChecks(e.target.checked)} disabled={bpBusy} size="small" />}
-                label="Require status checks"
-              />
-
-              {bpRequireChecks && (
-                <div style={{ marginLeft: 24, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <TextField
-                    size="small"
-                    fullWidth
-                    placeholder="Required checks (comma-separated)"
-                    value={bpContexts}
-                    onChange={(e) => setBpContexts(e.target.value)}
-                    onKeyDown={submitOnEnter(handleBranchProtection)}
-                    disabled={bpBusy}
-                  />
-                  <FormControlLabel
-                    control={<Checkbox checked={bpStrict} onChange={(e) => setBpStrict(e.target.checked)} disabled={bpBusy} size="small" />}
-                    label="Require branches up to date"
-                  />
-                </div>
-              )}
-
-              <FormControlLabel
-                control={<Checkbox checked={bpEnforceAdmins} onChange={(e) => setBpEnforceAdmins(e.target.checked)} disabled={bpBusy} size="small" />}
-                label="Include administrators"
-              />
-
-              <FormControlLabel
-                control={<Checkbox checked={bpLinear} onChange={(e) => setBpLinear(e.target.checked)} disabled={bpBusy} size="small" />}
-                label="Require linear history"
-              />
-            </div>
-
-            <Button
-              type="button"
-              variant="contained"
-              size="small"
-              onClick={handleBranchProtection}
-              disabled={bpBusy || !bpBranch}
-            >
-              {bpBusy ? "Applying..." : "Apply protection"}
-            </Button>
-
-            {bpMsg && (bpMsg.startsWith("Error:") ? <p className={styles.error}>{bpMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 8 }}>{bpMsg}</p>)}
-          </>
-        )}
-      </div>
-
-      {/* Section 5: Delete repositories */}
-      <div className={`${styles.field} ${styles.ghPanel}`} style={{ marginTop: 16 }}>
-        <label style={{ marginBottom: 8 }}>Delete repositories</label>
-        <p className={styles.fieldHint} style={{ margin: "0 0 8px" }}>
-          Permanently deletes repositories from {org} on GitHub, including all code, issues, and history. This cannot be undone. The token needs the delete_repo scope.
-        </p>
-        <TextField size="small" fullWidth placeholder="Filter repositories" value={delFilter} onChange={(e) => setDelFilter(e.target.value)} />
-        {(() => {
-          const filtered = repos.filter((r) => !delFilter.trim() || r.name.toLowerCase().includes(delFilter.trim().toLowerCase()));
-          const allSelected = filtered.length > 0 && filtered.every((r) => delSelected.has(r.name));
-          return (
-            <>
-              <FormControlLabel
-                sx={{ marginTop: 0.5 }}
-                control={
-                  <Checkbox
-                    size="small"
-                    checked={allSelected}
-                    indeterminate={!allSelected && filtered.some((r) => delSelected.has(r.name))}
-                    onChange={() =>
-                      setDelSelected((prev) => {
-                        const next = new Set(prev);
-                        if (allSelected) for (const r of filtered) next.delete(r.name);
-                        else for (const r of filtered) next.add(r.name);
-                        return next;
-                      })
-                    }
-                  />
-                }
-                label={<span style={{ fontSize: "0.85rem" }}>Select all{delFilter.trim() ? " (filtered)" : ""} ({filtered.length})</span>}
-              />
-              <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column" }}>
-                {filtered.map((r) => (
-                  <FormControlLabel
-                    key={r.fullName}
-                    sx={{ marginLeft: 1 }}
-                    control={
-                      <Checkbox
-                        size="small"
-                        checked={delSelected.has(r.name)}
-                        onChange={() =>
-                          setDelSelected((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(r.name)) next.delete(r.name);
-                            else next.add(r.name);
-                            return next;
-                          })
-                        }
-                      />
-                    }
-                    label={
-                      <span style={{ fontSize: "0.85rem", fontFamily: "monospace" }}>
-                        {r.name}
-                        <span style={{ color: "var(--text-secondary)", marginLeft: 8, fontSize: "0.75rem" }}>
-                          {r.private ? "private" : "public"}{r.isTemplate ? " · template" : ""}
-                        </span>
-                      </span>
-                    }
-                  />
-                ))}
-                {filtered.length === 0 && <p className={styles.fieldHint}>No repositories match.</p>}
-              </div>
-              <div style={{ marginTop: 8 }}>
-                <Button variant="contained" size="small" color="error" disabled={delBusy || delSelected.size === 0} onClick={handleDeleteRepos}>
-                  {delBusy ? "Deleting..." : `Delete ${delSelected.size || ""} selected`.replace("  ", " ")}
-                </Button>
-              </div>
-              {delNote && (
-                <p className={delNote.startsWith("Error") || delNote.includes("Failed:") ? styles.error : styles.fieldHint} style={{ marginTop: 8 }}>
-                  {delNote}
+              {prMsg && (prMsg.startsWith("Error:") ? <p className={styles.error}>{prMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 8 }}>{prMsg}</p>)}
+              {prResult && (
+                <p style={{ fontSize: "0.85rem", marginTop: 8, color: "var(--text-secondary)" }}>
+                  PR{" "}
+                  <a href={prResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", fontWeight: 600 }}>
+                    #{prResult.number}
+                  </a>{" "}
+                  created.
                 </p>
               )}
             </>
-          );
-        })()}
-      </div>
+          )}
+        </div>
+      </details>
+
+      <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
+        <summary>Branch protection</summary>
+        <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+          <Typeahead
+            options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
+            value={bpRepo}
+            onChange={(v) => setBpRepo(v)}
+            placeholder="Select a repository..."
+            noOptionsText="No repositories"
+          />
+
+          {bpRepo && (
+            <>
+              <Typeahead
+                options={bpBranches.map((b) => ({ value: b, label: b }))}
+                value={bpBranch}
+                onChange={(v) => setBpBranch(v)}
+                placeholder="Select a branch..."
+                noOptionsText="No branches"
+              />
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+                <FormControlLabel
+                  control={<Checkbox checked={bpRequirePr} onChange={(e) => setBpRequirePr(e.target.checked)} disabled={bpBusy} size="small" />}
+                  label="Require pull request reviews"
+                />
+
+                {bpRequirePr && (
+                  <div style={{ marginLeft: 24, display: "flex", alignItems: "center", gap: 8 }}>
+                    <label style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>Required approvals:</label>
+                    <TextField
+                      type="number"
+                      size="small"
+                      value={bpApprovals}
+                      onChange={(e) => setBpApprovals(Math.max(0, parseInt(e.target.value) || 0))}
+                      disabled={bpBusy}
+                      sx={{ width: 90 }}
+                      slotProps={{ htmlInput: { min: 0 } }}
+                    />
+                  </div>
+                )}
+
+                <FormControlLabel
+                  control={<Checkbox checked={bpRequireChecks} onChange={(e) => setBpRequireChecks(e.target.checked)} disabled={bpBusy} size="small" />}
+                  label="Require status checks"
+                />
+
+                {bpRequireChecks && (
+                  <div style={{ marginLeft: 24, display: "flex", flexDirection: "column", gap: 8 }}>
+                    <TextField
+                      size="small"
+                      fullWidth
+                      placeholder="Required checks (comma-separated)"
+                      value={bpContexts}
+                      onChange={(e) => setBpContexts(e.target.value)}
+                      onKeyDown={submitOnEnter(handleBranchProtection)}
+                      disabled={bpBusy}
+                    />
+                    <FormControlLabel
+                      control={<Checkbox checked={bpStrict} onChange={(e) => setBpStrict(e.target.checked)} disabled={bpBusy} size="small" />}
+                      label="Require branches up to date"
+                    />
+                  </div>
+                )}
+
+                <FormControlLabel
+                  control={<Checkbox checked={bpEnforceAdmins} onChange={(e) => setBpEnforceAdmins(e.target.checked)} disabled={bpBusy} size="small" />}
+                  label="Include administrators"
+                />
+
+                <FormControlLabel
+                  control={<Checkbox checked={bpLinear} onChange={(e) => setBpLinear(e.target.checked)} disabled={bpBusy} size="small" />}
+                  label="Require linear history"
+                />
+              </div>
+
+              <Button
+                type="button"
+                variant="contained"
+                size="small"
+                onClick={handleBranchProtection}
+                disabled={bpBusy || !bpBranch}
+              >
+                {bpBusy ? "Applying..." : "Apply protection"}
+              </Button>
+
+              {bpMsg && (bpMsg.startsWith("Error:") ? <p className={styles.error}>{bpMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 8 }}>{bpMsg}</p>)}
+            </>
+          )}
+        </div>
+      </details>
+
+      <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
+        <summary>Delete repositories</summary>
+        <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+          <p className={styles.fieldHint} style={{ margin: "0 0 8px" }}>
+            Permanently deletes repositories from {org} on GitHub, including all code, issues, and history. This cannot be undone. The token needs the delete_repo scope.
+          </p>
+          <TextField size="small" fullWidth placeholder="Filter repositories" value={delFilter} onChange={(e) => setDelFilter(e.target.value)} />
+          {(() => {
+            const filtered = repos.filter((r) => !delFilter.trim() || r.name.toLowerCase().includes(delFilter.trim().toLowerCase()));
+            const allSelected = filtered.length > 0 && filtered.every((r) => delSelected.has(r.name));
+            return (
+              <>
+                <FormControlLabel
+                  sx={{ marginTop: 0.5 }}
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={allSelected}
+                      indeterminate={!allSelected && filtered.some((r) => delSelected.has(r.name))}
+                      onChange={() =>
+                        setDelSelected((prev) => {
+                          const next = new Set(prev);
+                          if (allSelected) for (const r of filtered) next.delete(r.name);
+                          else for (const r of filtered) next.add(r.name);
+                          return next;
+                        })
+                      }
+                    />
+                  }
+                  label={<span style={{ fontSize: "0.85rem" }}>Select all{delFilter.trim() ? " (filtered)" : ""} ({filtered.length})</span>}
+                />
+                <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+                  {filtered.map((r) => (
+                    <FormControlLabel
+                      key={r.fullName}
+                      sx={{ marginLeft: 1 }}
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={delSelected.has(r.name)}
+                          onChange={() =>
+                            setDelSelected((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(r.name)) next.delete(r.name);
+                              else next.add(r.name);
+                              return next;
+                            })
+                          }
+                        />
+                      }
+                      label={
+                        <span style={{ fontSize: "0.85rem", fontFamily: "monospace" }}>
+                          {r.name}
+                          <span style={{ color: "var(--text-secondary)", marginLeft: 8, fontSize: "0.75rem" }}>
+                            {r.private ? "private" : "public"}{r.isTemplate ? " · template" : ""}
+                          </span>
+                        </span>
+                      }
+                    />
+                  ))}
+                  {filtered.length === 0 && <p className={styles.fieldHint}>No repositories match.</p>}
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <Button variant="contained" size="small" color="error" disabled={delBusy || delSelected.size === 0} onClick={handleDeleteRepos}>
+                    {delBusy ? "Deleting..." : `Delete ${delSelected.size || ""} selected`.replace("  ", " ")}
+                  </Button>
+                </div>
+                {delNote && (
+                  <p className={delNote.startsWith("Error") || delNote.includes("Failed:") ? styles.error : styles.fieldHint} style={{ marginTop: 8 }}>
+                    {delNote}
+                  </p>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      </details>
     </div>
   );
 }

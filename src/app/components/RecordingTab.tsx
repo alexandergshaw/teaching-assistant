@@ -7,6 +7,8 @@ import TabHeader from "./TabHeader";
 import styles from "../page.module.css";
 import { generateLectureScriptAction } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
+import { backupSupported, clearBackupDir, loadBackupDir, pickBackupDir, writeToBackupDir } from "@/lib/backup-dir";
+import type { DirHandle } from "@/lib/backup-dir";
 
 interface Device {
   deviceId: string;
@@ -21,6 +23,7 @@ interface Take {
   sizeBytes: number;
   durationSec: number;
   createdAt: number;
+  backup?: "pending" | "done" | "failed";
 }
 
 interface Stroke {
@@ -131,6 +134,56 @@ export default function RecordingTab() {
   const [useCountdown, setUseCountdown] = useState(true);
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Refs for mirroring state into function reads
+  const autoStopMinRef = useRef<"0" | "5" | "10" | "15" | "30">("0");
+  const stopRecordingRef = useRef<() => void>(() => {});
+  const backupDirRef = useRef<DirHandle | null>(null);
+  const cardPhaseRef = useRef<"title" | "closing" | null>(null);
+  const cardTitleRef = useRef<string>("");
+  const cardSubtitleRef = useRef<string>("");
+  const cardClosingRef = useRef<string>("");
+  const cardSecondsRef = useRef<"2" | "3" | "5">("3");
+  const usedPipelineRef = useRef(false);
+
+  // Feature 1: Auto-stop timer
+  const [autoStopMin, setAutoStopMin] = useState<"0" | "5" | "10" | "15" | "30">(() => {
+    if (typeof window === "undefined") return "0";
+    const saved = localStorage.getItem("ta-rec-autostop");
+    return saved === "5" || saved === "10" || saved === "15" || saved === "30" ? (saved as "5" | "10" | "15" | "30") : "0";
+  });
+
+  // Feature 2: Backup folder
+  const [backupDir, setBackupDir] = useState<DirHandle | null>(null);
+
+  // Feature 3: Title & closing cards
+  const [cardsOn, setCardsOn] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("ta-rec-cards") === "1";
+  });
+
+  const [cardTitle, setCardTitle] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-rec-card-title") ?? "";
+  });
+
+  const [cardSubtitle, setCardSubtitle] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-rec-card-subtitle") ?? "";
+  });
+
+  const [cardClosing, setCardClosing] = useState<string>(() => {
+    if (typeof window === "undefined") return "Thanks for watching.";
+    return localStorage.getItem("ta-rec-card-closing") ?? "Thanks for watching.";
+  });
+
+  const [cardSeconds, setCardSeconds] = useState<"2" | "3" | "5">(() => {
+    if (typeof window === "undefined") return "3";
+    const saved = localStorage.getItem("ta-rec-card-secs");
+    return saved === "2" || saved === "5" ? (saved as "2" | "5") : "3";
+  });
+
+  const [finishing, setFinishing] = useState(false);
+
   // Lecture script generation and teleprompter
   const [scriptTopic, setScriptTopic] = useState<string>(() => {
     if (typeof window === "undefined") return "";
@@ -157,6 +210,22 @@ export default function RecordingTab() {
   const [scriptError, setScriptError] = useState<string | null>(null);
   const [prompterOn, setPrompterOn] = useState(false);
   const [prompterSize, setPrompterSize] = useState<"sm" | "md" | "lg">("md");
+
+  // Persist auto-stop timer state to localStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-rec-autostop", autoStopMin);
+  }, [autoStopMin]);
+
+  // Persist card state to localStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-rec-cards", cardsOn ? "1" : "0");
+    localStorage.setItem("ta-rec-card-title", cardTitle);
+    localStorage.setItem("ta-rec-card-subtitle", cardSubtitle);
+    localStorage.setItem("ta-rec-card-closing", cardClosing);
+    localStorage.setItem("ta-rec-card-secs", cardSeconds);
+  }, [cardsOn, cardTitle, cardSubtitle, cardClosing, cardSeconds]);
 
   // Persist lecture script state to localStorage
   useEffect(() => {
@@ -443,6 +512,34 @@ export default function RecordingTab() {
     pipCornerRef.current = pipCorner;
   }, [pipCorner]);
 
+  // Mirror Feature 1: auto-stop timer ref
+  useEffect(() => {
+    autoStopMinRef.current = autoStopMin;
+  }, [autoStopMin]);
+
+  // Mirror Feature 2: backup dir ref
+  useEffect(() => {
+    backupDirRef.current = backupDir;
+  }, [backupDir]);
+
+  // Mirror Feature 3: card refs
+  useEffect(() => {
+    cardTitleRef.current = cardTitle;
+    cardSubtitleRef.current = cardSubtitle;
+    cardClosingRef.current = cardClosing;
+    cardSecondsRef.current = cardSeconds;
+  }, [cardTitle, cardSubtitle, cardClosing, cardSeconds]);
+
+  // Load backup directory from IndexedDB on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const h = await loadBackupDir();
+      if (!cancelled) setBackupDir(h);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Acquire/release PiP webcam stream
   useEffect(() => {
     const acquirePiP = async () => {
@@ -526,6 +623,28 @@ export default function RecordingTab() {
 
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Feature 3: Draw title or closing card instead of normal content
+      if (cardPhaseRef.current) {
+        ctx.fillStyle = "#0f172a";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#f8fafc";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        if (cardPhaseRef.current === "title") {
+          ctx.font = `700 ${Math.round(canvas.height * 0.08)}px system-ui, sans-serif`;
+          ctx.fillText(cardTitleRef.current || "Lecture", canvas.width / 2, canvas.height * 0.45);
+          if (cardSubtitleRef.current) {
+            ctx.font = `400 ${Math.round(canvas.height * 0.045)}px system-ui, sans-serif`;
+            ctx.fillStyle = "#cbd5e1";
+            ctx.fillText(cardSubtitleRef.current, canvas.width / 2, canvas.height * 0.58);
+          }
+        } else if (cardPhaseRef.current === "closing") {
+          ctx.font = `700 ${Math.round(canvas.height * 0.08)}px system-ui, sans-serif`;
+          ctx.fillText(cardClosingRef.current, canvas.width / 2, canvas.height * 0.5);
+        }
+        pipelineRafRef.current = requestAnimationFrame(draw);
+        return;
+      }
       const src = applyBackgroundEffect(video, canvas.width, canvas.height);
       if (source === "camera" && mirror) {
         ctx.save();
@@ -687,6 +806,9 @@ export default function RecordingTab() {
       clearInterval(countdownTimerRef.current);
       countdownTimerRef.current = null;
     }
+    // Feature 3: Reset card state
+    cardPhaseRef.current = null;
+    setFinishing(false);
     setCountdown(null);
     stopMeter();
     stopPipeline();
@@ -823,6 +945,11 @@ export default function RecordingTab() {
     intervalRef.current = setInterval(() => {
       elapsedRef.current += 1;
       setElapsed(elapsedRef.current);
+      // Feature 1: Auto-stop timer
+      const limit = Number(autoStopMinRef.current) * 60;
+      if (limit > 0 && elapsedRef.current >= limit) {
+        stopRecordingRef.current?.();
+      }
     }, 1000);
 
     return () => {
@@ -851,6 +978,8 @@ export default function RecordingTab() {
   };
 
   const beginRecording = () => {
+    // Feature 3: Guard against starting while finishing
+    if (finishing) return;
     if (!useCountdown) {
       void startRecording();
       return;
@@ -885,8 +1014,11 @@ export default function RecordingTab() {
 
       let recStream: MediaStream = streamRef.current;
       const canvas = pipelineCanvasRef.current;
+      let usedPipeline = false;
       if (canvas && typeof (canvas as HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream }).captureStream === "function") {
         startPipeline();
+        usedPipeline = true;
+        usedPipelineRef.current = true;
         const canvasStream = (canvas as HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream }).captureStream?.(30);
         if (canvasStream) {
           recStream = new MediaStream([...canvasStream.getVideoTracks(), ...streamRef.current.getAudioTracks()]);
@@ -913,23 +1045,52 @@ export default function RecordingTab() {
         const actualMimeType = recorder.mimeType || mimeType || "video/webm";
         const blob = new Blob(chunksRef.current, { type: actualMimeType });
         const url = URL.createObjectURL(blob);
-        setTakes((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            name: `Take ${prev.length + 1}`,
-            url,
-            mimeType: actualMimeType,
-            sizeBytes: blob.size,
-            durationSec: elapsedRef.current,
-            createdAt: Date.now(),
-          },
-        ]);
+        const takeId = crypto.randomUUID();
+        const newTake: Take = {
+          id: takeId,
+          name: `Take ${takes.length + 1}`,
+          url,
+          mimeType: actualMimeType,
+          sizeBytes: blob.size,
+          durationSec: elapsedRef.current,
+          createdAt: Date.now(),
+        };
+
+        // Feature 2: Backup folder integration
+        if (backupDirRef.current) {
+          newTake.backup = "pending";
+          setTakes((prev) => [...prev, newTake]);
+          void (async () => {
+            try {
+              const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+              const ext = actualMimeType.includes("mp4") ? "mp4" : "webm";
+              const safeName = newTake.name.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+              await writeToBackupDir(backupDirRef.current!, `${safeName}-${stamp}.${ext}`, blob);
+              setTakes((prev) => prev.map((t) => t.id === takeId ? { ...t, backup: "done" } : t));
+            } catch (err) {
+              console.error("Backup failed:", err);
+              setTakes((prev) => prev.map((t) => t.id === takeId ? { ...t, backup: "failed" } : t));
+            }
+          })();
+        } else {
+          setTakes((prev) => [...prev, newTake]);
+        }
       };
 
       recorderRef.current = recorder;
+      stopRecordingRef.current = () => {
+        if (recorder.state !== "inactive") recorder.stop();
+        setRecState("idle");
+      };
       recorder.start(1000);
       setRecState("recording");
+      // Feature 3: Start title card if enabled
+      if (usedPipeline && cardsOn) {
+        cardPhaseRef.current = "title";
+        window.setTimeout(() => {
+          if (cardPhaseRef.current === "title") cardPhaseRef.current = null;
+        }, Number(cardSecondsRef.current) * 1000);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start recording");
     }
@@ -950,10 +1111,21 @@ export default function RecordingTab() {
   };
 
   const stopRecording = () => {
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+    // Feature 3: Handle closing card
+    if (!recorderRef.current || recorderRef.current.state === "inactive") return;
+    if (cardsOn && usedPipelineRef.current && cardPhaseRef.current !== "closing") {
+      setFinishing(true);
+      cardPhaseRef.current = "closing";
+      window.setTimeout(() => {
+        cardPhaseRef.current = null;
+        setFinishing(false);
+        recorderRef.current?.stop();
+        setRecState("idle");
+      }, Number(cardSecondsRef.current) * 1000);
+    } else {
       recorderRef.current.stop();
+      setRecState("idle");
     }
-    setRecState("idle");
   };
 
   const handleRename = (id: string) => {
@@ -1219,6 +1391,123 @@ export default function RecordingTab() {
             </Button>
           </div>
         )}
+
+        <div className={styles.field} style={{ marginTop: 16 }}>
+          <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginBottom: 8 }}>Auto-stop</label>
+          <TextField
+            select
+            label="Auto-stop"
+            value={autoStopMin}
+            onChange={(e) => setAutoStopMin(e.target.value as "0" | "5" | "10" | "15" | "30")}
+            size="small"
+            sx={{ minWidth: 110 }}
+          >
+            <MenuItem value="0">Off</MenuItem>
+            <MenuItem value="5">5 min</MenuItem>
+            <MenuItem value="10">10 min</MenuItem>
+            <MenuItem value="15">15 min</MenuItem>
+            <MenuItem value="30">30 min</MenuItem>
+          </TextField>
+        </div>
+
+        <div className={styles.field} style={{ marginTop: 16 }}>
+          <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginBottom: 8 }}>Backup</label>
+          {!backupSupported() ? (
+            <p className={styles.fieldHint}>Automatic backup needs Chrome or Edge (File System Access API). Takes can still be downloaded manually.</p>
+          ) : backupDir ? (
+            <>
+              <span className={styles.ghMeta}>Backing up to: <strong>{backupDir.name}</strong></span>
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={async () => {
+                    try {
+                      const h = await pickBackupDir();
+                      if (h) setBackupDir(h);
+                    } catch {
+                      // user cancelled
+                    }
+                  }}
+                >
+                  Change
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={async () => {
+                    await clearBackupDir();
+                    setBackupDir(null);
+                  }}
+                >
+                  Clear
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={async () => {
+                  try {
+                    const h = await pickBackupDir();
+                    if (h) setBackupDir(h);
+                  } catch {
+                    // user cancelled
+                  }
+                }}
+              >
+                Choose backup folder
+              </Button>
+              <p className={styles.fieldHint} style={{ marginTop: 8 }}>Every finished recording is automatically saved there.</p>
+            </>
+          )}
+        </div>
+
+        <div className={styles.field} style={{ marginTop: 16 }}>
+          <FormControlLabel
+            control={<Checkbox checked={cardsOn} onChange={(e) => setCardsOn(e.target.checked)} size="small" />}
+            label="Add title and closing cards"
+          />
+          {cardsOn && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
+              <TextField
+                label="Title"
+                value={cardTitle}
+                onChange={(e) => setCardTitle(e.target.value)}
+                size="small"
+                sx={{ flex: "1 1 200px" }}
+              />
+              <TextField
+                label="Subtitle"
+                value={cardSubtitle}
+                onChange={(e) => setCardSubtitle(e.target.value)}
+                size="small"
+                sx={{ flex: "1 1 200px" }}
+              />
+              <TextField
+                label="Closing line"
+                value={cardClosing}
+                onChange={(e) => setCardClosing(e.target.value)}
+                size="small"
+                sx={{ flex: "1 1 200px" }}
+              />
+              <TextField
+                select
+                label="Card length"
+                value={cardSeconds}
+                onChange={(e) => setCardSeconds(e.target.value as "2" | "3" | "5")}
+                size="small"
+                sx={{ minWidth: 110 }}
+              >
+                <MenuItem value="2">2 s</MenuItem>
+                <MenuItem value="3">3 s</MenuItem>
+                <MenuItem value="5">5 s</MenuItem>
+              </TextField>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className={styles.adaptPanel}>
@@ -1475,7 +1764,10 @@ export default function RecordingTab() {
             {recState !== "idle" && (
               <>
                 <span className={styles.navBadge}>{recState === "recording" ? "REC" : "PAUSED"}</span>
-                <span className={styles.ghMetaMono}>{fmt(elapsed)}</span>
+                <span className={styles.ghMetaMono} style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--text-primary)" }}>
+                  {fmt(elapsed)}
+                </span>
+                {autoStopMin !== "0" && <span className={styles.ghMeta}>/ {autoStopMin} min</span>}
                 <span className={styles.ghMeta}>
                   {(bytes / 1048576).toFixed(1)} MB
                 </span>
@@ -1542,20 +1834,20 @@ export default function RecordingTab() {
             </>
           ) : recState === "recording" ? (
             <>
-              <Button variant="outlined" onClick={pauseRecording}>
+              <Button variant="outlined" onClick={pauseRecording} disabled={finishing}>
                 Pause
               </Button>
-              <Button variant="contained" color="error" onClick={stopRecording}>
-                Stop
+              <Button variant="contained" color="error" onClick={stopRecording} disabled={finishing}>
+                {finishing ? "Finishing..." : "Stop"}
               </Button>
             </>
           ) : (
             <>
-              <Button variant="contained" onClick={resumeRecording}>
+              <Button variant="contained" onClick={resumeRecording} disabled={finishing}>
                 Resume
               </Button>
-              <Button variant="contained" color="error" onClick={stopRecording}>
-                Stop
+              <Button variant="contained" color="error" onClick={stopRecording} disabled={finishing}>
+                {finishing ? "Finishing..." : "Stop"}
               </Button>
             </>
           )}
@@ -1601,6 +1893,9 @@ export default function RecordingTab() {
               <div className={styles.ghMeta}>
                 {fmt(take.durationSec)} · {(take.sizeBytes / 1048576).toFixed(1)} MB · {new Date(take.createdAt).toLocaleString()}
               </div>
+              {take.backup === "done" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Backed up</span>}
+              {take.backup === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Backup failed</span>}
+              {take.backup === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Backing up...</span>}
               <details style={{ marginTop: 8 }}>
                 <summary style={{ cursor: "pointer", color: "var(--accent)", fontWeight: 600 }}>
                   Play

@@ -80,6 +80,10 @@ export default function RecordingTab() {
 
   const loadDevices = async () => {
     try {
+      if (!navigator.mediaDevices?.enumerateDevices) {
+        setError("This browser exposes no media devices here. Camera and microphone need a secure context - use HTTPS or http://localhost, not a LAN IP address.");
+        return;
+      }
       const deviceList = await navigator.mediaDevices.enumerateDevices();
       // Before the first permission grant, browsers return devices with EMPTY
       // deviceIds - useless (and identical) select options. Filter them out;
@@ -100,6 +104,7 @@ export default function RecordingTab() {
       setDevices({ cameras, mics });
     } catch (err) {
       console.error("Failed to enumerate devices:", err);
+      setError(err instanceof Error ? `Could not list devices: ${err.message}` : "Could not list devices.");
     }
   };
 
@@ -107,9 +112,16 @@ export default function RecordingTab() {
     let cancelled = false;
 
     const initDevices = async () => {
-      if (!cancelled) {
-        await loadDevices();
+      if (cancelled) return;
+      if (typeof window !== "undefined" && !window.isSecureContext) {
+        setError("Camera and microphone are disabled on insecure pages. Open the app over HTTPS or at http://localhost - browsers block media devices on plain-HTTP addresses (e.g. a LAN IP).");
+        return;
       }
+      if (!navigator.mediaDevices) {
+        setError("This browser does not expose camera/microphone APIs on this page (no navigator.mediaDevices). Use HTTPS or localhost in a modern browser.");
+        return;
+      }
+      await loadDevices();
     };
 
     initDevices();
@@ -118,10 +130,10 @@ export default function RecordingTab() {
       if (!cancelled) loadDevices();
     };
 
-    navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
+    navigator.mediaDevices?.addEventListener("devicechange", handleDeviceChange);
     return () => {
       cancelled = true;
-      navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
+      navigator.mediaDevices?.removeEventListener("devicechange", handleDeviceChange);
     };
   }, []);
 
@@ -138,8 +150,17 @@ export default function RecordingTab() {
       }
       probe.getTracks().forEach((t) => t.stop());
       await loadDevices();
-    } catch {
-      setError("Could not get camera/microphone access. Check the browser's permission settings (HTTPS required).");
+    } catch (err) {
+      const name = err instanceof DOMException ? err.name : "";
+      setError(
+        name === "NotAllowedError"
+          ? "Access was blocked. Click the camera icon in the address bar (or the browser's site settings) and allow camera and microphone, then try again."
+          : name === "NotFoundError"
+            ? "The operating system reports no camera or microphone. Check that devices are connected and not disabled in OS privacy settings."
+            : name === "NotReadableError"
+              ? "A camera or microphone is in use by another application. Close it and try again."
+              : "Could not get camera/microphone access. Use HTTPS or localhost and check the browser's site permissions."
+      );
     }
   };
 

@@ -2678,6 +2678,71 @@ export async function generateLectureScriptAction(
   }
 }
 
+/** One slide's extracted text plus its AI narration. */
+export interface SlideNarration {
+  slide: number;
+  title: string;
+  text: string;
+  narration: string;
+}
+
+export async function extractPptxSlidesAction(
+  base64: string
+): Promise<{ slides: Array<{ slide: number; title: string; text: string }> } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!base64) return { error: "Upload a .pptx file." };
+    const paragraphs = await parseOfficeParagraphs("pptx", Buffer.from(base64, "base64"));
+    const bySlide = new Map<number, string[]>();
+    for (const p of paragraphs) {
+      if (typeof p.slide !== "number" || !p.text.trim()) continue;
+      (bySlide.get(p.slide) ?? bySlide.set(p.slide, []).get(p.slide)!).push(p.text.trim());
+    }
+    const slides = [...bySlide.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([slide, texts]) => ({ slide, title: texts[0] ?? `Slide ${slide}`, text: texts.join("\n") }));
+    if (!slides.length) return { error: "No slide text found in that file." };
+    return { slides };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not read the PowerPoint." };
+  }
+}
+
+export async function generateSlideNarrationAction(
+  slides: Array<{ slide: number; title: string; text: string }>,
+  provider: LlmProvider = "gemini"
+): Promise<{ narrations: SlideNarration[] } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!slides.length) return { error: "Extract slides first." };
+    if (slides.length > 60) return { error: "That deck is too large (60 slide limit)." };
+    const parts: LlmPart[] = [
+      {
+        text: [
+          "Write a spoken narration script for a lecture over these presentation slides. For EACH slide write 2-5 conversational first-person sentences an instructor would say while that slide is shown - do not read bullets verbatim; explain them.",
+          'Return ONLY a JSON array like [{"slide": 1, "narration": "..."}] covering every slide number given, in order. No markdown.',
+          "Slides:",
+          slides.map((s) => `Slide ${s.slide}: ${s.text}`).join("\n\n"),
+        ].join("\n\n"),
+      },
+    ];
+    const r = await callLlm(
+      { contents: [{ role: "user", parts }], generationConfig: { temperature: 0.5, maxOutputTokens: 8192 } },
+      provider
+    );
+    if (!r.ok) return { error: "The model returned no narration." };
+    const match = r.text.match(/\[[\s\S]*\]/);
+    if (!match) return { error: "Could not parse the narration output." };
+    const raw = JSON.parse(match[0]) as Array<{ slide?: number; narration?: string }>;
+    const byNum = new Map(raw.filter((x) => typeof x.slide === "number" && typeof x.narration === "string").map((x) => [x.slide as number, (x.narration as string).trim()]));
+    const narrations = slides.map((s) => ({ ...s, narration: byNum.get(s.slide) ?? "" }));
+    if (narrations.every((n) => !n.narration)) return { error: "The model produced no usable narration." };
+    return { narrations };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not write the narration." };
+  }
+}
+
 /** A timed caption for an uploaded screen recording. */
 export interface ScreenCaption {
   start: number;

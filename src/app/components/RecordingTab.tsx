@@ -5,6 +5,7 @@ import { Button, TextField, MenuItem, FormControlLabel, Checkbox } from "@mui/ma
 import type { ImageSegmenter as ImageSegmenterT } from "@mediapipe/tasks-vision";
 import TabHeader from "./TabHeader";
 import CaptionStudio from "./CaptionStudio";
+import SlideStudio from "./SlideStudio";
 import styles from "../page.module.css";
 import { generateLectureScriptAction } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -1918,6 +1919,7 @@ export default function RecordingTab() {
       </div>
 
       <CaptionStudio />
+      <SlideStudio />
     </section>
   );
 }

@@ -83,3 +83,26 @@ design system:
 - Long recordings held in memory as Blobs - cap the timer display with a
   soft warning around ~30 min; chunked `ondataavailable` keeps memory sane.
 - OneDrive-synced downloads folder can be slow for GB files - user-side note.
+
+## Phase 5: parity with Teams/Zoom (approved)
+
+Foundation: route capture through a canvas pipeline - draw the camera/screen
+video to a hidden canvas per frame (requestAnimationFrame), record
+canvas.captureStream(30) + the audio tracks with MediaRecorder. Everything
+below becomes a draw step in that pipeline.
+
+Priority order:
+1. Audio processing toggles (native constraints, no deps): noise suppression,
+   echo cancellation, auto gain - checkboxes mapped to getUserMedia audio
+   constraints; mic mute toggle during recording (track.enabled).
+2. Annotation overlay: draw on the live video (pen, highlighter, eraser,
+   color, size, clear, undo); strokes render onto the pipeline canvas so they
+   are burned into the recording. Toolbar over the stage.
+3. Background blur / virtual background (camera source): person segmentation
+   via @mediapipe/tasks-vision ImageSegmenter (selfie model, WASM, new dep),
+   composite blurred/替换 background behind the person on the canvas; graceful
+   fallback (toggle disabled with a note) when the model fails to load.
+4. Picture-in-picture: webcam bubble composited over screen share (position/
+   size presets), drawn in the same canvas pass.
+5. Countdown (3-2-1) before recording starts; keyboard shortcuts (R record,
+   P pause, M mute).

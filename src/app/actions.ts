@@ -5540,9 +5540,10 @@ export interface StudentRepoResult {
 const repoSlug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
 /**
- * Generate one repo per student in `org` from a template repo within that org.
+ * Generate one repo per student in `org` from a template repo (may live under any owner the token can access).
  * Each repo is named `<prefix>-<student>` (prefix optional). Returns a per-student
  * result so the UI can show successes and failures (e.g. a name that already exists).
+ * templateRepo may be a bare repo name ("my-template", lives in org) or a full name ("owner/my-template").
  */
 export async function generateStudentReposAction(
   org: string,
@@ -5558,12 +5559,14 @@ export async function generateStudentReposAction(
     const list = students.map((s) => s.trim()).filter(Boolean);
     if (list.length === 0) return { error: "Add at least one student." };
     const base = prefix.trim() ? repoSlug(prefix) : "";
+    const t = templateRepo.trim();
+    const [templateOwner, templateName] = t.includes("/") ? [t.split("/")[0], t.split("/").slice(1).join("/")] : [org.trim(), t];
     const results: StudentRepoResult[] = [];
     for (const student of list) {
       const suffix = repoSlug(student) || "student";
       const name = (base ? `${base}-${suffix}` : suffix).slice(0, 95);
       try {
-        const repo = await generateFromTemplate(org.trim(), templateRepo.trim(), org.trim(), name, isPrivate);
+        const repo = await generateFromTemplate(templateOwner, templateName, org.trim(), name, isPrivate);
         results.push({ student, name, htmlUrl: repo.htmlUrl });
       } catch (err) {
         results.push({ student, name, error: err instanceof Error ? err.message : "Failed" });

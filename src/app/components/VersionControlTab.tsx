@@ -5,6 +5,7 @@ import {
   listMyOrgsAction,
   listOrgReposAction,
   generateStudentReposAction,
+  listGithubReposAction,
   type StudentRepoResult,
 } from "../actions";
 import type { GithubRepo } from "@/lib/github";
@@ -34,6 +35,7 @@ export default function VersionControlTab() {
   const [selectedOrg, setSelectedOrg] = useState("");
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
+  const [myRepos, setMyRepos] = useState<GithubRepo[]>([]);
   const [templateRepo, setTemplateRepo] = useState("");
   const [prefix, setPrefix] = useState("");
   const [studentsText, setStudentsText] = useState("");
@@ -81,6 +83,11 @@ export default function VersionControlTab() {
       }
       setOrgs(r.orgs);
       setOrgsState("ready");
+      const mr = await listGithubReposAction();
+      if (cancelled) return;
+      if (!("error" in mr)) {
+        setMyRepos(mr.repos);
+      }
     })();
     return () => {
       cancelled = true;
@@ -110,8 +117,12 @@ export default function VersionControlTab() {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [selectedOrg]);
 
-  const templates = repos.filter((r) => r.isTemplate);
-  const templateOptions = templates.length > 0 ? templates : repos;
+  const externalTemplates = myRepos.filter((r) => r.isTemplate && !repos.some((o) => o.fullName === r.fullName));
+  const mergedRepos = [...repos, ...externalTemplates];
+  const templates = mergedRepos.filter((r) => r.isTemplate);
+  const templateOptions = (templates.length > 0 ? templates : mergedRepos)
+    .slice()
+    .sort((a, b) => Number(b.isTemplate) - Number(a.isTemplate) || a.fullName.localeCompare(b.fullName));
   const students = studentsText
     .split(/[\n,]+/)
     .map((s) => s.trim())
@@ -237,7 +248,7 @@ export default function VersionControlTab() {
           <div className={styles.field}>
             <label>Template repository</label>
             <Typeahead
-              options={templateOptions.map((r) => ({ value: r.name, label: `${r.name}${r.isTemplate ? " (template)" : ""}` }))}
+              options={templateOptions.map((r) => ({ value: r.fullName, label: `${r.fullName}${r.isTemplate ? " (template)" : ""}` }))}
               value={templateRepo}
               onChange={(name) => setTemplateRepo(name)}
               placeholder={reposLoading ? "Loading repositories..." : !selectedOrg ? "Choose an organization first" : "Choose a template repo..."}
@@ -245,7 +256,7 @@ export default function VersionControlTab() {
               loading={reposLoading}
               noOptionsText="No repositories"
             />
-            {selectedOrg && !reposLoading && templates.length === 0 && repos.length > 0 && (
+            {selectedOrg && !reposLoading && templates.length === 0 && mergedRepos.length > 0 && (
               <p style={{ fontSize: "0.8rem", color: "var(--warning)", marginTop: 4 }}>
                 No template repositories found in this org. Mark a repo as a template (Settings → Template repository), or
                 select one below — generation will fail if it isn&apos;t a template.

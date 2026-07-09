@@ -30,6 +30,7 @@ import {
   listPendingDeploymentsAction,
   reviewPendingDeploymentsAction,
   createRepoAction,
+  createRepoFromTemplateAction,
   createCopilotRepoAction,
   createCopilotTaskAction,
   listCopilotTasksAction,
@@ -183,6 +184,9 @@ export default function RepoDetail() {
   const [createBusy, setCreateBusy] = useState(false);
   const [createMsg, setCreateMsg] = useState<string | null>(null);
   const [createResult, setCreateResult] = useState<{ fullName: string; htmlUrl: string; issueUrl?: string; copilotNote?: string } | null>(null);
+  // Create-from-template state.
+  const [createFromTemplate, setCreateFromTemplate] = useState(false);
+  const [templateSource, setTemplateSource] = useState("");
 
   // Load repos on mount
   useEffect(() => {
@@ -983,6 +987,45 @@ export default function RepoDetail() {
     setShowCreate(false);
   };
 
+  // Create a new repo from another repo used as a template. If the source isn't
+  // marked as a template yet, warn and mark it as part of this operation.
+  const handleCreateFromTemplate = async () => {
+    const name = createName.trim();
+    if (!name) return;
+    if (!templateSource.trim()) {
+      setCreateMsg("Error: choose a source repository to use as the template.");
+      return;
+    }
+    const source = repos.find((r) => r.fullName === templateSource);
+    let markTemplate = false;
+    if (!source?.isTemplate) {
+      const ok =
+        typeof window !== "undefined" &&
+        window.confirm(
+          `"${templateSource}" isn't marked as a template. Mark it as a template and create "${name}" from it?`
+        );
+      if (!ok) return;
+      markTemplate = true;
+    }
+    setCreateBusy(true);
+    setCreateMsg(null);
+    setCreateResult(null);
+    const r = await createRepoFromTemplateAction(templateSource, name, createPrivate, markTemplate);
+    setCreateBusy(false);
+    if ("error" in r) {
+      setCreateMsg(`Error: ${r.error}`);
+      return;
+    }
+    setCreateResult({ fullName: r.repo.fullName, htmlUrl: r.repo.htmlUrl });
+    const list = await listGithubReposAction();
+    if (!("error" in list)) setRepos(list.repos);
+    setRepoRef(r.repo.fullName);
+    setCreateName("");
+    setShowCreate(false);
+    setCreateFromTemplate(false);
+    setTemplateSource("");
+  };
+
   const repoOptions = repos.map((r) => ({
     value: r.fullName,
     label: r.fullName,
@@ -1059,33 +1102,60 @@ export default function RepoDetail() {
             onChange={(e) => setCreateDescription(e.target.value)}
             onKeyDown={submitOnEnter(handleCreateRepo)}
           />
-          <div style={{ display: "flex", gap: 16 }}>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
             <FormControlLabel
               control={<Checkbox size="small" checked={createPrivate} onChange={(e) => setCreatePrivate(e.target.checked)} />}
               label="Private"
             />
             <FormControlLabel
-              control={<Checkbox size="small" checked={createTemplate} onChange={(e) => setCreateTemplate(e.target.checked)} />}
+              control={<Checkbox size="small" checked={createTemplate} onChange={(e) => setCreateTemplate(e.target.checked)} disabled={createFromTemplate} />}
               label="Template"
             />
+            <FormControlLabel
+              control={<Checkbox size="small" checked={createFromTemplate} onChange={(e) => setCreateFromTemplate(e.target.checked)} />}
+              label="Create from a template repo"
+            />
           </div>
-          <TextField
-            size="small"
-            fullWidth
-            multiline
-            minRows={4}
-            placeholder="GitHub Copilot prompt (optional)"
-            value={createPrompt}
-            onChange={(e) => setCreatePrompt(e.target.value)}
-            sx={{ "& textarea": { fontFamily: "monospace", fontSize: "0.82rem" } }}
-          />
+          {createFromTemplate ? (
+            <div>
+              <Typeahead
+                options={repos.map((r) => ({ value: r.fullName, label: r.fullName, hint: r.isTemplate ? "template" : undefined }))}
+                value={templateSource}
+                onChange={(v) => setTemplateSource(v)}
+                placeholder="Choose a source repository..."
+                noOptionsText="No repositories"
+              />
+              {templateSource && !repos.find((r) => r.fullName === templateSource)?.isTemplate && (
+                <p className={styles.fieldHint} style={{ color: "var(--warning)", marginTop: 4 }}>
+                  This repo isn&apos;t marked as a template yet — creating will mark it as a template first.
+                </p>
+              )}
+            </div>
+          ) : (
+            <TextField
+              size="small"
+              fullWidth
+              multiline
+              minRows={4}
+              placeholder="GitHub Copilot prompt (optional)"
+              value={createPrompt}
+              onChange={(e) => setCreatePrompt(e.target.value)}
+              sx={{ "& textarea": { fontFamily: "monospace", fontSize: "0.82rem" } }}
+            />
+          )}
           <Button
             variant="contained"
             size="small"
-            disabled={createBusy || !createName.trim()}
-            onClick={handleCreateRepo}
+            disabled={createBusy || !createName.trim() || (createFromTemplate && !templateSource.trim())}
+            onClick={createFromTemplate ? handleCreateFromTemplate : handleCreateRepo}
           >
-            {createBusy ? "Creating..." : (createPrompt.trim() ? "Create repo with Copilot prompt" : "Create repository")}
+            {createBusy
+              ? "Creating..."
+              : createFromTemplate
+                ? "Create from template"
+                : createPrompt.trim()
+                  ? "Create repo with Copilot prompt"
+                  : "Create repository"}
           </Button>
           {createMsg && (
             <p style={{ fontSize: "0.85rem", color: createMsg.startsWith("Error") ? "var(--danger)" : "var(--text-secondary)", marginTop: 4 }}>

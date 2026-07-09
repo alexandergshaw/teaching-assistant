@@ -5632,6 +5632,34 @@ export async function createRepoAction(
 }
 
 /**
+ * Create a new repo from an existing one used as a template. GitHub only allows
+ * generating from a repo whose is_template flag is set, so when `markTemplate`
+ * is true the source is flagged as a template first (the caller warns the user).
+ * The new repo is created under the same owner/org as the template.
+ */
+export async function createRepoFromTemplateAction(
+  templateRepoRef: string,
+  name: string,
+  isPrivate: boolean,
+  markTemplate: boolean
+): Promise<{ repo: { fullName: string; htmlUrl: string } } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(templateRepoRef);
+    if (!parsed) return { error: "Choose a source repository as owner/name." };
+    const clean = name.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
+    if (!clean) return { error: "Enter a name for the new repository." };
+    if (markTemplate) {
+      await updateRepo(parsed.owner, parsed.repo, { isTemplate: true });
+    }
+    const repo = await generateFromTemplate(parsed.owner, parsed.repo, parsed.owner, clean, isPrivate);
+    return { repo: { fullName: repo.fullName, htmlUrl: repo.htmlUrl } };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the repository from the template." };
+  }
+}
+
+/**
  * Create a new GitHub repo seeded with a generated Copilot prompt, then kick off
  * GitHub's Copilot coding agent to build it: the prompt is written to
  * .github/copilot-instructions.md and PROMPT.md, and an issue containing the

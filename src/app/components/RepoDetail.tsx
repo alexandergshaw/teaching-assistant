@@ -1096,10 +1096,13 @@ export default function RepoDetail() {
     });
   };
 
+  const selectedRepoInfo = repoRef ? repos.find((r) => r.fullName === repoRef) : undefined;
+
   return (
     <div className={styles.field}>
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 320px" }}>
+          <label className={styles.panelTitle} style={{ display: "block", marginBottom: 6 }}>Repository</label>
           <Typeahead
             options={repoOptions}
             value={repoRef}
@@ -1119,6 +1122,7 @@ export default function RepoDetail() {
         </div>
         {repoRef && (
           <div style={{ flex: "1 1 220px" }}>
+            <label className={styles.panelTitle} style={{ display: "block", marginBottom: 6 }}>Branch</label>
             <Typeahead
               options={branchOptions}
               value={branch}
@@ -1134,6 +1138,32 @@ export default function RepoDetail() {
       </div>
 
       {!repoRef && <p className={styles.fieldHint}>Pick a repository to browse its files, branches, pull requests, and actions.</p>}
+
+      {selectedRepoInfo && (
+        <div className={styles.ghRepoHead}>
+          <div className={styles.ghBadges}>
+            <a href={selectedRepoInfo.htmlUrl} target="_blank" rel="noreferrer" className={styles.ghRepoName}>
+              {selectedRepoInfo.fullName}
+            </a>
+            <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>
+              {selectedRepoInfo.private ? "Private" : "Public"}
+            </span>
+            {selectedRepoInfo.isTemplate && (
+              <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>Template</span>
+            )}
+            {selectedRepoInfo.archived && (
+              <span className={`${styles.ghBadge} ${styles.ghBadgeWarning}`}>Archived</span>
+            )}
+          </div>
+          {selectedRepoInfo.description && (
+            <p className={styles.ghMeta} style={{ margin: "6px 0 0" }}>{selectedRepoInfo.description}</p>
+          )}
+          <div className={styles.ghMetaRow} style={{ marginTop: 6 }}>
+            <span className={styles.ghMetaMono}>default: {selectedRepoInfo.defaultBranch}</span>
+            {selectedRepoInfo.updatedAt && <span>updated {formatRelative(selectedRepoInfo.updatedAt)}</span>}
+          </div>
+        </div>
+      )}
 
       {showCreate && (
         <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: 8 }}>
@@ -1245,9 +1275,19 @@ export default function RepoDetail() {
             onChange={(_, v) => setTab(v as "files" | "branches" | "pulls" | "actions" | "copilot" | "settings")}
             sx={{
               marginTop: 2,
+              minHeight: 40,
+              borderBottom: "1px solid var(--field-border)",
+              "& .MuiTabs-indicator": { backgroundColor: "var(--accent)" },
               "& .MuiTab-root": {
+                fontFamily: "inherit",
+                fontSize: "0.88rem",
+                fontWeight: 500,
                 textTransform: "none",
+                color: "var(--text-secondary)",
+                minHeight: 40,
+                padding: "8px 16px",
               },
+              "& .Mui-selected": { color: "var(--accent) !important", fontWeight: 600 },
             }}
           >
             <Tab label="Files" value="files" disableRipple />
@@ -1260,23 +1300,6 @@ export default function RepoDetail() {
 
           {tab === "files" && (
             <>
-            <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => { setShowNewFile((v) => !v); setShowNewFolder(false); setNewFileError(null); }}
-              >
-                {showNewFile ? "Cancel new file" : "New file"}
-              </Button>
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => { setShowNewFolder((v) => !v); setShowNewFile(false); setNewFolderError(null); setNewFolderResult(null); }}
-              >
-                {showNewFolder ? "Cancel new folder" : "New folder"}
-              </Button>
-            </div>
-
             {showNewFile && (
               <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: 8 }}>
                 <TextField
@@ -1426,7 +1449,25 @@ export default function RepoDetail() {
 
             <div className={styles.ghSplit}>
               <div className={`${styles.ghPanel} ${styles.ghSplitTree}`} style={{ width: treeWidth }}>
-                <label className={styles.panelTitle} style={{ display: "block", marginBottom: 10 }}>Files</label>
+                <div className={styles.ghPanelHead} style={{ marginBottom: 10 }}>
+                  <label className={styles.panelTitle}>Files</label>
+                  <div className={styles.ghPanelHeadRight}>
+                    <Button
+                      variant="text"
+                      size="small"
+                      onClick={() => { setShowNewFile((v) => !v); setShowNewFolder(false); setNewFileError(null); }}
+                    >
+                      {showNewFile ? "Cancel" : "New file"}
+                    </Button>
+                    <Button
+                      variant="text"
+                      size="small"
+                      onClick={() => { setShowNewFolder((v) => !v); setShowNewFile(false); setNewFolderError(null); setNewFolderResult(null); }}
+                    >
+                      {showNewFolder ? "Cancel" : "New folder"}
+                    </Button>
+                  </div>
+                </div>
                 <TextField
                   size="small"
                   fullWidth

@@ -10,6 +10,7 @@ import {
   createPullRequestAction,
   setBranchProtectionAction,
   listGithubBranchesAction,
+  deleteOrgReposAction,
 } from "../actions";
 import type { GithubRepo } from "@/lib/github";
 import Typeahead from "./ui/Typeahead";
@@ -66,9 +67,10 @@ const roleValue = (label: string): "admin" | "member" => {
 interface OrgManagementPanelProps {
   org: string;
   repos: GithubRepo[];
+  onReposChanged?: () => void;
 }
 
-export default function OrgManagementPanel({ org, repos }: OrgManagementPanelProps) {
+export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgManagementPanelProps) {
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [membersState, setMembersState] = useState<"loading" | "ready" | "error">("loading");
   const [membersError, setMembersError] = useState<string | null>(null);
@@ -108,6 +110,11 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
   const [bpLinear, setBpLinear] = useState(false);
   const [bpMsg, setBpMsg] = useState<string | null>(null);
   const [bpBusy, setBpBusy] = useState(false);
+
+  const [delFilter, setDelFilter] = useState("");
+  const [delSelected, setDelSelected] = useState<Set<string>>(new Set());
+  const [delBusy, setDelBusy] = useState(false);
+  const [delNote, setDelNote] = useState<string | null>(null);
 
   // Load members on mount and when org changes
   useEffect(() => {
@@ -288,6 +295,31 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
     } else {
       setBpMsg(`Protection updated on ${bpBranch}.`);
     }
+  };
+
+  const handleDeleteRepos = async () => {
+    const names = [...delSelected];
+    if (names.length === 0) return;
+    const typed = typeof window !== "undefined"
+      ? window.prompt(`This permanently deletes ${names.length} repositor${names.length === 1 ? "y" : "ies"} from ${org}, including all code and history. Type DELETE to confirm.`)
+      : null;
+    if (typed !== "DELETE") return;
+    setDelBusy(true);
+    setDelNote(null);
+    const r = await deleteOrgReposAction(org, names);
+    setDelBusy(false);
+    if ("error" in r) {
+      setDelNote(`Error: ${r.error}`);
+      return;
+    }
+    const failed = r.results.filter((x) => x.error);
+    const deleted = r.results.length - failed.length;
+    setDelNote(
+      `Deleted ${deleted} repositor${deleted === 1 ? "y" : "ies"}.` +
+        (failed.length > 0 ? ` Failed: ${failed.map((f) => `${f.name} (${f.error})`).join(", ")}` : "")
+    );
+    setDelSelected(new Set());
+    onReposChanged?.();
   };
 
   return (
@@ -601,6 +633,83 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
             {bpMsg && (bpMsg.startsWith("Error:") ? <p className={styles.error}>{bpMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 8 }}>{bpMsg}</p>)}
           </>
         )}
+      </div>
+
+      {/* Section 5: Delete repositories */}
+      <div className={`${styles.field} ${styles.ghPanel}`} style={{ marginTop: 16 }}>
+        <label style={{ marginBottom: 8 }}>Delete repositories</label>
+        <p className={styles.fieldHint} style={{ margin: "0 0 8px" }}>
+          Permanently deletes repositories from {org} on GitHub, including all code, issues, and history. This cannot be undone. The token needs the delete_repo scope.
+        </p>
+        <TextField size="small" fullWidth placeholder="Filter repositories" value={delFilter} onChange={(e) => setDelFilter(e.target.value)} />
+        {(() => {
+          const filtered = repos.filter((r) => !delFilter.trim() || r.name.toLowerCase().includes(delFilter.trim().toLowerCase()));
+          const allSelected = filtered.length > 0 && filtered.every((r) => delSelected.has(r.name));
+          return (
+            <>
+              <FormControlLabel
+                sx={{ marginTop: 0.5 }}
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={allSelected}
+                    indeterminate={!allSelected && filtered.some((r) => delSelected.has(r.name))}
+                    onChange={() =>
+                      setDelSelected((prev) => {
+                        const next = new Set(prev);
+                        if (allSelected) for (const r of filtered) next.delete(r.name);
+                        else for (const r of filtered) next.add(r.name);
+                        return next;
+                      })
+                    }
+                  />
+                }
+                label={<span style={{ fontSize: "0.85rem" }}>Select all{delFilter.trim() ? " (filtered)" : ""} ({filtered.length})</span>}
+              />
+              <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+                {filtered.map((r) => (
+                  <FormControlLabel
+                    key={r.fullName}
+                    sx={{ marginLeft: 1 }}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={delSelected.has(r.name)}
+                        onChange={() =>
+                          setDelSelected((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(r.name)) next.delete(r.name);
+                            else next.add(r.name);
+                            return next;
+                          })
+                        }
+                      />
+                    }
+                    label={
+                      <span style={{ fontSize: "0.85rem", fontFamily: "monospace" }}>
+                        {r.name}
+                        <span style={{ color: "var(--text-secondary)", marginLeft: 8, fontSize: "0.75rem" }}>
+                          {r.private ? "private" : "public"}{r.isTemplate ? " · template" : ""}
+                        </span>
+                      </span>
+                    }
+                  />
+                ))}
+                {filtered.length === 0 && <p className={styles.fieldHint}>No repositories match.</p>}
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <Button variant="contained" size="small" color="error" disabled={delBusy || delSelected.size === 0} onClick={handleDeleteRepos}>
+                  {delBusy ? "Deleting..." : `Delete ${delSelected.size || ""} selected`.replace("  ", " ")}
+                </Button>
+              </div>
+              {delNote && (
+                <p className={delNote.startsWith("Error") || delNote.includes("Failed:") ? styles.error : styles.fieldHint} style={{ marginTop: 8 }}>
+                  {delNote}
+                </p>
+              )}
+            </>
+          );
+        })()}
       </div>
     </div>
   );

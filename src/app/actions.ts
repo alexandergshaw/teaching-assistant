@@ -196,6 +196,7 @@ import {
   setBranchProtection,
   listPersonalRepos,
   updateRepo,
+  deleteRepo,
   forkRepo,
   createBranch,
   deleteBranch,
@@ -5552,6 +5553,34 @@ export interface StudentRepoResult {
 }
 
 const repoSlug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+/**
+ * Permanently delete repositories from an org, one result per repo so the UI
+ * can show partial failures (e.g. missing delete_repo scope or protection).
+ */
+export async function deleteOrgReposAction(
+  org: string,
+  names: string[]
+): Promise<{ results: Array<{ name: string; error?: string }> } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!org.trim()) return { error: "Choose an organization." };
+    const list = names.map((n) => n.trim()).filter(Boolean);
+    if (list.length === 0) return { error: "Choose at least one repository." };
+    const results: Array<{ name: string; error?: string }> = [];
+    for (const name of list) {
+      try {
+        await deleteRepo(org.trim(), name);
+        results.push({ name });
+      } catch (err) {
+        results.push({ name, error: err instanceof Error ? err.message : "Failed" });
+      }
+    }
+    return { results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not delete repositories." };
+  }
+}
 
 /**
  * Generate one repo per student in `org` from a template repo (may live under any owner the token can access).

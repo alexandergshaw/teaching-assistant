@@ -63,6 +63,7 @@ export default function VersionControlTab() {
   const [selectedOrg, setSelectedOrg] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_ORG_KEY) ?? "" : ""));
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
+  const [orgReposNonce, setOrgReposNonce] = useState(0);
   const [myRepos, setMyRepos] = useState<GithubRepo[]>([]);
   const [templateRepo, setTemplateRepo] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_TEMPLATE_KEY) ?? "" : ""));
   const [prefix, setPrefix] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_PREFIX_KEY) ?? "" : ""));
@@ -183,7 +184,7 @@ export default function VersionControlTab() {
       cancelled = true;
     };
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [selectedOrg]);
+  }, [selectedOrg, orgReposNonce]);
 
   useEffect(() => {
     let cancelled = false;
@@ -517,7 +518,7 @@ export default function VersionControlTab() {
             </div>
           )}
 
-          {selectedOrg && <OrgManagementPanel org={selectedOrg} repos={repos} />}
+          {selectedOrg && <OrgManagementPanel org={selectedOrg} repos={repos} onReposChanged={() => setOrgReposNonce((n) => n + 1)} />}
         </>
       )}
 

@@ -1086,6 +1086,11 @@ export async function updateRepo(owner: string, repo: string, patch: UpdateRepoP
   );
 }
 
+/** Permanently delete a repository. Requires a token with the delete_repo scope. */
+export async function deleteRepo(owner: string, repo: string): Promise<void> {
+  await ghFetch(`/repos/${owner}/${repo}`, { method: "DELETE" });
+}
+
 // ── Forking ─────────────────────────────────────────────────────────────────
 /** Fork a repo to the token's account, or into `org` when given. */
 export async function forkRepo(owner: string, repo: string, org?: string): Promise<GithubRepo> {

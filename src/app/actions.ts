@@ -2643,6 +2643,42 @@ export async function extractTextbookInfoAction(
 }
 
 /**
+ * Write a spoken-word lecture script for recording (teleprompter-ready).
+ * Targets roughly 140 words per minute of the requested duration.
+ */
+export async function generateLectureScriptAction(
+  topic: string,
+  objectives: string,
+  targetMinutes: number,
+  provider: LlmProvider = "gemini"
+): Promise<{ script: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!topic.trim()) return { error: "Enter a lecture topic." };
+    const minutes = Number.isFinite(targetMinutes) && targetMinutes >= 1 && targetMinutes <= 30 ? Math.round(targetMinutes) : 5;
+    const words = minutes * 140;
+    const parts: LlmPart[] = [
+      {
+        text: [
+          `Write a spoken-word lecture script for a college instructor to read aloud on camera about: ${topic.trim()}.`,
+          objectives.trim() ? `Cover these objectives/notes:\n${objectives.trim()}` : "",
+          `Target length: about ${words} words (${minutes} minutes at a natural speaking pace).`,
+          "Rules: conversational but precise; short sentences; first person; open with a one-sentence hook and end with a brief recap plus what students should do next. Insert [PAUSE] on its own line between major sections. Return ONLY the script as plain text - no headings, no markdown, no stage directions other than [PAUSE].",
+        ].filter(Boolean).join("\n\n"),
+      },
+    ];
+    const r = await callLlm(
+      { contents: [{ role: "user", parts }], generationConfig: { temperature: 0.6, maxOutputTokens: 4096 } },
+      provider
+    );
+    if (!r.ok || !r.text.trim()) return { error: "The model returned no script. Try again." };
+    return { script: r.text.trim() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate the script." };
+  }
+}
+
+/**
  * Read a former syllabus (.docx) and a codebase zip. Pass 1 identifies the
  * class-specific NON-schedule fields and the weekly-schedule block's bounds; pass
  * 2 produces a complete replacement for EVERY paragraph in that block, so the old

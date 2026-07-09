@@ -5,6 +5,8 @@ import { Button, TextField, MenuItem, FormControlLabel, Checkbox } from "@mui/ma
 import type { ImageSegmenter as ImageSegmenterT } from "@mediapipe/tasks-vision";
 import TabHeader from "./TabHeader";
 import styles from "../page.module.css";
+import { generateLectureScriptAction } from "../actions";
+import { getStoredProvider } from "@/lib/llm-provider";
 
 interface Device {
   deviceId: string;
@@ -128,6 +130,42 @@ export default function RecordingTab() {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [useCountdown, setUseCountdown] = useState(true);
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Lecture script generation and teleprompter
+  const [scriptTopic, setScriptTopic] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-rec-script-topic") ?? "";
+  });
+
+  const [scriptObjectives, setScriptObjectives] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-rec-script-objectives") ?? "";
+  });
+
+  const [scriptMinutes, setScriptMinutes] = useState<"2" | "5" | "10" | "15">(() => {
+    if (typeof window === "undefined") return "5";
+    const saved = localStorage.getItem("ta-rec-script-minutes");
+    return saved === "2" || saved === "10" || saved === "15" ? saved : "5";
+  });
+
+  const [script, setScript] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-rec-script") ?? "";
+  });
+
+  const [scriptBusy, setScriptBusy] = useState(false);
+  const [scriptError, setScriptError] = useState<string | null>(null);
+  const [prompterOn, setPrompterOn] = useState(false);
+  const [prompterSize, setPrompterSize] = useState<"sm" | "md" | "lg">("md");
+
+  // Persist lecture script state to localStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-rec-script-topic", scriptTopic);
+    localStorage.setItem("ta-rec-script-objectives", scriptObjectives);
+    localStorage.setItem("ta-rec-script-minutes", scriptMinutes);
+    localStorage.setItem("ta-rec-script", script);
+  }, [scriptTopic, scriptObjectives, scriptMinutes, script]);
 
   // Mirror source state into ref
   const sourceRef = useRef<"camera" | "screen">("camera");
@@ -950,6 +988,18 @@ export default function RecordingTab() {
     });
   };
 
+  const handleGenerateScript = async () => {
+    setScriptBusy(true);
+    setScriptError(null);
+    const r = await generateLectureScriptAction(scriptTopic, scriptObjectives, Number(scriptMinutes), getStoredProvider());
+    setScriptBusy(false);
+    if ("error" in r) {
+      setScriptError(r.error);
+      return;
+    }
+    setScript(r.script);
+  };
+
   // Unmount-only cleanup. Latest takes/stopEverything are read through refs so
   // this never re-runs (a deps-based cleanup would kill the stream and revoke
   // take URLs every time a take is added).
@@ -1173,8 +1223,118 @@ export default function RecordingTab() {
 
       <div className={styles.adaptPanel}>
         <div className={styles.adaptPanelHeader}>
+          <h2 className={styles.adaptPanelTitle}>Lecture script</h2>
+          <p className={styles.adaptPanelSubtitle}>Draft a teleprompter-ready script with AI, edit it, then read it while you record.</p>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+          <TextField
+            label="Topic"
+            value={scriptTopic}
+            onChange={(e) => setScriptTopic(e.target.value)}
+            size="small"
+            sx={{ flex: "1 1 260px" }}
+          />
+          <TextField
+            select
+            label="Length"
+            value={scriptMinutes}
+            onChange={(e) => setScriptMinutes(e.target.value as "2" | "5" | "10" | "15")}
+            size="small"
+            sx={{ minWidth: 110 }}
+          >
+            <MenuItem value="2">2 min</MenuItem>
+            <MenuItem value="5">5 min</MenuItem>
+            <MenuItem value="10">10 min</MenuItem>
+            <MenuItem value="15">15 min</MenuItem>
+          </TextField>
+          <Button
+            variant="contained"
+            size="small"
+            disabled={scriptBusy || !scriptTopic.trim()}
+            onClick={() => void handleGenerateScript()}
+          >
+            {scriptBusy ? "Writing..." : script ? "Regenerate" : "Generate script"}
+          </Button>
+        </div>
+        <TextField
+          label="Objectives / notes (optional)"
+          value={scriptObjectives}
+          onChange={(e) => setScriptObjectives(e.target.value)}
+          multiline
+          minRows={2}
+          fullWidth
+          size="small"
+          sx={{ marginBottom: 12 }}
+        />
+        {scriptError && <p className={styles.error}>{scriptError}</p>}
+        {script && (
+          <>
+            <TextField
+              multiline
+              minRows={6}
+              fullWidth
+              value={script}
+              onChange={(e) => setScript(e.target.value)}
+              size="small"
+              sx={{ marginBottom: 12 }}
+            />
+            <div className={styles.ghActions} style={{ alignItems: "center", marginBottom: 16 }}>
+              <span className={styles.ghMeta}>{script.trim().split(/\s+/).length} words · ~{Math.max(1, Math.round(script.trim().split(/\s+/).length / 140))} min at speaking pace</span>
+              <Button
+                variant="text"
+                size="small"
+                onClick={() => void navigator.clipboard.writeText(script)}
+              >
+                Copy
+              </Button>
+              <Button
+                variant={prompterOn ? "contained" : "outlined"}
+                size="small"
+                onClick={() => setPrompterOn((v) => !v)}
+              >
+                {prompterOn ? "Hide teleprompter" : "Teleprompter"}
+              </Button>
+              {prompterOn && (
+                <TextField
+                  select
+                  size="small"
+                  label="Text size"
+                  value={prompterSize}
+                  onChange={(e) => setPrompterSize(e.target.value as "sm" | "md" | "lg")}
+                  sx={{ minWidth: 110 }}
+                >
+                  <MenuItem value="sm">Small</MenuItem>
+                  <MenuItem value="md">Medium</MenuItem>
+                  <MenuItem value="lg">Large</MenuItem>
+                </TextField>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className={styles.adaptPanel}>
+        <div className={styles.adaptPanelHeader}>
           <h2 className={styles.adaptPanelTitle}>Stage</h2>
         </div>
+        {prompterOn && script && (
+          <div
+            style={{
+              maxHeight: 180,
+              overflowY: "auto",
+              padding: "14px 18px",
+              marginBottom: 10,
+              borderRadius: 12,
+              background: "#0f172a",
+              color: "#f8fafc",
+              fontSize: prompterSize === "sm" ? "1.05rem" : prompterSize === "md" ? "1.4rem" : "1.9rem",
+              lineHeight: 1.6,
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {script}
+          </div>
+        )}
         <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", background: "#0f172a" }}>
           <video
             ref={videoRef}

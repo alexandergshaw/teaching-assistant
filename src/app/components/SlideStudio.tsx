@@ -8,6 +8,41 @@ import styles from "../page.module.css";
 
 type BusyState = "idle" | "extracting" | "narrating";
 
+function drawSlideCard(ctx: CanvasRenderingContext2D, w: number, h: number, slide: { slide: number; title: string; text: string }) {
+  ctx.fillStyle = "#0f172a";
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "#64748b";
+  ctx.font = `500 ${Math.round(h * 0.03)}px system-ui, sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText(`Slide ${slide.slide}`, Math.round(w * 0.06), Math.round(h * 0.06));
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = `700 ${Math.round(h * 0.06)}px system-ui, sans-serif`;
+  wrapText(ctx, slide.title, Math.round(w * 0.06), Math.round(h * 0.13), Math.round(w * 0.88), Math.round(h * 0.075), 2);
+  ctx.fillStyle = "#cbd5e1";
+  ctx.font = `400 ${Math.round(h * 0.038)}px system-ui, sans-serif`;
+  const body = slide.text.split("\n").slice(1).join("  ");
+  wrapText(ctx, body, Math.round(w * 0.06), Math.round(h * 0.32), Math.round(w * 0.88), Math.round(h * 0.055), 9);
+}
+
+function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number) {
+  const words = text.split(/\s+/).filter(Boolean);
+  let line = "";
+  let lines = 0;
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      ctx.fillText(lines === maxLines - 1 && words.length ? `${line}...` : line, x, y + lines * lineHeight);
+      lines += 1;
+      line = word;
+      if (lines >= maxLines) return;
+    } else {
+      line = test;
+    }
+  }
+  if (line && lines < maxLines) ctx.fillText(line, x, y + lines * lineHeight);
+}
+
 export default function SlideStudio() {
   const [fileName, setFileName] = useState<string>("");
   const [slides, setSlides] = useState<Array<{ slide: number; title: string; text: string }> | null>(null);
@@ -39,6 +74,12 @@ export default function SlideStudio() {
   const cancelledRef = useRef(false);
   const avatarPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cloneFileRef = useRef<HTMLInputElement>(null);
+  const [stitchBusy, setStitchBusy] = useState(false);
+  const [stitchProgress, setStitchProgress] = useState<string | null>(null);
+  const [stitchError, setStitchError] = useState<string | null>(null);
+  const [stitchUrl, setStitchUrl] = useState<string | null>(null);
+  const stitchCancelRef = useRef(false);
+  const stitchUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -70,6 +111,19 @@ export default function SlideStudio() {
   useEffect(() => {
     return () => {
       if (avatarPollRef.current) clearInterval(avatarPollRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    stitchUrlRef.current = stitchUrl;
+  }, [stitchUrl]);
+
+  useEffect(() => {
+    return () => {
+      stitchCancelRef.current = true;
+      if (stitchUrlRef.current) {
+        URL.revokeObjectURL(stitchUrlRef.current);
+      }
     };
   }, []);
 
@@ -231,6 +285,85 @@ export default function SlideStudio() {
     }
   };
 
+  const handleStitch = async () => {
+    if (!narrations) return;
+    setStitchBusy(true);
+    setStitchError(null);
+    setStitchProgress("Preparing...");
+    stitchCancelRef.current = false;
+    if (stitchUrl) {
+      URL.revokeObjectURL(stitchUrl);
+      setStitchUrl(null);
+    }
+    const audioCtx = new AudioContext();
+    try {
+      const buffers = new Map<number, AudioBuffer>();
+      for (const n of narrations) {
+        const url = audioBySlide[n.slide];
+        if (!url) continue;
+        setStitchProgress(`Decoding audio ${n.slide}...`);
+        const ab = await (await fetch(url)).arrayBuffer();
+        buffers.set(n.slide, await audioCtx.decodeAudioData(ab));
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = 1280;
+      canvas.height = 720;
+      const ctx2d = canvas.getContext("2d");
+      if (!ctx2d) throw new Error("Canvas not supported.");
+      const dest = audioCtx.createMediaStreamDestination();
+      const canvasStream = (canvas as HTMLCanvasElement & { captureStream: (fps?: number) => MediaStream }).captureStream(30);
+      const recStream = new MediaStream([...canvasStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus") ? "video/webm;codecs=vp9,opus" : "video/webm";
+      const chunks: Blob[] = [];
+      const recorder = new MediaRecorder(recStream, { mimeType });
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      const stopped = new Promise<void>((resolve) => {
+        recorder.onstop = () => resolve();
+      });
+      recorder.start(1000);
+      let currentSlide = narrations[0];
+      let rafId = 0;
+      const paint = () => {
+        drawSlideCard(ctx2d, canvas.width, canvas.height, currentSlide);
+        rafId = requestAnimationFrame(paint);
+      };
+      paint();
+      for (const n of narrations) {
+        if (stitchCancelRef.current) break;
+        currentSlide = n;
+        setStitchProgress(`Recording slide ${n.slide} of ${narrations.length}...`);
+        const buf = buffers.get(n.slide);
+        if (buf) {
+          await new Promise<void>((resolve) => {
+            const srcNode = audioCtx.createBufferSource();
+            srcNode.buffer = buf;
+            srcNode.connect(dest);
+            srcNode.onended = () => resolve();
+            srcNode.start();
+          });
+        } else {
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+      }
+      cancelAnimationFrame(rafId);
+      recorder.stop();
+      await stopped;
+      canvasStream.getTracks().forEach((t) => t.stop());
+      if (!stitchCancelRef.current) {
+        const blob = new Blob(chunks, { type: mimeType });
+        setStitchUrl(URL.createObjectURL(blob));
+      }
+    } catch (err) {
+      setStitchError(err instanceof Error ? err.message : "Could not stitch the video.");
+    } finally {
+      void audioCtx.close();
+      setStitchProgress(null);
+      setStitchBusy(false);
+    }
+  };
+
   return (
     <div className={styles.adaptPanel}>
       <div className={styles.adaptPanelHeader}>
@@ -345,12 +478,45 @@ export default function SlideStudio() {
                 <Button variant="text" size="small" onClick={handleCopyAll}>
                   Copy full script
                 </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={stitchBusy || !narrations || !narrations.some((n) => audioBySlide[n.slide])}
+                  onClick={() => void handleStitch()}
+                >
+                  {stitchBusy ? stitchProgress ?? "Stitching..." : "Stitch deck video"}
+                </Button>
               </div>
+              {stitchError && <p className={styles.error}>{stitchError}</p>}
+              {narrations && !narrations.some((n) => audioBySlide[n.slide]) && (
+                <p className={styles.fieldHint}>
+                  Generate audio first - stitching combines the slide cards with your narration audio into one video.
+                </p>
+              )}
               {genError && <p className={styles.error}>{genError}</p>}
               {avatarError && <p className={styles.error}>{avatarError}</p>}
               <p className={styles.fieldHint}>
                 Audio is generated through the app via the ElevenLabs API (set ELEVENLABS_API_KEY, and ELEVENLABS_VOICE_ID once your voice clone exists - until then a stock voice is used). Avatar video needs HEYGEN_API_KEY and HEYGEN_AVATAR_ID (plus HEYGEN_VOICE_ID for your cloned voice). Browser previews use the built-in system voice.
               </p>
+              {stitchUrl && (
+                <div className={styles.field}>
+                  <video
+                    controls
+                    src={stitchUrl}
+                    style={{ width: "100%", maxHeight: 360, borderRadius: 12, background: "#0f172a" }}
+                  />
+                  <div className={styles.ghActions}>
+                    <a
+                      className={styles.linkButton}
+                      href={stitchUrl}
+                      download={`${(fileName || "deck").replace(/\.pptx$/i, "")}-narrated.webm`}
+                    >
+                      Download video
+                    </a>
+                    <span className={styles.ghMeta}>Slides without generated audio get a 3-second silent card.</span>
+                  </div>
+                </div>
+              )}
               {avatarUrl && (
                 <div className={styles.field}>
                   <video

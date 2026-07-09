@@ -100,7 +100,7 @@ Priority order:
    are burned into the recording. Toolbar over the stage.
 3. Background blur / virtual background (camera source): person segmentation
    via @mediapipe/tasks-vision ImageSegmenter (selfie model, WASM, new dep),
-   composite blurred/替换 background behind the person on the canvas; graceful
+   composite blurred or replaced background behind the person on the canvas; graceful
    fallback (toggle disabled with a note) when the model fails to load.
 4. Picture-in-picture: webcam bubble composited over screen share (position/
    size presets), drawn in the same canvas pass.

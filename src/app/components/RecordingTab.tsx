@@ -68,6 +68,11 @@ export default function RecordingTab() {
   });
 
   const [source, setSource] = useState<"camera" | "screen">("camera");
+  // Zoom/Teams-style audio processing, mapped to native getUserMedia constraints.
+  const [noiseSuppression, setNoiseSuppression] = useState(true);
+  const [echoCancellation, setEchoCancellation] = useState(true);
+  const [autoGain, setAutoGain] = useState(true);
+  const [muted, setMuted] = useState(false);
   const [recState, setRecState] = useState<RecState>("idle");
   const [elapsed, setElapsed] = useState(0);
   const [bytes, setBytes] = useState(0);
@@ -247,7 +252,12 @@ export default function RecordingTab() {
             width: { ideal: resolution === "1080" ? 1920 : 1280 },
             height: { ideal: resolution === "1080" ? 1080 : 720 },
           },
-          audio: micId ? { deviceId: { exact: micId } } : true,
+          audio: {
+            ...(micId ? { deviceId: { exact: micId } } : {}),
+            noiseSuppression,
+            echoCancellation,
+            autoGainControl: autoGain,
+          },
         });
       } else {
         const displayMediaDevices = navigator.mediaDevices as unknown as {
@@ -279,8 +289,9 @@ export default function RecordingTab() {
       }
       // Remember which config this stream was opened with, so the restart
       // effect only reacts to real device/resolution/source changes.
-      appliedCfgRef.current = `${source}|${cameraId}|${micId}|${resolution}`;
+      appliedCfgRef.current = `${source}|${cameraId}|${micId}|${resolution}|${noiseSuppression}|${echoCancellation}|${autoGain}`;
       setHasAudio(stream.getAudioTracks().length > 0);
+      setMuted(false);
       setHasStream(true);
 
       await loadDevices();
@@ -302,7 +313,7 @@ export default function RecordingTab() {
       setError(message);
       await stopEverything();
     }
-  }, [cameraId, micId, resolution, source, stopEverything, startMeter]);
+  }, [cameraId, micId, resolution, source, noiseSuppression, echoCancellation, autoGain, stopEverything, startMeter]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -329,11 +340,11 @@ export default function RecordingTab() {
   // immediately. Never fires from persisted choices on mount, and never
   // interrupts an active recording.
   useEffect(() => {
-    const cfg = `${source}|${cameraId}|${micId}|${resolution}`;
+    const cfg = `${source}|${cameraId}|${micId}|${resolution}|${noiseSuppression}|${echoCancellation}|${autoGain}`;
     if (userPickedRef.current && recState === "idle" && appliedCfgRef.current !== cfg) {
       void startPreview();
     }
-  }, [cameraId, micId, resolution, source, recState, startPreview]);
+  }, [cameraId, micId, resolution, source, noiseSuppression, echoCancellation, autoGain, recState, startPreview]);
 
   useEffect(() => {
     if (recState !== "recording") {
@@ -356,6 +367,15 @@ export default function RecordingTab() {
       }
     };
   }, [recState]);
+
+  // Mute/unmute the live mic without stopping the stream or recording.
+  const toggleMute = () => {
+    const next = !muted;
+    streamRef.current?.getAudioTracks().forEach((t) => {
+      t.enabled = !next;
+    });
+    setMuted(next);
+  };
 
   const pickMimeType = (): string => {
     const types = ["video/mp4", "video/webm;codecs=vp9,opus", "video/webm"];
@@ -576,6 +596,18 @@ export default function RecordingTab() {
             }
             label="Mirror preview"
           />
+          <FormControlLabel
+            control={<Checkbox size="small" checked={noiseSuppression} onChange={(e) => { userPickedRef.current = true; setNoiseSuppression(e.target.checked); }} />}
+            label="Noise suppression"
+          />
+          <FormControlLabel
+            control={<Checkbox size="small" checked={echoCancellation} onChange={(e) => { userPickedRef.current = true; setEchoCancellation(e.target.checked); }} />}
+            label="Echo cancellation"
+          />
+          <FormControlLabel
+            control={<Checkbox size="small" checked={autoGain} onChange={(e) => { userPickedRef.current = true; setAutoGain(e.target.checked); }} />}
+            label="Auto gain"
+          />
         </div>
         {(devices.cameras.length === 0 || devices.mics.length === 0) && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
@@ -620,6 +652,11 @@ export default function RecordingTab() {
             )}
           </div>
 
+          {hasStream && (
+            <Button variant={muted ? "contained" : "outlined"} size="small" color={muted ? "error" : "primary"} onClick={toggleMute}>
+              {muted ? "Unmute" : "Mute"}
+            </Button>
+          )}
           <span className={styles.ghMeta}>Mic level</span>
           <div
             title="Live microphone input level"

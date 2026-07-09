@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { useRef, useState, useEffect } from "react";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
@@ -114,7 +114,7 @@ const LS_KEYS = {
   adaptLocation: "adapt_location",
 };
 
-export default function CoursePlanningTab() {
+export default function CoursePlanningTab({ innerTabs }: { innerTabs?: ReactNode }) {
   // Planning mode toggle
   const [planningMode, setPlanningMode] = useState<PlanningMode>("syllabus");
 
@@ -744,10 +744,12 @@ export default function CoursePlanningTab() {
   return (
     <section className={styles.card}>
           <TabHeader
-            eyebrow="New Build Courses"
+            eyebrow="Build Courses"
             title="Build a new course"
             subtitle="Build a syllabus or generate a weekly course schedule with the help of AI."
           />
+
+          {innerTabs}
 
           {/* Mode toggle — segmented control (see .scheduleModeBtn) */}
           <div className={styles.scheduleModeToggle}>

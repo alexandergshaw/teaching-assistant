@@ -1,12 +1,14 @@
 "use client";
 
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 import TabHeader from "./TabHeader";
 import styles from "../page.module.css";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 
 type LessonPlanningFormProps = {
+  /** The Build Courses subtab switcher (New Build / Pre Built), shown under the header. */
+  innerTabs?: ReactNode;
   moduleObjectives: string;
   onModuleObjectivesChange: (value: string) => void;
   moduleTitle: string;
@@ -27,6 +29,7 @@ type LessonPlanningFormProps = {
 };
 
 export default function LessonPlanningForm({
+  innerTabs,
   moduleObjectives,
   onModuleObjectivesChange,
   moduleTitle,
@@ -45,10 +48,11 @@ export default function LessonPlanningForm({
   return (
     <section className={styles.card}>
       <TabHeader
-        eyebrow="Pre Built Courses"
+        eyebrow="Build Courses"
         title="Plan a lesson"
         subtitle="Plan and generate lesson content with AI assistance."
       />
+      {innerTabs}
       {isCourseEngine && (
         <div className={styles.field}>
           <label htmlFor="moduleTitle">Module Title</label>

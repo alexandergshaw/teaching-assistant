@@ -27,7 +27,10 @@ import { parseGeneratedRubric } from "./utils/rubric";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "courses" | "lesson-planning" | "course-planning" | "content" | "version-control";
+type ActiveTab = "courses" | "course-planning" | "content" | "version-control";
+// The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
+type BuildView = "new" | "prebuilt";
+const BUILD_VIEW_KEY = "ta-build-view";
 
 // The hosted Course Engine runs on Vercel, which caps the request body at
 // ~4.5 MB. Reject larger uploads client-side with a clear message rather than
@@ -129,12 +132,24 @@ export default function Home() {
   const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
   const [testState] = useActionState(testGeminiAction, initialTestState);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
-    if (typeof window === "undefined") return "lesson-planning";
+    if (typeof window === "undefined") return "course-planning";
     const saved = localStorage.getItem("ta-active-tab");
     // Grading and Communications are now subtabs of LMS Integration ("content").
     if (saved === "grading" || saved === "canvas") return "content";
-    return saved === "courses" || saved === "lesson-planning" || saved === "course-planning" || saved === "content" || saved === "version-control" ? saved : "lesson-planning";
+    // Pre Built Courses is now a subtab of Build Courses ("course-planning").
+    if (saved === "lesson-planning") return "course-planning";
+    return saved === "courses" || saved === "course-planning" || saved === "content" || saved === "version-control" ? saved : "course-planning";
   });
+  const [buildView, setBuildViewState] = useState<BuildView>(() => {
+    if (typeof window === "undefined") return "prebuilt";
+    // Users who last used the old Pre Built Courses tab land on that subtab.
+    if (localStorage.getItem("ta-active-tab") === "lesson-planning") return "prebuilt";
+    return localStorage.getItem(BUILD_VIEW_KEY) === "new" ? "new" : "prebuilt";
+  });
+  const setBuildView = (v: BuildView) => {
+    setBuildViewState(v);
+    if (typeof window !== "undefined") localStorage.setItem(BUILD_VIEW_KEY, v);
+  };
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -611,8 +626,7 @@ export default function Home() {
             value="courses"
             disableRipple
           />
-          <Tab label="New Build Courses" value="course-planning" disableRipple />
-          <Tab label="Pre Built Courses" value="lesson-planning" disableRipple />
+          <Tab label="Build Courses" value="course-planning" disableRipple />
           <Tab
             label={<NavTabLabel text="LMS Integration" count={totalNeedsGrading + totalUnread} />}
             value="content"
@@ -621,9 +635,61 @@ export default function Home() {
           <Tab label="Version Control Integration" value="version-control" disableRipple />
         </Tabs>
 
-        {activeTab === "courses" && <CoursesTab onNavigate={(tab) => setActiveTab(tab)} />}
+        {activeTab === "courses" && (
+          <CoursesTab
+            onNavigate={(tab) => {
+              // Course handoffs (syllabus prefill) live in the New Build flow.
+              if (tab === "course-planning") setBuildView("new");
+              setActiveTab(tab);
+            }}
+          />
+        )}
 
-        {activeTab === "course-planning" && <CoursePlanningTab />}
+        {activeTab === "course-planning" && (() => {
+          const buildSwitcher = (
+            <div className={styles.lessonInnerTabs} role="tablist" aria-label="Course build modes">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={buildView === "new"}
+                className={`${styles.lessonInnerTab}${buildView === "new" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                onClick={() => setBuildView("new")}
+              >
+                New Build
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={buildView === "prebuilt"}
+                className={`${styles.lessonInnerTab}${buildView === "prebuilt" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                onClick={() => setBuildView("prebuilt")}
+              >
+                Pre Built
+              </button>
+            </div>
+          );
+          return buildView === "new" ? (
+            <CoursePlanningTab innerTabs={buildSwitcher} />
+          ) : (
+            <LessonPlanningForm
+              innerTabs={buildSwitcher}
+              moduleObjectives={moduleObjectives}
+              onModuleObjectivesChange={setModuleObjectives}
+              moduleTitle={moduleTitle}
+              onModuleTitleChange={setModuleTitle}
+              isCourseEngine={provider === "other"}
+              lessonContext={lessonContext}
+              onLessonContextChange={setLessonContext}
+              contextFileRef={lessonContextFileRef}
+              homeworkText={homeworkText}
+              onHomeworkTextChange={setHomeworkText}
+              homeworkFileRef={homeworkFileRef}
+              lessonError={lessonError}
+              isGeneratingLesson={isGeneratingLesson}
+              onGenerate={handleGenerateLesson}
+            />
+          );
+        })()}
 
         {activeTab === "version-control" && <VersionControlTab />}
 
@@ -645,24 +711,6 @@ export default function Home() {
           />
         )}
 
-        {activeTab === "lesson-planning" && (
-          <LessonPlanningForm
-            moduleObjectives={moduleObjectives}
-            onModuleObjectivesChange={setModuleObjectives}
-            moduleTitle={moduleTitle}
-            onModuleTitleChange={setModuleTitle}
-            isCourseEngine={provider === "other"}
-            lessonContext={lessonContext}
-            onLessonContextChange={setLessonContext}
-            contextFileRef={lessonContextFileRef}
-            homeworkText={homeworkText}
-            onHomeworkTextChange={setHomeworkText}
-            homeworkFileRef={homeworkFileRef}
-            lessonError={lessonError}
-            isGeneratingLesson={isGeneratingLesson}
-            onGenerate={handleGenerateLesson}
-          />
-        )}
       </div>
 
       {lessonPlanPreview && (

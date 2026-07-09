@@ -281,9 +281,8 @@ export default function RecordingTab() {
     const r = c.getBoundingClientRect();
     let x = ((e.clientX - r.left) / r.width) * c.width;
     const y = ((e.clientY - r.top) / r.height) * c.height;
-    if (source === "camera" && mirror) {
-      x = c.width - x;
-    }
+    // The overlay canvas is not CSS-mirrored, so pointer coords map 1:1 even
+    // when the video preview is mirrored (the pipeline mirrors the video too).
     return { x, y };
   }, [source, mirror]);
 

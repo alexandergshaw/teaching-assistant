@@ -279,12 +279,12 @@ export default function RecordingTab() {
   const overlayPoint = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     const c = overlayCanvasRef.current!;
     const r = c.getBoundingClientRect();
-    let x = ((e.clientX - r.left) / r.width) * c.width;
+    const x = ((e.clientX - r.left) / r.width) * c.width;
     const y = ((e.clientY - r.top) / r.height) * c.height;
     // The overlay canvas is not CSS-mirrored, so pointer coords map 1:1 even
     // when the video preview is mirrored (the pipeline mirrors the video too).
     return { x, y };
-  }, [source, mirror]);
+  }, []);
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     if (tool === "off") return;

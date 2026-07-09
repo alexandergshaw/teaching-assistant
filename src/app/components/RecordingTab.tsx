@@ -525,20 +525,17 @@ export default function RecordingTab() {
             sx={{ minWidth: 160 }}
             disabled={source === "screen"}
           >
-            {devices.cameras.length === 0 ? (
-              <MenuItem value="">No cameras found</MenuItem>
-            ) : (
-              <>
-                {!devices.cameras.some((d) => d.deviceId === cameraId) && cameraId && (
-                  <MenuItem value={cameraId}>(Disconnected)</MenuItem>
-                )}
-                {devices.cameras.map((cam) => (
-                  <MenuItem key={cam.deviceId} value={cam.deviceId}>
-                    {cam.label}
-                  </MenuItem>
-                ))}
-              </>
-            )}
+            {devices.cameras.length === 0 && <MenuItem value="">No cameras found</MenuItem>}
+            {devices.cameras.length > 0 &&
+              cameraId &&
+              !devices.cameras.some((d) => d.deviceId === cameraId) && (
+                <MenuItem value={cameraId}>(Disconnected)</MenuItem>
+              )}
+            {devices.cameras.map((cam) => (
+              <MenuItem key={cam.deviceId} value={cam.deviceId}>
+                {cam.label}
+              </MenuItem>
+            ))}
           </TextField>
 
           <TextField

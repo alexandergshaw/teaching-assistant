@@ -36,6 +36,10 @@ export default function RecordingTab() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Config the current stream was opened with (see the restart effect).
   const appliedCfgRef = useRef("");
+  // True once the user explicitly picked a device/source or started a preview,
+  // so changing a select (re)starts the stream - but nothing auto-starts on
+  // mount from persisted choices.
+  const userPickedRef = useRef(false);
 
   const [devices, setDevices] = useState<{ cameras: Device[]; mics: Device[] }>({
     cameras: [],
@@ -75,8 +79,11 @@ export default function RecordingTab() {
   const loadDevices = async () => {
     try {
       const deviceList = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = deviceList.filter((d) => d.kind === "videoinput");
-      const audioDevices = deviceList.filter((d) => d.kind === "audioinput");
+      // Before the first permission grant, browsers return devices with EMPTY
+      // deviceIds - useless (and identical) select options. Filter them out;
+      // the list is re-enumerated with real ids after getUserMedia succeeds.
+      const videoDevices = deviceList.filter((d) => d.kind === "videoinput" && d.deviceId);
+      const audioDevices = deviceList.filter((d) => d.kind === "audioinput" && d.deviceId);
 
       const cameras = videoDevices.map((d, i) => ({
         deviceId: d.deviceId,
@@ -274,15 +281,16 @@ export default function RecordingTab() {
     localStorage.setItem("ta-rec-mirror", mirror ? "1" : "0");
   }, [mirror]);
 
-  // Restart the live preview only when the device/resolution/source actually
-  // changed while a stream is active and idle (not on stream start/stop).
+  // (Re)start the preview whenever the user picks a device, source, or
+  // resolution - including the first pick, so selecting a camera takes effect
+  // immediately. Never fires from persisted choices on mount, and never
+  // interrupts an active recording.
   useEffect(() => {
     const cfg = `${source}|${cameraId}|${micId}|${resolution}`;
-    if (hasStream && recState === "idle" && appliedCfgRef.current !== cfg) {
-       
+    if (userPickedRef.current && recState === "idle" && appliedCfgRef.current !== cfg) {
       void startPreview();
     }
-  }, [cameraId, micId, resolution, source, hasStream, recState, startPreview]);
+  }, [cameraId, micId, resolution, source, recState, startPreview]);
 
   useEffect(() => {
     if (recState !== "recording") {
@@ -343,16 +351,18 @@ export default function RecordingTab() {
         const actualMimeType = recorder.mimeType || mimeType || "video/webm";
         const blob = new Blob(chunksRef.current, { type: actualMimeType });
         const url = URL.createObjectURL(blob);
-        const take: Take = {
-          id: crypto.getRandomValues(new Uint8Array(16)).toString(),
-          name: `Take ${takes.length + 1}`,
-          url,
-          mimeType: actualMimeType,
-          sizeBytes: blob.size,
-          durationSec: elapsedRef.current,
-          createdAt: Date.now(),
-        };
-        setTakes((prev) => [...prev, take]);
+        setTakes((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            name: `Take ${prev.length + 1}`,
+            url,
+            mimeType: actualMimeType,
+            sizeBytes: blob.size,
+            durationSec: elapsedRef.current,
+            createdAt: Date.now(),
+          },
+        ]);
       };
 
       recorderRef.current = recorder;
@@ -455,7 +465,7 @@ export default function RecordingTab() {
             select
             label="Source"
             value={source}
-            onChange={(e) => setSource(e.target.value as "camera" | "screen")}
+            onChange={(e) => { userPickedRef.current = true; setSource(e.target.value as "camera" | "screen"); }}
             size="small"
             sx={{ minWidth: 160 }}
           >
@@ -467,7 +477,7 @@ export default function RecordingTab() {
             select
             label="Camera"
             value={cameraId}
-            onChange={(e) => setCameraId(e.target.value)}
+            onChange={(e) => { userPickedRef.current = true; setCameraId(e.target.value); }}
             size="small"
             sx={{ minWidth: 160 }}
             disabled={source === "screen"}
@@ -492,7 +502,7 @@ export default function RecordingTab() {
             select
             label="Microphone"
             value={micId}
-            onChange={(e) => setMicId(e.target.value)}
+            onChange={(e) => { userPickedRef.current = true; setMicId(e.target.value); }}
             size="small"
             sx={{ minWidth: 160 }}
           >
@@ -508,7 +518,7 @@ export default function RecordingTab() {
             select
             label="Resolution"
             value={resolution}
-            onChange={(e) => setResolution(e.target.value as "720" | "1080")}
+            onChange={(e) => { userPickedRef.current = true; setResolution(e.target.value as "720" | "1080"); }}
             size="small"
             sx={{ minWidth: 160 }}
           >
@@ -527,6 +537,11 @@ export default function RecordingTab() {
             label="Mirror preview"
           />
         </div>
+        {devices.cameras.length === 0 && (
+          <p className={styles.fieldHint} style={{ margin: "8px 0 0" }}>
+            Device names appear after the browser grants access - click Start preview once.
+          </p>
+        )}
       </div>
 
       <div className={styles.adaptPanel}>
@@ -583,7 +598,7 @@ export default function RecordingTab() {
 
         <div className={styles.ghActions}>
           {!hasStream ? (
-            <Button variant="contained" onClick={startPreview}>
+            <Button variant="contained" onClick={() => { userPickedRef.current = true; void startPreview(); }}>
               Start preview
             </Button>
           ) : recState === "idle" ? (

@@ -1261,6 +1261,58 @@ button.courseResourceValue:disabled {
   color: var(--text-secondary);
 }
 
+/* Resizable two-column split (file tree | editor) with a draggable divider. */
+.ghSplit {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  align-items: stretch;
+}
+
+.ghSplitTree {
+  flex: none;
+  min-width: 0;
+}
+
+.ghSplitDivider {
+  flex: none;
+  width: 6px;
+  border-radius: 999px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s ease;
+  touch-action: none;
+  align-self: stretch;
+}
+
+.ghSplitDivider:hover,
+.ghSplitDivider:active {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+@media (max-width: 920px) {
+  .ghSplit {
+    flex-wrap: wrap;
+  }
+
+  .ghSplitDivider {
+    display: none;
+  }
+
+  .ghSplitTree {
+    width: 100% !important;
+  }
+}
+
+/* The scrollable file list inside the tree panel. */
+.ghTreeList {
+  max-height: 58vh;
+  overflow-y: auto;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
 /* Collapsible institution groups on the Courses tab. */
 .courseGroups {
   display: flex;

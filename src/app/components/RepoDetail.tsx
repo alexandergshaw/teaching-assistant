@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   listGithubReposAction,
   listGithubBranchesAction,
@@ -58,6 +58,7 @@ import styles from "../page.module.css";
 
 const VC_REPO_KEY = "ta-vc-repo";
 const VC_BRANCH_KEY = "ta-vc-branch";
+const VC_TREE_WIDTH_KEY = "ta-vc-tree-width";
 
 // Monaco (the VS Code editor) is client-only; load it lazily with SSR disabled.
 const MonacoFileEditor = dynamic(() => import("./MonacoFileEditor"), {
@@ -89,6 +90,33 @@ export default function RepoDetail() {
   const [tree, setTree] = useState<RepoTreeEntry[]>([]);
   const [treeState, setTreeState] = useState<"loading" | "ready" | "error">("ready");
   const [filter, setFilter] = useState("");
+  // Width of the file-tree column; user-resizable via the split divider.
+  const [treeWidth, setTreeWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return 320;
+    const saved = Number(localStorage.getItem(VC_TREE_WIDTH_KEY));
+    return Number.isFinite(saved) && saved >= 220 && saved <= 600 ? saved : 320;
+  });
+  const treeWidthRef = useRef(treeWidth);
+
+  // Drag the divider to resize the tree column (pointer capture on window so
+  // the drag survives leaving the divider); persists the width on release.
+  const startTreeResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = treeWidthRef.current;
+    const move = (ev: PointerEvent) => {
+      const w = Math.min(600, Math.max(220, startW + (ev.clientX - startX)));
+      treeWidthRef.current = w;
+      setTreeWidth(w);
+    };
+    const up = () => {
+      localStorage.setItem(VC_TREE_WIDTH_KEY, String(treeWidthRef.current));
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
   const [selectedPath, setSelectedPath] = useState("");
   const [fileContent, setFileContent] = useState("");
   const [editContent, setEditContent] = useState("");
@@ -1384,8 +1412,9 @@ export default function RepoDetail() {
               </div>
             )}
 
-            <div style={{ display: "flex", gap: 16, marginTop: 16 }}>
-              <div style={{ width: 320, borderRight: "1px solid var(--field-border)" }}>
+            <div className={styles.ghSplit}>
+              <div className={`${styles.ghPanel} ${styles.ghSplitTree}`} style={{ width: treeWidth }}>
+                <label className={styles.panelTitle} style={{ display: "block", marginBottom: 10 }}>Files</label>
                 <TextField
                   size="small"
                   fullWidth
@@ -1394,15 +1423,7 @@ export default function RepoDetail() {
                   onChange={(e) => setFilter(e.target.value)}
                   disabled={treeState === "loading"}
                 />
-                <div
-                  style={{
-                    maxHeight: "50vh",
-                    overflowY: "auto",
-                    marginTop: 8,
-                    display: "flex",
-                    flexDirection: "column",
-                  }}
-                >
+                <div className={styles.ghTreeList}>
                   {treeState === "loading" && (
                     <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
                       <CircularProgress size={24} />
@@ -1475,13 +1496,21 @@ export default function RepoDetail() {
                 </div>
               </div>
 
-              <div style={{ flex: 1, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-                <div style={{ flex: "2 1 400px", minWidth: 320 }}>
+              <div
+                className={styles.ghSplitDivider}
+                role="separator"
+                aria-orientation="vertical"
+                title="Drag to resize the file list"
+                onPointerDown={startTreeResize}
+              />
+
+              <div style={{ flex: 1, minWidth: 0, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+                <div className={styles.ghPanel} style={{ flex: "2 1 400px", minWidth: 320 }}>
                 {!selectedPath ? (
-                  <p className={styles.fieldHint}>Select a file to view and edit it.</p>
+                  <p className={styles.fieldHint} style={{ margin: 0 }}>Select a file to view and edit it.</p>
                 ) : (
                   <>
-                    <p style={{ fontSize: "0.85rem", fontFamily: "monospace", marginBottom: 8, color: "var(--text-secondary)" }}>
+                    <p className={`${styles.ghMeta} ${styles.ghMetaMono}`} style={{ marginTop: 0, marginBottom: 10 }}>
                       {selectedPath}
                     </p>
                     {fileState === "loading" ? (

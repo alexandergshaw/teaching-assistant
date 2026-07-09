@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextField, MenuItem } from "@mui/material";
-import { extractPptxSlidesAction, generateSlideNarrationAction, type SlideNarration } from "../actions";
+import { extractPptxSlidesAction, generateSlideNarrationAction, voiceConfiguredAction, synthesizeNarrationAction, type SlideNarration } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
 
@@ -18,6 +18,37 @@ export default function SlideStudio() {
   });
   const [busy, setBusy] = useState<BusyState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [voiceReady, setVoiceReady] = useState(false);
+  const [genBusy, setGenBusy] = useState(false);
+  const [genProgress, setGenProgress] = useState<string | null>(null);
+  const [audioBySlide, setAudioBySlide] = useState<Record<number, string>>({});
+  const [genError, setGenError] = useState<string | null>(null);
+  const cancelledRef = useRef(false);
+
+  useEffect(() => {
+    cancelledRef.current = false;
+    (async () => {
+      const r = await voiceConfiguredAction();
+      if (!cancelledRef.current) setVoiceReady(r.configured);
+    })();
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, []);
+
+  // Unmount-only cleanup via a ref: a deps-based cleanup would revoke every
+  // player's URL each time a new slide's audio landed.
+  const audioBySlideRef = useRef(audioBySlide);
+  useEffect(() => {
+    audioBySlideRef.current = audioBySlide;
+  }, [audioBySlide]);
+  useEffect(() => {
+    return () => {
+      for (const url of Object.values(audioBySlideRef.current)) {
+        URL.revokeObjectURL(url);
+      }
+    };
+  }, []);
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -97,6 +128,28 @@ export default function SlideStudio() {
     await navigator.clipboard.writeText(fullScript);
   }, [narrations]);
 
+  const handleGenerateAudio = useCallback(async () => {
+    if (!narrations) return;
+    setGenBusy(true);
+    setGenError(null);
+    const next: Record<number, string> = { ...audioBySlide };
+    for (const n of narrations) {
+      if (!n.narration.trim()) continue;
+      setGenProgress(`Synthesizing slide ${n.slide}...`);
+      const r = await synthesizeNarrationAction(n.narration);
+      if ("error" in r) {
+        setGenError(`Slide ${n.slide}: ${r.error}`);
+        break;
+      }
+      const bytes = Uint8Array.from(atob(r.base64), (c) => c.charCodeAt(0));
+      if (next[n.slide]) URL.revokeObjectURL(next[n.slide]);
+      next[n.slide] = URL.createObjectURL(new Blob([bytes], { type: r.mimeType }));
+      setAudioBySlide({ ...next });
+    }
+    setGenProgress(null);
+    setGenBusy(false);
+  }, [narrations, audioBySlide]);
+
   return (
     <div className={styles.adaptPanel}>
       <div className={styles.adaptPanelHeader}>
@@ -165,14 +218,36 @@ export default function SlideStudio() {
                       onChange={(e) => handleNarrationChange(i, e.target.value)}
                       style={{ marginTop: 8 }}
                     />
-                    <Button
-                      variant="text"
-                      size="small"
-                      onClick={() => handlePreviewVoice(n.narration)}
-                      style={{ marginTop: 6 }}
-                    >
-                      Preview
-                    </Button>
+                    {audioBySlide[n.slide] && (
+                      <audio
+                        controls
+                        src={audioBySlide[n.slide]}
+                        style={{ width: "100%", height: 36, marginTop: 6 }}
+                      />
+                    )}
+                    <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                      <Button
+                        variant="text"
+                        size="small"
+                        onClick={() => handlePreviewVoice(n.narration)}
+                      >
+                        Preview
+                      </Button>
+                      {audioBySlide[n.slide] && (
+                        <Button
+                          variant="text"
+                          size="small"
+                          onClick={() => {
+                            const a = document.createElement("a");
+                            a.href = audioBySlide[n.slide];
+                            a.download = `slide-${n.slide}.mp3`;
+                            a.click();
+                          }}
+                        >
+                          Download
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -181,17 +256,18 @@ export default function SlideStudio() {
                 <Button
                   variant="contained"
                   size="small"
-                  disabled
-                  title="Requires the in-house voice sidecar"
+                  disabled={!voiceReady || genBusy || !narrations}
+                  onClick={() => void handleGenerateAudio()}
                 >
-                  {outputMode === "av" ? "Generate audio + video" : "Generate audio"}
+                  {genBusy ? genProgress ?? "Generating..." : outputMode === "av" ? "Generate audio (video coming next)" : "Generate audio"}
                 </Button>
                 <Button variant="text" size="small" onClick={handleCopyAll}>
                   Copy full script
                 </Button>
               </div>
+              {genError && <p className={styles.error}>{genError}</p>}
               <p className={styles.fieldHint}>
-                Generation uses your in-house voice (and avatar) models on a self-hosted GPU service. That service is not configured yet - set VOICE_SIDECAR_URL once it is running. Voice previews above use the browser&apos;s built-in voice as a placeholder. Nothing is ever sent to external voice or avatar providers.
+                Audio is generated through the app via the ElevenLabs API (set ELEVENLABS_API_KEY, and ELEVENLABS_VOICE_ID once your voice clone exists - until then a stock voice is used). Avatar video generation is the next phase. Browser previews use the built-in system voice.
               </p>
             </>
           )}

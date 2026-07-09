@@ -2743,6 +2743,49 @@ export async function generateSlideNarrationAction(
   }
 }
 
+/** Whether the ElevenLabs voice API is configured (for the UI to gate buttons). */
+export async function voiceConfiguredAction(): Promise<{ configured: boolean }> {
+  try {
+    await requireOwner();
+    return { configured: !!process.env.ELEVENLABS_API_KEY?.trim() };
+  } catch {
+    return { configured: false };
+  }
+}
+
+/**
+ * Synthesize one narration segment with ElevenLabs and return it as base64
+ * MP3. Called per slide so responses stay small. Uses ELEVENLABS_API_KEY and
+ * optional ELEVENLABS_VOICE_ID (defaults to the standard "Rachel" voice until
+ * the user's cloned voice id is configured).
+ */
+export async function synthesizeNarrationAction(
+  text: string
+): Promise<{ base64: string; mimeType: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const key = process.env.ELEVENLABS_API_KEY?.trim();
+    if (!key) return { error: "Voice generation is not configured. Set ELEVENLABS_API_KEY (and ELEVENLABS_VOICE_ID for your cloned voice)." };
+    const t = text.trim();
+    if (!t) return { error: "Nothing to synthesize." };
+    if (t.length > 4000) return { error: "That segment is too long for one synthesis call." };
+    const voiceId = process.env.ELEVENLABS_VOICE_ID?.trim() || "21m00Tcm4TlvDq8ikWAM";
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: "POST",
+      headers: { "xi-api-key": key, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: t, model_id: "eleven_multilingual_v2", voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      return { error: `Voice service error (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : ""}` };
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    return { base64: buf.toString("base64"), mimeType: "audio/mpeg" };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not synthesize audio." };
+  }
+}
+
 /** A timed caption for an uploaded screen recording. */
 export interface ScreenCaption {
   start: number;

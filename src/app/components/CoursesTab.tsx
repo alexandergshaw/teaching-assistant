@@ -459,8 +459,14 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   };
 
   const startTileEdit = (c: Course, field: InlineField) => {
+    if (tileEdit && tileEdit.id === c.id && tileEdit.field === field) return;
     setError(null);
     setTileEdit({ id: c.id, field, value: (c[field] ?? "") as string });
+  };
+
+  const tileClick = (handler: () => void) => (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest("a, button, input, textarea, select, label")) return;
+    handler();
   };
 
   const saveTileEdit = async () => {
@@ -896,7 +902,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                 </div>
 
                 <div className={styles.courseResources}>
-                  <div className={styles.courseResource}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => startTileEdit(c, "canvasUrl"))}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Canvas</span>
                       <button
@@ -921,7 +927,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         )}
                   </div>
 
-                  <div className={styles.courseResource}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => startTileEdit(c, "githubOrg"))}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Organization</span>
                       <button
@@ -946,7 +952,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         )}
                   </div>
 
-                  <div className={styles.courseResource}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => { setForm(formFromCourse(c)); setError(null); setFormNote(null); })}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Codebase{c.repos.length > 1 ? "s" : ""}</span>
                       <button
@@ -976,7 +982,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                     )}
                   </div>
 
-                  <div className={styles.courseResource}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => { setForm(formFromCourse(c)); setError(null); setFormNote(null); })}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Syllabus</span>
                       <button
@@ -1005,7 +1011,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                     )}
                   </div>
 
-                  <div className={styles.courseResource}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => startTileEdit(c, "textbook"))}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Textbook</span>
                       <button
@@ -1028,7 +1034,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         )}
                   </div>
 
-                  <div className={styles.courseResource}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => { setForm(formFromCourse(c)); setError(null); setFormNote(null); })}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Integration{c.integrations.length > 1 ? "s" : ""}</span>
                       <button
@@ -1055,7 +1061,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                     )}
                   </div>
 
-                  <div className={styles.courseResource}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => startTileEdit(c, "roster"))}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Roster</span>
                       <button

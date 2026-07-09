@@ -1061,6 +1061,21 @@ button.courseResourceValue:disabled {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
+/* Whole-tile click target for editable course tiles. */
+.courseResourceClickable {
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+
+.courseResourceClickable:hover {
+  border-color: var(--accent);
+}
+
+.courseResourceClickable:hover .tileEditBtn {
+  opacity: 1;
+  color: var(--accent);
+}
+
 /* Inline tile editor (input + save/cancel). */
 .tileEditor {
   display: flex;

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextField, MenuItem } from "@mui/material";
-import { extractPptxSlidesAction, generateSlideNarrationAction, voiceConfiguredAction, synthesizeNarrationAction, type SlideNarration } from "../actions";
+import { extractPptxSlidesAction, generateSlideNarrationAction, voiceConfiguredAction, synthesizeNarrationAction, avatarConfiguredAction, generateAvatarVideoAction, getAvatarVideoStatusAction, type SlideNarration } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
 
@@ -23,13 +23,21 @@ export default function SlideStudio() {
   const [genProgress, setGenProgress] = useState<string | null>(null);
   const [audioBySlide, setAudioBySlide] = useState<Record<number, string>>({});
   const [genError, setGenError] = useState<string | null>(null);
+  const [avatarReady, setAvatarReady] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarStatus, setAvatarStatus] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
+  const avatarPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     cancelledRef.current = false;
     (async () => {
       const r = await voiceConfiguredAction();
       if (!cancelledRef.current) setVoiceReady(r.configured);
+      const a = await avatarConfiguredAction();
+      if (!cancelledRef.current) setAvatarReady(a.configured);
     })();
     return () => {
       cancelledRef.current = true;
@@ -47,6 +55,12 @@ export default function SlideStudio() {
       for (const url of Object.values(audioBySlideRef.current)) {
         URL.revokeObjectURL(url);
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (avatarPollRef.current) clearInterval(avatarPollRef.current);
     };
   }, []);
 
@@ -149,6 +163,41 @@ export default function SlideStudio() {
     setGenProgress(null);
     setGenBusy(false);
   }, [narrations, audioBySlide]);
+
+  const handleGenerateAvatar = useCallback(async () => {
+    if (!narrations) return;
+    const script = narrations.map((n) => n.narration.trim()).filter(Boolean).join("\n\n");
+    setAvatarBusy(true);
+    setAvatarError(null);
+    setAvatarUrl(null);
+    setAvatarStatus("Starting render...");
+    const r = await generateAvatarVideoAction(script);
+    if ("error" in r) {
+      setAvatarError(r.error);
+      setAvatarBusy(false);
+      setAvatarStatus(null);
+      return;
+    }
+    setAvatarStatus("Rendering... this can take a few minutes.");
+    avatarPollRef.current = setInterval(async () => {
+      const s = await getAvatarVideoStatusAction(r.videoId);
+      if ("error" in s) {
+        if (avatarPollRef.current) clearInterval(avatarPollRef.current);
+        avatarPollRef.current = null;
+        setAvatarError(s.error);
+        setAvatarBusy(false);
+        setAvatarStatus(null);
+        return;
+      }
+      if (s.status === "completed" && s.videoUrl) {
+        if (avatarPollRef.current) clearInterval(avatarPollRef.current);
+        avatarPollRef.current = null;
+        setAvatarUrl(s.videoUrl);
+        setAvatarBusy(false);
+        setAvatarStatus(null);
+      } else setAvatarStatus(`Rendering (${s.status})...`);
+    }, 5000);
+  }, [narrations]);
 
   return (
     <div className={styles.adaptPanel}>
@@ -256,19 +305,40 @@ export default function SlideStudio() {
                 <Button
                   variant="contained"
                   size="small"
-                  disabled={!voiceReady || genBusy || !narrations}
-                  onClick={() => void handleGenerateAudio()}
+                  disabled={outputMode === "av" ? !avatarReady || avatarBusy || !narrations : !voiceReady || genBusy || !narrations}
+                  onClick={() => void (outputMode === "av" ? handleGenerateAvatar() : handleGenerateAudio())}
                 >
-                  {genBusy ? genProgress ?? "Generating..." : outputMode === "av" ? "Generate audio (video coming next)" : "Generate audio"}
+                  {outputMode === "av" ? (avatarBusy ? avatarStatus ?? "Rendering..." : "Generate audio + video") : (genBusy ? genProgress ?? "Generating..." : "Generate audio")}
                 </Button>
                 <Button variant="text" size="small" onClick={handleCopyAll}>
                   Copy full script
                 </Button>
               </div>
               {genError && <p className={styles.error}>{genError}</p>}
+              {avatarError && <p className={styles.error}>{avatarError}</p>}
               <p className={styles.fieldHint}>
-                Audio is generated through the app via the ElevenLabs API (set ELEVENLABS_API_KEY, and ELEVENLABS_VOICE_ID once your voice clone exists - until then a stock voice is used). Avatar video generation is the next phase. Browser previews use the built-in system voice.
+                Audio is generated through the app via the ElevenLabs API (set ELEVENLABS_API_KEY, and ELEVENLABS_VOICE_ID once your voice clone exists - until then a stock voice is used). Avatar video needs HEYGEN_API_KEY and HEYGEN_AVATAR_ID (plus HEYGEN_VOICE_ID for your cloned voice). Browser previews use the built-in system voice.
               </p>
+              {avatarUrl && (
+                <div className={styles.field}>
+                  <video
+                    controls
+                    src={avatarUrl}
+                    style={{ width: "100%", maxHeight: 360, borderRadius: 12, background: "#0f172a" }}
+                  />
+                  <div className={styles.ghActions}>
+                    <a
+                      href={avatarUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={styles.linkButton}
+                    >
+                      Open / download video
+                    </a>
+                    <span className={styles.ghMeta}>Link expires after a while - download promptly.</span>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </>

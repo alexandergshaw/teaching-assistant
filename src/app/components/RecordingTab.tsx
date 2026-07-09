@@ -75,6 +75,8 @@ export default function RecordingTab() {
   const [error, setError] = useState<string | null>(null);
   const [level, setLevel] = useState(0);
   const [hasStream, setHasStream] = useState(false);
+  // Whether the live stream carries an audio track (drives the meter hint).
+  const [hasAudio, setHasAudio] = useState(true);
 
   const loadDevices = async () => {
     try {
@@ -123,6 +125,24 @@ export default function RecordingTab() {
     };
   }, []);
 
+  // Ask for camera+mic permission once (falling back to mic-only), purely to
+  // unlock device names/ids in the pickers; the probe stream is stopped at once.
+  const requestAccess = async () => {
+    try {
+      setError(null);
+      let probe: MediaStream;
+      try {
+        probe = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      } catch {
+        probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+      probe.getTracks().forEach((t) => t.stop());
+      await loadDevices();
+    } catch {
+      setError("Could not get camera/microphone access. Check the browser's permission settings (HTTPS required).");
+    }
+  };
+
   const stopMeter = () => {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
@@ -166,7 +186,8 @@ export default function RecordingTab() {
         let sum = 0;
         for (let i = 0; i < data.length; i++) sum += (data[i] - 128) * (data[i] - 128);
         const rms = Math.sqrt(sum / data.length) / 128;
-        setLevel(Math.min(rms, 1));
+        // Raw RMS of speech is tiny; amplify so normal talking visibly moves the bar.
+        setLevel(Math.min(rms * 4, 1));
         rafRef.current = requestAnimationFrame(loop);
       };
       rafRef.current = requestAnimationFrame(loop);
@@ -238,6 +259,7 @@ export default function RecordingTab() {
       // Remember which config this stream was opened with, so the restart
       // effect only reacts to real device/resolution/source changes.
       appliedCfgRef.current = `${source}|${cameraId}|${micId}|${resolution}`;
+      setHasAudio(stream.getAudioTracks().length > 0);
       setHasStream(true);
 
       await loadDevices();
@@ -537,10 +559,15 @@ export default function RecordingTab() {
             label="Mirror preview"
           />
         </div>
-        {devices.cameras.length === 0 && (
-          <p className={styles.fieldHint} style={{ margin: "8px 0 0" }}>
-            Device names appear after the browser grants access - click Start preview once.
-          </p>
+        {(devices.cameras.length === 0 || devices.mics.length === 0) && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+            <p className={styles.fieldHint} style={{ margin: 0 }}>
+              Cameras and microphones appear here after the browser grants access.
+            </p>
+            <Button variant="outlined" size="small" onClick={() => void requestAccess()}>
+              Grant access
+            </Button>
+          </div>
         )}
       </div>
 
@@ -575,12 +602,14 @@ export default function RecordingTab() {
             )}
           </div>
 
+          <span className={styles.ghMeta}>Mic level</span>
           <div
+            title="Live microphone input level"
             style={{
-              height: 6,
+              height: 8,
               background: "color-mix(in srgb, var(--field-border) 40%, transparent)",
               borderRadius: 999,
-              width: 160,
+              width: 180,
               overflow: "hidden",
             }}
           >
@@ -594,6 +623,10 @@ export default function RecordingTab() {
               }}
             />
           </div>
+          {hasStream && !hasAudio && (
+            <span className={styles.ghMeta} style={{ color: "var(--warning)" }}>No mic on this stream</span>
+          )}
+          {!hasStream && <span className={styles.ghMeta}>Start the preview to test your mic</span>}
         </div>
 
         <div className={styles.ghActions}>

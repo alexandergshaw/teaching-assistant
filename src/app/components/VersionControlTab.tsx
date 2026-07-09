@@ -27,6 +27,12 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import styles from "../page.module.css";
 
 const VC_SUBTAB_KEY = "ta-vc-subtab";
+const VC_ORG_KEY = "ta-vc-org";
+const VC_TEMPLATE_KEY = "ta-vc-template";
+const VC_PREFIX_KEY = "ta-vc-prefix";
+const VC_STUDENTS_KEY = "ta-vc-students";
+const VC_PRIVATE_KEY = "ta-vc-private";
+const VC_ROSTER_FORMAT_KEY = "ta-vc-roster-format";
 
 /**
  * Version Control Integration: pick a GitHub org and a template repo within it,
@@ -38,14 +44,14 @@ export default function VersionControlTab() {
   const { institutions, active: activeInstitution } = useInstitutionSelection();
   const [orgs, setOrgs] = useState<string[]>([]);
   const [orgsState, setOrgsState] = useState<"loading" | "ready" | "unconfigured">("loading");
-  const [selectedOrg, setSelectedOrg] = useState("");
+  const [selectedOrg, setSelectedOrg] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_ORG_KEY) ?? "" : ""));
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
   const [myRepos, setMyRepos] = useState<GithubRepo[]>([]);
-  const [templateRepo, setTemplateRepo] = useState("");
-  const [prefix, setPrefix] = useState("");
-  const [studentsText, setStudentsText] = useState("");
-  const [isPrivate, setIsPrivate] = useState(true);
+  const [templateRepo, setTemplateRepo] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_TEMPLATE_KEY) ?? "" : ""));
+  const [prefix, setPrefix] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_PREFIX_KEY) ?? "" : ""));
+  const [studentsText, setStudentsText] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_STUDENTS_KEY) ?? "" : ""));
+  const [isPrivate, setIsPrivate] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_PRIVATE_KEY) !== "0" : true));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<StudentRepoResult[] | null>(null);
@@ -57,7 +63,10 @@ export default function VersionControlTab() {
   const [rosterCourses, setRosterCourses] = useState<CanvasCourse[]>([]);
   const [rosterCoursesLoading, setRosterCoursesLoading] = useState(false);
   const [rosterCourseId, setRosterCourseId] = useState("");
-  const [rosterFormat, setRosterFormat] = useState<"sortable" | "firstlast" | "login">("sortable");
+  const [rosterFormat, setRosterFormat] = useState<"sortable" | "firstlast" | "login">(() => {
+    const v = typeof window !== "undefined" ? localStorage.getItem(VC_ROSTER_FORMAT_KEY) : null;
+    return v === "firstlast" || v === "login" ? v : "sortable";
+  });
   const [rosterBusy, setRosterBusy] = useState(false);
   const [rosterNote, setRosterNote] = useState<string | null>(null);
 
@@ -72,6 +81,16 @@ export default function VersionControlTab() {
   useEffect(() => {
     if (typeof window !== "undefined") localStorage.setItem(VC_SUBTAB_KEY, subTab);
   }, [subTab]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(VC_ORG_KEY, selectedOrg);
+    localStorage.setItem(VC_TEMPLATE_KEY, templateRepo);
+    localStorage.setItem(VC_PREFIX_KEY, prefix);
+    localStorage.setItem(VC_STUDENTS_KEY, studentsText);
+    localStorage.setItem(VC_PRIVATE_KEY, isPrivate ? "1" : "0");
+    localStorage.setItem(VC_ROSTER_FORMAT_KEY, rosterFormat);
+  }, [selectedOrg, templateRepo, prefix, studentsText, isPrivate, rosterFormat]);
 
   // Arriving from a course in the Courses hub: open the Repos subtab with the
   // course's GitHub org (and template repo) prefilled.
@@ -204,9 +223,19 @@ export default function VersionControlTab() {
       .map((s) => (rosterFormat === "login" ? s.loginId : rosterFormat === "firstlast" ? s.name : s.sortableName))
       .map((s) => s.trim())
       .filter(Boolean);
-    setStudentsText(lines.join("\n"));
+    const existing = studentsText
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const seen = new Set(existing.map((s) => s.toLowerCase()));
+    const added = lines.filter((s) => !seen.has(s.toLowerCase()));
+    setStudentsText([...existing, ...added].join("\n"));
+    const skipped = lines.length - added.length;
     const courseName = rosterCourses.find((c) => c.id === rosterCourseId)?.name ?? "the course";
-    setRosterNote(`Inserted ${lines.length} student${lines.length === 1 ? "" : "s"} from ${courseName}.`);
+    setRosterNote(
+      `Added ${added.length} student${added.length === 1 ? "" : "s"} from ${courseName}.` +
+        (skipped > 0 ? ` ${skipped} already listed.` : "")
+    );
   };
 
   if (orgsState === "unconfigured") {

@@ -1233,6 +1233,34 @@ button.courseResourceValue:disabled {
   flex: none;
 }
 
+/* A ghPanel that stacks form controls vertically. */
+.ghPanelStack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Indented nested detail block (a run's jobs/artifacts) with a left rail. */
+.ghSubList {
+  margin-top: 8px;
+  margin-left: 4px;
+  padding-left: 14px;
+  border-left: 2px solid var(--field-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* A horizontal metadata strip under a row title. */
+.ghMetaRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
 /* Collapsible institution groups on the Courses tab. */
 .courseGroups {
   display: flex;

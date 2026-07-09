@@ -801,6 +801,17 @@ export default function RepoDetail() {
     return [...byUser.values()];
   };
 
+  // Badge tone for a workflow run / job / step conclusion (or live status).
+  const conclusionBadge = (conclusion: string | null, status: string): { label: string; cls: string } => {
+    const label = conclusion ?? status.replace(/_/g, " ");
+    if (conclusion === "success") return { label, cls: styles.ghBadgeSuccess };
+    if (conclusion === "failure" || conclusion === "cancelled" || conclusion === "startup_failure" || conclusion === "timed_out")
+      return { label, cls: styles.ghBadgeDanger };
+    if (!conclusion && (status === "in_progress" || status === "queued" || status === "waiting"))
+      return { label, cls: styles.ghBadgeWarning };
+    return { label, cls: styles.ghBadgeNeutral };
+  };
+
   // Colour a unified-diff line by its leading marker.
   const diffLineClass = (line: string): string =>
     line.startsWith("@@")
@@ -1085,7 +1096,7 @@ export default function RepoDetail() {
       {!repoRef && <p className={styles.fieldHint}>Pick a repository to browse its files, branches, pull requests, and actions.</p>}
 
       {showCreate && (
-        <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: 8 }}>
           <TextField
             size="small"
             fullWidth
@@ -1227,7 +1238,7 @@ export default function RepoDetail() {
             </div>
 
             {showNewFile && (
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: 8 }}>
                 <TextField
                   size="small"
                   fullWidth
@@ -1269,7 +1280,7 @@ export default function RepoDetail() {
             )}
 
             {showNewFolder && (
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: 8 }}>
                 <FormControlLabel
                   control={<Checkbox size="small" checked={bulkFolders} onChange={(e) => { setBulkFolders(e.target.checked); setNewFolderError(null); setNewFolderResult(null); }} />}
                   label="Create multiple folders"
@@ -1336,7 +1347,7 @@ export default function RepoDetail() {
             )}
 
             {selectedPaths.size > 0 && (
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: 8 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>{selectedPaths.size} selected</span>
                   <Button variant="outlined" size="small" color="error" disabled={bulkBusy} onClick={handleBulkDelete}>
@@ -1530,7 +1541,7 @@ export default function RepoDetail() {
 
           {tab === "branches" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+              <div className={styles.ghPanel}>
                 <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>
                   Fork this repository
                 </label>
@@ -1567,7 +1578,7 @@ export default function RepoDetail() {
                 )}
               </div>
 
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+              <div className={styles.ghPanel}>
                 <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>
                   Create a branch
                 </label>
@@ -1599,42 +1610,35 @@ export default function RepoDetail() {
                 </div>
               </div>
 
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+              <div className={styles.ghPanel}>
                 <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>
                   Branches
                 </label>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div>
                   {branches.length === 0 ? (
                     <p className={styles.fieldHint}>No branches found.</p>
                   ) : (
                     branches.map((b) => (
-                      <div key={b} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
-                        <span style={{ fontFamily: "monospace", fontSize: "0.85rem", flex: 1 }}>
-                          {b}
-                        </span>
-                        {b === defaultBranch && (
-                          <span
-                            style={{
-                              fontSize: "0.7rem",
-                              fontWeight: 500,
-                              backgroundColor: "var(--accent)",
-                              color: "white",
-                              padding: "2px 8px",
-                              borderRadius: 4,
-                            }}
-                          >
-                            default
-                          </span>
-                        )}
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          color="error"
-                          disabled={branchBusy || b === defaultBranch}
-                          onClick={() => handleDeleteBranch(b)}
-                        >
-                          Delete
-                        </Button>
+                      <div key={b} className={styles.ghRow}>
+                        <div className={styles.ghRowTop}>
+                          <div className={styles.ghRowTitle}>
+                            <span className={`${styles.ghRowName} ${styles.ghMetaMono}`} style={{ fontSize: "0.85rem" }}>{b}</span>
+                            {b === defaultBranch && (
+                              <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`} style={{ marginLeft: 8 }}>default</span>
+                            )}
+                          </div>
+                          <div className={styles.ghActions}>
+                            <Button
+                              variant="text"
+                              size="small"
+                              color="error"
+                              disabled={branchBusy || b === defaultBranch}
+                              onClick={() => handleDeleteBranch(b)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                     ))
                   )}
@@ -1877,7 +1881,7 @@ export default function RepoDetail() {
           )}
           {tab === "actions" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+              <div className={styles.ghPanel}>
                 <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>Workflows</label>
                 {actionsState === "loading" && (
                   <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
@@ -1888,20 +1892,24 @@ export default function RepoDetail() {
                 {actionsState === "idle" && workflows.length === 0 && <p className={styles.fieldHint}>No workflows found.</p>}
                 {actionsState === "idle" &&
                   workflows.map((w) => (
-                    <div key={w.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
-                      <div style={{ flex: 1 }}>
-                        <span>{w.name}</span>
-                        <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 2 }}>
-                          <span style={{ marginRight: 12 }}>{w.state}</span>
-                          <span style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>{w.path}</span>
+                    <div key={w.id} className={styles.ghRow}>
+                      <div className={styles.ghRowTop}>
+                        <div className={styles.ghRowTitle}>
+                          <span className={styles.ghRowName}>{w.name}</span>
+                          <span className={`${styles.ghBadge} ${w.state === "active" ? styles.ghBadgeSuccess : styles.ghBadgeNeutral}`} style={{ marginLeft: 8 }}>
+                            {w.state.replace(/_/g, " ")}
+                          </span>
+                          <div className={`${styles.ghMeta} ${styles.ghMetaMono}`} style={{ marginTop: 4 }}>{w.path}</div>
+                        </div>
+                        <div className={styles.ghActions}>
+                          <Button variant="text" size="small" onClick={() => handleToggleWorkflow(w, w.state !== "active")}>
+                            {w.state === "active" ? "Disable" : "Enable"}
+                          </Button>
+                          <Button variant="outlined" size="small" disabled={dispatchingId === w.id || w.state !== "active"} onClick={() => handleDispatch(w)}>
+                            {dispatchingId === w.id ? "Running..." : `Run on ${branch}`}
+                          </Button>
                         </div>
                       </div>
-                      <Button variant="text" size="small" onClick={() => handleToggleWorkflow(w, w.state !== "active")}>
-                        {w.state === "active" ? "Disable" : "Enable"}
-                      </Button>
-                      <Button variant="outlined" size="small" disabled={dispatchingId === w.id || w.state !== "active"} onClick={() => handleDispatch(w)}>
-                        {dispatchingId === w.id ? "Running..." : `Run on ${branch}`}
-                      </Button>
                     </div>
                   ))}
 
@@ -1911,7 +1919,7 @@ export default function RepoDetail() {
                   </Button>
                 </div>
                 {showRunWithInputs && (
-                  <div style={{ border: "1px solid var(--field-border)", borderRadius: 8, padding: 10, marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: 8 }}>
                     <TextField select size="small" label="Workflow" value={dispatchWorkflowId} onChange={(e) => setDispatchWorkflowId(e.target.value)} sx={{ maxWidth: 320 }} slotProps={{ inputLabel: { shrink: true } }}>
                       {workflows.map((w) => (
                         <MenuItem key={w.id} value={String(w.id)}>{w.name}</MenuItem>
@@ -1937,7 +1945,7 @@ export default function RepoDetail() {
                 )}
               </div>
 
-              <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+              <div className={styles.ghPanel}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
                   <label className={styles.panelTitle}>Runs</label>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -1973,26 +1981,25 @@ export default function RepoDetail() {
                       : null;
                   const durLabel = dur == null ? "" : dur >= 60 ? `${Math.floor(dur / 60)}m ${dur % 60}s` : `${dur}s`;
                   const pending = pendingByRun[run.id];
+                  const runBadge = conclusionBadge(run.conclusion, run.status);
                   return (
-                    <div key={run.id} style={{ padding: "12px 0", borderTop: "1px solid var(--field-border)" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                        <div style={{ flex: 1, minWidth: "200px" }}>
-                          <span>
-                            {run.displayTitle || run.name} <span style={{ color: "var(--text-secondary)" }}>#{run.runNumber}</span>
+                    <div key={run.id} className={styles.ghRow}>
+                      <div className={styles.ghRowTop}>
+                        <div className={styles.ghRowTitle}>
+                          <span className={styles.ghRowName}>
+                            {run.displayTitle || run.name} <span className={styles.ghMeta}>#{run.runNumber}</span>
                           </span>
-                          <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: "0.85rem", marginTop: 4, flexWrap: "wrap" }}>
-                            <span style={{ color: run.conclusion === "success" ? "var(--success)" : run.conclusion === "failure" || run.conclusion === "cancelled" ? "var(--danger)" : "var(--text-secondary)" }}>
-                              {run.conclusion ?? run.status}
-                            </span>
-                            <span style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>{run.headBranch}</span>
-                            {run.event && <span style={{ color: "var(--text-secondary)" }}>{run.event}</span>}
-                            {run.actor && <span style={{ color: "var(--text-secondary)" }}>{run.actor}</span>}
-                            {durLabel && <span style={{ color: "var(--text-secondary)" }}>{durLabel}</span>}
-                            <span style={{ color: "var(--text-secondary)" }}>{new Date(run.createdAt).toLocaleString()}</span>
-                            <a href={run.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "none", fontSize: "0.8rem" }}>open</a>
+                          <span className={`${styles.ghBadge} ${runBadge.cls}`} style={{ marginLeft: 8 }}>{runBadge.label}</span>
+                          <div className={styles.ghMetaRow} style={{ marginTop: 6 }}>
+                            <span className={styles.ghMetaMono}>{run.headBranch}</span>
+                            {run.event && <span>{run.event}</span>}
+                            {run.actor && <span>{run.actor}</span>}
+                            {durLabel && <span>{durLabel}</span>}
+                            <span>{new Date(run.createdAt).toLocaleString()}</span>
+                            <a href={run.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "none" }}>open</a>
                           </div>
                         </div>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <div className={styles.ghActions}>
                           <Button variant="text" size="small" onClick={() => toggleJobs(run.id)}>{expandedRun === run.id ? "Hide jobs" : "Jobs"}</Button>
                           <Button variant="text" size="small" onClick={() => toggleArtifacts(run.id)}>{expandedArtifactsRun === run.id ? "Hide artifacts" : "Artifacts"}</Button>
                           <Button variant="text" size="small" onClick={() => openDownload(getRunLogsDownloadUrlAction(repoRef, run.id))}>Logs</Button>
@@ -2011,8 +2018,8 @@ export default function RepoDetail() {
                       </div>
 
                       {pending && pending.length > 0 && (
-                        <div style={{ marginTop: 8, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 6 }}>
-                          <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Waiting on: {pending.map((d) => d.environmentName).join(", ")}</span>
+                        <div className={styles.ghSubList}>
+                          <span className={styles.ghMeta}>Waiting on: {pending.map((d) => d.environmentName).join(", ")}</span>
                           <div style={{ display: "flex", gap: 8 }}>
                             <Button variant="contained" size="small" disabled={runBusyId === run.id} onClick={() => handleReview(run.id, pending.map((d) => d.environmentId), "approved")}>Approve</Button>
                             <Button variant="outlined" size="small" color="error" disabled={runBusyId === run.id} onClick={() => handleReview(run.id, pending.map((d) => d.environmentId), "rejected")}>Reject</Button>
@@ -2021,40 +2028,43 @@ export default function RepoDetail() {
                       )}
 
                       {expandedRun === run.id && (
-                        <div style={{ marginTop: 8, paddingLeft: 16 }}>
+                        <div className={styles.ghSubList}>
                           {jobsLoadingRun === run.id && (
                             <div style={{ display: "flex", justifyContent: "center", padding: 8 }}>
                               <CircularProgress size={20} />
                             </div>
                           )}
-                          {jobsByRun[run.id] && (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                              {jobsByRun[run.id].map((job) => (
+                          {jobsByRun[run.id] &&
+                            jobsByRun[run.id].map((job) => {
+                              const jobBadge = conclusionBadge(job.conclusion, job.status);
+                              return (
                                 <div key={job.id} style={{ fontSize: "0.85rem" }}>
-                                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                                    <span>{job.name}</span>
-                                    <span style={{ color: job.conclusion === "success" ? "var(--success)" : job.conclusion === "failure" || job.conclusion === "cancelled" ? "var(--danger)" : "var(--text-secondary)" }}>{job.conclusion ?? job.status}</span>
+                                  <div className={styles.ghBadges}>
+                                    <span className={styles.ghRowName} style={{ fontSize: "0.85rem" }}>{job.name}</span>
+                                    <span className={`${styles.ghBadge} ${jobBadge.cls}`}>{jobBadge.label}</span>
                                     {job.htmlUrl && <a href={job.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", fontSize: "0.78rem" }}>view</a>}
                                   </div>
                                   {job.steps.length > 0 && (
-                                    <div style={{ paddingLeft: 16, marginTop: 2, display: "flex", flexDirection: "column", gap: 2 }}>
-                                      {job.steps.map((s) => (
-                                        <div key={s.number} style={{ fontSize: "0.78rem", color: "var(--text-secondary)" }}>
-                                          <span>{s.name}</span>
-                                          <span style={{ marginLeft: 8, color: s.conclusion === "success" ? "var(--success)" : s.conclusion === "failure" ? "var(--danger)" : "var(--text-secondary)" }}>{s.conclusion ?? s.status}</span>
-                                        </div>
-                                      ))}
+                                    <div className={styles.ghSubList} style={{ gap: 3 }}>
+                                      {job.steps.map((s) => {
+                                        const stepBadge = conclusionBadge(s.conclusion, s.status);
+                                        return (
+                                          <div key={s.number} className={styles.ghMetaRow}>
+                                            <span>{s.name}</span>
+                                            <span className={`${styles.ghBadge} ${stepBadge.cls}`}>{stepBadge.label}</span>
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                   )}
                                 </div>
-                              ))}
-                            </div>
-                          )}
+                              );
+                            })}
                         </div>
                       )}
 
                       {expandedArtifactsRun === run.id && (
-                        <div style={{ marginTop: 8, paddingLeft: 16 }}>
+                        <div className={styles.ghSubList}>
                           {artifactsLoadingRun === run.id && (
                             <div style={{ display: "flex", justifyContent: "center", padding: 8 }}>
                               <CircularProgress size={20} />
@@ -2063,11 +2073,11 @@ export default function RepoDetail() {
                           {artifactsByRun[run.id] && artifactsByRun[run.id].length === 0 && <p className={styles.fieldHint}>No artifacts.</p>}
                           {artifactsByRun[run.id] &&
                             artifactsByRun[run.id].map((a) => (
-                              <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", padding: "3px 0" }}>
-                                <span style={{ flex: 1 }}>{a.name}</span>
-                                <span style={{ color: "var(--text-secondary)", fontSize: "0.78rem" }}>{Math.round(a.sizeInBytes / 1024)} KB</span>
+                              <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem" }}>
+                                <span style={{ flex: 1, minWidth: 0 }} className={styles.ghRowName}>{a.name}</span>
+                                <span className={styles.ghMeta}>{Math.round(a.sizeInBytes / 1024)} KB</span>
                                 {a.expired ? (
-                                  <span style={{ color: "var(--text-secondary)", fontSize: "0.78rem" }}>expired</span>
+                                  <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>expired</span>
                                 ) : (
                                   <Button variant="text" size="small" onClick={() => openDownload(getArtifactDownloadUrlAction(repoRef, a.id))}>Download</Button>
                                 )}

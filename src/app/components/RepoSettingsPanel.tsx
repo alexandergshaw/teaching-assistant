@@ -61,7 +61,7 @@ export default function RepoSettingsPanel({ repo, onUpdated }: { repo: GithubRep
   };
 
   return (
-    <div className={styles.field} style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12 }}>
+    <div className={`${styles.field} ${styles.ghPanel}`}>
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <FormControlLabel
           control={

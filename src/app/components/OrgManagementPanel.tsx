@@ -295,7 +295,7 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
       <h3 style={{ margin: "0 0 4px" }}>Manage {org}</h3>
 
       {/* Section 1: Members */}
-      <div className={styles.field} style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 16 }}>
+      <div className={`${styles.field} ${styles.ghPanel}`} style={{ marginTop: 16 }}>
         <label style={{ marginBottom: 8 }}>Members</label>
         {membersState === "loading" && <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>Loading members...</p>}
         {membersState === "error" && membersError && <p className={styles.error}>{membersError}</p>}
@@ -351,7 +351,7 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
       </div>
 
       {/* Section 2: Repository Access */}
-      <div className={styles.field} style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 16 }}>
+      <div className={`${styles.field} ${styles.ghPanel}`} style={{ marginTop: 16 }}>
         <label style={{ marginBottom: 8 }}>Repository access</label>
         <Typeahead
           options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
@@ -432,7 +432,7 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
       </div>
 
       {/* Section 3: Create Pull Request */}
-      <div className={styles.field} style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 16 }}>
+      <div className={`${styles.field} ${styles.ghPanel}`} style={{ marginTop: 16 }}>
         <label style={{ marginBottom: 8 }}>Create pull request</label>
         <Typeahead
           options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
@@ -513,7 +513,7 @@ export default function OrgManagementPanel({ org, repos }: OrgManagementPanelPro
       </div>
 
       {/* Section 4: Branch Protection */}
-      <div className={styles.field} style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, marginTop: 16 }}>
+      <div className={`${styles.field} ${styles.ghPanel}`} style={{ marginTop: 16 }}>
         <label style={{ marginBottom: 8 }}>Branch protection</label>
         <Typeahead
           options={repos.map((r) => ({ value: r.fullName, label: r.name }))}

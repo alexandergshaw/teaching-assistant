@@ -187,6 +187,11 @@ export default function VersionControlTab() {
 
       {subTab === "orgs" && (
         <>
+          <div className={`${styles.ghPanel} ${styles.ghPanelStack}`}>
+          <label className={styles.panelTitle}>Generate student repositories</label>
+          <p className={styles.fieldHint} style={{ margin: 0 }}>
+            Pick an organization and a template repo, paste your roster, and generate one repository per student.
+          </p>
           <div className={styles.field}>
             <label>Organization</label>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -276,40 +281,44 @@ export default function VersionControlTab() {
             />
           </div>
 
-          <Button type="button" variant="contained" size="small" onClick={generate} disabled={busy || !selectedOrg || !templateRepo || students.length === 0}>
-            {busy ? `Generating ${students.length} repo${students.length === 1 ? "" : "s"}…` : `Generate ${students.length || ""} repo${students.length === 1 ? "" : "s"}`.trim()}
-          </Button>
+          <div>
+            <Button type="button" variant="contained" size="small" onClick={generate} disabled={busy || !selectedOrg || !templateRepo || students.length === 0}>
+              {busy ? `Generating ${students.length} repo${students.length === 1 ? "" : "s"}…` : `Generate ${students.length || ""} repo${students.length === 1 ? "" : "s"}`.trim()}
+            </Button>
+          </div>
 
           {error && <p className={styles.error}>{error}</p>}
+          </div>
 
           {results && (
-            <div className={styles.field}>
-              <label>Results</label>
-              <div style={{ border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8 }}>
-                {results.map((r, i) => (
-                  <div
-                    key={r.name}
-                    style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 10px", borderTop: i === 0 ? "none" : "1px solid #f1f5f9" }}
-                  >
-                    <span style={{ flex: "1 1 200px", minWidth: 0, fontSize: "0.88rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {r.student} → <code>{r.name}</code>
+            <div className={styles.ghPanel}>
+              <label className={styles.panelTitle} style={{ display: "block", marginBottom: 4 }}>Results</label>
+              {results.map((r) => (
+                <div key={r.name} className={styles.ghRow}>
+                  <div className={styles.ghRowTop}>
+                    <span className={styles.ghRowTitle} style={{ fontSize: "0.88rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.student} → <span className={styles.ghMetaMono}>{r.name}</span>
                     </span>
-                    {r.error ? (
-                      <span style={{ color: "var(--danger)", fontSize: "0.82rem" }}>{r.error}</span>
-                    ) : (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.82rem" }}>
-                        <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: "var(--success)" }} />
-                        <strong style={{ color: "var(--success)" }}>Created</strong>
-                        {r.htmlUrl && (
-                          <a href={r.htmlUrl} target="_blank" rel="noreferrer">
-                            open
-                          </a>
-                        )}
-                      </span>
-                    )}
+                    <div className={styles.ghBadges}>
+                      {r.error ? (
+                        <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>{r.error}</span>
+                      ) : (
+                        <>
+                          <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>
+                            <span className={styles.ghDot} />
+                            Created
+                          </span>
+                          {r.htmlUrl && (
+                            <a href={r.htmlUrl} target="_blank" rel="noreferrer" style={{ fontSize: "0.82rem" }}>
+                              open
+                            </a>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
           )}
 

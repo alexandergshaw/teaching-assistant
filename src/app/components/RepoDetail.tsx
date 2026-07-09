@@ -42,6 +42,7 @@ import RepoSettingsPanel from "./RepoSettingsPanel";
 import PublishToCanvasPage from "./PublishToCanvasPage";
 import CopilotChatPanel from "./CopilotChatPanel";
 import { buildBulkFolderNames } from "@/lib/bulk-folders";
+import { useVcCounts } from "./VcCounts";
 import { formatRelative } from "../utils/time";
 import dynamic from "next/dynamic";
 import Typeahead from "./ui/Typeahead";
@@ -69,6 +70,7 @@ const MonacoFileEditor = dynamic(() => import("./MonacoFileEditor"), {
 });
 
 export default function RepoDetail() {
+  const { openPrs: attentionPrs, runsNeedingApproval: attentionRuns, refresh: refreshVcCounts } = useVcCounts();
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [reposState, setReposState] = useState<"loading" | "ready" | "error">("loading");
   const [repoRef, setRepoRef] = useState(() =>
@@ -235,11 +237,15 @@ export default function RepoDetail() {
     };
   }, []);
 
-  // Persist the selected repo + branch so the Repos subtab reopens where it was.
+  // Persist the selected repo + branch so the Repos subtab reopens where it was,
+  // and point the attention badges at the newly selected repo.
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (repoRef) localStorage.setItem(VC_REPO_KEY, repoRef);
     else localStorage.removeItem(VC_REPO_KEY);
+    refreshVcCounts(repoRef);
+    // refreshVcCounts is stable (memoized in the provider).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoRef]);
 
   useEffect(() => {
@@ -760,6 +766,7 @@ export default function RepoDetail() {
     setPrTitle("");
     setPrBody("");
     await reloadPulls();
+    refreshVcCounts();
   };
 
   const handleMerge = async (n: number) => {
@@ -773,6 +780,7 @@ export default function RepoDetail() {
     }
     setPrMsg(`Merged #${n}.`);
     await reloadPulls();
+    refreshVcCounts();
   };
 
   const reloadPrReviews = async (n: number) => {
@@ -946,6 +954,7 @@ export default function RepoDetail() {
     }
     setPendingByRun((m) => ({ ...m, [id]: [] }));
     await reloadRuns();
+    refreshVcCounts();
   };
 
   const handleDispatch = async (w: WorkflowInfo) => {
@@ -982,6 +991,7 @@ export default function RepoDetail() {
       return;
     }
     await reloadRuns();
+    refreshVcCounts();
   };
 
   const toggleJobs = async (id: number) => {
@@ -1292,8 +1302,26 @@ export default function RepoDetail() {
           >
             <Tab label="Files" value="files" disableRipple />
             <Tab label="Branches" value="branches" disableRipple />
-            <Tab label="Pull requests" value="pulls" disableRipple />
-            <Tab label="Actions" value="actions" disableRipple />
+            <Tab
+              label={
+                <span className={styles.tabLabelWrap}>
+                  Pull requests
+                  {attentionPrs > 0 && <span className={styles.navBadge}>{attentionPrs}</span>}
+                </span>
+              }
+              value="pulls"
+              disableRipple
+            />
+            <Tab
+              label={
+                <span className={styles.tabLabelWrap}>
+                  Actions
+                  {attentionRuns > 0 && <span className={styles.navBadge}>{attentionRuns}</span>}
+                </span>
+              }
+              value="actions"
+              disableRipple
+            />
             <Tab label="Copilot" value="copilot" disableRipple />
             <Tab label="Settings" value="settings" disableRipple />
           </Tabs>

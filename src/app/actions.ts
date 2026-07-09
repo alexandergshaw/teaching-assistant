@@ -6600,6 +6600,32 @@ export async function mergePullRequestAction(repoRef: string, prNumber: number, 
   }
 }
 
+/**
+ * Attention counts for a repo's badges: open non-draft pull requests (agent or
+ * human, awaiting review/merge) and workflow runs blocked on approval
+ * (waiting = deployment review, action_required = fork approval).
+ */
+export async function getRepoAttentionAction(
+  repoRef: string
+): Promise<{ openPrs: number; runsNeedingApproval: number } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const [pulls, waiting, actionRequired] = await Promise.all([
+      listPullRequests(parsed.owner, parsed.repo, "open"),
+      listWorkflowRuns(parsed.owner, parsed.repo, { status: "waiting", perPage: 50 }),
+      listWorkflowRuns(parsed.owner, parsed.repo, { status: "action_required", perPage: 50 }),
+    ]);
+    return {
+      openPrs: pulls.filter((p) => !p.draft).length,
+      runsNeedingApproval: waiting.length + actionRequired.length,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load attention counts." };
+  }
+}
+
 /** List the reviews submitted on a pull request. */
 export async function listPullRequestReviewsAction(
   repoRef: string,

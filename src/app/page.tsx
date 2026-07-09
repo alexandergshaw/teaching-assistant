@@ -14,6 +14,7 @@ import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModa
 import LessonPlanningForm from "./components/LessonPlanningForm";
 import TopBar from "./components/TopBar";
 import { useInstitutionCounts } from "./components/InstitutionCounts";
+import { useVcCounts } from "./components/VcCounts";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { stampDocxAppProperties } from "@/lib/docx";
@@ -130,6 +131,7 @@ export default function Home() {
   const [state, formAction, pending] = useActionState(gradeAction, initialState);
   const { user } = useSupabase();
   const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
+  const { total: vcAttention } = useVcCounts();
   const [testState] = useActionState(testGeminiAction, initialTestState);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "course-planning";
@@ -632,7 +634,11 @@ export default function Home() {
             value="content"
             disableRipple
           />
-          <Tab label="Version Control Integration" value="version-control" disableRipple />
+          <Tab
+            label={<NavTabLabel text="Version Control Integration" count={vcAttention} />}
+            value="version-control"
+            disableRipple
+          />
         </Tabs>
 
         {activeTab === "courses" && (

@@ -13,6 +13,7 @@ import RepoDetail from "./RepoDetail";
 import TabHeader from "./TabHeader";
 import Typeahead from "./ui/Typeahead";
 import { takeCourseHandoff } from "@/lib/course-handoff";
+import { useVcCounts } from "./VcCounts";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Checkbox from "@mui/material/Checkbox";
@@ -27,6 +28,7 @@ const VC_SUBTAB_KEY = "ta-vc-subtab";
  * (the GitHub Classroom distribution pattern).
  */
 export default function VersionControlTab() {
+  const { total: vcAttention } = useVcCounts();
   const [orgs, setOrgs] = useState<string[]>([]);
   const [orgsState, setOrgsState] = useState<"loading" | "ready" | "unconfigured">("loading");
   const [selectedOrg, setSelectedOrg] = useState("");
@@ -181,7 +183,10 @@ export default function VersionControlTab() {
           className={`${styles.lessonInnerTab}${subTab === "repos" ? ` ${styles.lessonInnerTabActive}` : ""}`}
           onClick={() => setSubTab("repos")}
         >
-          <span className={styles.tabLabelWrap}>Repos</span>
+          <span className={styles.tabLabelWrap}>
+            Repos
+            {vcAttention > 0 && <span className={styles.navBadge}>{vcAttention}</span>}
+          </span>
         </button>
       </div>
 

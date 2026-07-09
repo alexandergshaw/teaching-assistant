@@ -2678,6 +2678,58 @@ export async function generateLectureScriptAction(
   }
 }
 
+/** A timed caption for an uploaded screen recording. */
+export interface ScreenCaption {
+  start: number;
+  end: number;
+  text: string;
+}
+
+/**
+ * Describe an uploaded screen recording from sampled keyframes: returns timed
+ * captions narrating what is happening on screen.
+ */
+export async function describeScreenRecordingAction(
+  frames: Array<{ timeSec: number; base64: string }>,
+  durationSec: number,
+  context: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ captions: ScreenCaption[] } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!frames.length) return { error: "No frames were extracted from the video." };
+    if (frames.length > 30) return { error: "Too many frames; sample the video more sparsely." };
+    const parts: LlmPart[] = [
+      {
+        text: [
+          "The images are keyframes sampled from a screen recording (software/computer usage), in order, with their timestamps in seconds:",
+          frames.map((f, i) => `Frame ${i + 1}: t=${Math.round(f.timeSec)}s`).join("\n"),
+          context.trim() ? `Context from the author: ${context.trim()}` : "",
+          `The full video is ${Math.round(durationSec)} seconds long.`,
+          'Write viewer captions that narrate what is happening on screen. Return ONLY a JSON array like [{"start": 0, "end": 6, "text": "..."}] - seconds as numbers, segments in order, covering 0 to the full duration with no gaps or overlaps, one segment per meaningful action (merge frames showing the same action), each text a single concise present-tense sentence under 14 words. No markdown, no code fences.',
+        ].filter(Boolean).join("\n\n"),
+      },
+      ...frames.map((f) => ({ inlineData: { mimeType: "image/jpeg", data: f.base64 } })),
+    ];
+    const r = await callLlm(
+      { contents: [{ role: "user", parts }], generationConfig: { temperature: 0.2, maxOutputTokens: 4096 } },
+      provider
+    );
+    if (!r.ok) return { error: "The model returned no captions. Try again." };
+    const match = r.text.match(/\[[\s\S]*\]/);
+    if (!match) return { error: "Could not parse captions from the model output." };
+    const raw = JSON.parse(match[0]) as Array<{ start?: number; end?: number; text?: string }>;
+    const captions = raw
+      .filter((c) => typeof c.start === "number" && typeof c.end === "number" && typeof c.text === "string" && c.text.trim())
+      .map((c) => ({ start: Math.max(0, c.start as number), end: Math.min(durationSec, c.end as number), text: (c.text as string).trim() }))
+      .filter((c) => c.end > c.start);
+    if (!captions.length) return { error: "The model produced no usable captions." };
+    return { captions };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not describe the recording." };
+  }
+}
+
 /**
  * Read a former syllabus (.docx) and a codebase zip. Pass 1 identifies the
  * class-specific NON-schedule fields and the weekly-schedule block's bounds; pass

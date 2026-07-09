@@ -106,3 +106,17 @@ Priority order:
    size presets), drawn in the same canvas pass.
 5. Countdown (3-2-1) before recording starts; keyboard shortcuts (R record,
    P pause, M mute).
+
+## Phase 6: caption studio + in-house constraint
+
+- Caption studio (shipped, slice 1): upload a screen recording; keyframes are
+  sampled client-side (~24 JPEG frames) and a vision LLM writes timed captions
+  describing the on-screen actions; captions are editable, render as native
+  subtitles on the player, and export as .vtt. Slice 2 (next): burn captions
+  into the video via the canvas pipeline and optionally record live mic
+  narration during the re-encode.
+- Constraint (user directive): ALL voice and avatar generation must be done in
+  house - no ElevenLabs/HeyGen/Synthesia. Voice: XTTS/F5-TTS self-hosted;
+  avatar: SadTalker/EchoMimic/LivePortrait; both behind a local GPU sidecar
+  service the app calls via env URL. LLM text/vision providers already in the
+  app remain acceptable.

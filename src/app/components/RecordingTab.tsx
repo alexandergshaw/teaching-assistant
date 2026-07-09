@@ -32,6 +32,7 @@ export default function RecordingTab() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
+  const levelRef = useRef(0);
   const elapsedRef = useRef<number>(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Config the current stream was opened with (see the restart effect).
@@ -212,8 +213,15 @@ export default function RecordingTab() {
         let sum = 0;
         for (let i = 0; i < data.length; i++) sum += (data[i] - 128) * (data[i] - 128);
         const rms = Math.sqrt(sum / data.length) / 128;
-        // Raw RMS of speech is tiny; amplify so normal talking visibly moves the bar.
-        setLevel(Math.min(rms * 4, 1));
+        // Raw RMS of speech is tiny; amplify so normal talking visibly moves
+        // the bar. Quantize and only set state on change - updating at 60fps
+        // re-rendered the whole tab every frame, which broke the device
+        // dropdowns (MUI menus re-render out from under the click).
+        const q = Math.round(Math.min(rms * 4, 1) * 20) / 20;
+        if (q !== levelRef.current) {
+          levelRef.current = q;
+          setLevel(q);
+        }
         rafRef.current = requestAnimationFrame(loop);
       };
       rafRef.current = requestAnimationFrame(loop);
@@ -609,6 +617,14 @@ export default function RecordingTab() {
             label="Auto gain"
           />
         </div>
+        {devices.cameras.length > 0 && (
+          <p className={styles.fieldHint} style={{ margin: "8px 0 0" }}>
+            {devices.cameras.length} camera{devices.cameras.length === 1 ? "" : "s"}, {devices.mics.length} mic{devices.mics.length === 1 ? "" : "s"} detected
+            {cameraId
+              ? ` - using: ${devices.cameras.find((d) => d.deviceId === cameraId)?.label ?? "previous camera (reselect)"}`
+              : " - no camera selected yet"}
+          </p>
+        )}
         {(devices.cameras.length === 0 || devices.mics.length === 0) && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
             <p className={styles.fieldHint} style={{ margin: 0 }}>

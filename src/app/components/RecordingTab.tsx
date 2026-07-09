@@ -116,6 +116,22 @@ export default function RecordingTab() {
   const bgStatusRef = useRef<"idle" | "loading" | "ready" | "failed">("idle");
   const applyBackgroundEffectTemp = useRef<HTMLCanvasElement | null>(null);
 
+  // Picture-in-Picture webcam bubble
+  const [pipEnabled, setPipEnabled] = useState(false);
+  const [pipCorner, setPipCorner] = useState<"br" | "bl" | "tr" | "tl">("br");
+  const pipVideoRef = useRef<HTMLVideoElement | null>(null);
+  const pipStreamRef = useRef<MediaStream | null>(null);
+  const pipEnabledRef = useRef(false);
+  const pipCornerRef = useRef<"br" | "bl" | "tr" | "tl">("br");
+
+  // Countdown before recording
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [useCountdown, setUseCountdown] = useState(true);
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Mirror source state into ref
+  const sourceRef = useRef<"camera" | "screen">("camera");
+
   const redrawOverlay = useCallback(() => {
     const canvas = overlayCanvasRef.current;
     if (!canvas) return;
@@ -377,6 +393,66 @@ export default function RecordingTab() {
     bgStatusRef.current = bgStatus;
   }, [bgStatus]);
 
+  // Mirror source, pipEnabled, and pipCorner into refs
+  useEffect(() => {
+    sourceRef.current = source;
+  }, [source]);
+
+  useEffect(() => {
+    pipEnabledRef.current = pipEnabled;
+  }, [pipEnabled]);
+
+  useEffect(() => {
+    pipCornerRef.current = pipCorner;
+  }, [pipCorner]);
+
+  // Acquire/release PiP webcam stream
+  useEffect(() => {
+    const acquirePiP = async () => {
+      if (!pipEnabled || source !== "screen" || !hasStream) {
+        // Release PiP stream if conditions not met
+        if (pipStreamRef.current) {
+          pipStreamRef.current.getTracks().forEach((t) => t.stop());
+          pipStreamRef.current = null;
+        }
+        if (pipVideoRef.current) {
+          pipVideoRef.current.srcObject = null;
+        }
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: cameraId ? { deviceId: { exact: cameraId } } : true,
+        });
+
+        pipStreamRef.current = stream;
+
+        // Create video element if needed
+        if (!pipVideoRef.current) {
+          pipVideoRef.current = document.createElement("video");
+          pipVideoRef.current.muted = true;
+          pipVideoRef.current.playsInline = true;
+        }
+
+        pipVideoRef.current.srcObject = stream;
+        void pipVideoRef.current.play();
+      } catch (err) {
+        console.warn("Could not acquire PiP webcam stream:", err);
+        setError(`Could not start the webcam bubble: ${err instanceof Error ? err.message : "unknown error"}`);
+      }
+    };
+
+    void acquirePiP();
+
+    return () => {
+      if (pipStreamRef.current) {
+        pipStreamRef.current.getTracks().forEach((t) => t.stop());
+        pipStreamRef.current = null;
+      }
+    };
+  }, [pipEnabled, source, hasStream, cameraId]);
+
   // Ask for camera+mic permission once (falling back to mic-only), purely to
   // unlock device names/ids in the pickers; the probe stream is stopped at once.
   const requestAccess = async () => {
@@ -423,6 +499,59 @@ export default function RecordingTab() {
       } else {
         ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
       }
+
+      // Picture-in-Picture bubble
+      const pipV = pipVideoRef.current;
+      if (pipEnabledRef.current && pipV && pipV.readyState >= 2 && sourceRef.current === "screen") {
+        const bw = Math.round(canvas.width * 0.22);
+        const bh = Math.round(bw * (pipV.videoHeight / Math.max(1, pipV.videoWidth))) || Math.round(bw * 0.75);
+        const m = Math.round(canvas.width * 0.02);
+
+        let x = 0, y = 0;
+        const corner = pipCornerRef.current;
+        if (corner === "br") {
+          x = canvas.width - bw - m;
+          y = canvas.height - bh - m;
+        } else if (corner === "bl") {
+          x = m;
+          y = canvas.height - bh - m;
+        } else if (corner === "tr") {
+          x = canvas.width - bw - m;
+          y = m;
+        } else if (corner === "tl") {
+          x = m;
+          y = m;
+        }
+
+        ctx.save();
+        ctx.beginPath();
+        const ctxWithRoundRect = ctx as CanvasRenderingContext2D & {
+          roundRect?: (x: number, y: number, w: number, h: number, r: number) => void;
+        };
+        if (ctxWithRoundRect.roundRect) {
+          ctxWithRoundRect.roundRect(x, y, bw, bh, 16);
+        } else {
+          // Fallback for older browsers
+          ctx.rect(x, y, bw, bh);
+        }
+        ctx.clip();
+        ctx.drawImage(pipV, x, y, bw, bh);
+        ctx.restore();
+
+        // Subtle white border
+        ctx.save();
+        ctx.beginPath();
+        if (ctxWithRoundRect.roundRect) {
+          ctxWithRoundRect.roundRect(x, y, bw, bh, 16);
+        } else {
+          ctx.rect(x, y, bw, bh);
+        }
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(255,255,255,0.85)";
+        ctx.stroke();
+        ctx.restore();
+      }
+
       const overlay = overlayCanvasRef.current;
       if (overlay) {
         ctx.drawImage(overlay, 0, 0, canvas.width, canvas.height);
@@ -510,6 +639,18 @@ export default function RecordingTab() {
     if (videoRef.current && videoRef.current.srcObject !== null) {
       videoRef.current.srcObject = null;
     }
+    if (pipStreamRef.current) {
+      pipStreamRef.current.getTracks().forEach((t) => t.stop());
+      pipStreamRef.current = null;
+    }
+    if (pipVideoRef.current) {
+      pipVideoRef.current.srcObject = null;
+    }
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    setCountdown(null);
     stopMeter();
     stopPipeline();
     setRecState("idle");
@@ -672,6 +813,28 @@ export default function RecordingTab() {
     return "";
   };
 
+  const beginRecording = () => {
+    if (!useCountdown) {
+      void startRecording();
+      return;
+    }
+    setCountdown(3);
+    countdownTimerRef.current = setInterval(() => {
+      setCountdown((c) => {
+        if (c === null) return null;
+        if (c <= 1) {
+          if (countdownTimerRef.current) {
+            clearInterval(countdownTimerRef.current);
+            countdownTimerRef.current = null;
+          }
+          void startRecording();
+          return null;
+        }
+        return c - 1;
+      });
+    }, 1000);
+  };
+
   const startRecording = async () => {
     if (!streamRef.current) return;
     try {
@@ -809,6 +972,26 @@ export default function RecordingTab() {
     };
   }, []);
 
+  // Keyboard shortcuts: R record/stop, P pause/resume, M mute
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.closest("input, textarea, select, [contenteditable]")) return;
+      const k = e.key.toLowerCase();
+      if (k === "r") {
+        if (recState === "idle" && hasStream) beginRecording();
+        else if (recState !== "idle") stopRecording();
+      } else if (k === "p") {
+        if (recState === "recording") pauseRecording();
+        else if (recState === "paused") resumeRecording();
+      } else if (k === "m") {
+        if (hasStream) toggleMute();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   return (
     <section className={styles.card}>
       <TabHeader
@@ -940,6 +1123,31 @@ export default function RecordingTab() {
               e.target.value = "";
             }}
           />
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={pipEnabled}
+                onChange={(e) => setPipEnabled(e.target.checked)}
+                disabled={source !== "screen"}
+              />
+            }
+            label="Webcam bubble"
+          />
+          {pipEnabled && source === "screen" && (
+            <TextField
+              select
+              label="Bubble corner"
+              value={pipCorner}
+              onChange={(e) => setPipCorner(e.target.value as "br" | "bl" | "tr" | "tl")}
+              size="small"
+              sx={{ minWidth: 130 }}
+            >
+              <MenuItem value="br">Bottom right</MenuItem>
+              <MenuItem value="bl">Bottom left</MenuItem>
+              <MenuItem value="tr">Top right</MenuItem>
+              <MenuItem value="tl">Top left</MenuItem>
+            </TextField>
+          )}
         </div>
         {devices.cameras.length > 0 && (
           <p className={styles.fieldHint} style={{ margin: "8px 0 0" }}>
@@ -999,6 +1207,11 @@ export default function RecordingTab() {
               touchAction: "none",
             }}
           />
+          {countdown !== null && (
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(15,23,42,0.45)", pointerEvents: "none" }}>
+              <span style={{ fontSize: "6rem", fontWeight: 800, color: "#fff", textShadow: "0 4px 24px rgba(0,0,0,0.5)" }}>{countdown}</span>
+            </div>
+          )}
         </div>
 
         {hasStream && tool !== "off" && (
@@ -1109,6 +1322,7 @@ export default function RecordingTab() {
                 </span>
               </>
             )}
+            <span className={styles.ghMeta}>Shortcuts: R record - P pause - M mute</span>
           </div>
 
           {hasStream && (
@@ -1116,6 +1330,16 @@ export default function RecordingTab() {
               {muted ? "Unmute" : "Mute"}
             </Button>
           )}
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={useCountdown}
+                onChange={(e) => setUseCountdown(e.target.checked)}
+                size="small"
+              />
+            }
+            label="3-2-1 countdown"
+          />
           <span className={styles.ghMeta}>Mic level</span>
           <div
             title="Live microphone input level"
@@ -1150,7 +1374,7 @@ export default function RecordingTab() {
             </Button>
           ) : recState === "idle" ? (
             <>
-              <Button variant="contained" onClick={startRecording}>
+              <Button variant="contained" onClick={beginRecording} disabled={countdown !== null}>
                 Record
               </Button>
               <Button variant="text" onClick={stopEverything}>

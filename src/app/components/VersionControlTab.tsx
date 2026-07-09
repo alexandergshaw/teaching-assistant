@@ -6,17 +6,22 @@ import {
   listOrgReposAction,
   generateStudentReposAction,
   listGithubReposAction,
+  listCoursesAction,
+  listCourseRosterAction,
   type StudentRepoResult,
 } from "../actions";
 import type { GithubRepo } from "@/lib/github";
+import type { CanvasCourse } from "@/lib/canvas";
 import OrgManagementPanel from "./OrgManagementPanel";
 import RepoDetail from "./RepoDetail";
 import TabHeader from "./TabHeader";
 import Typeahead from "./ui/Typeahead";
 import { takeCourseHandoff } from "@/lib/course-handoff";
 import { useVcCounts } from "./VcCounts";
+import { useInstitutionSelection } from "@/lib/institutions";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import styles from "../page.module.css";
@@ -30,6 +35,7 @@ const VC_SUBTAB_KEY = "ta-vc-subtab";
  */
 export default function VersionControlTab() {
   const { total: vcAttention } = useVcCounts();
+  const { institutions, active: activeInstitution } = useInstitutionSelection();
   const [orgs, setOrgs] = useState<string[]>([]);
   const [orgsState, setOrgsState] = useState<"loading" | "ready" | "unconfigured">("loading");
   const [selectedOrg, setSelectedOrg] = useState("");
@@ -47,6 +53,13 @@ export default function VersionControlTab() {
     typeof window !== "undefined" && localStorage.getItem(VC_SUBTAB_KEY) === "repos" ? "repos" : "orgs"
   );
   // (Copilot repo creation was removed from the Orgs subtab.)
+  const [rosterInstitution, setRosterInstitution] = useState("");
+  const [rosterCourses, setRosterCourses] = useState<CanvasCourse[]>([]);
+  const [rosterCoursesLoading, setRosterCoursesLoading] = useState(false);
+  const [rosterCourseId, setRosterCourseId] = useState("");
+  const [rosterFormat, setRosterFormat] = useState<"sortable" | "firstlast" | "login">("sortable");
+  const [rosterBusy, setRosterBusy] = useState(false);
+  const [rosterNote, setRosterNote] = useState<string | null>(null);
 
   const refreshOrgs = async () => {
     const r = await listMyOrgsAction();
@@ -117,6 +130,29 @@ export default function VersionControlTab() {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [selectedOrg]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const inst = rosterInstitution || activeInstitution;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (!inst) {
+      setRosterCourses([]);
+      setRosterCourseId("");
+      return;
+    }
+    setRosterCoursesLoading(true);
+    (async () => {
+      const r = await listCoursesAction(inst);
+      if (cancelled) return;
+      if (!("error" in r)) setRosterCourses(r.courses);
+      setRosterCoursesLoading(false);
+    })();
+    setRosterCourseId("");
+    /* eslint-enable react-hooks/set-state-in-effect */
+    return () => {
+      cancelled = true;
+    };
+  }, [rosterInstitution, activeInstitution]);
+
   const externalTemplates = myRepos.filter((r) => r.isTemplate && !repos.some((o) => o.fullName === r.fullName));
   const mergedRepos = [...repos, ...externalTemplates];
   const templates = mergedRepos.filter((r) => r.isTemplate);
@@ -151,6 +187,26 @@ export default function VersionControlTab() {
       return;
     }
     setResults(r.results);
+  };
+
+  const handleInsertRoster = async () => {
+    const inst = rosterInstitution || activeInstitution;
+    if (!inst || !rosterCourseId) return;
+    setRosterBusy(true);
+    setRosterNote(null);
+    const r = await listCourseRosterAction(inst, rosterCourseId);
+    setRosterBusy(false);
+    if ("error" in r) {
+      setRosterNote(`Error: ${r.error}`);
+      return;
+    }
+    const lines = r.students
+      .map((s) => (rosterFormat === "login" ? s.loginId : rosterFormat === "firstlast" ? s.name : s.sortableName))
+      .map((s) => s.trim())
+      .filter(Boolean);
+    setStudentsText(lines.join("\n"));
+    const courseName = rosterCourses.find((c) => c.id === rosterCourseId)?.name ?? "the course";
+    setRosterNote(`Inserted ${lines.length} student${lines.length === 1 ? "" : "s"} from ${courseName}.`);
   };
 
   if (orgsState === "unconfigured") {
@@ -282,7 +338,7 @@ export default function VersionControlTab() {
             <TextField
               id="vc-students"
               multiline
-              minRows={8}
+              minRows={4}
               fullWidth
               placeholder={"jsmith\nadoe\nmlee"}
               value={studentsText}
@@ -290,6 +346,40 @@ export default function VersionControlTab() {
               disabled={busy}
               sx={{ fontFamily: "monospace" }}
             />
+            {institutions.length > 0 ? (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                <span className={styles.fieldHint} style={{ margin: 0 }}>Fill from a Canvas class:</span>
+                {institutions.length > 1 && (
+                  <TextField select size="small" label="Institution" value={rosterInstitution || activeInstitution} onChange={(e) => setRosterInstitution(e.target.value)} sx={{ minWidth: 120 }}>
+                    {institutions.map((i) => (
+                      <MenuItem key={i} value={i}>{i}</MenuItem>
+                    ))}
+                  </TextField>
+                )}
+                <div style={{ flex: "1 1 220px", minWidth: 180 }}>
+                  <Typeahead
+                    options={rosterCourses.map((c) => ({ value: c.id, label: c.name }))}
+                    value={rosterCourseId}
+                    onChange={(v) => setRosterCourseId(v)}
+                    placeholder={rosterCoursesLoading ? "Loading courses..." : "Choose a course..."}
+                    disabled={rosterBusy || rosterCoursesLoading}
+                    loading={rosterCoursesLoading}
+                    noOptionsText="No courses"
+                  />
+                </div>
+                <TextField select size="small" label="Name format" value={rosterFormat} onChange={(e) => setRosterFormat(e.target.value as "sortable" | "firstlast" | "login")} sx={{ minWidth: 150 }}>
+                  <MenuItem value="sortable">Last, First</MenuItem>
+                  <MenuItem value="firstlast">First Last</MenuItem>
+                  <MenuItem value="login">Login ID</MenuItem>
+                </TextField>
+                <Button variant="outlined" size="small" disabled={rosterBusy || !rosterCourseId} onClick={handleInsertRoster}>
+                  {rosterBusy ? "Loading..." : "Insert roster"}
+                </Button>
+              </div>
+            ) : null}
+            {rosterNote && (
+              <p className={rosterNote.startsWith("Error") ? styles.error : styles.fieldHint} style={{ margin: "4px 0 0" }}>{rosterNote}</p>
+            )}
             <FormControlLabel
               sx={{ marginTop: 0.75 }}
               control={<Checkbox checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} disabled={busy} size="small" />}

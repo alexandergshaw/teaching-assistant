@@ -732,6 +732,7 @@ interface CanvasUserListItem {
   id?: number;
   name?: string;
   sortable_name?: string;
+  login_id?: string;
 }
 
 /** List students enrolled in a course for the pull-back picker. */
@@ -761,6 +762,45 @@ export async function listStudents(code: string, courseId: string): Promise<Canv
 
   students.sort((a, b) => a.name.localeCompare(b.name));
   return students;
+}
+
+/** One roster entry with the name forms needed by the repo-generation picker. */
+export interface CanvasRosterEntry {
+  id: string;
+  name: string;
+  sortableName: string;
+  loginId: string;
+}
+
+/** List a course's students with display name, sortable name, and login id. */
+export async function listCourseRoster(code: string, courseId: string): Promise<CanvasRosterEntry[]> {
+  const { institution, token, baseUrl } = resolveInstitutionByCode(code);
+  let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/users?enrollment_type[]=student&per_page=100`;
+  const entries: CanvasRosterEntry[] = [];
+
+  while (next) {
+    const response = await fetch(next, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      throw canvasError(response.status, institution);
+    }
+    const page = (await response.json()) as CanvasUserListItem[];
+    for (const user of page) {
+      if (typeof user.id === "number") {
+        entries.push({
+          id: String(user.id),
+          name: (user.name ?? "").trim(),
+          sortableName: (user.sortable_name ?? "").trim(),
+          loginId: (user.login_id ?? "").trim(),
+        });
+      }
+    }
+    next = parseNextLink(response.headers.get("link"));
+  }
+
+  entries.sort((a, b) => a.sortableName.localeCompare(b.sortableName) || a.name.localeCompare(b.name));
+  return entries;
 }
 
 interface CanvasAssignmentDetailItem {

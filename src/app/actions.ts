@@ -66,6 +66,7 @@ import {
   setConversationWorkflowState,
   listAssignments,
   listStudents,
+  listCourseRoster,
   fetchSubmissionDetail,
   type CanvasAnnouncement,
   type CanvasConversationSummary,
@@ -74,6 +75,7 @@ import {
   type CanvasCourse,
   type CanvasAssignmentBrief,
   type CanvasPerson,
+  type CanvasRosterEntry,
   type CanvasSubmissionDetail,
   type CanvasStudentWork,
 } from "@/lib/canvas";
@@ -1020,6 +1022,18 @@ export async function listStudentsAction(
     return { students: await listStudents(code.trim().toUpperCase(), courseId) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not list students." };
+  }
+}
+
+export async function listCourseRosterAction(
+  code: string,
+  courseId: string
+): Promise<{ students: CanvasRosterEntry[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return { students: await listCourseRoster(code.trim().toUpperCase(), courseId) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the roster." };
   }
 }
 

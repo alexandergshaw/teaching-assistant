@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextField, MenuItem } from "@mui/material";
-import { extractPptxSlidesAction, generateSlideNarrationAction, voiceConfiguredAction, synthesizeNarrationAction, avatarConfiguredAction, generateAvatarVideoAction, getAvatarVideoStatusAction, type SlideNarration } from "../actions";
+import { extractPptxSlidesAction, generateSlideNarrationAction, voiceConfiguredAction, synthesizeNarrationAction, createVoiceCloneAction, avatarConfiguredAction, generateAvatarVideoAction, getAvatarVideoStatusAction, type SlideNarration } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
 
@@ -28,8 +28,17 @@ export default function SlideStudio() {
   const [avatarStatus, setAvatarStatus] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [cloneVoiceId, setCloneVoiceId] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-voice-id") ?? "";
+  });
+  const [cloneName, setCloneName] = useState("");
+  const [cloneBusy, setCloneBusy] = useState(false);
+  const [cloneError, setCloneError] = useState<string | null>(null);
+  const [cloneNote, setCloneNote] = useState<string | null>(null);
   const cancelledRef = useRef(false);
   const avatarPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cloneFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -150,7 +159,7 @@ export default function SlideStudio() {
     for (const n of narrations) {
       if (!n.narration.trim()) continue;
       setGenProgress(`Synthesizing slide ${n.slide}...`);
-      const r = await synthesizeNarrationAction(n.narration);
+      const r = await synthesizeNarrationAction(n.narration, cloneVoiceId || undefined);
       if ("error" in r) {
         setGenError(`Slide ${n.slide}: ${r.error}`);
         break;
@@ -162,7 +171,7 @@ export default function SlideStudio() {
     }
     setGenProgress(null);
     setGenBusy(false);
-  }, [narrations, audioBySlide]);
+  }, [narrations, audioBySlide, cloneVoiceId]);
 
   const handleGenerateAvatar = useCallback(async () => {
     if (!narrations) return;
@@ -198,6 +207,29 @@ export default function SlideStudio() {
       } else setAvatarStatus(`Rendering (${s.status})...`);
     }, 5000);
   }, [narrations]);
+
+  const handleCreateClone = async (fileList: FileList | null) => {
+    const picked = Array.from(fileList ?? []);
+    if (!picked.length) return;
+    if (!cloneName.trim()) { setCloneError("Enter a name for the voice first."); return; }
+    setCloneBusy(true); setCloneError(null); setCloneNote(null);
+    try {
+      const files = await Promise.all(picked.map(async (f) => ({
+        base64: await new Promise<string>((resolve, reject) => { const rd = new FileReader(); rd.onload = () => resolve((rd.result as string).split(",")[1] ?? ""); rd.onerror = reject; rd.readAsDataURL(f); }),
+        mimeType: f.type || "audio/mpeg",
+        fileName: f.name,
+      })));
+      const r = await createVoiceCloneAction(cloneName, files);
+      if ("error" in r) { setCloneError(r.error); return; }
+      setCloneVoiceId(r.voiceId);
+      if (typeof window !== "undefined") localStorage.setItem("ta-voice-id", r.voiceId);
+      setCloneNote(`Voice created. All audio generation now uses "${cloneName.trim()}".`);
+    } catch (err) {
+      setCloneError(err instanceof Error ? err.message : "Could not read the audio files.");
+    } finally {
+      setCloneBusy(false);
+    }
+  };
 
   return (
     <div className={styles.adaptPanel}>
@@ -343,6 +375,32 @@ export default function SlideStudio() {
           )}
         </>
       )}
+
+      <details className={styles.adaptDisclosure} style={{ marginTop: 4 }}>
+        <summary>My voice clone</summary>
+        <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+          {cloneVoiceId ? (
+            <p className={styles.fieldHint} style={{ margin: 0 }}>
+              Using your cloned voice (id <span className={styles.ghMeta}>{cloneVoiceId}</span>) for audio generation.{" "}
+              <button type="button" className={styles.linkButton} onClick={() => { setCloneVoiceId(""); if (typeof window !== "undefined") localStorage.removeItem("ta-voice-id"); setCloneNote(null); }}>Stop using it</button>
+            </p>
+          ) : (
+            <p className={styles.fieldHint} style={{ margin: 0 }}>
+              Record one to three minutes of clean speech (the recorder above works - download a take), then create your clone. Audio generation switches to your voice automatically.
+            </p>
+          )}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <TextField size="small" label="Voice name" value={cloneName} onChange={(e) => setCloneName(e.target.value)} sx={{ flex: "1 1 180px" }} disabled={cloneBusy || !voiceReady} />
+            <Button variant="outlined" size="small" disabled={cloneBusy || !voiceReady || !cloneName.trim()} onClick={() => cloneFileRef.current?.click()}>
+              {cloneBusy ? "Creating..." : "Upload samples & create"}
+            </Button>
+            <input ref={cloneFileRef} type="file" accept="audio/*,video/webm,video/mp4" multiple style={{ display: "none" }} onChange={(e) => { void handleCreateClone(e.target.files); e.target.value = ""; }} />
+          </div>
+          {!voiceReady && <p className={styles.fieldHint} style={{ margin: 0 }}>Requires ELEVENLABS_API_KEY.</p>}
+          {cloneError && <p className={styles.error}>{cloneError}</p>}
+          {cloneNote && <p className={styles.fieldHint}>{cloneNote}</p>}
+        </div>
+      </details>
 
       {busy === "extracting" && <p className={styles.ghMeta}>Reading deck...</p>}
     </div>

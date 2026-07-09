@@ -2760,7 +2760,8 @@ export async function voiceConfiguredAction(): Promise<{ configured: boolean }> 
  * the user's cloned voice id is configured).
  */
 export async function synthesizeNarrationAction(
-  text: string
+  text: string,
+  voiceIdOverride?: string
 ): Promise<{ base64: string; mimeType: string } | { error: string }> {
   try {
     await requireOwner();
@@ -2769,7 +2770,7 @@ export async function synthesizeNarrationAction(
     const t = text.trim();
     if (!t) return { error: "Nothing to synthesize." };
     if (t.length > 4000) return { error: "That segment is too long for one synthesis call." };
-    const voiceId = process.env.ELEVENLABS_VOICE_ID?.trim() || "21m00Tcm4TlvDq8ikWAM";
+    const voiceId = voiceIdOverride?.trim() || process.env.ELEVENLABS_VOICE_ID?.trim() || "21m00Tcm4TlvDq8ikWAM";
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: "POST",
       headers: { "xi-api-key": key, "Content-Type": "application/json" },
@@ -2783,6 +2784,44 @@ export async function synthesizeNarrationAction(
     return { base64: buf.toString("base64"), mimeType: "audio/mpeg" };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not synthesize audio." };
+  }
+}
+
+/**
+ * Create an ElevenLabs instant voice clone from uploaded audio samples and
+ * return its voice id. Samples must total under ~7 MB (server action body cap).
+ */
+export async function createVoiceCloneAction(
+  name: string,
+  files: Array<{ base64: string; mimeType: string; fileName: string }>
+): Promise<{ voiceId: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const key = process.env.ELEVENLABS_API_KEY?.trim();
+    if (!key) return { error: "Set ELEVENLABS_API_KEY to create a voice clone." };
+    if (!name.trim()) return { error: "Name the voice (e.g. your own name)." };
+    if (!files.length) return { error: "Upload at least one audio sample." };
+    const totalBytes = files.reduce((s, f) => s + Math.ceil(f.base64.length * 0.75), 0);
+    if (totalBytes > 7 * 1024 * 1024) return { error: "Samples are too large (7 MB total limit here). One to three minutes of clean audio is enough." };
+    const form = new FormData();
+    form.append("name", name.trim());
+    for (const f of files) {
+      const bytes = Buffer.from(f.base64, "base64");
+      form.append("files", new Blob([new Uint8Array(bytes)], { type: f.mimeType || "audio/mpeg" }), f.fileName || "sample.mp3");
+    }
+    const res = await fetch("https://api.elevenlabs.io/v1/voices/add", {
+      method: "POST",
+      headers: { "xi-api-key": key },
+      body: form,
+    });
+    const data = (await res.json().catch(() => null)) as { voice_id?: string; detail?: { message?: string } | string } | null;
+    if (!res.ok || !data?.voice_id) {
+      const msg = typeof data?.detail === "string" ? data.detail : data?.detail?.message;
+      return { error: `Voice clone failed (HTTP ${res.status})${msg ? `: ${msg.slice(0, 200)}` : ""}` };
+    }
+    return { voiceId: data.voice_id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the voice clone." };
   }
 }
 

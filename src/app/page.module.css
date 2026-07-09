@@ -1032,6 +1032,60 @@ button.courseResourceValue:disabled {
   align-items: center;
 }
 
+/* Tile header row: label + inline-edit pencil. */
+.courseResourceHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.tileEditBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.tileEditBtn:hover {
+  opacity: 1;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* Inline tile editor (input + save/cancel). */
+.tileEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tileEditorActions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Expanded roster list inside a course tile. */
+.rosterPreview {
+  margin-top: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--field-border) 18%, transparent);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
 /* "Open in ..." row at the foot of a course card. */
 .courseOpenBar {
   display: flex;

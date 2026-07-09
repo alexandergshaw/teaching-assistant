@@ -47,6 +47,9 @@ interface CourseForm {
   notes: string;
 }
 
+// Fields that can be edited inline on tiles.
+type InlineField = "canvasUrl" | "githubOrg" | "textbook" | "roster";
+
 const EMPTY_FORM: CourseForm = {
   id: null,
   name: "",
@@ -76,6 +79,24 @@ function formFromCourse(c: Course): CourseForm {
     textbook: c.textbook ?? "",
     syllabusId: c.syllabusId ?? "",
     integrations: c.integrations.map((i) => ({ name: i.name, url: i.url ?? "" })),
+    roster: c.roster ?? "",
+    notes: c.notes ?? "",
+  };
+}
+
+// Map a Course row to the update-action input (used by inline tile saves).
+function courseToInput(c: Course) {
+  return {
+    name: c.name,
+    courseCode: c.courseCode ?? "",
+    term: c.term ?? "",
+    institution: c.institution ?? "",
+    canvasUrl: c.canvasUrl ?? "",
+    repos: c.repos.map((r) => ({ repo: r.repo, branch: r.branch })),
+    githubOrg: c.githubOrg ?? "",
+    textbook: c.textbook ?? "",
+    syllabusId: c.syllabusId ?? "",
+    integrations: c.integrations.map((i) => ({ name: i.name, url: i.url })),
     roster: c.roster ?? "",
     notes: c.notes ?? "",
   };
@@ -120,6 +141,15 @@ let hubCache: { courses: Course[]; syllabi: FinalizedSyllabusMeta[]; orgs: strin
 const COLLAPSE_KEY = "ta-courses-collapsed";
 const NO_INSTITUTION = "__none__";
 
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="m5.433 13.917 1.262-3.155A4 4 0 0 1 7.58 9.42l6.92-6.918a2.121 2.121 0 0 1 3 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 0 1-.65-.65Z" />
+      <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0 0 10 3H4.75A2.75 2.75 0 0 0 2 5.75v9.5A2.75 2.75 0 0 0 4.75 18h9.5A2.75 2.75 0 0 0 17 15.25V10a.75.75 0 0 0-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5Z" />
+    </svg>
+  );
+}
+
 export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-planning" | "version-control") => void }) {
   const institutions = useInstitutions();
   const [courses, setCourses] = useState<Course[]>(() => hubCache?.courses ?? []);
@@ -141,6 +171,9 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [busyId, setBusyId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ name: string; paragraphs: SyllabusPreviewPara[] } | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [tileEdit, setTileEdit] = useState<{ id: string; field: InlineField; value: string } | null>(null);
+  const [tileSaving, setTileSaving] = useState(false);
+  const [expandedRosterId, setExpandedRosterId] = useState<string | null>(null);
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
 
@@ -425,11 +458,61 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     onNavigate("version-control");
   };
 
+  const startTileEdit = (c: Course, field: InlineField) => {
+    setError(null);
+    setTileEdit({ id: c.id, field, value: (c[field] ?? "") as string });
+  };
+
+  const saveTileEdit = async () => {
+    if (!tileEdit) return;
+    const course = courses.find((c) => c.id === tileEdit.id);
+    if (!course) return;
+    setTileSaving(true);
+    setError(null);
+    const r = await updateCourseHubAction(course.id, { ...courseToInput(course), [tileEdit.field]: tileEdit.value });
+    setTileSaving(false);
+    if ("error" in r) {
+      setError(r.error);
+      return;
+    }
+    setCourses((prev) => {
+      const next = prev.map((c) => (c.id === r.course.id ? r.course : c));
+      if (hubCache) hubCache = { ...hubCache, courses: next };
+      return next;
+    });
+    setTileEdit(null);
+  };
+
   // A course's total outstanding LMS notifications (unread inbox + needs grading).
   const courseNotifTotal = (c: Course): number => {
     const n = notifByCourse[c.id];
     return n ? n.needsGrading + n.unread : 0;
   };
+
+  // Render the inline tile editor (input + save/cancel).
+  const tileEditor = (multiline: boolean, placeholder: string) =>
+    tileEdit && (
+      <div className={styles.tileEditor}>
+        <TextField
+          size="small"
+          fullWidth
+          multiline={multiline}
+          minRows={multiline ? 3 : undefined}
+          placeholder={placeholder}
+          value={tileEdit.value}
+          onChange={(e) => setTileEdit((t) => (t ? { ...t, value: e.target.value } : t))}
+          autoFocus
+        />
+        <div className={styles.tileEditorActions}>
+          <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
+            {tileSaving ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="text" size="small" disabled={tileSaving} onClick={() => setTileEdit(null)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
 
   // Full-text filter across a course's searchable fields.
   const query = search.trim().toLowerCase();
@@ -814,29 +897,67 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
 
                 <div className={styles.courseResources}>
                   <div className={styles.courseResource}>
-                    <span className={styles.courseResourceLabel}>Canvas</span>
-                    {c.canvasUrl ? (
-                      <a className={styles.courseResourceValue} href={c.canvasUrl} target="_blank" rel="noreferrer">
-                        Open course
-                      </a>
-                    ) : (
-                      <span className={styles.courseResourceEmpty}>Not linked</span>
-                    )}
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>Canvas</span>
+                      <button
+                        type="button"
+                        className={styles.tileEditBtn}
+                        title="Edit"
+                        onClick={() => startTileEdit(c, "canvasUrl")}
+                      >
+                        <PencilIcon />
+                      </button>
+                    </div>
+                    {tileEdit?.id === c.id && tileEdit?.field === "canvasUrl"
+                      ? tileEditor(false, "https://canvas.../courses/123")
+                      : c.canvasUrl
+                        ? (
+                          <a className={styles.courseResourceValue} href={c.canvasUrl} target="_blank" rel="noreferrer">
+                            Open course
+                          </a>
+                        )
+                        : (
+                          <span className={styles.courseResourceEmpty}>Not linked</span>
+                        )}
                   </div>
 
                   <div className={styles.courseResource}>
-                    <span className={styles.courseResourceLabel}>Organization</span>
-                    {c.githubOrg ? (
-                      <a className={styles.courseResourceValue} href={`https://github.com/${c.githubOrg}`} target="_blank" rel="noreferrer">
-                        {c.githubOrg}
-                      </a>
-                    ) : (
-                      <span className={styles.courseResourceEmpty}>Not set</span>
-                    )}
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>Organization</span>
+                      <button
+                        type="button"
+                        className={styles.tileEditBtn}
+                        title="Edit"
+                        onClick={() => startTileEdit(c, "githubOrg")}
+                      >
+                        <PencilIcon />
+                      </button>
+                    </div>
+                    {tileEdit?.id === c.id && tileEdit?.field === "githubOrg"
+                      ? tileEditor(false, "e.g. my-university-org")
+                      : c.githubOrg
+                        ? (
+                          <a className={styles.courseResourceValue} href={`https://github.com/${c.githubOrg}`} target="_blank" rel="noreferrer">
+                            {c.githubOrg}
+                          </a>
+                        )
+                        : (
+                          <span className={styles.courseResourceEmpty}>Not set</span>
+                        )}
                   </div>
 
                   <div className={styles.courseResource}>
-                    <span className={styles.courseResourceLabel}>Codebase{c.repos.length > 1 ? "s" : ""}</span>
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>Codebase{c.repos.length > 1 ? "s" : ""}</span>
+                      <button
+                        type="button"
+                        className={styles.tileEditBtn}
+                        title="Edit"
+                        onClick={() => { setForm(formFromCourse(c)); setError(null); setFormNote(null); }}
+                      >
+                        <PencilIcon />
+                      </button>
+                    </div>
                     {c.repos.length > 0 ? (
                       c.repos.map((r, i) => (
                         <a
@@ -856,7 +977,17 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   </div>
 
                   <div className={styles.courseResource}>
-                    <span className={styles.courseResourceLabel}>Syllabus</span>
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>Syllabus</span>
+                      <button
+                        type="button"
+                        className={styles.tileEditBtn}
+                        title="Edit"
+                        onClick={() => { setForm(formFromCourse(c)); setError(null); setFormNote(null); }}
+                      >
+                        <PencilIcon />
+                      </button>
+                    </div>
                     {sName ? (
                       <>
                         <span className={styles.courseResourceValue}>{sName}</span>
@@ -875,16 +1006,40 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   </div>
 
                   <div className={styles.courseResource}>
-                    <span className={styles.courseResourceLabel}>Textbook</span>
-                    {c.textbook ? (
-                      <span className={styles.courseResourceValue}>{c.textbook}</span>
-                    ) : (
-                      <span className={styles.courseResourceEmpty}>Not set</span>
-                    )}
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>Textbook</span>
+                      <button
+                        type="button"
+                        className={styles.tileEditBtn}
+                        title="Edit"
+                        onClick={() => startTileEdit(c, "textbook")}
+                      >
+                        <PencilIcon />
+                      </button>
+                    </div>
+                    {tileEdit?.id === c.id && tileEdit?.field === "textbook"
+                      ? tileEditor(true, "Title, author, edition, ISBN…")
+                      : c.textbook
+                        ? (
+                          <span className={styles.courseResourceValue}>{c.textbook}</span>
+                        )
+                        : (
+                          <span className={styles.courseResourceEmpty}>Not set</span>
+                        )}
                   </div>
 
                   <div className={styles.courseResource}>
-                    <span className={styles.courseResourceLabel}>Integration{c.integrations.length > 1 ? "s" : ""}</span>
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>Integration{c.integrations.length > 1 ? "s" : ""}</span>
+                      <button
+                        type="button"
+                        className={styles.tileEditBtn}
+                        title="Edit"
+                        onClick={() => { setForm(formFromCourse(c)); setError(null); setFormNote(null); }}
+                      >
+                        <PencilIcon />
+                      </button>
+                    </div>
                     {c.integrations.length > 0 ? (
                       c.integrations.map((it, i) =>
                         it.url ? (
@@ -901,25 +1056,53 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   </div>
 
                   <div className={styles.courseResource}>
-                    <span className={styles.courseResourceLabel}>Roster</span>
-                    {c.roster && c.roster.trim() ? (
-                      <>
-                        <span className={styles.courseResourceValue}>
-                          {c.roster.split("\n").map((l) => l.trim()).filter(Boolean).length} students
-                        </span>
-                        <div className={styles.courseResourceActions}>
-                          <button
-                            type="button"
-                            className={styles.linkButton}
-                            onClick={() => void navigator.clipboard.writeText(c.roster ?? "")}
-                          >
-                            Copy
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <span className={styles.courseResourceEmpty}>Not set</span>
-                    )}
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>Roster</span>
+                      <button
+                        type="button"
+                        className={styles.tileEditBtn}
+                        title="Edit"
+                        onClick={() => startTileEdit(c, "roster")}
+                      >
+                        <PencilIcon />
+                      </button>
+                    </div>
+                    {tileEdit?.id === c.id && tileEdit?.field === "roster"
+                      ? tileEditor(true, "One student per line")
+                      : c.roster && c.roster.trim()
+                        ? (
+                          <>
+                            <span className={styles.courseResourceValue}>
+                              {c.roster.split("\n").map((l) => l.trim()).filter(Boolean).length} students
+                            </span>
+                            <div className={styles.courseResourceActions}>
+                              <button
+                                type="button"
+                                className={styles.linkButton}
+                                onClick={() => setExpandedRosterId(expandedRosterId === c.id ? null : c.id)}
+                              >
+                                {expandedRosterId === c.id ? "Hide" : "View"}
+                              </button>
+                              <button
+                                type="button"
+                                className={styles.linkButton}
+                                onClick={() => void navigator.clipboard.writeText(c.roster ?? "")}
+                              >
+                                Copy
+                              </button>
+                            </div>
+                            {expandedRosterId === c.id && (
+                              <div className={styles.rosterPreview}>
+                                {(c.roster ?? "").split("\n").map((l) => l.trim()).filter(Boolean).map((l, i) => (
+                                  <div key={i}>{l}</div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )
+                        : (
+                          <span className={styles.courseResourceEmpty}>Not set</span>
+                        )}
                   </div>
 
                   <div className={styles.courseResource}>

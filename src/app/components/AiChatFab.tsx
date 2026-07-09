@@ -6,6 +6,7 @@ import SpeedDialIcon from "@mui/material/SpeedDialIcon";
 import AiChatWindow from "./AiChatWindow";
 import DeadlinesWindow from "./DeadlinesWindow";
 import SubmissionPullbackWindow from "./SubmissionPullbackWindow";
+import RosterWindow from "./RosterWindow";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
 import type { ChatMessage } from "@/lib/chat/types";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -53,6 +54,7 @@ export default function AiChatFab() {
   const [chatOpen, setChatOpen] = useState<boolean>(() => readLS("chat-open", false));
   const [deadlinesOpen, setDeadlinesOpen] = useState<boolean>(() => readLS("deadlines-open", false));
   const [pullbackOpen, setPullbackOpen] = useState<boolean>(() => readLS("pullback-open", false));
+  const [rosterOpen, setRosterOpen] = useState<boolean>(() => readLS("roster-open", false));
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -105,6 +107,7 @@ export default function AiChatFab() {
   useEffect(() => { writeLS("chat-open", chatOpen); }, [chatOpen]);
   useEffect(() => { writeLS("deadlines-open", deadlinesOpen); }, [deadlinesOpen]);
   useEffect(() => { writeLS("pullback-open", pullbackOpen); }, [pullbackOpen]);
+  useEffect(() => { writeLS("roster-open", rosterOpen); }, [rosterOpen]);
 
   // Persist position to localStorage whenever it changes.
   useEffect(() => { writeLS("chat-pos", chatPos); }, [chatPos]);
@@ -269,6 +272,14 @@ export default function AiChatFab() {
             setPullbackOpen((v) => !v);
           }}
         />
+        <SpeedDialAction
+          icon={<RosterIcon />}
+          title="Class rosters"
+          onClick={() => {
+            setDialOpen(false);
+            setRosterOpen((v) => !v);
+          }}
+        />
       </SpeedDial>
 
       {chatOpen && (
@@ -300,6 +311,10 @@ export default function AiChatFab() {
           onClose={() => setPullbackOpen(false)}
         />
       )}
+
+      {rosterOpen && (
+        <RosterWindow onClose={() => setRosterOpen(false)} />
+      )}
     </>
   );
 }
@@ -328,6 +343,14 @@ function PullbackIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
       <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+    </svg>
+  );
+}
+
+function RosterIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
     </svg>
   );
 }

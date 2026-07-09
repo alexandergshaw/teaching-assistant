@@ -8,10 +8,12 @@ import {
   listGithubReposAction,
   listCoursesAction,
   listCourseRosterAction,
+  listCourseHubAction,
   type StudentRepoResult,
 } from "../actions";
 import type { GithubRepo } from "@/lib/github";
 import type { CanvasCourse } from "@/lib/canvas";
+import type { Course as HubCourse } from "@/lib/supabase/courses";
 import OrgManagementPanel from "./OrgManagementPanel";
 import RepoDetail from "./RepoDetail";
 import TabHeader from "./TabHeader";
@@ -83,6 +85,8 @@ export default function VersionControlTab() {
   });
   const [rosterBusy, setRosterBusy] = useState(false);
   const [rosterNote, setRosterNote] = useState<string | null>(null);
+  const [hubCourses, setHubCourses] = useState<HubCourse[]>([]);
+  const [hubCourseId, setHubCourseId] = useState("");
 
   const refreshOrgs = async () => {
     const r = await listMyOrgsAction();
@@ -90,6 +94,21 @@ export default function VersionControlTab() {
       setOrgs(r.orgs);
       setOrgsState("ready");
     }
+  };
+
+  const mergeIntoStudents = (lines: string[], sourceName: string) => {
+    const existing = studentsText
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const seen = new Set(existing.map((s) => s.toLowerCase()));
+    const added = lines.filter((s) => !seen.has(s.toLowerCase()));
+    setStudentsText([...existing, ...added].join("\n"));
+    const skipped = lines.length - added.length;
+    setRosterNote(
+      `Added ${added.length} student${added.length === 1 ? "" : "s"} from ${sourceName}.` +
+        (skipped > 0 ? ` ${skipped} already listed.` : "")
+    );
   };
 
   useEffect(() => {
@@ -134,6 +153,9 @@ export default function VersionControlTab() {
       if (!("error" in mr)) {
         setMyRepos(mr.repos);
       }
+      const hc = await listCourseHubAction();
+      if (cancelled) return;
+      if (!("error" in hc)) setHubCourses(hc.courses);
     })();
     return () => {
       cancelled = true;
@@ -245,19 +267,15 @@ export default function VersionControlTab() {
       )
       .map((s) => s.trim())
       .filter(Boolean);
-    const existing = studentsText
-      .split(/[\n,]+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const seen = new Set(existing.map((s) => s.toLowerCase()));
-    const added = lines.filter((s) => !seen.has(s.toLowerCase()));
-    setStudentsText([...existing, ...added].join("\n"));
-    const skipped = lines.length - added.length;
     const courseName = rosterCourses.find((c) => c.id === rosterCourseId)?.name ?? "the course";
-    setRosterNote(
-      `Added ${added.length} student${added.length === 1 ? "" : "s"} from ${courseName}.` +
-        (skipped > 0 ? ` ${skipped} already listed.` : "")
-    );
+    mergeIntoStudents(lines, courseName);
+  };
+
+  const handleInsertFromTile = () => {
+    const course = hubCourses.find((c) => c.id === hubCourseId);
+    if (!course) return;
+    const lines = (course.roster ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+    mergeIntoStudents(lines, course.name);
   };
 
   if (orgsState === "unconfigured") {
@@ -429,6 +447,25 @@ export default function VersionControlTab() {
                 </Button>
               </div>
             ) : null}
+            {hubCourses.some((c) => (c.roster ?? "").trim()) && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                <span className={styles.fieldHint} style={{ margin: 0 }}>From a course tile:</span>
+                <div style={{ flex: "1 1 220px", minWidth: 180 }}>
+                  <Typeahead
+                    options={hubCourses
+                      .filter((c) => (c.roster ?? "").trim())
+                      .map((c) => ({ value: c.id, label: `${c.name}${c.courseCode ? ` (${c.courseCode})` : ""}` }))}
+                    value={hubCourseId}
+                    onChange={(v) => setHubCourseId(v)}
+                    placeholder="Choose a course tile..."
+                    noOptionsText="No course tiles with rosters"
+                  />
+                </div>
+                <Button variant="outlined" size="small" disabled={!hubCourseId} onClick={handleInsertFromTile}>
+                  Insert from tile
+                </Button>
+              </div>
+            )}
             {rosterNote && (
               <p className={rosterNote.startsWith("Error") ? styles.error : styles.fieldHint} style={{ margin: "4px 0 0" }}>{rosterNote}</p>
             )}

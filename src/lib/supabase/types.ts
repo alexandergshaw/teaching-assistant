@@ -165,6 +165,7 @@ export interface Database {
           syllabus_id: string | null;
           institution: string | null;
           integrations: Array<{ name: string; url: string | null }>;
+          roster: string | null;
           notes: string | null;
           created_at: string;
           updated_at: string;
@@ -182,6 +183,7 @@ export interface Database {
           syllabus_id?: string | null;
           institution?: string | null;
           integrations?: Array<{ name: string; url: string | null }>;
+          roster?: string | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -199,6 +201,7 @@ export interface Database {
           syllabus_id?: string | null;
           institution?: string | null;
           integrations?: Array<{ name: string; url: string | null }>;
+          roster?: string | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;

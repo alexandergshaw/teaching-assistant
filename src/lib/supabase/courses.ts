@@ -34,6 +34,7 @@ export interface Course {
   syllabusId: string | null;
   institution: string | null;
   integrations: CourseIntegration[];
+  roster: string | null;
   notes: string | null;
   updatedAt: string;
 }
@@ -50,11 +51,12 @@ export interface CourseInput {
   syllabusId?: string | null;
   institution?: string | null;
   integrations?: CourseIntegration[];
+  roster?: string | null;
   notes?: string | null;
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, notes, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -76,6 +78,7 @@ interface CourseRow {
   syllabus_id: string | null;
   institution: string | null;
   integrations: Array<{ name: string; url: string | null }> | null;
+  roster: string | null;
   notes: string | null;
   updated_at: string;
 }
@@ -93,6 +96,7 @@ function toCourse(r: CourseRow): Course {
     syllabusId: r.syllabus_id,
     institution: r.institution,
     integrations: Array.isArray(r.integrations) ? r.integrations.filter((x) => x && x.name) : [],
+    roster: r.roster,
     notes: r.notes,
     updatedAt: r.updated_at,
   };
@@ -122,6 +126,7 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     syllabus_id: clean(input.syllabusId),
     institution: clean(input.institution),
     integrations,
+    roster: clean(input.roster),
     notes: clean(input.notes),
     updated_at: new Date().toISOString(),
   };

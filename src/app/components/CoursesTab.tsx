@@ -18,6 +18,7 @@ import {
   extractTextbookInfoAction,
   listMyOrgsAction,
   getCourseNotificationsAction,
+  listCourseRosterAction,
 } from "../actions";
 import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
@@ -42,6 +43,7 @@ interface CourseForm {
   textbook: string;
   syllabusId: string;
   integrations: Array<{ name: string; url: string }>;
+  roster: string;
   notes: string;
 }
 
@@ -57,6 +59,7 @@ const EMPTY_FORM: CourseForm = {
   textbook: "",
   syllabusId: "",
   integrations: [],
+  roster: "",
   notes: "",
 };
 
@@ -73,6 +76,7 @@ function formFromCourse(c: Course): CourseForm {
     textbook: c.textbook ?? "",
     syllabusId: c.syllabusId ?? "",
     integrations: c.integrations.map((i) => ({ name: i.name, url: i.url ?? "" })),
+    roster: c.roster ?? "",
     notes: c.notes ?? "",
   };
 }
@@ -133,6 +137,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [saving, setSaving] = useState(false);
   const [uploadingSyllabus, setUploadingSyllabus] = useState(false);
   const [extractingTextbook, setExtractingTextbook] = useState(false);
+  const [fetchingRoster, setFetchingRoster] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ name: string; paragraphs: SyllabusPreviewPara[] } | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
@@ -261,6 +266,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       textbook: form.textbook,
       syllabusId: form.syllabusId,
       integrations: form.integrations.map((i) => ({ name: i.name, url: i.url.trim() || null })),
+      roster: form.roster,
       notes: form.notes,
     };
     const result = form.id ? await updateCourseHubAction(form.id, input) : await createCourseHubAction(input);
@@ -329,6 +335,28 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     } finally {
       setExtractingTextbook(false);
     }
+  };
+
+  const handleFetchRoster = async () => {
+    if (!form) return;
+    const match = form.canvasUrl.match(/\/courses\/(\d+)/);
+    const inst = form.institution.trim();
+    if (!match || !inst) {
+      setError("Set the Canvas course URL and institution first.");
+      return;
+    }
+    setFetchingRoster(true);
+    setError(null);
+    setFormNote(null);
+    const r = await listCourseRosterAction(inst, match[1]);
+    setFetchingRoster(false);
+    if ("error" in r) {
+      setError(r.error);
+      return;
+    }
+    const lines = r.students.map((s) => s.sortableName || s.name).map((s) => s.trim()).filter(Boolean);
+    update({ roster: lines.join("\n") });
+    setFormNote(`Fetched ${lines.length} student${lines.length === 1 ? "" : "s"} from Canvas.`);
   };
 
   const handleDelete = async (c: Course) => {
@@ -648,6 +676,25 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
           </div>
 
           <div className={styles.field}>
+            <label>Roster</label>
+            <TextField
+              size="small"
+              fullWidth
+              multiline
+              minRows={3}
+              placeholder="One student per line. Paste a roster, or fetch it from Canvas."
+              value={form.roster}
+              onChange={(e) => update({ roster: e.target.value })}
+            />
+            <div>
+              <Button variant="outlined" size="small" disabled={fetchingRoster} onClick={handleFetchRoster}>
+                {fetchingRoster ? "Fetching…" : "Fetch from Canvas"}
+              </Button>
+            </div>
+            <p className={styles.fieldHint}>Fetching replaces the list with the course&apos;s Canvas enrollment (Last, First per line).</p>
+          </div>
+
+          <div className={styles.field}>
             <label>Integrations</label>
             {form.integrations.length === 0 && <p className={styles.fieldHint}>No integrations linked yet (e.g. Cengage, McGraw-Hill Connect, Pearson).</p>}
             {form.integrations.map((it, i) => (
@@ -850,6 +897,28 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       )
                     ) : (
                       <span className={styles.courseResourceEmpty}>None</span>
+                    )}
+                  </div>
+
+                  <div className={styles.courseResource}>
+                    <span className={styles.courseResourceLabel}>Roster</span>
+                    {c.roster && c.roster.trim() ? (
+                      <>
+                        <span className={styles.courseResourceValue}>
+                          {c.roster.split("\n").map((l) => l.trim()).filter(Boolean).length} students
+                        </span>
+                        <div className={styles.courseResourceActions}>
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            onClick={() => void navigator.clipboard.writeText(c.roster ?? "")}
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <span className={styles.courseResourceEmpty}>Not set</span>
                     )}
                   </div>
 

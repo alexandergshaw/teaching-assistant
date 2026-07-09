@@ -34,6 +34,20 @@ const VC_STUDENTS_KEY = "ta-vc-students";
 const VC_PRIVATE_KEY = "ta-vc-private";
 const VC_ROSTER_FORMAT_KEY = "ta-vc-roster-format";
 
+// "<first initial>_<last name>" (e.g. "J_Smith") from a roster entry: prefer
+// the sortable "Last, First" form; fall back to splitting the display name.
+function firstInitialLast(sortableName: string, name: string): string {
+  const s = sortableName.trim();
+  if (s.includes(",")) {
+    const [last, first] = s.split(",").map((p) => p.trim());
+    if (first && last) return `${first[0].toUpperCase()}_${last}`;
+    if (last) return last;
+  }
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return `${parts[0][0].toUpperCase()}_${parts[parts.length - 1]}`;
+  return parts[0] ?? "";
+}
+
 /**
  * Version Control Integration: pick a GitHub org and a template repo within it,
  * paste a list of students, and generate one repo per student from the template
@@ -63,9 +77,9 @@ export default function VersionControlTab() {
   const [rosterCourses, setRosterCourses] = useState<CanvasCourse[]>([]);
   const [rosterCoursesLoading, setRosterCoursesLoading] = useState(false);
   const [rosterCourseId, setRosterCourseId] = useState("");
-  const [rosterFormat, setRosterFormat] = useState<"sortable" | "firstlast" | "login">(() => {
+  const [rosterFormat, setRosterFormat] = useState<"sortable" | "firstlast" | "login" | "flast">(() => {
     const v = typeof window !== "undefined" ? localStorage.getItem(VC_ROSTER_FORMAT_KEY) : null;
-    return v === "firstlast" || v === "login" ? v : "sortable";
+    return v === "firstlast" || v === "login" || v === "flast" ? v : "sortable";
   });
   const [rosterBusy, setRosterBusy] = useState(false);
   const [rosterNote, setRosterNote] = useState<string | null>(null);
@@ -220,7 +234,15 @@ export default function VersionControlTab() {
       return;
     }
     const lines = r.students
-      .map((s) => (rosterFormat === "login" ? s.loginId : rosterFormat === "firstlast" ? s.name : s.sortableName))
+      .map((s) =>
+        rosterFormat === "login"
+          ? s.loginId
+          : rosterFormat === "firstlast"
+            ? s.name
+            : rosterFormat === "flast"
+              ? firstInitialLast(s.sortableName, s.name)
+              : s.sortableName
+      )
       .map((s) => s.trim())
       .filter(Boolean);
     const existing = studentsText
@@ -396,10 +418,11 @@ export default function VersionControlTab() {
                     noOptionsText="No courses"
                   />
                 </div>
-                <TextField select size="small" label="Name format" value={rosterFormat} onChange={(e) => setRosterFormat(e.target.value as "sortable" | "firstlast" | "login")} sx={{ minWidth: 150 }}>
+                <TextField select size="small" label="Name format" value={rosterFormat} onChange={(e) => setRosterFormat(e.target.value as "sortable" | "firstlast" | "login" | "flast")} sx={{ minWidth: 150 }}>
                   <MenuItem value="sortable">Last, First</MenuItem>
                   <MenuItem value="firstlast">First Last</MenuItem>
                   <MenuItem value="login">Login ID</MenuItem>
+                  <MenuItem value="flast">First initial_Last</MenuItem>
                 </TextField>
                 <Button variant="outlined" size="small" disabled={rosterBusy || !rosterCourseId} onClick={handleInsertRoster}>
                   {rosterBusy ? "Loading..." : "Insert roster"}

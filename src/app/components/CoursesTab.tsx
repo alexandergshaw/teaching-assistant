@@ -48,7 +48,7 @@ interface CourseForm {
 }
 
 // Fields that can be edited inline on tiles.
-type InlineField = "canvasUrl" | "githubOrg" | "textbook" | "roster";
+type InlineField = "canvasUrl" | "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations";
 
 const EMPTY_FORM: CourseForm = {
   id: null,
@@ -101,6 +101,20 @@ function courseToInput(c: Course) {
     notes: c.notes ?? "",
   };
 }
+
+// Serialization helpers for complex fields.
+const reposToText = (c: Course) => c.repos.map((r) => (r.branch ? `${r.repo}#${r.branch}` : r.repo)).join("\n");
+const integrationsToText = (c: Course) => c.integrations.map((i) => (i.url ? `${i.name} | ${i.url}` : i.name)).join("\n");
+const parseRepoLines = (text: string) =>
+  text.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+    const [repo, branch] = l.split("#").map((p) => p.trim());
+    return { repo, branch: branch || null };
+  }).filter((r) => r.repo);
+const parseIntegrationLines = (text: string) =>
+  text.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+    const [name, url] = l.split("|").map((p) => p.trim());
+    return { name: name ?? "", url: url || null };
+  }).filter((i) => i.name || i.url);
 
 // Read a File as a bare base64 string (no data: prefix).
 function readFileBase64(file: File): Promise<string> {
@@ -461,7 +475,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const startTileEdit = (c: Course, field: InlineField) => {
     if (tileEdit && tileEdit.id === c.id && tileEdit.field === field) return;
     setError(null);
-    setTileEdit({ id: c.id, field, value: (c[field] ?? "") as string });
+    const value =
+      field === "repos" ? reposToText(c)
+      : field === "integrations" ? integrationsToText(c)
+      : field === "syllabusId" ? (c.syllabusId ?? "")
+      : ((c[field] ?? "") as string);
+    setTileEdit({ id: c.id, field, value });
   };
 
   const tileClick = (handler: () => void) => (e: React.MouseEvent) => {
@@ -475,7 +494,11 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     if (!course) return;
     setTileSaving(true);
     setError(null);
-    const r = await updateCourseHubAction(course.id, { ...courseToInput(course), [tileEdit.field]: tileEdit.value });
+    const patch =
+      tileEdit.field === "repos" ? { repos: parseRepoLines(tileEdit.value) }
+      : tileEdit.field === "integrations" ? { integrations: parseIntegrationLines(tileEdit.value) }
+      : { [tileEdit.field]: tileEdit.value };
+    const r = await updateCourseHubAction(course.id, { ...courseToInput(course), ...patch });
     setTileSaving(false);
     if ("error" in r) {
       setError(r.error);
@@ -495,8 +518,22 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     return n ? n.needsGrading + n.unread : 0;
   };
 
+  // Click outside the currently-editing tile to cancel editing.
+  useEffect(() => {
+    if (!tileEdit) return;
+    const onDown = (e: MouseEvent) => {
+      // MUI select menus render in a body-level portal, outside the tile - do
+      // not treat picking an option as clicking away.
+      const el = e.target as HTMLElement;
+      if (el.closest('[data-tile-editing="true"], .MuiPopover-root, .MuiMenu-root, [role="listbox"]')) return;
+      setTileEdit(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [tileEdit]);
+
   // Render the inline tile editor (input + save/cancel).
-  const tileEditor = (multiline: boolean, placeholder: string) =>
+  const tileEditor = (multiline: boolean, placeholder: string, hint?: string) =>
     tileEdit && (
       <div className={styles.tileEditor}>
         <TextField
@@ -509,6 +546,29 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
           onChange={(e) => setTileEdit((t) => (t ? { ...t, value: e.target.value } : t))}
           autoFocus
         />
+        {hint && <p className={styles.fieldHint} style={{ margin: 0 }}>{hint}</p>}
+        <div className={styles.tileEditorActions}>
+          <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
+            {tileSaving ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="text" size="small" disabled={tileSaving} onClick={() => setTileEdit(null)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+
+  // Render the inline syllabus editor (select + save/cancel).
+  const tileSyllabusEditor = () =>
+    tileEdit && (
+      <div className={styles.tileEditor}>
+        <TextField select size="small" fullWidth value={tileEdit.value}
+          onChange={(e) => setTileEdit((t) => (t ? { ...t, value: e.target.value } : t))}>
+          <MenuItem value="">No syllabus linked</MenuItem>
+          {syllabi.map((s) => (
+            <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>
+          ))}
+        </TextField>
         <div className={styles.tileEditorActions}>
           <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
             {tileSaving ? "Saving…" : "Save"}
@@ -902,7 +962,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                 </div>
 
                 <div className={styles.courseResources}>
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => startTileEdit(c, "canvasUrl"))}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "canvasUrl" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "canvasUrl"))}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Canvas</span>
                       <button
@@ -927,7 +987,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         )}
                   </div>
 
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => startTileEdit(c, "githubOrg"))}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "githubOrg" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "githubOrg"))}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Organization</span>
                       <button
@@ -952,19 +1012,19 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         )}
                   </div>
 
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => { setForm(formFromCourse(c)); setError(null); setFormNote(null); })}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "repos" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "repos"))}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Codebase{c.repos.length > 1 ? "s" : ""}</span>
                       <button
                         type="button"
                         className={styles.tileEditBtn}
                         title="Edit"
-                        onClick={() => { setForm(formFromCourse(c)); setError(null); setFormNote(null); }}
+                        onClick={() => startTileEdit(c, "repos")}
                       >
                         <PencilIcon />
                       </button>
                     </div>
-                    {c.repos.length > 0 ? (
+                    {tileEdit?.id === c.id && tileEdit?.field === "repos" ? tileEditor(true, "owner/repo#branch", "One repository per line: owner/repo or owner/repo#branch.") : (c.repos.length > 0 ? (
                       c.repos.map((r, i) => (
                         <a
                           key={i}
@@ -979,22 +1039,22 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       ))
                     ) : (
                       <span className={styles.courseResourceEmpty}>Not set</span>
-                    )}
+                    ))}
                   </div>
 
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => { setForm(formFromCourse(c)); setError(null); setFormNote(null); })}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "syllabusId" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "syllabusId"))}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Syllabus</span>
                       <button
                         type="button"
                         className={styles.tileEditBtn}
                         title="Edit"
-                        onClick={() => { setForm(formFromCourse(c)); setError(null); setFormNote(null); }}
+                        onClick={() => startTileEdit(c, "syllabusId")}
                       >
                         <PencilIcon />
                       </button>
                     </div>
-                    {sName ? (
+                    {tileEdit?.id === c.id && tileEdit?.field === "syllabusId" ? tileSyllabusEditor() : (sName ? (
                       <>
                         <span className={styles.courseResourceValue}>{sName}</span>
                         <div className={styles.courseResourceActions}>
@@ -1008,10 +1068,10 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       </>
                     ) : (
                       <span className={styles.courseResourceEmpty}>Not linked</span>
-                    )}
+                    ))}
                   </div>
 
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => startTileEdit(c, "textbook"))}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "textbook" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "textbook"))}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Textbook</span>
                       <button
@@ -1034,19 +1094,19 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         )}
                   </div>
 
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => { setForm(formFromCourse(c)); setError(null); setFormNote(null); })}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "integrations" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "integrations"))}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Integration{c.integrations.length > 1 ? "s" : ""}</span>
                       <button
                         type="button"
                         className={styles.tileEditBtn}
                         title="Edit"
-                        onClick={() => { setForm(formFromCourse(c)); setError(null); setFormNote(null); }}
+                        onClick={() => startTileEdit(c, "integrations")}
                       >
                         <PencilIcon />
                       </button>
                     </div>
-                    {c.integrations.length > 0 ? (
+                    {tileEdit?.id === c.id && tileEdit?.field === "integrations" ? tileEditor(true, "Cengage | https://...", "One per line: Name | link (link optional).") : (c.integrations.length > 0 ? (
                       c.integrations.map((it, i) =>
                         it.url ? (
                           <a key={i} className={styles.courseResourceValue} href={it.url} target="_blank" rel="noreferrer">
@@ -1058,10 +1118,10 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       )
                     ) : (
                       <span className={styles.courseResourceEmpty}>None</span>
-                    )}
+                    ))}
                   </div>
 
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} onClick={tileClick(() => startTileEdit(c, "roster"))}>
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "roster" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "roster"))}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Roster</span>
                       <button

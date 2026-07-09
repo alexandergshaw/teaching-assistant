@@ -1,0 +1,680 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Button, TextField, MenuItem, FormControlLabel, Checkbox } from "@mui/material";
+import TabHeader from "./TabHeader";
+import styles from "../page.module.css";
+
+interface Device {
+  deviceId: string;
+  label: string;
+}
+
+interface Take {
+  id: string;
+  name: string;
+  url: string;
+  mimeType: string;
+  sizeBytes: number;
+  durationSec: number;
+  createdAt: number;
+}
+
+type RecState = "idle" | "recording" | "paused";
+
+const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+export default function RecordingTab() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const elapsedRef = useRef<number>(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Config the current stream was opened with (see the restart effect).
+  const appliedCfgRef = useRef("");
+
+  const [devices, setDevices] = useState<{ cameras: Device[]; mics: Device[] }>({
+    cameras: [],
+    mics: [],
+  });
+
+  const [cameraId, setCameraId] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-rec-camera") ?? "";
+  });
+
+  const [micId, setMicId] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-rec-mic") ?? "";
+  });
+
+  const [resolution, setResolution] = useState<"720" | "1080">(() => {
+    if (typeof window === "undefined") return "720";
+    const saved = localStorage.getItem("ta-rec-res");
+    return saved === "1080" ? "1080" : "720";
+  });
+
+  const [mirror, setMirror] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("ta-rec-mirror") === "1";
+  });
+
+  const [source, setSource] = useState<"camera" | "screen">("camera");
+  const [recState, setRecState] = useState<RecState>("idle");
+  const [elapsed, setElapsed] = useState(0);
+  const [bytes, setBytes] = useState(0);
+  const [takes, setTakes] = useState<Take[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [level, setLevel] = useState(0);
+  const [hasStream, setHasStream] = useState(false);
+
+  const loadDevices = async () => {
+    try {
+      const deviceList = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = deviceList.filter((d) => d.kind === "videoinput");
+      const audioDevices = deviceList.filter((d) => d.kind === "audioinput");
+
+      const cameras = videoDevices.map((d, i) => ({
+        deviceId: d.deviceId,
+        label: d.label || `Camera ${i + 1}`,
+      }));
+
+      const mics = audioDevices.map((d, i) => ({
+        deviceId: d.deviceId,
+        label: d.label || `Microphone ${i + 1}`,
+      }));
+
+      setDevices({ cameras, mics });
+    } catch (err) {
+      console.error("Failed to enumerate devices:", err);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const initDevices = async () => {
+      if (!cancelled) {
+        await loadDevices();
+      }
+    };
+
+    initDevices();
+
+    const handleDeviceChange = () => {
+      if (!cancelled) loadDevices();
+    };
+
+    navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
+    return () => {
+      cancelled = true;
+      navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
+    };
+  }, []);
+
+  const stopMeter = () => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+      audioCtxRef.current.close();
+      audioCtxRef.current = null;
+    }
+    analyserRef.current = null;
+  };
+
+  const startMeter = useCallback((stream: MediaStream) => {
+    stopMeter();
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0) return;
+
+    try {
+      const audioCtx =
+        typeof window !== "undefined" && window.AudioContext
+          ? new window.AudioContext()
+          : typeof window !== "undefined" && (window as unknown as Record<string, unknown>).webkitAudioContext
+            ? new ((window as unknown as Record<string, unknown>).webkitAudioContext as typeof AudioContext)()
+            : null;
+
+      if (!audioCtx) {
+        console.warn("AudioContext not supported");
+        return;
+      }
+
+      audioCtxRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const loop = () => {
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += (data[i] - 128) * (data[i] - 128);
+        const rms = Math.sqrt(sum / data.length) / 128;
+        setLevel(Math.min(rms, 1));
+        rafRef.current = requestAnimationFrame(loop);
+      };
+      rafRef.current = requestAnimationFrame(loop);
+    } catch (err) {
+      console.error("Failed to start level meter:", err);
+    }
+  }, []);
+
+  const stopEverything = useCallback(async () => {
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recorderRef.current.stop();
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current && videoRef.current.srcObject !== null) {
+      videoRef.current.srcObject = null;
+    }
+    stopMeter();
+    setRecState("idle");
+    setHasStream(false);
+  }, []);
+
+  const startPreview = useCallback(async () => {
+    try {
+      setError(null);
+      await stopEverything();
+
+      let stream: MediaStream;
+
+      if (source === "camera") {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            deviceId: cameraId ? { exact: cameraId } : undefined,
+            width: { ideal: resolution === "1080" ? 1920 : 1280 },
+            height: { ideal: resolution === "1080" ? 1080 : 720 },
+          },
+          audio: micId ? { deviceId: { exact: micId } } : true,
+        });
+      } else {
+        const displayMediaDevices = navigator.mediaDevices as unknown as {
+          getDisplayMedia: (constraints: { video: unknown; audio: unknown }) => Promise<MediaStream>;
+        };
+        stream = await displayMediaDevices.getDisplayMedia({
+          video: true,
+          audio: true,
+        });
+
+        if (micId) {
+          try {
+            const audioStream = await navigator.mediaDevices.getUserMedia({
+              audio: { deviceId: { exact: micId } },
+            });
+            const audioTrack = audioStream.getAudioTracks()[0];
+            if (audioTrack) {
+              stream.addTrack(audioTrack);
+            }
+          } catch (err) {
+            console.warn("Could not add selected mic to screen share:", err);
+          }
+        }
+      }
+
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      // Remember which config this stream was opened with, so the restart
+      // effect only reacts to real device/resolution/source changes.
+      appliedCfgRef.current = `${source}|${cameraId}|${micId}|${resolution}`;
+      setHasStream(true);
+
+      await loadDevices();
+      startMeter(stream);
+
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.addEventListener("ended", () => {
+          void stopEverything();
+        });
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message.includes("Permission denied")
+            ? "Permission denied. Please enable camera/screen and microphone access in your browser settings (HTTPS required)."
+            : `Failed to start preview: ${err.message}`
+          : "Failed to start preview. Please check permissions and HTTPS.";
+      setError(message);
+      await stopEverything();
+    }
+  }, [cameraId, micId, resolution, source, stopEverything, startMeter]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-rec-camera", cameraId);
+  }, [cameraId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-rec-mic", micId);
+  }, [micId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-rec-res", resolution);
+  }, [resolution]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-rec-mirror", mirror ? "1" : "0");
+  }, [mirror]);
+
+  // Restart the live preview only when the device/resolution/source actually
+  // changed while a stream is active and idle (not on stream start/stop).
+  useEffect(() => {
+    const cfg = `${source}|${cameraId}|${micId}|${resolution}`;
+    if (hasStream && recState === "idle" && appliedCfgRef.current !== cfg) {
+       
+      void startPreview();
+    }
+  }, [cameraId, micId, resolution, source, hasStream, recState, startPreview]);
+
+  useEffect(() => {
+    if (recState !== "recording") {
+      if (intervalRef.current !== null) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
+    }
+
+    intervalRef.current = setInterval(() => {
+      elapsedRef.current += 1;
+      setElapsed(elapsedRef.current);
+    }, 1000);
+
+    return () => {
+      if (intervalRef.current !== null) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [recState]);
+
+  const pickMimeType = (): string => {
+    const types = ["video/mp4", "video/webm;codecs=vp9,opus", "video/webm"];
+    for (const type of types) {
+      if (MediaRecorder.isTypeSupported(type)) return type;
+    }
+    return "";
+  };
+
+  const startRecording = async () => {
+    if (!streamRef.current) return;
+    try {
+      setError(null);
+      chunksRef.current = [];
+      setBytes(0);
+      elapsedRef.current = 0;
+      setElapsed(0);
+
+      const mimeType = pickMimeType();
+      const recorder = new MediaRecorder(
+        streamRef.current,
+        mimeType ? { mimeType } : undefined
+      );
+
+      let recordedBytes = 0;
+
+      recorder.ondataavailable = (evt) => {
+        if (evt.data.size > 0) {
+          chunksRef.current.push(evt.data);
+          recordedBytes += evt.data.size;
+          setBytes(recordedBytes);
+        }
+      };
+
+      recorder.onstop = () => {
+        const actualMimeType = recorder.mimeType || mimeType || "video/webm";
+        const blob = new Blob(chunksRef.current, { type: actualMimeType });
+        const url = URL.createObjectURL(blob);
+        const take: Take = {
+          id: crypto.getRandomValues(new Uint8Array(16)).toString(),
+          name: `Take ${takes.length + 1}`,
+          url,
+          mimeType: actualMimeType,
+          sizeBytes: blob.size,
+          durationSec: elapsedRef.current,
+          createdAt: Date.now(),
+        };
+        setTakes((prev) => [...prev, take]);
+      };
+
+      recorderRef.current = recorder;
+      recorder.start(1000);
+      setRecState("recording");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start recording");
+    }
+  };
+
+  const pauseRecording = () => {
+    if (recorderRef.current && recorderRef.current.state === "recording") {
+      recorderRef.current.pause();
+      setRecState("paused");
+    }
+  };
+
+  const resumeRecording = () => {
+    if (recorderRef.current && recorderRef.current.state === "paused") {
+      recorderRef.current.resume();
+      setRecState("recording");
+    }
+  };
+
+  const stopRecording = () => {
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recorderRef.current.stop();
+    }
+    setRecState("idle");
+  };
+
+  const handleRename = (id: string) => {
+    const take = takes.find((t) => t.id === id);
+    if (!take) return;
+    const newName = window.prompt("Rename take:", take.name);
+    if (newName && newName.trim()) {
+      setTakes((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, name: newName.trim() } : t))
+      );
+    }
+  };
+
+  const handleDownload = (take: Take) => {
+    const ext = take.mimeType.includes("mp4") ? "mp4" : "webm";
+    const safeName = take.name.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+    const a = document.createElement("a");
+    a.href = take.url;
+    a.download = `${safeName}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleDelete = (id: string) => {
+    setTakes((prev) => {
+      const take = prev.find((t) => t.id === id);
+      if (take) {
+        URL.revokeObjectURL(take.url);
+      }
+      return prev.filter((t) => t.id !== id);
+    });
+  };
+
+  // Unmount-only cleanup. Latest takes/stopEverything are read through refs so
+  // this never re-runs (a deps-based cleanup would kill the stream and revoke
+  // take URLs every time a take is added).
+  const takesRef = useRef(takes);
+  useEffect(() => {
+    takesRef.current = takes;
+  }, [takes]);
+  const stopEverythingRef = useRef(stopEverything);
+  useEffect(() => {
+    stopEverythingRef.current = stopEverything;
+  }, [stopEverything]);
+  useEffect(() => {
+    return () => {
+      void stopEverythingRef.current();
+      takesRef.current.forEach((take) => {
+        URL.revokeObjectURL(take.url);
+      });
+    };
+  }, []);
+
+  return (
+    <section className={styles.card}>
+      <TabHeader
+        eyebrow="Recording"
+        title="Record from a camera"
+        subtitle="Record video from any attached camera or your screen, preview it live, and download the takes."
+      />
+
+      {error && <p className={styles.error}>{error}</p>}
+
+      <div className={styles.adaptPanel}>
+        <div className={styles.adaptPanelHeader}>
+          <h2 className={styles.adaptPanelTitle}>Source &amp; devices</h2>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          <TextField
+            select
+            label="Source"
+            value={source}
+            onChange={(e) => setSource(e.target.value as "camera" | "screen")}
+            size="small"
+            sx={{ minWidth: 160 }}
+          >
+            <MenuItem value="camera">Camera</MenuItem>
+            <MenuItem value="screen">Screen</MenuItem>
+          </TextField>
+
+          <TextField
+            select
+            label="Camera"
+            value={cameraId}
+            onChange={(e) => setCameraId(e.target.value)}
+            size="small"
+            sx={{ minWidth: 160 }}
+            disabled={source === "screen"}
+          >
+            {devices.cameras.length === 0 ? (
+              <MenuItem value="">No cameras found</MenuItem>
+            ) : (
+              <>
+                {!devices.cameras.some((d) => d.deviceId === cameraId) && cameraId && (
+                  <MenuItem value={cameraId}>(Disconnected)</MenuItem>
+                )}
+                {devices.cameras.map((cam) => (
+                  <MenuItem key={cam.deviceId} value={cam.deviceId}>
+                    {cam.label}
+                  </MenuItem>
+                ))}
+              </>
+            )}
+          </TextField>
+
+          <TextField
+            select
+            label="Microphone"
+            value={micId}
+            onChange={(e) => setMicId(e.target.value)}
+            size="small"
+            sx={{ minWidth: 160 }}
+          >
+            <MenuItem value="">System default</MenuItem>
+            {devices.mics.map((mic) => (
+              <MenuItem key={mic.deviceId} value={mic.deviceId}>
+                {mic.label}
+              </MenuItem>
+            ))}
+          </TextField>
+
+          <TextField
+            select
+            label="Resolution"
+            value={resolution}
+            onChange={(e) => setResolution(e.target.value as "720" | "1080")}
+            size="small"
+            sx={{ minWidth: 160 }}
+          >
+            <MenuItem value="720">720p</MenuItem>
+            <MenuItem value="1080">1080p</MenuItem>
+          </TextField>
+
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={mirror}
+                onChange={(e) => setMirror(e.target.checked)}
+                disabled={source === "screen"}
+              />
+            }
+            label="Mirror preview"
+          />
+        </div>
+      </div>
+
+      <div className={styles.adaptPanel}>
+        <div className={styles.adaptPanelHeader}>
+          <h2 className={styles.adaptPanelTitle}>Stage</h2>
+        </div>
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          style={{
+            width: "100%",
+            maxHeight: "48vh",
+            background: "#0f172a",
+            borderRadius: 12,
+            transform: source === "camera" && mirror ? "scaleX(-1)" : undefined,
+          }}
+        />
+
+        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {recState !== "idle" && (
+              <>
+                <span className={styles.navBadge}>{recState === "recording" ? "REC" : "PAUSED"}</span>
+                <span className={styles.ghMetaMono}>{fmt(elapsed)}</span>
+                <span className={styles.ghMeta}>
+                  {(bytes / 1048576).toFixed(1)} MB
+                </span>
+              </>
+            )}
+          </div>
+
+          <div
+            style={{
+              height: 6,
+              background: "color-mix(in srgb, var(--field-border) 40%, transparent)",
+              borderRadius: 999,
+              width: 160,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${Math.round(level * 100)}%`,
+                height: "100%",
+                background: "var(--success)",
+                borderRadius: 999,
+                transition: "width 0.05s ease",
+              }}
+            />
+          </div>
+        </div>
+
+        <div className={styles.ghActions}>
+          {!hasStream ? (
+            <Button variant="contained" onClick={startPreview}>
+              Start preview
+            </Button>
+          ) : recState === "idle" ? (
+            <>
+              <Button variant="contained" onClick={startRecording}>
+                Record
+              </Button>
+              <Button variant="text" onClick={stopEverything}>
+                Stop preview
+              </Button>
+            </>
+          ) : recState === "recording" ? (
+            <>
+              <Button variant="outlined" onClick={pauseRecording}>
+                Pause
+              </Button>
+              <Button variant="contained" color="error" onClick={stopRecording}>
+                Stop
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="contained" onClick={resumeRecording}>
+                Resume
+              </Button>
+              <Button variant="contained" color="error" onClick={stopRecording}>
+                Stop
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className={styles.ghPanel}>
+        <h3 className={styles.adaptPanelTitle}>Takes</h3>
+        {takes.length === 0 ? (
+          <p className={styles.fieldHint}>No takes yet - record something.</p>
+        ) : (
+          takes.map((take) => (
+            <div key={take.id} className={styles.ghRow}>
+              <div className={styles.ghRowTop}>
+                <div className={styles.ghRowTitle}>
+                  <div className={styles.ghRowName}>{take.name}</div>
+                </div>
+                <div className={styles.ghActions}>
+                  <button
+                    type="button"
+                    className={styles.linkButton}
+                    onClick={() => handleRename(take.id)}
+                  >
+                    Rename
+                  </button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => handleDownload(take)}
+                  >
+                    Download
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="error"
+                    onClick={() => handleDelete(take.id)}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </div>
+              <div className={styles.ghMeta}>
+                {fmt(take.durationSec)} · {(take.sizeBytes / 1048576).toFixed(1)} MB · {new Date(take.createdAt).toLocaleString()}
+              </div>
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ cursor: "pointer", color: "var(--accent)", fontWeight: 600 }}>
+                  Play
+                </summary>
+                <video
+                  controls
+                  src={take.url}
+                  style={{
+                    maxWidth: "100%",
+                    borderRadius: 8,
+                    marginTop: 8,
+                    background: "#0f172a",
+                  }}
+                />
+              </details>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}

@@ -122,6 +122,22 @@ function rosterStats(roster: string): { students: number; withUsernames: number 
   return { students: lines.length, withUsernames: lines.filter((l) => l.includes("|") && l.split("|").pop()!.trim()).length };
 }
 
+// Parse roster text into explicit rows (pipe convention; see rosterStats).
+function rosterToRows(text: string): Array<{ student: string; username: string }> {
+  return text.split("\n").map((l) => l.trim()).filter(Boolean).map((row) => {
+    const idx = row.lastIndexOf("|");
+    if (idx === -1) return { student: row, username: "" };
+    return { student: row.slice(0, idx).trim(), username: row.slice(idx + 1).trim() };
+  });
+}
+
+function rowsToRoster(rows: Array<{ student: string; username: string }>): string {
+  return rows
+    .filter((r) => r.student.trim() || r.username.trim())
+    .map((r) => (r.username.trim() ? `${r.student.trim()} | ${r.username.trim()}` : r.student.trim()))
+    .join("\n");
+}
+
 // Read a File as a bare base64 string (no data: prefix).
 function readFileBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -585,6 +601,50 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         </div>
       </div>
     );
+
+  // Render the roster table editor (student/username pairs + save/cancel).
+  const rosterTableEditor = () => {
+    if (!tileEdit) return null;
+    const rows = rosterToRows(tileEdit.value);
+    const setRows = (next: Array<{ student: string; username: string }>) =>
+      setTileEdit((t) => (t ? { ...t, value: rowsToRoster(next) } : t));
+    const update = (i: number, patch: Partial<{ student: string; username: string }>) =>
+      setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    return (
+      <div className={styles.tileEditor}>
+        <div style={{ display: "flex", gap: 6 }}>
+          <span className={styles.ghMeta} style={{ flex: 1 }}>Student</span>
+          <span className={styles.ghMeta} style={{ width: 150 }}>GitHub username</span>
+          <span style={{ width: 24 }} />
+        </div>
+        <div style={{ maxHeight: 240, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+          {rows.map((r, i) => (
+            <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <TextField size="small" value={r.student} onChange={(e) => update(i, { student: e.target.value })} sx={{ flex: 1 }} placeholder="Smith, John" />
+              <TextField size="small" value={r.username} onChange={(e) => update(i, { username: e.target.value })} sx={{ width: 150 }} placeholder="jsmith-gh" />
+              <button type="button" className={styles.linkButton} title="Remove student" onClick={() => setRows(rows.filter((_, idx) => idx !== i))} style={{ width: 24, color: "var(--danger)" }}>
+                x
+              </button>
+            </div>
+          ))}
+          {rows.length === 0 && <p className={styles.fieldHint} style={{ margin: 0 }}>No students yet.</p>}
+        </div>
+        <div>
+          <Button variant="text" size="small" onClick={() => setRows([...rows, { student: "New student", username: "" }])}>
+            Add student
+          </Button>
+        </div>
+        <div className={styles.tileEditorActions}>
+          <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
+            {tileSaving ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="text" size="small" disabled={tileSaving} onClick={() => setTileEdit(null)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
 
   // Full-text filter across a course's searchable fields.
   const query = search.trim().toLowerCase();
@@ -1140,7 +1200,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       </button>
                     </div>
                     {tileEdit?.id === c.id && tileEdit?.field === "roster"
-                      ? tileEditor(true, "Smith, John | jsmith-gh", "Append | github-username to link a student's GitHub account.")
+                      ? rosterTableEditor()
                       : c.roster && c.roster.trim()
                         ? (
                           <>

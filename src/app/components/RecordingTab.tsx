@@ -138,6 +138,10 @@ export default function RecordingTab() {
   // Whether the live stream carries an audio track (drives the meter hint).
   const [hasAudio, setHasAudio] = useState(true);
 
+  // Feature 2: Card notice (title/closing countdown)
+  const [cardNotice, setCardNotice] = useState<{ kind: "title" | "closing"; secondsLeft: number } | null>(null);
+  const cardNoticeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Annotation state
   const [tool, setTool] = useState<"off" | "pen" | "highlighter" | "eraser">("off");
   const [penColor, setPenColor] = useState<string>(() => {
@@ -320,6 +324,18 @@ export default function RecordingTab() {
 
   // Mirror source state into ref
   const sourceRef = useRef<"camera" | "screen">("camera");
+
+  // Mirror muted state into ref
+  const mutedRef = useRef(false);
+
+  useEffect(() => {
+    mutedRef.current = muted;
+  }, [muted]);
+
+  // Helper to enable/disable mic capture
+  const setMicCaptureEnabled = (enabled: boolean) => {
+    streamRef.current?.getAudioTracks().forEach((t) => { t.enabled = enabled; });
+  };
 
   const redrawOverlay = useCallback(() => {
     const canvas = overlayCanvasRef.current;
@@ -896,6 +912,11 @@ export default function RecordingTab() {
     }
     // Feature 3: Reset card state
     cardPhaseRef.current = null;
+    if (cardNoticeTimerRef.current) {
+      clearInterval(cardNoticeTimerRef.current);
+      cardNoticeTimerRef.current = null;
+    }
+    setCardNotice(null);
     setFinishing(false);
     setCountdown(null);
     stopMeter();
@@ -918,7 +939,7 @@ export default function RecordingTab() {
             width: { ideal: resolution === "1080" ? 1920 : 1280 },
             height: { ideal: resolution === "1080" ? 1080 : 720 },
           },
-          audio: {
+          audio: micId === "off" ? false : {
             ...(micId ? { deviceId: { exact: micId } } : {}),
             noiseSuppression,
             echoCancellation,
@@ -934,7 +955,7 @@ export default function RecordingTab() {
           audio: true,
         });
 
-        if (micId) {
+        if (micId && micId !== "off") {
           try {
             const audioStream = await navigator.mediaDevices.getUserMedia({
               audio: { deviceId: { exact: micId } },
@@ -1201,9 +1222,32 @@ export default function RecordingTab() {
       // Feature 3: Start title card if enabled
       if (usedPipeline && cardsOn) {
         cardPhaseRef.current = "title";
+        setMicCaptureEnabled(false);
+        const cardDuration = Number(cardSecondsRef.current);
+        setCardNotice({ kind: "title", secondsLeft: cardDuration });
+        cardNoticeTimerRef.current = setInterval(() => {
+          setCardNotice((prev) => {
+            if (!prev || prev.kind !== "title") return prev;
+            if (prev.secondsLeft <= 1) {
+              if (cardNoticeTimerRef.current) {
+                clearInterval(cardNoticeTimerRef.current);
+                cardNoticeTimerRef.current = null;
+              }
+              return null;
+            }
+            return { kind: "title", secondsLeft: prev.secondsLeft - 1 };
+          });
+        }, 1000);
         window.setTimeout(() => {
-          if (cardPhaseRef.current === "title") cardPhaseRef.current = null;
-        }, Number(cardSecondsRef.current) * 1000);
+          if (cardPhaseRef.current !== "title") return;
+          cardPhaseRef.current = null;
+          setMicCaptureEnabled(!mutedRef.current);
+          setCardNotice(null);
+          if (cardNoticeTimerRef.current) {
+            clearInterval(cardNoticeTimerRef.current);
+            cardNoticeTimerRef.current = null;
+          }
+        }, cardDuration * 1000);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start recording");
@@ -1230,12 +1274,34 @@ export default function RecordingTab() {
     if (cardsOn && usedPipelineRef.current && cardPhaseRef.current !== "closing") {
       setFinishing(true);
       cardPhaseRef.current = "closing";
+      setMicCaptureEnabled(false);
+      const cardDuration = Number(cardSecondsRef.current);
+      setCardNotice({ kind: "closing", secondsLeft: cardDuration });
+      cardNoticeTimerRef.current = setInterval(() => {
+        setCardNotice((prev) => {
+          if (!prev || prev.kind !== "closing") return prev;
+          if (prev.secondsLeft <= 1) {
+            if (cardNoticeTimerRef.current) {
+              clearInterval(cardNoticeTimerRef.current);
+              cardNoticeTimerRef.current = null;
+            }
+            return null;
+          }
+          return { kind: "closing", secondsLeft: prev.secondsLeft - 1 };
+        });
+      }, 1000);
       window.setTimeout(() => {
         cardPhaseRef.current = null;
+        setCardNotice(null);
+        if (cardNoticeTimerRef.current) {
+          clearInterval(cardNoticeTimerRef.current);
+          cardNoticeTimerRef.current = null;
+        }
+        setMicCaptureEnabled(!mutedRef.current);
         setFinishing(false);
         recorderRef.current?.stop();
         setRecState("idle");
-      }, Number(cardSecondsRef.current) * 1000);
+      }, cardDuration * 1000);
     } else {
       recorderRef.current.stop();
       setRecState("idle");
@@ -1397,6 +1463,7 @@ export default function RecordingTab() {
             sx={{ minWidth: 160 }}
           >
             <MenuItem value="">System default</MenuItem>
+            <MenuItem value="off">No microphone (mute)</MenuItem>
             {devices.mics.map((mic) => (
               <MenuItem key={mic.deviceId} value={mic.deviceId}>
                 {mic.label}
@@ -1612,41 +1679,44 @@ export default function RecordingTab() {
                 label="Add title and closing cards"
               />
               {cardsOn && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
-                  <TextField
-                    label="Title"
-                    value={cardTitle}
-                    onChange={(e) => setCardTitle(e.target.value)}
-                    size="small"
-                    sx={{ flex: "1 1 200px" }}
-                  />
-                  <TextField
-                    label="Subtitle"
-                    value={cardSubtitle}
-                    onChange={(e) => setCardSubtitle(e.target.value)}
-                    size="small"
-                    sx={{ flex: "1 1 200px" }}
-                  />
-                  <TextField
-                    label="Closing line"
-                    value={cardClosing}
-                    onChange={(e) => setCardClosing(e.target.value)}
-                    size="small"
-                    sx={{ flex: "1 1 200px" }}
-                  />
-                  <TextField
-                    select
-                    label="Card length"
-                    value={cardSeconds}
-                    onChange={(e) => setCardSeconds(e.target.value as "2" | "3" | "5")}
-                    size="small"
-                    sx={{ minWidth: 110 }}
-                  >
-                    <MenuItem value="2">2 s</MenuItem>
-                    <MenuItem value="3">3 s</MenuItem>
-                    <MenuItem value="5">5 s</MenuItem>
-                  </TextField>
-                </div>
+                <>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
+                    <TextField
+                      label="Title"
+                      value={cardTitle}
+                      onChange={(e) => setCardTitle(e.target.value)}
+                      size="small"
+                      sx={{ flex: "1 1 200px" }}
+                    />
+                    <TextField
+                      label="Subtitle"
+                      value={cardSubtitle}
+                      onChange={(e) => setCardSubtitle(e.target.value)}
+                      size="small"
+                      sx={{ flex: "1 1 200px" }}
+                    />
+                    <TextField
+                      label="Closing line"
+                      value={cardClosing}
+                      onChange={(e) => setCardClosing(e.target.value)}
+                      size="small"
+                      sx={{ flex: "1 1 200px" }}
+                    />
+                    <TextField
+                      select
+                      label="Card length"
+                      value={cardSeconds}
+                      onChange={(e) => setCardSeconds(e.target.value as "2" | "3" | "5")}
+                      size="small"
+                      sx={{ minWidth: 110 }}
+                    >
+                      <MenuItem value="2">2 s</MenuItem>
+                      <MenuItem value="3">3 s</MenuItem>
+                      <MenuItem value="5">5 s</MenuItem>
+                    </TextField>
+                  </div>
+                  <p className={styles.fieldHint} style={{ marginTop: 8 }}>Cards are added around your video: the title card records first (mic muted) and a notice on the preview counts down until your video starts; the closing card is appended after you press Stop.</p>
+                </>
               )}
             </div>
           </div>
@@ -1803,6 +1873,15 @@ export default function RecordingTab() {
               <span style={{ fontSize: "6rem", fontWeight: 800, color: "#fff", textShadow: "0 4px 24px rgba(0,0,0,0.5)" }}>{countdown}</span>
             </div>
           )}
+          {cardNotice && (
+            <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "10px 16px", background: "rgba(15,23,42,0.72)", pointerEvents: "none" }}>
+              <span style={{ color: "#f8fafc", fontWeight: 600, fontSize: "0.95rem" }}>
+                {cardNotice.kind === "title"
+                  ? `Title card is recording - your video starts in ${cardNotice.secondsLeft}...`
+                  : `Adding the closing card (${cardNotice.secondsLeft}s)...`}
+              </span>
+            </div>
+          )}
         </div>
 
         {hasStream && tool !== "off" && (
@@ -1919,7 +1998,7 @@ export default function RecordingTab() {
             <span className={styles.ghMeta}>Shortcuts: R record - P pause - M mute</span>
           </div>
 
-          {hasStream && (
+          {hasStream && hasAudio && (
             <Button variant={muted ? "contained" : "outlined"} size="small" color={muted ? "error" : "primary"} onClick={toggleMute}>
               {muted ? "Unmute" : "Mute"}
             </Button>

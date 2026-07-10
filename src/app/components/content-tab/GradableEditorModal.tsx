@@ -16,6 +16,7 @@ import MenuItem from "@mui/material/MenuItem";
 import styles from "../../page.module.css";
 import { QuizQuestionsEditor } from "./QuizQuestionsEditor";
 import { toLocalInput } from "./utils";
+import { HtmlEditor } from "./HtmlEditor";
 
 // ── Gradable editor (description + due date + points) ─────────────────────────
 
@@ -235,18 +236,8 @@ export function GradableEditorModal({
             </div>
 
             <div className={styles.field}>
-              <TextField
-                id="gradable-desc"
-                multiline
-                minRows={isQuiz ? 6 : 10}
-                fullWidth
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                slotProps={{ htmlInput: { spellCheck: false } }}
-                label="Description (HTML allowed)"
-                size="small"
-                sx={{ "& .MuiInputBase-input": { fontFamily: "var(--font-mono, monospace)" } }}
-              />
+              <label>Description</label>
+              <HtmlEditor value={description} onChange={setDescription} minHeight={isQuiz ? 160 : 220} ariaLabel="Description" />
             </div>
 
             {isQuiz && item.contentId != null && (

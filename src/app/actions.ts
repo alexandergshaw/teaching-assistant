@@ -3016,6 +3016,50 @@ export async function describeScreenRecordingAction(
 }
 
 /**
+ * Generate timed narration segments for a video: returns a script that an
+ * instructor would speak over each part, synchronized to the video timeline.
+ */
+export async function generateVideoNarrationAction(
+  frames: Array<{ timeSec: number; base64: string }>,
+  durationSec: number,
+  context: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ segments: Array<{ start: number; end: number; text: string }> } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!frames.length) return { error: "No frames were extracted from the video." };
+    if (frames.length > 30) return { error: "Too many frames; sample the video more sparsely." };
+    const parts: LlmPart[] = [
+      {
+        text: [
+          "The images are keyframes sampled from a video (classroom recording, screen capture, or lecture footage), in order, with their timestamps in seconds:",
+          frames.map((f, i) => `Frame ${i + 1}: t=${Math.round(f.timeSec)}s`).join("\n"),
+          context.trim() ? `Context from the author: ${context.trim()}` : "",
+          `The full video is ${Math.round(durationSec)} seconds long.`,
+          'Write a spoken narration script for a voice-over of this video. Return ONLY a JSON array like [{"start": 0, "end": 12, "text": "..."}] - seconds as numbers, segments in order covering 0 to the full duration with no overlaps, each segment 5-25 seconds, each text 1-3 conversational first-person-plural sentences an instructor would SAY over that part of the video (not captions - flowing spoken narration that explains what is happening and why). No markdown, no code fences.',
+        ].filter(Boolean).join("\n\n"),
+      },
+      ...frames.map((f) => ({ inlineData: { mimeType: "image/jpeg", data: f.base64 } })),
+    ];
+    const r = await callLlm(
+      { contents: [{ role: "user", parts }], generationConfig: { temperature: 0.2, maxOutputTokens: 4096 } },
+      provider
+    );
+    if (!r.ok) return { error: "The model returned no narration. Try again." };
+    const raw = parseLenientJsonArray(r.text) as Array<{ start?: number; end?: number; text?: string }> | null;
+    if (!raw) return { error: "Could not parse narration from the model output. Try generating again." };
+    const segments = raw
+      .filter((s) => typeof s.start === "number" && typeof s.end === "number" && typeof s.text === "string" && s.text.trim())
+      .map((s) => ({ start: Math.max(0, s.start as number), end: Math.min(durationSec, s.end as number), text: (s.text as string).trim() }))
+      .filter((s) => s.end > s.start);
+    if (!segments.length) return { error: "The model produced no usable narration segments." };
+    return { segments };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate video narration." };
+  }
+}
+
+/**
  * Read a former syllabus (.docx) and a codebase zip. Pass 1 identifies the
  * class-specific NON-schedule fields and the weekly-schedule block's bounds; pass
  * 2 produces a complete replacement for EVERY paragraph in that block, so the old

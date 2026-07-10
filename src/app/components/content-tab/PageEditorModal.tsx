@@ -9,6 +9,7 @@ import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import styles from "../../page.module.css";
 import { previewDoc } from "./utils";
+import { HtmlEditor } from "./HtmlEditor";
 
 // ── Page editor modal ─────────────────────────────────────────────────────────
 
@@ -201,18 +202,8 @@ export function PageEditorModal({
 
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
               <div className={styles.field} style={{ flex: "1 1 360px", minWidth: 280 }}>
-                <TextField
-                  id="content-page-body"
-                  multiline
-                  minRows={18}
-                  fullWidth
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  slotProps={{ htmlInput: { spellCheck: false } }}
-                  label="HTML source"
-                  size="small"
-                  sx={{ "& .MuiInputBase-input": { fontFamily: "var(--font-mono, monospace)" } }}
-                />
+                <label>Page body</label>
+                <HtmlEditor value={body} onChange={setBody} minHeight={260} ariaLabel="Page body" />
               </div>
               <div className={styles.field} style={{ flex: "1 1 360px", minWidth: 280 }}>
                 <label>Live preview</label>

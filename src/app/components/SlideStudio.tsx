@@ -2,11 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextField, MenuItem } from "@mui/material";
-import { extractPptxSlidesAction, generateSlideNarrationAction, voiceConfiguredAction, synthesizeNarrationAction, createVoiceCloneAction, avatarConfiguredAction, generateAvatarVideoAction, getAvatarVideoStatusAction, type SlideNarration } from "../actions";
+import { extractPptxSlidesAction, generateSlideNarrationAction, voiceConfiguredAction, synthesizeNarrationAction, createVoiceCloneAction, avatarConfiguredAction, generateAvatarVideoAction, getAvatarVideoStatusAction, generateVideoNarrationAction, type SlideNarration } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
+import { useSupabase } from "@/context/SupabaseProvider";
+import { listRecordingFiles, downloadRecordingFile, saveRecordingFile, extForMime } from "@/lib/recording-files";
+import { extractVideoFrames, renderNarratedVideo, type NarrationClip } from "@/lib/narrate-video";
 import styles from "../page.module.css";
 
 type BusyState = "idle" | "extracting" | "narrating";
+
+interface NarrationSegment {
+  start: number;
+  end: number;
+  text: string;
+}
 
 function drawSlideCard(ctx: CanvasRenderingContext2D, w: number, h: number, slide: { slide: number; title: string; text: string }) {
   ctx.fillStyle = "#0f172a";
@@ -44,6 +53,14 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: num
 }
 
 export default function SlideStudio() {
+  const { supabase, user } = useSupabase();
+
+  const [mode, setMode] = useState<"deck" | "video">(() => {
+    if (typeof window === "undefined") return "deck";
+    const saved = localStorage.getItem("ta-slides-mode");
+    return saved === "deck" || saved === "video" ? saved : "deck";
+  });
+
   const [fileName, setFileName] = useState<string>(() => {
     if (typeof window === "undefined") return "";
     return localStorage.getItem("ta-slides-file-name") ?? "";
@@ -111,6 +128,38 @@ export default function SlideStudio() {
   const stitchCancelRef = useRef(false);
   const stitchUrlRef = useRef<string | null>(null);
 
+  // Video mode state
+  const [vidUrl, setVidUrl] = useState<string | null>(null);
+  const [vidName, setVidName] = useState("");
+  const [vidBlob, setVidBlob] = useState<Blob | null>(null);
+  const [segments, setSegments] = useState<NarrationSegment[] | null>(null);
+  const [segAudio, setSegAudio] = useState<Record<number, { url: string; base64: string; mimeType: string }>>({});
+  const [genBusyV, setGenBusyV] = useState(false);
+  const [genErrorV, setGenErrorV] = useState<string | null>(null);
+  const [voBusyV, setVoBusyV] = useState<null | "one" | "all">(null);
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applyPct, setApplyPct] = useState(0);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ url: string; blob: Blob } | null>(null);
+  const [resultSave, setResultSave] = useState<"idle" | "saving" | "done" | "failed">("idle");
+  const [videoContext, setVideoContext] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-slides-video-context") ?? "";
+  });
+  const [applyMode, setApplyMode] = useState<"replace" | "mix">(() => {
+    if (typeof window === "undefined") return "replace";
+    const saved = localStorage.getItem("ta-slides-video-mode");
+    return saved === "replace" || saved === "mix" ? saved : "replace";
+  });
+  const [resultName, setResultName] = useState<string>(() => {
+    if (typeof window === "undefined") return "narrated-video";
+    return localStorage.getItem("ta-slides-video-name") ?? "narrated-video";
+  });
+
+  const vidUrlRef = useRef<string | null>(null);
+  const resultUrlRef = useRef<string | null>(null);
+  const segAudioRef = useRef(segAudio);
+
   useEffect(() => {
     cancelledRef.current = false;
     (async () => {
@@ -157,7 +206,40 @@ export default function SlideStudio() {
     };
   }, []);
 
+  // Track refs for video mode cleanup
+  useEffect(() => {
+    vidUrlRef.current = vidUrl;
+  }, [vidUrl]);
+
+  useEffect(() => {
+    resultUrlRef.current = result?.url ?? null;
+  }, [result]);
+
+  useEffect(() => {
+    segAudioRef.current = segAudio;
+  }, [segAudio]);
+
+  // Unmount-only cleanup for video mode URLs
+  useEffect(() => {
+    return () => {
+      if (vidUrlRef.current) {
+        URL.revokeObjectURL(vidUrlRef.current);
+      }
+      if (resultUrlRef.current) {
+        URL.revokeObjectURL(resultUrlRef.current);
+      }
+      for (const audio of Object.values(segAudioRef.current)) {
+        URL.revokeObjectURL(audio.url);
+      }
+    };
+  }, []);
+
   // Persist form state to localStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-slides-mode", mode);
+  }, [mode]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     localStorage.setItem("ta-slides-file-name", fileName);
@@ -190,6 +272,21 @@ export default function SlideStudio() {
     if (typeof window === "undefined") return;
     localStorage.setItem("ta-slides-clone-name", cloneName);
   }, [cloneName]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-slides-video-context", videoContext);
+  }, [videoContext]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-slides-video-mode", applyMode);
+  }, [applyMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-slides-video-name", resultName);
+  }, [resultName]);
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -349,6 +446,198 @@ export default function SlideStudio() {
     }
   };
 
+  // Video mode handlers
+  const adoptVideo = useCallback(
+    (blob: Blob, name: string) => {
+      if (vidUrl) URL.revokeObjectURL(vidUrl);
+      const url = URL.createObjectURL(blob);
+      setVidUrl(url);
+      setVidName(name);
+      setVidBlob(blob);
+      setSegments(null);
+      setSegAudio({});
+      setApplyError(null);
+      setResult(null);
+    },
+    [vidUrl]
+  );
+
+  const handleVideoFileSelect = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      try {
+        const blob = new Blob([await f.arrayBuffer()], { type: f.type });
+        adoptVideo(blob, f.name);
+      } catch (err) {
+        setApplyError(err instanceof Error ? err.message : "Could not read the video file.");
+      }
+      e.target.value = "";
+    },
+    [adoptVideo]
+  );
+
+  const handleBrowseLibrary = useCallback(async () => {
+    if (!supabase || !user) return;
+    try {
+      const files = await listRecordingFiles(supabase, user.id);
+      const videoFiles = files.filter((f) => f.mimeType.includes("video"));
+      if (!videoFiles.length) {
+        setApplyError("No videos in library.");
+        return;
+      }
+      for (const file of videoFiles) {
+        const blob = await downloadRecordingFile(supabase, file);
+        adoptVideo(blob, file.name);
+        break;
+      }
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : "Could not browse library.");
+    }
+  }, [supabase, user, adoptVideo]);
+
+  const handleGenerateNarration = useCallback(async () => {
+    if (!vidUrl) return;
+    setGenBusyV(true);
+    setGenErrorV(null);
+    try {
+      const { frames, durationSec } = await extractVideoFrames(vidUrl);
+      const r = await generateVideoNarrationAction(frames, durationSec, videoContext, getStoredProvider());
+      if ("error" in r) {
+        setGenErrorV(r.error);
+        return;
+      }
+      setSegments(r.segments);
+      setSegAudio({});
+    } catch (err) {
+      setGenErrorV(err instanceof Error ? err.message : "Failed to generate narration.");
+    } finally {
+      setGenBusyV(false);
+    }
+  }, [vidUrl, videoContext]);
+
+  const handleSegmentChange = useCallback(
+    (index: number, field: "start" | "end" | "text", value: string | number) => {
+      setSegments((prev) => {
+        if (!prev) return null;
+        const updated = [...prev];
+        if (field === "start" || field === "end") {
+          updated[index] = { ...updated[index], [field]: Math.max(0, value as number) };
+        } else {
+          updated[index] = { ...updated[index], text: value as string };
+          const next = { ...segAudio };
+          delete next[index];
+          setSegAudio(next);
+          if (segAudio[index]) {
+            URL.revokeObjectURL(segAudio[index].url);
+          }
+        }
+        return updated;
+      });
+    },
+    [segAudio]
+  );
+
+  const handleSynthesizeOne = useCallback(
+    async (index: number, text: string) => {
+      if (!text.trim()) return;
+      setVoBusyV("one");
+      try {
+        const r = await synthesizeNarrationAction(text, localStorage.getItem("ta-voice-id") || undefined);
+        if ("error" in r) {
+          throw new Error(r.error);
+        }
+        const bytes = Uint8Array.from(atob(r.base64), (c) => c.charCodeAt(0));
+        const newAudio = { ...segAudio };
+        if (newAudio[index]) {
+          URL.revokeObjectURL(newAudio[index].url);
+        }
+        newAudio[index] = {
+          url: URL.createObjectURL(new Blob([bytes], { type: r.mimeType })),
+          base64: r.base64,
+          mimeType: r.mimeType,
+        };
+        setSegAudio(newAudio);
+      } catch (err) {
+        setApplyError(err instanceof Error ? err.message : "Failed to synthesize audio.");
+      } finally {
+        setVoBusyV(null);
+      }
+    },
+    [segAudio]
+  );
+
+  const handleGenerateAllVoices = useCallback(async () => {
+    if (!segments) return;
+    setVoBusyV("all");
+    try {
+      const newAudio = { ...segAudio };
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        if (!seg.text.trim()) continue;
+        if (newAudio[i]) continue;
+        const r = await synthesizeNarrationAction(seg.text, localStorage.getItem("ta-voice-id") || undefined);
+        if ("error" in r) continue;
+        const bytes = Uint8Array.from(atob(r.base64), (c) => c.charCodeAt(0));
+        newAudio[i] = {
+          url: URL.createObjectURL(new Blob([bytes], { type: r.mimeType })),
+          base64: r.base64,
+          mimeType: r.mimeType,
+        };
+      }
+      setSegAudio(newAudio);
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : "Failed to generate voices.");
+    } finally {
+      setVoBusyV(null);
+    }
+  }, [segments, segAudio]);
+
+  const handleApplyNarration = useCallback(async () => {
+    if (!vidBlob || !segments) return;
+    setApplyBusy(true);
+    setApplyPct(0);
+    setApplyError(null);
+    try {
+      const clips: NarrationClip[] = segments
+        .map((s, i) => {
+          const audio = segAudio[i];
+          return audio ? { startSec: s.start, base64: audio.base64, mimeType: audio.mimeType } : null;
+        })
+        .filter((c): c is NarrationClip => c !== null);
+
+      if (!clips.length) {
+        setApplyError("No narration audio to apply.");
+        setApplyBusy(false);
+        return;
+      }
+
+      const out = await renderNarratedVideo(vidBlob, clips, applyMode, (pct) => setApplyPct(pct));
+      if (result?.url) URL.revokeObjectURL(result.url);
+      setResult({ url: URL.createObjectURL(out), blob: out });
+
+      if (user && supabase) {
+        setResultSave("saving");
+        try {
+          await saveRecordingFile(supabase, user.id, out, {
+            name: resultName.trim() || "narrated-video",
+            kind: "narrated",
+            mimeType: out.type || "video/webm",
+            durationSec: null,
+          });
+          setResultSave("done");
+        } catch (err) {
+          console.error("Failed to save to library:", err);
+          setResultSave("failed");
+        }
+      }
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : "Failed to apply narration.");
+    } finally {
+      setApplyBusy(false);
+    }
+  }, [vidBlob, segments, segAudio, applyMode, user, supabase, result, resultName]);
+
   const handleStitch = async () => {
     if (!narrations) return;
     setStitchBusy(true);
@@ -435,9 +724,27 @@ export default function SlideStudio() {
         <p className={styles.adaptPanelSubtitle}>
           Upload a deck, let AI draft what you would say on each slide, then generate audio - or audio and video - of the walkthrough.
         </p>
+        <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+          <Button
+            variant={mode === "deck" ? "contained" : "outlined"}
+            size="small"
+            onClick={() => setMode("deck")}
+          >
+            Narrate a deck
+          </Button>
+          <Button
+            variant={mode === "video" ? "contained" : "outlined"}
+            size="small"
+            onClick={() => setMode("video")}
+          >
+            Narrate a video
+          </Button>
+        </div>
       </div>
 
-      {error && <p className={styles.error}>{error}</p>}
+      {mode === "deck" && (
+        <>
+          {error && <p className={styles.error}>{error}</p>}
 
       <div className={styles.field}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -609,6 +916,216 @@ export default function SlideStudio() {
                 </div>
               )}
             </>
+          )}
+        </>
+      )}
+        </>
+      )}
+
+      {mode === "video" && (
+        <>
+          {applyError && <p className={styles.error}>{applyError}</p>}
+          {genErrorV && <p className={styles.error}>{genErrorV}</p>}
+
+          <div className={styles.field}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => document.getElementById("video-input")?.click()}
+              >
+                Choose video
+              </Button>
+              <Button variant="text" size="small" onClick={handleBrowseLibrary}>
+                Browse library
+              </Button>
+              {vidName && <span className={styles.ghMeta}>{vidName}</span>}
+            </div>
+            <input
+              id="video-input"
+              type="file"
+              accept="video/*"
+              style={{ display: "none" }}
+              onChange={handleVideoFileSelect}
+            />
+          </div>
+
+          {vidUrl && (
+            <div className={styles.field}>
+              <video
+                controls
+                playsInline
+                src={vidUrl}
+                style={{ width: "100%", maxHeight: 320, borderRadius: 12, background: "#0f172a" }}
+              />
+            </div>
+          )}
+
+          <div className={styles.field}>
+            <TextField
+              label="Context (optional)"
+              value={videoContext}
+              onChange={(e) => setVideoContext(e.target.value)}
+              size="small"
+              fullWidth
+              multiline
+              minRows={2}
+            />
+            <div style={{ marginTop: 8 }}>
+              <Button
+                variant="contained"
+                size="small"
+                disabled={!vidUrl || genBusyV}
+                onClick={() => void handleGenerateNarration()}
+              >
+                {genBusyV ? "Generating narration..." : "Generate narration"}
+              </Button>
+            </div>
+          </div>
+
+          {segments && (
+            <>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {segments.map((seg, i) => (
+                  <div key={i} style={{ padding: "12px", border: "1px solid var(--field-border)", borderRadius: 8 }}>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                      <TextField
+                        label="Start (s)"
+                        type="number"
+                        value={seg.start}
+                        onChange={(e) => handleSegmentChange(i, "start", parseFloat(e.target.value) || 0)}
+                        size="small"
+                        slotProps={{ inputLabel: { shrink: true } }}
+                        sx={{ width: 100 }}
+                      />
+                      <TextField
+                        label="End (s)"
+                        type="number"
+                        value={seg.end}
+                        onChange={(e) => handleSegmentChange(i, "end", parseFloat(e.target.value) || 0)}
+                        size="small"
+                        slotProps={{ inputLabel: { shrink: true } }}
+                        sx={{ width: 100 }}
+                      />
+                    </div>
+                    <TextField
+                      size="small"
+                      fullWidth
+                      multiline
+                      minRows={2}
+                      value={seg.text}
+                      onChange={(e) => handleSegmentChange(i, "text", e.target.value)}
+                      style={{ marginBottom: 8 }}
+                    />
+                    {segAudio[i] && (
+                      <audio
+                        controls
+                        src={segAudio[i].url}
+                        style={{ width: "100%", height: 36, marginBottom: 8 }}
+                      />
+                    )}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Button
+                        variant="text"
+                        size="small"
+                        disabled={voBusyV !== null || !seg.text.trim()}
+                        onClick={() => void handleSynthesizeOne(i, seg.text)}
+                      >
+                        Voice
+                      </Button>
+                      {segAudio[i] && (
+                        <Button
+                          variant="text"
+                          size="small"
+                          onClick={() => {
+                            const newAudio = { ...segAudio };
+                            if (newAudio[i]) {
+                              URL.revokeObjectURL(newAudio[i].url);
+                              delete newAudio[i];
+                              setSegAudio(newAudio);
+                            }
+                          }}
+                        >
+                          Remove audio
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {!voiceReady && (
+                <p className={styles.fieldHint}>
+                  Requires ELEVENLABS_API_KEY.
+                </p>
+              )}
+
+              <Button
+                variant="outlined"
+                size="small"
+                disabled={voBusyV !== null || !segments.some((s) => s.text.trim())}
+                onClick={() => void handleGenerateAllVoices()}
+              >
+                {voBusyV === "all" ? "Generating voices..." : "Generate all voices"}
+              </Button>
+            </>
+          )}
+
+          {segments && (
+            <div className={styles.field}>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
+                <TextField
+                  select
+                  label="Audio mode"
+                  value={applyMode}
+                  onChange={(e) => setApplyMode(e.target.value as "replace" | "mix")}
+                  size="small"
+                  sx={{ minWidth: 180 }}
+                >
+                  <MenuItem value="replace">Replace original audio</MenuItem>
+                  <MenuItem value="mix">Mix with original audio</MenuItem>
+                </TextField>
+                <Button
+                  variant="contained"
+                  size="small"
+                  disabled={!vidBlob || !segments || !Object.keys(segAudio).length || applyBusy}
+                  onClick={() => void handleApplyNarration()}
+                >
+                  {applyBusy ? `Applying... ${applyPct}%` : "Apply narration to video"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {result && (
+            <div className={styles.field}>
+              <video
+                controls
+                src={result.url}
+                style={{ width: "100%", maxHeight: 360, borderRadius: 12, background: "#0f172a" }}
+              />
+              <div className={styles.ghActions} style={{ alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 12 }}>
+                <TextField
+                  label="Video name"
+                  size="small"
+                  value={resultName}
+                  onChange={(e) => setResultName(e.target.value)}
+                  sx={{ minWidth: 200 }}
+                />
+                <a
+                  className={styles.linkButton}
+                  href={result.url}
+                  download={`${(resultName.trim() || "narrated-video")}.${extForMime(result.blob.type)}`}
+                >
+                  Download video
+                </a>
+                <span className={styles.ghMeta}>
+                  {resultSave === "saving" && "Saving to library..."}
+                  {resultSave === "done" && "In library - see the Files tab"}
+                  {resultSave === "failed" && "Library save failed"}
+                </span>
+              </div>
+            </div>
           )}
         </>
       )}

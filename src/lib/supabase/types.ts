@@ -405,7 +405,7 @@ export interface Database {
           id: string;
           user_id: string;
           name: string;
-          kind: "recording" | "captioned";
+          kind: "recording" | "captioned" | "narrated";
           mime_type: string;
           size_bytes: number;
           duration_sec: number | null;
@@ -417,7 +417,7 @@ export interface Database {
           id?: string;
           user_id: string;
           name: string;
-          kind?: "recording" | "captioned";
+          kind?: "recording" | "captioned" | "narrated";
           mime_type?: string;
           size_bytes?: number;
           duration_sec?: number | null;
@@ -429,7 +429,7 @@ export interface Database {
           id?: string;
           user_id?: string;
           name?: string;
-          kind?: "recording" | "captioned";
+          kind?: "recording" | "captioned" | "narrated";
           mime_type?: string;
           size_bytes?: number;
           duration_sec?: number | null;

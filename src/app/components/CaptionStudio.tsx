@@ -5,6 +5,9 @@ import { Button, TextField, FormControlLabel, Checkbox } from "@mui/material";
 import { describeScreenRecordingAction, type ScreenCaption } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { listBackupVideos, readBackupFile, type BackupVideo, type DirHandle } from "@/lib/backup-dir";
+import { activeCaptionAt, wrapCaptionLines, captionLayout, ensureFiniteDuration } from "@/lib/caption-burn";
+import { saveRecordingFile, extForMime } from "@/lib/recording-files";
+import { useSupabase } from "@/context/SupabaseProvider";
 import type { Take } from "./RecordingTab";
 import styles from "../page.module.css";
 
@@ -59,9 +62,19 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
   const [folderBusy, setFolderBusy] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importingKey, setImportingKey] = useState<string | null>(null);
+  const [burning, setBurning] = useState(false);
+  const [burnProgress, setBurnProgress] = useState(0);
+  const [burnError, setBurnError] = useState<string | null>(null);
+  const [burned, setBurned] = useState<{ url: string; name: string; mimeType: string } | null>(null);
+  const [burnSave, setBurnSave] = useState<"idle" | "saving" | "done" | "failed">("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const prevVttUrlRef = useRef<string | null>(null);
+  const burnAbortRef = useRef<(() => void) | null>(null);
+  const burnedUrlRef = useRef<string | null>(null);
+  const videoUrlRef = useRef<string | null>(null);
+
+  const { supabase, user } = useSupabase();
 
   const fmtTime = (sec: number): string => {
     const m = Math.floor(sec / 60);
@@ -91,6 +104,10 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     /* eslint-disable-next-line react-hooks/set-state-in-effect */
     setPageContextSummary(gatherRecordingContext().summary);
   }, []);
+
+  useEffect(() => {
+    videoUrlRef.current = videoUrl;
+  }, [videoUrl]);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -149,7 +166,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
         v.removeEventListener("loadedmetadata", handleLoadedMetadata);
         (async () => {
           try {
-            const dur = v.duration;
+            const dur = await ensureFiniteDuration(v);
             const step = Math.max(5, dur / 24);
             const canvas = document.createElement("canvas");
             canvas.width = 640;
@@ -266,12 +283,222 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     });
   }, []);
 
+  const handleBurnCaptions = useCallback(async () => {
+    if (!videoUrl || !captions || captions.length === 0 || burning) return;
+
+    setBurnError(null);
+    if (burned) {
+      if (burned.url) URL.revokeObjectURL(burned.url);
+      setBurned(null);
+    }
+    setBurning(true);
+    setBurnProgress(0);
+    setBurnSave("idle");
+
+    let audioContext: AudioContext | null = null;
+    let cancelled = false;
+
+    try {
+      const v = document.createElement("video");
+      v.src = videoUrl;
+      v.playsInline = true;
+      v.preload = "auto";
+
+      await new Promise<void>((resolve) => {
+        if (v.readyState >= 1) {
+          resolve();
+        } else {
+          v.addEventListener("loadedmetadata", () => resolve(), { once: true });
+        }
+      });
+
+      const dur = await ensureFiniteDuration(v);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = v.videoWidth || 1280;
+      canvas.height = v.videoHeight || 720;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Could not get canvas context");
+
+      let audioTracks: MediaStreamTrack[] = [];
+      try {
+        audioContext = new AudioContext();
+        const src = audioContext.createMediaElementSource(v);
+        const dest = audioContext.createMediaStreamDestination();
+        src.connect(dest);
+        audioTracks = dest.stream.getAudioTracks();
+      } catch {
+        audioTracks = [];
+      }
+
+      const stream = new MediaStream([...canvas.captureStream(30).getVideoTracks(), ...audioTracks]);
+
+      const mimeTypes = ["video/mp4", "video/webm;codecs=vp9,opus", "video/webm"];
+      let selectedMime = "video/webm";
+      for (const mime of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mime)) {
+          selectedMime = mime;
+          break;
+        }
+      }
+
+      const recorder = new MediaRecorder(stream, { mimeType: selectedMime });
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        if (cancelled) {
+          return;
+        }
+
+        const blob = new Blob(chunks, { type: selectedMime });
+        const outUrl = URL.createObjectURL(blob);
+        const base = fileName.replace(/\.[^/.]+$/, "") || "video";
+        const outName = `${base}-captioned`;
+
+        setBurned({ url: outUrl, name: outName, mimeType: blob.type || "video/webm" });
+        burnedUrlRef.current = outUrl;
+        setBurning(false);
+        setBurnProgress(100);
+
+        if (user) {
+          setBurnSave("saving");
+          saveRecordingFile(supabase, user.id, blob, {
+            name: outName,
+            kind: "captioned",
+            mimeType: blob.type || "video/webm",
+            durationSec: dur,
+          })
+            .then(() => setBurnSave("done"))
+            .catch((err) => {
+              console.error("Save failed:", err);
+              setBurnSave("failed");
+            });
+        }
+      };
+
+      recorder.start(1000);
+
+      let rafId: number | null = null;
+      let lastReportedProgress = 0;
+
+      const drawLoop = () => {
+        if (cancelled || v.ended) {
+          if (rafId !== null) cancelAnimationFrame(rafId);
+          v.pause();
+          recorder.stop();
+          burnAbortRef.current = null;
+          if (audioContext && audioContext.state !== "closed") {
+            try {
+              audioContext.close();
+            } catch {
+              // Double-close guard
+            }
+          }
+          return;
+        }
+
+        ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+
+        const cue = activeCaptionAt(captions, v.currentTime);
+        if (cue) {
+          const layout = captionLayout(canvas.width, canvas.height);
+          ctx.font = `600 ${layout.fontPx}px system-ui, sans-serif`;
+          const lines = wrapCaptionLines(cue.text, layout.maxTextWidth, (s) => ctx.measureText(s).width);
+
+          let baselineY = canvas.height - layout.bottomMargin - layout.padY;
+
+          for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i];
+            const textWidth = ctx.measureText(line).width;
+            const boxW = textWidth + layout.padX * 2;
+            const boxH = layout.lineHeight;
+            const boxX = (canvas.width - boxW) / 2;
+            const boxY = baselineY - boxH / 2 - layout.lineHeight / 2;
+            const lineY = boxY + boxH / 2;
+
+            if (ctx.roundRect) {
+              ctx.beginPath();
+              ctx.roundRect(boxX, boxY, boxW, boxH, 8);
+              ctx.fillStyle = "rgba(15,23,42,0.78)";
+              ctx.fill();
+            } else {
+              ctx.fillStyle = "rgba(15,23,42,0.78)";
+              ctx.fillRect(boxX, boxY, boxW, boxH);
+            }
+
+            ctx.fillStyle = "#f8fafc";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(line, canvas.width / 2, lineY);
+
+            baselineY -= layout.lineHeight;
+          }
+        }
+
+        const newProgress = Math.min(100, Math.round((v.currentTime / dur) * 100));
+        if (newProgress !== lastReportedProgress) {
+          lastReportedProgress = newProgress;
+          setBurnProgress(newProgress);
+        }
+
+        rafId = requestAnimationFrame(drawLoop);
+      };
+
+      burnAbortRef.current = () => {
+        cancelled = true;
+        if (rafId !== null) cancelAnimationFrame(rafId);
+        v.pause();
+        v.removeAttribute("src");
+        if (recorder.state !== "inactive") recorder.stop();
+        if (audioContext && audioContext.state !== "closed") {
+          try {
+            audioContext.close();
+          } catch {
+            // Double-close guard
+          }
+        }
+        setBurning(false);
+        burnAbortRef.current = null;
+      };
+
+      v.currentTime = 0;
+      await v.play();
+      drawLoop();
+    } catch (err) {
+      const abort = burnAbortRef.current;
+      if (abort) {
+        // Abort pauses the video, stops the recorder (cancelled, so onstop
+        // produces no result), closes the AudioContext, and nulls the ref.
+        abort();
+      } else {
+        if (audioContext && audioContext.state !== "closed") {
+          try {
+            audioContext.close();
+          } catch {
+            // Guard
+          }
+        }
+        burnAbortRef.current = null;
+      }
+      setBurnError(err instanceof Error ? err.message : "An error occurred");
+      setBurning(false);
+    }
+  }, [videoUrl, captions, burning, burned, fileName, user, supabase]);
+
   useEffect(() => {
     return () => {
-      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current);
       if (prevVttUrlRef.current) URL.revokeObjectURL(prevVttUrlRef.current);
+      if (burnedUrlRef.current) URL.revokeObjectURL(burnedUrlRef.current);
+      burnAbortRef.current?.();
     };
-  }, [videoUrl]);
+  }, []);
 
   return (
     <div className={styles.adaptPanel}>
@@ -353,10 +580,14 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
 
       {videoUrl && (
         <video
+          key={videoUrl}
           ref={videoRef}
           controls
+          playsInline
+          preload="auto"
           src={videoUrl}
           style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 12, background: "#0f172a" }}
+          onError={() => setError("The browser could not decode this video. Try re-importing it, or convert it to MP4/WebM.")}
         >
           {vttUrl && (
             <track kind="subtitles" src={vttUrl} srcLang="en" label="AI captions" default />
@@ -413,11 +644,66 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
               Copy captions
             </Button>
           </div>
+
+          <div className={styles.ghActions} style={{ marginTop: 12, alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <Button variant="outlined" size="small" disabled={burning} onClick={() => void handleBurnCaptions()}>
+              {burning ? `Exporting... ${burnProgress}%` : "Export video with captions"}
+            </Button>
+            {burning && (
+              <Button variant="text" size="small" color="error" onClick={() => burnAbortRef.current?.()}>
+                Cancel
+              </Button>
+            )}
+            {burning && (
+              <span className={styles.fieldHint} style={{ margin: 0 }}>
+                The video plays through once (silently) while the captions are rendered in.
+              </span>
+            )}
+          </div>
+
+          {burnError && <p className={styles.error}>{burnError}</p>}
+
+          {burned && (
+            <div className={styles.field} style={{ marginTop: 12 }}>
+              <video
+                key={burned.url}
+                controls
+                playsInline
+                src={burned.url}
+                style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 12, background: "#0f172a" }}
+              />
+              <div className={styles.ghActions}>
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={() => {
+                    const a = document.createElement("a");
+                    a.href = burned.url;
+                    a.download = `${burned.name}.${extForMime(burned.mimeType)}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                  }}
+                >
+                  Download captioned video
+                </Button>
+                {burnSave === "saving" && (
+                  <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Saving to library...</span>
+                )}
+                {burnSave === "done" && (
+                  <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>In library - see the Files tab</span>
+                )}
+                {burnSave === "failed" && (
+                  <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Library save failed</span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       <p className={styles.fieldHint}>
-        Burning captions into the video and adding voice narration is coming next; for now the .vtt file loads into Canvas Studio, YouTube, and most players.
+        The .vtt file loads into Canvas Studio, YouTube, and most players; exporting burns the captions into the video itself.
       </p>
     </div>
   );

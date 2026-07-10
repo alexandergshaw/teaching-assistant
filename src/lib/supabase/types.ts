@@ -400,6 +400,44 @@ export interface Database {
           context_text?: string | null;
         };
       };
+      recording_files: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          kind: "recording" | "captioned";
+          mime_type: string;
+          size_bytes: number;
+          duration_sec: number | null;
+          storage_path: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          kind?: "recording" | "captioned";
+          mime_type?: string;
+          size_bytes?: number;
+          duration_sec?: number | null;
+          storage_path: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          kind?: "recording" | "captioned";
+          mime_type?: string;
+          size_bytes?: number;
+          duration_sec?: number | null;
+          storage_path?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
     };
     Views: Record<string, { Row: Record<string, unknown> }>;
     Functions: Record<string, { Args: Record<string, unknown>; Returns: unknown }>;

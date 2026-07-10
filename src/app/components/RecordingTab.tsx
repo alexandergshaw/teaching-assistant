@@ -11,6 +11,11 @@ import { generateLectureScriptAction } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { backupSupported, clearBackupDir, loadBackupDir, pickBackupDir, writeToBackupDir } from "@/lib/backup-dir";
 import type { DirHandle } from "@/lib/backup-dir";
+import { useSupabase } from "@/context/SupabaseProvider";
+import { saveRecordingFile } from "@/lib/recording-files";
+import type { User } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/lib/supabase/types";
 
 interface Device {
   deviceId: string;
@@ -26,6 +31,7 @@ export interface Take {
   durationSec: number;
   createdAt: number;
   backup?: "pending" | "done" | "failed";
+  dbSave?: "pending" | "done" | "failed";
 }
 
 interface Stroke {
@@ -40,6 +46,8 @@ type RecState = "idle" | "recording" | "paused";
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 export default function RecordingTab() {
+  const { supabase, user } = useSupabase();
+
   const [recView, setRecView] = useState<"record" | "captions" | "slides">(() => {
     if (typeof window === "undefined") return "record";
     const v = localStorage.getItem("ta-rec-view");
@@ -156,6 +164,8 @@ export default function RecordingTab() {
   const cardClosingRef = useRef<string>("");
   const cardSecondsRef = useRef<"2" | "3" | "5">("3");
   const usedPipelineRef = useRef(false);
+  const supabaseRef = useRef<SupabaseClient<Database> | null>(null);
+  const userRef = useRef<User | null>(null);
 
   // Feature 1: Auto-stop timer
   const [autoStopMin, setAutoStopMin] = useState<"0" | "5" | "10" | "15" | "30">(() => {
@@ -541,6 +551,15 @@ export default function RecordingTab() {
     cardClosingRef.current = cardClosing;
     cardSecondsRef.current = cardSeconds;
   }, [cardTitle, cardSubtitle, cardClosing, cardSeconds]);
+
+  // Mirror supabase and user into refs for recorder.onstop
+  useEffect(() => {
+    supabaseRef.current = supabase;
+  }, [supabase]);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   // Load backup directory from IndexedDB on mount
   useEffect(() => {
@@ -1086,6 +1105,32 @@ export default function RecordingTab() {
           })();
         } else {
           setTakes((prev) => [...prev, newTake]);
+        }
+
+        // Auto-save to Supabase library
+        if (userRef.current && supabaseRef.current) {
+          newTake.dbSave = "pending";
+          setTakes((prev) =>
+            prev.map((t) => (t.id === takeId ? { ...t, dbSave: "pending" } : t))
+          );
+          void (async () => {
+            try {
+              await saveRecordingFile(supabaseRef.current!, userRef.current!.id, blob, {
+                name: newTake.name,
+                kind: "recording",
+                mimeType: actualMimeType,
+                durationSec: elapsedRef.current,
+              });
+              setTakes((prev) =>
+                prev.map((t) => (t.id === takeId ? { ...t, dbSave: "done" } : t))
+              );
+            } catch (err) {
+              console.error("Save to library failed:", err);
+              setTakes((prev) =>
+                prev.map((t) => (t.id === takeId ? { ...t, dbSave: "failed" } : t))
+              );
+            }
+          })();
         }
       };
 
@@ -1927,6 +1972,9 @@ export default function RecordingTab() {
                   {take.backup === "done" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Backed up</span>}
                   {take.backup === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Backup failed</span>}
                   {take.backup === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Backing up...</span>}
+                  {take.dbSave === "done" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>In library</span>}
+                  {take.dbSave === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Library save failed</span>}
+                  {take.dbSave === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Saving to library...</span>}
                   <details style={{ marginTop: 8 }}>
                     <summary style={{ cursor: "pointer", color: "var(--accent-ink)", fontWeight: 600 }}>
                       Play

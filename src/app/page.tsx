@@ -10,6 +10,7 @@ import CanvasTab from "./components/CanvasTab";
 import ContentTab from "./components/ContentTab";
 import GradingTab from "./components/GradingTab";
 import RecordingTab from "./components/RecordingTab";
+import FilesTab from "./components/FilesTab";
 import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
 import LessonPlanningForm from "./components/LessonPlanningForm";
@@ -29,7 +30,7 @@ import { parseGeneratedRubric } from "./utils/rubric";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "courses" | "course-planning" | "content" | "version-control" | "recording";
+type ActiveTab = "courses" | "course-planning" | "content" | "version-control" | "recording" | "files";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 type BuildView = "new" | "prebuilt";
 const BUILD_VIEW_KEY = "ta-build-view";
@@ -141,7 +142,7 @@ export default function Home() {
     if (saved === "grading" || saved === "canvas") return "content";
     // Pre Built Courses is now a subtab of Build Courses ("course-planning").
     if (saved === "lesson-planning") return "course-planning";
-    return saved === "courses" || saved === "course-planning" || saved === "content" || saved === "version-control" || saved === "recording" ? saved : "course-planning";
+    return saved === "courses" || saved === "course-planning" || saved === "content" || saved === "version-control" || saved === "recording" || saved === "files" ? saved : "course-planning";
   });
   const [buildView, setBuildViewState] = useState<BuildView>(() => {
     if (typeof window === "undefined") return "prebuilt";
@@ -641,6 +642,7 @@ export default function Home() {
             disableRipple
           />
           <Tab label="Recording" value="recording" disableRipple />
+          <Tab label="Files" value="files" disableRipple />
         </Tabs>
 
         {activeTab === "courses" && (
@@ -702,6 +704,8 @@ export default function Home() {
         {activeTab === "version-control" && <VersionControlTab />}
 
         {activeTab === "recording" && <RecordingTab />}
+
+        {activeTab === "files" && <FilesTab />}
 
         {activeTab === "content" && (
           <ContentTab

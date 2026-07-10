@@ -35,7 +35,7 @@ export default function RosterWindow({ onClose }: { onClose: () => void }) {
         position: "fixed",
         bottom: 90,
         right: 24,
-        width: 380,
+        width: "min(600px, calc(100vw - 48px))",
         maxHeight: "62vh",
         display: "flex",
         flexDirection: "column",

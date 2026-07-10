@@ -5,11 +5,13 @@ import {
   listMyOrgsAction,
   listOrgReposAction,
   generateStudentReposAction,
+  inviteStudentCollaboratorsAction,
   listGithubReposAction,
   listCoursesAction,
   listCourseRosterAction,
   listCourseHubAction,
   type StudentRepoResult,
+  type StudentInviteResult,
 } from "../actions";
 import type { GithubRepo } from "@/lib/github";
 import type { CanvasCourse } from "@/lib/canvas";
@@ -35,6 +37,7 @@ const VC_PREFIX_KEY = "ta-vc-prefix";
 const VC_STUDENTS_KEY = "ta-vc-students";
 const VC_PRIVATE_KEY = "ta-vc-private";
 const VC_ROSTER_FORMAT_KEY = "ta-vc-roster-format";
+const VC_INVITES_KEY = "ta-vc-invites";
 
 // "<first initial>_<last name>" (e.g. "J_Smith") from a roster entry: prefer
 // the sortable "Last, First" form; fall back to splitting the display name.
@@ -88,6 +91,11 @@ export default function VersionControlTab() {
   const [rosterNote, setRosterNote] = useState<string | null>(null);
   const [hubCourses, setHubCourses] = useState<HubCourse[]>([]);
   const [hubCourseId, setHubCourseId] = useState("");
+  const [inviteLines, setInviteLines] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_INVITES_KEY) ?? "" : ""));
+  const [invitePermission, setInvitePermission] = useState<"pull" | "push" | "maintain">("push");
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteResults, setInviteResults] = useState<StudentInviteResult[] | null>(null);
 
   const refreshOrgs = async () => {
     const r = await listMyOrgsAction();
@@ -124,7 +132,8 @@ export default function VersionControlTab() {
     localStorage.setItem(VC_STUDENTS_KEY, studentsText);
     localStorage.setItem(VC_PRIVATE_KEY, isPrivate ? "1" : "0");
     localStorage.setItem(VC_ROSTER_FORMAT_KEY, rosterFormat);
-  }, [selectedOrg, templateRepo, prefix, studentsText, isPrivate, rosterFormat]);
+    localStorage.setItem(VC_INVITES_KEY, inviteLines);
+  }, [selectedOrg, templateRepo, prefix, studentsText, isPrivate, rosterFormat, inviteLines]);
 
   // Arriving from a course in the Courses hub: open the Repos subtab with the
   // course's GitHub org (and template repo) prefilled.
@@ -243,6 +252,21 @@ export default function VersionControlTab() {
       return;
     }
     setResults(r.results);
+  };
+
+  const handleInvite = async () => {
+    const rows = inviteLines.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+    if (!selectedOrg || rows.length === 0) return;
+    setInviteBusy(true);
+    setInviteError(null);
+    setInviteResults(null);
+    const r = await inviteStudentCollaboratorsAction(selectedOrg, prefix, rows, invitePermission);
+    setInviteBusy(false);
+    if ("error" in r) {
+      setInviteError(r.error);
+      return;
+    }
+    setInviteResults(r.results);
   };
 
   const handleInsertRoster = async () => {
@@ -527,6 +551,67 @@ export default function VersionControlTab() {
               ))}
             </div>
           )}
+
+          <details className={styles.adaptDisclosure}>
+            <summary>Give students access (outside collaborators)</summary>
+            <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+              <p className={styles.fieldHint} style={{ margin: 0 }}>
+                Invites each student to their own generated repo as an outside collaborator - they are never added to the organization, so they can only ever see their own repository. One line per student: their GitHub username (when repos were generated from usernames), or &quot;student, github-username&quot; using the same student text the repos were generated from. Uses the prefix above to find each repo. Keep the org&apos;s base member permission at None if you ever add members.
+              </p>
+              <TextField
+                multiline
+                minRows={5}
+                fullWidth
+                placeholder={"jsmith-gh\nSmith, John, jsmith-gh"}
+                value={inviteLines}
+                onChange={(e) => setInviteLines(e.target.value)}
+                disabled={inviteBusy}
+                sx={{ fontFamily: "monospace" }}
+              />
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <TextField
+                  select
+                  size="small"
+                  label="Permission"
+                  value={invitePermission}
+                  onChange={(e) => setInvitePermission(e.target.value as "pull" | "push" | "maintain")}
+                  sx={{ minWidth: 130 }}
+                >
+                  <MenuItem value="push">Write (push)</MenuItem>
+                  <MenuItem value="pull">Read only</MenuItem>
+                  <MenuItem value="maintain">Maintain</MenuItem>
+                </TextField>
+                <Button
+                  variant="contained"
+                  size="small"
+                  disabled={inviteBusy || !selectedOrg || !inviteLines.trim()}
+                  onClick={() => void handleInvite()}
+                >
+                  {inviteBusy ? "Inviting..." : "Invite students"}
+                </Button>
+              </div>
+              {inviteError && <p className={styles.error}>{inviteError}</p>}
+              {inviteResults && inviteResults.map((r, i) => (
+                <div key={`${r.repo}-${r.username}-${i}`} className={styles.ghRow}>
+                  <div className={styles.ghRowTop}>
+                    <span className={styles.ghRowTitle} style={{ fontSize: "0.88rem" }}>
+                      <span className={styles.ghMetaMono}>{r.username || "(no username)"}</span> to <span className={styles.ghMetaMono}>{r.repo}</span>
+                    </span>
+                    <div className={styles.ghBadges}>
+                      {r.error ? (
+                        <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>{r.error}</span>
+                      ) : (
+                        <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Invited</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {inviteResults && !inviteResults.some((r) => r.error) && (
+                <p className={styles.fieldHint}>All invitations sent. Students accept by email or at github.com/notifications; they never become org members.</p>
+              )}
+            </div>
+          </details>
 
           {selectedOrg && <OrgManagementPanel org={selectedOrg} repos={repos} onReposChanged={() => setOrgReposNonce((n) => n + 1)} />}
         </>

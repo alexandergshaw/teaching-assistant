@@ -5858,6 +5858,13 @@ export interface StudentRepoResult {
   error?: string;
 }
 
+/** One row's outcome when inviting students to their own repos. */
+export interface StudentInviteResult {
+  repo: string;
+  username: string;
+  error?: string;
+}
+
 const repoSlug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
 /**
@@ -5924,6 +5931,50 @@ export async function generateStudentReposAction(
     return { results };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate the repositories." };
+  }
+}
+
+/**
+ * Invite students as OUTSIDE COLLABORATORS on their own generated repos - they
+ * are never added to the org, so they can only see the repo they are invited
+ * to. Each line is "github-username" (repo derived from the username) or
+ * "student, github-username" (repo derived from the student text, matching
+ * how the repos were generated).
+ */
+export async function inviteStudentCollaboratorsAction(
+  org: string,
+  prefix: string,
+  lines: string[],
+  permission: RepoPermission
+): Promise<{ results: StudentInviteResult[] } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!org.trim()) return { error: "Choose an organization." };
+    const rows = lines.map((l) => l.trim()).filter(Boolean);
+    if (rows.length === 0) return { error: "Add at least one student line." };
+    const base = prefix.trim() ? repoSlug(prefix) : "";
+    const results: StudentInviteResult[] = [];
+    for (const row of rows) {
+      const idx = row.lastIndexOf(",");
+      const left = idx === -1 ? row : row.slice(0, idx).trim();
+      const right = idx === -1 ? "" : row.slice(idx + 1).trim();
+      const username = (right || left).replace(/^@/, "");
+      const suffix = repoSlug(right ? left : username) || "student";
+      const repo = (base ? `${base}-${suffix}` : suffix).slice(0, 95);
+      if (!username) {
+        results.push({ repo, username: "", error: "Missing username" });
+        continue;
+      }
+      try {
+        await setRepoCollaborator(org.trim(), repo, username, permission);
+        results.push({ repo, username });
+      } catch (err) {
+        results.push({ repo, username, error: err instanceof Error ? err.message : "Failed" });
+      }
+    }
+    return { results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not send the invitations." };
   }
 }
 

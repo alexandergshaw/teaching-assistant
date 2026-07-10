@@ -15,9 +15,11 @@ import {
   deleteCourseFileAction,
   deleteModuleAction,
   deleteModuleItemAction,
+  draftAssignmentDescriptionAction,
   generateDocumentTextAction,
   generateSlidesAction,
   getGradableAction,
+  listAssignmentGroupsAction,
   listRubricsAction,
   previewFileAction,
   revisePageWithAiAction,
@@ -27,7 +29,7 @@ import {
   updateModuleItemAction,
   updatePageAction,
 } from "../../actions";
-import { useLlmProvider } from "@/lib/llm-provider";
+import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { resolveDocumentAuthor } from "@/lib/author";
@@ -150,6 +152,16 @@ export function ModulesView({
   const [naPublish, setNaPublish] = useState(true);
   const [naModuleId, setNaModuleId] = useState<string>("");
   const [naBusy, setNaBusy] = useState(false);
+  const [naUnlock, setNaUnlock] = useState("");
+  const [naLock, setNaLock] = useState("");
+  const [naGrading, setNaGrading] = useState("points");
+  const [naAttempts, setNaAttempts] = useState("unlimited");
+  const [naExtensions, setNaExtensions] = useState("");
+  const [naPeer, setNaPeer] = useState(false);
+  const [naOmit, setNaOmit] = useState(false);
+  const [naGroupId, setNaGroupId] = useState("");
+  const [naGroups, setNaGroups] = useState<Array<{ id: number; name: string }> | null>(null);
+  const [naDrafting, setNaDrafting] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [confirmId, setConfirmId] = useState<string | null>(null);
   // Filter modules by name or by a contained item's title.
@@ -1389,16 +1401,55 @@ export function ModulesView({
     setNaBusy(true);
     const r = await createCourseAssignmentAction(
       courseUrl,
-      { name: naName, description: naDescription, pointsPossible: naPoints.trim() ? Number(naPoints) : null, dueAt: naDue, submissionType: naType, published: naPublish },
+      {
+        name: naName,
+        description: naDescription,
+        pointsPossible: naPoints.trim() ? Number(naPoints) : null,
+        dueAt: naDue,
+        submissionType: naType,
+        published: naPublish,
+        unlockAt: naUnlock,
+        lockAt: naLock,
+        gradingType: naGrading,
+        allowedAttempts: naAttempts === "unlimited" ? -1 : Number(naAttempts),
+        allowedExtensions: naType === "online_upload" ? naExtensions : "",
+        peerReviews: naPeer,
+        omitFromFinalGrade: naOmit,
+        assignmentGroupId: naGroupId ? Number(naGroupId) : null,
+      },
       naModuleId ? Number(naModuleId) : null,
       acronym
     );
     setNaBusy(false);
-    if ("error" in r) { setNote({ kind: "error", text: r.error }); return; }
+    if ("error" in r) {
+      setNote({ kind: "error", text: r.error });
+      return;
+    }
     setNote({ kind: "success", text: `Created "${r.name}"${r.addedToModule ? " and added it to the module" : ""}.` });
     setShowNewAssignment(false);
-    setNaName(""); setNaDescription(""); setNaDue("");
+    setNaName("");
+    setNaDescription("");
+    setNaDue("");
+    setNaUnlock("");
+    setNaLock("");
+    setNaGrading("points");
+    setNaAttempts("unlimited");
+    setNaExtensions("");
+    setNaPeer(false);
+    setNaOmit(false);
+    setNaGroupId("");
     reload();
+  };
+
+  const handleDraftDescription = async () => {
+    setNaDrafting(true);
+    const r = await draftAssignmentDescriptionAction(naName, naDescription, getStoredProvider());
+    setNaDrafting(false);
+    if ("error" in r) {
+      setNote({ kind: "error", text: r.error });
+      return;
+    }
+    setNaDescription(r.text);
   };
 
   const saveModuleName = async (m: CanvasModule) => {
@@ -2507,7 +2558,18 @@ export function ModulesView({
           <Button
             variant="outlined"
             size="small"
-            onClick={() => setShowNewAssignment((v) => !v)}
+            onClick={() => {
+              setShowNewAssignment((v) => {
+                const next = !v;
+                if (next && naGroups === null) {
+                  void (async () => {
+                    const r = await listAssignmentGroupsAction(courseUrl, acronym);
+                    if (!("error" in r)) setNaGroups(r.groups);
+                  })();
+                }
+                return next;
+              });
+            }}
           >
             {showNewAssignment ? "Cancel assignment" : "New assignment"}
           </Button>
@@ -2532,6 +2594,20 @@ export function ModulesView({
                 sx={{ width: 100 }}
               />
               <TextField
+                select
+                size="small"
+                label="Grading"
+                value={naGrading}
+                onChange={(e) => setNaGrading(e.target.value)}
+                sx={{ minWidth: 130 }}
+              >
+                <MenuItem value="points">Points</MenuItem>
+                <MenuItem value="percent">Percentage</MenuItem>
+                <MenuItem value="pass_fail">Pass/fail</MenuItem>
+                <MenuItem value="letter_grade">Letter grade</MenuItem>
+                <MenuItem value="not_graded">Not graded</MenuItem>
+              </TextField>
+              <TextField
                 size="small"
                 type="datetime-local"
                 label="Due"
@@ -2540,6 +2616,40 @@ export function ModulesView({
                 slotProps={{ inputLabel: { shrink: true } }}
                 sx={{ width: 210 }}
               />
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <TextField
+                size="small"
+                type="datetime-local"
+                label="Available from"
+                value={naUnlock}
+                onChange={(e) => setNaUnlock(e.target.value)}
+                slotProps={{ inputLabel: { shrink: true } }}
+                sx={{ width: 200 }}
+              />
+              <TextField
+                size="small"
+                type="datetime-local"
+                label="Until"
+                value={naLock}
+                onChange={(e) => setNaLock(e.target.value)}
+                slotProps={{ inputLabel: { shrink: true } }}
+                sx={{ width: 200 }}
+              />
+              <TextField
+                select
+                size="small"
+                label="Attempts"
+                value={naAttempts}
+                onChange={(e) => setNaAttempts(e.target.value)}
+                sx={{ minWidth: 120 }}
+              >
+                <MenuItem value="unlimited">Unlimited</MenuItem>
+                <MenuItem value="1">1</MenuItem>
+                <MenuItem value="2">2</MenuItem>
+                <MenuItem value="3">3</MenuItem>
+                <MenuItem value="5">5</MenuItem>
+              </TextField>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <TextField
@@ -2556,6 +2666,16 @@ export function ModulesView({
                 <MenuItem value="on_paper">On paper</MenuItem>
                 <MenuItem value="none">No submission</MenuItem>
               </TextField>
+              {naType === "online_upload" && (
+                <TextField
+                  size="small"
+                  label="Allowed extensions"
+                  placeholder="pdf,docx"
+                  value={naExtensions}
+                  onChange={(e) => setNaExtensions(e.target.value)}
+                  sx={{ width: 170 }}
+                />
+              )}
               <TextField
                 select
                 size="small"
@@ -2571,6 +2691,29 @@ export function ModulesView({
                   </MenuItem>
                 ))}
               </TextField>
+              <TextField
+                select
+                size="small"
+                label="Assignment group"
+                value={naGroupId}
+                onChange={(e) => setNaGroupId(e.target.value)}
+                sx={{ minWidth: 180 }}
+              >
+                <MenuItem value="">{naGroups === null ? "Loading…" : "Default group"}</MenuItem>
+                {(naGroups ?? []).map((g) => (
+                  <MenuItem key={g.id} value={String(g.id)}>
+                    {g.name}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <FormControlLabel
+                control={<Checkbox size="small" checked={naPeer} onChange={(e) => setNaPeer(e.target.checked)} />}
+                label="Peer reviews"
+              />
+              <FormControlLabel
+                control={<Checkbox size="small" checked={naOmit} onChange={(e) => setNaOmit(e.target.checked)} />}
+                label="Omit from final grade"
+              />
               <FormControlLabel
                 control={<Checkbox size="small" checked={naPublish} onChange={(e) => setNaPublish(e.target.checked)} />}
                 label="Publish"
@@ -2584,6 +2727,19 @@ export function ModulesView({
               value={naDescription}
               onChange={(e) => setNaDescription(e.target.value)}
             />
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <Button
+                variant="text"
+                size="small"
+                disabled={naDrafting || !naName.trim()}
+                onClick={() => void handleDraftDescription()}
+              >
+                {naDrafting ? "Drafting…" : "Draft with AI"}
+              </Button>
+              <span style={{ fontSize: "0.875rem", color: "var(--text-secondary, rgba(0,0,0,0.6))" }}>
+                Uses the assignment name plus whatever is already in the description as guidance.
+              </span>
+            </div>
             <div style={{ display: "flex", gap: 8 }}>
               <Button
                 variant="contained"

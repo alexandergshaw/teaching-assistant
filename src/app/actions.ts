@@ -155,6 +155,7 @@ import {
   appendOfficeParagraph,
   listScannableFiles,
   createAssignment,
+  listAssignmentGroups,
   type NewAssignment,
 } from "@/lib/canvas-modules";
 import type { OfficeImage } from "@/lib/office-edit";
@@ -2182,6 +2183,50 @@ export async function createCourseAssignmentAction(
     return { ...created, addedToModule };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not create the assignment." };
+  }
+}
+
+/** List the course's assignment groups for the assignment editor. */
+export async function listAssignmentGroupsAction(
+  courseUrl: string,
+  acronym?: string
+): Promise<{ groups: Array<{ id: number; name: string }> } | { error: string }> {
+  try {
+    await requireOwner();
+    return { groups: await listAssignmentGroups(courseUrl, acronym) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load assignment groups." };
+  }
+}
+
+/** Draft an assignment description for the LMS editor. */
+export async function draftAssignmentDescriptionAction(
+  name: string,
+  notes: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ text: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!name.trim()) return { error: "Name the assignment first." };
+    const parts: LlmPart[] = [
+      {
+        text: [
+          `Write a Canvas assignment description for an assignment named: ${name.trim()}.`,
+          notes.trim() ? `Instructor notes to incorporate:\n${notes.trim()}` : "",
+          "Structure: one short overview paragraph, then a short list of concrete requirements/steps, then a one-line submission note. Plain text only (no markdown headings, no asterisks) - use blank lines between sections and hyphen bullets. Under 220 words.",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      },
+    ];
+    const r = await callLlm(
+      { contents: [{ role: "user", parts }], generationConfig: { temperature: 0.5, maxOutputTokens: 1024 } },
+      provider
+    );
+    if (!r.ok || !r.text.trim()) return { error: "The model returned no description." };
+    return { text: r.text.trim() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not draft the description." };
   }
 }
 

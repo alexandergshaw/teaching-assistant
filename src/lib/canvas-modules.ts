@@ -335,6 +335,19 @@ export interface NewAssignment {
   /** Canvas submission type, e.g. online_text_entry / online_upload / online_url / on_paper / none. */
   submissionType: string;
   published: boolean;
+  /** ISO datetime or "" - when students can start. */
+  unlockAt?: string;
+  /** ISO datetime or "" - until when they can submit. */
+  lockAt?: string;
+  /** points | percent | pass_fail | letter_grade | not_graded */
+  gradingType?: string;
+  /** -1 = unlimited. */
+  allowedAttempts?: number;
+  /** Comma-separated list like "pdf,docx" (only for online_upload). */
+  allowedExtensions?: string;
+  peerReviews?: boolean;
+  omitFromFinalGrade?: boolean;
+  assignmentGroupId?: number | null;
 }
 
 /** Create an assignment in the course. Returns its id, name, and URL. */
@@ -352,6 +365,18 @@ export async function createAssignment(
   if (a.dueAt.trim()) params.append("assignment[due_at]", new Date(a.dueAt).toISOString());
   params.append("assignment[submission_types][]", a.submissionType || "online_text_entry");
   params.append("assignment[published]", a.published ? "true" : "false");
+  if (a.unlockAt?.trim()) params.append("assignment[unlock_at]", new Date(a.unlockAt).toISOString());
+  if (a.lockAt?.trim()) params.append("assignment[lock_at]", new Date(a.lockAt).toISOString());
+  if (a.gradingType?.trim()) params.append("assignment[grading_type]", a.gradingType);
+  if (typeof a.allowedAttempts === "number" && a.allowedAttempts !== 0) params.append("assignment[allowed_attempts]", String(a.allowedAttempts));
+  if (a.allowedExtensions?.trim()) {
+    for (const ext of a.allowedExtensions.split(",").map((x) => x.trim().replace(/^\./, "")).filter(Boolean)) {
+      params.append("assignment[allowed_extensions][]", ext);
+    }
+  }
+  if (a.peerReviews) params.append("assignment[peer_reviews]", "true");
+  if (a.omitFromFinalGrade) params.append("assignment[omit_from_final_grade]", "true");
+  if (typeof a.assignmentGroupId === "number") params.append("assignment[assignment_group_id]", String(a.assignmentGroupId));
   const raw = await writeJson<{ id?: number; name?: string; html_url?: string }>(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/assignments`,
     "POST",
@@ -364,6 +389,21 @@ export async function createAssignment(
     name: raw.name ?? a.name,
     htmlUrl: raw.html_url ?? "",
   };
+}
+
+/** The course's assignment groups (for the editor's group picker). */
+export async function listAssignmentGroups(courseUrl: string, code?: string): Promise<Array<{ id: number; name: string }>> {
+  const ctx = resolveCourse(courseUrl, code);
+  const raw = await fetchAll<{ id?: number; name?: string }>(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/assignment_groups?per_page=100`,
+    ctx
+  );
+  return raw
+    .filter((g) => typeof g.id === "number")
+    .map((g) => ({
+      id: g.id!,
+      name: (g.name ?? "").trim() || `Group ${g.id}`,
+    }));
 }
 
 /**

@@ -1,16 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, TextField, FormControlLabel, Checkbox } from "@mui/material";
+import { Button, TextField, FormControlLabel, Checkbox, MenuItem } from "@mui/material";
 import { describeScreenRecordingAction, type ScreenCaption } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { listBackupVideos, readBackupFile, type BackupVideo, type DirHandle } from "@/lib/backup-dir";
-import { activeCaptionAt, wrapCaptionLines, captionLayout, ensureFiniteDuration } from "@/lib/caption-burn";
-import { saveRecordingFile, extForMime } from "@/lib/recording-files";
+import { activeCaptionAt, wrapCaptionLines, captionLayout, ensureFiniteDuration, captionBlockBaselineY, vttLineSetting, type CaptionPosition } from "@/lib/caption-burn";
+import { saveRecordingFile, extForMime, listRecordingFiles, downloadRecordingFile, renameRecordingFile, type RecordingFile } from "@/lib/recording-files";
 import { startFrameTicker } from "@/lib/frame-ticker";
 import { useSupabase } from "@/context/SupabaseProvider";
 import type { Take } from "./RecordingTab";
 import styles from "../page.module.css";
+
+type EditableCaption = ScreenCaption & { position?: CaptionPosition };
 
 // Context the Recording page already knows (script + title cards), persisted
 // in localStorage - harvested so captions understand what the video is about.
@@ -63,20 +65,23 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
   const [pageContextSummary, setPageContextSummary] = useState("");
   const [busy, setBusy] = useState<"idle" | "sampling" | "describing">("idle");
   const [error, setError] = useState<string | null>(null);
-  const [captions, setCaptions] = useState<ScreenCaption[] | null>(null);
-  const [vttUrl, setVttUrl] = useState<string | null>(null);
+  const [captions, setCaptions] = useState<EditableCaption[] | null>(null);
   const [folderVideos, setFolderVideos] = useState<BackupVideo[] | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
+  const [libraryVideos, setLibraryVideos] = useState<RecordingFile[] | null>(null);
+  const [libraryBusy, setLibraryBusy] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importingKey, setImportingKey] = useState<string | null>(null);
+  const [playhead, setPlayhead] = useState(0);
   const [burning, setBurning] = useState(false);
   const [burnProgress, setBurnProgress] = useState(0);
   const [burnError, setBurnError] = useState<string | null>(null);
   const [burned, setBurned] = useState<{ url: string; name: string; mimeType: string } | null>(null);
+  const [burnedRow, setBurnedRow] = useState<RecordingFile | null>(null);
   const [burnSave, setBurnSave] = useState<"idle" | "saving" | "done" | "failed">("idle");
+  const [renameNote, setRenameNote] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const prevVttUrlRef = useRef<string | null>(null);
   const burnAbortRef = useRef<(() => void) | null>(null);
   const burnedUrlRef = useRef<string | null>(null);
   const videoUrlRef = useRef<string | null>(null);
@@ -87,6 +92,13 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     const m = Math.floor(sec / 60);
     const s = Math.floor(sec % 60);
     return `${m}:${String(s).padStart(2, "0")}`;
+  };
+
+  const fmtTimeMs = (sec: number): string => {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    const ds = Math.round((sec % 1) * 10);
+    return `${m}:${String(s).padStart(2, "0")}.${ds}`;
   };
 
   const adoptVideo = useCallback((blob: Blob, name: string) => {
@@ -171,6 +183,32 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     }
   };
 
+  const handleBrowseLibrary = async () => {
+    if (!supabase || !user) return;
+    setLibraryBusy(true);
+    setImportError(null);
+    try {
+      const files = await listRecordingFiles(supabase, user.id);
+      setLibraryVideos(files);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Could not load library.");
+    } finally {
+      setLibraryBusy(false);
+    }
+  };
+
+  const handleImportLibraryVideo = async (file: RecordingFile) => {
+    setImportingKey("lib:" + file.id);
+    try {
+      const blob = await downloadRecordingFile(supabase, file);
+      adoptVideo(blob, file.name + "." + extForMime(file.mimeType));
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Could not load that video.");
+    } finally {
+      setImportingKey(null);
+    }
+  };
+
   const extractFrames = useCallback(async (): Promise<{ frames: Array<{ timeSec: number; base64: string }>; dur: number }> => {
     if (!videoUrl) throw new Error("No video URL");
     return new Promise((resolve, reject) => {
@@ -242,28 +280,13 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     for (let i = 0; i < captions.length; i++) {
       const c = captions[i];
       lines.push(`${i + 1}`);
-      lines.push(`${vttTime(c.start)} --> ${vttTime(c.end)}`);
+      const positionSetting = vttLineSetting(c.position);
+      lines.push(`${vttTime(c.start)} --> ${vttTime(c.end)}${positionSetting}`);
       lines.push(c.text);
       lines.push("");
     }
     return lines.join("\n");
   }, [captions]);
-
-  useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
-    if (captions) {
-      const vtt = buildVttContent();
-      const blob = new Blob([vtt], { type: "text/vtt" });
-      if (prevVttUrlRef.current) URL.revokeObjectURL(prevVttUrlRef.current);
-      const newUrl = URL.createObjectURL(blob);
-      prevVttUrlRef.current = newUrl;
-      setVttUrl(newUrl);
-    } else if (prevVttUrlRef.current) {
-      URL.revokeObjectURL(prevVttUrlRef.current);
-      prevVttUrlRef.current = null;
-      setVttUrl(null);
-    }
-  }, [captions, buildVttContent]);
 
   const handleDownloadVtt = useCallback(() => {
     if (!captions) return;
@@ -284,19 +307,42 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     navigator.clipboard.writeText(text);
   }, [captions]);
 
-  const handleUpdateCaption = useCallback((i: number, text: string) => {
+  const updateCue = useCallback((i: number, patch: Partial<EditableCaption>) => {
     setCaptions((prev) => {
       if (!prev) return prev;
       const next = [...prev];
-      next[i] = { ...next[i], text };
+      const updated = { ...next[i], ...patch };
+      updated.start = Math.max(0, updated.start);
+      updated.end = Math.max(updated.start + 0.1, updated.end);
+      next[i] = updated;
       return next;
     });
   }, []);
+
+  const sortCaptions = useCallback(() => {
+    setCaptions((prev) => {
+      if (!prev) return prev;
+      return [...prev].sort((a, b) => a.start - b.start);
+    });
+  }, []);
+
+  const handleUpdateCaption = useCallback((i: number, text: string) => {
+    updateCue(i, { text });
+  }, [updateCue]);
 
   const handleRemoveCaption = useCallback((i: number) => {
     setCaptions((prev) => {
       if (!prev) return prev;
       return prev.filter((_, idx) => idx !== i);
+    });
+  }, []);
+
+  const handleAddCaptionAtPlayhead = useCallback(() => {
+    const t = Math.round((videoRef.current?.currentTime ?? 0) * 10) / 10;
+    setCaptions((prev) => {
+      const next = prev ? [...prev] : [];
+      next.push({ start: t, end: t + 2, text: "New caption", position: "bottom" });
+      return next.sort((a, b) => a.start - b.start);
     });
   }, []);
 
@@ -311,6 +357,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     setBurning(true);
     setBurnProgress(0);
     setBurnSave("idle");
+    setBurnedRow(null);
 
     let audioContext: AudioContext | null = null;
     let cancelled = false;
@@ -392,7 +439,10 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
             mimeType: blob.type || "video/webm",
             durationSec: dur,
           })
-            .then(() => setBurnSave("done"))
+            .then((result) => {
+              setBurnedRow(result);
+              setBurnSave("done");
+            })
             .catch((err) => {
               console.error("Save failed:", err);
               setBurnSave("failed");
@@ -427,8 +477,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
           const layout = captionLayout(canvas.width, canvas.height);
           ctx.font = `600 ${layout.fontPx}px system-ui, sans-serif`;
           const lines = wrapCaptionLines(cue.text, layout.maxTextWidth, (s) => ctx.measureText(s).width);
-
-          let baselineY = canvas.height - layout.bottomMargin - layout.padY;
+          let baselineY = captionBlockBaselineY(canvas.height, layout, lines.length, cue.position);
 
           for (let i = lines.length - 1; i >= 0; i--) {
             const line = lines[i];
@@ -509,7 +558,6 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
   useEffect(() => {
     return () => {
       if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current);
-      if (prevVttUrlRef.current) URL.revokeObjectURL(prevVttUrlRef.current);
       if (burnedUrlRef.current) URL.revokeObjectURL(burnedUrlRef.current);
       burnAbortRef.current?.();
     };
@@ -531,12 +579,20 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
           Choose video
         </Button>
         <input ref={fileInputRef} type="file" accept="video/*" style={{ display: "none" }} onChange={handleFileChange} />
-        {fileName && <span className={styles.ghMeta} style={{ marginLeft: 12 }}>{fileName}</span>}
+        {fileName && (
+          <TextField
+            size="small"
+            label="Video name"
+            value={fileName}
+            onChange={(e) => setFileName(e.target.value)}
+            style={{ marginLeft: 12, width: 200 }}
+          />
+        )}
       </div>
 
       {importError && <p className={styles.error}>{importError}</p>}
 
-      {(takes.length > 0 || backupDir) && (
+      {(takes.length > 0 || backupDir || user) && (
         <div className={styles.field}>
           <p className={styles.fieldHint} style={{ margin: 0 }}>Or import a video you have already saved:</p>
 
@@ -570,6 +626,28 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
               ))}
             </div>
           )}
+
+          {user && (
+            <div>
+              <Button variant="text" size="small" disabled={libraryBusy} onClick={() => void handleBrowseLibrary()}>
+                {libraryBusy ? "Loading library..." : libraryVideos ? "Refresh library" : "Browse library"}
+              </Button>
+              {libraryVideos && libraryVideos.length === 0 && <p className={styles.fieldHint} style={{ margin: 0 }}>No saved videos in your library.</p>}
+              {libraryVideos && libraryVideos.map((v) => (
+                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+                  <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
+                    {v.name} - {v.kind === "recording" ? "Recording" : "Captioned"}
+                    {v.durationSec && ` - ${fmtTime(v.durationSec)}`}
+                    {" "}
+                    - {(v.sizeBytes / 1048576).toFixed(1)} MB
+                  </span>
+                  <Button variant="outlined" size="small" disabled={importingKey !== null} onClick={() => void handleImportLibraryVideo(v)}>
+                    {importingKey === "lib:" + v.id ? "Importing..." : "Import"}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -594,20 +672,60 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
       </div>
 
       {videoUrl && (
-        <video
-          key={videoUrl}
-          ref={videoRef}
-          controls
-          playsInline
-          preload="auto"
-          src={videoUrl}
-          style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 12, background: "#0f172a" }}
-          onError={() => setError("The browser could not decode this video. Try re-importing it, or convert it to MP4/WebM.")}
-        >
-          {vttUrl && (
-            <track kind="subtitles" src={vttUrl} srcLang="en" label="AI captions" default />
+        <div style={{ position: "relative", maxWidth: "100%", display: "inline-block" }}>
+          <video
+            key={videoUrl}
+            ref={videoRef}
+            controls
+            playsInline
+            preload="auto"
+            src={videoUrl}
+            style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 12, background: "#0f172a", display: "block" }}
+            onError={() => setError("The browser could not decode this video. Try re-importing it, or convert it to MP4/WebM.")}
+            onTimeUpdate={(e) => setPlayhead(e.currentTarget.currentTime)}
+            onSeeked={(e) => setPlayhead(e.currentTarget.currentTime)}
+          />
+          {captions && (
+            (() => {
+              const activeCue = captions.find((c) => c.start <= playhead && playhead < c.end) ?? null;
+              if (!activeCue) return null;
+              const positionStyle = activeCue.position === "middle"
+                ? { top: "50%", transform: "translateY(-50%)" }
+                : activeCue.position === "top"
+                  ? { top: "6%" }
+                  : { bottom: "6%" };
+              return (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    pointerEvents: "none",
+                    display: "flex",
+                    justifyContent: "center",
+                    ...positionStyle,
+                  }}
+                >
+                  <span
+                    style={{
+                      background: "rgba(15,23,42,0.78)",
+                      color: "#f8fafc",
+                      padding: "4px 10px",
+                      borderRadius: 8,
+                      fontSize: "0.9rem",
+                      fontWeight: 600,
+                      maxWidth: "88%",
+                      textAlign: "center",
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    {activeCue.text}
+                  </span>
+                </div>
+              );
+            })()
           )}
-        </video>
+        </div>
       )}
 
       <Button
@@ -627,18 +745,121 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
 
       {captions && (
         <div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 16 }}>
             {captions.map((c, i) => (
-              <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0" }}>
-                <span className={styles.ghMetaMono} style={{ flexShrink: 0 }}>
-                  {fmtTime(c.start)}-{fmtTime(c.end)}
+              <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "8px 0", flexWrap: "wrap" }}>
+                <span className={styles.ghMetaMono} style={{ flexShrink: 0, minWidth: 50 }}>
+                  {fmtTimeMs(c.start)}-{fmtTimeMs(c.end)}
                 </span>
+
+                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                  <TextField
+                    size="small"
+                    label="Start s"
+                    type="number"
+                    value={Number(c.start.toFixed(1))}
+                    onChange={(e) => updateCue(i, { start: parseFloat(e.target.value) || 0 })}
+                    onBlur={() => sortCaptions()}
+                    style={{ width: 90 }}
+                  />
+                  <Button
+                    variant="text"
+                    size="small"
+                    onClick={() => updateCue(i, { start: Math.max(0, c.start - 0.5) })}
+                    title="Nudge start earlier"
+                  >
+                    -0.5
+                  </Button>
+                  <Button
+                    variant="text"
+                    size="small"
+                    onClick={() => updateCue(i, { start: c.start + 0.5 })}
+                    title="Nudge start later"
+                  >
+                    +0.5
+                  </Button>
+                  <Button
+                    variant="text"
+                    size="small"
+                    onClick={() => {
+                      const t = Math.round((videoRef.current?.currentTime ?? 0) * 10) / 10;
+                      updateCue(i, { start: t });
+                    }}
+                  >
+                    Set start
+                  </Button>
+                </div>
+
+                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                  <TextField
+                    size="small"
+                    label="End s"
+                    type="number"
+                    value={Number(c.end.toFixed(1))}
+                    onChange={(e) => updateCue(i, { end: parseFloat(e.target.value) || c.start + 0.1 })}
+                    onBlur={() => sortCaptions()}
+                    style={{ width: 90 }}
+                  />
+                  <Button
+                    variant="text"
+                    size="small"
+                    onClick={() => updateCue(i, { end: Math.max(c.start + 0.1, c.end - 0.5) })}
+                    title="Nudge end earlier"
+                  >
+                    -0.5
+                  </Button>
+                  <Button
+                    variant="text"
+                    size="small"
+                    onClick={() => updateCue(i, { end: c.end + 0.5 })}
+                    title="Nudge end later"
+                  >
+                    +0.5
+                  </Button>
+                  <Button
+                    variant="text"
+                    size="small"
+                    onClick={() => {
+                      const t = Math.round((videoRef.current?.currentTime ?? 0) * 10) / 10;
+                      updateCue(i, { end: Math.max(c.start + 0.1, t) });
+                    }}
+                  >
+                    Set end
+                  </Button>
+                </div>
+
+                <Button
+                  variant="text"
+                  size="small"
+                  onClick={() => {
+                    const v = videoRef.current;
+                    if (v) v.currentTime = c.start;
+                  }}
+                >
+                  Jump
+                </Button>
+
+                <TextField
+                  select
+                  size="small"
+                  label="Position"
+                  value={c.position ?? "bottom"}
+                  onChange={(e) => updateCue(i, { position: e.target.value as CaptionPosition })}
+                  style={{ minWidth: 100 }}
+                >
+                  <MenuItem value="bottom">Bottom</MenuItem>
+                  <MenuItem value="middle">Middle</MenuItem>
+                  <MenuItem value="top">Top</MenuItem>
+                </TextField>
+
                 <TextField
                   size="small"
                   fullWidth
                   value={c.text}
                   onChange={(e) => handleUpdateCaption(i, e.target.value)}
+                  style={{ minWidth: 200, flex: 1 }}
                 />
+
                 <Button
                   variant="text"
                   size="small"
@@ -650,6 +871,10 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
               </div>
             ))}
           </div>
+
+          <Button variant="outlined" size="small" onClick={handleAddCaptionAtPlayhead} style={{ marginTop: 12 }}>
+            Add caption at playhead
+          </Button>
 
           <div className={styles.ghActions} style={{ marginTop: 16, display: "flex", gap: 12 }}>
             <Button variant="contained" size="small" onClick={handleDownloadVtt}>
@@ -687,7 +912,38 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
                 src={burned.url}
                 style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 12, background: "#0f172a" }}
               />
-              <div className={styles.ghActions}>
+              {burnedRow && (
+                <div style={{ marginTop: 8 }}>
+                  <TextField
+                    size="small"
+                    label="Name"
+                    value={burned.name}
+                    onChange={(e) => {
+                      setBurned({ ...burned, name: e.target.value });
+                      setRenameNote(null);
+                    }}
+                    onBlur={async (e) => {
+                      const newName = e.currentTarget.value.trim();
+                      if (newName && newName !== burned.name) {
+                        try {
+                          await renameRecordingFile(supabase, burnedRow.id, newName);
+                          setRenameNote("Renamed in library.");
+                          setBurned({ ...burned, name: newName });
+                        } catch (err) {
+                          setRenameNote(err instanceof Error ? err.message : "Rename failed");
+                        }
+                      }
+                    }}
+                    style={{ marginRight: 8 }}
+                  />
+                  {renameNote && (
+                    <p className={styles.fieldHint} style={{ margin: 0, marginTop: 4 }}>
+                      {renameNote}
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className={styles.ghActions} style={{ marginTop: 8 }}>
                 <Button
                   variant="contained"
                   size="small"

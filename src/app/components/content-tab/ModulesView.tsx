@@ -22,6 +22,7 @@ import {
   listAssignmentGroupsAction,
   listRubricsAction,
   previewFileAction,
+  requestFileUploadAction,
   revisePageWithAiAction,
   setModuleDueDatesAction,
   updateGradableAction,
@@ -33,6 +34,8 @@ import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { resolveDocumentAuthor } from "@/lib/author";
+import { useSupabase } from "@/context/SupabaseProvider";
+import { listRecordingFiles, downloadRecordingFile, extForMime, type RecordingFile } from "@/lib/recording-files";
 import type {
   BulkKind,
   CanvasAddableContent,
@@ -111,6 +114,7 @@ export function ModulesView({
   canCopy: boolean;
 }) {
   const [provider] = useLlmProvider();
+  const { supabase, user } = useSupabase();
   // Resizable sticky header: null = natural height; a number caps the body's
   // height (it scrolls) so the module list below gets more room. Persisted.
   const headerBodyRef = useRef<HTMLDivElement>(null);
@@ -199,6 +203,12 @@ export function ModulesView({
   const [addAiBusy, setAddAiBusy] = useState<Record<number, boolean>>({});
   // Per-module "New Assignment" creation: name, points, due date, submission type, published.
   const [newAsg, setNewAsg] = useState<Record<number, { name: string; points: string; due: string; stype: string; publish: boolean }>>({});
+  // Video picker state: which module (if any) has the picker open, and the loaded files.
+  const [videoPickerModuleId, setVideoPickerModuleId] = useState<number | null>(null);
+  const [videoPickerFiles, setVideoPickerFiles] = useState<RecordingFile[] | null>(null);
+  const [videoPickerLoading, setVideoPickerLoading] = useState(false);
+  const [videoPickerError, setVideoPickerError] = useState<string | null>(null);
+  const [videoPickerBusy, setVideoPickerBusy] = useState(false);
 
   // ── Bulk selection across the module tree ──────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -1714,6 +1724,7 @@ export function ModulesView({
     if (type === "ExternalUrl") return !!(addUrl[m.id] ?? "").trim();
     if (type === "SubHeader") return !!(addTitle[m.id] ?? "").trim();
     if (type === "File") return (addFileContent[m.id] ?? "").trim() !== "";
+    if (type === "VideoLibrary") return false;
     return false;
   };
 
@@ -1842,6 +1853,96 @@ export function ModulesView({
       }
     }
     reload();
+  };
+
+  // Open the video picker for a module, loading files from the library.
+  const openVideoPicker = async (m: CanvasModule) => {
+    if (!user) {
+      setVideoPickerError("Sign in to use the library.");
+      return;
+    }
+    setVideoPickerModuleId(m.id);
+    setVideoPickerFiles(null);
+    setVideoPickerError(null);
+    setVideoPickerLoading(true);
+    try {
+      const files = await listRecordingFiles(supabase, user.id);
+      setVideoPickerFiles(files);
+      if (files.length === 0) {
+        setVideoPickerError("No saved videos yet - record something on the Recording tab.");
+      }
+    } catch (err) {
+      setVideoPickerError(err instanceof Error ? err.message : "Failed to load library");
+    } finally {
+      setVideoPickerLoading(false);
+    }
+  };
+
+  // Close the video picker.
+  const closeVideoPicker = () => {
+    setVideoPickerModuleId(null);
+    setVideoPickerFiles(null);
+    setVideoPickerError(null);
+  };
+
+  // Add a video from the library to a module.
+  const addVideoFromLibrary = async (m: CanvasModule, file: RecordingFile) => {
+    setVideoPickerBusy(true);
+    setNote(null);
+    try {
+      const blob = await downloadRecordingFile(supabase, file);
+      const fileName = `${file.name.replace(/[^a-z0-9 _-]/gi, "_")}.${extForMime(file.mimeType)}`;
+
+      const ticket = await requestFileUploadAction(
+        courseUrl,
+        {
+          name: fileName,
+          size: blob.size,
+          contentType: file.mimeType,
+          folderPath: "uploads",
+        },
+        acronym
+      );
+
+      if ("error" in ticket) throw new Error(ticket.error);
+
+      const form = new FormData();
+      for (const [k, v] of Object.entries(ticket.ticket.uploadParams)) {
+        form.append(k, v);
+      }
+      form.append("file", blob, fileName);
+
+      const up = await fetch(ticket.ticket.uploadUrl, {
+        method: "POST",
+        body: form,
+      });
+
+      if (!up.ok) {
+        throw new Error(`Upload to Canvas failed (HTTP ${up.status}).`);
+      }
+
+      const uploaded = (await up.json().catch(() => null)) as { id?: number } | null;
+      if (typeof uploaded?.id !== "number") {
+        throw new Error("Canvas did not return the uploaded file id.");
+      }
+
+      const result = await createModuleItemAction(
+        courseUrl,
+        m.id,
+        { type: "File", contentId: uploaded.id, title: file.name },
+        acronym
+      );
+
+      if ("error" in result) throw new Error(result.error);
+
+      setNote({ kind: "success", text: `Added "${file.name}" to the module.` });
+      closeVideoPicker();
+      reload();
+    } catch (err) {
+      setNote({ kind: "error", text: err instanceof Error ? err.message : "Failed to add video" });
+    } finally {
+      setVideoPickerBusy(false);
+    }
   };
 
   const arrowBtn = (label: string, onClick: () => void, disabled: boolean) => (
@@ -3190,6 +3291,9 @@ export function ModulesView({
                     onChange={(e) => {
                       const t = e.target.value;
                       setAddType((p) => ({ ...p, [m.id]: t }));
+                      if (t === "VideoLibrary") {
+                        void openVideoPicker(m);
+                      }
                     }}
                     disabled={busy}
                     aria-label="Item type"
@@ -3198,6 +3302,7 @@ export function ModulesView({
                     <MenuItem value="File">File (AI generated)</MenuItem>
                     <MenuItem value="ExternalUrl">External URL</MenuItem>
                     <MenuItem value="SubHeader">Text header</MenuItem>
+                    <MenuItem value="VideoLibrary">Video from Files library</MenuItem>
                   </TextField>
 
                   {addType[m.id] === "File" && (
@@ -3291,6 +3396,38 @@ export function ModulesView({
                       value={addTitle[m.id] ?? ""}
                       onChange={(e) => setAddTitle((p) => ({ ...p, [m.id]: e.target.value }))}
                     />
+                  )}
+
+                  {addType[m.id] === "VideoLibrary" && videoPickerModuleId === m.id && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: "1 1 100%", maxWidth: "100%" }}>
+                      {videoPickerLoading && <span style={{ fontSize: "0.875rem", color: "var(--muted-text, #666)" }}>Loading your library...</span>}
+                      {videoPickerError && <span style={{ fontSize: "0.875rem", color: "var(--error, #b91c1c)" }}>{videoPickerError}</span>}
+                      {!videoPickerLoading && videoPickerFiles && videoPickerFiles.length > 0 && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {videoPickerFiles.map((file) => (
+                            <div key={file.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: 8, border: "1px solid var(--border-color, #ddd)", borderRadius: 4 }}>
+                              <div style={{ flex: "1 1 100%" }}>
+                                <div style={{ fontWeight: 500, fontSize: "0.9rem" }}>{file.name}</div>
+                                <div style={{ fontSize: "0.8rem", color: "var(--muted-text, #666)" }}>
+                                  {file.kind === "recording" ? "Recording" : "Captioned"} - {(file.sizeBytes / 1048576).toFixed(1)} MB - {new Date(file.createdAt).toLocaleDateString()}
+                                </div>
+                              </div>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => void addVideoFromLibrary(m, file)}
+                                disabled={videoPickerBusy || busy}
+                              >
+                                {videoPickerBusy ? "Adding..." : "Add"}
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <Button variant="text" size="small" onClick={() => closeVideoPicker()} disabled={videoPickerBusy || busy}>
+                        Cancel
+                      </Button>
+                    </div>
                   )}
 
                   {addType[m.id] === "NewAssignment" && (

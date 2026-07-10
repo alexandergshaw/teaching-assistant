@@ -104,6 +104,10 @@ export default function SlideStudio() {
   const [stitchProgress, setStitchProgress] = useState<string | null>(null);
   const [stitchError, setStitchError] = useState<string | null>(null);
   const [stitchUrl, setStitchUrl] = useState<string | null>(null);
+  const [stitchName, setStitchName] = useState<string>(() => {
+    if (typeof window === "undefined") return "narrated-deck";
+    return localStorage.getItem("ta-slides-stitch-name") ?? "narrated-deck";
+  });
   const stitchCancelRef = useRef(false);
   const stitchUrlRef = useRef<string | null>(null);
 
@@ -158,6 +162,11 @@ export default function SlideStudio() {
     if (typeof window === "undefined") return;
     localStorage.setItem("ta-slides-file-name", fileName);
   }, [fileName]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-slides-stitch-name", stitchName);
+  }, [stitchName]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -560,11 +569,18 @@ export default function SlideStudio() {
                     src={stitchUrl}
                     style={{ width: "100%", maxHeight: 360, borderRadius: 12, background: "#0f172a" }}
                   />
-                  <div className={styles.ghActions}>
+                  <div className={styles.ghActions} style={{ alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                    <TextField
+                      label="Video name"
+                      size="small"
+                      value={stitchName}
+                      onChange={(e) => setStitchName(e.target.value)}
+                      sx={{ minWidth: 200 }}
+                    />
                     <a
                       className={styles.linkButton}
                       href={stitchUrl}
-                      download={`${(fileName || "deck").replace(/\.pptx$/i, "")}-narrated.webm`}
+                      download={`${(stitchName.trim() || "narrated-deck")}.webm`}
                     >
                       Download video
                     </a>

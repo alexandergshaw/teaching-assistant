@@ -1,9 +1,12 @@
 // Helpers for burning captions onto video frames; pure so they can be unit tested.
 
+export type CaptionPosition = "top" | "middle" | "bottom";
+
 export interface CaptionCue {
   start: number;
   end: number;
   text: string;
+  position?: CaptionPosition;
 }
 
 export function activeCaptionAt(cues: CaptionCue[], timeSec: number): CaptionCue | null {
@@ -58,6 +61,7 @@ export interface CaptionLayoutMetrics {
   maxTextWidth: number;
   lineHeight: number;
   bottomMargin: number;
+  topMargin: number;
   padX: number;
   padY: number;
 }
@@ -67,10 +71,36 @@ export function captionLayout(canvasWidth: number, canvasHeight: number): Captio
   const maxTextWidth = Math.round(canvasWidth * 0.88);
   const lineHeight = Math.round(fontPx * 1.35);
   const bottomMargin = Math.round(canvasHeight * 0.05);
+  const topMargin = Math.round(canvasHeight * 0.05);
   const padX = Math.round(fontPx * 0.55);
   const padY = Math.round(fontPx * 0.3);
 
-  return { fontPx, maxTextWidth, lineHeight, bottomMargin, padX, padY };
+  return { fontPx, maxTextWidth, lineHeight, bottomMargin, topMargin, padX, padY };
+}
+
+export function captionBlockBaselineY(
+  canvasHeight: number,
+  layout: CaptionLayoutMetrics,
+  lineCount: number,
+  position?: CaptionPosition
+): number {
+  const lines = lineCount;
+  if (position === "middle") {
+    return Math.round(canvasHeight / 2 + (lines * layout.lineHeight) / 2);
+  } else if (position === "top") {
+    return Math.round(layout.topMargin + layout.padY + lines * layout.lineHeight);
+  }
+  // bottom (default)
+  return canvasHeight - layout.bottomMargin - layout.padY;
+}
+
+export function vttLineSetting(position?: CaptionPosition): string {
+  if (position === "middle") {
+    return " line:50%";
+  } else if (position === "top") {
+    return " line:8%";
+  }
+  return "";
 }
 
 export async function ensureFiniteDuration(video: HTMLVideoElement): Promise<number> {

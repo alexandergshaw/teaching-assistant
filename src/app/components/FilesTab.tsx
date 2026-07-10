@@ -47,6 +47,9 @@ export default function FilesTab() {
   // Delete confirmation state
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
+  // Rename drafts state
+  const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
+
   // Play state
   const [playUrls, setPlayUrls] = useState<Record<string, string>>({});
 
@@ -137,28 +140,39 @@ export default function FilesTab() {
     }
   };
 
-  const handleRename = (file: RecordingFile) => {
-    const newName = window.prompt("Rename file:", file.name);
-    if (newName && newName.trim()) {
-      const trimmed = newName.trim();
-      (async () => {
-        try {
-          await renameRecordingFile(supabase, file.id, trimmed);
-          setFiles((prev) =>
-            prev
-              ? prev.map((f) =>
-                  f.id === file.id ? { ...f, name: trimmed } : f
-                )
-              : null
-          );
-          setNote({ kind: "success", text: "File renamed." });
-        } catch (err) {
-          setNote({
-            kind: "error",
-            text: err instanceof Error ? err.message : "Failed to rename",
-          });
-        }
-      })();
+  const saveRename = async (file: RecordingFile) => {
+    const draft = nameDrafts[file.id];
+    if (draft === undefined) return;
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === file.name) {
+      setNameDrafts((prev) => {
+        const next = { ...prev };
+        delete next[file.id];
+        return next;
+      });
+      return;
+    }
+    setFiles((prev) =>
+      prev
+        ? prev.map((f) =>
+            f.id === file.id ? { ...f, name: trimmed } : f
+          )
+        : null
+    );
+    try {
+      await renameRecordingFile(supabase, file.id, trimmed);
+      setNameDrafts((prev) => {
+        const next = { ...prev };
+        delete next[file.id];
+        return next;
+      });
+      setNote({ kind: "success", text: "File renamed." });
+    } catch (err) {
+      setNote({
+        kind: "error",
+        text: err instanceof Error ? err.message : "Failed to rename",
+      });
+      void reload();
     }
   };
 
@@ -431,16 +445,20 @@ export default function FilesTab() {
               <div key={file.id} className={styles.ghRow}>
                 <div className={styles.ghRowTop}>
                   <div className={styles.ghRowTitle}>
-                    <div className={styles.ghRowName}>{file.name}</div>
+                    <TextField
+                      size="small"
+                      type="text"
+                      className={styles.ccItemName}
+                      title={file.name}
+                      value={nameDrafts[file.id] ?? file.name}
+                      onChange={(e) => setNameDrafts((prev) => ({ ...prev, [file.id]: e.target.value }))}
+                      onBlur={() => void saveRename(file)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
+                    />
                   </div>
                   <div className={styles.ghActions}>
-                    <button
-                      type="button"
-                      className={styles.linkButton}
-                      onClick={() => handleRename(file)}
-                    >
-                      Rename
-                    </button>
                     <Button
                       size="small"
                       variant="outlined"

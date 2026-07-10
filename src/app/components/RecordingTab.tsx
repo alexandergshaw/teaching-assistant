@@ -138,6 +138,9 @@ export default function RecordingTab() {
   // Whether the live stream carries an audio track (drives the meter hint).
   const [hasAudio, setHasAudio] = useState(true);
 
+  // Rename drafts state for takes (in-memory only)
+  const [takeNameDrafts, setTakeNameDrafts] = useState<Record<string, string>>({});
+
   // Feature 2: Card notice (title/closing countdown)
   const [cardNotice, setCardNotice] = useState<{ kind: "title" | "closing"; secondsLeft: number } | null>(null);
   const cardNoticeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1308,15 +1311,27 @@ export default function RecordingTab() {
     }
   };
 
-  const handleRename = (id: string) => {
-    const take = takes.find((t) => t.id === id);
-    if (!take) return;
-    const newName = window.prompt("Rename take:", take.name);
-    if (newName && newName.trim()) {
-      setTakes((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, name: newName.trim() } : t))
-      );
+  const saveTakeName = (take: Take) => {
+    const draft = takeNameDrafts[take.id];
+    if (draft === undefined) return;
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === take.name) {
+      setTakeNameDrafts((prev) => {
+        const next = { ...prev };
+        delete next[take.id];
+        return next;
+      });
+      return;
     }
+    // Renaming a take does not rename the copy already saved to the library (they are separate records).
+    setTakes((prev) =>
+      prev.map((t) => (t.id === take.id ? { ...t, name: trimmed } : t))
+    );
+    setTakeNameDrafts((prev) => {
+      const next = { ...prev };
+      delete next[take.id];
+      return next;
+    });
   };
 
   const handleDownload = (take: Take) => {
@@ -2075,20 +2090,24 @@ export default function RecordingTab() {
                 <div key={take.id} className={styles.ghRow}>
                   <div className={styles.ghRowTop}>
                     <div className={styles.ghRowTitle}>
-                      <div className={styles.ghRowName}>{take.name}</div>
+                      <TextField
+                        size="small"
+                        type="text"
+                        className={styles.ccItemName}
+                        title={take.name}
+                        value={takeNameDrafts[take.id] ?? take.name}
+                        onChange={(e) => setTakeNameDrafts((prev) => ({ ...prev, [take.id]: e.target.value }))}
+                        onBlur={() => saveTakeName(take)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                        }}
+                      />
                     </div>
                     <div className={styles.ghActions}>
-                      <button
-                        type="button"
-                        className={styles.linkButton}
-                        onClick={() => handleRename(take.id)}
-                      >
-                        Rename
-                      </button>
                       <Button
                         size="small"
                         variant="outlined"
-                        onClick={() => handleDownload(take)}
+                        onClick={() => void handleDownload(take)}
                       >
                         Download
                       </Button>
@@ -2096,7 +2115,7 @@ export default function RecordingTab() {
                         size="small"
                         variant="outlined"
                         color="error"
-                        onClick={() => handleDelete(take.id)}
+                        onClick={() => void handleDelete(take.id)}
                       >
                         Delete
                       </Button>

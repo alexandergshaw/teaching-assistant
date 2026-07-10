@@ -290,7 +290,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     }
   };
 
-  const handleBrowseLibrary = async () => {
+  const loadLibrary = useCallback(async () => {
     if (!supabase || !user) return;
     setLibraryBusy(true);
     setImportError(null);
@@ -302,7 +302,34 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     } finally {
       setLibraryBusy(false);
     }
-  };
+  }, [supabase, user]);
+
+  useEffect(() => {
+    if (user && supabase && libraryVideos === null && !libraryBusy) {
+      let cancelled = false;
+      (async () => {
+        setLibraryBusy(true);
+        setImportError(null);
+        try {
+          const files = await listRecordingFiles(supabase, user.id);
+          if (!cancelled) {
+            setLibraryVideos(files);
+          }
+        } catch (err) {
+          if (!cancelled) {
+            setImportError(err instanceof Error ? err.message : "Could not load library.");
+          }
+        } finally {
+          if (!cancelled) {
+            setLibraryBusy(false);
+          }
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [user, supabase, libraryVideos, libraryBusy]);
 
   const handleImportLibraryVideo = async (file: RecordingFile) => {
     setImportingKey("lib:" + file.id);
@@ -865,7 +892,35 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
 
       {(takes.length > 0 || backupDir || user) && (
         <div className={styles.field}>
-          <p className={styles.fieldHint} style={{ margin: 0 }}>Or import a video you have already saved:</p>
+          <p className={styles.fieldHint} style={{ margin: 0 }}>Or import a saved video:</p>
+
+          {user && (
+            <div>
+              <p className={styles.fieldHint} style={{ margin: 0, fontWeight: 600 }}>From the Files tab</p>
+              {libraryBusy && !libraryVideos && (
+                <p className={styles.fieldHint} style={{ margin: 0 }}>Loading your library...</p>
+              )}
+              {libraryVideos && libraryVideos.length === 0 && (
+                <p className={styles.fieldHint} style={{ margin: 0 }}>No saved videos yet - record one on the Recording tab or upload on the Files tab.</p>
+              )}
+              <Button variant="text" size="small" disabled={libraryBusy} onClick={() => void loadLibrary()}>
+                {libraryBusy ? "Loading..." : "Refresh"}
+              </Button>
+              {libraryVideos && libraryVideos.map((v) => (
+                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+                  <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
+                    {v.name} - {v.kind === "recording" ? "Recording" : v.kind === "narrated" ? "Narrated" : "Captioned"}
+                    {v.durationSec && ` - ${fmtTime(v.durationSec)}`}
+                    {" "}
+                    - {(v.sizeBytes / 1048576).toFixed(1)} MB
+                  </span>
+                  <Button variant="outlined" size="small" disabled={importingKey !== null} onClick={() => void handleImportLibraryVideo(v)}>
+                    {importingKey === "lib:" + v.id ? "Importing..." : "Import"}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
 
           {takes.length > 0 && takes.map((take) => (
             <div key={take.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
@@ -892,28 +947,6 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
                   </span>
                   <Button variant="outlined" size="small" disabled={importingKey !== null} onClick={() => void handleImportFolderVideo(v.name)}>
                     {importingKey === "file:" + v.name ? "Importing..." : "Import"}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {user && (
-            <div>
-              <Button variant="text" size="small" disabled={libraryBusy} onClick={() => void handleBrowseLibrary()}>
-                {libraryBusy ? "Loading library..." : libraryVideos ? "Refresh library" : "Browse library"}
-              </Button>
-              {libraryVideos && libraryVideos.length === 0 && <p className={styles.fieldHint} style={{ margin: 0 }}>No saved videos in your library.</p>}
-              {libraryVideos && libraryVideos.map((v) => (
-                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
-                  <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
-                    {v.name} - {v.kind === "recording" ? "Recording" : "Captioned"}
-                    {v.durationSec && ` - ${fmtTime(v.durationSec)}`}
-                    {" "}
-                    - {(v.sizeBytes / 1048576).toFixed(1)} MB
-                  </span>
-                  <Button variant="outlined" size="small" disabled={importingKey !== null} onClick={() => void handleImportLibraryVideo(v)}>
-                    {importingKey === "lib:" + v.id ? "Importing..." : "Import"}
                   </Button>
                 </div>
               ))}

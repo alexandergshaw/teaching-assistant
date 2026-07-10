@@ -23,15 +23,17 @@ export interface ClassroomWizardProps {
   onPrivateChange: (v: boolean) => void;
 }
 
+// "Student" or "Student | github-username" (pipe-separated so commas in
+// names like "Last, First" never masquerade as usernames).
 function parseRosterLines(text: string): Array<{ student: string; username: string }> {
   return text
     .split(/\n+/)
     .map((l) => l.trim())
     .filter(Boolean)
     .map((row) => {
-      const idx = row.lastIndexOf(",");
+      const idx = row.lastIndexOf("|");
       if (idx === -1) return { student: row, username: "" };
-      return { student: row.slice(0, idx).trim(), username: row.slice(idx + 1).trim() };
+      return { student: row.slice(0, idx).trim(), username: row.slice(idx + 1).trim().replace(/^@/, "") };
     });
 }
 
@@ -121,7 +123,7 @@ export function ClassroomWizard({
             <span className={styles.adaptPanelStep}>1</span> Class list
           </p>
           <p className={styles.adaptPanelSubtitle}>
-            One student per line: &quot;student&quot; or &quot;student, github-username&quot;. The student text names
+            One student per line: &quot;Student&quot; or &quot;Student | github-username&quot;. The student text names
             the repo; the username receives the invite. You can add usernames later and re-run safely.
           </p>
         </div>
@@ -171,7 +173,7 @@ export function ClassroomWizard({
           multiline
           minRows={5}
           fullWidth
-          placeholder={"Smith, John, jsmith-gh\nadoe"}
+          placeholder={"Smith, John | jsmith-gh\nDoe, Alice"}
           value={roster}
           onChange={(e) => setRoster(e.target.value)}
           disabled={running}

@@ -116,6 +116,12 @@ const parseIntegrationLines = (text: string) =>
     return { name: name ?? "", url: url || null };
   }).filter((i) => i.name || i.url);
 
+// Count roster lines and how many carry a "| github-username" suffix.
+function rosterStats(roster: string): { students: number; withUsernames: number } {
+  const lines = roster.split("\n").map((l) => l.trim()).filter(Boolean);
+  return { students: lines.length, withUsernames: lines.filter((l) => l.includes("|") && l.split("|").pop()!.trim()).length };
+}
+
 // Read a File as a bare base64 string (no data: prefix).
 function readFileBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -831,7 +837,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
               fullWidth
               multiline
               minRows={3}
-              placeholder="One student per line. Paste a roster, or fetch it from Canvas."
+              placeholder="One student per line. Add a GitHub username with a pipe: Smith, John | jsmith-gh"
               value={form.roster}
               onChange={(e) => update({ roster: e.target.value })}
             />
@@ -840,7 +846,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                 {fetchingRoster ? "Fetching…" : "Fetch from Canvas"}
               </Button>
             </div>
-            <p className={styles.fieldHint}>Fetching replaces the list with the course&apos;s Canvas enrollment (Last, First per line).</p>
+            <p className={styles.fieldHint}>Fetching replaces the list with the course&apos;s Canvas enrollment (Last, First per line). Append | github-username to a line to link that student&apos;s GitHub account.</p>
           </div>
 
           <div className={styles.field}>
@@ -1134,12 +1140,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       </button>
                     </div>
                     {tileEdit?.id === c.id && tileEdit?.field === "roster"
-                      ? tileEditor(true, "One student per line")
+                      ? tileEditor(true, "Smith, John | jsmith-gh", "Append | github-username to link a student's GitHub account.")
                       : c.roster && c.roster.trim()
                         ? (
                           <>
                             <span className={styles.courseResourceValue}>
-                              {c.roster.split("\n").map((l) => l.trim()).filter(Boolean).length} students
+                              {(() => { const s = rosterStats(c.roster ?? ""); return `${s.students} students${s.withUsernames > 0 ? ` - ${s.withUsernames} with GitHub usernames` : ""}`; })()}
                             </span>
                             <div className={styles.courseResourceActions}>
                               <button

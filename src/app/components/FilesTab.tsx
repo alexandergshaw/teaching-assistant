@@ -17,6 +17,7 @@ import {
   type RecordingFile,
 } from "@/lib/recording-files";
 import { ensureFiniteDuration } from "@/lib/caption-burn";
+import { stripAudio } from "@/lib/strip-audio";
 import {
   listCourseContentAction,
   requestFileUploadAction,
@@ -55,6 +56,9 @@ export default function FilesTab() {
 
   // Upload state
   const [uploads, setUploads] = useState<Array<{ name: string; status: "uploading" | "done" | "error"; error?: string }>>([]);
+
+  // Strip audio state
+  const [stripping, setStripping] = useState<{ id: string; pct: number } | null>(null);
 
   // Add-to-module panel state
   const [addTarget, setAddTarget] = useState<string | null>(null);
@@ -192,6 +196,28 @@ export default function FilesTab() {
         kind: "error",
         text: err instanceof Error ? err.message : "Download failed",
       });
+    }
+  };
+
+  const handleStripAudio = async (file: RecordingFile) => {
+    if (!user || stripping) return;
+    setStripping({ id: file.id, pct: 0 });
+    setNote(null);
+    try {
+      const blob = await downloadRecordingFile(supabase, file);
+      const out = await stripAudio(blob, (pct) => setStripping({ id: file.id, pct }));
+      await saveRecordingFile(supabase, user.id, out, {
+        name: `${file.name} (no audio)`,
+        kind: "recording",
+        mimeType: out.type || "video/webm",
+        durationSec: file.durationSec,
+      });
+      setNote({ kind: "success", text: `Created "${file.name} (no audio)".` });
+      await reload();
+    } catch (err) {
+      setNote({ kind: "error", text: err instanceof Error ? err.message : "Could not strip the audio." });
+    } finally {
+      setStripping(null);
     }
   };
 
@@ -465,6 +491,15 @@ export default function FilesTab() {
                       onClick={() => void handleDownload(file)}
                     >
                       Download
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={stripping !== null}
+                      onClick={() => void handleStripAudio(file)}
+                      title="Create a copy of this video without its audio track"
+                    >
+                      {stripping?.id === file.id ? `Stripping... ${stripping.pct}%` : "Strip audio"}
                     </Button>
                     <Button
                       size="small"

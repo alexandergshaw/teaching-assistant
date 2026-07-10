@@ -46,7 +46,7 @@ type RecState = "idle" | "recording" | "paused";
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-export default function RecordingTab() {
+export default function RecordingTab({ active = true }: { active?: boolean }) {
   const { supabase, user } = useSupabase();
 
   const [recView, setRecView] = useState<"record" | "captions" | "slides">(() => {
@@ -206,6 +206,8 @@ export default function RecordingTab() {
   const cardSubtitleRef = useRef<string>("");
   const cardClosingRef = useRef<string>("");
   const cardSecondsRef = useRef<"2" | "3" | "5">("3");
+  const cardBgRef = useRef<string>("#0f172a");
+  const cardTextRef = useRef<string>("#f8fafc");
   const usedPipelineRef = useRef(false);
   const supabaseRef = useRef<SupabaseClient<Database> | null>(null);
   const userRef = useRef<User | null>(null);
@@ -245,6 +247,16 @@ export default function RecordingTab() {
     if (typeof window === "undefined") return "3";
     const saved = localStorage.getItem("ta-rec-card-secs");
     return saved === "2" || saved === "5" ? (saved as "2" | "5") : "3";
+  });
+
+  const [cardBg, setCardBg] = useState<string>(() => {
+    if (typeof window === "undefined") return "#0f172a";
+    return localStorage.getItem("ta-rec-card-bg") ?? "#0f172a";
+  });
+
+  const [cardText, setCardText] = useState<string>(() => {
+    if (typeof window === "undefined") return "#f8fafc";
+    return localStorage.getItem("ta-rec-card-text") ?? "#f8fafc";
   });
 
   const [finishing, setFinishing] = useState(false);
@@ -297,7 +309,9 @@ export default function RecordingTab() {
     localStorage.setItem("ta-rec-card-subtitle", cardSubtitle);
     localStorage.setItem("ta-rec-card-closing", cardClosing);
     localStorage.setItem("ta-rec-card-secs", cardSeconds);
-  }, [cardsOn, cardTitle, cardSubtitle, cardClosing, cardSeconds]);
+    localStorage.setItem("ta-rec-card-bg", cardBg);
+    localStorage.setItem("ta-rec-card-text", cardText);
+  }, [cardsOn, cardTitle, cardSubtitle, cardClosing, cardSeconds, cardBg, cardText]);
 
   // Persist lecture script state to localStorage
   useEffect(() => {
@@ -629,7 +643,9 @@ export default function RecordingTab() {
     cardSubtitleRef.current = cardSubtitle;
     cardClosingRef.current = cardClosing;
     cardSecondsRef.current = cardSeconds;
-  }, [cardTitle, cardSubtitle, cardClosing, cardSeconds]);
+    cardBgRef.current = cardBg;
+    cardTextRef.current = cardText;
+  }, [cardTitle, cardSubtitle, cardClosing, cardSeconds, cardBg, cardText]);
 
   // Mirror supabase and user into refs for recorder.onstop
   useEffect(() => {
@@ -735,9 +751,9 @@ export default function RecordingTab() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       // Feature 3: Draw title or closing card instead of normal content
       if (cardPhaseRef.current) {
-        ctx.fillStyle = "#0f172a";
+        ctx.fillStyle = cardBgRef.current;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = "#f8fafc";
+        ctx.fillStyle = cardTextRef.current;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         if (cardPhaseRef.current === "title") {
@@ -745,8 +761,9 @@ export default function RecordingTab() {
           ctx.fillText(cardTitleRef.current || "Lecture", canvas.width / 2, canvas.height * 0.45);
           if (cardSubtitleRef.current) {
             ctx.font = `400 ${Math.round(canvas.height * 0.045)}px system-ui, sans-serif`;
-            ctx.fillStyle = "#cbd5e1";
+            ctx.globalAlpha = 0.8;
             ctx.fillText(cardSubtitleRef.current, canvas.width / 2, canvas.height * 0.58);
+            ctx.globalAlpha = 1;
           }
         } else if (cardPhaseRef.current === "closing") {
           ctx.font = `700 ${Math.round(canvas.height * 0.08)}px system-ui, sans-serif`;
@@ -1391,6 +1408,7 @@ export default function RecordingTab() {
   // Keyboard shortcuts: R record/stop, P pause/resume, M mute
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (!active) return;
       const t = e.target as HTMLElement;
       if (t.closest("input, textarea, select, [contenteditable]")) return;
       const k = e.key.toLowerCase();
@@ -1426,7 +1444,7 @@ export default function RecordingTab() {
         ))}
       </div>
 
-      {recView === "record" && (
+      <div style={{ display: recView === "record" ? undefined : "none" }}>
         <>
           {error && <p className={styles.error}>{error}</p>}
 
@@ -1729,6 +1747,26 @@ export default function RecordingTab() {
                       <MenuItem value="3">3 s</MenuItem>
                       <MenuItem value="5">5 s</MenuItem>
                     </TextField>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                      Background
+                      <input
+                        type="color"
+                        value={cardBg}
+                        onChange={(e) => setCardBg(e.target.value)}
+                        style={{ width: 32, height: 28, border: "none", background: "transparent", cursor: "pointer" }}
+                        aria-label="Card background color"
+                      />
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                      Text
+                      <input
+                        type="color"
+                        value={cardText}
+                        onChange={(e) => setCardText(e.target.value)}
+                        style={{ width: 32, height: 28, border: "none", background: "transparent", cursor: "pointer" }}
+                        aria-label="Card text color"
+                      />
+                    </label>
                   </div>
                   <p className={styles.fieldHint} style={{ marginTop: 8 }}>Cards are added around your video: the title card records first (mic muted) and a notice on the preview counts down until your video starts; the closing card is appended after you press Stop.</p>
                 </>
@@ -2150,10 +2188,16 @@ export default function RecordingTab() {
             )}
           </div>
         </>
-      )}
+      </div>
 
-      {recView === "captions" && <CaptionStudio takes={takes} backupDir={backupDir} />}
-      {recView === "slides" && <SlideStudio />}
+      {/* Inner views stay mounted (hidden with display:none) so navigation never kills a live preview, takes, or an in-progress caption burn. */}
+      <div style={{ display: recView === "captions" ? undefined : "none" }}>
+        <CaptionStudio takes={takes} backupDir={backupDir} />
+      </div>
+
+      <div style={{ display: recView === "slides" ? undefined : "none" }}>
+        <SlideStudio />
+      </div>
     </section>
   );
 }

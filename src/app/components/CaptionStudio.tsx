@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextField, FormControlLabel, Checkbox, MenuItem } from "@mui/material";
-import { describeScreenRecordingAction, type ScreenCaption } from "../actions";
+import { describeScreenRecordingAction, voiceConfiguredAction, synthesizeNarrationAction, type ScreenCaption } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { listBackupVideos, readBackupFile, type BackupVideo, type DirHandle } from "@/lib/backup-dir";
 import { activeCaptionAt, wrapCaptionLines, captionLayout, ensureFiniteDuration, captionBlockBaselineY, vttLineSetting, type CaptionPosition } from "@/lib/caption-burn";
@@ -16,8 +16,8 @@ type EditableCaption = ScreenCaption & { position?: CaptionPosition };
 
 // Context the Recording page already knows (script + title cards), persisted
 // in localStorage - harvested so captions understand what the video is about.
-function gatherRecordingContext(): { text: string; summary: string } {
-  if (typeof window === "undefined") return { text: "", summary: "" };
+function gatherRecordingContext(): { text: string; summary: string; cardSeconds: number } {
+  if (typeof window === "undefined") return { text: "", summary: "", cardSeconds: 0 };
   const get = (k: string) => (localStorage.getItem(k) ?? "").trim();
   const topic = get("ta-rec-script-topic");
   const objectives = get("ta-rec-script-objectives");
@@ -25,6 +25,8 @@ function gatherRecordingContext(): { text: string; summary: string } {
   const cardTitle = get("ta-rec-card-title");
   const cardSubtitle = get("ta-rec-card-subtitle");
   const cardClosing = get("ta-rec-card-closing");
+  const cardsOn = localStorage.getItem("ta-rec-cards") === "1";
+  const cardSecs = Number(localStorage.getItem("ta-rec-card-secs") ?? "3");
   const sections: string[] = [];
   const found: string[] = [];
   if (topic) {
@@ -43,12 +45,16 @@ function gatherRecordingContext(): { text: string; summary: string } {
     sections.push(`Closing card: ${cardClosing}`);
     found.push("closing card");
   }
+  if (cardsOn) {
+    sections.push(`Video structure: the recording begins with a title card shown for about ${cardSecs} seconds before the lecture content starts, and ends with a closing card of the same length. Caption timestamps must account for this - the first content caption should start after the title card.`);
+    found.push(`title/closing cards (${cardSecs}s)`);
+  }
   if (script) {
     const words = script.split(/\s+/).filter(Boolean).length;
     sections.push(`Lecture script the author wrote for this material (may describe what the video shows):\n${script.slice(0, 1500)}${script.length > 1500 ? "..." : ""}`);
     found.push(`lecture script (${words} words)`);
   }
-  return { text: sections.join("\n\n"), summary: found.join(", ") };
+  return { text: sections.join("\n\n"), summary: found.join(", "), cardSeconds: cardsOn ? cardSecs : 0 };
 }
 
 export default function CaptionStudio({ takes = [], backupDir = null }: { takes?: Take[]; backupDir?: DirHandle | null }) {
@@ -62,7 +68,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     if (typeof window === "undefined") return true;
     return localStorage.getItem("ta-cap-use-page") !== "0";
   });
-  const [pageContextSummary, setPageContextSummary] = useState("");
+  const [pageContextSummary] = useState(() => gatherRecordingContext().summary);
   const [busy, setBusy] = useState<"idle" | "sampling" | "describing">("idle");
   const [error, setError] = useState<string | null>(null);
   const [captions, setCaptions] = useState<EditableCaption[] | null>(null);
@@ -80,11 +86,25 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
   const [burnedRow, setBurnedRow] = useState<RecordingFile | null>(null);
   const [burnSave, setBurnSave] = useState<"idle" | "saving" | "done" | "failed">("idle");
   const [renameNote, setRenameNote] = useState<string | null>(null);
+  const [shiftSecs, setShiftSecs] = useState<string>(() => {
+    if (typeof window === "undefined") return "0";
+    return localStorage.getItem("ta-cap-shift-secs") ?? "0";
+  });
+  const [voiceReady, setVoiceReady] = useState(false);
+  const [cueAudio, setCueAudio] = useState<Record<number, { url: string; base64: string; mimeType: string }>>({});
+  const [voBusy, setVoBusy] = useState<null | "one" | "all">(null);
+  const [voError, setVoError] = useState<string | null>(null);
+  const [voMode, setVoMode] = useState<"original" | "voiceover" | "mix" | "none">(() => {
+    if (typeof window === "undefined") return "original";
+    const saved = localStorage.getItem("ta-cap-voiceover-mode");
+    return saved === "original" || saved === "voiceover" || saved === "mix" || saved === "none" ? saved : "original";
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const burnAbortRef = useRef<(() => void) | null>(null);
   const burnedUrlRef = useRef<string | null>(null);
   const videoUrlRef = useRef<string | null>(null);
+  const cueAudioRef = useRef(cueAudio);
 
   const { supabase, user } = useSupabase();
 
@@ -120,11 +140,6 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
   };
 
   useEffect(() => {
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */
-    setPageContextSummary(gatherRecordingContext().summary);
-  }, []);
-
-  useEffect(() => {
     if (typeof window === "undefined") return;
     localStorage.setItem("ta-cap-context", context);
   }, [context]);
@@ -133,6 +148,27 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     if (typeof window === "undefined") return;
     localStorage.setItem("ta-cap-use-page", usePageContext ? "1" : "0");
   }, [usePageContext]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-cap-shift-secs", shiftSecs);
+  }, [shiftSecs]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-cap-voiceover-mode", voMode);
+  }, [voMode]);
+
+  useEffect(() => {
+    cueAudioRef.current = cueAudio;
+  }, [cueAudio]);
+
+  useEffect(() => {
+    (async () => {
+      const r = await voiceConfiguredAction();
+      setVoiceReady(r.configured);
+    })();
+  }, []);
 
   useEffect(() => {
     videoUrlRef.current = videoUrl;
@@ -267,12 +303,16 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
         setError(r.error);
         return;
       }
+      for (const url of Object.values(cueAudio)) {
+        URL.revokeObjectURL(url.url);
+      }
+      setCueAudio({});
       setCaptions(r.captions);
     } catch (err) {
       setBusy("idle");
       setError(err instanceof Error ? err.message : "An error occurred");
     }
-  }, [videoUrl, context, usePageContext, extractFrames]);
+  }, [videoUrl, context, usePageContext, extractFrames, cueAudio]);
 
   const buildVttContent = useCallback((): string => {
     if (!captions) return "";
@@ -328,14 +368,26 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
 
   const handleUpdateCaption = useCallback((i: number, text: string) => {
     updateCue(i, { text });
-  }, [updateCue]);
+    if (cueAudio[i]) {
+      URL.revokeObjectURL(cueAudio[i].url);
+      setCueAudio((prev) => {
+        const next = { ...prev };
+        delete next[i];
+        return next;
+      });
+    }
+  }, [updateCue, cueAudio]);
 
   const handleRemoveCaption = useCallback((i: number) => {
+    for (const url of Object.values(cueAudio)) {
+      URL.revokeObjectURL(url.url);
+    }
+    setCueAudio({});
     setCaptions((prev) => {
       if (!prev) return prev;
       return prev.filter((_, idx) => idx !== i);
     });
-  }, []);
+  }, [cueAudio]);
 
   const handleAddCaptionAtPlayhead = useCallback(() => {
     const t = Math.round((videoRef.current?.currentTime ?? 0) * 10) / 10;
@@ -346,8 +398,79 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     });
   }, []);
 
+  const handleGenerateVoiceForCue = useCallback(async (i: number) => {
+    if (!captions || !voiceReady) return;
+    const c = captions[i];
+    if (!c) return;
+    setVoError(null);
+    setVoBusy("one");
+    try {
+      const r = await synthesizeNarrationAction(c.text, localStorage.getItem("ta-voice-id") || undefined);
+      if ("error" in r) {
+        setVoError(r.error);
+        setVoBusy(null);
+        return;
+      }
+      const bytes = Uint8Array.from(atob(r.base64), (ch) => ch.charCodeAt(0));
+      const blob = new Blob([bytes], { type: r.mimeType });
+      const url = URL.createObjectURL(blob);
+      setCueAudio((prev) => {
+        if (prev[i]) URL.revokeObjectURL(prev[i].url);
+        return { ...prev, [i]: { url, base64: r.base64, mimeType: r.mimeType } };
+      });
+    } catch (err) {
+      setVoError(err instanceof Error ? err.message : "An error occurred");
+    } finally {
+      setVoBusy(null);
+    }
+  }, [captions, voiceReady]);
+
+  const handleGenerateAllVoices = useCallback(async () => {
+    if (!captions || !voiceReady) return;
+    setVoError(null);
+    setVoBusy("all");
+    const next = { ...cueAudio };
+    for (let i = 0; i < captions.length; i++) {
+      if (next[i]) continue;
+      setVoError(null);
+      const c = captions[i];
+      try {
+        const r = await synthesizeNarrationAction(c.text, localStorage.getItem("ta-voice-id") || undefined);
+        if ("error" in r) {
+          setVoError(`Cue ${i + 1}: ${r.error}`);
+          break;
+        }
+        const bytes = Uint8Array.from(atob(r.base64), (ch) => ch.charCodeAt(0));
+        const blob = new Blob([bytes], { type: r.mimeType });
+        next[i] = { url: URL.createObjectURL(blob), base64: r.base64, mimeType: r.mimeType };
+        setCueAudio({ ...next });
+      } catch (err) {
+        setVoError(err instanceof Error ? err.message : "An error occurred");
+        break;
+      }
+    }
+    setVoBusy(null);
+  }, [captions, voiceReady, cueAudio]);
+
+  const handleShiftAllCaptions = useCallback((delta: number) => {
+    setCaptions((prev) => {
+      if (!prev) return prev;
+      return prev.map((c) => {
+        const start = Math.max(0, +(c.start + delta).toFixed(1));
+        const end = Math.max(start + 0.1, +(c.end + delta).toFixed(1));
+        return { ...c, start, end };
+      });
+    });
+    sortCaptions();
+  }, [sortCaptions]);
+
   const handleBurnCaptions = useCallback(async () => {
     if (!videoUrl || !captions || captions.length === 0 || burning) return;
+
+    if ((voMode === "voiceover" || voMode === "mix") && Object.keys(cueAudio).length === 0) {
+      setBurnError("Generate voices for your captions first (or set Export audio to Original).");
+      return;
+    }
 
     setBurnError(null);
     if (burned) {
@@ -362,6 +485,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     let audioContext: AudioContext | null = null;
     let cancelled = false;
     let ticker: { stop: () => void } | null = null;
+    const voiceNodes: Array<AudioBufferSourceNode> = [];
 
     try {
       const v = document.createElement("video");
@@ -385,15 +509,42 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Could not get canvas context");
 
+      // Mode "none" strips all audio: no AudioContext, no element source, no
+      // destination - the recorder stream carries only the canvas video track.
       let audioTracks: MediaStreamTrack[] = [];
-      try {
-        audioContext = new AudioContext();
-        const src = audioContext.createMediaElementSource(v);
-        const dest = audioContext.createMediaStreamDestination();
-        src.connect(dest);
-        audioTracks = dest.stream.getAudioTracks();
-      } catch {
-        audioTracks = [];
+      let voiceDest: MediaStreamAudioDestinationNode | null = null;
+      const decodedVoices: Array<{ buffer: AudioBuffer; startSec: number }> = [];
+      if (voMode !== "none") {
+        try {
+          audioContext = new AudioContext();
+          if ((voMode === "voiceover" || voMode === "mix") && Object.keys(cueAudio).length > 0) {
+            for (const [indexStr, entry] of Object.entries(cueAudio)) {
+              try {
+                const idx = Number(indexStr);
+                const cue = captions[idx];
+                if (!cue) continue;
+                const bytes = Uint8Array.from(atob(entry.base64), (ch) => ch.charCodeAt(0));
+                const buffer = await audioContext.decodeAudioData(bytes.buffer.slice(0));
+                decodedVoices.push({ buffer, startSec: cue.start });
+              } catch {
+                // Skip failures
+              }
+            }
+          }
+          const src = audioContext.createMediaElementSource(v);
+          const dest = audioContext.createMediaStreamDestination();
+          voiceDest = dest;
+          if (voMode === "original" || voMode === "mix") {
+            src.connect(dest);
+          }
+          audioTracks = dest.stream.getAudioTracks();
+        } catch {
+          audioTracks = [];
+        }
+      } else {
+        // Without a media element source to detach the element's output,
+        // mute it so the export stays silent for the user.
+        v.muted = true;
       }
 
       const stream = new MediaStream([...canvas.captureStream(30).getVideoTracks(), ...audioTracks]);
@@ -520,6 +671,13 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
         v.pause();
         v.removeAttribute("src");
         if (recorder.state !== "inactive") recorder.stop();
+        for (const node of voiceNodes) {
+          try {
+            node.stop();
+          } catch {
+            // Guard
+          }
+        }
         if (audioContext && audioContext.state !== "closed") {
           try {
             audioContext.close();
@@ -533,6 +691,17 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
 
       v.currentTime = 0;
       await v.play();
+      if (audioContext && decodedVoices.length > 0) {
+        for (const { buffer, startSec } of decodedVoices) {
+          const node = audioContext.createBufferSource();
+          node.buffer = buffer;
+          if (voiceDest) {
+            node.connect(voiceDest);
+            node.start(audioContext.currentTime + startSec);
+            voiceNodes.push(node);
+          }
+        }
+      }
       ticker = startFrameTicker(30, drawLoop);
     } catch (err) {
       const abort = burnAbortRef.current;
@@ -548,17 +717,27 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
             // Guard
           }
         }
+        for (const node of voiceNodes) {
+          try {
+            node.stop();
+          } catch {
+            // Guard
+          }
+        }
         burnAbortRef.current = null;
       }
       setBurnError(err instanceof Error ? err.message : "An error occurred");
       setBurning(false);
     }
-  }, [videoUrl, captions, burning, burned, fileName, user, supabase]);
+  }, [videoUrl, captions, burning, burned, fileName, user, supabase, voMode, cueAudio]);
 
   useEffect(() => {
     return () => {
       if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current);
       if (burnedUrlRef.current) URL.revokeObjectURL(burnedUrlRef.current);
+      for (const entry of Object.values(cueAudioRef.current)) {
+        URL.revokeObjectURL(entry.url);
+      }
       burnAbortRef.current?.();
     };
   }, []);
@@ -745,6 +924,70 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
 
       {captions && (
         <div>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
+            <TextField
+              type="number"
+              size="small"
+              label="Shift all (s)"
+              value={shiftSecs}
+              onChange={(e) => setShiftSecs(e.target.value)}
+              style={{ width: 120 }}
+            />
+            <Button
+              variant="outlined"
+              size="small"
+              disabled={!captions || captions.length === 0 || Number(shiftSecs) === 0 || isNaN(Number(shiftSecs))}
+              onClick={() => handleShiftAllCaptions(Number(shiftSecs))}
+            >
+              Shift all
+            </Button>
+            {gatherRecordingContext().cardSeconds > 0 && (
+              <>
+                <Button
+                  variant="text"
+                  size="small"
+                  onClick={() => handleShiftAllCaptions(gatherRecordingContext().cardSeconds)}
+                >
+                  Shift all +{gatherRecordingContext().cardSeconds}s (title card)
+                </Button>
+                <p className={styles.fieldHint} style={{ margin: 0, flex: 1, minWidth: 200 }}>
+                  This video was recorded with a title card - if captions look early, shift them right by the card length.
+                </p>
+              </>
+            )}
+          </div>
+
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
+            <Button
+              variant="outlined"
+              size="small"
+              disabled={!voiceReady || voBusy !== null || !captions || captions.length === 0}
+              onClick={() => void handleGenerateAllVoices()}
+            >
+              {voBusy === "all" ? `Voicing cue...` : "Generate all voices"}
+            </Button>
+            <TextField
+              select
+              size="small"
+              label="Export audio"
+              value={voMode}
+              onChange={(e) => setVoMode(e.target.value as "original" | "voiceover" | "mix" | "none")}
+              style={{ minWidth: 170 }}
+            >
+              <MenuItem value="original">Original audio</MenuItem>
+              <MenuItem value="voiceover">AI voiceover only</MenuItem>
+              <MenuItem value="mix">Original + voiceover</MenuItem>
+              <MenuItem value="none">No audio (strip)</MenuItem>
+            </TextField>
+            {!voiceReady && (
+              <p className={styles.fieldHint} style={{ margin: 0 }}>
+                AI voice is not configured (set ELEVENLABS_API_KEY, and clone your voice on the Narrate a deck tab).
+              </p>
+            )}
+          </div>
+
+          {voError && <p className={styles.error}>{voError}</p>}
+
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 16 }}>
             {captions.map((c, i) => (
               <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "8px 0", flexWrap: "wrap" }}>
@@ -863,6 +1106,23 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
                 <Button
                   variant="text"
                   size="small"
+                  disabled={!voiceReady || voBusy !== null}
+                  onClick={() => void handleGenerateVoiceForCue(i)}
+                >
+                  Voice
+                </Button>
+
+                {cueAudio[i] && (
+                  <audio
+                    controls
+                    src={cueAudio[i].url}
+                    style={{ height: 28, maxWidth: 200 }}
+                  />
+                )}
+
+                <Button
+                  variant="text"
+                  size="small"
                   color="error"
                   onClick={() => handleRemoveCaption(i)}
                 >
@@ -886,6 +1146,19 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
           </div>
 
           <div className={styles.ghActions} style={{ marginTop: 12, alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <TextField
+              select
+              size="small"
+              label="Export audio"
+              value={voMode}
+              onChange={(e) => setVoMode(e.target.value as "original" | "voiceover" | "mix" | "none")}
+              style={{ minWidth: 170 }}
+            >
+              <MenuItem value="original">Original audio</MenuItem>
+              <MenuItem value="voiceover">AI voiceover only</MenuItem>
+              <MenuItem value="mix">Original + voiceover</MenuItem>
+              <MenuItem value="none">No audio (strip)</MenuItem>
+            </TextField>
             <Button variant="outlined" size="small" disabled={burning} onClick={() => void handleBurnCaptions()}>
               {burning ? `Exporting... ${burnProgress}%` : "Export video with captions"}
             </Button>

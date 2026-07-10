@@ -213,14 +213,7 @@ export default function ContentTab({
         subtitle="Manage a Canvas course's modules, pages, files, grading, and communications, or work with the GitHub side of your courses under Version Control. Changes are written to Canvas when you save."
       />
 
-      <div className={styles.field}>
-        <label>Institution</label>
-        <InstitutionSwitcher metric="both" />
-      </div>
-
-      {activeInstitution && (
-        <>
-          <div className={styles.lessonInnerTabs}>
+      <div className={styles.lessonInnerTabs}>
             <button
               type="button"
               className={`${styles.lessonInnerTab} ${view === "modules" ? styles.lessonInnerTabActive : ""}`}
@@ -289,6 +282,15 @@ export default function ContentTab({
             )}
           </div>
 
+      {view !== "version-control" && (
+        <div className={styles.field}>
+          <label>Institution</label>
+          <InstitutionSwitcher metric="both" />
+        </div>
+      )}
+
+      {activeInstitution && (
+        <>
           {courseTab && (
             <CoursePicker
               activeInstitution={activeInstitution}
@@ -375,8 +377,6 @@ export default function ContentTab({
             announcements
           ) : view === "inbox" ? (
             inbox
-          ) : view === "version-control" ? (
-            versionControl
           ) : !loaded ? null : view === "modules" ? (
             <ModulesView
               courseUrl={courseUrl}
@@ -405,6 +405,8 @@ export default function ContentTab({
           ) : null}
         </>
       )}
+
+      {view === "version-control" && versionControl}
 
       {editorOpen && courseId && (
         <PageEditorModal

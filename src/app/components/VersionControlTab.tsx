@@ -10,7 +10,6 @@ import type { GithubRepo } from "@/lib/github";
 import OrgManagementPanel from "./OrgManagementPanel";
 import { ClassroomWizard } from "./ClassroomWizard";
 import RepoDetail from "./RepoDetail";
-import TabHeader from "./TabHeader";
 import { takeCourseHandoff } from "@/lib/course-handoff";
 import { useVcCounts } from "./VcCounts";
 import styles from "../page.module.css";
@@ -122,12 +121,7 @@ export default function VersionControlTab() {
 
   if (orgsState === "unconfigured") {
     return (
-      <div className={styles.card}>
-        <TabHeader
-          eyebrow="Version Control Integration"
-          title="Repositories & organizations"
-          subtitle="Generate per-student repos from a template, manage your organization's members and rules, and configure your own repositories."
-        />
+      <div className={styles.form}>
         <p style={{ color: "var(--text-secondary)" }}>
           GitHub isn&apos;t configured. Set the <code>GITHUB_TOKEN</code> environment variable (a token that owns the
           target organizations) to use Version Control Integration.
@@ -137,13 +131,7 @@ export default function VersionControlTab() {
   }
 
   return (
-    <div className={styles.card}>
-      <TabHeader
-        eyebrow="Version Control Integration"
-        title="Repositories & organizations"
-        subtitle="Generate per-student repos from a template, manage your organization's members and rules, and configure your own repositories."
-      />
-
+    <div className={styles.form}>
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Version control sections" style={{ marginBottom: 4 }}>
         <button
           type="button"

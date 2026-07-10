@@ -708,7 +708,9 @@ export default function Home() {
           );
         })()}
 
-        {activeTab === "recording" && <RecordingTab />}
+        <div style={{ display: activeTab === "recording" ? undefined : "none" }}>
+          <RecordingTab active={activeTab === "recording"} />
+        </div>
 
         {activeTab === "files" && <FilesTab />}
 

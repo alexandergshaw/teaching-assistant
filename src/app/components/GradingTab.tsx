@@ -150,15 +150,7 @@ export default function GradingTab({
   const showContextFields = source === "zip" || canvasRetrieved;
 
   return (
-    <section className={styles.card}>
-      <div className={styles.header}>
-        <h1>Grading</h1>
-        <p>
-          Add the student submissions and the grading context needed to review
-          an assignment.
-        </p>
-      </div>
-
+    <div className={styles.form}>
       <div className={styles.field}>
         <label htmlFor="grade-source">Grade from</label>
         <TextField
@@ -436,6 +428,6 @@ export default function GradingTab({
           }
         />
       )}
-    </section>
+    </div>
   );
 }

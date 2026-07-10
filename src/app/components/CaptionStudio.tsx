@@ -1,15 +1,54 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, TextField } from "@mui/material";
+import { Button, TextField, FormControlLabel, Checkbox } from "@mui/material";
 import { describeScreenRecordingAction, type ScreenCaption } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
+
+// Context the Recording page already knows (script + title cards), persisted
+// in localStorage - harvested so captions understand what the video is about.
+function gatherRecordingContext(): { text: string; summary: string } {
+  if (typeof window === "undefined") return { text: "", summary: "" };
+  const get = (k: string) => (localStorage.getItem(k) ?? "").trim();
+  const topic = get("ta-rec-script-topic");
+  const objectives = get("ta-rec-script-objectives");
+  const script = get("ta-rec-script");
+  const cardTitle = get("ta-rec-card-title");
+  const cardSubtitle = get("ta-rec-card-subtitle");
+  const cardClosing = get("ta-rec-card-closing");
+  const sections: string[] = [];
+  const found: string[] = [];
+  if (topic) {
+    sections.push(`Lecture topic: ${topic}`);
+    found.push(`topic "${topic.slice(0, 40)}"`);
+  }
+  if (objectives) {
+    sections.push(`Objectives: ${objectives}`);
+    found.push("objectives");
+  }
+  if (cardTitle || cardSubtitle) {
+    sections.push(`Video title card: ${[cardTitle, cardSubtitle].filter(Boolean).join(" - ")}`);
+    found.push("title card");
+  }
+  if (cardClosing) {
+    sections.push(`Closing card: ${cardClosing}`);
+    found.push("closing card");
+  }
+  if (script) {
+    const words = script.split(/\s+/).filter(Boolean).length;
+    sections.push(`Lecture script the author wrote for this material (may describe what the video shows):\n${script.slice(0, 1500)}${script.length > 1500 ? "..." : ""}`);
+    found.push(`lecture script (${words} words)`);
+  }
+  return { text: sections.join("\n\n"), summary: found.join(", ") };
+}
 
 export default function CaptionStudio() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
   const [context, setContext] = useState("");
+  const [usePageContext, setUsePageContext] = useState(true);
+  const [pageContextSummary, setPageContextSummary] = useState("");
   const [busy, setBusy] = useState<"idle" | "sampling" | "describing">("idle");
   const [error, setError] = useState<string | null>(null);
   const [captions, setCaptions] = useState<ScreenCaption[] | null>(null);
@@ -31,6 +70,11 @@ export default function CaptionStudio() {
     const ms = Math.floor((sec % 1) * 1000);
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
   };
+
+  useEffect(() => {
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */
+    setPageContextSummary(gatherRecordingContext().summary);
+  }, []);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -93,7 +137,9 @@ export default function CaptionStudio() {
       setBusy("sampling");
       const { frames, dur } = await extractFrames();
       setBusy("describing");
-      const r = await describeScreenRecordingAction(frames, dur, context, getStoredProvider());
+      const page = usePageContext ? gatherRecordingContext().text : "";
+      const combined = [context.trim(), page].filter(Boolean).join("\n\n");
+      const r = await describeScreenRecordingAction(frames, dur, combined, getStoredProvider());
       setBusy("idle");
       if ("error" in r) {
         setError(r.error);
@@ -104,7 +150,7 @@ export default function CaptionStudio() {
       setBusy("idle");
       setError(err instanceof Error ? err.message : "An error occurred");
     }
-  }, [videoUrl, context, extractFrames]);
+  }, [videoUrl, context, usePageContext, extractFrames]);
 
   const buildVttContent = useCallback((): string => {
     if (!captions) return "";
@@ -205,6 +251,15 @@ export default function CaptionStudio() {
           size="small"
           fullWidth
         />
+        <FormControlLabel
+          control={<Checkbox size="small" checked={usePageContext} onChange={(e) => setUsePageContext(e.target.checked)} />}
+          label={<span style={{ fontSize: "0.85rem" }}>Use context from this Recording page</span>}
+        />
+        {usePageContext && (
+          <p className={styles.fieldHint} style={{ margin: 0 }}>
+            {pageContextSummary ? `Found: ${pageContextSummary}.` : "No page context found yet - set a lecture script or title cards on the Record view and it will be used automatically."}
+          </p>
+        )}
       </div>
 
       {videoUrl && (

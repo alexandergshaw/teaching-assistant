@@ -15,7 +15,7 @@ export function ItemA11yBadge({ item }: { item: CanvasModuleItem }) {
   if (!scan) return null;
   const issues = scan.errorCount + scan.warningCount;
   if (issues === 0) return null;
-  const color = scan.errorCount > 0 ? "#dc2626" : "#d97706";
+  const color = scan.errorCount > 0 ? "var(--danger)" : "var(--warning)";
   return (
     <IconButton
       size="small"
@@ -30,7 +30,7 @@ export function ItemA11yBadge({ item }: { item: CanvasModuleItem }) {
         padding: "0 7px",
         borderRadius: 0.75,
         border: `1px solid ${color}`,
-        background: "#fff",
+        background: "var(--field-background)",
         color,
         fontSize: "0.74rem",
         fontWeight: 700,

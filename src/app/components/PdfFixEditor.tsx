@@ -96,21 +96,21 @@ export default function PdfFixEditor({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(560px, 96vw)", maxHeight: "90vh", background: "#fff", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
+        style={{ width: "min(560px, 96vw)", maxHeight: "90vh", background: "var(--field-background)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
       >
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b", display: "flex", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", gap: 8 }}>
             <span>PDF accessibility · {title}</span>
             {progress && <span style={{ color: "var(--accent, #2563eb)" }}>{progress.index} of {progress.total}</span>}
           </div>
-          <div style={{ fontSize: "0.85rem", color: "#475569", marginTop: 4 }}>
+          <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: 4 }}>
             Set the document language and title, then save back to Canvas.
           </div>
         </div>
 
         <div style={{ padding: "14px 18px", overflowY: "auto" }}>
           {stage === "loading" ? (
-            <p style={{ color: "#64748b" }}>Loading PDF…</p>
+            <p style={{ color: "var(--text-secondary)" }}>Loading PDF…</p>
           ) : (
             <>
               <div style={{ marginBottom: 16 }}>
@@ -151,11 +151,11 @@ export default function PdfFixEditor({
                 />
               </div>
 
-              <p style={{ fontSize: "0.78rem", color: "#94a3b8", marginTop: 14 }}>
+              <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: 14 }}>
                 Tagging the PDF for structure and headings can&apos;t be done here — it needs Acrobat&apos;s
                 tagging tools, or fixing the source Word file and re-exporting as a tagged PDF.
               </p>
-              {error && <p style={{ color: "#dc2626", fontSize: "0.85rem", marginTop: 8 }}>{error}</p>}
+              {error && <p style={{ color: "var(--danger)", fontSize: "0.85rem", marginTop: 8 }}>{error}</p>}
             </>
           )}
         </div>

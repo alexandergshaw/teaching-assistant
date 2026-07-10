@@ -111,22 +111,22 @@ export default function RemediationEditor({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(720px, 96vw)", maxHeight: "90vh", background: "#fff", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
+        style={{ width: "min(720px, 96vw)", maxHeight: "90vh", background: "var(--field-background)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
       >
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b", display: "flex", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", gap: 8 }}>
             <span>Fix · {title}</span>
             {progress && <span style={{ color: "var(--accent, #2563eb)" }}>{progress.index} of {progress.total}</span>}
           </div>
-          <div style={{ fontSize: "0.95rem", color: "#0f172a", marginTop: 2 }}>{issue.message}</div>
+          <div style={{ fontSize: "0.95rem", color: "var(--text-primary)", marginTop: 2 }}>{issue.message}</div>
         </div>
 
         <div style={{ padding: "14px 18px", overflowY: "auto" }}>
           {stage === "loading" ? (
-            <p style={{ color: "#64748b" }}>Preparing the fix…</p>
+            <p style={{ color: "var(--text-secondary)" }}>Preparing the fix…</p>
           ) : (
             <>
-              <p style={{ fontSize: "0.85rem", color: located ? "#16a34a" : "#475569", margin: "0 0 8px" }}>
+              <p style={{ fontSize: "0.85rem", color: located ? "var(--success)" : "var(--text-secondary)", margin: "0 0 8px" }}>
                 {located
                   ? "Fix pre-applied below — review the HTML and save."
                   : issue.ruleId === "broken-link"
@@ -163,7 +163,7 @@ export default function RemediationEditor({
               />
             </>
           )}
-          {error && <p style={{ color: "#dc2626", fontSize: "0.85rem", marginTop: 8 }}>{error}</p>}
+          {error && <p style={{ color: "var(--danger)", fontSize: "0.85rem", marginTop: 8 }}>{error}</p>}
         </div>
 
         <div style={{ padding: "12px 18px", borderTop: "1px solid var(--field-border, #e2e8f0)", display: "flex", justifyContent: "flex-end", gap: 8 }}>

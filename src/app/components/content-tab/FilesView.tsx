@@ -255,7 +255,7 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
       {uploads.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {uploads.map((row, idx) => (
-            <span key={idx} className={styles.ccHint} style={{ color: row.status === "error" ? "#b91c1c" : undefined }}>
+            <span key={idx} className={styles.ccHint} style={{ color: row.status === "error" ? "var(--danger)" : undefined }}>
               {row.name}: {row.status === "uploading" ? "uploading…" : row.status === "done" ? "uploaded" : `failed (${row.error})`}
             </span>
           ))}

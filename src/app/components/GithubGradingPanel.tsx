@@ -39,12 +39,12 @@ const QUEUE_KEY = "ta-github-grading-queue";
 const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 function TestStatusCell({ test }: { test: TestState }) {
-  if (test.status === "idle") return <span style={{ color: "#94a3b8", fontSize: "0.82rem" }}>—</span>;
+  if (test.status === "idle") return <span style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>—</span>;
   if (test.status === "error")
-    return <span style={{ color: "#dc2626", fontSize: "0.82rem" }}>{test.message ?? "Error"}</span>;
+    return <span style={{ color: "var(--danger)", fontSize: "0.82rem" }}>{test.message ?? "Error"}</span>;
   const ok = test.conclusion === "success";
   const failed = test.conclusion === "failure" || test.conclusion === "timed_out";
-  const color = test.status === "running" ? "#2563eb" : ok ? "#16a34a" : failed ? "#dc2626" : "#64748b";
+  const color = test.status === "running" ? "var(--accent)" : ok ? "var(--success)" : failed ? "var(--danger)" : "var(--text-secondary)";
   const base = test.status === "running" ? "Running…" : ok ? "Passed" : failed ? "Failed" : test.conclusion ?? "Done";
   const s = test.summary;
   const counts = s ? ` ${s.passed}/${s.tests}${s.skipped ? ` (+${s.skipped} skipped)` : ""}` : "";
@@ -336,7 +336,7 @@ export default function GithubGradingPanel() {
           <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", margin: "6px 0 0" }}>
             With a prefix, the student label is taken from the rest of the repo name (e.g. <code>lab1-jsmith</code> → <code>jsmith</code>).
           </p>
-          {importNote && <p style={{ fontSize: "0.8rem", color: "#16a34a", marginTop: 4 }}>{importNote}</p>}
+          {importNote && <p style={{ fontSize: "0.8rem", color: "var(--success)", marginTop: 4 }}>{importNote}</p>}
         </div>
       )}
 
@@ -353,13 +353,13 @@ export default function GithubGradingPanel() {
             {queue.map((row, i) => (
               <div
                 key={row.id}
-                style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 10px", borderTop: i === 0 ? "none" : "1px solid #f1f5f9", flexWrap: "wrap" }}
+                style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 10px", borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", flexWrap: "wrap" }}
               >
                 <div style={{ flex: "1 1 200px", minWidth: 0 }}>
-                  <div style={{ fontSize: "0.88rem", fontWeight: 600, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div style={{ fontSize: "0.88rem", fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {row.label || row.repoRef}
                   </div>
-                  <div style={{ fontSize: "0.78rem", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div style={{ fontSize: "0.78rem", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {row.repoRef}
                     {row.branch ? ` @ ${row.branch}` : ""}
                   </div>
@@ -400,7 +400,7 @@ export default function GithubGradingPanel() {
             />
           </p>
 
-          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #f1f5f9" }}>
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border-soft)" }}>
             <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", margin: "0 0 6px" }}>
               No <code>workflow_dispatch</code> workflow yet? Push a standard one (runs tests + uploads a JUnit
               report) into every queued repo. Needs the token&apos;s <code>workflow</code> scope.
@@ -431,7 +431,7 @@ export default function GithubGradingPanel() {
                 {busy === "setup" ? "Adding…" : "Add test workflow to all repos"}
               </Button>
             </div>
-            {setupNote && <p style={{ fontSize: "0.8rem", color: "#16a34a", marginTop: 6 }}>{setupNote}</p>}
+            {setupNote && <p style={{ fontSize: "0.8rem", color: "var(--success)", marginTop: 6 }}>{setupNote}</p>}
           </div>
         </div>
       )}

@@ -225,7 +225,7 @@ export function PageEditorModal({
                     minHeight: 360,
                     border: "1px solid var(--field-border)",
                     borderRadius: 8,
-                    background: "#fff",
+                    background: "var(--field-background)",
                   }}
                 />
               </div>
@@ -262,7 +262,7 @@ export function PageEditorModal({
                   size="small"
                   onClick={handleDelete}
                   disabled={busy}
-                  sx={{ color: "#b91c1c", borderColor: "#fecaca" }}
+                  sx={{ color: "var(--danger)", borderColor: "#fecaca" }}
                 >
                   {deleting ? "Deleting…" : confirmDelete ? "Confirm delete" : "Delete page"}
                 </Button>

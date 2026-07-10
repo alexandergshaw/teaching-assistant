@@ -112,7 +112,7 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
       </Button>
 
       {error && <p className={styles.error}>{error}</p>}
-      {note && <p style={{ fontSize: "0.85rem", color: "#16a34a" }}>{note}</p>}
+      {note && <p style={{ fontSize: "0.85rem", color: "var(--success)" }}>{note}</p>}
 
       {loaded && (
         <>

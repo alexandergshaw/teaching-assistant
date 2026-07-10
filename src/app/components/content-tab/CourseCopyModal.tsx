@@ -466,7 +466,7 @@ export function CourseCopyModal({
                     <FormControlLabel
                       control={<Checkbox size="small" checked={purgeConfirm} onChange={(e) => setPurgeConfirm(e.target.checked)} disabled={running} />}
                       label={
-                        <span className={styles.fieldHint} style={{ margin: 0, color: "#b91c1c" }}>
+                        <span className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)" }}>
                           Permanently delete the checked content from {isExport ? "each destination course" : "this course"}{" "}
                           before copying. This cannot be undone.
                         </span>

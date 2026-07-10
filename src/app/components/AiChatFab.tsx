@@ -216,11 +216,11 @@ export default function AiChatFab() {
           right: DIAL_RIGHT,
           zIndex: 9999,
           "& .MuiSpeedDial-fab": {
-            background: "#2563eb",
+            background: "var(--accent)",
             color: "#fff",
             boxShadow:
               "0 4px 16px rgba(37, 99, 235, 0.45), 0 2px 6px rgba(0, 0, 0, 0.12)",
-            "&:hover": { background: "#1d4ed8" },
+            "&:hover": { background: "var(--accent-hover)" },
           },
         }}
         icon={<SpeedDialIcon />}

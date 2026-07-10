@@ -11,7 +11,7 @@
 .card {
   width: 100%;
   max-width: 600px;
-  background: #ffffff;
+  background: var(--field-background);
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 18px;
   box-shadow: 0 20px 45px -24px rgba(15, 23, 42, 0.28);
@@ -21,12 +21,12 @@
 .title {
   font-size: 1.5rem;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--text-primary);
   letter-spacing: -0.02em;
 }
 
 .subtitle {
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 0.95rem;
   margin-top: 6px;
 }
@@ -40,12 +40,12 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #475569;
+  color: var(--text-secondary);
   margin-bottom: 12px;
 }
 
 .empty {
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 0.92rem;
 }
 
@@ -62,14 +62,14 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border-soft);
   border-radius: 12px;
-  background: #f8fafc;
+  background: var(--surface-subtle);
 }
 
 .factorName {
   font-weight: 600;
-  color: #0f172a;
+  color: var(--text-primary);
 }
 
 .pill {
@@ -82,7 +82,7 @@
   padding: 2px 8px;
   border-radius: 999px;
   background: #dcfce7;
-  color: #15803d;
+  color: var(--success);
 }
 
 .pillPending {
@@ -94,7 +94,7 @@
   display: block;
   font-size: 0.8rem;
   font-weight: 600;
-  color: #334155;
+  color: var(--text-secondary);
   margin-bottom: 7px;
   margin-top: 14px;
 }
@@ -103,17 +103,17 @@
   width: 100%;
   padding: 10px 13px;
   font-size: 0.95rem;
-  color: #0f172a;
-  background: #ffffff;
-  border: 1px solid #d1d5db;
+  color: var(--text-primary);
+  background: var(--field-background);
+  border: 1px solid var(--field-border);
   border-radius: 10px;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .input:focus {
-  outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+  border-color: var(--accent);
 }
 
 .row {
@@ -129,7 +129,7 @@
   font-size: 0.92rem;
   font-weight: 600;
   color: #ffffff;
-  background: #2563eb;
+  background: var(--accent);
   border: none;
   border-radius: 10px;
   cursor: pointer;
@@ -137,7 +137,7 @@
 }
 
 .primary:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: var(--accent-hover);
 }
 
 .primary:disabled {
@@ -149,22 +149,22 @@
   padding: 10px 16px;
   font-size: 0.92rem;
   font-weight: 600;
-  color: #334155;
+  color: var(--text-secondary);
   background: transparent;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--field-border);
   border-radius: 10px;
   cursor: pointer;
 }
 
 .secondary:hover:not(:disabled) {
-  border-color: #94a3b8;
-  color: #0f172a;
+  border-color: var(--text-muted);
+  color: var(--text-primary);
 }
 
 .remove {
   font-size: 0.82rem;
   font-weight: 600;
-  color: #b91c1c;
+  color: var(--danger);
   background: transparent;
   border: 1px solid #fecaca;
   border-radius: 8px;
@@ -179,8 +179,8 @@
 .qrFrame {
   display: inline-block;
   padding: 12px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
+  background: var(--field-background);
+  border: 1px solid var(--border-soft);
   border-radius: 12px;
 }
 
@@ -191,27 +191,27 @@
 }
 
 .secret {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85rem;
-  background: #f1f5f9;
+  background: var(--surface-muted);
   padding: 2px 7px;
   border-radius: 6px;
-  color: #0f172a;
+  color: var(--text-primary);
 }
 
 .help {
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 0.88rem;
   margin-top: 6px;
 }
 
 .tip {
   margin-top: 16px;
-  color: #475569;
+  color: var(--text-secondary);
   font-size: 0.88rem;
   line-height: 1.5;
-  background: #f8fafc;
-  border: 1px dashed #cbd5e1;
+  background: var(--surface-subtle);
+  border: 1px dashed var(--field-border);
   border-radius: 10px;
   padding: 11px 13px;
 }
@@ -219,7 +219,7 @@
 .error {
   margin-top: 16px;
   font-size: 0.9rem;
-  color: #b91c1c;
+  color: var(--danger);
   background: #fef2f2;
   border: 1px solid #fecaca;
   border-radius: 10px;
@@ -229,7 +229,7 @@
 .notice {
   margin-top: 16px;
   font-size: 0.9rem;
-  color: #15803d;
+  color: var(--success);
   background: #f0fdf4;
   border: 1px solid #bbf7d0;
   border-radius: 10px;

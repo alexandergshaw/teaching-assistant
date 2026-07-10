@@ -852,7 +852,7 @@ function InboxPanel() {
                         alignItems: "center",
                         gap: 6,
                         background: "#eff4ff",
-                        color: "#2563eb",
+                        color: "var(--accent)",
                         fontSize: 12,
                         fontWeight: 600,
                         padding: "3px 9px",
@@ -910,7 +910,7 @@ function InboxPanel() {
                     size="small"
                     onClick={handleSuggestTimes}
                     disabled={suggesting}
-                    sx={meetingHint ? { borderColor: "#2563eb", color: "#2563eb" } : {}}
+                    sx={meetingHint ? { borderColor: "var(--accent)", color: "var(--accent)" } : {}}
                   >
                     {suggesting ? "Finding times…" : "Schedule a call"}
                   </Button>
@@ -1024,7 +1024,7 @@ function InboxPanel() {
                 alignItems: "center",
                 marginTop: 14,
                 paddingTop: 14,
-                borderTop: "1px solid #e5e7eb",
+                borderTop: "1px solid var(--border-soft)",
                 flexWrap: "wrap",
               }}
             >
@@ -1042,7 +1042,7 @@ function InboxPanel() {
                   size="small"
                   onClick={handleBookSelected}
                   disabled={booking || offering}
-                  sx={{ borderColor: "#2563eb", color: "#2563eb" }}
+                  sx={{ borderColor: "var(--accent)", color: "var(--accent)" }}
                 >
                   {booking ? "Booking…" : `Book ${selectedLabel}`}
                 </Button>

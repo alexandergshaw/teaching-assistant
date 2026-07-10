@@ -148,21 +148,21 @@ export default function DocStructureEditor({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(680px, 96vw)", maxHeight: "90vh", background: "#fff", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
+        style={{ width: "min(680px, 96vw)", maxHeight: "90vh", background: "var(--field-background)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
       >
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b", display: "flex", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", gap: 8 }}>
             <span>Document structure · {title}</span>
             {progress && <span style={{ color: "var(--accent, #2563eb)" }}>{progress.index} of {progress.total}</span>}
           </div>
-          <div style={{ fontSize: "0.85rem", color: "#475569", marginTop: 4 }}>
+          <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: 4 }}>
             Give the file a title and mark its section headings, then save back to Canvas.
           </div>
         </div>
 
         <div style={{ padding: "14px 18px", overflowY: "auto" }}>
           {stage === "loading" ? (
-            <p style={{ color: "#64748b" }}>Loading document…</p>
+            <p style={{ color: "var(--text-secondary)" }}>Loading document…</p>
           ) : (
             <>
               <div style={{ marginBottom: 16 }}>
@@ -204,8 +204,8 @@ export default function DocStructureEditor({
                   </div>
 
                   {selected.size > 0 && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 10px", background: "#f1f5f9", borderRadius: 8, marginBottom: 6 }}>
-                      <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#334155" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 10px", background: "var(--surface-muted)", borderRadius: 8, marginBottom: 6 }}>
+                      <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-secondary)" }}>
                         {selected.size} selected — set to
                       </span>
                       {LEVELS.map((l) => (
@@ -238,7 +238,7 @@ export default function DocStructureEditor({
                       return (
                         <div
                           key={p.id}
-                          style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 10px", borderTop: i === 0 ? "none" : "1px solid #f1f5f9", background: isSelected ? "#eff6ff" : undefined }}
+                          style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 10px", borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", background: isSelected ? "#eff6ff" : undefined }}
                         >
                           <Checkbox
                             checked={isSelected}
@@ -249,7 +249,7 @@ export default function DocStructureEditor({
                           />
                           <span
                             title={p.text}
-                            style={{ flex: 1, minWidth: 0, fontSize: "0.85rem", color: isHeading ? "#0f172a" : "#475569", fontWeight: isHeading ? 700 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                            style={{ flex: 1, minWidth: 0, fontSize: "0.85rem", color: isHeading ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: isHeading ? 700 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                           >
                             {p.text}
                           </span>
@@ -273,13 +273,13 @@ export default function DocStructureEditor({
                   </div>
                 </>
               )}
-              {error && <p style={{ color: "#dc2626", fontSize: "0.85rem", marginTop: 10 }}>{error}</p>}
+              {error && <p style={{ color: "var(--danger)", fontSize: "0.85rem", marginTop: 10 }}>{error}</p>}
             </>
           )}
         </div>
 
         <div style={{ padding: "12px 18px", borderTop: "1px solid var(--field-border, #e2e8f0)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: "0.8rem", color: headingCount > 0 ? "#16a34a" : "#d97706" }}>
+          <span style={{ fontSize: "0.8rem", color: headingCount > 0 ? "var(--success)" : "var(--warning)" }}>
             {headingCount > 0 ? `${headingCount} heading${headingCount === 1 ? "" : "s"} marked` : "No headings marked yet"}
           </span>
           <div style={{ display: "flex", gap: 8 }}>

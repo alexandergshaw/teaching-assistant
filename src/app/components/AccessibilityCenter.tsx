@@ -64,9 +64,9 @@ function buildReviewQueue(items: ItemScan[]): FixTarget[] {
 }
 
 const SEVERITY: Record<Severity, { color: string; label: string }> = {
-  error: { color: "#dc2626", label: "Error" },
-  warning: { color: "#d97706", label: "Warning" },
-  suggestion: { color: "#2563eb", label: "Suggestion" },
+  error: { color: "var(--danger)", label: "Error" },
+  warning: { color: "var(--warning)", label: "Warning" },
+  suggestion: { color: "var(--accent)", label: "Suggestion" },
 };
 
 const TYPE_LABEL: Record<AccessibleItemType, string> = {
@@ -244,7 +244,7 @@ export default function AccessibilityCenter() {
     right: 0,
     bottom: 0,
     width: "min(440px, 96vw)",
-    background: "#ffffff",
+    background: "var(--field-background)",
     borderLeft: "1px solid var(--field-border, #cbd5e1)",
     boxShadow: "-8px 0 28px rgba(15,23,42,0.18)",
     zIndex: 10000,
@@ -274,11 +274,11 @@ export default function AccessibilityCenter() {
         <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "#0f172a" }}>Accessibility</h2>
+              <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "var(--text-primary)" }}>Accessibility</h2>
               {a11y.hasCourse && courseLabel && (
                 <div
                   title={courseLabel}
-                  style={{ fontSize: "0.78rem", color: "#64748b", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}
+                  style={{ fontSize: "0.78rem", color: "var(--text-secondary)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}
                 >
                   {courseLabel}
                 </div>
@@ -321,7 +321,7 @@ export default function AccessibilityCenter() {
               </Button>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 14, marginTop: 10, fontSize: "0.84rem", color: "#475569" }}>
+          <div style={{ display: "flex", gap: 14, marginTop: 10, fontSize: "0.84rem", color: "var(--text-secondary)" }}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <Dot color={SEVERITY.error.color} /> {a11y.errorCount} errors
             </span>
@@ -357,15 +357,15 @@ export default function AccessibilityCenter() {
         {/* Body */}
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
           {!a11y.hasCourse ? (
-            <p style={{ color: "#64748b", fontSize: "0.9rem" }}>
+            <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
               Open a course under LMS Integration to scan it for accessibility issues.
             </p>
           ) : a11y.status === "scanning" && flagged.length === 0 ? (
-            <p style={{ color: "#64748b", fontSize: "0.9rem" }}>Scanning the course…</p>
+            <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>Scanning the course…</p>
           ) : a11y.status === "error" ? (
-            <p style={{ color: "#dc2626", fontSize: "0.9rem" }}>{a11y.error ?? "Scan failed."}</p>
+            <p style={{ color: "var(--danger)", fontSize: "0.9rem" }}>{a11y.error ?? "Scan failed."}</p>
           ) : flagged.length === 0 ? (
-            <p style={{ color: "#16a34a", fontSize: "0.9rem", fontWeight: 600 }}>
+            <p style={{ color: "var(--success)", fontSize: "0.9rem", fontWeight: 600 }}>
               No accessibility issues found in this course.
             </p>
           ) : (
@@ -457,7 +457,7 @@ function ItemBlock({
   const issues = [...item.issues].sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity]);
   return (
     <div style={{ marginBottom: 14, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 10, overflow: "hidden" }}>
-      <div style={{ padding: "9px 12px", background: "#f8fafc", borderBottom: "1px solid var(--field-border, #eef2f7)", display: "flex", gap: 9, alignItems: "flex-start" }}>
+      <div style={{ padding: "9px 12px", background: "var(--surface-subtle)", borderBottom: "1px solid var(--field-border, #eef2f7)", display: "flex", gap: 9, alignItems: "flex-start" }}>
         {onToggleSelect && (
           <Checkbox
             checked={!!selected}
@@ -468,24 +468,24 @@ function ItemBlock({
           />
         )}
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: "#64748b" }}>
+          <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--text-secondary)" }}>
             {TYPE_LABEL[item.type]}
           </div>
-          <div style={{ fontSize: "0.92rem", fontWeight: 600, color: "#0f172a", wordBreak: "break-word" }}>{item.title}</div>
+          <div style={{ fontSize: "0.92rem", fontWeight: 600, color: "var(--text-primary)", wordBreak: "break-word" }}>{item.title}</div>
         </div>
       </div>
       <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
         {issues.map((issue, i) => (
           <li
             key={i}
-            style={{ padding: "9px 12px", borderTop: i === 0 ? "none" : "1px solid #f1f5f9", display: "flex", gap: 9, alignItems: "flex-start" }}
+            style={{ padding: "9px 12px", borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", display: "flex", gap: 9, alignItems: "flex-start" }}
           >
             <span style={{ marginTop: 4 }}>
               <Dot color={SEVERITY[issue.severity].color} />
             </span>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontSize: "0.88rem", color: "#1f2933" }}>{issue.message}</div>
-              <div style={{ fontSize: "0.74rem", color: "#94a3b8", marginTop: 2 }}>
+              <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", marginTop: 2 }}>
                 {SEVERITY[issue.severity].label}
                 {issue.wcag ? ` · WCAG ${issue.wcag}` : ""}
               </div>

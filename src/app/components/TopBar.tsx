@@ -115,7 +115,7 @@ function InstitutionsSection({ open }: { open: boolean }) {
 // Universal-access glyph (head + arms-out body), tinted by severity.
 function AccessIcon({ color }: { color: string }) {
   return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill={color} aria-hidden="true" focusable="false">
+    <svg width="17" height="17" viewBox="0 0 24 24" style={{ fill: color }} aria-hidden="true" focusable="false">
       <circle cx="12" cy="4.2" r="2.1" />
       <path d="M21 8.6a1 1 0 0 1-.72 1.18l-4.28 1.07V21a1 1 0 1 1-2 0v-5h-2v5a1 1 0 1 1-2 0V10.85L3.72 9.78A1 1 0 1 1 4.28 7.86l5.06 1.27c.43.1.88.16 1.32.16h2.68c.44 0 .89-.06 1.32-.16l5.06-1.27A1 1 0 0 1 21 8.6Z" />
     </svg>
@@ -130,7 +130,7 @@ function AccessibilityPill() {
   if (!a11y.hasCourse) return null;
   const issues = a11y.errorCount + a11y.warningCount;
   const scanning = a11y.status === "scanning";
-  const color = a11y.errorCount > 0 ? "#dc2626" : a11y.warningCount > 0 ? "#d97706" : "#16a34a";
+  const color = a11y.errorCount > 0 ? "var(--danger)" : a11y.warningCount > 0 ? "var(--warning)" : "var(--success)";
   const label = scanning && issues === 0 ? "Scanning accessibility" : `${issues} accessibility issue${issues === 1 ? "" : "s"}`;
   return (
     <Button
@@ -147,8 +147,8 @@ function AccessibilityPill() {
         padding: "0 11px",
         borderRadius: 1.125,
         border: "1px solid var(--field-border, #cbd5e1)",
-        background: "#fff",
-        color: "#334155",
+        background: "var(--field-background)",
+        color: "var(--text-secondary)",
         fontSize: "0.85rem",
         fontWeight: 600,
         textTransform: "none",
@@ -159,11 +159,11 @@ function AccessibilityPill() {
     >
       <AccessIcon color={color} />
       {scanning && issues === 0 ? (
-        <span style={{ color: "#94a3b8" }}>…</span>
+        <span style={{ color: "var(--text-muted)" }}>…</span>
       ) : issues > 0 ? (
         <span style={{ color }}>{issues}</span>
       ) : (
-        <span style={{ color: "#16a34a" }}>OK</span>
+        <span style={{ color: "var(--success)" }}>OK</span>
       )}
     </Button>
   );

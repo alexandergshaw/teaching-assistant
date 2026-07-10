@@ -133,15 +133,15 @@ export default function OfficeAltEditor({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(640px, 96vw)", maxHeight: "90vh", background: "#fff", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
+        style={{ width: "min(640px, 96vw)", maxHeight: "90vh", background: "var(--field-background)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
       >
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b", display: "flex", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", gap: 8 }}>
             <span>Image alt text · {title}</span>
             {progress && <span style={{ color: "var(--accent, #2563eb)" }}>{progress.index} of {progress.total}</span>}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 4 }}>
-            <span style={{ fontSize: "0.85rem", color: "#475569" }}>
+            <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
               Describe each image for screen-reader users, then save back to Canvas.
             </span>
             {images.length > 0 && missingCount > 0 && (
@@ -160,9 +160,9 @@ export default function OfficeAltEditor({
 
         <div style={{ padding: "12px 18px", overflowY: "auto" }}>
           {stage === "loading" ? (
-            <p style={{ color: "#64748b" }}>Loading images…</p>
+            <p style={{ color: "var(--text-secondary)" }}>Loading images…</p>
           ) : images.length === 0 ? (
-            <p style={{ color: "#64748b" }}>No images found in this file.</p>
+            <p style={{ color: "var(--text-secondary)" }}>No images found in this file.</p>
           ) : (
             images.map((im) => {
               const value = alts[im.id] ?? "";
@@ -174,16 +174,16 @@ export default function OfficeAltEditor({
                     <img
                       src={`data:${im.mimeType ?? "image/png"};base64,${im.base64}`}
                       alt=""
-                      style={{ width: 64, height: 64, objectFit: "contain", flexShrink: 0, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8, background: "#f8fafc" }}
+                      style={{ width: 64, height: 64, objectFit: "contain", flexShrink: 0, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8, background: "var(--surface-subtle)" }}
                     />
                   ) : (
-                    <div style={{ width: 64, height: 64, flexShrink: 0, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8, background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.65rem", color: "#94a3b8", textAlign: "center" }}>
+                    <div style={{ width: 64, height: 64, flexShrink: 0, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8, background: "var(--surface-subtle)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.65rem", color: "var(--text-muted)", textAlign: "center" }}>
                       no preview
                     </div>
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.82rem", color: "#334155", marginBottom: 4 }}>
-                    {missing && <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: "#d97706" }} />}
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.82rem", color: "var(--text-secondary)", marginBottom: 4 }}>
+                    {missing && <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--warning)" }} />}
                     {im.name}
                   </label>
                   <div style={{ display: "flex", gap: 6 }}>
@@ -220,11 +220,11 @@ export default function OfficeAltEditor({
               );
             })
           )}
-          {error && <p style={{ color: "#dc2626", fontSize: "0.85rem", marginTop: 8 }}>{error}</p>}
+          {error && <p style={{ color: "var(--danger)", fontSize: "0.85rem", marginTop: 8 }}>{error}</p>}
         </div>
 
         <div style={{ padding: "12px 18px", borderTop: "1px solid var(--field-border, #e2e8f0)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: "0.8rem", color: missingCount > 0 ? "#d97706" : "#16a34a" }}>
+          <span style={{ fontSize: "0.8rem", color: missingCount > 0 ? "var(--warning)" : "var(--success)" }}>
             {missingCount > 0 ? `${missingCount} image${missingCount === 1 ? "" : "s"} still missing alt text` : "All images have alt text"}
           </span>
           <div style={{ display: "flex", gap: 8 }}>

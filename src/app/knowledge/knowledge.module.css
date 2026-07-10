@@ -8,21 +8,21 @@
   margin: 0 0 4px;
   font-size: 1.35rem;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--text-primary);
 }
 
 .subtitle {
   margin: 0 0 24px;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary);
   font-size: 0.92rem;
   line-height: 1.5;
 }
 
 .status {
   padding: 14px 16px;
-  border: 1px solid var(--field-border, #e2e8f0);
+  border: 1px solid var(--field-border);
   border-radius: 10px;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary);
   font-size: 0.92rem;
 }
 
@@ -31,7 +31,7 @@
   border: 1px solid #fecaca;
   background: #fef2f2;
   border-radius: 10px;
-  color: #b91c1c;
+  color: var(--danger);
   font-size: 0.9rem;
   margin-bottom: 16px;
 }
@@ -46,10 +46,10 @@
 }
 
 .card {
-  border: 1px solid var(--field-border, #e2e8f0);
+  border: 1px solid var(--field-border);
   border-radius: 12px;
   padding: 16px 18px;
-  background: #fff;
+  background: var(--field-background);
 }
 
 .cardHeader {
@@ -63,7 +63,7 @@
 .cardTitle {
   font-size: 1rem;
   font-weight: 650;
-  color: #0f172a;
+  color: var(--text-primary);
   margin: 0;
 }
 
@@ -72,33 +72,33 @@
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 999px;
-  border: 1px solid var(--field-border, #e2e8f0);
-  color: #475569;
-  background: #f8fafc;
+  border: 1px solid var(--field-border);
+  color: var(--text-secondary);
+  background: var(--surface-subtle);
   text-transform: capitalize;
 }
 
 .badgeSource {
-  color: #1d4ed8;
+  color: var(--accent-hover);
   border-color: #bfdbfe;
   background: #eff6ff;
 }
 
 .summary {
   margin: 0 0 10px;
-  color: #334155;
+  color: var(--text-secondary);
   font-size: 0.9rem;
   line-height: 1.55;
 }
 
 .meta {
   margin: 0 0 12px;
-  color: var(--text-secondary, #94a3b8);
+  color: var(--text-muted);
   font-size: 0.8rem;
 }
 
 .meta a {
-  color: #1d4ed8;
+  color: var(--accent-hover);
 }
 
 .editRow {
@@ -110,14 +110,14 @@
 
 .editHint {
   font-size: 0.78rem;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary);
   margin: 0;
 }
 
 .input {
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid var(--field-border, #cbd5e1);
+  border: 1px solid var(--field-border);
   border-radius: 8px;
   font: inherit;
   font-size: 0.88rem;
@@ -141,8 +141,8 @@
   padding: 7px 16px;
   border-radius: 8px;
   border: none;
-  background: var(--accent, #0f172a);
-  color: var(--accent-contrast, #fff);
+  background: var(--accent);
+  color: #fff;
   font: inherit;
   font-size: 0.86rem;
   font-weight: 600;
@@ -158,9 +158,9 @@
 .discard {
   padding: 7px 16px;
   border-radius: 8px;
-  border: 1px solid var(--field-border, #cbd5e1);
-  background: #fff;
-  color: #334155;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  color: var(--text-secondary);
   font: inherit;
   font-size: 0.86rem;
   font-weight: 600;

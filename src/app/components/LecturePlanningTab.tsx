@@ -812,7 +812,7 @@ export default function LecturePlanningTab() {
                           padding: "2px 8px",
                           borderRadius: 20,
                           background: "color-mix(in srgb, #f59e0b 14%, transparent 86%)",
-                          color: "#b45309",
+                          color: "var(--warning)",
                           border: "1px solid color-mix(in srgb, #f59e0b 35%, transparent 65%)",
                         }}
                       >

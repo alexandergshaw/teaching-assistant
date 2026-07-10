@@ -25,11 +25,11 @@ interface WeekCalendarProps {
 const DAYS_PER_PAGE = 5;
 
 // Brand palette (matches the rest of the app).
-const ACCENT = "#2563eb";
+const ACCENT = "var(--accent)";
 const ACCENT_BG = "#eff4ff";
-const BUSY_BG = "#e5e7eb";
+const BUSY_BG = "var(--border-soft)";
 const BUSY_TEXT = "#6b7280";
-const BORDER = "#e5e7eb";
+const BORDER = "var(--border-soft)";
 const MUTED = "#9ca3af";
 
 // Wall-clock parts of an ISO instant in a given IANA time zone.

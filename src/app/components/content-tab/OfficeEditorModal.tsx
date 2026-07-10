@@ -281,19 +281,19 @@ export function OfficeEditorModal({
       >
         <div
           onClick={(e) => e.stopPropagation()}
-          style={{ width: "min(440px, 96vw)", maxHeight: "80vh", background: "#fff", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
+          style={{ width: "min(440px, 96vw)", maxHeight: "80vh", background: "var(--field-background)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
         >
           <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border)" }}>
-            <div style={{ fontWeight: 700, color: "#0f172a" }}>Move section to another file</div>
-            <div style={{ fontSize: "0.85rem", color: "#475569", marginTop: 2 }}>
+            <div style={{ fontWeight: 700, color: "var(--text-primary)" }}>Move section to another file</div>
+            <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: 2 }}>
               Appends &ldquo;{spansToPlainText(movingSection.spans).slice(0, 60) || "(empty)"}&rdquo; to the end of the chosen Word file.
             </div>
           </div>
           <div style={{ padding: "10px 12px", overflowY: "auto" }}>
             {!moveFiles ? (
-              <p style={{ color: "#64748b" }}>Loading files…</p>
+              <p style={{ color: "var(--text-secondary)" }}>Loading files…</p>
             ) : moveFiles.length === 0 ? (
-              <p style={{ color: "#64748b" }}>No other Word (.docx) files in this course.</p>
+              <p style={{ color: "var(--text-secondary)" }}>No other Word (.docx) files in this course.</p>
             ) : (
               moveFiles.map((f) => (
                 <Button

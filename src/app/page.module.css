@@ -219,7 +219,7 @@
 }
 
 .field textarea::placeholder {
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .textInput {
@@ -235,7 +235,7 @@
 }
 
 .textInput::placeholder {
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .fieldHint {
@@ -245,7 +245,7 @@
 }
 
 .textInput:focus {
-  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
   border-color: var(--accent);
 }
@@ -350,7 +350,7 @@
 }
 
 .fieldEditArea:focus {
-  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
   border-color: var(--accent);
 }
@@ -395,7 +395,7 @@
 
 .field textarea:focus,
 .fileField:focus-within {
-  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
   border-color: var(--accent);
 }
@@ -879,7 +879,7 @@
 .finalizedMeta {
   font-size: 0.75rem;
   color: var(--text-secondary);
-  font-family: monospace;
+  font-family: var(--font-mono);
   word-break: break-all;
 }
 
@@ -1130,13 +1130,13 @@ button.courseResourceValue:disabled {
 }
 
 .prFileName {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   word-break: break-all;
 }
 
 .prFileStat {
-  font-family: monospace;
+  font-family: var(--font-mono);
   white-space: nowrap;
   flex: none;
 }
@@ -1145,7 +1145,7 @@ button.courseResourceValue:disabled {
   margin: 0;
   max-height: 360px;
   overflow: auto;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 0.78rem;
   line-height: 1.5;
   background: var(--field-background);
@@ -1234,7 +1234,7 @@ button.courseResourceValue:disabled {
 }
 
 .ghMetaMono {
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .ghActions {
@@ -1742,7 +1742,7 @@ button.courseResourceValue:disabled {
 }
 
 .deckTitleInput:focus {
-  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
   border-color: var(--accent);
 }
@@ -1767,7 +1767,7 @@ button.courseResourceValue:disabled {
 }
 
 .editorCodeArea {
-  font-family: "Fira Code", "Cascadia Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.82rem;
 }
 
@@ -1794,7 +1794,7 @@ button.courseResourceValue:disabled {
 }
 
 .docEditArea:focus {
-  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
   border-color: var(--accent);
 }
@@ -2132,7 +2132,7 @@ button.courseResourceValue:disabled {
 }
 
 .lfSearch:focus {
-  outline: 2px solid rgba(37, 99, 235, 0.5);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
   border-color: var(--accent);
 }
@@ -2253,7 +2253,7 @@ button.courseResourceValue:disabled {
 .lfCardSelected,
 .lfCardSelected:hover {
   border-color: var(--accent);
-  background: rgba(37, 99, 235, 0.2);
+  background: var(--focus-ring-color);
   box-shadow: 0 0 0 1px var(--accent);
 }
 
@@ -2600,7 +2600,7 @@ button.courseResourceValue:disabled {
 .lfDetail input:focus,
 .lfDetail textarea:focus,
 .lfDetail .textInput:focus {
-  outline: 2px solid rgba(37, 99, 235, 0.5);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
   border-color: var(--accent);
 }
@@ -3006,7 +3006,7 @@ button.courseResourceValue:disabled {
 }
 
 .feedbackText:focus {
-  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
   border-color: var(--accent);
 }
@@ -3402,7 +3402,7 @@ button.courseResourceValue:disabled {
 .exampleCodeBlock {
   margin: 0;
   padding: 14px 16px;
-  font-family: "Fira Code", "Cascadia Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.82rem;
   line-height: 1.6;
   color: var(--text-primary);
@@ -3443,11 +3443,11 @@ button.courseResourceValue:disabled {
 }
 
 .lessonRevisionArea::placeholder {
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .lessonRevisionArea:focus {
-  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
   border-color: var(--accent);
 }
@@ -3560,7 +3560,7 @@ button.courseResourceValue:disabled {
 }
 
 .selectionChatEmpty {
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 0.85rem;
   text-align: center;
   padding: 12px 0;
@@ -3627,7 +3627,7 @@ button.courseResourceValue:disabled {
   background: none;
   border: none;
   cursor: pointer;
-  color: #94a3b8;
+  color: var(--text-muted);
   padding: 2px 4px;
   border-radius: 4px;
   display: flex;
@@ -3684,11 +3684,11 @@ button.courseResourceValue:disabled {
 }
 
 .selectionChatInput::placeholder {
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .selectionChatInput:focus {
-  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
   border-color: #2563eb;
 }
@@ -3821,7 +3821,7 @@ button.courseResourceValue:disabled {
 }
 
 .deadlinesInput:focus {
-  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
   border-color: #2563eb;
 }
@@ -3888,7 +3888,7 @@ button.courseResourceValue:disabled {
   line-height: 1.35;
   background: #eff6ff;
   color: #1e3a8a;
-  border: 1px solid rgba(37, 99, 235, 0.2);
+  border: 1px solid var(--focus-ring-color);
 }
 
 .deadlinesUploadStatus[data-kind="success"] {
@@ -3950,7 +3950,7 @@ button.courseResourceValue:disabled {
 
 .deadlineItemDesc {
   font-size: 0.78rem;
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .deadlineItemBadge {
@@ -3978,7 +3978,7 @@ button.courseResourceValue:disabled {
   background: none;
   border: none;
   cursor: pointer;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 1.1rem;
   padding: 0 3px;
   border-radius: 4px;
@@ -4038,180 +4038,6 @@ button.courseResourceValue:disabled {
 
   .matrix {
     min-width: 900px;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  .page {
-    --page-background: linear-gradient(180deg, #020617 0%, #0f172a 100%);
-    --card-background: rgba(15, 23, 42, 0.92);
-    --card-border: rgba(148, 163, 184, 0.2);
-    --text-primary: #e2e8f0;
-    --text-secondary: #cbd5e1;
-    --field-border: rgba(148, 163, 184, 0.3);
-    --field-background: rgba(15, 23, 42, 0.75);
-    --accent: #60a5fa;
-    --accent-hover: #3b82f6;
-    --success: #22c55e;
-    --warning: #f59e0b;
-    --danger: #f87171;
-  }
-
-  .selectionAiButton {
-    background: #3b82f6;
-  }
-
-  .selectionAiButton:hover {
-    background: #2563eb;
-  }
-
-  .selectionChatWindow {
-    background: #1e293b;
-    border-color: rgba(148, 163, 184, 0.2);
-  }
-
-  .selectionChatHeader,
-  .selectionChatContext,
-  .selectionChatInputRow {
-    background: #0f172a;
-    border-color: rgba(148, 163, 184, 0.12);
-  }
-
-  .selectionChatHeaderLeft {
-    color: #60a5fa;
-  }
-
-  .selectionChatClose {
-    color: #94a3b8;
-  }
-
-  .selectionChatClose:hover {
-    background: rgba(148, 163, 184, 0.1);
-    color: #e2e8f0;
-  }
-
-  .selectionChatContext {
-    color: #94a3b8;
-  }
-
-  .selectionChatAiMsg {
-    background: #0f172a;
-    color: #e2e8f0;
-  }
-
-  .selectionChatEmpty {
-    color: #475569;
-  }
-
-  .selectionChatInput {
-    background: #1e293b;
-    border-color: rgba(148, 163, 184, 0.3);
-    color: #e2e8f0;
-  }
-
-  .selectionChatInput:focus {
-    border-color: #60a5fa;
-    outline-color: rgba(96, 165, 250, 0.2);
-  }
-
-  .selectionChatSend {
-    background: #3b82f6;
-  }
-
-  .selectionChatSend:hover:not(:disabled) {
-    background: #2563eb;
-  }
-
-  .selectionChatSend:disabled {
-    background: #334155;
-  }
-
-  .selectionChatMsgAction:hover:not(:disabled) {
-    color: #cbd5e1;
-    background: rgba(148, 163, 184, 0.1);
-  }
-
-  .deadlinesAddForm {
-    background: #0f172a;
-    border-color: rgba(148, 163, 184, 0.12);
-  }
-  
-  .suggestionBubbles {
-    background: #0f172a;
-    border-color: rgba(148, 163, 184, 0.12);
-  }
-
-  .deadlinesInput {
-    background: #1e293b;
-    border-color: rgba(148, 163, 184, 0.3);
-    color: #e2e8f0;
-  }
-
-  .deadlinesInput:focus {
-    border-color: #60a5fa;
-    outline-color: rgba(96, 165, 250, 0.2);
-  }
-
-  .deadlinesAddBtn {
-    background: #3b82f6;
-  }
-
-  .deadlinesAddBtn:hover:not(:disabled) {
-    background: #2563eb;
-  }
-
-  .deadlinesAddBtn:disabled {
-    background: #334155;
-  }
-
-  .deadlinesCancelBtn {
-    background: #1e293b;
-    border-color: rgba(148, 163, 184, 0.3);
-    color: #94a3b8;
-  }
-
-  .deadlinesCancelBtn:hover {
-    background: #0f172a;
-  }
-
-  .deadlineItem {
-    background: #0f172a;
-    border-color: rgba(148, 163, 184, 0.1);
-  }
-
-  .deadlineItemTitle {
-    color: #e2e8f0;
-  }
-
-  .deadlineItemDate {
-    color: #64748b;
-  }
-
-  .deadlineItemDesc {
-    color: #475569;
-  }
-
-  .deadlinesAddIconBtn {
-    color: #64748b;
-  }
-
-  .deadlinesAddIconBtn:hover {
-    background: rgba(148, 163, 184, 0.1);
-    color: #60a5fa;
-  .suggestionBubble {
-    background: #1e293b;
-    border-color: rgba(148, 163, 184, 0.3);
-    color: #cbd5e1;
-  }
-
-  .suggestionBubble:hover {
-    background: #1e3a5f;
-    border-color: #60a5fa;
-    color: #93c5fd;
-  }
-
-  .suggestionBubble:active {
-    background: #1e3a5f;
   }
 }
 
@@ -4319,7 +4145,7 @@ button.courseResourceValue:disabled {
 }
 
 .chatModalEmpty {
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 0.85rem;
   text-align: center;
   padding: 12px 0;
@@ -4388,11 +4214,11 @@ button.courseResourceValue:disabled {
 }
 
 .chatModalInput::placeholder {
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .chatModalInput:focus {
-  outline: 2px solid rgba(37, 99, 235, 0.2);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
   border-color: #2563eb;
 }
@@ -4422,72 +4248,6 @@ button.courseResourceValue:disabled {
 .chatModalSend:disabled {
   background: #cbd5e1;
   cursor: not-allowed;
-}
-
-@media (prefers-color-scheme: dark) {
-  .fab {
-    background: #3b82f6;
-  }
-
-  .fab:hover {
-    background: #2563eb;
-  }
-
-  .chatModal {
-    background: #1e293b;
-    border-color: rgba(148, 163, 184, 0.2);
-  }
-
-  .chatModalHeader,
-  .chatModalInputRow {
-    background: #0f172a;
-    border-color: rgba(148, 163, 184, 0.12);
-  }
-
-  .chatModalHeaderLeft {
-    color: #60a5fa;
-  }
-
-  .chatModalClose {
-    color: #94a3b8;
-  }
-
-  .chatModalClose:hover {
-    background: rgba(148, 163, 184, 0.1);
-    color: #e2e8f0;
-  }
-
-  .chatModalAiMsg {
-    background: #0f172a;
-    color: #e2e8f0;
-  }
-
-  .chatModalEmpty {
-    color: #475569;
-  }
-
-  .chatModalInput {
-    background: #1e293b;
-    border-color: rgba(148, 163, 184, 0.3);
-    color: #e2e8f0;
-  }
-
-  .chatModalInput:focus {
-    border-color: #60a5fa;
-    outline-color: rgba(96, 165, 250, 0.2);
-  }
-
-  .chatModalSend {
-    background: #3b82f6;
-  }
-
-  .chatModalSend:hover:not(:disabled) {
-    background: #2563eb;
-  }
-
-  .chatModalSend:disabled {
-    background: #334155;
-  }
 }
 
 /* ── Bulk edit bar (Course Content selection toolbar) ──────────────────────────
@@ -5182,7 +4942,7 @@ button.courseResourceValue:disabled {
 
 .ccDueEmpty {
   background: transparent;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-weight: 500;
   font-style: italic;
 }

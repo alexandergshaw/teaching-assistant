@@ -7,6 +7,7 @@ import { getStoredProvider } from "@/lib/llm-provider";
 import { listBackupVideos, readBackupFile, type BackupVideo, type DirHandle } from "@/lib/backup-dir";
 import { activeCaptionAt, wrapCaptionLines, captionLayout, ensureFiniteDuration } from "@/lib/caption-burn";
 import { saveRecordingFile, extForMime } from "@/lib/recording-files";
+import { startFrameTicker } from "@/lib/frame-ticker";
 import { useSupabase } from "@/context/SupabaseProvider";
 import type { Take } from "./RecordingTab";
 import styles from "../page.module.css";
@@ -51,8 +52,14 @@ function gatherRecordingContext(): { text: string; summary: string } {
 export default function CaptionStudio({ takes = [], backupDir = null }: { takes?: Take[]; backupDir?: DirHandle | null }) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
-  const [context, setContext] = useState("");
-  const [usePageContext, setUsePageContext] = useState(true);
+  const [context, setContext] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-cap-context") ?? "";
+  });
+  const [usePageContext, setUsePageContext] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("ta-cap-use-page") !== "0";
+  });
   const [pageContextSummary, setPageContextSummary] = useState("");
   const [busy, setBusy] = useState<"idle" | "sampling" | "describing">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +111,16 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     /* eslint-disable-next-line react-hooks/set-state-in-effect */
     setPageContextSummary(gatherRecordingContext().summary);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-cap-context", context);
+  }, [context]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-cap-use-page", usePageContext ? "1" : "0");
+  }, [usePageContext]);
 
   useEffect(() => {
     videoUrlRef.current = videoUrl;
@@ -297,6 +314,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
 
     let audioContext: AudioContext | null = null;
     let cancelled = false;
+    let ticker: { stop: () => void } | null = null;
 
     try {
       const v = document.createElement("video");
@@ -384,12 +402,11 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
 
       recorder.start(1000);
 
-      let rafId: number | null = null;
       let lastReportedProgress = 0;
 
       const drawLoop = () => {
         if (cancelled || v.ended) {
-          if (rafId !== null) cancelAnimationFrame(rafId);
+          ticker?.stop();
           v.pause();
           recorder.stop();
           burnAbortRef.current = null;
@@ -446,13 +463,11 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
           lastReportedProgress = newProgress;
           setBurnProgress(newProgress);
         }
-
-        rafId = requestAnimationFrame(drawLoop);
       };
 
       burnAbortRef.current = () => {
         cancelled = true;
-        if (rafId !== null) cancelAnimationFrame(rafId);
+        ticker?.stop();
         v.pause();
         v.removeAttribute("src");
         if (recorder.state !== "inactive") recorder.stop();
@@ -469,7 +484,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
 
       v.currentTime = 0;
       await v.play();
-      drawLoop();
+      ticker = startFrameTicker(30, drawLoop);
     } catch (err) {
       const abort = burnAbortRef.current;
       if (abort) {

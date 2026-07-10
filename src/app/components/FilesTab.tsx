@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, TextField, MenuItem } from "@mui/material";
 import TabHeader from "./TabHeader";
 import CoursePicker from "./CoursePicker";
@@ -12,9 +12,11 @@ import {
   renameRecordingFile,
   getRecordingFileUrl,
   downloadRecordingFile,
+  saveRecordingFile,
   extForMime,
   type RecordingFile,
 } from "@/lib/recording-files";
+import { ensureFiniteDuration } from "@/lib/caption-burn";
 import {
   listCourseContentAction,
   requestFileUploadAction,
@@ -48,15 +50,28 @@ export default function FilesTab() {
   // Play state
   const [playUrls, setPlayUrls] = useState<Record<string, string>>({});
 
+  // Upload state
+  const [uploads, setUploads] = useState<Array<{ name: string; status: "uploading" | "done" | "error"; error?: string }>>([]);
+
   // Add-to-module panel state
   const [addTarget, setAddTarget] = useState<string | null>(null);
-  const [courseUrl, setCourseUrl] = useState("");
+  const [courseUrl, setCourseUrl] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-files-course-url") ?? "";
+  });
   const [courseName, setCourseName] = useState("");
   const [modules, setModules] = useState<CanvasModule[]>([]);
   const [modulesStatus, setModulesStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  // The remembered module id is not restored eagerly - it is applied via
+  // pendingModuleRef in handleSelectCourse once the course's modules load
+  // and the id is confirmed present.
   const [moduleId, setModuleId] = useState<number | "">("");
   const [adding, setAdding] = useState(false);
   const [addNote, setAddNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const pendingModuleRef = useRef<string | null>((() => {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem("ta-files-module-id");
+  })());
 
   // Load files on mount and when user changes
   useEffect(() => {
@@ -65,7 +80,6 @@ export default function FilesTab() {
     }
 
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setStatus("loading");
     setError(null);
 
@@ -88,6 +102,40 @@ export default function FilesTab() {
       cancelled = true;
     };
   }, [user, supabase]);
+
+  const handleSelectCourse = async (url: string) => {
+    setCourseUrl(url);
+    setModules([]);
+    setModuleId("");
+
+    if (!url) return;
+
+    setModulesStatus("loading");
+    try {
+      const result = await listCourseContentAction(
+        url,
+        activeInstitution || undefined
+      );
+      if ("error" in result) {
+        setNote({ kind: "error", text: result.error });
+        setModulesStatus("error");
+      } else {
+        setCourseName(result.courseName);
+        setModules(result.modules);
+        setModulesStatus("ready");
+        const pending = pendingModuleRef.current;
+        if (pending && result.modules.some((m) => String(m.id) === pending)) {
+          setModuleId(Number(pending));
+        }
+      }
+    } catch (err) {
+      setNote({
+        kind: "error",
+        text: err instanceof Error ? err.message : "Failed to load course",
+      });
+      setModulesStatus("error");
+    }
+  };
 
   const handleRename = (file: RecordingFile) => {
     const newName = window.prompt("Rename file:", file.name);
@@ -177,36 +225,6 @@ export default function FilesTab() {
     }
   };
 
-  const handleSelectCourse = async (url: string) => {
-    setCourseUrl(url);
-    setModules([]);
-    setModuleId("");
-
-    if (!url) return;
-
-    setModulesStatus("loading");
-    try {
-      const result = await listCourseContentAction(
-        url,
-        activeInstitution || undefined
-      );
-      if ("error" in result) {
-        setNote({ kind: "error", text: result.error });
-        setModulesStatus("error");
-      } else {
-        setCourseName(result.courseName);
-        setModules(result.modules);
-        setModulesStatus("ready");
-      }
-    } catch (err) {
-      setNote({
-        kind: "error",
-        text: err instanceof Error ? err.message : "Failed to load course",
-      });
-      setModulesStatus("error");
-    }
-  };
-
   const handleAddToModule = async (file: RecordingFile) => {
     setAdding(true);
     setAddNote(null);
@@ -290,6 +308,61 @@ export default function FilesTab() {
     }
   };
 
+  const readDuration = async (file: File): Promise<number | null> => {
+    const url = URL.createObjectURL(file);
+    try {
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.src = url;
+      await new Promise<void>((res, rej) => {
+        v.addEventListener("loadedmetadata", () => res(), { once: true });
+        v.addEventListener("error", () => rej(new Error("metadata failed")), { once: true });
+      });
+      const dur = await ensureFiniteDuration(v);
+      return Number.isFinite(dur) && dur > 0 ? dur : null;
+    } catch {
+      return null;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const handleUploadFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0 || !user) return;
+    const arr = Array.from(fileList);
+    setUploads(arr.map((f) => ({ name: f.name, status: "uploading" as const })));
+    for (let i = 0; i < arr.length; i++) {
+      const file = arr[i];
+      try {
+        const durationSec = await readDuration(file);
+        await saveRecordingFile(supabase, user.id, file, {
+          name: file.name.replace(/\.[^/.]+$/, "") || file.name,
+          kind: "recording",
+          mimeType: file.type || "video/webm",
+          durationSec,
+        });
+        setUploads((u) => u.map((row, idx) => (idx === i ? { ...row, status: "done" as const } : row)));
+      } catch (err) {
+        setUploads((u) => u.map((row, idx) => (idx === i ? { ...row, status: "error" as const, error: err instanceof Error ? err.message : "Failed" } : row)));
+      }
+    }
+    void reload();
+  };
+
+  // Persist courseUrl to localStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-files-course-url", courseUrl);
+  }, [courseUrl]);
+
+  // Persist moduleId to localStorage and update pendingModuleRef
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (moduleId === "") return;
+    localStorage.setItem("ta-files-module-id", String(moduleId));
+    pendingModuleRef.current = String(moduleId);
+  }, [moduleId]);
+
   return (
     <section className={styles.card}>
       <TabHeader
@@ -318,6 +391,10 @@ export default function FilesTab() {
       {status === "ready" && files !== null && (
         <>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16 }}>
+            <label className={styles.downloadButton} style={{ cursor: "pointer" }}>
+              Upload videos
+              <input type="file" accept="video/*" multiple style={{ display: "none" }} onChange={(e) => { void handleUploadFiles(e.target.files); e.target.value = ""; }} />
+            </label>
             <Button
               variant="outlined"
               size="small"
@@ -330,6 +407,20 @@ export default function FilesTab() {
               {files.length} file{files.length === 1 ? "" : "s"}
             </span>
           </div>
+
+          <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void handleUploadFiles(e.dataTransfer.files); }} className={styles.ccDrop}>
+            <span className={styles.ccHint}>Drop video files here to add them to your library.</span>
+          </div>
+
+          {uploads.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {uploads.map((row, idx) => (
+                <span key={idx} className={styles.ccHint} style={{ color: row.status === "error" ? "var(--danger)" : undefined }}>
+                  {row.name}: {row.status === "uploading" ? "uploading..." : row.status === "done" ? "uploaded" : `failed (${row.error})`}
+                </span>
+              ))}
+            </div>
+          )}
 
           {files.length === 0 ? (
             <div className={styles.emptyState}>
@@ -368,9 +459,15 @@ export default function FilesTab() {
                     <Button
                       size="small"
                       variant="outlined"
-                      onClick={() =>
-                        setAddTarget(addTarget === file.id ? null : file.id)
-                      }
+                      onClick={() => {
+                        const opening = addTarget !== file.id;
+                        setAddTarget(opening ? file.id : null);
+                        // Auto-load the remembered course's modules when the
+                        // panel opens for the first time.
+                        if (opening && courseUrl && modulesStatus === "idle") {
+                          void handleSelectCourse(courseUrl);
+                        }
+                      }}
                     >
                       Add to module
                     </Button>

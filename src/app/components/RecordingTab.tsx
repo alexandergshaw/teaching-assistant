@@ -13,6 +13,7 @@ import { backupSupported, clearBackupDir, loadBackupDir, pickBackupDir, writeToB
 import type { DirHandle } from "@/lib/backup-dir";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { saveRecordingFile } from "@/lib/recording-files";
+import { startFrameTicker, type FrameTicker } from "@/lib/frame-ticker";
 import type { User } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
@@ -78,7 +79,7 @@ export default function RecordingTab() {
   // Canvas pipeline and annotation refs
   const pipelineCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
-  const pipelineRafRef = useRef<number | null>(null);
+  const pipelineTickerRef = useRef<FrameTicker | null>(null);
   const strokesRef = useRef<Stroke[]>([]);
   const drawingRef = useRef(false);
 
@@ -108,11 +109,24 @@ export default function RecordingTab() {
     return localStorage.getItem("ta-rec-mirror") === "1";
   });
 
-  const [source, setSource] = useState<"camera" | "screen">("camera");
+  const [source, setSource] = useState<"camera" | "screen">(() => {
+    if (typeof window === "undefined") return "camera";
+    const saved = localStorage.getItem("ta-rec-source");
+    return saved === "screen" || saved === "camera" ? saved : "camera";
+  });
   // Zoom/Teams-style audio processing, mapped to native getUserMedia constraints.
-  const [noiseSuppression, setNoiseSuppression] = useState(true);
-  const [echoCancellation, setEchoCancellation] = useState(true);
-  const [autoGain, setAutoGain] = useState(true);
+  const [noiseSuppression, setNoiseSuppression] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("ta-rec-noise") !== "0";
+  });
+  const [echoCancellation, setEchoCancellation] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("ta-rec-echo") !== "0";
+  });
+  const [autoGain, setAutoGain] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("ta-rec-gain") !== "0";
+  });
   const [muted, setMuted] = useState(false);
   const [recState, setRecState] = useState<RecState>("idle");
   const [elapsed, setElapsed] = useState(0);
@@ -126,11 +140,23 @@ export default function RecordingTab() {
 
   // Annotation state
   const [tool, setTool] = useState<"off" | "pen" | "highlighter" | "eraser">("off");
-  const [penColor, setPenColor] = useState("#ef4444");
-  const [penSize, setPenSize] = useState(4);
+  const [penColor, setPenColor] = useState<string>(() => {
+    if (typeof window === "undefined") return "#ef4444";
+    return localStorage.getItem("ta-rec-pen-color") ?? "#ef4444";
+  });
+  const [penSize, setPenSize] = useState<number>(() => {
+    if (typeof window === "undefined") return 4;
+    const saved = localStorage.getItem("ta-rec-pen-size");
+    const n = saved ? Number(saved) : NaN;
+    return isNaN(n) ? 4 : n;
+  });
 
   // Background effect state
-  const [bgMode, setBgMode] = useState<"none" | "blur" | "image">("none");
+  const [bgMode, setBgMode] = useState<"none" | "blur" | "image">(() => {
+    if (typeof window === "undefined") return "none";
+    const saved = localStorage.getItem("ta-rec-bg");
+    return saved === "blur" || saved === "image" ? saved : "none";
+  });
   const [bgStatus, setBgStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
   const segmenterRef = useRef<ImageSegmenterT | null>(null);
   const bgImageRef = useRef<HTMLImageElement | null>(null);
@@ -142,8 +168,15 @@ export default function RecordingTab() {
   const applyBackgroundEffectTemp = useRef<HTMLCanvasElement | null>(null);
 
   // Picture-in-Picture webcam bubble
-  const [pipEnabled, setPipEnabled] = useState(false);
-  const [pipCorner, setPipCorner] = useState<"br" | "bl" | "tr" | "tl">("br");
+  const [pipEnabled, setPipEnabled] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("ta-rec-pip") === "1";
+  });
+  const [pipCorner, setPipCorner] = useState<"br" | "bl" | "tr" | "tl">(() => {
+    if (typeof window === "undefined") return "br";
+    const saved = localStorage.getItem("ta-rec-pip-corner");
+    return (saved === "br" || saved === "bl" || saved === "tr" || saved === "tl") ? saved : "br";
+  });
   const pipVideoRef = useRef<HTMLVideoElement | null>(null);
   const pipStreamRef = useRef<MediaStream | null>(null);
   const pipEnabledRef = useRef(false);
@@ -151,7 +184,10 @@ export default function RecordingTab() {
 
   // Countdown before recording
   const [countdown, setCountdown] = useState<number | null>(null);
-  const [useCountdown, setUseCountdown] = useState(true);
+  const [useCountdown, setUseCountdown] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("ta-rec-use-countdown") !== "0";
+  });
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Refs for mirroring state into function reads
@@ -230,8 +266,15 @@ export default function RecordingTab() {
 
   const [scriptBusy, setScriptBusy] = useState(false);
   const [scriptError, setScriptError] = useState<string | null>(null);
-  const [prompterOn, setPrompterOn] = useState(false);
-  const [prompterSize, setPrompterSize] = useState<"sm" | "md" | "lg">("md");
+  const [prompterOn, setPrompterOn] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("ta-rec-prompter") === "1";
+  });
+  const [prompterSize, setPrompterSize] = useState<"sm" | "md" | "lg">(() => {
+    if (typeof window === "undefined") return "md";
+    const saved = localStorage.getItem("ta-rec-prompter-size");
+    return (saved === "sm" || saved === "lg") ? saved : "md";
+  });
 
   // Persist auto-stop timer state to localStorage
   useEffect(() => {
@@ -257,6 +300,23 @@ export default function RecordingTab() {
     localStorage.setItem("ta-rec-script-minutes", scriptMinutes);
     localStorage.setItem("ta-rec-script", script);
   }, [scriptTopic, scriptObjectives, scriptMinutes, script]);
+
+  // Persist form control states to localStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-rec-source", source);
+    localStorage.setItem("ta-rec-noise", noiseSuppression ? "1" : "0");
+    localStorage.setItem("ta-rec-echo", echoCancellation ? "1" : "0");
+    localStorage.setItem("ta-rec-gain", autoGain ? "1" : "0");
+    localStorage.setItem("ta-rec-use-countdown", useCountdown ? "1" : "0");
+    localStorage.setItem("ta-rec-bg", bgMode);
+    localStorage.setItem("ta-rec-pip", pipEnabled ? "1" : "0");
+    localStorage.setItem("ta-rec-pip-corner", pipCorner);
+    localStorage.setItem("ta-rec-pen-color", penColor);
+    localStorage.setItem("ta-rec-pen-size", String(penSize));
+    localStorage.setItem("ta-rec-prompter", prompterOn ? "1" : "0");
+    localStorage.setItem("ta-rec-prompter-size", prompterSize);
+  }, [source, noiseSuppression, echoCancellation, autoGain, useCountdown, bgMode, pipEnabled, pipCorner, penColor, penSize, prompterOn, prompterSize]);
 
   // Mirror source state into ref
   const sourceRef = useRef<"camera" | "screen">("camera");
@@ -673,7 +733,6 @@ export default function RecordingTab() {
           ctx.font = `700 ${Math.round(canvas.height * 0.08)}px system-ui, sans-serif`;
           ctx.fillText(cardClosingRef.current, canvas.width / 2, canvas.height * 0.5);
         }
-        pipelineRafRef.current = requestAnimationFrame(draw);
         return;
       }
       const src = applyBackgroundEffect(video, canvas.width, canvas.height);
@@ -743,16 +802,14 @@ export default function RecordingTab() {
       if (overlay) {
         ctx.drawImage(overlay, 0, 0, canvas.width, canvas.height);
       }
-      pipelineRafRef.current = requestAnimationFrame(draw);
     };
-    pipelineRafRef.current = requestAnimationFrame(draw);
+    pipelineTickerRef.current?.stop();
+    pipelineTickerRef.current = startFrameTicker(30, draw);
   }, [source, mirror, applyBackgroundEffect]);
 
   const stopPipeline = useCallback(() => {
-    if (pipelineRafRef.current !== null) {
-      cancelAnimationFrame(pipelineRafRef.current);
-      pipelineRafRef.current = null;
-    }
+    pipelineTickerRef.current?.stop();
+    pipelineTickerRef.current = null;
   }, []);
 
   const stopMeter = () => {

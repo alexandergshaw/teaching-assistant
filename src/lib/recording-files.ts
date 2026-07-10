@@ -17,7 +17,11 @@ export interface RecordingFile {
 }
 
 export function extForMime(mime: string): string {
-  return mime.includes("mp4") ? "mp4" : "webm";
+  const m = mime.toLowerCase();
+  if (m.includes("mp4")) return "mp4";
+  if (m.includes("quicktime")) return "mov";
+  if (m.includes("matroska")) return "mkv";
+  return "webm";
 }
 
 export async function saveRecordingFile(

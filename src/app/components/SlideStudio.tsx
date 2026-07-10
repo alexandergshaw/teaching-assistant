@@ -44,9 +44,32 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: num
 }
 
 export default function SlideStudio() {
-  const [fileName, setFileName] = useState<string>("");
-  const [slides, setSlides] = useState<Array<{ slide: number; title: string; text: string }> | null>(null);
-  const [narrations, setNarrations] = useState<SlideNarration[] | null>(null);
+  const [fileName, setFileName] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-slides-file-name") ?? "";
+  });
+  const [slides, setSlides] = useState<Array<{ slide: number; title: string; text: string }> | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const saved = localStorage.getItem("ta-slides-slides");
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
+  const [narrations, setNarrations] = useState<SlideNarration[] | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const saved = localStorage.getItem("ta-slides-narrations");
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
   const [outputMode, setOutputMode] = useState<"audio" | "av">(() => {
     if (typeof window === "undefined") return "audio";
     return (localStorage.getItem("ta-slides-output") as "audio" | "av") || "audio";
@@ -67,7 +90,10 @@ export default function SlideStudio() {
     if (typeof window === "undefined") return "";
     return localStorage.getItem("ta-voice-id") ?? "";
   });
-  const [cloneName, setCloneName] = useState("");
+  const [cloneName, setCloneName] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-slides-clone-name") ?? "";
+  });
   const [cloneBusy, setCloneBusy] = useState(false);
   const [cloneError, setCloneError] = useState<string | null>(null);
   const [cloneNote, setCloneNote] = useState<string | null>(null);
@@ -126,6 +152,35 @@ export default function SlideStudio() {
       }
     };
   }, []);
+
+  // Persist form state to localStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-slides-file-name", fileName);
+  }, [fileName]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (slides === null) {
+      localStorage.removeItem("ta-slides-slides");
+    } else {
+      localStorage.setItem("ta-slides-slides", JSON.stringify(slides));
+    }
+  }, [slides]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (narrations === null) {
+      localStorage.removeItem("ta-slides-narrations");
+    } else {
+      localStorage.setItem("ta-slides-narrations", JSON.stringify(narrations));
+    }
+  }, [narrations]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-slides-clone-name", cloneName);
+  }, [cloneName]);
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];

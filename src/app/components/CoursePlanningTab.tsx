@@ -1108,6 +1108,12 @@ export default function CoursePlanningTab({ innerTabs }: { innerTabs?: ReactNode
                             placeholder="https://canvas.../courses/123"
                             value={placeCourseUrl}
                             onChange={(e) => setPlaceCourseUrl(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !(placeBusy !== "idle")) {
+                                e.preventDefault();
+                                void handleLoadPlaceModules();
+                              }
+                            }}
                           />
                         </div>
                         <Button variant="contained" size="small" onClick={handleLoadPlaceModules} disabled={placeBusy !== "idle"}>

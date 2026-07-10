@@ -257,6 +257,7 @@ export function ModulesView({
   const [descSharedState, setDescSharedState] = useState<"idle" | "loading" | "same" | "mixed">("idle");
   const [bulkPoints, setBulkPoints] = useState("");
   const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
+  const [bulkSubType, setBulkSubType] = useState("");
   // Top-toolbar rubric picker for editing a rubric without selecting items.
   const [editRubricId, setEditRubricId] = useState<number | "">("");
   const [confirmDeleteContent, setConfirmDeleteContent] = useState(false);
@@ -1241,6 +1242,42 @@ export function ModulesView({
       .filter(({ item }) => item.type === "Assignment" && typeof item.contentId === "number")
       .map(({ item }) => ({ id: String(item.contentId), title: item.title, points: item.pointsPossible }));
     setRubricBuilder({ assignments });
+  };
+
+  // Count the number of selected assignment items.
+  const selectedAssignmentCount = (): number => {
+    return selectedItems().filter(({ item }) => item.type === "Assignment" && typeof item.contentId === "number").length;
+  };
+
+  // Update submission type on all selected assignments.
+  const bulkUpdateSubmissionType = () => {
+    if (bulkSubType === "") {
+      setNote({ kind: "error", text: "Pick a submission type first." });
+      return;
+    }
+    const ids = selectedItems()
+      .filter(({ item }) => item.type === "Assignment" && typeof item.contentId === "number")
+      .map(({ item }) => String(item.contentId));
+    if (ids.length === 0) {
+      setNote({ kind: "error", text: "No selected assignments." });
+      return;
+    }
+    void (async () => {
+      setOpBusy(true);
+      setNote(null);
+      const result = await bulkUpdateAction(courseUrl, "Assignment", ids, { submissionType: bulkSubType }, acronym);
+      setOpBusy(false);
+      if ("error" in result) {
+        setNote({ kind: "error", text: result.error });
+        return;
+      }
+      const failed = result.failures.length;
+      setNote({
+        kind: failed > 0 ? "error" : "success",
+        text: `Submission type updated on ${result.updated} assignment${result.updated === 1 ? "" : "s"}${failed > 0 ? `, ${failed} failed` : ""}`,
+      });
+      reload();
+    })();
   };
 
   // Replace the description on every selected gradable, and the body on selected
@@ -2566,6 +2603,32 @@ export function ModulesView({
                 <Button variant="outlined" size="small" disabled={opBusy} onClick={openRubricBuilder}>
                   New rubric
                 </Button>
+              </div>
+              <div className={styles.bulkRow}>
+                <span className={styles.bulkLabel}>Submission type</span>
+                <TextField
+                  select
+                  size="small"
+                  sx={{ minWidth: 180 }}
+                  value={bulkSubType}
+                  onChange={(e) => setBulkSubType(e.target.value)}
+                  aria-label="Submission type"
+                >
+                  <MenuItem value="">Change submission type…</MenuItem>
+                  <MenuItem value="online_text_entry">Text entry</MenuItem>
+                  <MenuItem value="online_upload">File upload</MenuItem>
+                  <MenuItem value="online_url">Website URL</MenuItem>
+                  <MenuItem value="on_paper">On paper</MenuItem>
+                  <MenuItem value="none">No submission</MenuItem>
+                </TextField>
+                <Button variant="outlined" size="small" disabled={opBusy || bulkSubType === ""} onClick={bulkUpdateSubmissionType}>
+                  Apply
+                </Button>
+                <span className={styles.bulkHint}>
+                  {selectedAssignmentCount() > 0
+                    ? `${selectedAssignmentCount()} assignment${selectedAssignmentCount() === 1 ? "" : "s"} selected`
+                    : "Select assignment items to change their submission type."}
+                </span>
               </div>
               <div className={styles.bulkRow}>
                 <span className={styles.bulkLabel}>Move</span>

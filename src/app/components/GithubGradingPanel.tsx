@@ -300,6 +300,12 @@ export default function GithubGradingPanel() {
             value={pickLabel}
             placeholder="Student name (optional)"
             onChange={(e) => setPickLabel(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !(!pickRepo.trim())) {
+                e.preventDefault();
+                addToQueue();
+              }
+            }}
             sx={{ flex: "1 1 200px" }}
           />
           <Button type="button" variant="contained" size="small" onClick={addToQueue} disabled={!pickRepo.trim()}>
@@ -326,6 +332,12 @@ export default function GithubGradingPanel() {
               value={orgPrefix}
               placeholder="name prefix (optional, e.g. lab1-)"
               onChange={(e) => setOrgPrefix(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !(importing || !selectedOrg)) {
+                  e.preventDefault();
+                  void importFromOrg();
+                }
+              }}
               disabled={importing}
               sx={{ flex: "1 1 180px" }}
             />

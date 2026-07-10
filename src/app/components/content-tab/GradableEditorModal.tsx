@@ -43,6 +43,7 @@ export function GradableEditorModal({
   const [description, setDescription] = useState("");
   const [due, setDue] = useState(toLocalInput(item.dueAt));
   const [points, setPoints] = useState(item.pointsPossible != null ? String(item.pointsPossible) : "");
+  const [submissionType, setSubmissionType] = useState("online_text_entry");
   const [saving, setSaving] = useState(false);
   // Set when a quiz question is saved/deleted, so closing reloads the module list.
   const [questionsChanged, setQuestionsChanged] = useState(false);
@@ -74,6 +75,9 @@ export function GradableEditorModal({
       }
       setTitle(result.detail.title || item.title);
       setDescription(result.detail.description);
+      if (kind === "Assignment") {
+        setSubmissionType(result.detail.submissionTypes[0] ?? "online_text_entry");
+      }
       setLoading(false);
     })();
     return () => {
@@ -89,13 +93,16 @@ export function GradableEditorModal({
     }
     setSaving(true);
     setNote(null);
-    const fields: { title?: string; description?: string; pointsPossible?: number } = {
+    const fields: { title?: string; description?: string; pointsPossible?: number; submissionType?: string } = {
       title: title.trim(),
       description,
     };
     if (showPoints && points.trim() !== "") {
       const p = Number(points);
       if (Number.isFinite(p)) fields.pointsPossible = p;
+    }
+    if (kind === "Assignment") {
+      fields.submissionType = submissionType;
     }
     const saved = await updateGradableAction(courseUrl, kind, item.contentId, fields, acronym);
     if ("error" in saved) {
@@ -231,6 +238,25 @@ export function GradableEditorModal({
                     onChange={(e) => setPoints(e.target.value)}
                     label="Points"
                   />
+                </div>
+              )}
+              {kind === "Assignment" && (
+                <div className={styles.field} style={{ flex: "0 0 180px" }}>
+                  <TextField
+                    id="gradable-submission-type"
+                    select
+                    size="small"
+                    fullWidth
+                    value={submissionType}
+                    onChange={(e) => setSubmissionType(e.target.value)}
+                    label="Submission type"
+                  >
+                    <MenuItem value="online_text_entry">Text entry</MenuItem>
+                    <MenuItem value="online_upload">File upload</MenuItem>
+                    <MenuItem value="online_url">Website URL</MenuItem>
+                    <MenuItem value="on_paper">On paper</MenuItem>
+                    <MenuItem value="none">No submission</MenuItem>
+                  </TextField>
                 </div>
               )}
             </div>

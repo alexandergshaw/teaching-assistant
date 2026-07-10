@@ -1418,7 +1418,7 @@ export async function bulkUpdateAction(
   courseUrl: string,
   kind: BulkKind,
   ids: string[],
-  fields: { published?: boolean; pointsPossible?: number },
+  fields: { published?: boolean; pointsPossible?: number; submissionType?: string },
   acronym?: string
 ): Promise<BulkActionResult | { error: string }> {
   try {
@@ -1617,7 +1617,7 @@ export async function updateGradableAction(
   courseUrl: string,
   kind: GradableKind,
   contentId: number,
-  fields: { title?: string; description?: string; pointsPossible?: number },
+  fields: { title?: string; description?: string; pointsPossible?: number; submissionType?: string },
   acronym?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {

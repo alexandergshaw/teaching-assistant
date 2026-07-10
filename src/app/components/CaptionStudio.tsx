@@ -928,6 +928,12 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
           placeholder="e.g. Demonstrating how to submit an assignment in Canvas"
           value={context}
           onChange={(e) => setContext(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !(!videoUrl || busy !== "idle")) {
+              e.preventDefault();
+              void handleGenerate();
+            }
+          }}
           size="small"
           fullWidth
         />
@@ -1023,6 +1029,12 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
               label="Shift all (s)"
               value={shiftSecs}
               onChange={(e) => setShiftSecs(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !(!captions || captions.length === 0 || Number(shiftSecs) === 0 || isNaN(Number(shiftSecs)))) {
+                  e.preventDefault();
+                  handleShiftAllCaptions(Number(shiftSecs));
+                }
+              }}
               style={{ width: 120 }}
             />
             <Button

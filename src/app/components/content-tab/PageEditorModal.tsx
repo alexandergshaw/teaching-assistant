@@ -168,6 +168,12 @@ export function PageEditorModal({
                 placeholder="e.g. fix typos, add a section on submission steps, update the due date to Friday"
                 value={aiInstr}
                 onChange={(e) => setAiInstr(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !(aiBusy || !aiInstr.trim())) {
+                    e.preventDefault();
+                    void handleRevise();
+                  }
+                }}
                 label="Revise with AI (optional)"
               />
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>

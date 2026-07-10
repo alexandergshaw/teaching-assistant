@@ -1785,6 +1785,12 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
               label="Topic"
               value={scriptTopic}
               onChange={(e) => setScriptTopic(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !(scriptBusy || !scriptTopic.trim())) {
+                  e.preventDefault();
+                  void handleGenerateScript();
+                }
+              }}
               size="small"
               sx={{ flex: "1 1 260px" }}
             />

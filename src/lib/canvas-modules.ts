@@ -1450,7 +1450,7 @@ function bulkUpdateRequest(
   base: string,
   kind: BulkKind,
   id: string,
-  fields: { published?: boolean; pointsPossible?: number }
+  fields: { published?: boolean; pointsPossible?: number; submissionType?: string }
 ): { url: string; params: URLSearchParams } {
   const params = new URLSearchParams();
   if (kind === "Assignment") {
@@ -1458,6 +1458,7 @@ function bulkUpdateRequest(
     if (fields.pointsPossible !== undefined) {
       params.append("assignment[points_possible]", String(fields.pointsPossible));
     }
+    if (fields.submissionType !== undefined) params.append("assignment[submission_types][]", fields.submissionType);
     return { url: `${base}/assignments/${id}`, params };
   }
   if (kind === "Quiz") {
@@ -1481,7 +1482,7 @@ export async function bulkUpdate(
   courseUrl: string,
   kind: BulkKind,
   ids: string[],
-  fields: { published?: boolean; pointsPossible?: number },
+  fields: { published?: boolean; pointsPossible?: number; submissionType?: string },
   code?: string
 ): Promise<BulkResult> {
   const ctx = resolveCourse(courseUrl, code);
@@ -1894,6 +1895,8 @@ export interface GradableDetail {
   description: string;
   /** Associated rubric id (assignments with a rubric), for pre-filling bulk edits. */
   rubricId?: number;
+  /** Submission types for assignments only; empty array for other kinds. */
+  submissionTypes: string[];
 }
 
 /** Fetch one assignment/quiz/discussion's title + description for editing. */
@@ -1921,11 +1924,13 @@ export async function getGradable(
     description?: string | null;
     message?: string | null;
     rubric_settings?: { id?: number } | null;
+    submission_types?: string[];
   };
   return {
     title: (data.name ?? data.title ?? "").trim(),
     description: (kind === "Discussion" ? data.message : data.description) ?? "",
     rubricId: typeof data.rubric_settings?.id === "number" ? data.rubric_settings.id : undefined,
+    submissionTypes: kind === "Assignment" && Array.isArray(data.submission_types) ? data.submission_types : [],
   };
 }
 
@@ -1946,7 +1951,7 @@ export async function updateGradable(
   courseUrl: string,
   kind: GradableKind,
   contentId: number,
-  fields: { title?: string; description?: string; pointsPossible?: number },
+  fields: { title?: string; description?: string; pointsPossible?: number; submissionType?: string },
   code?: string
 ): Promise<void> {
   const ctx = resolveCourse(courseUrl, code);
@@ -1957,6 +1962,7 @@ export async function updateGradable(
     if (fields.title !== undefined) params.append("assignment[name]", fields.title);
     if (description !== undefined) params.append("assignment[description]", description);
     if (fields.pointsPossible !== undefined) params.append("assignment[points_possible]", String(fields.pointsPossible));
+    if (fields.submissionType !== undefined) params.append("assignment[submission_types][]", fields.submissionType);
     if ([...params.keys()].length > 0) await writeJson(`${base}/assignments/${contentId}`, "PUT", ctx, params);
     return;
   }

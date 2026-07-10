@@ -36,10 +36,8 @@ import type {
   CanvasAddableContent,
   CanvasModule,
   CanvasModuleItem,
-  CanvasPageSummary,
   CanvasRubric,
   GradableKind,
-  NewModuleItem,
 } from "@/lib/canvas-modules";
 import styles from "../../page.module.css";
 import FilePreviewModal, { type PreviewFile } from "../FilePreviewModal";
@@ -73,9 +71,7 @@ export function ModulesView({
   courseUrl,
   acronym,
   modules,
-  pages,
   targets,
-  targetsState,
   ensureTargets,
   busy,
   expanded,
@@ -94,9 +90,8 @@ export function ModulesView({
   courseUrl: string;
   acronym?: string;
   modules: CanvasModule[];
-  pages: CanvasPageSummary[];
   targets: CanvasAddableContent | null;
-  targetsState: "idle" | "loading" | "error";
+  /** Lazily load the existing-content lists (used by the bulk file picker). */
   ensureTargets: () => void;
   busy: boolean;
   expanded: Set<number>;
@@ -181,10 +176,8 @@ export function ModulesView({
   const [uploads, setUploads] = useState<
     Record<number, Array<{ name: string; status: "uploading" | "done" | "error"; error?: string }>>
   >({});
-  // Per-module "add item" controls: chosen type, the selected content (page slug
-  // or content id), and the external-url / header-text inputs.
+  // Per-module "add item" controls: chosen type, and the external-url / header-text inputs.
   const [addType, setAddType] = useState<Record<number, string>>({});
-  const [addValue, setAddValue] = useState<Record<number, string>>({});
   const [addUrl, setAddUrl] = useState<Record<number, string>>({});
   const [addTitle, setAddTitle] = useState<Record<number, string>>({});
   // Per-module "File" creation: docx/pptx format, AI prompt, generated content.
@@ -1654,25 +1647,10 @@ export function ModulesView({
     );
   };
 
-  // Item types whose target is picked from a dropdown of existing course content.
-  const CONTENT_TYPES = ["Page", "Assignment", "Quiz", "Discussion", "File"];
-  // Of those, the ones sourced from the lazily-loaded addable content.
-  const TARGET_TYPES = ["Assignment", "Quiz", "Discussion", "File"];
-
-  const optionsFor = (type: string): Array<{ value: string; label: string }> => {
-    if (type === "Page") return pages.map((p) => ({ value: p.url, label: p.title }));
+  // For bulk operations: get list of existing files.
+  const bulkFileOptions = (): Array<{ value: string; label: string }> => {
     if (!targets) return [];
-    if (type === "Assignment") return targets.assignments.map((a) => ({ value: String(a.id), label: a.title }));
-    if (type === "Quiz") return targets.quizzes.map((q) => ({ value: String(q.id), label: q.title }));
-    if (type === "Discussion") return targets.discussions.map((d) => ({ value: String(d.id), label: d.title }));
-    if (type === "File") return targets.files.map((f) => ({ value: String(f.id), label: f.title }));
-    return [];
-  };
-
-  const contentPlaceholder = (type: string): string => {
-    if (TARGET_TYPES.includes(type) && targetsState === "loading") return "Loading…";
-    if (TARGET_TYPES.includes(type) && targetsState === "error") return "Could not load";
-    return optionsFor(type).length === 0 ? `No ${type.toLowerCase()}s to add` : `Choose a ${type.toLowerCase()}…`;
+    return targets.files.map((f) => ({ value: String(f.id), label: f.title }));
   };
 
   const asgOf = (id: number) => newAsg[id] ?? NEW_ASG_DEFAULT;
@@ -1680,12 +1658,12 @@ export function ModulesView({
     setNewAsg((p) => ({ ...p, [id]: { ...asgOf(id), ...patch } }));
 
   const canAdd = (m: CanvasModule): boolean => {
-    const type = addType[m.id] ?? "Page";
+    const type = addType[m.id] ?? "NewAssignment";
+    if (type === "NewAssignment") return !!asgOf(m.id).name.trim();
     if (type === "ExternalUrl") return !!(addUrl[m.id] ?? "").trim();
     if (type === "SubHeader") return !!(addTitle[m.id] ?? "").trim();
-    if (type === "File") return !!addValue[m.id] || (addFileContent[m.id] ?? "").trim() !== "";
-    if (type === "NewAssignment") return !!asgOf(m.id).name.trim();
-    return !!addValue[m.id];
+    if (type === "File") return (addFileContent[m.id] ?? "").trim() !== "";
+    return false;
   };
 
   // A file name derived from the generated content's first heading/line.
@@ -1731,7 +1709,7 @@ export function ModulesView({
   };
 
   const addItem = async (m: CanvasModule) => {
-    const type = addType[m.id] ?? "Page";
+    const type = addType[m.id] ?? "NewAssignment";
     if (type === "NewAssignment") {
       const a = asgOf(m.id);
       setBusy(true);
@@ -1770,28 +1748,24 @@ export function ModulesView({
       reload();
       return;
     }
-    let item: NewModuleItem | null = null;
-    if (type === "Page") {
-      const pageUrl = addValue[m.id];
-      if (pageUrl) item = { type: "Page", pageUrl };
-    } else if (type === "ExternalUrl") {
+    if (type === "ExternalUrl") {
       const externalUrl = (addUrl[m.id] ?? "").trim();
       const title = (addTitle[m.id] ?? "").trim();
-      if (externalUrl) item = { type: "ExternalUrl", externalUrl, title: title || externalUrl };
-    } else if (type === "SubHeader") {
-      const title = (addTitle[m.id] ?? "").trim();
-      if (title) item = { type: "SubHeader", title };
-    } else {
-      const id = addValue[m.id];
-      if (id) item = { type, contentId: Number(id) };
+      if (!externalUrl) return;
+      setAddUrl((p) => ({ ...p, [m.id]: "" }));
+      setAddTitle((p) => ({ ...p, [m.id]: "" }));
+      await run(() => createModuleItemAction(courseUrl, m.id, { type: "ExternalUrl", externalUrl, title: title || externalUrl }, acronym), "Could not add the item.");
+      reload();
+      return;
     }
-    if (!item) return;
-    const newItem = item;
-    setAddValue((p) => ({ ...p, [m.id]: "" }));
-    setAddUrl((p) => ({ ...p, [m.id]: "" }));
-    setAddTitle((p) => ({ ...p, [m.id]: "" }));
-    await run(() => createModuleItemAction(courseUrl, m.id, newItem, acronym), "Could not add the item.");
-    reload();
+    if (type === "SubHeader") {
+      const title = (addTitle[m.id] ?? "").trim();
+      if (!title) return;
+      setAddTitle((p) => ({ ...p, [m.id]: "" }));
+      await run(() => createModuleItemAction(courseUrl, m.id, { type: "SubHeader", title }, acronym), "Could not add the item.");
+      reload();
+      return;
+    }
   };
 
   // Upload dropped/picked files straight into a module, tracking each file's
@@ -2015,7 +1989,6 @@ export function ModulesView({
                   onChange={(e) => {
                     const t = e.target.value;
                     setBulkAddType(t);
-                    if (t === "File") ensureTargets();
                   }}
                   aria-label="Type of item to add to each selected module"
                 >
@@ -2079,12 +2052,13 @@ export function ModulesView({
                     size="small"
                     sx={{ flex: "1 1 200px", maxWidth: 300 }}
                     value={bulkAddFileId}
-                    disabled={opBusy || bulkAddFileContent.trim() !== "" || optionsFor("File").length === 0}
+                    disabled={opBusy || bulkAddFileContent.trim() !== ""}
                     onChange={(e) => setBulkAddFileId(e.target.value === "" ? "" : Number(e.target.value))}
                     aria-label="Existing file to add to each module"
+                    slotProps={{ select: { onOpen: () => ensureTargets() } }}
                   >
-                    <MenuItem value="">{`or pick existing — ${contentPlaceholder("File")}`}</MenuItem>
-                    {optionsFor("File").map((o) => (
+                    <MenuItem value="">{bulkFileOptions().length === 0 ? (targets ? "No files available" : "Loading files…") : "or pick existing file…"}</MenuItem>
+                    {bulkFileOptions().map((o) => (
                       <MenuItem key={o.value} value={o.value}>
                         {o.label}
                       </MenuItem>
@@ -3056,22 +3030,16 @@ export function ModulesView({
                     select
                     size="small"
                     sx={{ maxWidth: 150 }}
-                    value={addType[m.id] ?? "Page"}
+                    value={addType[m.id] ?? "NewAssignment"}
                     onChange={(e) => {
                       const t = e.target.value;
                       setAddType((p) => ({ ...p, [m.id]: t }));
-                      setAddValue((p) => ({ ...p, [m.id]: "" }));
-                      if (TARGET_TYPES.includes(t)) ensureTargets();
                     }}
                     disabled={busy}
                     aria-label="Item type"
                   >
-                    <MenuItem value="Page">Page</MenuItem>
-                    <MenuItem value="Assignment">Assignment</MenuItem>
-                    <MenuItem value="NewAssignment">New assignment</MenuItem>
-                    <MenuItem value="Quiz">Quiz</MenuItem>
-                    <MenuItem value="Discussion">Discussion</MenuItem>
-                    <MenuItem value="File">File</MenuItem>
+                    <MenuItem value="NewAssignment">Assignment</MenuItem>
+                    <MenuItem value="File">File (AI generated)</MenuItem>
                     <MenuItem value="ExternalUrl">External URL</MenuItem>
                     <MenuItem value="SubHeader">Text header</MenuItem>
                   </TextField>
@@ -3090,33 +3058,6 @@ export function ModulesView({
                     >
                       <MenuItem value="docx">Word (.docx)</MenuItem>
                       <MenuItem value="pptx">PowerPoint (.pptx)</MenuItem>
-                    </TextField>
-                  )}
-
-                  {CONTENT_TYPES.includes(addType[m.id] ?? "Page") && (
-                    <TextField
-                      select
-                      size="small"
-                      sx={{ flex: "1 1 200px", maxWidth: 320 }}
-                      value={addValue[m.id] ?? ""}
-                      onChange={(e) => setAddValue((p) => ({ ...p, [m.id]: e.target.value }))}
-                      disabled={
-                        busy ||
-                        optionsFor(addType[m.id] ?? "Page").length === 0 ||
-                        (addType[m.id] === "File" && (addFileContent[m.id] ?? "").trim() !== "")
-                      }
-                      aria-label="Content to add"
-                    >
-                      <MenuItem value="">
-                        {addType[m.id] === "File"
-                          ? `or pick existing — ${contentPlaceholder("File")}`
-                          : contentPlaceholder(addType[m.id] ?? "Page")}
-                      </MenuItem>
-                      {optionsFor(addType[m.id] ?? "Page").map((o) => (
-                        <MenuItem key={o.value} value={o.value}>
-                          {o.label}
-                        </MenuItem>
-                      ))}
                     </TextField>
                   )}
 

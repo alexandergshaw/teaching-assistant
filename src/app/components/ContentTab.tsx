@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Button from "@mui/material/Button";
 import {
   listCourseContentAction,
@@ -59,10 +59,17 @@ export default function ContentTab({
   const [courseName, setCourseName] = useState("");
   const [modules, setModules] = useState<CanvasModule[]>([]);
   const [pages, setPages] = useState<CanvasPageSummary[]>([]);
-  // Addable content (assignments/quizzes/discussions/files) for the item picker,
-  // loaded lazily the first time the user adds a non-page item.
   const [targets, setTargets] = useState<CanvasAddableContent | null>(null);
-  const [targetsState, setTargetsState] = useState<"idle" | "loading" | "error">("idle");
+  const targetsLoadingRef = useRef(false);
+
+  // Lazily fetch the existing-content lists the first time a picker needs them.
+  const ensureTargets = async () => {
+    if (targets || targetsLoadingRef.current || !courseUrl) return;
+    targetsLoadingRef.current = true;
+    const result = await listAddableContentAction(courseUrl, activeInstitution || undefined);
+    targetsLoadingRef.current = false;
+    if (!("error" in result)) setTargets(result.content);
+  };
   const [loadState, setLoadState] = useState<LoadState>(() => {
     if (typeof window === "undefined") return { status: "idle", message: "" };
     const url = localStorage.getItem(CONTENT_URL_KEY) ?? "";
@@ -96,7 +103,6 @@ export default function ContentTab({
     setModules([]);
     setPages([]);
     setTargets(null);
-    setTargetsState("idle");
     setCourseName("");
     setCourseUrl("");
     setExpanded(new Set());
@@ -121,9 +127,7 @@ export default function ContentTab({
     if (typeof window !== "undefined") localStorage.setItem(CONTENT_URL_KEY, url);
     if (!silent) setLoadState({ status: "loading", message: "" });
     setNote(null);
-    // Addable content belongs to this course; clear it so it reloads on demand.
     setTargets(null);
-    setTargetsState("idle");
     const result = await listCourseContentAction(url, activeInstitution || undefined);
     if ("error" in result) {
       if (silent) {
@@ -175,20 +179,6 @@ export default function ContentTab({
 
   const reload = () => {
     if (courseUrl) void loadContent(courseUrl, true);
-  };
-
-  // Lazily fetch the assignments/quizzes/discussions/files for the item picker
-  // the first time they're needed (or after a failed attempt is retried).
-  const ensureTargets = async () => {
-    if (targets || targetsState === "loading") return;
-    setTargetsState("loading");
-    const result = await listAddableContentAction(courseUrl, activeInstitution || undefined);
-    if ("error" in result) {
-      setTargetsState("error");
-      return;
-    }
-    setTargets(result.content);
-    setTargetsState("idle");
   };
 
   const toggleExpand = (id: number) =>
@@ -374,9 +364,7 @@ export default function ContentTab({
               courseUrl={courseUrl}
               acronym={activeInstitution || undefined}
               modules={modules}
-              pages={pages}
               targets={targets}
-              targetsState={targetsState}
               ensureTargets={() => void ensureTargets()}
               busy={busy}
               expanded={expanded}

@@ -24,13 +24,14 @@ import { resolveDocumentAuthor } from "@/lib/author";
 import { useSupabase } from "@/context/SupabaseProvider";
 import styles from "./page.module.css";
 import { parseGeneratedRubric } from "./utils/rubric";
+import { VIEW_KEY } from "./components/content-tab/constants";
 
 
 
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "courses" | "course-planning" | "content" | "version-control" | "recording" | "files";
+type ActiveTab = "courses" | "course-planning" | "content" | "recording" | "files";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 type BuildView = "new" | "prebuilt";
 const BUILD_VIEW_KEY = "ta-build-view";
@@ -142,7 +143,12 @@ export default function Home() {
     if (saved === "grading" || saved === "canvas") return "content";
     // Pre Built Courses is now a subtab of Build Courses ("course-planning").
     if (saved === "lesson-planning") return "course-planning";
-    return saved === "courses" || saved === "course-planning" || saved === "content" || saved === "version-control" || saved === "recording" || saved === "files" ? saved : "course-planning";
+    // Version Control tab is now a subtab of Integrations ("content").
+    if (saved === "version-control") {
+      localStorage.setItem(VIEW_KEY, "version-control");
+      return "content";
+    }
+    return saved === "courses" || saved === "course-planning" || saved === "content" || saved === "recording" || saved === "files" ? saved : "course-planning";
   });
   const [buildView, setBuildViewState] = useState<BuildView>(() => {
     if (typeof window === "undefined") return "prebuilt";
@@ -632,13 +638,8 @@ export default function Home() {
           />
           <Tab label="Build Courses" value="course-planning" disableRipple />
           <Tab
-            label={<NavTabLabel text="LMS Integration" count={totalNeedsGrading + totalUnread} />}
+            label={<NavTabLabel text="Integrations" count={totalNeedsGrading + totalUnread + vcAttention} />}
             value="content"
-            disableRipple
-          />
-          <Tab
-            label={<NavTabLabel text="Version Control Integration" count={vcAttention} />}
-            value="version-control"
             disableRipple
           />
           <Tab label="Recording" value="recording" disableRipple />
@@ -650,7 +651,13 @@ export default function Home() {
             onNavigate={(tab) => {
               // Course handoffs (syllabus prefill) live in the New Build flow.
               if (tab === "course-planning") setBuildView("new");
-              setActiveTab(tab);
+              // Version Control tab is now a subtab of Integrations ("content").
+              if (tab === "version-control") {
+                localStorage.setItem(VIEW_KEY, "version-control");
+                setActiveTab("content");
+              } else {
+                setActiveTab(tab as ActiveTab);
+              }
             }}
           />
         )}
@@ -701,8 +708,6 @@ export default function Home() {
           );
         })()}
 
-        {activeTab === "version-control" && <VersionControlTab />}
-
         {activeTab === "recording" && <RecordingTab />}
 
         {activeTab === "files" && <FilesTab />}
@@ -722,6 +727,7 @@ export default function Home() {
             }
             announcements={<CanvasTab view="announcements" />}
             inbox={<CanvasTab view="inbox" />}
+            versionControl={<VersionControlTab />}
           />
         )}
 

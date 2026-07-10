@@ -17,6 +17,7 @@ import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { useInstitutionCounts } from "./InstitutionCounts";
+import { useVcCounts } from "./VcCounts";
 import TabHeader from "./TabHeader";
 import styles from "../page.module.css";
 import {
@@ -38,19 +39,22 @@ import { ModulesView } from "./content-tab/ModulesView";
 
 
 
-type ContentView = "modules" | "pages" | "files" | "grading" | "announcements" | "inbox";
+type ContentView = "modules" | "pages" | "files" | "grading" | "announcements" | "inbox" | "version-control";
 
 export default function ContentTab({
   grading,
   announcements,
   inbox,
+  versionControl,
 }: {
   grading?: ReactNode;
   announcements?: ReactNode;
   inbox?: ReactNode;
+  versionControl?: ReactNode;
 }) {
   const { active: activeInstitution } = useInstitutionSelection();
   const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
+  const { total: vcAttention } = useVcCounts();
   const [provider] = useLlmProvider();
 
   const [courseUrl, setCourseUrl] = useState<string>(() =>
@@ -81,8 +85,8 @@ export default function ContentTab({
   const [view, setViewState] = useState<ContentView>(() => {
     if (typeof window === "undefined") return "modules";
     const saved = localStorage.getItem(VIEW_KEY);
-    return saved === "pages" || saved === "files" || saved === "grading" || saved === "announcements" || saved === "inbox"
-      ? saved
+    return saved === "pages" || saved === "files" || saved === "grading" || saved === "announcements" || saved === "inbox" || saved === "version-control"
+      ? (saved as ContentView)
       : "modules";
   });
   const [editorOpen, setEditorOpen] = useState(false);
@@ -204,9 +208,9 @@ export default function ContentTab({
   return (
     <div className={styles.card}>
       <TabHeader
-        eyebrow="LMS Integration"
-        title="Course content, grading & communications"
-        subtitle="Manage a Canvas course's modules, pages, and files, grade submissions, and handle announcements and messages, all in one place. Changes are written to Canvas when you save."
+        eyebrow="Integrations"
+        title="LMS & version control"
+        subtitle="Manage a Canvas course's modules, pages, files, grading, and communications, or work with the GitHub side of your courses under Version Control. Changes are written to Canvas when you save."
       />
 
       <div className={styles.field}>
@@ -268,6 +272,18 @@ export default function ContentTab({
                 <span className={styles.tabLabelWrap}>
                   Inbox
                   {totalUnread > 0 && <span className={styles.navBadge}>{totalUnread}</span>}
+                </span>
+              </button>
+            )}
+            {versionControl && (
+              <button
+                type="button"
+                className={`${styles.lessonInnerTab} ${view === "version-control" ? styles.lessonInnerTabActive : ""}`}
+                onClick={() => setView("version-control")}
+              >
+                <span className={styles.tabLabelWrap}>
+                  Version Control
+                  {vcAttention > 0 && <span className={styles.navBadge}>{vcAttention}</span>}
                 </span>
               </button>
             )}
@@ -359,6 +375,8 @@ export default function ContentTab({
             announcements
           ) : view === "inbox" ? (
             inbox
+          ) : view === "version-control" ? (
+            versionControl
           ) : !loaded ? null : view === "modules" ? (
             <ModulesView
               courseUrl={courseUrl}

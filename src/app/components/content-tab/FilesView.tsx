@@ -10,11 +10,13 @@ import {
   requestFileUploadAction,
 } from "../../actions";
 import type { CanvasModule, CourseFile } from "@/lib/canvas-modules";
+import { parseCanvasCourseId } from "@/lib/canvas-url";
 import styles from "../../page.module.css";
 import { base64ToBlobUrl, fileKindLabel, findDuplicateGroups, formatBytes } from "./utils";
 import DocStructureEditor from "../DocStructureEditor";
 import FilePreviewModal, { type PreviewFile } from "../FilePreviewModal";
 import { OfficeEditorModal } from "./OfficeEditorModal";
+import { CourseCopyModal } from "./CourseCopyModal";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -37,6 +39,8 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [editFile, setEditFile] = useState<CourseFile | null>(null);
   const [structureFile, setStructureFile] = useState<CourseFile | null>(null);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const courseId = parseCanvasCourseId(courseUrl);
 
   const shown = files.filter((f) => f.displayName.toLowerCase().includes(search.trim().toLowerCase()));
   const dupGroups = useMemo(() => findDuplicateGroups(files), [files]);
@@ -234,6 +238,9 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
         </label>
         <Button variant="outlined" size="small" onClick={() => void reload()} disabled={busy}>
           Refresh
+        </Button>
+        <Button variant="outlined" size="small" onClick={() => setCopyOpen(true)} disabled={!courseId} title="Copy a page or file from another Canvas course into this course">
+          Copy from another course
         </Button>
         <TextField
           size="small"
@@ -457,6 +464,10 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
             }
           }}
         />
+      )}
+
+      {copyOpen && courseId && (
+        <CourseCopyModal mode="import" focus="pages-files" courseUrl={courseUrl} currentCourseId={courseId} acronym={acronym} onClose={() => setCopyOpen(false)} onDone={() => { setCopyOpen(false); void reload(); }} />
       )}
     </div>
   );

@@ -40,6 +40,7 @@ export function CourseCopyModal({
   acronym,
   onClose,
   onDone,
+  focus,
 }: {
   mode: "export" | "import";
   courseUrl: string;
@@ -47,12 +48,13 @@ export function CourseCopyModal({
   acronym?: string;
   onClose: () => void;
   onDone: () => void;
+  focus?: "pages-files";
 }) {
   const isExport = mode === "export";
   const [courses, setCourses] = useState<Array<{ id: string; name: string }>>([]);
   const [coursesState, setCoursesState] = useState<"loading" | "ready" | "error">(acronym ? "loading" : "ready");
   const [selectedCourses, setSelectedCourses] = useState<Set<string>>(new Set());
-  const [granularity, setGranularity] = useState<"all" | "types" | "items">("all");
+  const [granularity, setGranularity] = useState<"all" | "types" | "items">(focus ? "items" : "all");
   const [types, setTypes] = useState<Set<string>>(() => new Set(COURSE_COPY_TYPES.map((t) => t.key)));
   const [phase, setPhase] = useState<"setup" | "selecting" | "done">("setup");
   const [running, setRunning] = useState(false);
@@ -341,7 +343,7 @@ export function CourseCopyModal({
     <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
       <div className={styles.previewModal} style={{ width: "min(640px, 94vw)", maxWidth: "none" }} onClick={(e) => e.stopPropagation()}>
         <div className={styles.previewHeader}>
-          <h3>{isExport ? "Copy this course to another" : "Import another course"}</h3>
+          <h3>{focus ? "Copy a page or file from another course" : isExport ? "Copy this course to another" : "Import another course"}</h3>
           <button type="button" className={styles.previewCloseButton} onClick={onClose}>
             Close
           </button>
@@ -362,9 +364,17 @@ export function CourseCopyModal({
                   ? `Choose the items to copy into all ${selectedCourses.size} selected courses.`
                   : "Choose the individual items to copy."}
               </p>
-              <div style={{ border: "1px solid var(--card-border)", borderRadius: 10, padding: 10, maxHeight: "44vh", overflowY: "auto" }}>
-                {nodes.length === 0 ? <p className={styles.fieldHint}>Canvas returned no selectable items.</p> : nodes.map((n) => renderNode(n, 0))}
-              </div>
+              {(() => {
+                const shownNodes = focus ? (() => { const f = nodes.filter((n) => n.type === "wiki_pages" || n.type === "attachments" || /wiki_pages|attachments/.test(n.property)); return f.length > 0 ? f : nodes; })() : nodes;
+                return (
+                  <>
+                    <div style={{ border: "1px solid var(--card-border)", borderRadius: 10, padding: 10, maxHeight: "44vh", overflowY: "auto" }}>
+                      {shownNodes.length === 0 ? <p className={styles.fieldHint}>Canvas returned no selectable items.</p> : shownNodes.map((n) => renderNode(n, 0))}
+                    </div>
+                    {focus && <p className={styles.fieldHint} style={{ margin: 0 }}>Showing this course&apos;s pages and files. Expand a group and tick the items to copy.</p>}
+                  </>
+                );
+              })()}
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
                 <Button variant="contained" size="small" onClick={() => void submitItems()} disabled={running || props.size === 0 || purgeBlocked}>
                   {running
@@ -380,7 +390,7 @@ export function CourseCopyModal({
           ) : (
             <>
               <div className={styles.field}>
-                <label>{isExport ? "Copy to these courses" : "Import from these courses"}</label>
+                <label>{focus ? "Pick a course" : isExport ? "Copy to these courses" : "Import from these courses"}</label>
                 {coursesState === "loading" ? (
                   <p className={styles.fieldHint}>Loading courses…</p>
                 ) : coursesState === "error" ? (
@@ -400,29 +410,35 @@ export function CourseCopyModal({
                   </div>
                 )}
                 <p className={styles.fieldHint} style={{ margin: 0 }}>
-                  {selectedCourses.size} selected.{" "}
-                  {isExport ? "This course's content is copied into each." : "Each course's content is copied into this one."}
+                  {focus ? "Pick the course to copy a page or file from." : (
+                    <>
+                      {selectedCourses.size} selected.{" "}
+                      {isExport ? "This course's content is copied into each." : "Each course's content is copied into this one."}
+                    </>
+                  )}
                 </p>
               </div>
 
-              <div className={styles.field}>
-                <label htmlFor="copy-granularity">What to copy</label>
-                <TextField
-                  id="copy-granularity"
-                  select
-                  size="small"
-                  fullWidth
-                  value={granularity}
-                  onChange={(e) => setGranularity(e.target.value as "all" | "types" | "items")}
-                  disabled={running}
-                >
-                  <MenuItem value="all">All content</MenuItem>
-                  <MenuItem value="types">Specific content types</MenuItem>
-                  <MenuItem value="items" disabled={!isExport && selectedCourses.size > 1}>
-                    Specific items{!isExport && selectedCourses.size > 1 ? " (one source only)" : ""}
-                  </MenuItem>
-                </TextField>
-              </div>
+              {!focus && (
+                <div className={styles.field}>
+                  <label htmlFor="copy-granularity">What to copy</label>
+                  <TextField
+                    id="copy-granularity"
+                    select
+                    size="small"
+                    fullWidth
+                    value={granularity}
+                    onChange={(e) => setGranularity(e.target.value as "all" | "types" | "items")}
+                    disabled={running}
+                  >
+                    <MenuItem value="all">All content</MenuItem>
+                    <MenuItem value="types">Specific content types</MenuItem>
+                    <MenuItem value="items" disabled={!isExport && selectedCourses.size > 1}>
+                      Specific items{!isExport && selectedCourses.size > 1 ? " (one source only)" : ""}
+                    </MenuItem>
+                  </TextField>
+                </div>
+              )}
 
               {granularity === "types" && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
@@ -437,7 +453,7 @@ export function CourseCopyModal({
                 </div>
               )}
 
-              {granularity === "items" && (
+              {granularity === "items" && !focus && (
                 <p className={styles.fieldHint} style={{ margin: 0 }}>
                   {isExport
                     ? "Canvas prepares the content first; you'll pick the items, then they're copied into every selected course."
@@ -445,37 +461,39 @@ export function CourseCopyModal({
                 </p>
               )}
 
-              <div className={styles.field}>
-                <FormControlLabel
-                  control={<Checkbox size="small" checked={purgeEnabled} onChange={(e) => setPurgeEnabled(e.target.checked)} disabled={running} />}
-                  label={isExport ? "Clear destination courses before copying" : "Clear this course before importing"}
-                  style={{ margin: 0 }}
-                />
-                {purgeEnabled && (
-                  <>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
-                      {PURGE_TYPES.map((t) => (
-                        <FormControlLabel
-                          key={t.key}
-                          control={<Checkbox size="small" checked={purgeTypes.has(t.key)} onChange={() => setPurgeTypes((s) => toggleIn(s, t.key))} disabled={running} />}
-                          label={t.label}
-                          style={{ margin: 0, flex: "0 0 130px" }}
-                        />
-                      ))}
-                    </div>
-                    <FormControlLabel
-                      control={<Checkbox size="small" checked={purgeConfirm} onChange={(e) => setPurgeConfirm(e.target.checked)} disabled={running} />}
-                      label={
-                        <span className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)" }}>
-                          Permanently delete the checked content from {isExport ? "each destination course" : "this course"}{" "}
-                          before copying. This cannot be undone.
-                        </span>
-                      }
-                      style={{ marginTop: 8, alignItems: "flex-start" }}
-                    />
-                  </>
-                )}
-              </div>
+              {!focus && (
+                <div className={styles.field}>
+                  <FormControlLabel
+                    control={<Checkbox size="small" checked={purgeEnabled} onChange={(e) => setPurgeEnabled(e.target.checked)} disabled={running} />}
+                    label={isExport ? "Clear destination courses before copying" : "Clear this course before importing"}
+                    style={{ margin: 0 }}
+                  />
+                  {purgeEnabled && (
+                    <>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
+                        {PURGE_TYPES.map((t) => (
+                          <FormControlLabel
+                            key={t.key}
+                            control={<Checkbox size="small" checked={purgeTypes.has(t.key)} onChange={() => setPurgeTypes((s) => toggleIn(s, t.key))} disabled={running} />}
+                            label={t.label}
+                            style={{ margin: 0, flex: "0 0 130px" }}
+                          />
+                        ))}
+                      </div>
+                      <FormControlLabel
+                        control={<Checkbox size="small" checked={purgeConfirm} onChange={(e) => setPurgeConfirm(e.target.checked)} disabled={running} />}
+                        label={
+                          <span className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)" }}>
+                            Permanently delete the checked content from {isExport ? "each destination course" : "this course"}{" "}
+                            before copying. This cannot be undone.
+                          </span>
+                        }
+                        style={{ marginTop: 8, alignItems: "flex-start" }}
+                      />
+                    </>
+                  )}
+                </div>
+              )}
 
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
                 <Button variant="contained" size="small" onClick={() => void start()} disabled={running || selectedCourses.size === 0 || purgeBlocked}>

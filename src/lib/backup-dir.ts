@@ -4,6 +4,12 @@
 
 export type DirHandle = FileSystemDirectoryHandle;
 
+export interface BackupVideo {
+  name: string;
+  sizeBytes: number;
+  lastModified: number;
+}
+
 const DB = "ta-backup";
 const STORE = "handles";
 const KEY = "recordings-dir";
@@ -72,4 +78,35 @@ export async function writeToBackupDir(handle: DirHandle, fileName: string, blob
   const w = await file.createWritable();
   await w.write(blob);
   await w.close();
+}
+
+export async function listBackupVideos(handle: DirHandle): Promise<BackupVideo[]> {
+  const h = handle as DirHandle & { queryPermission?: (o: { mode: string }) => Promise<string>; requestPermission?: (o: { mode: string }) => Promise<string> };
+  if (h.queryPermission && (await h.queryPermission({ mode: "read" })) !== "granted") {
+    if (!h.requestPermission || (await h.requestPermission({ mode: "read" })) !== "granted") throw new Error("Backup folder permission was not granted.");
+  }
+  const videos: BackupVideo[] = [];
+  const videoExtensions = [".webm", ".mp4", ".mov", ".m4v", ".mkv"];
+  for await (const entry of (handle as unknown as { values: () => AsyncIterable<FileSystemHandle> }).values()) {
+    if (entry.kind === "file") {
+      const lowerName = entry.name.toLowerCase();
+      if (videoExtensions.some((ext) => lowerName.endsWith(ext))) {
+        const file = await (entry as FileSystemFileHandle).getFile();
+        videos.push({
+          name: entry.name,
+          sizeBytes: file.size,
+          lastModified: file.lastModified,
+        });
+      }
+    }
+  }
+  return videos.sort((a, b) => b.lastModified - a.lastModified);
+}
+
+export async function readBackupFile(handle: DirHandle, name: string): Promise<File> {
+  const h = handle as DirHandle & { queryPermission?: (o: { mode: string }) => Promise<string>; requestPermission?: (o: { mode: string }) => Promise<string> };
+  if (h.queryPermission && (await h.queryPermission({ mode: "read" })) !== "granted") {
+    if (!h.requestPermission || (await h.requestPermission({ mode: "read" })) !== "granted") throw new Error("Backup folder permission was not granted.");
+  }
+  return (await handle.getFileHandle(name)).getFile();
 }

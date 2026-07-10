@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextField, FormControlLabel, Checkbox } from "@mui/material";
 import { describeScreenRecordingAction, type ScreenCaption } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
+import { listBackupVideos, readBackupFile, type BackupVideo, type DirHandle } from "@/lib/backup-dir";
+import type { Take } from "./RecordingTab";
 import styles from "../page.module.css";
 
 // Context the Recording page already knows (script + title cards), persisted
@@ -43,7 +45,7 @@ function gatherRecordingContext(): { text: string; summary: string } {
   return { text: sections.join("\n\n"), summary: found.join(", ") };
 }
 
-export default function CaptionStudio() {
+export default function CaptionStudio({ takes = [], backupDir = null }: { takes?: Take[]; backupDir?: DirHandle | null }) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
   const [context, setContext] = useState("");
@@ -53,6 +55,10 @@ export default function CaptionStudio() {
   const [error, setError] = useState<string | null>(null);
   const [captions, setCaptions] = useState<ScreenCaption[] | null>(null);
   const [vttUrl, setVttUrl] = useState<string | null>(null);
+  const [folderVideos, setFolderVideos] = useState<BackupVideo[] | null>(null);
+  const [folderBusy, setFolderBusy] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importingKey, setImportingKey] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const prevVttUrlRef = useRef<string | null>(null);
@@ -62,6 +68,16 @@ export default function CaptionStudio() {
     const s = Math.floor(sec % 60);
     return `${m}:${String(s).padStart(2, "0")}`;
   };
+
+  const adoptVideo = useCallback((blob: Blob, name: string) => {
+    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    const url = URL.createObjectURL(blob);
+    setVideoUrl(url);
+    setFileName(name);
+    setCaptions(null);
+    setError(null);
+    setImportError(null);
+  }, [videoUrl]);
 
   const vttTime = (sec: number): string => {
     const h = Math.floor(sec / 3600);
@@ -79,13 +95,47 @@ export default function CaptionStudio() {
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
-    const url = URL.createObjectURL(file);
-    setVideoUrl(url);
-    setFileName(file.name);
-    setCaptions(null);
-    setError(null);
-  }, [videoUrl]);
+    adoptVideo(file, file.name);
+  }, [adoptVideo]);
+
+  const handleImportTake = async (take: Take) => {
+    setImportingKey("take:" + take.id);
+    try {
+      const blob = await (await fetch(take.url)).blob();
+      const ext = take.mimeType.includes("mp4") ? "mp4" : "webm";
+      adoptVideo(blob, take.name + "." + ext);
+    } catch {
+      setImportError("Could not load that take.");
+    } finally {
+      setImportingKey(null);
+    }
+  };
+
+  const handleBrowseFolder = async () => {
+    if (!backupDir) return;
+    setFolderBusy(true);
+    setImportError(null);
+    try {
+      setFolderVideos(await listBackupVideos(backupDir));
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Could not read the backup folder.");
+    } finally {
+      setFolderBusy(false);
+    }
+  };
+
+  const handleImportFolderVideo = async (name: string) => {
+    if (!backupDir) return;
+    setImportingKey("file:" + name);
+    try {
+      const file = await readBackupFile(backupDir, name);
+      adoptVideo(file, file.name);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Could not read that file.");
+    } finally {
+      setImportingKey(null);
+    }
+  };
 
   const extractFrames = useCallback(async (): Promise<{ frames: Array<{ timeSec: number; base64: string }>; dur: number }> => {
     if (!videoUrl) throw new Error("No video URL");
@@ -241,6 +291,45 @@ export default function CaptionStudio() {
         <input ref={fileInputRef} type="file" accept="video/*" style={{ display: "none" }} onChange={handleFileChange} />
         {fileName && <span className={styles.ghMeta} style={{ marginLeft: 12 }}>{fileName}</span>}
       </div>
+
+      {importError && <p className={styles.error}>{importError}</p>}
+
+      {(takes.length > 0 || backupDir) && (
+        <div className={styles.field}>
+          <p className={styles.fieldHint} style={{ margin: 0 }}>Or import a video you have already saved:</p>
+
+          {takes.length > 0 && takes.map((take) => (
+            <div key={take.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+              <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
+                {take.name} - {fmtTime(take.durationSec)} - {(take.sizeBytes / 1048576).toFixed(1)} MB
+              </span>
+              <Button variant="outlined" size="small" disabled={importingKey !== null} onClick={() => void handleImportTake(take)}>
+                {importingKey === "take:" + take.id ? "Importing..." : "Import"}
+              </Button>
+            </div>
+          ))}
+          {takes.length === 0 && <p className={styles.fieldHint} style={{ margin: 0 }}>No takes recorded this session.</p>}
+
+          {backupDir && (
+            <div>
+              <Button variant="text" size="small" disabled={folderBusy} onClick={() => void handleBrowseFolder()}>
+                {folderBusy ? "Reading folder..." : folderVideos ? "Refresh backup folder" : "Browse backup folder (" + backupDir.name + ")"}
+              </Button>
+              {folderVideos && folderVideos.length === 0 && <p className={styles.fieldHint} style={{ margin: 0 }}>No videos found in the backup folder.</p>}
+              {folderVideos && folderVideos.map((v) => (
+                <div key={v.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+                  <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {v.name} - {(v.sizeBytes / 1048576).toFixed(1)} MB - {new Date(v.lastModified).toLocaleString()}
+                  </span>
+                  <Button variant="outlined" size="small" disabled={importingKey !== null} onClick={() => void handleImportFolderVideo(v.name)}>
+                    {importingKey === "file:" + v.name ? "Importing..." : "Import"}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className={styles.field}>
         <TextField

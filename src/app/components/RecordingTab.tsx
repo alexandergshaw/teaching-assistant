@@ -17,7 +17,7 @@ interface Device {
   label: string;
 }
 
-interface Take {
+export interface Take {
   id: string;
   name: string;
   url: string;
@@ -1949,7 +1949,7 @@ export default function RecordingTab() {
         </>
       )}
 
-      {recView === "captions" && <CaptionStudio />}
+      {recView === "captions" && <CaptionStudio takes={takes} backupDir={backupDir} />}
       {recView === "slides" && <SlideStudio />}
     </section>
   );

@@ -99,12 +99,15 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     const saved = localStorage.getItem("ta-cap-voiceover-mode");
     return saved === "original" || saved === "voiceover" || saved === "mix" || saved === "none" ? saved : "original";
   });
+  const [previewing, setPreviewing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const burnAbortRef = useRef<(() => void) | null>(null);
   const burnedUrlRef = useRef<string | null>(null);
   const videoUrlRef = useRef<string | null>(null);
   const cueAudioRef = useRef(cueAudio);
+  const previewAudioRef = useRef<Record<number, HTMLAudioElement>>({});
+  const previewWasMutedRef = useRef(false);
 
   const { supabase, user } = useSupabase();
 
@@ -121,7 +124,24 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     return `${m}:${String(s).padStart(2, "0")}.${ds}`;
   };
 
+  const stopCueAudio = useCallback(() => {
+    for (const a of Object.values(previewAudioRef.current)) {
+      try {
+        a.pause();
+        a.currentTime = 0;
+      } catch {}
+    }
+  }, []);
+
+  const endPreview = useCallback(() => {
+    setPreviewing(false);
+    stopCueAudio();
+    const v = videoRef.current;
+    if (v) v.muted = previewWasMutedRef.current;
+  }, [stopCueAudio]);
+
   const adoptVideo = useCallback((blob: Blob, name: string) => {
+    if (previewing) endPreview();
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     const url = URL.createObjectURL(blob);
     setVideoUrl(url);
@@ -129,7 +149,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     setCaptions(null);
     setError(null);
     setImportError(null);
-  }, [videoUrl]);
+  }, [videoUrl, previewing, endPreview]);
 
   const vttTime = (sec: number): string => {
     const h = Math.floor(sec / 3600);
@@ -162,6 +182,57 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
   useEffect(() => {
     cueAudioRef.current = cueAudio;
   }, [cueAudio]);
+
+  useEffect(() => {
+    if (!previewing) return;
+    const v = videoRef.current;
+    if (!v) return;
+    const tick = () => {
+      const t = v.currentTime;
+      if (!captions) return;
+      captions.forEach((c, i) => {
+        const a = previewAudioRef.current[i];
+        if (!a) return;
+        const inWindow = t >= c.start && t < c.end + 0.25;
+        if (inWindow && a.paused && !a.ended) {
+          const offset = t - c.start;
+          if (offset > 0.15 && Math.abs(a.currentTime - offset) > 0.3) {
+            try {
+              a.currentTime = offset;
+            } catch {}
+          }
+          void a.play().catch(() => {});
+        } else if (!inWindow && !a.paused) {
+          a.pause();
+        }
+      });
+    };
+    const onPause = () => {
+      stopCueAudio();
+    };
+    const onSeeking = () => {
+      stopCueAudio();
+      for (const a of Object.values(previewAudioRef.current)) {
+        try {
+          a.currentTime = 0;
+        } catch {}
+      }
+    };
+    const onEnded = () => {
+      endPreview();
+    };
+    v.addEventListener("timeupdate", tick);
+    v.addEventListener("pause", onPause);
+    v.addEventListener("seeking", onSeeking);
+    v.addEventListener("ended", onEnded);
+    return () => {
+      v.removeEventListener("timeupdate", tick);
+      v.removeEventListener("pause", onPause);
+      v.removeEventListener("seeking", onSeeking);
+      v.removeEventListener("ended", onEnded);
+      stopCueAudio();
+    };
+  }, [previewing, captions, endPreview, stopCueAudio]);
 
   useEffect(() => {
     (async () => {
@@ -464,7 +535,27 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     sortCaptions();
   }, [sortCaptions]);
 
+  const startPreview = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || !captions || captions.length === 0) return;
+    previewWasMutedRef.current = v.muted;
+    v.muted = voMode === "voiceover" || voMode === "none";
+    stopCueAudio();
+    previewAudioRef.current = {};
+    if (voMode === "voiceover" || voMode === "mix") {
+      for (const [idxStr, entry] of Object.entries(cueAudio)) {
+        const a = new Audio(entry.url);
+        a.preload = "auto";
+        previewAudioRef.current[Number(idxStr)] = a;
+      }
+    }
+    setPreviewing(true);
+    v.currentTime = 0;
+    void v.play();
+  }, [captions, cueAudio, voMode, stopCueAudio]);
+
   const handleBurnCaptions = useCallback(async () => {
+    if (previewing) endPreview();
     if (!videoUrl || !captions || captions.length === 0 || burning) return;
 
     if ((voMode === "voiceover" || voMode === "mix") && Object.keys(cueAudio).length === 0) {
@@ -729,7 +820,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
       setBurnError(err instanceof Error ? err.message : "An error occurred");
       setBurning(false);
     }
-  }, [videoUrl, captions, burning, burned, fileName, user, supabase, voMode, cueAudio]);
+  }, [videoUrl, captions, burning, burned, fileName, user, supabase, voMode, cueAudio, previewing, endPreview]);
 
   useEffect(() => {
     return () => {
@@ -738,9 +829,10 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
       for (const entry of Object.values(cueAudioRef.current)) {
         URL.revokeObjectURL(entry.url);
       }
+      stopCueAudio();
       burnAbortRef.current?.();
     };
-  }, []);
+  }, [stopCueAudio]);
 
   return (
     <div className={styles.adaptPanel}>
@@ -1159,6 +1251,13 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
               <MenuItem value="mix">Original + voiceover</MenuItem>
               <MenuItem value="none">No audio (strip)</MenuItem>
             </TextField>
+            <Button variant="contained" size="small" disabled={!videoUrl || !captions || captions.length === 0 || burning} onClick={() => (previewing ? endPreview() : startPreview())}>
+              {previewing ? "Stop preview" : "Preview"}
+            </Button>
+            {previewing && <span className={styles.fieldHint} style={{ margin: 0 }}>Previewing with {voMode === "original" ? "the original audio" : voMode === "voiceover" ? "AI voiceover only" : voMode === "mix" ? "original audio plus voiceover" : "no audio"}.</span>}
+            {previewing && (voMode === "voiceover" || voMode === "mix") && Object.keys(cueAudio).length === 0 && (
+              <span className={styles.fieldHint} style={{ margin: 0, color: "var(--warning, #b45309)" }}>No generated voices yet - captions will be silent. Use Voice / Generate all voices.</span>
+            )}
             <Button variant="outlined" size="small" disabled={burning} onClick={() => void handleBurnCaptions()}>
               {burning ? `Exporting... ${burnProgress}%` : "Export video with captions"}
             </Button>

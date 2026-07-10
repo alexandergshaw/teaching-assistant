@@ -107,7 +107,7 @@ export default function RosterWindow({ onClose }: { onClose: () => void }) {
                     style={{
                       background: "none",
                       border: "none",
-                      color: "var(--accent)",
+                      color: "var(--accent-ink)",
                       cursor: "pointer",
                       font: "inherit",
                       fontSize: "0.8rem",

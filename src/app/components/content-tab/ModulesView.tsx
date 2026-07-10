@@ -2545,7 +2545,7 @@ export function ModulesView({
                 className={styles.ccGrip}
                 title="Drag to reorder modules"
                 aria-label="Drag to reorder module"
-                style={moduleDrag === m.id ? { cursor: "grabbing", color: "var(--accent)" } : undefined}
+                style={moduleDrag === m.id ? { cursor: "grabbing", color: "var(--accent-ink)" } : undefined}
               >
                 ⠿
               </span>
@@ -2676,7 +2676,7 @@ export function ModulesView({
                       className={styles.ccGrip}
                       title="Drag to reorder or move between modules"
                       aria-label="Drag to reorder"
-                      style={isDraggingItem(m.id, it.id) ? { cursor: "grabbing", color: "var(--accent)" } : undefined}
+                      style={isDraggingItem(m.id, it.id) ? { cursor: "grabbing", color: "var(--accent-ink)" } : undefined}
                     >
                       ⠿
                     </span>

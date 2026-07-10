@@ -28,6 +28,7 @@ export function formatWhen(iso: string | null): string {
 // (sandboxed, no scripts) instead of bleeding into the app's own styles.
 export function previewDoc(html: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><style>
+    /* paper preview stays white/dark-text in dark mode */
     body { font: 15px/1.6 system-ui, -apple-system, sans-serif; color: #1f2933; padding: 14px; margin: 0; }
     img { max-width: 100%; height: auto; }
     table { border-collapse: collapse; }

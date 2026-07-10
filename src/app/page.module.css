@@ -193,7 +193,7 @@
 
 .clearFileButton:hover {
   color: var(--text-primary);
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 .field textarea {
@@ -234,7 +234,7 @@
 .textInput:focus {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 .syllabusSectionCard {
@@ -290,7 +290,7 @@
 }
 
 .syllabusSectionActionButtonActive {
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
   color: var(--accent-ink);
   background: color-mix(in srgb, var(--field-background) 88%, var(--accent) 12%);
 }
@@ -339,7 +339,7 @@
 .fieldEditArea:focus {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 .fieldEditActions {
@@ -384,7 +384,7 @@
 .fileField:focus-within {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 .submitButton {
@@ -1055,7 +1055,7 @@ button.courseResourceValue:disabled {
 }
 
 .courseResourceClickable:hover {
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 .courseResourceClickable:hover .tileEditBtn {
@@ -1420,7 +1420,7 @@ button.courseResourceValue:disabled {
 }
 
 .courseGroupHeader:hover {
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 .courseGroupHeader::before {
@@ -1596,7 +1596,7 @@ button.courseResourceValue:disabled {
 
 @media (hover: hover) and (pointer: fine) {
   .downloadButton:hover {
-    border-color: var(--accent-ink);
+    border-color: var(--accent);
     background: color-mix(in srgb, var(--field-background) 88%, var(--accent) 12%);
   }
 }
@@ -1731,7 +1731,7 @@ button.courseResourceValue:disabled {
 .deckTitleInput:focus {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 .editorToolbar {
@@ -1783,7 +1783,7 @@ button.courseResourceValue:disabled {
 .docEditArea:focus {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 .docPreviewPane {
@@ -2121,7 +2121,7 @@ button.courseResourceValue:disabled {
 .lfSearch:focus {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 .lfChips {
@@ -2152,7 +2152,7 @@ button.courseResourceValue:disabled {
 .lfChipActive,
 .lfChipActive:hover {
   background: var(--accent);
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
   color: #fff;
 }
 
@@ -2239,7 +2239,7 @@ button.courseResourceValue:disabled {
 
 .lfCardSelected,
 .lfCardSelected:hover {
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
   background: var(--focus-ring-color);
   box-shadow: 0 0 0 1px var(--accent);
 }
@@ -2259,7 +2259,7 @@ button.courseResourceValue:disabled {
   margin-top: 3px;
   width: 16px;
   height: 16px;
-  accent-color: var(--accent-ink);
+  accent-color: var(--accent);
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -2335,7 +2335,7 @@ button.courseResourceValue:disabled {
 
 .lfBadgeSoon {
   background: #fef3c7;
-  color: var(--warning-ink);
+  color: #92400e;
   border: 1px solid #fcd34d;
 }
 
@@ -2589,7 +2589,7 @@ button.courseResourceValue:disabled {
 .lfDetail .textInput:focus {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 /* ── Announcement preview ─────────────────────────────────────────────────── */
@@ -2613,7 +2613,7 @@ button.courseResourceValue:disabled {
 }
 
 .inboxItemSelected {
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 .inboxItemUnread {
@@ -2843,7 +2843,7 @@ button.courseResourceValue:disabled {
 
 @media (hover: hover) and (pointer: fine) {
   .fileIconButton:hover {
-    border-color: var(--accent-ink);
+    border-color: var(--accent);
     color: var(--accent-ink);
   }
 }
@@ -2935,7 +2935,7 @@ button.courseResourceValue:disabled {
 
 @media (hover: hover) and (pointer: fine) {
   .copyIconButton:hover {
-    border-color: var(--accent-ink);
+    border-color: var(--accent);
     background: color-mix(in srgb, var(--field-background) 88%, var(--accent) 12%);
   }
 }
@@ -2959,7 +2959,7 @@ button.courseResourceValue:disabled {
 .scoreBadgeDeducted {
   border-color: #fca5a5;
   background: var(--danger-surface);
-  color: #b91c1c;
+  color: var(--danger);
 }
 
 .overallFeedbackCell {
@@ -2995,7 +2995,7 @@ button.courseResourceValue:disabled {
 .feedbackText:focus {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 .previewBackdrop {
@@ -3022,7 +3022,7 @@ button.courseResourceValue:disabled {
   border-radius: 18px;
   border: 1px solid var(--field-border);
   background: var(--field-background);
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 20px 56px rgba(15, 23, 42, 0.25);
 }
 
 .previewHeader {
@@ -3115,7 +3115,7 @@ button.courseResourceValue:disabled {
   border-radius: 18px;
   border: 1px solid var(--field-border);
   background: var(--field-background);
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 20px 56px rgba(15, 23, 42, 0.25);
 }
 
 .lessonSlideList {
@@ -3393,7 +3393,7 @@ button.courseResourceValue:disabled {
   font-size: 0.82rem;
   line-height: 1.6;
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--field-background) 60%, #f1f5f9 40%);
+  background: color-mix(in srgb, var(--field-background) 60%, var(--surface-muted) 40%);
   overflow-x: auto;
   white-space: pre;
 }
@@ -3436,7 +3436,7 @@ button.courseResourceValue:disabled {
 .lessonRevisionArea:focus {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 /* ── Selection AI Chat Widget ───────────────────────────────────────────── */
@@ -3476,7 +3476,7 @@ button.courseResourceValue:disabled {
   background: var(--field-background);
   border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 16px;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.08);
   overflow: hidden;
   font-family: inherit;
   resize: both;
@@ -3487,7 +3487,7 @@ button.courseResourceValue:disabled {
   align-items: center;
   justify-content: space-between;
   padding: 11px 14px;
-  background: #f8fafc;
+  background: var(--surface-subtle);
   border-bottom: 1px solid rgba(15, 23, 42, 0.08);
   flex-shrink: 0;
   cursor: grab;
@@ -3521,14 +3521,14 @@ button.courseResourceValue:disabled {
 
 .selectionChatClose:hover {
   background: rgba(15, 23, 42, 0.07);
-  color: #0f172a;
+  color: var(--text-primary);
 }
 
 .selectionChatContext {
   padding: 8px 14px;
   font-size: 0.8rem;
   color: #64748b;
-  background: #f8fafc;
+  background: var(--surface-subtle);
   border-bottom: 1px solid rgba(15, 23, 42, 0.06);
   white-space: nowrap;
   overflow: hidden;
@@ -3572,8 +3572,8 @@ button.courseResourceValue:disabled {
 
 .selectionChatAiMsg {
   align-self: flex-start;
-  background: #f1f5f9;
-  color: #0f172a;
+  background: var(--surface-muted);
+  color: var(--text-primary);
   padding: 8px 12px;
   border-radius: 12px 12px 12px 2px;
   font-size: 0.875rem;
@@ -3624,7 +3624,7 @@ button.courseResourceValue:disabled {
 }
 
 .selectionChatMsgAction:hover:not(:disabled) {
-  color: #475569;
+  color: var(--text-secondary);
   background: rgba(15, 23, 42, 0.06);
 }
 
@@ -3650,7 +3650,7 @@ button.courseResourceValue:disabled {
   gap: 8px;
   padding: 10px 12px;
   border-top: 1px solid rgba(15, 23, 42, 0.08);
-  background: #f8fafc;
+  background: var(--surface-subtle);
   flex-shrink: 0;
 }
 
@@ -3662,7 +3662,7 @@ button.courseResourceValue:disabled {
   background: var(--field-background);
   font: inherit;
   font-size: 0.875rem;
-  color: #0f172a;
+  color: var(--text-primary);
   resize: none;
   min-height: 36px;
   max-height: 96px;
@@ -3713,7 +3713,7 @@ button.courseResourceValue:disabled {
   gap: 6px;
   padding: 8px 12px 4px;
   border-top: 1px solid rgba(15, 23, 42, 0.08);
-  background: #f8fafc;
+  background: var(--surface-subtle);
   flex-shrink: 0;
 }
 
@@ -3724,7 +3724,7 @@ button.courseResourceValue:disabled {
   padding: 4px 12px;
   font: inherit;
   font-size: 0.8rem;
-  color: #334155;
+  color: var(--text-primary);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -3737,7 +3737,7 @@ button.courseResourceValue:disabled {
 .suggestionBubble:hover {
   background: var(--accent-surface);
   border-color: #93c5fd;
-  color: #1d4ed8;
+  color: var(--accent-ink);
 }
 
 .suggestionBubble:active {
@@ -3786,7 +3786,7 @@ button.courseResourceValue:disabled {
   gap: 6px;
   padding: 10px 12px;
   border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-  background: #f8fafc;
+  background: var(--surface-subtle);
   flex-shrink: 0;
 }
 
@@ -3803,7 +3803,7 @@ button.courseResourceValue:disabled {
   background: var(--field-background);
   font: inherit;
   font-size: 0.8rem;
-  color: #0f172a;
+  color: var(--text-primary);
   box-sizing: border-box;
 }
 
@@ -3846,7 +3846,7 @@ button.courseResourceValue:disabled {
   border-radius: 8px;
   border: 1px solid #cbd5e1;
   background: var(--field-background);
-  color: #475569;
+  color: var(--text-secondary);
   font: inherit;
   font-size: 0.8rem;
   cursor: pointer;
@@ -3854,7 +3854,7 @@ button.courseResourceValue:disabled {
 }
 
 .deadlinesCancelBtn:hover {
-  background: #f1f5f9;
+  background: var(--surface-muted);
 }
 
 .deadlinesTextarea {
@@ -3874,19 +3874,19 @@ button.courseResourceValue:disabled {
   font-size: 0.8rem;
   line-height: 1.35;
   background: var(--accent-surface);
-  color: #1e3a8a;
+  color: var(--accent-ink);
   border: 1px solid var(--focus-ring-color);
 }
 
 .deadlinesUploadStatus[data-kind="success"] {
-  background: #ecfdf5;
-  color: #065f46;
+  background: var(--success-surface);
+  color: var(--success);
   border-color: rgba(16, 185, 129, 0.25);
 }
 
 .deadlinesUploadStatus[data-kind="error"] {
   background: var(--danger-surface);
-  color: #991b1b;
+  color: var(--danger);
   border-color: rgba(239, 68, 68, 0.25);
 }
 
@@ -3913,7 +3913,7 @@ button.courseResourceValue:disabled {
   gap: 8px;
   padding: 10px 12px;
   border-radius: 10px;
-  background: #f8fafc;
+  background: var(--surface-subtle);
   border: 1px solid rgba(15, 23, 42, 0.07);
 }
 
@@ -3927,7 +3927,7 @@ button.courseResourceValue:disabled {
 .deadlineItemTitle {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--text-primary);
 }
 
 .deadlineItemDate {
@@ -4072,7 +4072,7 @@ button.courseResourceValue:disabled {
   background: var(--field-background);
   border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 16px;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.08);
   overflow: hidden;
   font-family: inherit;
   resize: both;
@@ -4083,7 +4083,7 @@ button.courseResourceValue:disabled {
   align-items: center;
   justify-content: space-between;
   padding: 11px 14px;
-  background: #f8fafc;
+  background: var(--surface-subtle);
   border-bottom: 1px solid rgba(15, 23, 42, 0.08);
   flex-shrink: 0;
   cursor: grab;
@@ -4118,7 +4118,7 @@ button.courseResourceValue:disabled {
 
 .chatModalClose:hover {
   background: rgba(15, 23, 42, 0.07);
-  color: #0f172a;
+  color: var(--text-primary);
 }
 
 .chatModalMessages {
@@ -4157,8 +4157,8 @@ button.courseResourceValue:disabled {
 
 .chatModalAiMsg {
   align-self: flex-start;
-  background: #f1f5f9;
-  color: #0f172a;
+  background: var(--surface-muted);
+  color: var(--text-primary);
   padding: 8px 12px;
   border-radius: 12px 12px 12px 2px;
   font-size: 0.875rem;
@@ -4182,7 +4182,7 @@ button.courseResourceValue:disabled {
   gap: 8px;
   padding: 10px 12px;
   border-top: 1px solid rgba(15, 23, 42, 0.08);
-  background: #f8fafc;
+  background: var(--surface-subtle);
   flex-shrink: 0;
 }
 
@@ -4194,7 +4194,7 @@ button.courseResourceValue:disabled {
   background: var(--field-background);
   font: inherit;
   font-size: 0.875rem;
-  color: #0f172a;
+  color: var(--text-primary);
   min-height: 36px;
   outline: none;
   line-height: 1.4;
@@ -4246,7 +4246,7 @@ button.courseResourceValue:disabled {
   border: 1px solid var(--card-border);
   border-radius: 14px;
   background: var(--card-background);
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.1);
   overflow: hidden;
 }
 
@@ -4344,7 +4344,7 @@ button.courseResourceValue:disabled {
 }
 
 .bulkBtn:hover:not(:disabled) {
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
   background: var(--accent-soft);
 }
 
@@ -4474,7 +4474,7 @@ button.courseResourceValue:disabled {
 
 .ccBarBtn:hover:not(:disabled),
 .ccBarSelect:hover:not(:disabled) {
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
   background: var(--accent-soft);
 }
 
@@ -4511,7 +4511,7 @@ button.courseResourceValue:disabled {
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--card-border);
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 8px 18px -12px rgba(15, 23, 42, 0.3);
 }
 
 /* The header's controls. When the user drags the resize handle shorter, this body
@@ -4621,7 +4621,7 @@ button.courseResourceValue:disabled {
 }
 
 .ccIconBtn:hover:not(:disabled) {
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent-ink);
 }
@@ -4676,7 +4676,7 @@ button.courseResourceValue:disabled {
 }
 
 .ccBtn:hover:not(:disabled) {
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
   background: var(--accent-soft);
 }
 
@@ -4890,7 +4890,7 @@ button.courseResourceValue:disabled {
 
 .ccDropEndActive {
   padding: 14px 12px;
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
   background: var(--accent-soft-strong);
   color: var(--accent-ink);
 }
@@ -4920,7 +4920,7 @@ button.courseResourceValue:disabled {
 }
 
 .ccDue:hover:not(:disabled) {
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 
 .ccDue:disabled {
@@ -5017,7 +5017,7 @@ button.courseResourceValue:disabled {
   margin-bottom: 8px;
   border: 1px solid var(--field-border);
   border-radius: 8px;
-  background: #f8fafc;
+  background: var(--surface-subtle);
 }
 .rteToolbarBtn {
   min-width: 30px;
@@ -5032,7 +5032,7 @@ button.courseResourceValue:disabled {
   cursor: pointer;
 }
 .rteToolbarBtn:hover {
-  background: #eef2f7;
+  background: var(--surface-muted);
 }
 .rteToolbarSep {
   width: 1px;
@@ -5064,7 +5064,7 @@ button.courseResourceValue:disabled {
   overflow-wrap: anywhere;
 }
 .rteField:focus {
-  border-color: var(--accent-ink);
+  border-color: var(--accent);
 }
 .rteFieldChanged {
   background: rgba(37, 99, 235, 0.08);
@@ -5130,7 +5130,7 @@ button.courseResourceValue:disabled {
   border-radius: 6px;
   border: 1px solid var(--field-border);
   background: var(--field-background);
-  color: #475569;
+  color: var(--text-secondary);
   cursor: pointer;
 }
 .rteSectionActionBtn:disabled {
@@ -5140,7 +5140,7 @@ button.courseResourceValue:disabled {
   color: var(--accent-ink);
 }
 .rteSectionActionBtnDanger {
-  color: #b91c1c;
+  color: var(--danger);
 }
 
 /* Per-section paragraph-style control in the rich text section editor */
@@ -5155,7 +5155,7 @@ button.courseResourceValue:disabled {
   padding: 0 6px;
   font-size: 0.75rem;
   font-weight: 600;
-  color: #475569;
+  color: var(--text-secondary);
   border: 1px solid var(--field-border);
   border-radius: 6px;
   background: var(--field-background);

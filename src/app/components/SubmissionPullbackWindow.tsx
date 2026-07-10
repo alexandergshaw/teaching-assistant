@@ -512,7 +512,7 @@ export default function SubmissionPullbackWindow({ onClose }: { onClose: () => v
                     target="_blank"
                     rel="noopener noreferrer"
                     className={styles.fieldHint}
-                    style={{ color: "var(--accent)", textDecoration: "underline", cursor: "pointer" }}
+                    style={{ color: "var(--accent-ink)", textDecoration: "underline", cursor: "pointer" }}
                   >
                     Open in SpeedGrader
                   </a>

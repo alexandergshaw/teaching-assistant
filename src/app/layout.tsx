@@ -19,9 +19,12 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const themeBootstrap = `(function(){try{var t=localStorage.getItem("ta-theme");if(t!=="light"&&t!=="dark"){t=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}document.documentElement.dataset.theme=t;}catch(e){document.documentElement.dataset.theme="light";}})();`;
+
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body>
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrap }} />
         <AppThemeProvider>
           <SupabaseProvider>
             <InstitutionCountsProvider>

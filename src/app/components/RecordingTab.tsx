@@ -1928,7 +1928,7 @@ export default function RecordingTab() {
                   {take.backup === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Backup failed</span>}
                   {take.backup === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Backing up...</span>}
                   <details style={{ marginTop: 8 }}>
-                    <summary style={{ cursor: "pointer", color: "var(--accent)", fontWeight: 600 }}>
+                    <summary style={{ cursor: "pointer", color: "var(--accent-ink)", fontWeight: 600 }}>
                       Play
                     </summary>
                     <video

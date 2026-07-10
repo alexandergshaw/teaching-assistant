@@ -36,20 +36,31 @@ interface MonacoFileEditorProps {
 /**
  * The Monaco editor (the engine behind VS Code) for editing a repo file: syntax
  * highlighting, line numbers, find/replace, multi-cursor, minimap, bracket
- * matching, and the command palette. Client-only; the theme follows the OS.
+ * matching, and the command palette. Client-only; the editor theme follows the
+ * app's data-theme attribute.
  */
 export default function MonacoFileEditor({ path, value, onChange, height = "60vh" }: MonacoFileEditorProps) {
   const [theme, setTheme] = useState<"vs-dark" | "light">(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return "vs-dark";
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "vs-dark" : "light";
+    if (typeof window === "undefined") return "light";
+    const dataTheme = document.documentElement.dataset.theme;
+    return dataTheme === "dark" ? "vs-dark" : "light";
   });
 
   useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChangeMq = (e: MediaQueryListEvent) => setTheme(e.matches ? "vs-dark" : "light");
-    mq.addEventListener("change", onChangeMq);
-    return () => mq.removeEventListener("change", onChangeMq);
+    if (typeof window === "undefined") return;
+
+    // Watch for changes to data-theme attribute
+    const observer = new MutationObserver(() => {
+      const newDataTheme = document.documentElement.dataset.theme;
+      setTheme(newDataTheme === "dark" ? "vs-dark" : "light");
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+
+    return () => observer.disconnect();
   }, []);
 
   return (

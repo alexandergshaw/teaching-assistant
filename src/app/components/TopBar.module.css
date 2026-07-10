@@ -241,3 +241,32 @@
   background: color-mix(in srgb, var(--field-background, #fff) 88%, var(--accent, #2563eb) 12%);
   color: var(--accent, #2563eb);
 }
+
+.themeRow {
+  display: flex;
+  gap: 4px;
+}
+
+.themeOption {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--field-border, #cbd5e1);
+  border-radius: 8px;
+  background: var(--field-background, #ffffff);
+  color: var(--text-secondary, #475569);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.themeOption:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
+.themeOptionActive {
+  border-color: var(--accent, #2563eb);
+  color: var(--accent, #2563eb);
+  background: var(--accent-surface, color-mix(in srgb, var(--field-background, #fff) 92%, var(--accent, #2563eb) 8%));
+}

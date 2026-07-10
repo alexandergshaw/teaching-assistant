@@ -60,6 +60,52 @@
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
   --shadow-md: 0 12px 32px rgba(15, 23, 42, 0.18);
   --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.12);
+
+  /* New tokens for dark mode */
+  --accent-ink: #2563eb;
+  --navy-ink: var(--navy);
+  --warning-ink: #92400e;
+  --scrollbar-thumb: #cbd5e1;
+  --scrollbar-thumb-hover: #94a3b8;
+  /* Adaptive status surfaces - defined ONCE, auto-adapt via scheme-dependent tokens */
+  --accent-surface: color-mix(in srgb, var(--accent) 8%, var(--field-background));
+  --accent-border-soft: color-mix(in srgb, var(--accent) 30%, var(--field-background));
+  --danger-surface: color-mix(in srgb, var(--danger) 8%, var(--field-background));
+  --danger-border: color-mix(in srgb, var(--danger) 30%, var(--field-background));
+  --warning-surface: color-mix(in srgb, var(--warning) 10%, var(--field-background));
+  --warning-border: color-mix(in srgb, var(--warning) 35%, var(--field-background));
+  --success-surface: color-mix(in srgb, var(--success) 10%, var(--field-background));
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0b1120;
+  --foreground: #ededed;
+  --page-background: linear-gradient(180deg, #0b1120 0%, #0e1626 100%);
+  --card-background: rgba(15, 23, 42, 0.92);
+  --card-border: rgba(148, 163, 184, 0.12);
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --field-border: #334155;
+  --field-background: #1e293b;
+  --border-soft: #253248;
+  --surface-subtle: #111a2e;
+  --surface-muted: #182338;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --accent-ink: #60a5fa;
+  --navy-ink: #a7b9e0;
+  --warning-ink: #fcd34d;
+  --navy-highlight: #2b3a5c;
+  --navy-highlight-strong: #364a75;
+  --scrollbar-thumb: #334155;
+  --scrollbar-thumb-hover: #475569;
+  --focus-ring-color: color-mix(in srgb, var(--accent-ink) 35%, transparent);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
 }
 
 html {
@@ -90,7 +136,7 @@ body {
   box-sizing: border-box;
   padding: 0;
   margin: 0;
-  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   scrollbar-width: thin;
 }
 
@@ -104,12 +150,12 @@ body {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: var(--scrollbar-thumb-hover);
 }
 
 a {
@@ -123,7 +169,7 @@ a {
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--accent) 24%, #ffffff);
+  background: color-mix(in srgb, var(--accent) 24%, var(--background));
   color: var(--text-primary);
 }
 

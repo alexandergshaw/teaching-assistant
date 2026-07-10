@@ -66,7 +66,7 @@ function buildReviewQueue(items: ItemScan[]): FixTarget[] {
 const SEVERITY: Record<Severity, { color: string; label: string }> = {
   error: { color: "var(--danger)", label: "Error" },
   warning: { color: "var(--warning)", label: "Warning" },
-  suggestion: { color: "var(--accent)", label: "Suggestion" },
+  suggestion: { color: "var(--accent-ink)", label: "Suggestion" },
 };
 
 const TYPE_LABEL: Record<AccessibleItemType, string> = {
@@ -484,7 +484,7 @@ function ItemBlock({
               <Dot color={SEVERITY[issue.severity].color} />
             </span>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: "0.88rem", color: "#1f2933" }}>{issue.message}</div>
+              <div style={{ fontSize: "0.88rem", color: "var(--text-primary)" }}>{issue.message}</div>
               <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", marginTop: 2 }}>
                 {SEVERITY[issue.severity].label}
                 {issue.wcag ? ` · WCAG ${issue.wcag}` : ""}

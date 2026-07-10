@@ -1285,14 +1285,14 @@ export default function RepoDetail() {
             <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: 4 }}>
               <p style={{ margin: 0 }}>
                 Created{" "}
-                <a href={createResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                <a href={createResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)" }}>
                   {createResult.fullName}
                 </a>
               </p>
               {createResult.issueUrl && (
                 <p style={{ margin: "4px 0 0" }}>
                   Copilot is building it —{" "}
-                  <a href={createResult.issueUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                  <a href={createResult.issueUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)" }}>
                     view the issue
                   </a>
                   .
@@ -1325,7 +1325,7 @@ export default function RepoDetail() {
                 minHeight: 40,
                 padding: "8px 16px",
               },
-              "& .Mui-selected": { color: "var(--accent) !important", fontWeight: 600 },
+              "& .Mui-selected": { color: "var(--accent-ink) !important", fontWeight: 600 },
             }}
           >
             <Tab label="Files" value="files" disableRipple />
@@ -1738,7 +1738,7 @@ export default function RepoDetail() {
                 {forkResult && (
                   <p style={{ marginTop: 8, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
                     Forked to{" "}
-                    <a href={forkResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                    <a href={forkResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)" }}>
                       {forkResult.fullName}
                     </a>
                   </p>
@@ -2174,7 +2174,7 @@ export default function RepoDetail() {
                             {run.actor && <span>{run.actor}</span>}
                             {durLabel && <span>{durLabel}</span>}
                             <span>{new Date(run.createdAt).toLocaleString()}</span>
-                            <a href={run.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "none" }}>open</a>
+                            <a href={run.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)", textDecoration: "none" }}>open</a>
                           </div>
                         </div>
                         <div className={styles.ghActions}>
@@ -2220,7 +2220,7 @@ export default function RepoDetail() {
                                   <div className={styles.ghBadges}>
                                     <span className={styles.ghRowName} style={{ fontSize: "0.85rem" }}>{job.name}</span>
                                     <span className={`${styles.ghBadge} ${jobBadge.cls}`}>{jobBadge.label}</span>
-                                    {job.htmlUrl && <a href={job.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", fontSize: "0.78rem" }}>view</a>}
+                                    {job.htmlUrl && <a href={job.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)", fontSize: "0.78rem" }}>view</a>}
                                   </div>
                                   {job.steps.length > 0 && (
                                     <div className={styles.ghSubList} style={{ gap: 3 }}>
@@ -2317,7 +2317,7 @@ export default function RepoDetail() {
                     {copilotTaskMsg.url && (
                       <>
                         {" "}
-                        <a href={copilotTaskMsg.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                        <a href={copilotTaskMsg.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)" }}>
                           view the issue
                         </a>
                       </>

@@ -312,12 +312,12 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
             gap: 12,
             flexWrap: "wrap",
             padding: "10px 14px",
-            border: "1px solid #fde68a",
-            background: "#fffbeb",
+            border: "1px solid var(--warning-border)",
+            background: "var(--warning-surface)",
             borderRadius: 8,
           }}
         >
-          <span style={{ fontSize: "0.85rem", color: "#92400e", flex: "1 1 240px" }}>
+          <span style={{ fontSize: "0.85rem", color: "var(--warning-ink)", flex: "1 1 240px" }}>
             {strayCount} duplicate {strayCount === 1 ? "copy" : "copies"} found across{" "}
             {dupGroups.length} {dupGroups.length === 1 ? "file" : "files"} (e.g. &ldquo;{dupGroups[0].strays[0].displayName}&rdquo;).
             The newest copy of each is kept.

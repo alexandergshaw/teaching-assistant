@@ -618,7 +618,7 @@ export default function Home() {
               padding: "10px 20px",
             },
             "& .Mui-selected": {
-              color: "var(--accent) !important",
+              color: "var(--accent-ink) !important",
               fontWeight: 600,
             },
             minHeight: 44,

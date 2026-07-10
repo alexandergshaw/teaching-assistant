@@ -26,11 +26,11 @@ const DAYS_PER_PAGE = 5;
 
 // Brand palette (matches the rest of the app).
 const ACCENT = "var(--accent)";
-const ACCENT_BG = "#eff4ff";
+const ACCENT_BG = "var(--accent-surface)";
 const BUSY_BG = "var(--border-soft)";
-const BUSY_TEXT = "#6b7280";
+const BUSY_TEXT = "var(--text-secondary)";
 const BORDER = "var(--border-soft)";
-const MUTED = "#9ca3af";
+const MUTED = "var(--text-muted)";
 
 // Wall-clock parts of an ISO instant in a given IANA time zone.
 function zonedParts(iso: string, timeZone: string): { dateKey: string; minutes: number } {

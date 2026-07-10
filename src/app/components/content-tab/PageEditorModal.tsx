@@ -262,7 +262,7 @@ export function PageEditorModal({
                   size="small"
                   onClick={handleDelete}
                   disabled={busy}
-                  sx={{ color: "var(--danger)", borderColor: "#fecaca" }}
+                  sx={{ color: "var(--danger)", borderColor: "var(--danger-border)" }}
                 >
                   {deleting ? "Deleting…" : confirmDelete ? "Confirm delete" : "Delete page"}
                 </Button>

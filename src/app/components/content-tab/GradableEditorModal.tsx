@@ -303,7 +303,7 @@ export function GradableEditorModal({
                 size="small"
                 onClick={handleChangeType}
                 disabled={busy || targetKind === ""}
-                sx={{ color: "var(--danger)", borderColor: "#fecaca" }}
+                sx={{ color: "var(--danger)", borderColor: "var(--danger-border)" }}
               >
                 {changing ? "Changing…" : confirmChange ? "Confirm: recreate & delete original" : "Change type"}
               </Button>

@@ -1,14 +1,36 @@
 import { createTheme } from "@mui/material/styles";
 
-// Project-wide MUI theme, pinned to light theme.
+declare module "@mui/material/styles" {
+  interface CssThemeVariables {
+    enabled: true;
+  }
+}
+
+// Project-wide MUI theme with light and dark color schemes.
 // Maps to the app's design tokens (see globals.css).
 const theme = createTheme({
-  palette: {
-    primary: { main: "#2563eb", dark: "#1d4ed8", contrastText: "#ffffff" },
-    background: { default: "#ffffff", paper: "#ffffff" },
-    text: { primary: "#0f172a", secondary: "#475569" },
-    divider: "#cbd5e1",
-    error: { main: "#dc2626" },
+  cssVariables: {
+    colorSchemeSelector: '[data-theme="%s"]',
+  },
+  colorSchemes: {
+    light: {
+      palette: {
+        primary: { main: "#2563eb", dark: "#1d4ed8", contrastText: "#ffffff" },
+        background: { default: "#ffffff", paper: "#ffffff" },
+        text: { primary: "#0f172a", secondary: "#475569" },
+        divider: "#cbd5e1",
+        error: { main: "#dc2626" },
+      },
+    },
+    dark: {
+      palette: {
+        primary: { main: "#3b82f6", dark: "#60a5fa", contrastText: "#ffffff" },
+        background: { default: "#0b1120", paper: "#1e293b" },
+        text: { primary: "#e2e8f0", secondary: "#94a3b8" },
+        divider: "rgba(148, 163, 184, 0.25)",
+        error: { main: "#f87171" },
+      },
+    },
   },
   shape: { borderRadius: 8 },
   typography: { fontFamily: "inherit", fontSize: 14 },

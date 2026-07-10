@@ -10,6 +10,7 @@ import ProviderToggle from "./ProviderToggle";
 import { useAccessibility } from "./AccessibilityProvider";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { useInstitutions, writeInstitutions } from "@/lib/institutions";
+import { useThemePreference } from "@/hooks/useThemePreference";
 import { checkInstitutionsAction } from "../actions";
 import styles from "./TopBar.module.css";
 
@@ -153,7 +154,7 @@ function AccessibilityPill() {
         fontWeight: 600,
         textTransform: "none",
         "&:hover": {
-          backgroundColor: "#f8f9fa",
+          backgroundColor: "var(--surface-subtle)",
         },
       }}
     >
@@ -213,6 +214,42 @@ function GearIcon() {
   );
 }
 
+function AppearanceSection() {
+  const { preference, setPreference } = useThemePreference();
+
+  return (
+    <div className={styles.menuSection}>
+      <span className={styles.menuLabel}>Appearance</span>
+      <div className={styles.themeRow}>
+        <button
+          type="button"
+          className={`${styles.themeOption} ${preference === "light" ? styles.themeOptionActive : ""}`}
+          onClick={() => setPreference("light")}
+          aria-pressed={preference === "light"}
+        >
+          Light
+        </button>
+        <button
+          type="button"
+          className={`${styles.themeOption} ${preference === "dark" ? styles.themeOptionActive : ""}`}
+          onClick={() => setPreference("dark")}
+          aria-pressed={preference === "dark"}
+        >
+          Dark
+        </button>
+        <button
+          type="button"
+          className={`${styles.themeOption} ${preference === "system" ? styles.themeOptionActive : ""}`}
+          onClick={() => setPreference("system")}
+          aria-pressed={preference === "system"}
+        >
+          System
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -254,6 +291,7 @@ function SettingsMenu() {
             <span className={styles.menuLabel}>LLM provider</span>
             <ProviderToggle />
           </div>
+          <AppearanceSection />
           <InstitutionsSection open={open} />
           <Link
             href="/knowledge"

@@ -166,14 +166,14 @@
   font-weight: 600;
   color: var(--danger);
   background: transparent;
-  border: 1px solid #fecaca;
+  border: 1px solid var(--danger-border);
   border-radius: 8px;
   padding: 5px 11px;
   cursor: pointer;
 }
 
 .remove:hover {
-  background: #fef2f2;
+  background: var(--danger-surface);
 }
 
 .qrFrame {
@@ -220,8 +220,8 @@
   margin-top: 16px;
   font-size: 0.9rem;
   color: var(--danger);
-  background: #fef2f2;
-  border: 1px solid #fecaca;
+  background: var(--danger-surface);
+  border: 1px solid var(--danger-border);
   border-radius: 10px;
   padding: 10px 12px;
 }

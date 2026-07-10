@@ -536,7 +536,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
               {prResult && (
                 <p style={{ fontSize: "0.85rem", marginTop: 8, color: "var(--text-secondary)" }}>
                   PR{" "}
-                  <a href={prResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", fontWeight: 600 }}>
+                  <a href={prResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)", fontWeight: 600 }}>
                     #{prResult.number}
                   </a>{" "}
                   created.

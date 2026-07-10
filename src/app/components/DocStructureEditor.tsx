@@ -238,7 +238,7 @@ export default function DocStructureEditor({
                       return (
                         <div
                           key={p.id}
-                          style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 10px", borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", background: isSelected ? "#eff6ff" : undefined }}
+                          style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 10px", borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", background: isSelected ? "var(--accent-surface)" : undefined }}
                         >
                           <Checkbox
                             checked={isSelected}

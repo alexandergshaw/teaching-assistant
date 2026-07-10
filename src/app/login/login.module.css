@@ -47,7 +47,7 @@
 .brandName {
   font-size: 1.05rem;
   font-weight: 700;
-  color: var(--navy);
+  color: var(--navy-ink);
   letter-spacing: -0.01em;
 }
 
@@ -134,8 +134,8 @@
 .error {
   font-size: 0.9rem;
   color: var(--danger);
-  background: #fef2f2;
-  border: 1px solid #fecaca;
+  background: var(--danger-surface);
+  border: 1px solid var(--danger-border);
   border-radius: 10px;
   padding: 10px 12px;
 }
@@ -161,4 +161,8 @@
 
 .linkButton:hover {
   text-decoration: underline;
+}
+
+:global(html[data-theme="dark"]) .page {
+  background: radial-gradient(1200px 600px at 50% -10%, rgba(37, 99, 235, 0.18), transparent 60%), linear-gradient(135deg, #0b1120 0%, #111827 100%);
 }

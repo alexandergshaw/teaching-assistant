@@ -67,6 +67,8 @@ import { RenameModulesModal } from "./RenameModulesModal";
 import { RubricBuilderModal } from "./RubricBuilderModal";
 import { SchedulerModal } from "./SchedulerModal";
 
+const NEW_ASG_DEFAULT = { name: "", points: "100", due: "", stype: "online_text_entry", publish: true };
+
 export function ModulesView({
   courseUrl,
   acronym,
@@ -190,6 +192,8 @@ export function ModulesView({
   const [addFileContent, setAddFileContent] = useState<Record<number, string>>({});
   const [addAiPrompt, setAddAiPrompt] = useState<Record<number, string>>({});
   const [addAiBusy, setAddAiBusy] = useState<Record<number, boolean>>({});
+  // Per-module "New Assignment" creation: name, points, due date, submission type, published.
+  const [newAsg, setNewAsg] = useState<Record<number, { name: string; points: string; due: string; stype: string; publish: boolean }>>({});
 
   // ── Bulk selection across the module tree ──────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -1671,11 +1675,16 @@ export function ModulesView({
     return optionsFor(type).length === 0 ? `No ${type.toLowerCase()}s to add` : `Choose a ${type.toLowerCase()}…`;
   };
 
+  const asgOf = (id: number) => newAsg[id] ?? NEW_ASG_DEFAULT;
+  const patchAsg = (id: number, patch: Partial<typeof NEW_ASG_DEFAULT>) =>
+    setNewAsg((p) => ({ ...p, [id]: { ...asgOf(id), ...patch } }));
+
   const canAdd = (m: CanvasModule): boolean => {
     const type = addType[m.id] ?? "Page";
     if (type === "ExternalUrl") return !!(addUrl[m.id] ?? "").trim();
     if (type === "SubHeader") return !!(addTitle[m.id] ?? "").trim();
     if (type === "File") return !!addValue[m.id] || (addFileContent[m.id] ?? "").trim() !== "";
+    if (type === "NewAssignment") return !!asgOf(m.id).name.trim();
     return !!addValue[m.id];
   };
 
@@ -1723,6 +1732,23 @@ export function ModulesView({
 
   const addItem = async (m: CanvasModule) => {
     const type = addType[m.id] ?? "Page";
+    if (type === "NewAssignment") {
+      const a = asgOf(m.id);
+      setBusy(true);
+      setNote(null);
+      const r = await createCourseAssignmentAction(
+        courseUrl,
+        { name: a.name, description: "", pointsPossible: a.points.trim() ? Number(a.points) : null, dueAt: a.due, submissionType: a.stype, published: a.publish },
+        m.id,
+        acronym
+      );
+      setBusy(false);
+      if ("error" in r) { setNote({ kind: "error", text: r.error }); return; }
+      setNote({ kind: "success", text: `Created "${r.name}" in ${m.name}.` });
+      setNewAsg((p) => ({ ...p, [m.id]: { ...NEW_ASG_DEFAULT } }));
+      reload();
+      return;
+    }
     // AI-generated file: build a .docx/.pptx and upload it into this module.
     if (type === "File" && (addFileContent[m.id] ?? "").trim() !== "") {
       const content = addFileContent[m.id];
@@ -3042,6 +3068,7 @@ export function ModulesView({
                   >
                     <MenuItem value="Page">Page</MenuItem>
                     <MenuItem value="Assignment">Assignment</MenuItem>
+                    <MenuItem value="NewAssignment">New assignment</MenuItem>
                     <MenuItem value="Quiz">Quiz</MenuItem>
                     <MenuItem value="Discussion">Discussion</MenuItem>
                     <MenuItem value="File">File</MenuItem>
@@ -3167,6 +3194,22 @@ export function ModulesView({
                       value={addTitle[m.id] ?? ""}
                       onChange={(e) => setAddTitle((p) => ({ ...p, [m.id]: e.target.value }))}
                     />
+                  )}
+
+                  {addType[m.id] === "NewAssignment" && (
+                    <>
+                      <TextField size="small" placeholder="Assignment name" value={asgOf(m.id).name} onChange={(e) => patchAsg(m.id, { name: e.target.value })} disabled={busy} sx={{ flex: "1 1 180px" }} />
+                      <TextField size="small" type="number" label="Points" value={asgOf(m.id).points} onChange={(e) => patchAsg(m.id, { points: e.target.value })} disabled={busy} sx={{ width: 90 }} slotProps={{ inputLabel: { shrink: true } }} />
+                      <TextField size="small" type="datetime-local" label="Due" value={asgOf(m.id).due} onChange={(e) => patchAsg(m.id, { due: e.target.value })} disabled={busy} sx={{ width: 200 }} slotProps={{ inputLabel: { shrink: true } }} />
+                      <TextField select size="small" label="Type" value={asgOf(m.id).stype} onChange={(e) => patchAsg(m.id, { stype: e.target.value })} disabled={busy} sx={{ minWidth: 140 }}>
+                        <MenuItem value="online_text_entry">Text entry</MenuItem>
+                        <MenuItem value="online_upload">File upload</MenuItem>
+                        <MenuItem value="online_url">Website URL</MenuItem>
+                        <MenuItem value="on_paper">On paper</MenuItem>
+                        <MenuItem value="none">No submission</MenuItem>
+                      </TextField>
+                      <FormControlLabel control={<Checkbox size="small" checked={asgOf(m.id).publish} onChange={(e) => patchAsg(m.id, { publish: e.target.checked })} disabled={busy} />} label="Publish" />
+                    </>
                   )}
 
                   <Button

@@ -17,6 +17,7 @@ import {
   type SubmittedFileInfo,
 } from "@/lib/grade";
 import { runSubmittedCode, type CodeRunResult } from "@/lib/code-runner";
+import { parseLenientJsonArray } from "@/lib/lenient-json";
 import {
   buildEmbeddedRubric,
   gradeEntriesEmbedded,
@@ -2799,9 +2800,8 @@ export async function generateSlideNarrationAction(
       provider
     );
     if (!r.ok) return { error: "The model returned no narration." };
-    const match = r.text.match(/\[[\s\S]*\]/);
-    if (!match) return { error: "Could not parse the narration output." };
-    const raw = JSON.parse(match[0]) as Array<{ slide?: number; narration?: string }>;
+    const raw = parseLenientJsonArray(r.text) as Array<{ slide?: number; narration?: string }> | null;
+    if (!raw) return { error: "Could not parse the narration output." };
     const byNum = new Map(raw.filter((x) => typeof x.slide === "number" && typeof x.narration === "string").map((x) => [x.slide as number, (x.narration as string).trim()]));
     const narrations = slides.map((s) => ({ ...s, narration: byNum.get(s.slide) ?? "" }));
     if (narrations.every((n) => !n.narration)) return { error: "The model produced no usable narration." };
@@ -3002,9 +3002,8 @@ export async function describeScreenRecordingAction(
       provider
     );
     if (!r.ok) return { error: "The model returned no captions. Try again." };
-    const match = r.text.match(/\[[\s\S]*\]/);
-    if (!match) return { error: "Could not parse captions from the model output." };
-    const raw = JSON.parse(match[0]) as Array<{ start?: number; end?: number; text?: string }>;
+    const raw = parseLenientJsonArray(r.text) as Array<{ start?: number; end?: number; text?: string }> | null;
+    if (!raw) return { error: "Could not parse captions from the model output. Try generating again." };
     const captions = raw
       .filter((c) => typeof c.start === "number" && typeof c.end === "number" && typeof c.text === "string" && c.text.trim())
       .map((c) => ({ start: Math.max(0, c.start as number), end: Math.min(durationSec, c.end as number), text: (c.text as string).trim() }))

@@ -6,6 +6,7 @@ import {
   bulkAssociateRubricAction,
   bulkDeleteAction,
   bulkUpdateAction,
+  createCourseAssignmentAction,
   createGradableAction,
   createModuleAction,
   createModuleItemAction,
@@ -143,6 +144,15 @@ export function ModulesView({
     window.addEventListener("pointerup", onUp);
   };
   const [newModuleName, setNewModuleName] = useState("");
+  const [showNewAssignment, setShowNewAssignment] = useState(false);
+  const [naName, setNaName] = useState("");
+  const [naPoints, setNaPoints] = useState("100");
+  const [naDue, setNaDue] = useState("");
+  const [naType, setNaType] = useState("online_text_entry");
+  const [naDescription, setNaDescription] = useState("");
+  const [naPublish, setNaPublish] = useState(true);
+  const [naModuleId, setNaModuleId] = useState<string>("");
+  const [naBusy, setNaBusy] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [confirmId, setConfirmId] = useState<string | null>(null);
   // Filter modules by name or by a contained item's title.
@@ -1377,6 +1387,23 @@ export function ModulesView({
     reload();
   };
 
+  const handleCreateAssignment = async () => {
+    if (!naName.trim()) return;
+    setNaBusy(true);
+    const r = await createCourseAssignmentAction(
+      courseUrl,
+      { name: naName, description: naDescription, pointsPossible: naPoints.trim() ? Number(naPoints) : null, dueAt: naDue, submissionType: naType, published: naPublish },
+      naModuleId ? Number(naModuleId) : null,
+      acronym
+    );
+    setNaBusy(false);
+    if ("error" in r) { setNote({ kind: "error", text: r.error }); return; }
+    setNote({ kind: "success", text: `Created "${r.name}"${r.addedToModule ? " and added it to the module" : ""}.` });
+    setShowNewAssignment(false);
+    setNaName(""); setNaDescription(""); setNaDue("");
+    reload();
+  };
+
   const saveModuleName = async (m: CanvasModule) => {
     const draft = drafts[`m${m.id}`];
     if (draft === undefined || draft.trim() === m.name) return;
@@ -2473,6 +2500,102 @@ export function ModulesView({
             Add module
           </Button>
         </div>
+      </div>
+
+      <div className={styles.field}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setShowNewAssignment((v) => !v)}
+          >
+            {showNewAssignment ? "Cancel assignment" : "New assignment"}
+          </Button>
+        </div>
+        {showNewAssignment && (
+          <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <TextField
+                size="small"
+                label="Assignment name"
+                required
+                value={naName}
+                onChange={(e) => setNaName(e.target.value)}
+                sx={{ flex: "1 1 220px" }}
+              />
+              <TextField
+                size="small"
+                type="number"
+                label="Points"
+                value={naPoints}
+                onChange={(e) => setNaPoints(e.target.value)}
+                sx={{ width: 100 }}
+              />
+              <TextField
+                size="small"
+                type="datetime-local"
+                label="Due"
+                value={naDue}
+                onChange={(e) => setNaDue(e.target.value)}
+                slotProps={{ inputLabel: { shrink: true } }}
+                sx={{ width: 210 }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <TextField
+                select
+                size="small"
+                label="Submission type"
+                value={naType}
+                onChange={(e) => setNaType(e.target.value)}
+                sx={{ minWidth: 170 }}
+              >
+                <MenuItem value="online_text_entry">Text entry</MenuItem>
+                <MenuItem value="online_upload">File upload</MenuItem>
+                <MenuItem value="online_url">Website URL</MenuItem>
+                <MenuItem value="on_paper">On paper</MenuItem>
+                <MenuItem value="none">No submission</MenuItem>
+              </TextField>
+              <TextField
+                select
+                size="small"
+                label="Add to module"
+                value={naModuleId}
+                onChange={(e) => setNaModuleId(e.target.value)}
+                sx={{ minWidth: 200 }}
+              >
+                <MenuItem value="">No module</MenuItem>
+                {modules.map((m) => (
+                  <MenuItem key={m.id} value={String(m.id)}>
+                    {m.name}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <FormControlLabel
+                control={<Checkbox size="small" checked={naPublish} onChange={(e) => setNaPublish(e.target.checked)} />}
+                label="Publish"
+              />
+            </div>
+            <TextField
+              multiline
+              minRows={3}
+              fullWidth
+              label="Description (optional)"
+              value={naDescription}
+              onChange={(e) => setNaDescription(e.target.value)}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button
+                variant="contained"
+                size="small"
+                disabled={naBusy || !naName.trim()}
+                onClick={handleCreateAssignment}
+              >
+                {naBusy ? "Creating..." : "Create assignment"}
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {modules.length === 0 && <p className={styles.emptyState}>This course has no modules yet.</p>}

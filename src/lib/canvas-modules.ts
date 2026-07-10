@@ -325,6 +325,47 @@ export async function createModule(
   };
 }
 
+/** Fields for a new Canvas assignment. */
+export interface NewAssignment {
+  name: string;
+  description: string;
+  pointsPossible: number | null;
+  /** ISO datetime or "" for none. */
+  dueAt: string;
+  /** Canvas submission type, e.g. online_text_entry / online_upload / online_url / on_paper / none. */
+  submissionType: string;
+  published: boolean;
+}
+
+/** Create an assignment in the course. Returns its id, name, and URL. */
+export async function createAssignment(
+  courseUrl: string,
+  a: NewAssignment,
+  code?: string
+): Promise<{ id: number; name: string; htmlUrl: string }> {
+  if (!a.name.trim()) throw new Error("An assignment needs a name.");
+  const ctx = resolveCourse(courseUrl, code);
+  const params = new URLSearchParams();
+  params.append("assignment[name]", a.name.trim());
+  if (a.description.trim()) params.append("assignment[description]", textToHtml(a.description.trim()));
+  if (a.pointsPossible !== null && Number.isFinite(a.pointsPossible)) params.append("assignment[points_possible]", String(a.pointsPossible));
+  if (a.dueAt.trim()) params.append("assignment[due_at]", new Date(a.dueAt).toISOString());
+  params.append("assignment[submission_types][]", a.submissionType || "online_text_entry");
+  params.append("assignment[published]", a.published ? "true" : "false");
+  const raw = await writeJson<{ id?: number; name?: string; html_url?: string }>(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/assignments`,
+    "POST",
+    ctx,
+    params
+  );
+  if (!raw.id) throw new Error("Canvas did not return an assignment id.");
+  return {
+    id: raw.id,
+    name: raw.name ?? a.name,
+    htmlUrl: raw.html_url ?? "",
+  };
+}
+
 /**
  * Update a module's name, publish state, and/or position. Setting position
  * reorders the module list (Canvas shifts the others to make room).

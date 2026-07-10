@@ -154,6 +154,8 @@ import {
   uploadFileToModule,
   appendOfficeParagraph,
   listScannableFiles,
+  createAssignment,
+  type NewAssignment,
 } from "@/lib/canvas-modules";
 import type { OfficeImage } from "@/lib/office-edit";
 import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
@@ -2159,6 +2161,27 @@ export async function createModuleItemAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not add the item." };
+  }
+}
+
+/** Create a Canvas assignment and optionally add it to a module. */
+export async function createCourseAssignmentAction(
+  courseUrl: string,
+  fields: NewAssignment,
+  moduleId: number | null,
+  acronym?: string
+): Promise<{ id: number; name: string; htmlUrl: string; addedToModule: boolean } | { error: string }> {
+  try {
+    await requireOwner();
+    const created = await createAssignment(courseUrl, fields, acronym);
+    let addedToModule = false;
+    if (moduleId !== null) {
+      await createModuleItem(courseUrl, moduleId, { type: "Assignment", contentId: created.id, title: created.name }, acronym);
+      addedToModule = true;
+    }
+    return { ...created, addedToModule };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the assignment." };
   }
 }
 

@@ -5978,6 +5978,70 @@ export async function inviteStudentCollaboratorsAction(
   }
 }
 
+/** Outcome of one student's classroom setup (repo creation + invite). */
+export interface ClassroomRowResult {
+  repo: string;
+  created: "created" | "existed" | "failed";
+  createError?: string;
+  invited: boolean;
+  inviteError?: string;
+}
+
+/**
+ * Set up ONE student: create their repo from the template (an existing repo
+ * with the same name counts as success, so re-runs are safe) and, when a
+ * GitHub username is given, invite them to that repo as an outside
+ * collaborator (never an org member).
+ */
+export async function setupStudentRepoAction(
+  org: string,
+  templateRepo: string,
+  prefix: string,
+  student: string,
+  username: string,
+  isPrivate: boolean,
+  permission: RepoPermission
+): Promise<ClassroomRowResult | { error: string }> {
+  try {
+    await requireOwner();
+    if (!org.trim()) return { error: "Choose an organization." };
+    if (!templateRepo.trim()) return { error: "Choose a template repository." };
+    if (!student.trim() && !username.trim()) return { error: "Empty row." };
+    const t = templateRepo.trim();
+    const [templateOwner, templateName] = t.includes("/") ? [t.split("/")[0], t.split("/").slice(1).join("/")] : [org.trim(), t];
+    const base = prefix.trim() ? repoSlug(prefix) : "";
+    const suffix = repoSlug(student.trim() || username.trim()) || "student";
+    const repo = (base ? `${base}-${suffix}` : suffix).slice(0, 95);
+    let created: ClassroomRowResult["created"] = "created";
+    let createError: string | undefined;
+    try {
+      await generateFromTemplate(templateOwner, templateName, org.trim(), repo, isPrivate);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed";
+      if (/already exists/i.test(msg)) {
+        created = "existed";
+      } else {
+        created = "failed";
+        createError = msg;
+      }
+    }
+    let invited = false;
+    let inviteError: string | undefined;
+    const user = username.trim().replace(/^@/, "");
+    if (user && created !== "failed") {
+      try {
+        await setRepoCollaborator(org.trim(), repo, user, permission);
+        invited = true;
+      } catch (err) {
+        inviteError = err instanceof Error ? err.message : "Invite failed";
+      }
+    }
+    return { repo, created, createError, invited, inviteError };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Setup failed." };
+  }
+}
+
 /** List the orgs the token owns, for the "Import from org" dropdown. */
 export async function listMyOrgsAction(): Promise<{ orgs: string[] } | { error: string }> {
   try {

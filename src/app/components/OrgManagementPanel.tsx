@@ -71,6 +71,16 @@ interface OrgManagementPanelProps {
 }
 
 export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgManagementPanelProps) {
+  const [orgView, setOrgView] = useState<"students" | "management">(() => {
+    if (typeof window === "undefined") return "students";
+    const v = localStorage.getItem("ta-vc-org-view");
+    return v === "students" || v === "management" ? v : "students";
+  });
+
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem("ta-vc-org-view", orgView);
+  }, [orgView]);
+
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [membersState, setMembersState] = useState<"loading" | "ready" | "error">("loading");
   const [membersError, setMembersError] = useState<string | null>(null);
@@ -326,8 +336,19 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
     <div style={{ marginTop: 20 }}>
       <h3 style={{ margin: "0 0 4px" }}>Manage {org}</h3>
 
-      <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
-        <summary>Members</summary>
+      <div className={styles.lessonInnerTabs} role="tablist" aria-label="Organization management">
+        {([["students", "Student management"], ["management", "Org management"]] as const).map(([key, label]) => (
+          <button key={key} type="button" role="tab" aria-selected={orgView === key}
+            className={`${styles.lessonInnerTab}${orgView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
+            onClick={() => setOrgView(key)}>
+            <span className={styles.tabLabelWrap}>{label}</span>
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: orgView === "students" ? undefined : "none" }}>
+        <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
+          <summary>Members</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
           {membersState === "loading" && <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>Loading members...</p>}
           {membersState === "error" && membersError && <p className={styles.error}>{membersError}</p>}
@@ -464,9 +485,11 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
           )}
         </div>
       </details>
+      </div>
 
-      <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
-        <summary>Create pull request</summary>
+      <div style={{ display: orgView === "management" ? undefined : "none" }}>
+        <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
+          <summary>Create pull request</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
           <Typeahead
             options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
@@ -716,6 +739,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
           })()}
         </div>
       </details>
+      </div>
     </div>
   );
 }

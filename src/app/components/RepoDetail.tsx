@@ -98,6 +98,7 @@ export default function RepoDetail() {
   const [tree, setTree] = useState<RepoTreeEntry[]>([]);
   const [treeState, setTreeState] = useState<"loading" | "ready" | "error">("ready");
   const [filter, setFilter] = useState("");
+  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
   // Width of the file-tree column; user-resizable via the split divider.
   const [treeWidth, setTreeWidth] = useState<number>(() => {
     if (typeof window === "undefined") return 320;
@@ -272,6 +273,7 @@ export default function RepoDetail() {
       setEditContent("");
       setCommitMessage("");
       setCommitMsg("");
+      setCollapsedDirs(new Set());
       return;
     }
     let cancelled = false;
@@ -294,6 +296,7 @@ export default function RepoDetail() {
       setEditContent("");
       setCommitMessage("");
       setCommitMsg("");
+      setCollapsedDirs(new Set());
     })();
     return () => {
       cancelled = true;
@@ -673,6 +676,27 @@ export default function RepoDetail() {
     setSelectedPaths(new Set());
     setShowMove(false);
     setMoveDest("");
+  };
+
+  const toggleCollapsedDir = (dirPath: string) => {
+    setCollapsedDirs((prev) => {
+      const next = new Set(prev);
+      if (next.has(dirPath)) {
+        next.delete(dirPath);
+      } else {
+        next.add(dirPath);
+      }
+      return next;
+    });
+  };
+
+  const collapseAllDirs = () => {
+    const allTreePaths = tree.filter((e) => e.type === "tree").map((e) => e.path);
+    setCollapsedDirs(new Set(allTreePaths));
+  };
+
+  const expandAllDirs = () => {
+    setCollapsedDirs(new Set());
   };
 
   const affectsOpenFile = (paths: string[]) =>
@@ -1145,11 +1169,16 @@ export default function RepoDetail() {
     label: b,
   }));
 
+  const collapseActive = !filter.trim();
   const entryList = tree
     .filter((e) => e.type === "blob" || e.type === "tree")
     .filter((e) => {
       if (!filter) return true;
       return e.path.toLowerCase().includes(filter.toLowerCase());
+    })
+    .filter((e) => {
+      if (!collapseActive) return true;
+      return ![...collapsedDirs].some((d) => e.path.startsWith(d + "/"));
     })
     .sort((a, b) => a.path.localeCompare(b.path));
 
@@ -1621,24 +1650,46 @@ export default function RepoDetail() {
                   disabled={treeState === "loading"}
                 />
                 {treeState === "ready" && entryList.length > 0 && (
-                  <FormControlLabel
-                    sx={{ marginTop: 0.5, marginLeft: "-4px" }}
-                    control={
-                      <Checkbox
+                  <>
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <Button
+                        variant="text"
                         size="small"
-                        checked={allEntriesSelected}
-                        indeterminate={someEntriesSelected && !allEntriesSelected}
-                        onChange={toggleSelectAll}
-                        sx={{ padding: "2px" }}
-                      />
-                    }
-                    label={
-                      <span className={styles.ghMeta}>
-                        {allEntriesSelected ? "Deselect all" : "Select all"}
-                        {filter.trim() ? " (filtered)" : ""} · {entryList.length}
-                      </span>
-                    }
-                  />
+                        disabled={!collapseActive}
+                        onClick={collapseAllDirs}
+                        title={collapseActive ? "" : "Clear the search to fold folders"}
+                      >
+                        Collapse all
+                      </Button>
+                      <Button
+                        variant="text"
+                        size="small"
+                        disabled={!collapseActive || collapsedDirs.size === 0}
+                        onClick={expandAllDirs}
+                        title={collapseActive ? "" : "Clear the search to fold folders"}
+                      >
+                        Expand all
+                      </Button>
+                    </div>
+                    <FormControlLabel
+                      sx={{ marginTop: 0.5, marginLeft: "-4px" }}
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={allEntriesSelected}
+                          indeterminate={someEntriesSelected && !allEntriesSelected}
+                          onChange={toggleSelectAll}
+                          sx={{ padding: "2px" }}
+                        />
+                      }
+                      label={
+                        <span className={styles.ghMeta}>
+                          {allEntriesSelected ? "Deselect all" : "Select all"}
+                          {filter.trim() ? " (filtered)" : ""} · {entryList.length}
+                        </span>
+                      }
+                    />
+                  </>
                 )}
                 <div className={styles.ghTreeList}>
                   {treeState === "loading" && (
@@ -1652,6 +1703,7 @@ export default function RepoDetail() {
                       const depth = entry.path.split("/").length - 1;
                       const name = entry.path.split("/").pop() || entry.path;
                       const indent = depth * 14 + 8;
+                      const isCollapsed = collapsedDirs.has(entry.path);
                       return (
                         <div
                           key={entry.path}
@@ -1669,43 +1721,81 @@ export default function RepoDetail() {
                             sx={{ padding: "2px" }}
                           />
                           {entry.type === "blob" ? (
-                            <Button
-                              variant="text"
-                              onClick={() => setSelectedPath(entry.path)}
-                              title={entry.path}
-                              sx={{
-                                justifyContent: "flex-start",
-                                textTransform: "none",
-                                flex: 1,
-                                minWidth: 0,
-                                fontFamily: "monospace",
-                                fontSize: "0.8rem",
-                                pl: `${indent}px`,
-                              }}
-                            >
-                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", textAlign: "left" }}>
-                                {name}
-                              </span>
-                            </Button>
+                            <>
+                              <div style={{ width: 24, display: "flex", justifyContent: "center" }} />
+                              <Button
+                                variant="text"
+                                onClick={() => setSelectedPath(entry.path)}
+                                title={entry.path}
+                                sx={{
+                                  justifyContent: "flex-start",
+                                  textTransform: "none",
+                                  flex: 1,
+                                  minWidth: 0,
+                                  fontFamily: "monospace",
+                                  fontSize: "0.8rem",
+                                  pl: `${indent}px`,
+                                }}
+                              >
+                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", textAlign: "left" }}>
+                                  {name}
+                                </span>
+                              </Button>
+                            </>
                           ) : (
-                            <span
-                              title={entry.path}
-                              style={{
-                                flex: 1,
-                                minWidth: 0,
-                                fontFamily: "monospace",
-                                fontSize: "0.8rem",
-                                fontWeight: 600,
-                                color: "var(--text-secondary)",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                                padding: "6px 8px",
-                                paddingLeft: indent,
-                              }}
-                            >
-                              {name}/
-                            </span>
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleCollapsedDir(entry.path);
+                                }}
+                                aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${name}`}
+                                style={{
+                                  width: 24,
+                                  height: 24,
+                                  padding: 0,
+                                  border: "none",
+                                  background: "transparent",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  color: "var(--text-secondary)",
+                                  fontSize: "0.75rem",
+                                  lineHeight: "1em",
+                                }}
+                              >
+                                {isCollapsed ? "▸" : "▾"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleCollapsedDir(entry.path);
+                                }}
+                                title={entry.path}
+                                style={{
+                                  flex: 1,
+                                  minWidth: 0,
+                                  fontFamily: "monospace",
+                                  fontSize: "0.8rem",
+                                  fontWeight: 600,
+                                  color: "var(--text-secondary)",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                  padding: "6px 8px",
+                                  paddingLeft: `${indent}px`,
+                                  border: "none",
+                                  background: "transparent",
+                                  cursor: "pointer",
+                                  textAlign: "left",
+                                }}
+                              >
+                                {name}/
+                              </button>
+                            </>
                           )}
                         </div>
                       );

@@ -191,11 +191,12 @@ export default function VersionControlTab() {
 
       {subTab === "repos" && <RepoDetail />}
 
-      {subTab === "bulk" && (
-        // Bulk actions must offer every repo the token can see - personal and
-        // collaborator repos included - not just the selected org + templates.
+      {/* Keep BulkRepoActionsPanel mounted to preserve state across tab switches */}
+      <div style={{ display: subTab === "bulk" ? undefined : "none" }}>
+        {/* Bulk actions must offer every repo the token can see - personal and
+        collaborator repos included - not just the selected org + templates. */}
         <BulkRepoActionsPanel repos={[...new Set([...myRepos, ...mergedRepos].map((r) => r.fullName))].sort()} />
-      )}
+      </div>
     </div>
   );
 }

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createCopilotTaskAction, listPullRequestsAction, mergePullRequestAction } from "../actions";
-import type { PullRequestInfo } from "@/lib/github";
+import { createCopilotTaskAction, listPullRequestsAction, mergePullRequestAction, listCopilotTasksAction } from "../actions";
+import type { PullRequestInfo, CopilotTask } from "@/lib/github";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Checkbox from "@mui/material/Checkbox";
@@ -76,7 +76,31 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
   const [copilotBody, setCopilotBody] = useState(() =>
     typeof window !== "undefined" ? localStorage.getItem("ta-vc-bulk-copilot-body") ?? "" : ""
   );
-  const [copilotRows, setCopilotRows] = useState<CopilotRow[]>([]);
+  const [copilotRows, setCopilotRows] = useState<CopilotRow[]>(() => {
+    if (typeof window === "undefined") return [];
+    const stored = localStorage.getItem("ta-vc-bulk-copilot-rows");
+    if (!stored) return [];
+    try {
+      const parsed = JSON.parse(stored) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      const rows = parsed.filter((row): row is CopilotRow => {
+        const r = row as Record<string, unknown>;
+        return (
+          typeof row === "object" &&
+          row !== null &&
+          typeof r.repo === "string" &&
+          typeof r.status === "string" &&
+          ["pending", "done", "failed", "skipped"].includes(r.status)
+        );
+      });
+      return rows.map((row) => ({
+        ...row,
+        status: row.status === "pending" ? "skipped" : row.status,
+      }));
+    } catch {
+      return [];
+    }
+  });
   const [copilotRunning, setCopilotRunning] = useState(false);
   const copilotCancelRef = useRef(false);
 
@@ -87,6 +111,10 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
   useEffect(() => {
     if (typeof window !== "undefined") localStorage.setItem("ta-vc-bulk-copilot-body", copilotBody);
   }, [copilotBody]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem("ta-vc-bulk-copilot-rows", JSON.stringify(copilotRows));
+  }, [copilotRows]);
 
   const handleStartCopilot = async () => {
     const selected = [...selectedRepos];
@@ -141,6 +169,43 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
     copilotCancelRef.current = true;
   };
 
+  // Running agents status - not persisted (live data)
+  const [agentStatus, setAgentStatus] = useState<Record<string, CopilotTask[]>>({});
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  const [agentChecking, setAgentChecking] = useState(false);
+  const agentCancelRef = useRef(false);
+
+  const handleCheckAgentStatus = async () => {
+    const reposToCheck = new Set<string>([
+      ...selectedRepos,
+      ...copilotRows.map((r) => r.repo),
+    ]);
+    if (reposToCheck.size === 0) return;
+
+    setAgentChecking(true);
+    agentCancelRef.current = false;
+    const newStatus: Record<string, CopilotTask[]> = {};
+
+    for (const repo of reposToCheck) {
+      if (agentCancelRef.current) break;
+
+      const result = await listCopilotTasksAction(repo);
+      if (agentCancelRef.current) break;
+
+      if (!("error" in result)) {
+        newStatus[repo] = result.tasks;
+      }
+    }
+
+    setAgentStatus(newStatus);
+    setCheckedAt(Date.now());
+    setAgentChecking(false);
+  };
+
+  const handleCancelAgentCheck = () => {
+    agentCancelRef.current = true;
+  };
+
   // Section 3: Merge Pull Requests
   const [prTitleFilter, setPrTitleFilter] = useState(() =>
     typeof window !== "undefined" ? localStorage.getItem("ta-vc-bulk-pr-title") ?? "" : ""
@@ -157,7 +222,32 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
     if (stored === "merge" || stored === "squash" || stored === "rebase") return stored;
     return "merge";
   });
-  const [prMatches, setPrMatches] = useState<PrMatch[]>([]);
+  const [prMatches, setPrMatches] = useState<PrMatch[]>(() => {
+    if (typeof window === "undefined") return [];
+    const stored = localStorage.getItem("ta-vc-bulk-pr-matches");
+    if (!stored) return [];
+    try {
+      const parsed = JSON.parse(stored) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((match): match is PrMatch => {
+        const m = match as Record<string, unknown>;
+        const pr = m.pr as Record<string, unknown>;
+        return (
+          typeof match === "object" &&
+          match !== null &&
+          typeof m.repo === "string" &&
+          typeof m.include === "boolean" &&
+          typeof m.pr === "object" &&
+          m.pr !== null &&
+          typeof pr.number === "number" &&
+          typeof pr.state === "string" &&
+          typeof pr.htmlUrl === "string"
+        );
+      });
+    } catch {
+      return [];
+    }
+  });
   const [prPreviewing, setPrPreviewing] = useState(false);
   const [prMerging, setPrMerging] = useState(false);
   const [mergeConfirm, setMergeConfirm] = useState(false);
@@ -179,6 +269,10 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
   useEffect(() => {
     if (typeof window !== "undefined") localStorage.setItem("ta-vc-bulk-merge-method", mergeMethod);
   }, [mergeMethod]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem("ta-vc-bulk-pr-matches", JSON.stringify(prMatches));
+  }, [prMatches]);
 
   const handlePreviewPrs = async () => {
     const selected = [...selectedRepos];
@@ -292,13 +386,15 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
           sx={{ mb: 1.5 }}
         />
 
-        <div style={{ display: "flex", gap: 12, marginBottom: 8 }}>
+        <div style={{ display: "flex", gap: 12, marginBottom: 8, alignItems: "center" }}>
           <Button size="small" variant="text" onClick={handleSelectAll} disabled={shown.length === 0}>
             {allShownSelected ? "Clear all shown" : "Select all shown"}
           </Button>
-          <Button size="small" variant="text" onClick={handleClear}>
-            Clear
-          </Button>
+          {selectedRepos.size > 0 && (
+            <Button size="small" variant="text" onClick={handleClear}>
+              Clear
+            </Button>
+          )}
         </div>
 
         <div
@@ -337,9 +433,58 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
           )}
         </div>
 
-        <p className={styles.fieldHint} style={{ marginTop: 8 }}>
-          {selectedRepos.size} selected
-        </p>
+        {selectedRepos.size > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: 6, color: "var(--text-primary)" }}>
+              Selected repositories ({selectedRepos.size})
+            </label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {[...selectedRepos].sort().map((repo) => {
+                const displayName = repo.includes("/") ? repo.split("/")[1] : repo;
+                return (
+                  <span
+                    key={repo}
+                    className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, paddingRight: 4 }}
+                    title={repo}
+                  >
+                    {displayName}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${repo}`}
+                      onClick={() => setSelectedRepos((prev) => {
+                        const next = new Set(prev);
+                        next.delete(repo);
+                        return next;
+                      })}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: 16,
+                        height: 16,
+                        padding: 0,
+                        border: "none",
+                        background: "none",
+                        color: "inherit",
+                        cursor: "pointer",
+                        fontSize: "1rem",
+                        lineHeight: 1,
+                      }}
+                    >
+                      x
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {selectedRepos.size === 0 && (
+          <p className={styles.fieldHint} style={{ marginTop: 8 }}>
+            No repositories selected.
+          </p>
+        )}
       </div>
 
       {/* Section 2: Start Copilot Agents */}
@@ -448,6 +593,184 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
         <p className={styles.fieldHint} style={{ marginTop: 8 }}>
           Each repo gets a Copilot coding-agent task with these instructions.
         </p>
+
+        {/* Running agents subsection */}
+        <div style={{ marginTop: 20, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
+          <h4 style={{ margin: "0 0 12px" }}>Running agents</h4>
+
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <Button
+              type="button"
+              variant="outlined"
+              size="small"
+              disabled={
+                agentChecking ||
+                (selectedRepos.size === 0 && copilotRows.length === 0)
+              }
+              onClick={handleCheckAgentStatus}
+            >
+              Check agent status
+            </Button>
+            {agentChecking && (
+              <Button type="button" variant="outlined" size="small" color="error" onClick={handleCancelAgentCheck}>
+                Cancel
+              </Button>
+            )}
+          </div>
+
+          {checkedAt !== null && (
+            <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: 8 }}>
+              Checked at {new Date(checkedAt).toLocaleString()}
+            </p>
+          )}
+
+          {Object.entries(agentStatus).length > 0 ? (
+            <div
+              style={{
+                maxHeight: 400,
+                overflowY: "auto",
+                border: "1px solid var(--field-border)",
+                borderRadius: 4,
+                padding: 8,
+              }}
+            >
+              {Object.entries(agentStatus).map(([repo, tasks]) => (
+                <div key={repo}>
+                  <div style={{ fontSize: "0.85rem", fontWeight: 500, marginBottom: 8, color: "var(--text-primary)" }}>
+                    <span style={{ fontFamily: "monospace" }}>{repo}</span>
+                  </div>
+
+                  {tasks.length === 0 ? (
+                    <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: 12 }}>
+                      No agent tasks found.
+                    </p>
+                  ) : (
+                    <div style={{ marginBottom: 12, marginLeft: 12 }}>
+                      {tasks.map((task) => {
+                        const taskState = task.state === "OPEN" && (!task.pr || task.pr.isDraft) ? "Working" :
+                          task.state === "OPEN" && task.pr && !task.pr.isDraft && task.pr.state === "OPEN" ? "Ready for review" :
+                          task.pr?.state === "MERGED" ? "Merged" :
+                          task.state === "CLOSED" ? "Closed" :
+                          "Unknown";
+
+                        const stateBadgeClass =
+                          task.pr?.state === "MERGED"
+                            ? styles.ghBadgeMerged
+                            : taskState === "Working" || taskState === "Ready for review"
+                              ? styles.ghBadgeNeutral
+                              : taskState === "Closed"
+                                ? styles.ghBadgeNeutral
+                                : styles.ghBadgeNeutral;
+
+                        return (
+                          <div
+                            key={task.number}
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 4,
+                              fontSize: "0.8rem",
+                              marginBottom: 10,
+                              paddingBottom: 10,
+                              borderBottom: "1px solid var(--field-border)",
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                              <a
+                                href={task.htmlUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  color: "var(--accent-ink)",
+                                  textDecoration: "none",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                #{task.number} {task.title}
+                              </a>
+                              <span className={`${styles.ghBadge} ${stateBadgeClass}`}>
+                                {taskState}
+                              </span>
+                            </div>
+
+                            {task.pr && (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginLeft: 8 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                  <a
+                                    href={task.pr.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{
+                                      color: "var(--accent-ink)",
+                                      textDecoration: "none",
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    PR #{task.pr.number}
+                                  </a>
+
+                                  {task.pr.checks && (
+                                    <span
+                                      className={`${styles.ghBadge} ${
+                                        task.pr.checks === "SUCCESS"
+                                          ? styles.ghBadgeSuccess
+                                          : task.pr.checks === "FAILURE" || task.pr.checks === "ERROR"
+                                            ? styles.ghBadgeDanger
+                                            : styles.ghBadgeNeutral
+                                      }`}
+                                    >
+                                      {task.pr.checks === "SUCCESS"
+                                        ? "CI passing"
+                                        : task.pr.checks === "FAILURE" || task.pr.checks === "ERROR"
+                                          ? "CI failing"
+                                          : task.pr.checks === "PENDING" || task.pr.checks === "EXPECTED"
+                                            ? "CI running"
+                                            : "CI unknown"}
+                                    </span>
+                                  )}
+
+                                  {task.pr.reviewDecision && (
+                                    <span
+                                      className={`${styles.ghBadge} ${
+                                        task.pr.reviewDecision === "APPROVED"
+                                          ? styles.ghBadgeSuccess
+                                          : styles.ghBadgeNeutral
+                                      }`}
+                                    >
+                                      {task.pr.reviewDecision === "APPROVED"
+                                        ? "Approved"
+                                        : task.pr.reviewDecision === "CHANGES_REQUESTED"
+                                          ? "Changes requested"
+                                          : "Review required"}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div
+                                  className={styles.ghMetaMono}
+                                  style={{
+                                    fontSize: "0.75rem",
+                                    color: "var(--text-secondary)",
+                                  }}
+                                >
+                                  +{task.pr.additions} -{task.pr.deletions} ({task.pr.changedFiles} files)
+                                  {" updated "}
+                                  {new Date(task.pr.updatedAt).toLocaleString()}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : checkedAt !== null ? (
+            <p className={styles.fieldHint}>No agent tasks found.</p>
+          ) : null}
+        </div>
       </div>
 
       {/* Section 3: Merge Pull Requests */}

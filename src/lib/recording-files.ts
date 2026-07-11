@@ -8,7 +8,7 @@ import type { Database } from "./supabase/types";
 export interface RecordingFile {
   id: string;
   name: string;
-  kind: "recording" | "captioned" | "narrated";
+  kind: "recording" | "captioned" | "narrated" | "bundle";
   mimeType: string;
   sizeBytes: number;
   durationSec: number | null;
@@ -21,6 +21,7 @@ export function extForMime(mime: string): string {
   if (m.includes("mp4")) return "mp4";
   if (m.includes("quicktime")) return "mov";
   if (m.includes("matroska")) return "mkv";
+  if (m.includes("zip")) return "zip";
   return "webm";
 }
 
@@ -28,7 +29,7 @@ export async function saveRecordingFile(
   supabase: SupabaseClient<Database>,
   userId: string,
   blob: Blob,
-  meta: { name: string; kind: "recording" | "captioned" | "narrated"; mimeType: string; durationSec: number | null }
+  meta: { name: string; kind: "recording" | "captioned" | "narrated" | "bundle"; mimeType: string; durationSec: number | null }
 ): Promise<RecordingFile> {
   const id = crypto.randomUUID();
   const path = `${userId}/${id}.${extForMime(meta.mimeType)}`;

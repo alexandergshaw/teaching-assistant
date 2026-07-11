@@ -423,7 +423,7 @@ export interface Database {
           id: string;
           user_id: string;
           name: string;
-          kind: "recording" | "captioned" | "narrated";
+          kind: "recording" | "captioned" | "narrated" | "bundle";
           mime_type: string;
           size_bytes: number;
           duration_sec: number | null;
@@ -435,7 +435,7 @@ export interface Database {
           id?: string;
           user_id: string;
           name: string;
-          kind?: "recording" | "captioned" | "narrated";
+          kind?: "recording" | "captioned" | "narrated" | "bundle";
           mime_type?: string;
           size_bytes?: number;
           duration_sec?: number | null;
@@ -447,7 +447,7 @@ export interface Database {
           id?: string;
           user_id?: string;
           name?: string;
-          kind?: "recording" | "captioned" | "narrated";
+          kind?: "recording" | "captioned" | "narrated" | "bundle";
           mime_type?: string;
           size_bytes?: number;
           duration_sec?: number | null;

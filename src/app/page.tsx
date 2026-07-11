@@ -23,6 +23,7 @@ import { stampDocxAppProperties } from "@/lib/docx";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { uploadCourseZip, removeCourseZip } from "@/lib/course-files";
+import { saveRecordingFile } from "@/lib/recording-files";
 import styles from "./page.module.css";
 import { parseGeneratedRubric } from "./utils/rubric";
 import { VIEW_KEY } from "./components/content-tab/constants";
@@ -516,6 +517,14 @@ export default function Home() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      if (user) {
+        void saveRecordingFile(supabase, user.id, built.blob, {
+          name: built.fileName.replace(/\.zip$/i, ""),
+          kind: "bundle",
+          mimeType: "application/zip",
+          durationSec: null,
+        }).catch((err) => console.error("Library save failed:", err));
+      }
     } catch (err) {
       setLessonError(err instanceof Error ? err.message : "Download failed.");
     }
@@ -548,6 +557,12 @@ export default function Home() {
       setHubCourses((prev) =>
         prev?.map((c) => c.id === courseId ? { ...c, materialsZipPath: path } : c) ?? null
       );
+      void saveRecordingFile(supabase, user.id, built.blob, {
+        name: built.fileName.replace(/\.zip$/i, ""),
+        kind: "bundle",
+        mimeType: "application/zip",
+        durationSec: null,
+      }).catch((err) => console.error("Library save failed:", err));
     } catch (err) {
       setAttachNote({ kind: "error", text: err instanceof Error ? err.message : "Could not attach materials." });
     } finally {

@@ -18,6 +18,7 @@ import { buildSlidesPptx } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { useSupabase } from "@/context/SupabaseProvider";
+import { saveRecordingFile } from "@/lib/recording-files";
 import styles from "../page.module.css";
 import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 import Button from "@mui/material/Button";
@@ -66,7 +67,7 @@ function downloadBase64File(base64: string, fileName: string, mimeType: string) 
 }
 
 export default function LecturePlanningTab() {
-  const { user } = useSupabase();
+  const { user, supabase } = useSupabase();
   const [provider] = useLlmProvider();
   const [lectureDuration, setLectureDuration] = useState("50");
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
@@ -396,6 +397,14 @@ export default function LecturePlanningTab() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      if (user) {
+        void saveRecordingFile(supabase, user.id, blob, {
+          name: baseName,
+          kind: "bundle",
+          mimeType: "application/zip",
+          durationSec: null,
+        }).catch((err) => console.error("Library save failed:", err));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed.");
     } finally {

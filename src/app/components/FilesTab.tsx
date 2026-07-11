@@ -44,6 +44,9 @@ const kindLabels: Record<string, string> = {
 };
 
 const getDisplayKind = (file: RecordingFile): { label: string; badgeClass: string } => {
+  if (file.mimeType.includes("zip") || file.kind === "bundle") {
+    return { label: "Bundle", badgeClass: styles.ghBadgeNeutral };
+  }
   if (file.mimeType.startsWith("audio/")) {
     return { label: "Audio", badgeClass: styles.ghBadgeNeutral };
   }
@@ -77,10 +80,10 @@ export default function FilesTab() {
     const stored = localStorage.getItem("ta-files-sort");
     return (stored as "newest" | "oldest" | "name" | "largest" | null) ?? "newest";
   });
-  const [filterKind, setFilterKind] = useState<"all" | "recording" | "captioned" | "narrated" | "audio">(() => {
+  const [filterKind, setFilterKind] = useState<"all" | "recording" | "captioned" | "narrated" | "audio" | "bundle">(() => {
     if (typeof window === "undefined") return "all";
     const stored = localStorage.getItem("ta-files-kind");
-    return (stored as "all" | "recording" | "captioned" | "narrated" | "audio" | null) ?? "all";
+    return (stored as "all" | "recording" | "captioned" | "narrated" | "audio" | "bundle" | null) ?? "all";
   });
 
   // Delete confirmation state
@@ -538,6 +541,9 @@ export default function FilesTab() {
       if (filterKind === "audio") {
         return f.mimeType.startsWith("audio/");
       }
+      if (filterKind === "bundle") {
+        return f.kind === "bundle" || f.mimeType.includes("zip");
+      }
       if (filterKind !== "all") {
         return f.kind === filterKind && !f.mimeType.startsWith("audio/");
       }
@@ -635,7 +641,7 @@ export default function FilesTab() {
                 select
                 size="small"
                 value={filterKind}
-                onChange={(e) => setFilterKind(e.target.value as "all" | "recording" | "captioned" | "narrated" | "audio")}
+                onChange={(e) => setFilterKind(e.target.value as "all" | "recording" | "captioned" | "narrated" | "audio" | "bundle")}
                 sx={{ minWidth: 140 }}
               >
                 <MenuItem value="all">All kinds</MenuItem>
@@ -643,6 +649,7 @@ export default function FilesTab() {
                 <MenuItem value="captioned">Captioned</MenuItem>
                 <MenuItem value="narrated">Narrated</MenuItem>
                 <MenuItem value="audio">Audio</MenuItem>
+                <MenuItem value="bundle">Bundles</MenuItem>
               </TextField>
             </div>
           </div>
@@ -844,29 +851,31 @@ export default function FilesTab() {
                           {new Date(file.createdAt).toLocaleDateString()} {new Date(file.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                         </div>
                         <div className={styles.libActions}>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            onClick={() => {
-                              const opening = expandedPlay !== file.id;
-                              setExpandedPlay(opening ? file.id : null);
-                              if (opening && !playUrls[file.id]) {
-                                void (async () => {
-                                  try {
-                                    const url = await getRecordingFileUrl(supabase, file);
-                                    setPlayUrls((prev) => ({ ...prev, [file.id]: url }));
-                                  } catch (err) {
-                                    setNote({
-                                      kind: "error",
-                                      text: err instanceof Error ? err.message : "Failed to load video",
-                                    });
-                                  }
-                                })();
-                              }
-                            }}
-                          >
-                            {expandedPlay === file.id ? "Close" : "Play"}
-                          </Button>
+                          {!displayKind.label.includes("Bundle") && (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => {
+                                const opening = expandedPlay !== file.id;
+                                setExpandedPlay(opening ? file.id : null);
+                                if (opening && !playUrls[file.id]) {
+                                  void (async () => {
+                                    try {
+                                      const url = await getRecordingFileUrl(supabase, file);
+                                      setPlayUrls((prev) => ({ ...prev, [file.id]: url }));
+                                    } catch (err) {
+                                      setNote({
+                                        kind: "error",
+                                        text: err instanceof Error ? err.message : "Failed to load video",
+                                      });
+                                    }
+                                  })();
+                                }
+                              }}
+                            >
+                              {expandedPlay === file.id ? "Close" : "Play"}
+                            </Button>
+                          )}
                           <Button
                             size="small"
                             variant="outlined"
@@ -874,7 +883,7 @@ export default function FilesTab() {
                           >
                             Download
                           </Button>
-                          {!isAudio && (
+                          {!isAudio && displayKind.label !== "Bundle" && (
                             <Button
                               size="small"
                               variant="outlined"

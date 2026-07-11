@@ -1904,6 +1904,7 @@ export default function RepoDetail() {
               branches={branches}
               defaultBranch={defaultBranch}
               description={repos.find(r => r.fullName === repoRef)?.description}
+              repos={repos}
             />
           )}
 

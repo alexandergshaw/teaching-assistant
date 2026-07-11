@@ -243,6 +243,9 @@ import {
   type PendingDeployment,
   type CopyRepoOptions,
   type CopyRepoResult,
+  copyPathsToRepo,
+  type CopyPathsOptions,
+  type CopyPathsResult,
 } from "@/lib/github";
 import {
   listGithubModels,
@@ -7131,6 +7134,21 @@ export async function copyRepoAction(
     return { result };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not copy the repository." };
+  }
+}
+
+export async function copyPathsToRepoAction(
+  repoRef: string,
+  opts: CopyPathsOptions
+): Promise<{ result: CopyPathsResult } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const result = await copyPathsToRepo(parsed.owner, parsed.repo, opts);
+    return { result };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not copy files to the repository." };
   }
 }
 

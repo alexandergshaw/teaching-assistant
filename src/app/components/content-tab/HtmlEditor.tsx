@@ -2,7 +2,7 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import styles from "../page.module.css";
+import styles from "../../page.module.css";
 
 /**
  * A WYSIWYG HTML editor with visual and source modes.

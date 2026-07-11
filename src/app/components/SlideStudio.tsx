@@ -7,6 +7,7 @@ import { getStoredProvider } from "@/lib/llm-provider";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { listRecordingFiles, downloadRecordingFile, saveRecordingFile, extForMime } from "@/lib/recording-files";
 import { extractVideoFrames, renderNarratedVideo, type NarrationClip } from "@/lib/narrate-video";
+import { resolveVoiceId, setVoiceId, clearVoiceId } from "@/lib/voice-id";
 import styles from "../page.module.css";
 
 const VOICE_SAMPLE_SCRIPT = `Hello, and welcome to today's session. This is a sample of my natural speaking voice, recorded so it can be cloned for course narration.
@@ -126,6 +127,7 @@ export default function SlideStudio() {
   const [cloneBusy, setCloneBusy] = useState(false);
   const [cloneError, setCloneError] = useState<string | null>(null);
   const [cloneNote, setCloneNote] = useState<string | null>(null);
+  const [sampleSaved, setSampleSaved] = useState<"idle" | "done" | "failed">("idle");
   const [stockVoices, setStockVoices] = useState<Array<{ voiceId: string; name: string; category: string }> | null>(null);
   const [stockLoading, setStockLoading] = useState(false);
   const [stockSel, setStockSel] = useState<string>("");
@@ -141,6 +143,7 @@ export default function SlideStudio() {
   const sampleRecRef = useRef<MediaRecorder | null>(null);
   const sampleStreamRef = useRef<MediaStream | null>(null);
   const sampleIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sampleStartRef = useRef<number>(0);
   const cancelledRef = useRef(false);
   const avatarPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cloneFileRef = useRef<HTMLInputElement>(null);
@@ -199,6 +202,18 @@ export default function SlideStudio() {
       cancelledRef.current = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (cloneVoiceId) return;
+      const id = await resolveVoiceId();
+      if (!cancelled && id) setCloneVoiceId(id);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cloneVoiceId]);
 
   // Unmount-only cleanup via a ref: a deps-based cleanup would revoke every
   // player's URL each time a new slide's audio landed.
@@ -423,11 +438,12 @@ export default function SlideStudio() {
     if (!narrations) return;
     setGenBusy(true);
     setGenError(null);
+    const voiceId = cloneVoiceId || (await resolveVoiceId());
     const next: Record<number, string> = { ...audioBySlide };
     for (const n of narrations) {
       if (!n.narration.trim()) continue;
       setGenProgress(`Synthesizing slide ${n.slide}...`);
-      const r = await synthesizeNarrationAction(n.narration, cloneVoiceId || undefined);
+      const r = await synthesizeNarrationAction(n.narration, voiceId ?? undefined);
       if ("error" in r) {
         setGenError(`Slide ${n.slide}: ${r.error}`);
         break;
@@ -490,8 +506,24 @@ export default function SlideStudio() {
       const r = await createVoiceCloneAction(cloneName, files);
       if ("error" in r) { setCloneError(r.error); return; }
       setCloneVoiceId(r.voiceId);
-      if (typeof window !== "undefined") localStorage.setItem("ta-voice-id", r.voiceId);
+      setVoiceId(r.voiceId);
       setCloneNote(`Voice created. All audio generation now uses "${cloneName.trim()}".`);
+      if (user && supabase) {
+        for (const f of picked) {
+          void (async () => {
+            try {
+              await saveRecordingFile(supabase, user.id, f, {
+                name: f.name.replace(/\.[^/.]+$/, "") || f.name,
+                kind: "recording",
+                mimeType: f.type || "audio/mpeg",
+                durationSec: null,
+              });
+            } catch (err) {
+              console.error("Failed to save voice file to library:", err);
+            }
+          })();
+        }
+      }
     } catch (err) {
       setCloneError(err instanceof Error ? err.message : "Could not read the audio files.");
     } finally {
@@ -542,6 +574,7 @@ export default function SlideStudio() {
 
   const handleStartRecording = useCallback(async () => {
     setCloneError(null);
+    setSampleSaved("idle");
     try {
       const audioConstraints: MediaTrackConstraints = {
         noiseSuppression: true,
@@ -612,17 +645,34 @@ export default function SlideStudio() {
           const blob = new Blob([e.data], { type: mimeType });
           setSampleBlob(blob);
           setSampleUrl(URL.createObjectURL(blob));
+          if (user && supabase) {
+            void (async () => {
+              try {
+                await saveRecordingFile(supabase, user.id, blob, {
+                  name: `Voice sample ${new Date().toLocaleString()}`,
+                  kind: "recording",
+                  mimeType: blob.type || "audio/webm",
+                  durationSec: Math.max(1, Math.round((Date.now() - sampleStartRef.current) / 1000)),
+                });
+                setSampleSaved("done");
+              } catch (err) {
+                console.error("Library save failed:", err);
+                setSampleSaved("failed");
+              }
+            })();
+          }
         }
       };
 
       recorder.start();
+      sampleStartRef.current = Date.now();
 
       await enumerateSampleMics();
     } catch (err) {
       setCloneError(err instanceof Error ? err.message : "Could not access microphone.");
       setSampleRecState("idle");
     }
-  }, [sampleMicId, enumerateSampleMics]);
+  }, [sampleMicId, enumerateSampleMics, supabase, user]);
 
   const handleStopRecording = useCallback(() => {
     if (sampleRecRef.current && sampleRecState === "recording") {
@@ -638,6 +688,7 @@ export default function SlideStudio() {
     setSampleUrl(null);
     setSampleBlob(null);
     setSampleElapsed(0);
+    setSampleSaved("idle");
   }, [sampleUrl]);
 
   const handleCreateCloneFromSample = useCallback(async () => {
@@ -671,7 +722,7 @@ export default function SlideStudio() {
         return;
       }
       setCloneVoiceId(r.voiceId);
-      if (typeof window !== "undefined") localStorage.setItem("ta-voice-id", r.voiceId);
+      setVoiceId(r.voiceId);
       setCloneNote(`Voice created. All audio generation now uses "${cloneName.trim()}".`);
       handleDiscardSample();
     } catch (err) {
@@ -703,7 +754,7 @@ export default function SlideStudio() {
     const selected = stockVoices.find((v) => v.voiceId === stockSel);
     if (!selected) return;
     setCloneVoiceId(stockSel);
-    if (typeof window !== "undefined") localStorage.setItem("ta-voice-id", stockSel);
+    setVoiceId(stockSel);
     setCloneNote(`Voice set to ${selected.name}. All narration will use it.`);
     setStockSel("");
   }, [stockSel, stockVoices]);
@@ -805,7 +856,8 @@ export default function SlideStudio() {
       if (!text.trim()) return;
       setVoBusyV("one");
       try {
-        const r = await synthesizeNarrationAction(text, localStorage.getItem("ta-voice-id") || undefined);
+        const voiceId = await resolveVoiceId();
+        const r = await synthesizeNarrationAction(text, voiceId ?? undefined);
         if ("error" in r) {
           throw new Error(r.error);
         }
@@ -833,12 +885,13 @@ export default function SlideStudio() {
     if (!segments) return;
     setVoBusyV("all");
     try {
+      const voiceId = await resolveVoiceId();
       const newAudio = { ...segAudio };
       for (let i = 0; i < segments.length; i++) {
         const seg = segments[i];
         if (!seg.text.trim()) continue;
         if (newAudio[i]) continue;
-        const r = await synthesizeNarrationAction(seg.text, localStorage.getItem("ta-voice-id") || undefined);
+        const r = await synthesizeNarrationAction(seg.text, voiceId ?? undefined);
         if ("error" in r) continue;
         const bytes = Uint8Array.from(atob(r.base64), (c) => c.charCodeAt(0));
         newAudio[i] = {
@@ -1474,6 +1527,8 @@ export default function SlideStudio() {
                   <Button variant="text" size="small" onClick={handleDiscardSample}>
                     Discard
                   </Button>
+                  {sampleSaved === "done" && <span className={styles.ghMeta}>Saved to the Files tab</span>}
+                  {sampleSaved === "failed" && <span className={styles.ghMeta}>Library save failed</span>}
                 </>
               )}
             </div>
@@ -1514,7 +1569,7 @@ export default function SlideStudio() {
           {cloneVoiceId ? (
             <p className={styles.fieldHint} style={{ margin: 0 }}>
               Using your cloned voice (id <span className={styles.ghMeta}>{cloneVoiceId}</span>) for audio generation.{" "}
-              <button type="button" className={styles.linkButton} onClick={() => { setCloneVoiceId(""); if (typeof window !== "undefined") localStorage.removeItem("ta-voice-id"); setCloneNote(null); }}>Stop using it</button>
+              <button type="button" className={styles.linkButton} onClick={() => { setCloneVoiceId(""); clearVoiceId(); setCloneNote(null); }}>Stop using it</button>
             </p>
           ) : (
             <p className={styles.fieldHint} style={{ margin: 0 }}>

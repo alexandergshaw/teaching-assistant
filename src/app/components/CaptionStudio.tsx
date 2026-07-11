@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextField, FormControlLabel, Checkbox, MenuItem } from "@mui/material";
 import { describeScreenRecordingAction, voiceConfiguredAction, synthesizeNarrationAction, type ScreenCaption } from "../actions";
+import { resolveVoiceId } from "@/lib/voice-id";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { listBackupVideos, readBackupFile, type BackupVideo, type DirHandle } from "@/lib/backup-dir";
 import { activeCaptionAt, wrapCaptionLines, captionLayout, ensureFiniteDuration, captionBlockBaselineY, vttLineSetting, type CaptionPosition } from "@/lib/caption-burn";
@@ -514,7 +515,8 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     setVoError(null);
     setVoBusy("one");
     try {
-      const r = await synthesizeNarrationAction(c.text, localStorage.getItem("ta-voice-id") || undefined);
+      const voiceId = await resolveVoiceId();
+      const r = await synthesizeNarrationAction(c.text, voiceId ?? undefined);
       if ("error" in r) {
         setVoError(r.error);
         setVoBusy(null);
@@ -538,13 +540,14 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     if (!captions || !voiceReady) return;
     setVoError(null);
     setVoBusy("all");
+    const voiceId = await resolveVoiceId();
     const next = { ...cueAudio };
     for (let i = 0; i < captions.length; i++) {
       if (next[i]) continue;
       setVoError(null);
       const c = captions[i];
       try {
-        const r = await synthesizeNarrationAction(c.text, localStorage.getItem("ta-voice-id") || undefined);
+        const r = await synthesizeNarrationAction(c.text, voiceId ?? undefined);
         if ("error" in r) {
           setVoError(`Cue ${i + 1}: ${r.error}`);
           break;

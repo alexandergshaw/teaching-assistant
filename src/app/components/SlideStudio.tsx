@@ -133,6 +133,11 @@ export default function SlideStudio() {
   const [sampleUrl, setSampleUrl] = useState<string | null>(null);
   const [sampleBlob, setSampleBlob] = useState<Blob | null>(null);
   const [sampleElapsed, setSampleElapsed] = useState(0);
+  const [sampleMics, setSampleMics] = useState<Array<{ deviceId: string; label: string }>>([]);
+  const [sampleMicId, setSampleMicId] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-sample-mic-id") ?? "";
+  });
   const sampleRecRef = useRef<MediaRecorder | null>(null);
   const sampleStreamRef = useRef<MediaStream | null>(null);
   const sampleIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -318,6 +323,11 @@ export default function SlideStudio() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    localStorage.setItem("ta-sample-mic-id", sampleMicId);
+  }, [sampleMicId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     localStorage.setItem("ta-slides-video-context", videoContext);
   }, [videoContext]);
 
@@ -489,16 +499,82 @@ export default function SlideStudio() {
     }
   };
 
+  const enumerateSampleMics = useCallback(async () => {
+    try {
+      if (!navigator.mediaDevices?.enumerateDevices) {
+        return;
+      }
+      const deviceList = await navigator.mediaDevices.enumerateDevices();
+      const audioDevices = deviceList.filter((d) => d.kind === "audioinput" && d.deviceId);
+      const mics = audioDevices.map((d, i) => ({
+        deviceId: d.deviceId,
+        label: d.label || `Microphone ${i + 1}`,
+      }));
+      setSampleMics(mics);
+    } catch (err) {
+      console.error("Failed to enumerate sample mics:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const initMics = async () => {
+      if (!cancelled) {
+        await enumerateSampleMics();
+      }
+    };
+
+    initMics();
+
+    const handleDeviceChange = () => {
+      if (!cancelled) {
+        void enumerateSampleMics();
+      }
+    };
+
+    navigator.mediaDevices?.addEventListener("devicechange", handleDeviceChange);
+    return () => {
+      cancelled = true;
+      navigator.mediaDevices?.removeEventListener("devicechange", handleDeviceChange);
+    };
+  }, [enumerateSampleMics]);
+
   const handleStartRecording = useCallback(async () => {
     setCloneError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          noiseSuppression: true,
-          echoCancellation: true,
-          autoGainControl: true,
-        },
-      });
+      const audioConstraints: MediaTrackConstraints = {
+        noiseSuppression: true,
+        echoCancellation: true,
+        autoGainControl: true,
+      };
+
+      if (sampleMicId) {
+        audioConstraints.deviceId = { exact: sampleMicId };
+      }
+
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: audioConstraints,
+        });
+      } catch (err) {
+        const errName = (err as DOMException)?.name;
+        const shouldRetry =
+          sampleMicId && (errName === "OverconstrainedError" || errName === "NotFoundError");
+        if (shouldRetry) {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              noiseSuppression: true,
+              echoCancellation: true,
+              autoGainControl: true,
+            },
+          });
+        } else {
+          throw err;
+        }
+      }
+
       sampleStreamRef.current = stream;
 
       const mimeType = [
@@ -540,11 +616,13 @@ export default function SlideStudio() {
       };
 
       recorder.start();
+
+      await enumerateSampleMics();
     } catch (err) {
       setCloneError(err instanceof Error ? err.message : "Could not access microphone.");
       setSampleRecState("idle");
     }
-  }, []);
+  }, [sampleMicId, enumerateSampleMics]);
 
   const handleStopRecording = useCallback(() => {
     if (sampleRecRef.current && sampleRecState === "recording") {
@@ -1347,6 +1425,27 @@ export default function SlideStudio() {
 
             <div>
               <h4 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 8px 0" }}>2. Record</h4>
+              <div style={{ marginBottom: 8 }}>
+                <TextField
+                  select
+                  label="Microphone"
+                  value={sampleMicId}
+                  onChange={(e) => setSampleMicId(e.target.value)}
+                  size="small"
+                  sx={{ minWidth: 220 }}
+                  disabled={sampleRecState === "recording"}
+                >
+                  <MenuItem value="">Default microphone</MenuItem>
+                  {sampleMics.map((mic) => (
+                    <MenuItem key={mic.deviceId} value={mic.deviceId}>
+                      {mic.label}
+                    </MenuItem>
+                  ))}
+                  {sampleMicId && !sampleMics.some((d) => d.deviceId === sampleMicId) && (
+                    <MenuItem value={sampleMicId}>Previous microphone (reconnect or reselect)</MenuItem>
+                  )}
+                </TextField>
+              </div>
               {sampleRecState === "idle" ? (
                 <Button
                   variant="contained"

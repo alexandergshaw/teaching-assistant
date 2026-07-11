@@ -46,6 +46,18 @@ type RecState = "idle" | "recording" | "paused";
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
+const VOICE_SAMPLE_SCRIPT = `Hello, and welcome to today's session. This is a sample of my natural speaking voice, recorded so it can be cloned for course narration.
+
+When I teach, I try to keep things simple: one idea at a time, explained clearly, with room to breathe. Some sentences are short. Others stretch a little longer, winding through an example or two before they land, because that is how real explanations sound.
+
+Let's try some variety. How do computers store information? Why does a loop repeat, and when should it stop? Questions like these lift my tone at the end, while statements settle back down.
+
+Here are a few specifics: on March 3rd, 2026, at 9:45 in the morning, exactly 127 students submitted assignment number 6. About 83 percent passed on the first try - a strong result, though not a perfect one.
+
+Now for texture: the quick brown fox jumps over the lazy dog, while five jazzy wizards begin to quickly vex the judge. Think of thirty-three thankful thoughts, and measure the pleasure of a treasured vision.
+
+Finally, a calm close. Thank you for listening carefully. Take a breath, review your notes, and remember: steady practice beats last-minute cramming every single time.`;
+
 export default function RecordingTab({ active = true }: { active?: boolean }) {
   const { supabase, user } = useSupabase();
 
@@ -1871,6 +1883,27 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
               </div>
             </>
           )}
+        </div>
+      </details>
+
+      <details className={styles.adaptDisclosure}>
+        <summary>Voice clone sample script</summary>
+        <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+          <p className={styles.adaptPanelSubtitle} style={{ marginBottom: 8 }}>Read this aloud in one take to give the voice clone a clean, varied sample of your voice (about 90 seconds).</p>
+          <ul className={styles.fieldHint} style={{ margin: "0 0 10px", paddingLeft: 18 }}>
+            <li>Record in a quiet room, mic at a constant distance, no music.</li>
+            <li>Speak naturally at your normal teaching pace - do not read monotone.</li>
+            <li>Use the microphone-only setup: pick your mic, press Record, read, press Stop.</li>
+            <li>Then download the take and create the clone on Narrate a deck under voice cloning.</li>
+          </ul>
+          <div style={{ padding: "14px 18px", borderRadius: 12, background: "color-mix(in srgb, var(--field-border) 18%, transparent)", whiteSpace: "pre-wrap", lineHeight: 1.6, color: "var(--text-primary)", fontSize: "0.95rem" }}>
+            {VOICE_SAMPLE_SCRIPT}
+          </div>
+          <div className={styles.ghActions} style={{ marginTop: 10 }}>
+            <Button variant="contained" size="small" onClick={() => { setScript(VOICE_SAMPLE_SCRIPT); setPrompterOn(true); }}>Load into teleprompter</Button>
+            <Button variant="text" size="small" onClick={() => void navigator.clipboard.writeText(VOICE_SAMPLE_SCRIPT)}>Copy</Button>
+          </div>
+          <p className={styles.fieldHint} style={{ marginTop: 8 }}>Loading replaces the current lecture script in the teleprompter.</p>
         </div>
       </details>
 

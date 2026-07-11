@@ -45,10 +45,11 @@ interface CourseForm {
   integrations: Array<{ name: string; url: string }>;
   roster: string;
   notes: string;
+  topics: string;
 }
 
 // Fields that can be edited inline on tiles.
-type InlineField = "canvasUrl" | "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations";
+type InlineField = "canvasUrl" | "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics";
 
 const EMPTY_FORM: CourseForm = {
   id: null,
@@ -64,6 +65,7 @@ const EMPTY_FORM: CourseForm = {
   integrations: [],
   roster: "",
   notes: "",
+  topics: "",
 };
 
 function formFromCourse(c: Course): CourseForm {
@@ -81,6 +83,7 @@ function formFromCourse(c: Course): CourseForm {
     integrations: c.integrations.map((i) => ({ name: i.name, url: i.url ?? "" })),
     roster: c.roster ?? "",
     notes: c.notes ?? "",
+    topics: c.topics ?? "",
   };
 }
 
@@ -99,6 +102,7 @@ function courseToInput(c: Course) {
     integrations: c.integrations.map((i) => ({ name: i.name, url: i.url })),
     roster: c.roster ?? "",
     notes: c.notes ?? "",
+    topics: c.topics ?? "",
   };
 }
 
@@ -210,6 +214,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [tileEdit, setTileEdit] = useState<{ id: string; field: InlineField; value: string } | null>(null);
   const [tileSaving, setTileSaving] = useState(false);
   const [expandedRosterId, setExpandedRosterId] = useState<string | null>(null);
+  const [expandedTopicsId, setExpandedTopicsId] = useState<string | null>(null);
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
 
@@ -337,6 +342,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       integrations: form.integrations.map((i) => ({ name: i.name, url: i.url.trim() || null })),
       roster: form.roster,
       notes: form.notes,
+      topics: form.topics,
     };
     const result = form.id ? await updateCourseHubAction(form.id, input) : await createCourseHubAction(input);
     setSaving(false);
@@ -501,6 +507,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       field === "repos" ? reposToText(c)
       : field === "integrations" ? integrationsToText(c)
       : field === "syllabusId" ? (c.syllabusId ?? "")
+      : field === "topics" ? (c.topics ?? "")
       : ((c[field] ?? "") as string);
     setTileEdit({ id: c.id, field, value });
   };
@@ -519,6 +526,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     const patch =
       tileEdit.field === "repos" ? { repos: parseRepoLines(tileEdit.value) }
       : tileEdit.field === "integrations" ? { integrations: parseIntegrationLines(tileEdit.value) }
+      : tileEdit.field === "topics" ? { topics: tileEdit.value }
       : { [tileEdit.field]: tileEdit.value };
     const r = await updateCourseHubAction(course.id, { ...courseToInput(course), ...patch });
     setTileSaving(false);
@@ -657,6 +665,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       c.institution,
       c.textbook,
       c.notes,
+      c.topics,
       c.githubOrg,
       ...c.repos.map((r) => r.repo),
       ...c.integrations.map((i) => i.name),
@@ -907,6 +916,20 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
               </Button>
             </div>
             <p className={styles.fieldHint}>Fetching replaces the list with the course&apos;s Canvas enrollment (Last, First per line). Append | github-username to a line to link that student&apos;s GitHub account.</p>
+          </div>
+
+          <div className={styles.field}>
+            <label>Topics</label>
+            <TextField
+              size="small"
+              fullWidth
+              multiline
+              minRows={3}
+              placeholder="One topic per line."
+              value={form.topics}
+              onChange={(e) => update({ topics: e.target.value })}
+            />
+            <p className={styles.fieldHint}>One topic per line. Used to describe what the course covers.</p>
           </div>
 
           <div className={styles.field}>
@@ -1226,6 +1249,52 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                             {expandedRosterId === c.id && (
                               <div className={styles.rosterPreview}>
                                 {(c.roster ?? "").split("\n").map((l) => l.trim()).filter(Boolean).map((l, i) => (
+                                  <div key={i}>{l}</div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )
+                        : (
+                          <span className={styles.courseResourceEmpty}>Not set</span>
+                        )}
+                  </div>
+
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "topics" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "topics"))}>
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>Topics</span>
+                      {c.topics && c.topics.trim() && (
+                        <span className={styles.navBadge} style={{ marginLeft: 8 }}>{c.topics.split("\n").map((l) => l.trim()).filter(Boolean).length}</span>
+                      )}
+                      <button
+                        type="button"
+                        className={styles.tileEditBtn}
+                        title="Edit"
+                        onClick={() => startTileEdit(c, "topics")}
+                      >
+                        <PencilIcon />
+                      </button>
+                    </div>
+                    {tileEdit?.id === c.id && tileEdit?.field === "topics"
+                      ? tileEditor(true, "One topic per line.", "One topic per line. Used to describe what the course covers.")
+                      : c.topics && c.topics.trim()
+                        ? (
+                          <>
+                            <span className={styles.courseResourceValue}>
+                              {c.topics.split("\n").map((l) => l.trim()).filter(Boolean).length} topics
+                            </span>
+                            <div className={styles.courseResourceActions}>
+                              <button
+                                type="button"
+                                className={styles.linkButton}
+                                onClick={() => setExpandedTopicsId(expandedTopicsId === c.id ? null : c.id)}
+                              >
+                                {expandedTopicsId === c.id ? "Hide" : "View"}
+                              </button>
+                            </div>
+                            {expandedTopicsId === c.id && (
+                              <div className={styles.rosterPreview}>
+                                {(c.topics ?? "").split("\n").map((l) => l.trim()).filter(Boolean).map((l, i) => (
                                   <div key={i}>{l}</div>
                                 ))}
                               </div>

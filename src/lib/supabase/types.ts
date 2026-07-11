@@ -167,6 +167,7 @@ export interface Database {
           integrations: Array<{ name: string; url: string | null }>;
           roster: string | null;
           notes: string | null;
+          topics: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -185,6 +186,7 @@ export interface Database {
           integrations?: Array<{ name: string; url: string | null }>;
           roster?: string | null;
           notes?: string | null;
+          topics?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -203,6 +205,7 @@ export interface Database {
           integrations?: Array<{ name: string; url: string | null }>;
           roster?: string | null;
           notes?: string | null;
+          topics?: string | null;
           created_at?: string;
           updated_at?: string;
         };

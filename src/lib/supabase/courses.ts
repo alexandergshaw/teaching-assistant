@@ -36,6 +36,7 @@ export interface Course {
   integrations: CourseIntegration[];
   roster: string | null;
   notes: string | null;
+  topics: string | null;
   updatedAt: string;
 }
 
@@ -53,10 +54,11 @@ export interface CourseInput {
   integrations?: CourseIntegration[];
   roster?: string | null;
   notes?: string | null;
+  topics?: string | null;
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -80,6 +82,7 @@ interface CourseRow {
   integrations: Array<{ name: string; url: string | null }> | null;
   roster: string | null;
   notes: string | null;
+  topics: string | null;
   updated_at: string;
 }
 
@@ -98,6 +101,7 @@ function toCourse(r: CourseRow): Course {
     integrations: Array.isArray(r.integrations) ? r.integrations.filter((x) => x && x.name) : [],
     roster: r.roster,
     notes: r.notes,
+    topics: r.topics,
     updatedAt: r.updated_at,
   };
 }
@@ -128,6 +132,7 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     integrations,
     roster: clean(input.roster),
     notes: clean(input.notes),
+    topics: clean(input.topics),
     updated_at: new Date().toISOString(),
   };
 }

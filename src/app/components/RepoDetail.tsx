@@ -36,8 +36,10 @@ import {
   listCopilotTasksAction,
   bulkDeletePathsAction,
   bulkMovePathsAction,
+  detectRepoFrontendAction,
 } from "../actions";
 import type { GithubRepo, RepoTreeEntry, PullRequestInfo, PullRequestReviewInfo, PullRequestFileInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo, CopilotTask, ArtifactInfo, PendingDeployment } from "@/lib/github";
+import { sandboxUrls } from "@/lib/frontend-detect";
 import RepoSettingsPanel from "./RepoSettingsPanel";
 import PublishToCanvasPage from "./PublishToCanvasPage";
 import CopilotChatPanel from "./CopilotChatPanel";
@@ -81,6 +83,8 @@ export default function RepoDetail() {
   const [branches, setBranches] = useState<string[]>([]);
   const [defaultBranch, setDefaultBranch] = useState("");
   const [tab, setTab] = useState<"files" | "branches" | "copy" | "pulls" | "actions" | "copilot" | "settings">("files");
+  const [frontend, setFrontend] = useState<{ framework: string; devCommand: string } | null>(null);
+  const [frontendChecked, setFrontendChecked] = useState(false);
   const [copilotTaskTitle, setCopilotTaskTitle] = useState("");
   const [copilotTaskBody, setCopilotTaskBody] = useState("");
   const [copilotBusy, setCopilotBusy] = useState(false);
@@ -293,6 +297,28 @@ export default function RepoDetail() {
     return () => {
       cancelled = true;
     };
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [repoRef]);
+
+  // Detect frontend framework when repo changes
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (!repoRef) {
+      setFrontend(null);
+      setFrontendChecked(false);
+      return;
+    }
+    setFrontendChecked(false);
+    setFrontend(null);
+    (async () => {
+      const r = await detectRepoFrontendAction(repoRef);
+      if ("error" in r) {
+        setFrontendChecked(true);
+        return;
+      }
+      setFrontend(r.frontend);
+      setFrontendChecked(true);
+    })();
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [repoRef]);
 
@@ -1201,6 +1227,20 @@ export default function RepoDetail() {
             <span className={styles.ghMetaMono}>default: {selectedRepoInfo.defaultBranch}</span>
             {selectedRepoInfo.updatedAt && <span>updated {formatRelative(selectedRepoInfo.updatedAt)}</span>}
           </div>
+          {frontendChecked && frontend && (
+            <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>{frontend.framework}</span>
+              <Button size="small" variant="outlined" component="a" href={sandboxUrls(selectedRepoInfo.fullName).stackblitz} target="_blank" rel="noreferrer">
+                Spin up in StackBlitz
+              </Button>
+              <Button size="small" variant="outlined" component="a" href={sandboxUrls(selectedRepoInfo.fullName).codesandbox} target="_blank" rel="noreferrer">
+                CodeSandbox
+              </Button>
+              <p className={styles.fieldHint} style={{ margin: 0, marginLeft: "auto", fontSize: "0.8rem" }}>
+                Boots the app&apos;s dev server in your browser (WebContainers). Private repos ask you to sign in to the sandbox with GitHub once.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

@@ -253,6 +253,7 @@ import {
 } from "@/lib/github-models";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
 import { filesToLlmParts } from "@/lib/llm-files";
+import { classifyFrontend } from "@/lib/frontend-detect";
 import {
   courseEngineSchedule,
   courseEngineLecture,
@@ -7130,6 +7131,26 @@ export async function copyRepoAction(
     return { result };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not copy the repository." };
+  }
+}
+
+export async function detectRepoFrontendAction(fullName: string): Promise<{ frontend: { framework: string; devCommand: string } | null } | { error: string }> {
+  try {
+    await requireOwner();
+    const parts = fullName.split("/");
+    if (parts.length !== 2) {
+      return { frontend: null };
+    }
+    const [owner, repo] = parts;
+    let text: string;
+    try {
+      text = await getFileText(owner, repo, "package.json");
+    } catch {
+      return { frontend: null };
+    }
+    return { frontend: classifyFrontend(text) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not detect frontend framework." };
   }
 }
 

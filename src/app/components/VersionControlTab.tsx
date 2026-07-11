@@ -10,6 +10,7 @@ import type { GithubRepo } from "@/lib/github";
 import OrgManagementPanel from "./OrgManagementPanel";
 import { ClassroomWizard } from "./ClassroomWizard";
 import RepoDetail from "./RepoDetail";
+import BulkRepoActionsPanel from "./BulkRepoActionsPanel";
 import { takeCourseHandoff } from "@/lib/course-handoff";
 import { useVcCounts } from "./VcCounts";
 import styles from "../page.module.css";
@@ -37,9 +38,12 @@ export default function VersionControlTab() {
   const [templateRepo, setTemplateRepo] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_TEMPLATE_KEY) ?? "" : ""));
   const [prefix, setPrefix] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_PREFIX_KEY) ?? "" : ""));
   const [isPrivate, setIsPrivate] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_PRIVATE_KEY) !== "0" : true));
-  const [subTab, setSubTab] = useState<"orgs" | "repos">(() =>
-    typeof window !== "undefined" && localStorage.getItem(VC_SUBTAB_KEY) === "repos" ? "repos" : "orgs"
-  );
+  const [subTab, setSubTab] = useState<"orgs" | "repos" | "bulk">(() => {
+    if (typeof window === "undefined") return "orgs";
+    const stored = localStorage.getItem(VC_SUBTAB_KEY);
+    if (stored === "repos" || stored === "bulk") return stored;
+    return "orgs";
+  });
 
 
   useEffect(() => {
@@ -154,6 +158,15 @@ export default function VersionControlTab() {
             {vcAttention > 0 && <span className={styles.navBadge}>{vcAttention}</span>}
           </span>
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subTab === "bulk"}
+          className={`${styles.lessonInnerTab}${subTab === "bulk" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+          onClick={() => setSubTab("bulk")}
+        >
+          <span className={styles.tabLabelWrap}>Bulk actions</span>
+        </button>
       </div>
 
       {subTab === "orgs" && (
@@ -177,6 +190,10 @@ export default function VersionControlTab() {
       )}
 
       {subTab === "repos" && <RepoDetail />}
+
+      {subTab === "bulk" && (
+        <BulkRepoActionsPanel repos={[...new Set(mergedRepos.map((r) => r.fullName))].sort()} />
+      )}
     </div>
   );
 }

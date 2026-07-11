@@ -192,7 +192,9 @@ export default function VersionControlTab() {
       {subTab === "repos" && <RepoDetail />}
 
       {subTab === "bulk" && (
-        <BulkRepoActionsPanel repos={[...new Set(mergedRepos.map((r) => r.fullName))].sort()} />
+        // Bulk actions must offer every repo the token can see - personal and
+        // collaborator repos included - not just the selected org + templates.
+        <BulkRepoActionsPanel repos={[...new Set([...myRepos, ...mergedRepos].map((r) => r.fullName))].sort()} />
       )}
     </div>
   );

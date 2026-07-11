@@ -2843,6 +2843,36 @@ export async function voiceConfiguredAction(): Promise<{ configured: boolean }> 
   }
 }
 
+/** List available ElevenLabs stock voices. */
+export async function listElevenVoicesAction(): Promise<
+  { voices: Array<{ voiceId: string; name: string; category: string }> } | { error: string }
+> {
+  try {
+    await requireOwner();
+    const key = process.env.ELEVENLABS_API_KEY?.trim();
+    if (!key) return { error: "Voice generation is not configured. Set ELEVENLABS_API_KEY." };
+    const res = await fetch("https://api.elevenlabs.io/v1/voices", {
+      headers: { "xi-api-key": key },
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      return { error: `Voice service error (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : ""}` };
+    }
+    const data = (await res.json().catch(() => null)) as { voices?: Array<{ voice_id?: string; name?: string; category?: string }> } | null;
+    if (!data?.voices) return { error: "Could not fetch voice list." };
+    const voices = data.voices
+      .filter((v) => v.voice_id && v.name)
+      .map((v) => ({
+        voiceId: v.voice_id!,
+        name: v.name!,
+        category: v.category ?? "",
+      }));
+    return { voices };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list voices." };
+  }
+}
+
 /**
  * Synthesize one narration segment with ElevenLabs and return it as base64
  * MP3. Called per slide so responses stay small. Uses ELEVENLABS_API_KEY and
@@ -2907,6 +2937,9 @@ export async function createVoiceCloneAction(
     const data = (await res.json().catch(() => null)) as { voice_id?: string; detail?: { message?: string } | string } | null;
     if (!res.ok || !data?.voice_id) {
       const msg = typeof data?.detail === "string" ? data.detail : data?.detail?.message;
+      if (msg && msg.toLowerCase().includes("does not include instant voice cloning")) {
+        return { error: "Your ElevenLabs plan does not include instant voice cloning (it needs Starter or higher). Pick a ready-made voice below instead - all narration features work with it." };
+      }
       return { error: `Voice clone failed (HTTP ${res.status})${msg ? `: ${msg.slice(0, 200)}` : ""}` };
     }
     return { voiceId: data.voice_id };

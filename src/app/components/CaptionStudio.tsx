@@ -106,7 +106,9 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
   const burnedUrlRef = useRef<string | null>(null);
   const videoUrlRef = useRef<string | null>(null);
   const cueAudioRef = useRef(cueAudio);
-  const previewAudioRef = useRef<Record<number, HTMLAudioElement>>({});
+  const previewCtxRef = useRef<AudioContext | null>(null);
+  const previewBuffersRef = useRef<Record<number, AudioBuffer>>({});
+  const previewNodesRef = useRef<Record<number, AudioBufferSourceNode>>({});
   const previewWasMutedRef = useRef(false);
 
   const { supabase, user } = useSupabase();
@@ -124,21 +126,28 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     return `${m}:${String(s).padStart(2, "0")}.${ds}`;
   };
 
-  const stopCueAudio = useCallback(() => {
-    for (const a of Object.values(previewAudioRef.current)) {
+  const stopPreviewNodes = useCallback(() => {
+    for (const node of Object.values(previewNodesRef.current)) {
       try {
-        a.pause();
-        a.currentTime = 0;
+        node.stop();
       } catch {}
     }
+    previewNodesRef.current = {};
   }, []);
 
   const endPreview = useCallback(() => {
     setPreviewing(false);
-    stopCueAudio();
+    stopPreviewNodes();
+    const ctx = previewCtxRef.current;
+    if (ctx && ctx.state !== "closed") {
+      try {
+        ctx.close();
+      } catch {}
+    }
+    previewCtxRef.current = null;
     const v = videoRef.current;
     if (v) v.muted = previewWasMutedRef.current;
-  }, [stopCueAudio]);
+  }, [stopPreviewNodes]);
 
   const adoptVideo = useCallback((blob: Blob, name: string) => {
     if (previewing) endPreview();
@@ -191,32 +200,34 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
       const t = v.currentTime;
       if (!captions) return;
       captions.forEach((c, i) => {
-        const a = previewAudioRef.current[i];
-        if (!a) return;
+        const buffer = previewBuffersRef.current[i];
+        if (!buffer) return;
         const inWindow = t >= c.start && t < c.end + 0.25;
-        if (inWindow && a.paused && !a.ended) {
-          const offset = t - c.start;
-          if (offset > 0.15 && Math.abs(a.currentTime - offset) > 0.3) {
-            try {
-              a.currentTime = offset;
-            } catch {}
-          }
-          void a.play().catch(() => {});
-        } else if (!inWindow && !a.paused) {
-          a.pause();
+        const ctx = previewCtxRef.current;
+        if (!ctx) return;
+        if (inWindow && !previewNodesRef.current[i]) {
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(ctx.destination);
+          const offset = Math.max(0, t - c.start);
+          source.start(0, offset);
+          previewNodesRef.current[i] = source;
+          source.onended = () => {
+            delete previewNodesRef.current[i];
+          };
+        } else if (!inWindow && previewNodesRef.current[i]) {
+          try {
+            previewNodesRef.current[i].stop();
+          } catch {}
+          delete previewNodesRef.current[i];
         }
       });
     };
     const onPause = () => {
-      stopCueAudio();
+      stopPreviewNodes();
     };
     const onSeeking = () => {
-      stopCueAudio();
-      for (const a of Object.values(previewAudioRef.current)) {
-        try {
-          a.currentTime = 0;
-        } catch {}
-      }
+      stopPreviewNodes();
     };
     const onEnded = () => {
       endPreview();
@@ -230,9 +241,9 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
       v.removeEventListener("pause", onPause);
       v.removeEventListener("seeking", onSeeking);
       v.removeEventListener("ended", onEnded);
-      stopCueAudio();
+      stopPreviewNodes();
     };
-  }, [previewing, captions, endPreview, stopCueAudio]);
+  }, [previewing, captions, endPreview, stopPreviewNodes]);
 
   useEffect(() => {
     (async () => {
@@ -567,19 +578,27 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     if (!v || !captions || captions.length === 0) return;
     previewWasMutedRef.current = v.muted;
     v.muted = voMode === "voiceover" || voMode === "none";
-    stopCueAudio();
-    previewAudioRef.current = {};
+    stopPreviewNodes();
+    previewBuffersRef.current = {};
+    previewNodesRef.current = {};
     if (voMode === "voiceover" || voMode === "mix") {
+      const ctx = new AudioContext();
+      previewCtxRef.current = ctx;
+      void ctx.resume();
       for (const [idxStr, entry] of Object.entries(cueAudio)) {
-        const a = new Audio(entry.url);
-        a.preload = "auto";
-        previewAudioRef.current[Number(idxStr)] = a;
+        void (async () => {
+          try {
+            const bytes = Uint8Array.from(atob(entry.base64), (ch) => ch.charCodeAt(0));
+            const buffer = await ctx.decodeAudioData(bytes.buffer.slice(0));
+            previewBuffersRef.current[Number(idxStr)] = buffer;
+          } catch {}
+        })();
       }
     }
     setPreviewing(true);
     v.currentTime = 0;
     void v.play();
-  }, [captions, cueAudio, voMode, stopCueAudio]);
+  }, [captions, cueAudio, voMode, stopPreviewNodes]);
 
   const handleBurnCaptions = useCallback(async () => {
     if (previewing) endPreview();
@@ -856,10 +875,16 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
       for (const entry of Object.values(cueAudioRef.current)) {
         URL.revokeObjectURL(entry.url);
       }
-      stopCueAudio();
+      stopPreviewNodes();
+      const ctx = previewCtxRef.current;
+      if (ctx && ctx.state !== "closed") {
+        try {
+          ctx.close();
+        } catch {}
+      }
       burnAbortRef.current?.();
     };
-  }, [stopCueAudio]);
+  }, [stopPreviewNodes]);
 
   return (
     <div className={styles.adaptPanel}>

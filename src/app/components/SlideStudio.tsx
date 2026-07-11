@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextField, MenuItem } from "@mui/material";
-import { extractPptxSlidesAction, generateSlideNarrationAction, voiceConfiguredAction, synthesizeNarrationAction, createVoiceCloneAction, avatarConfiguredAction, generateAvatarVideoAction, getAvatarVideoStatusAction, generateVideoNarrationAction, type SlideNarration } from "../actions";
+import { extractPptxSlidesAction, generateSlideNarrationAction, voiceConfiguredAction, synthesizeNarrationAction, createVoiceCloneAction, listElevenVoicesAction, avatarConfiguredAction, generateAvatarVideoAction, getAvatarVideoStatusAction, generateVideoNarrationAction, type SlideNarration } from "../actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { listRecordingFiles, downloadRecordingFile, saveRecordingFile, extForMime } from "@/lib/recording-files";
@@ -126,6 +126,9 @@ export default function SlideStudio() {
   const [cloneBusy, setCloneBusy] = useState(false);
   const [cloneError, setCloneError] = useState<string | null>(null);
   const [cloneNote, setCloneNote] = useState<string | null>(null);
+  const [stockVoices, setStockVoices] = useState<Array<{ voiceId: string; name: string; category: string }> | null>(null);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [stockSel, setStockSel] = useState<string>("");
   const [sampleRecState, setSampleRecState] = useState<"idle" | "recording">("idle");
   const [sampleUrl, setSampleUrl] = useState<string | null>(null);
   const [sampleBlob, setSampleBlob] = useState<Blob | null>(null);
@@ -599,6 +602,33 @@ export default function SlideStudio() {
       setCloneBusy(false);
     }
   }, [sampleBlob, cloneName, handleDiscardSample]);
+
+  const handleLoadStockVoices = useCallback(async () => {
+    setStockLoading(true);
+    setCloneError(null);
+    try {
+      const r = await listElevenVoicesAction();
+      if ("error" in r) {
+        setCloneError(r.error);
+        return;
+      }
+      setStockVoices(r.voices);
+    } catch (err) {
+      setCloneError(err instanceof Error ? err.message : "Could not load voices.");
+    } finally {
+      setStockLoading(false);
+    }
+  }, []);
+
+  const handleUseStockVoice = useCallback(async () => {
+    if (!stockSel || !stockVoices) return;
+    const selected = stockVoices.find((v) => v.voiceId === stockSel);
+    if (!selected) return;
+    setCloneVoiceId(stockSel);
+    if (typeof window !== "undefined") localStorage.setItem("ta-voice-id", stockSel);
+    setCloneNote(`Voice set to ${selected.name}. All narration will use it.`);
+    setStockSel("");
+  }, [stockSel, stockVoices]);
 
   // Video mode handlers
   const adoptVideo = useCallback(
@@ -1402,6 +1432,48 @@ export default function SlideStudio() {
           {!voiceReady && <p className={styles.fieldHint} style={{ margin: 0 }}>Requires ELEVENLABS_API_KEY.</p>}
           {cloneError && <p className={styles.error}>{cloneError}</p>}
           {cloneNote && <p className={styles.fieldHint}>{cloneNote}</p>}
+        </div>
+      </details>
+
+      <details className={styles.adaptDisclosure} style={{ marginTop: 16 }}>
+        <summary>Use a ready-made voice</summary>
+        <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+          <p className={styles.fieldHint}>
+            No cloning on your plan? Pick a ready-made ElevenLabs voice - captions, video narration, and deck narration all work with it.
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+            <TextField
+              select
+              label="Voice"
+              value={stockSel}
+              onChange={(e) => setStockSel(e.target.value)}
+              size="small"
+              disabled={stockLoading || !voiceReady}
+              sx={{ minWidth: 220 }}
+            >
+              {stockVoices && stockVoices.map((v) => (
+                <MenuItem key={v.voiceId} value={v.voiceId}>
+                  {v.name}
+                  {v.category ? ` (${v.category})` : ""}
+                </MenuItem>
+              ))}
+            </TextField>
+            <Button
+              variant="contained"
+              size="small"
+              disabled={!stockSel || stockLoading || cloneBusy || !voiceReady}
+              onClick={() => void handleUseStockVoice()}
+            >
+              Use this voice
+            </Button>
+            {!stockVoices && (
+              <Button variant="text" size="small" disabled={stockLoading || !voiceReady} onClick={() => void handleLoadStockVoices()}>
+                Browse voices
+              </Button>
+            )}
+          </div>
+          {!voiceReady && <p className={styles.fieldHint} style={{ margin: 0 }}>Requires ELEVENLABS_API_KEY.</p>}
+          {cloneError && <p className={styles.error}>{cloneError}</p>}
         </div>
       </details>
 

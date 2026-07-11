@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createCopilotTaskAction, listPullRequestsAction, mergePullRequestAction, listCopilotTasksAction } from "../actions";
+import { createCopilotTaskAction, listPullRequestsAction, mergePullRequestAction, markPullRequestReadyAction, listCopilotTasksAction } from "../actions";
 import type { PullRequestInfo, CopilotTask } from "@/lib/github";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
@@ -293,7 +293,6 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
 
       if (!("error" in result)) {
         const filtered = result.pulls.filter((pr) => {
-          if (pr.draft) return false;
           if (prTitleFilter.trim() && !pr.title.toLowerCase().includes(prTitleFilter.trim().toLowerCase())) return false;
           if (prAuthorFilter.trim() && !pr.user.toLowerCase().includes(prAuthorFilter.trim().toLowerCase())) return false;
           if (prBranchFilter.trim() && !pr.head.toLowerCase().includes(prBranchFilter.trim().toLowerCase())) return false;
@@ -337,6 +336,25 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
       if (prCancelRef.current) break;
 
       const match = toMerge[i];
+
+      // If the PR is a draft, mark it as ready for review first
+      if (match.pr.draft) {
+        const readyResult = await markPullRequestReadyAction(match.repo, match.pr.number);
+        if (prCancelRef.current) break;
+
+        if ("error" in readyResult) {
+          failedCount += 1;
+          setPrMatches((prev) =>
+            prev.map((m) =>
+              m.repo === match.repo && m.pr.number === match.pr.number
+                ? { ...m, pr: { ...m.pr, state: "closed" } }
+                : m
+            )
+          );
+          continue;
+        }
+      }
+
       const result = await mergePullRequestAction(match.repo, match.pr.number, mergeMethod);
 
       if (prCancelRef.current) break;
@@ -820,6 +838,10 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
           </TextField>
         </div>
 
+        <p className={styles.fieldHint} style={{ marginBottom: 12 }}>
+          Draft pull requests (for example from Copilot agents) are listed too - merging marks them ready for review first.
+        </p>
+
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           <Button
             type="button"
@@ -891,6 +913,11 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
                   >
                     #{match.pr.number} {match.pr.title}
                   </a>
+                  {match.pr.draft && (
+                    <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ whiteSpace: "nowrap" }}>
+                      Draft
+                    </span>
+                  )}
                   <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
                     {match.pr.user} ({match.pr.head} → {match.pr.base})
                   </span>

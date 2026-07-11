@@ -207,6 +207,7 @@ import {
   listCommits,
   listPullRequests,
   mergePullRequest,
+  markPullRequestReady,
   listPullRequestReviews,
   reviewPullRequest,
   listPullRequestFiles,
@@ -7392,6 +7393,18 @@ export async function mergePullRequestAction(repoRef: string, prNumber: number, 
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not merge the pull request." };
+  }
+}
+
+export async function markPullRequestReadyAction(repoRef: string, prNumber: number): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    await markPullRequestReady(parsed.owner, parsed.repo, prNumber);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not mark the pull request as ready." };
   }
 }
 

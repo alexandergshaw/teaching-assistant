@@ -1650,6 +1650,45 @@ export async function mergePullRequest(
   });
 }
 
+/** Mark a draft pull request as ready for review. */
+export async function markPullRequestReady(owner: string, repo: string, prNumber: number): Promise<void> {
+  // Query to get the PR's id and check if it is a draft
+  const queryData = await ghGraphql<{
+    repository?: { pullRequest?: { id?: string; isDraft?: boolean } };
+  }>(
+    `query($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) {
+          id
+          isDraft
+        }
+      }
+    }`,
+    { owner, repo, number: prNumber }
+  );
+
+  const pr = queryData.repository?.pullRequest;
+  if (!pr || !pr.id) {
+    throw new Error("Pull request not found.");
+  }
+
+  if (!pr.isDraft) {
+    return;
+  }
+
+  // Mutation to mark as ready for review
+  await ghGraphql<{ markPullRequestReadyForReview?: { pullRequest?: { isDraft?: boolean } } }>(
+    `mutation($id: ID!) {
+      markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+        pullRequest {
+          isDraft
+        }
+      }
+    }`,
+    { id: pr.id }
+  );
+}
+
 // ── Pull request reviews + files (view & approve) ───────────────────────────
 export interface PullRequestReviewInfo {
   id: number;

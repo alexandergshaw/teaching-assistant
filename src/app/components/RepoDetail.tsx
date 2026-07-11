@@ -2647,7 +2647,15 @@ export default function RepoDetail() {
             return selectedRepo ? (
               <RepoSettingsPanel
                 repo={selectedRepo}
-                onUpdated={(u) => setRepos((prev) => prev.map((r) => (r.fullName === u.fullName ? u : r)))}
+                onUpdated={(u, previousFullName) => {
+                  // Reconcile by the pre-save name so renames update the row
+                  // instead of leaving a stale entry, and follow the rename in
+                  // the selected-repo reference.
+                  setRepos((prev) => prev.map((r) => (r.fullName === previousFullName ? u : r)));
+                  if (repoRef === previousFullName && u.fullName !== previousFullName) {
+                    setRepoRef(u.fullName);
+                  }
+                }}
               />
             ) : (
               <p className={styles.fieldHint}>Repository details unavailable.</p>

@@ -1065,15 +1065,18 @@ export async function listPersonalRepos(): Promise<GithubRepo[]> {
 }
 
 export interface UpdateRepoPatch {
+  /** New repository name; GitHub redirects the old URL after a rename. */
+  name?: string;
   private?: boolean;
   isTemplate?: boolean;
   description?: string;
   archived?: boolean;
 }
 
-/** Update a repo's settings (visibility, template flag, description, archived). */
+/** Update a repo's settings (name, visibility, template flag, description, archived). */
 export async function updateRepo(owner: string, repo: string, patch: UpdateRepoPatch): Promise<GithubRepo> {
   const body: Record<string, unknown> = {};
+  if (patch.name !== undefined) body.name = patch.name;
   if (patch.private !== undefined) body.private = patch.private;
   if (patch.isTemplate !== undefined) body.is_template = patch.isTemplate;
   if (patch.description !== undefined) body.description = patch.description;

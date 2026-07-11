@@ -1347,29 +1347,29 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                     </div>
                     {!tileEdit && (
                       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
-                        <TextField
-                          select
-                          size="small"
-                          label="Extract from repo"
-                          value={topicsRepoSel[c.id] ?? ""}
-                          onChange={(e) => setTopicsRepoSel((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                        <Autocomplete
+                          freeSolo
+                          options={ownedRepos ?? []}
+                          inputValue={topicsRepoSel[c.id] ?? ""}
+                          onInputChange={(_, v) => setTopicsRepoSel((prev) => ({ ...prev, [c.id]: v }))}
                           sx={{ minWidth: 220, flex: 1 }}
-                        >
-                          <MenuItem value="">
-                            {ownedReposLoading ? "Loading repos..." : "Choose a repo..."}
-                          </MenuItem>
-                          {ownedRepos?.map((repoName) => (
-                            <MenuItem key={repoName} value={repoName}>{repoName}</MenuItem>
-                          ))}
-                        </TextField>
+                          renderInput={(params) => (
+                            <TextField
+                              {...params}
+                              size="small"
+                              label="Extract from repo"
+                              placeholder={ownedReposLoading ? "Loading repos..." : "owner/name"}
+                            />
+                          )}
+                        />
                         <Button
                           variant="outlined"
                           size="small"
-                          disabled={!topicsRepoSel[c.id] || extractingTopicsId !== null || ownedReposLoading}
+                          disabled={!/^[^/\s]+\/[^/\s]+$/.test((topicsRepoSel[c.id] ?? "").trim()) || extractingTopicsId !== null}
                           onClick={async () => {
                             setExtractingTopicsId(c.id);
                             setError(null);
-                            const r = await extractTopicsFromRepoAction(topicsRepoSel[c.id], getStoredProvider());
+                            const r = await extractTopicsFromRepoAction((topicsRepoSel[c.id] ?? "").trim(), getStoredProvider());
                             setExtractingTopicsId(null);
                             if ("error" in r) {
                               setError(r.error);

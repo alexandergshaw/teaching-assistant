@@ -58,6 +58,7 @@ import MenuItem from "@mui/material/MenuItem";
 import CircularProgress from "@mui/material/CircularProgress";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
+import Autocomplete from "@mui/material/Autocomplete";
 import styles from "../page.module.css";
 
 const VC_REPO_KEY = "ta-vc-repo";
@@ -138,12 +139,14 @@ export default function RepoDetail() {
   const [treeNonce, setTreeNonce] = useState(0);
   const [showNewFile, setShowNewFile] = useState(false);
   const [newFilePath, setNewFilePath] = useState("");
+  const [newFileDest, setNewFileDest] = useState(""); // Destinations are repo-specific and stale values would misdirect actions into the wrong folders; do not persist.
   const [newFileContent, setNewFileContent] = useState("");
   const [newFileMsg, setNewFileMsg] = useState("");
   const [creatingFile, setCreatingFile] = useState(false);
   const [newFileError, setNewFileError] = useState<string | null>(null);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderPath, setNewFolderPath] = useState("");
+  const [newFolderDest, setNewFolderDest] = useState(""); // Destinations are repo-specific and stale values would misdirect actions into the wrong folders; do not persist.
   const [newFolderMsg, setNewFolderMsg] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderError, setNewFolderError] = useState<string | null>(null);
@@ -531,19 +534,23 @@ export default function RepoDetail() {
   const normalizePath = (p: string) => p.trim().replace(/^\/+/, "").replace(/\/+$/, "");
 
   const handleCreateFile = async () => {
-    const path = normalizePath(newFilePath);
-    if (!path) {
+    const dest = normalizePath(newFileDest);
+    let fileName = normalizePath(newFilePath);
+    if (!fileName) {
       setNewFileError("Enter a file path.");
       return;
+    }
+    if (dest) {
+      fileName = `${dest}/${fileName}`;
     }
     if (!repoRef || !branch) {
       setNewFileError("Pick a repository and branch first.");
       return;
     }
-    const message = newFileMsg.trim() || `Add ${path}`;
+    const message = newFileMsg.trim() || `Add ${fileName}`;
     setCreatingFile(true);
     setNewFileError(null);
-    const r = await commitFileAction(repoRef, path, newFileContent, message, branch);
+    const r = await commitFileAction(repoRef, fileName, newFileContent, message, branch);
     setCreatingFile(false);
     if ("error" in r) {
       setNewFileError(r.error);
@@ -551,10 +558,11 @@ export default function RepoDetail() {
     }
     setShowNewFile(false);
     setNewFilePath("");
+    setNewFileDest("");
     setNewFileContent("");
     setNewFileMsg("");
     setTreeNonce((n) => n + 1);
-    setSelectedPath(path);
+    setSelectedPath(fileName);
   };
 
   const handleCreateFolder = async () => {
@@ -562,7 +570,8 @@ export default function RepoDetail() {
       setNewFolderError("Pick a repository and branch first.");
       return;
     }
-    const names = bulkFolders
+    const dest = normalizePath(newFolderDest);
+    let names = bulkFolders
       ? buildBulkFolderNames(newFolderPath, Number.parseInt(folderStart, 10), Number.parseInt(folderCount, 10))
       : (() => {
           const f = normalizePath(newFolderPath);
@@ -573,6 +582,9 @@ export default function RepoDetail() {
         bulkFolders ? "Enter a name pattern and a count of 1 to 100." : "Enter a folder path."
       );
       return;
+    }
+    if (dest) {
+      names = names.map((name) => `${dest}/${name}`);
     }
     setCreatingFolder(true);
     setNewFolderError(null);
@@ -593,6 +605,7 @@ export default function RepoDetail() {
     }
     setNewFolderResult(`Created ${created} folder${created === 1 ? "" : "s"}.`);
     setNewFolderPath("");
+    setNewFolderDest("");
     setNewFolderMsg("");
   };
 
@@ -1169,6 +1182,8 @@ export default function RepoDetail() {
     label: b,
   }));
 
+  const folderOptions = tree.filter((e) => e.type === "tree").map((e) => e.path).sort();
+
   const collapseActive = !filter.trim();
   const entryList = tree
     .filter((e) => e.type === "blob" || e.type === "tree")
@@ -1475,10 +1490,18 @@ export default function RepoDetail() {
             <>
             {showNewFile && (
               <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: 8 }}>
+                <Autocomplete
+                  freeSolo
+                  options={folderOptions}
+                  inputValue={newFileDest}
+                  onInputChange={(_, v) => setNewFileDest(v)}
+                  renderInput={(params) => <TextField {...params} label="Destination folder (optional)" size="small" placeholder="empty = repo root" />}
+                  sx={{ "& .MuiInputBase-input": { fontFamily: "monospace", fontSize: "0.82rem" } }}
+                />
                 <TextField
                   size="small"
                   fullWidth
-                  placeholder="File path, e.g. src/util/new.ts"
+                  placeholder="File name or path, e.g. new.ts (relative to destination)"
                   value={newFilePath}
                   onChange={(e) => setNewFilePath(e.target.value)}
                   disabled={creatingFile}
@@ -1520,6 +1543,14 @@ export default function RepoDetail() {
                 <FormControlLabel
                   control={<Checkbox size="small" checked={bulkFolders} onChange={(e) => { setBulkFolders(e.target.checked); setNewFolderError(null); setNewFolderResult(null); }} />}
                   label="Create multiple folders"
+                />
+                <Autocomplete
+                  freeSolo
+                  options={folderOptions}
+                  inputValue={newFolderDest}
+                  onInputChange={(_, v) => setNewFolderDest(v)}
+                  renderInput={(params) => <TextField {...params} label="Destination folder (optional)" size="small" placeholder="empty = repo root" />}
+                  sx={{ "& .MuiInputBase-input": { fontFamily: "monospace", fontSize: "0.82rem" } }}
                 />
                 <TextField
                   size="small"
@@ -1598,14 +1629,13 @@ export default function RepoDetail() {
                 </div>
                 {showMove && (
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <TextField
-                      size="small"
-                      placeholder="Destination folder (blank = repo root)"
-                      value={moveDest}
-                      onChange={(e) => setMoveDest(e.target.value)}
-                      onKeyDown={submitOnEnter(handleBulkMove)}
-                      disabled={bulkBusy}
-                      sx={{ flex: "1 1 240px", "& input": { fontFamily: "monospace", fontSize: "0.82rem" } }}
+                    <Autocomplete
+                      freeSolo
+                      options={folderOptions}
+                      inputValue={moveDest}
+                      onInputChange={(_, v) => setMoveDest(v)}
+                      renderInput={(params) => <TextField {...params} label="Destination folder" size="small" placeholder="e.g. src/components (empty = repo root)" />}
+                      sx={{ minWidth: 260, "& .MuiInputBase-input": { fontFamily: "monospace", fontSize: "0.82rem" } }}
                     />
                     <Button variant="contained" size="small" disabled={bulkBusy} onClick={handleBulkMove}>
                       {bulkBusy ? "Moving..." : `Move ${selectedPaths.size} to ${moveDest.trim() ? moveDest.trim() : "root"}`}
@@ -1628,14 +1658,14 @@ export default function RepoDetail() {
                     <Button
                       variant="text"
                       size="small"
-                      onClick={() => { setShowNewFile((v) => !v); setShowNewFolder(false); setNewFileError(null); }}
+                      onClick={() => { setShowNewFile((v) => !v); setShowNewFolder(false); setNewFileError(null); if (!showNewFile) { setNewFileDest(""); } }}
                     >
                       {showNewFile ? "Cancel" : "New file"}
                     </Button>
                     <Button
                       variant="text"
                       size="small"
-                      onClick={() => { setShowNewFolder((v) => !v); setShowNewFile(false); setNewFolderError(null); setNewFolderResult(null); }}
+                      onClick={() => { setShowNewFolder((v) => !v); setShowNewFile(false); setNewFolderError(null); setNewFolderResult(null); if (!showNewFolder) { setNewFolderDest(""); } }}
                     >
                       {showNewFolder ? "Cancel" : "New folder"}
                     </Button>

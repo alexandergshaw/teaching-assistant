@@ -168,6 +168,8 @@ export interface Database {
           roster: string | null;
           notes: string | null;
           topics: string | null;
+          csv_name: string | null;
+          csv_data: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -187,6 +189,8 @@ export interface Database {
           roster?: string | null;
           notes?: string | null;
           topics?: string | null;
+          csv_name?: string | null;
+          csv_data?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -206,6 +210,8 @@ export interface Database {
           roster?: string | null;
           notes?: string | null;
           topics?: string | null;
+          csv_name?: string | null;
+          csv_data?: string | null;
           created_at?: string;
           updated_at?: string;
         };

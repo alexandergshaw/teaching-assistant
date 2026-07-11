@@ -49,7 +49,7 @@ interface CourseForm {
 }
 
 // Fields that can be edited inline on tiles.
-type InlineField = "canvasUrl" | "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics";
+type InlineField = "canvasUrl" | "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics" | "csv";
 
 const EMPTY_FORM: CourseForm = {
   id: null,
@@ -103,6 +103,8 @@ function courseToInput(c: Course) {
     roster: c.roster ?? "",
     notes: c.notes ?? "",
     topics: c.topics ?? "",
+    csvName: c.csvName ?? "",
+    csvData: c.csvData ?? "",
   };
 }
 
@@ -152,6 +154,18 @@ function readFileBase64(file: File): Promise<string> {
     };
     reader.onerror = () => reject(reader.error ?? new Error("Could not read the file."));
     reader.readAsDataURL(file);
+  });
+}
+
+// Read a File as text.
+function readFileText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve(reader.result as string);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read the file."));
+    reader.readAsText(file);
   });
 }
 
@@ -215,8 +229,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [tileSaving, setTileSaving] = useState(false);
   const [expandedRosterId, setExpandedRosterId] = useState<string | null>(null);
   const [expandedTopicsId, setExpandedTopicsId] = useState<string | null>(null);
+  const [expandedCsvId, setExpandedCsvId] = useState<string | null>(null);
+  const [csvRemoveConfirm, setCsvRemoveConfirm] = useState<string | null>(null);
+  const [uploadingCsv, setUploadingCsv] = useState(false);
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
+  const csvUploadRef = useRef<HTMLInputElement>(null);
 
   // Fetch everything and refresh the cache. `silent` skips the blocking spinner
   // (used for background revalidation and post-mutation refreshes).
@@ -434,6 +452,32 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     setFormNote(`Fetched ${lines.length} student${lines.length === 1 ? "" : "s"} from Canvas.`);
   };
 
+  const handleCsvUpload = async (c: Course, file: File) => {
+    if (file.size > 2 * 1024 * 1024) {
+      setError("CSV is too large (max 2 MB).");
+      return;
+    }
+    setUploadingCsv(true);
+    setError(null);
+    try {
+      const text = await readFileText(file);
+      const r = await updateCourseHubAction(c.id, { ...courseToInput(c), csvName: file.name, csvData: text });
+      if ("error" in r) {
+        setError(r.error);
+        return;
+      }
+      setCourses((prev) => {
+        const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
+        if (hubCache) hubCache = { ...hubCache, courses: next };
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read the CSV file.");
+    } finally {
+      setUploadingCsv(false);
+    }
+  };
+
   const handleDelete = async (c: Course) => {
     if (typeof window !== "undefined" && !window.confirm(`Delete "${c.name}"? This cannot be undone.`)) return;
     setBusyId(c.id);
@@ -508,7 +552,8 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       : field === "integrations" ? integrationsToText(c)
       : field === "syllabusId" ? (c.syllabusId ?? "")
       : field === "topics" ? (c.topics ?? "")
-      : ((c[field] ?? "") as string);
+      : field === "csv" ? ""
+      : ((c[field as Exclude<InlineField, "csv">] ?? "") as string);
     setTileEdit({ id: c.id, field, value });
   };
 
@@ -666,6 +711,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       c.textbook,
       c.notes,
       c.topics,
+      c.csvName,
       c.githubOrg,
       ...c.repos.map((r) => r.repo),
       ...c.integrations.map((i) => i.name),
@@ -1304,6 +1350,160 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         : (
                           <span className={styles.courseResourceEmpty}>Not set</span>
                         )}
+                  </div>
+
+                  <div className={`${styles.courseResource}${!c.csvData ? " " + styles.courseResourceClickable : ""}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "csv" ? "true" : undefined}>
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>CSV</span>
+                      {c.csvData && c.csvData.trim() && (
+                        <span className={styles.navBadge} style={{ marginLeft: 8 }}>
+                          {(() => {
+                            const lines = c.csvData.split("\n").map((l) => l.trim()).filter(Boolean);
+                            const count = lines.length > 1 ? lines.length - 1 : lines.length;
+                            return `${count} row${count !== 1 ? "s" : ""}`;
+                          })()}
+                        </span>
+                      )}
+                    </div>
+                    {!c.csvData
+                      ? (
+                        <>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            disabled={uploadingCsv}
+                            onClick={() => csvUploadRef.current?.click()}
+                          >
+                            {uploadingCsv ? "Uploading…" : "Upload CSV"}
+                          </Button>
+                          <input
+                            ref={csvUploadRef}
+                            type="file"
+                            accept=".csv,text/csv"
+                            style={{ display: "none" }}
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) void handleCsvUpload(c, f);
+                              e.target.value = "";
+                            }}
+                          />
+                        </>
+                      )
+                      : (
+                        <>
+                          <span className={styles.courseResourceValue}>{c.csvName || "course.csv"}</span>
+                          <div className={styles.courseResourceActions}>
+                            <button
+                              type="button"
+                              className={styles.linkButton}
+                              onClick={() => setExpandedCsvId(expandedCsvId === c.id ? null : c.id)}
+                            >
+                              {expandedCsvId === c.id ? "Hide" : "View"}
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.linkButton}
+                              onClick={() => {
+                                const blob = new Blob([c.csvData ?? ""], { type: "text/csv;charset=utf-8" });
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement("a");
+                                a.href = url;
+                                a.download = c.csvName || "course.csv";
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                URL.revokeObjectURL(url);
+                              }}
+                            >
+                              Download
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.linkButton}
+                              disabled={uploadingCsv}
+                              onClick={() => csvUploadRef.current?.click()}
+                            >
+                              {uploadingCsv ? "Uploading…" : "Replace"}
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.linkButton}
+                              style={{ color: "var(--danger)" }}
+                              onClick={() => setCsvRemoveConfirm(csvRemoveConfirm === c.id ? null : c.id)}
+                            >
+                              {csvRemoveConfirm === c.id ? "Confirm" : "Remove"}
+                            </button>
+                            {csvRemoveConfirm === c.id && (
+                              <input
+                                type="hidden"
+                                onChange={() => {
+                                  /* Trigger update on confirm */
+                                  void updateCourseHubAction(c.id, { ...courseToInput(c), csvName: null, csvData: null }).then((r) => {
+                                    if (!("error" in r)) {
+                                      setCourses((prev) => {
+                                        const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
+                                        if (hubCache) hubCache = { ...hubCache, courses: next };
+                                        return next;
+                                      });
+                                      setCsvRemoveConfirm(null);
+                                    }
+                                  });
+                                }}
+                              />
+                            )}
+                          </div>
+                          {csvRemoveConfirm === c.id && (
+                            <div style={{ marginTop: 8 }}>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                color="error"
+                                onClick={() => {
+                                  void updateCourseHubAction(c.id, { ...courseToInput(c), csvName: null, csvData: null }).then((r) => {
+                                    if (!("error" in r)) {
+                                      setCourses((prev) => {
+                                        const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
+                                        if (hubCache) hubCache = { ...hubCache, courses: next };
+                                        return next;
+                                      });
+                                      setCsvRemoveConfirm(null);
+                                    } else {
+                                      setError(r.error);
+                                    }
+                                  });
+                                }}
+                              >
+                                Delete CSV
+                              </Button>
+                              <Button
+                                variant="text"
+                                size="small"
+                                onClick={() => setCsvRemoveConfirm(null)}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          )}
+                          {expandedCsvId === c.id && c.csvData && (
+                            <div className={styles.rosterPreview} style={{ maxHeight: 400, overflow: "auto" }}>
+                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85em" }}>
+                                <tbody>
+                                  {c.csvData.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 20).map((line, i) => (
+                                    <tr key={i} style={{ borderBottom: "1px solid var(--border-color)" }}>
+                                      {line.split(",").map((cell, j) => (
+                                        <td key={j} style={{ padding: "4px 8px", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                          {cell.trim()}
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>Preview uses simple comma splitting.</p>
+                            </div>
+                          )}
+                        </>
+                      )}
                   </div>
 
                   <div className={styles.courseResource}>

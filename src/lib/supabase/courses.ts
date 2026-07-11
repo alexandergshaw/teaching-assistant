@@ -37,6 +37,8 @@ export interface Course {
   roster: string | null;
   notes: string | null;
   topics: string | null;
+  csvName: string | null;
+  csvData: string | null;
   updatedAt: string;
 }
 
@@ -55,10 +57,12 @@ export interface CourseInput {
   roster?: string | null;
   notes?: string | null;
   topics?: string | null;
+  csvName?: string | null;
+  csvData?: string | null;
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -83,6 +87,8 @@ interface CourseRow {
   roster: string | null;
   notes: string | null;
   topics: string | null;
+  csv_name: string | null;
+  csv_data: string | null;
   updated_at: string;
 }
 
@@ -102,6 +108,8 @@ function toCourse(r: CourseRow): Course {
     roster: r.roster,
     notes: r.notes,
     topics: r.topics,
+    csvName: r.csv_name,
+    csvData: r.csv_data,
     updatedAt: r.updated_at,
   };
 }
@@ -133,6 +141,8 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     roster: clean(input.roster),
     notes: clean(input.notes),
     topics: clean(input.topics),
+    csv_name: clean(input.csvName),
+    csv_data: clean(input.csvData),
     updated_at: new Date().toISOString(),
   };
 }

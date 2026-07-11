@@ -331,6 +331,19 @@ import {
 import { humanizeAssignmentName, stripAssignmentSlugPrefix, looksLikeAssignmentSlug } from "@/lib/assignment-name";
 import type JSZip from "jszip";
 
+// Standard submission guidance appended to every repo-generated assignment instruction
+const REPO_SUBMISSION_GUIDANCE = `
+
+## Getting Started
+
+Open the README.md file at the root of your repository first - it explains the project layout and any setup steps you need before you write code.
+
+## Submitting Your Work
+
+1. Commit your work as you go with clear commit messages.
+2. Push your commits to your GitHub repository.
+3. Copy your repository link (it looks like https://github.com/your-username/your-repo) and paste it into the Canvas assignment as your submission.`;
+
 export interface SlideData {
   title: string;
   bullets: string[];
@@ -5403,11 +5416,11 @@ Using the README content above, write a complete, student-facing assignment inst
 3. Include a "Instructions" section that details exactly what students must do, broken into bulleted steps or tasks pulled from the README (each step on its own line starting with "- ").
 4. Include a "Requirements" section listing any technical or functional requirements mentioned in the README (e.g., methods to implement, expected behaviour, constraints).
 5. Include a "Helpful Free Resources" section with at least 5 free external resources (tutorials, official documentation, guides, or reference material) that help students complete this assignment. For each resource, give the title, the URL, and one short sentence on why it helps. Every resource must be freely accessible (no paywalls) and come from a reputable source (e.g. official docs, MDN, Python docs, freeCodeCamp, Microsoft Learn, university or open course material).
-6. End with a "Deliverables" section. The deliverable is ALWAYS: submit the up-to-date zip of the entire codebase with all completed files included.
+6. End with a "Deliverables" section that describes what must be completed and submitted (e.g., files to implement, tests to pass).
 7. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Instructions"). For any list, start each item on its own line with a hyphen ("- "); NEVER use numbered lists (no "1.", "2.", etc.). Do not use any other markdown symbols (no bold or italics) in the body text.
 8. Write in clear, direct language appropriate for undergraduate students.
 
-Do not invent requirements not present in the README. If the README is sparse, note that students should contact the instructor (for example during office hours) for clarification. Never tell students to use, post on, check, or refer to a course discussion board, forum, or message board anywhere in the document. The "Helpful Free Resources" section should always be included regardless of how sparse the README is.${buildStrictTemplateBlock(templateText)}`;
+Do not invent requirements not present in the README. If the README is sparse, note that students should contact the instructor (for example during office hours) for clarification. Never tell students to use, post on, check, or refer to a course discussion board, forum, or message board anywhere in the document. The "Helpful Free Resources" section should always be included regardless of how sparse the README is. Do not include submission instructions - a standard submission section is appended automatically.${buildStrictTemplateBlock(templateText)}`;
 
   const result = await callLlm(
     {
@@ -5925,6 +5938,12 @@ async function buildAssignmentPlan(
   const parsedWeek = name.match(/\d+/)?.[0];
   const weekNumber = parsedWeek ? parseInt(parsedWeek, 10) : index + 1;
 
+  // Append submission guidance to instructions, guarded against double-appending
+  let finalInstructions = "error" in instructionsResult ? "" : instructionsResult.text;
+  if (finalInstructions.trim() && !finalInstructions.includes("Submitting your work")) {
+    finalInstructions += REPO_SUBMISSION_GUIDANCE;
+  }
+
   return {
     assignmentName: name,
     slides,
@@ -5933,7 +5952,7 @@ async function buildAssignmentPlan(
     presentationTitle: displayTitle,
     label,
     moduleIntroduction: "error" in introResult ? "" : introResult.text,
-    assignmentInstructions: "error" in instructionsResult ? "" : instructionsResult.text,
+    assignmentInstructions: finalInstructions,
     weekNumber,
     introTemplateHeadings: templates.introTemplateHeadings,
     instructionsTemplateHeadings: templates.instructionsTemplateHeadings,

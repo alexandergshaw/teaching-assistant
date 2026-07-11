@@ -1484,7 +1484,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
         <div className={styles.adaptPanelHeader}>
           <h2 className={styles.adaptPanelTitle}>Source &amp; devices</h2>
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           <TextField
             select
             label="Source"
@@ -1559,7 +1559,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           </p>
         )}
         {(devices.cameras.length === 0 || devices.mics.length === 0) && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
             <p className={styles.fieldHint} style={{ margin: 0 }}>
               Cameras and microphones appear here after the browser grants access.
             </p>
@@ -1572,7 +1572,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
         <details className={styles.adaptDisclosure} style={{ marginTop: 4 }}>
           <summary>Recording options</summary>
           <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
               <FormControlLabel
                 control={
                   <Checkbox
@@ -1607,7 +1607,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
                 label="3-2-1 countdown"
               />
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 8 }}>
               <TextField
                 select
                 size="small"
@@ -2256,15 +2256,17 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
                       </Button>
                     </div>
                   </div>
-                  <div className={styles.ghMeta}>
-                    {fmt(take.durationSec)} · {(take.sizeBytes / 1048576).toFixed(1)} MB · {new Date(take.createdAt).toLocaleString()}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+                    <span className={styles.ghMeta}>
+                      {fmt(take.durationSec)} · {(take.sizeBytes / 1048576).toFixed(1)} MB · {new Date(take.createdAt).toLocaleString()}
+                    </span>
+                    {take.backup === "done" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Backed up</span>}
+                    {take.backup === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Backup failed</span>}
+                    {take.backup === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Backing up...</span>}
+                    {take.dbSave === "done" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>In library</span>}
+                    {take.dbSave === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Library save failed</span>}
+                    {take.dbSave === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Saving to library...</span>}
                   </div>
-                  {take.backup === "done" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Backed up</span>}
-                  {take.backup === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Backup failed</span>}
-                  {take.backup === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Backing up...</span>}
-                  {take.dbSave === "done" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>In library</span>}
-                  {take.dbSave === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Library save failed</span>}
-                  {take.dbSave === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Saving to library...</span>}
                   <details style={{ marginTop: 8 }}>
                     <summary style={{ cursor: "pointer", color: "var(--accent-ink)", fontWeight: 600 }}>
                       Play

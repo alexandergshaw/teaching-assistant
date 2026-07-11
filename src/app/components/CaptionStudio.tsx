@@ -872,214 +872,227 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
 
       {error && <p className={styles.error}>{error}</p>}
 
-      <div>
-        <Button variant="outlined" size="small" onClick={() => fileInputRef.current?.click()}>
-          Choose video
-        </Button>
-        <input ref={fileInputRef} type="file" accept="video/*" style={{ display: "none" }} onChange={handleFileChange} />
-        {fileName && (
-          <TextField
-            size="small"
-            label="Video name"
-            value={fileName}
-            onChange={(e) => setFileName(e.target.value)}
-            style={{ marginLeft: 12, width: 200 }}
-          />
+      <div className={styles.field}>
+        <p className={styles.adaptPanelSubtitle} style={{ marginBottom: 8 }}>1. Video source</p>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <Button variant="outlined" size="small" onClick={() => fileInputRef.current?.click()}>
+            Choose video
+          </Button>
+          <input ref={fileInputRef} type="file" accept="video/*" style={{ display: "none" }} onChange={handleFileChange} />
+          {fileName && (
+            <TextField
+              size="small"
+              label="Video name"
+              value={fileName}
+              onChange={(e) => setFileName(e.target.value)}
+              sx={{ width: 200 }}
+            />
+          )}
+        </div>
+
+        {importError && <p className={styles.error}>{importError}</p>}
+
+        {(takes.length > 0 || backupDir || user) && (
+          <div style={{ marginTop: 16 }}>
+            <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>Or import a saved video:</p>
+
+            {user && (
+              <div style={{ marginTop: 8 }}>
+                <p className={styles.fieldHint} style={{ margin: "0 0 8px 0", fontWeight: 600 }}>From the Files tab</p>
+                {libraryBusy && !libraryVideos && (
+                  <p className={styles.fieldHint} style={{ margin: 0 }}>Loading your library...</p>
+                )}
+                {libraryVideos && libraryVideos.length === 0 && (
+                  <p className={styles.fieldHint} style={{ margin: 0 }}>No saved videos yet - record one on the Recording tab or upload on the Files tab.</p>
+                )}
+                <Button variant="text" size="small" disabled={libraryBusy} onClick={() => void loadLibrary()}>
+                  {libraryBusy ? "Loading..." : "Refresh"}
+                </Button>
+                {libraryVideos && libraryVideos.map((v) => (
+                  <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+                    <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
+                      {v.name} - {v.kind === "recording" ? "Recording" : v.kind === "narrated" ? "Narrated" : "Captioned"}
+                      {v.durationSec && ` - ${fmtTime(v.durationSec)}`}
+                      {" "}
+                      - {(v.sizeBytes / 1048576).toFixed(1)} MB
+                    </span>
+                    <Button variant="outlined" size="small" disabled={importingKey !== null} onClick={() => void handleImportLibraryVideo(v)}>
+                      {importingKey === "lib:" + v.id ? "Importing..." : "Import"}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {takes.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <p className={styles.fieldHint} style={{ margin: "0 0 8px 0", fontWeight: 600 }}>From current session</p>
+                {takes.map((take) => (
+                  <div key={take.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+                    <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
+                      {take.name} - {fmtTime(take.durationSec)} - {(take.sizeBytes / 1048576).toFixed(1)} MB
+                    </span>
+                    <Button variant="outlined" size="small" disabled={importingKey !== null} onClick={() => void handleImportTake(take)}>
+                      {importingKey === "take:" + take.id ? "Importing..." : "Import"}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {backupDir && (
+              <div style={{ marginTop: 8 }}>
+                <p className={styles.fieldHint} style={{ margin: "0 0 8px 0", fontWeight: 600 }}>From backup folder ({backupDir.name})</p>
+                <Button variant="text" size="small" disabled={folderBusy} onClick={() => void handleBrowseFolder()}>
+                  {folderBusy ? "Reading folder..." : folderVideos ? "Refresh" : "Browse"}
+                </Button>
+                {folderVideos && folderVideos.length === 0 && <p className={styles.fieldHint} style={{ margin: 0 }}>No videos found.</p>}
+                {folderVideos && folderVideos.map((v) => (
+                  <div key={v.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+                    <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {v.name} - {(v.sizeBytes / 1048576).toFixed(1)} MB - {new Date(v.lastModified).toLocaleString()}
+                    </span>
+                    <Button variant="outlined" size="small" disabled={importingKey !== null} onClick={() => void handleImportFolderVideo(v.name)}>
+                      {importingKey === "file:" + v.name ? "Importing..." : "Import"}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
-      {importError && <p className={styles.error}>{importError}</p>}
-
-      {(takes.length > 0 || backupDir || user) && (
+      {videoUrl && (
         <div className={styles.field}>
-          <p className={styles.fieldHint} style={{ margin: 0 }}>Or import a saved video:</p>
-
-          {user && (
-            <div>
-              <p className={styles.fieldHint} style={{ margin: 0, fontWeight: 600 }}>From the Files tab</p>
-              {libraryBusy && !libraryVideos && (
-                <p className={styles.fieldHint} style={{ margin: 0 }}>Loading your library...</p>
-              )}
-              {libraryVideos && libraryVideos.length === 0 && (
-                <p className={styles.fieldHint} style={{ margin: 0 }}>No saved videos yet - record one on the Recording tab or upload on the Files tab.</p>
-              )}
-              <Button variant="text" size="small" disabled={libraryBusy} onClick={() => void loadLibrary()}>
-                {libraryBusy ? "Loading..." : "Refresh"}
-              </Button>
-              {libraryVideos && libraryVideos.map((v) => (
-                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
-                  <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
-                    {v.name} - {v.kind === "recording" ? "Recording" : v.kind === "narrated" ? "Narrated" : "Captioned"}
-                    {v.durationSec && ` - ${fmtTime(v.durationSec)}`}
-                    {" "}
-                    - {(v.sizeBytes / 1048576).toFixed(1)} MB
-                  </span>
-                  <Button variant="outlined" size="small" disabled={importingKey !== null} onClick={() => void handleImportLibraryVideo(v)}>
-                    {importingKey === "lib:" + v.id ? "Importing..." : "Import"}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {takes.length > 0 && takes.map((take) => (
-            <div key={take.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
-              <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
-                {take.name} - {fmtTime(take.durationSec)} - {(take.sizeBytes / 1048576).toFixed(1)} MB
-              </span>
-              <Button variant="outlined" size="small" disabled={importingKey !== null} onClick={() => void handleImportTake(take)}>
-                {importingKey === "take:" + take.id ? "Importing..." : "Import"}
-              </Button>
-            </div>
-          ))}
-          {takes.length === 0 && <p className={styles.fieldHint} style={{ margin: 0 }}>No takes recorded this session.</p>}
-
-          {backupDir && (
-            <div>
-              <Button variant="text" size="small" disabled={folderBusy} onClick={() => void handleBrowseFolder()}>
-                {folderBusy ? "Reading folder..." : folderVideos ? "Refresh backup folder" : "Browse backup folder (" + backupDir.name + ")"}
-              </Button>
-              {folderVideos && folderVideos.length === 0 && <p className={styles.fieldHint} style={{ margin: 0 }}>No videos found in the backup folder.</p>}
-              {folderVideos && folderVideos.map((v) => (
-                <div key={v.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
-                  <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {v.name} - {(v.sizeBytes / 1048576).toFixed(1)} MB - {new Date(v.lastModified).toLocaleString()}
-                  </span>
-                  <Button variant="outlined" size="small" disabled={importingKey !== null} onClick={() => void handleImportFolderVideo(v.name)}>
-                    {importingKey === "file:" + v.name ? "Importing..." : "Import"}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
+          <div style={{ position: "relative", maxWidth: "100%", display: "inline-block" }}>
+            <video
+              key={videoUrl}
+              ref={videoRef}
+              controls
+              playsInline
+              preload="auto"
+              src={videoUrl}
+              style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 12, background: "#0f172a", display: "block" }}
+              onError={() => setError("The browser could not decode this video. Try re-importing it, or convert it to MP4/WebM.")}
+              onTimeUpdate={(e) => setPlayhead(e.currentTarget.currentTime)}
+              onSeeked={(e) => setPlayhead(e.currentTarget.currentTime)}
+            />
+            {captions && (
+              (() => {
+                const activeCue = captions.find((c) => c.start <= playhead && playhead < c.end) ?? null;
+                if (!activeCue) return null;
+                const positionStyle = activeCue.position === "middle"
+                  ? { top: "50%", transform: "translateY(-50%)" }
+                  : activeCue.position === "top"
+                    ? { top: "6%" }
+                    : { bottom: "6%" };
+                return (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      pointerEvents: "none",
+                      display: "flex",
+                      justifyContent: "center",
+                      ...positionStyle,
+                    }}
+                  >
+                    <span
+                      style={{
+                        background: "rgba(15,23,42,0.78)",
+                        color: "#f8fafc",
+                        padding: "4px 10px",
+                        borderRadius: 8,
+                        fontSize: "0.9rem",
+                        fontWeight: 600,
+                        maxWidth: "88%",
+                        textAlign: "center",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {activeCue.text}
+                    </span>
+                  </div>
+                );
+              })()
+            )}
+          </div>
         </div>
       )}
 
       <div className={styles.field}>
-        <TextField
-          label="Context (optional)"
-          placeholder="e.g. Demonstrating how to submit an assignment in Canvas"
-          value={context}
-          onChange={(e) => setContext(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !(!videoUrl || busy !== "idle")) {
-              e.preventDefault();
-              void handleGenerate();
-            }
-          }}
-          size="small"
-          fullWidth
-        />
+        <p className={styles.adaptPanelSubtitle} style={{ marginBottom: 8 }}>2. Captions</p>
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 16 }}>
+          <TextField
+            label="Context (optional)"
+            placeholder="e.g. Demonstrating how to submit an assignment in Canvas"
+            value={context}
+            onChange={(e) => setContext(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !(!videoUrl || busy !== "idle")) {
+                e.preventDefault();
+                void handleGenerate();
+              }
+            }}
+            size="small"
+            sx={{ flex: "1 1 300px" }}
+          />
+          <Button
+            variant="contained"
+            size="small"
+            disabled={!videoUrl || busy !== "idle"}
+            onClick={handleGenerate}
+          >
+            {busy === "sampling"
+              ? "Reading video..."
+              : busy === "describing"
+                ? "Writing captions..."
+                : captions
+                  ? "Regenerate captions"
+                  : "Generate captions"}
+          </Button>
+        </div>
         <FormControlLabel
           control={<Checkbox size="small" checked={usePageContext} onChange={(e) => setUsePageContext(e.target.checked)} />}
           label={<span style={{ fontSize: "0.85rem" }}>Use context from this Recording page</span>}
         />
         {usePageContext && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
+          <p className={styles.fieldHint} style={{ margin: "4px 0 0 0" }}>
             {pageContextSummary ? `Found: ${pageContextSummary}.` : "No page context found yet - set a lecture script or title cards on the Record view and it will be used automatically."}
           </p>
         )}
       </div>
 
-      {videoUrl && (
-        <div style={{ position: "relative", maxWidth: "100%", display: "inline-block" }}>
-          <video
-            key={videoUrl}
-            ref={videoRef}
-            controls
-            playsInline
-            preload="auto"
-            src={videoUrl}
-            style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 12, background: "#0f172a", display: "block" }}
-            onError={() => setError("The browser could not decode this video. Try re-importing it, or convert it to MP4/WebM.")}
-            onTimeUpdate={(e) => setPlayhead(e.currentTarget.currentTime)}
-            onSeeked={(e) => setPlayhead(e.currentTarget.currentTime)}
-          />
-          {captions && (
-            (() => {
-              const activeCue = captions.find((c) => c.start <= playhead && playhead < c.end) ?? null;
-              if (!activeCue) return null;
-              const positionStyle = activeCue.position === "middle"
-                ? { top: "50%", transform: "translateY(-50%)" }
-                : activeCue.position === "top"
-                  ? { top: "6%" }
-                  : { bottom: "6%" };
-              return (
-                <div
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    pointerEvents: "none",
-                    display: "flex",
-                    justifyContent: "center",
-                    ...positionStyle,
-                  }}
-                >
-                  <span
-                    style={{
-                      background: "rgba(15,23,42,0.78)",
-                      color: "#f8fafc",
-                      padding: "4px 10px",
-                      borderRadius: 8,
-                      fontSize: "0.9rem",
-                      fontWeight: 600,
-                      maxWidth: "88%",
-                      textAlign: "center",
-                      whiteSpace: "pre-wrap",
-                    }}
-                  >
-                    {activeCue.text}
-                  </span>
-                </div>
-              );
-            })()
-          )}
-        </div>
-      )}
-
-      <Button
-        variant="contained"
-        size="small"
-        disabled={!videoUrl || busy !== "idle"}
-        onClick={handleGenerate}
-      >
-        {busy === "sampling"
-          ? "Reading video..."
-          : busy === "describing"
-            ? "Writing captions..."
-            : captions
-              ? "Regenerate captions"
-              : "Generate captions"}
-      </Button>
-
       {captions && (
         <div>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
-            <TextField
-              type="number"
-              size="small"
-              label="Shift all (s)"
-              value={shiftSecs}
-              onChange={(e) => setShiftSecs(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !(!captions || captions.length === 0 || Number(shiftSecs) === 0 || isNaN(Number(shiftSecs)))) {
-                  e.preventDefault();
-                  handleShiftAllCaptions(Number(shiftSecs));
-                }
-              }}
-              style={{ width: 120 }}
-            />
-            <Button
-              variant="outlined"
-              size="small"
-              disabled={!captions || captions.length === 0 || Number(shiftSecs) === 0 || isNaN(Number(shiftSecs))}
-              onClick={() => handleShiftAllCaptions(Number(shiftSecs))}
-            >
-              Shift all
-            </Button>
-            {gatherRecordingContext().cardSeconds > 0 && (
-              <>
+          <div className={styles.field} style={{ marginTop: 16 }}>
+            <p className={styles.adaptPanelSubtitle} style={{ marginBottom: 8 }}>Edit captions</p>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+              <TextField
+                type="number"
+                size="small"
+                label="Shift all (s)"
+                value={shiftSecs}
+                onChange={(e) => setShiftSecs(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !(!captions || captions.length === 0 || Number(shiftSecs) === 0 || isNaN(Number(shiftSecs)))) {
+                    e.preventDefault();
+                    handleShiftAllCaptions(Number(shiftSecs));
+                  }
+                }}
+                style={{ width: 120 }}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                disabled={!captions || captions.length === 0 || Number(shiftSecs) === 0 || isNaN(Number(shiftSecs))}
+                onClick={() => handleShiftAllCaptions(Number(shiftSecs))}
+              >
+                Shift all
+              </Button>
+              {gatherRecordingContext().cardSeconds > 0 && (
                 <Button
                   variant="text"
                   size="small"
@@ -1087,60 +1100,30 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
                 >
                   Shift all +{gatherRecordingContext().cardSeconds}s (title card)
                 </Button>
-                <p className={styles.fieldHint} style={{ margin: 0, flex: 1, minWidth: 200 }}>
-                  This video was recorded with a title card - if captions look early, shift them right by the card length.
-                </p>
-              </>
-            )}
-          </div>
-
-          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
-            <Button
-              variant="outlined"
-              size="small"
-              disabled={!voiceReady || voBusy !== null || !captions || captions.length === 0}
-              onClick={() => void handleGenerateAllVoices()}
-            >
-              {voBusy === "all" ? `Voicing cue...` : "Generate all voices"}
-            </Button>
-            <TextField
-              select
-              size="small"
-              label="Export audio"
-              value={voMode}
-              onChange={(e) => setVoMode(e.target.value as "original" | "voiceover" | "mix" | "none")}
-              style={{ minWidth: 170 }}
-            >
-              <MenuItem value="original">Original audio</MenuItem>
-              <MenuItem value="voiceover">AI voiceover only</MenuItem>
-              <MenuItem value="mix">Original + voiceover</MenuItem>
-              <MenuItem value="none">No audio (strip)</MenuItem>
-            </TextField>
-            {!voiceReady && (
-              <p className={styles.fieldHint} style={{ margin: 0 }}>
-                AI voice is not configured (set ELEVENLABS_API_KEY, and clone your voice on the Narrate a deck tab).
+              )}
+            </div>
+            {gatherRecordingContext().cardSeconds > 0 && (
+              <p className={styles.fieldHint} style={{ margin: "0 0 16px 0" }}>
+                This video was recorded with a title card - if captions look early, shift them right by the card length.
               </p>
             )}
           </div>
 
-          {voError && <p className={styles.error}>{voError}</p>}
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 16 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {captions.map((c, i) => (
-              <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "8px 0", flexWrap: "wrap" }}>
-                <span className={styles.ghMetaMono} style={{ flexShrink: 0, minWidth: 50 }}>
-                  {fmtTimeMs(c.start)}-{fmtTimeMs(c.end)}
-                </span>
-
-                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <div key={i} style={{ border: "1px solid var(--field-border)", borderRadius: 8, padding: "12px", display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span className={styles.ghMetaMono} style={{ flexShrink: 0 }}>
+                    {fmtTimeMs(c.start)}-{fmtTimeMs(c.end)}
+                  </span>
                   <TextField
                     size="small"
-                    label="Start s"
+                    label="Start"
                     type="number"
                     value={Number(c.start.toFixed(1))}
                     onChange={(e) => updateCue(i, { start: parseFloat(e.target.value) || 0 })}
                     onBlur={() => sortCaptions()}
-                    style={{ width: 90 }}
+                    sx={{ width: 80 }}
                   />
                   <Button
                     variant="text"
@@ -1166,19 +1149,16 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
                       updateCue(i, { start: t });
                     }}
                   >
-                    Set start
+                    Set
                   </Button>
-                </div>
-
-                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                   <TextField
                     size="small"
-                    label="End s"
+                    label="End"
                     type="number"
                     value={Number(c.end.toFixed(1))}
                     onChange={(e) => updateCue(i, { end: parseFloat(e.target.value) || c.start + 0.1 })}
                     onBlur={() => sortCaptions()}
-                    style={{ width: 90 }}
+                    sx={{ width: 80 }}
                   />
                   <Button
                     variant="text"
@@ -1204,72 +1184,70 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
                       updateCue(i, { end: Math.max(c.start + 0.1, t) });
                     }}
                   >
-                    Set end
+                    Set
                   </Button>
+                  <Button
+                    variant="text"
+                    size="small"
+                    onClick={() => {
+                      const v = videoRef.current;
+                      if (v) v.currentTime = c.start;
+                    }}
+                  >
+                    Jump
+                  </Button>
+                  <TextField
+                    select
+                    size="small"
+                    label="Position"
+                    value={c.position ?? "bottom"}
+                    onChange={(e) => updateCue(i, { position: e.target.value as CaptionPosition })}
+                    sx={{ minWidth: 100 }}
+                  >
+                    <MenuItem value="bottom">Bottom</MenuItem>
+                    <MenuItem value="middle">Middle</MenuItem>
+                    <MenuItem value="top">Top</MenuItem>
+                  </TextField>
                 </div>
-
-                <Button
-                  variant="text"
-                  size="small"
-                  onClick={() => {
-                    const v = videoRef.current;
-                    if (v) v.currentTime = c.start;
-                  }}
-                >
-                  Jump
-                </Button>
-
-                <TextField
-                  select
-                  size="small"
-                  label="Position"
-                  value={c.position ?? "bottom"}
-                  onChange={(e) => updateCue(i, { position: e.target.value as CaptionPosition })}
-                  style={{ minWidth: 100 }}
-                >
-                  <MenuItem value="bottom">Bottom</MenuItem>
-                  <MenuItem value="middle">Middle</MenuItem>
-                  <MenuItem value="top">Top</MenuItem>
-                </TextField>
 
                 <TextField
                   size="small"
                   fullWidth
                   value={c.text}
                   onChange={(e) => handleUpdateCaption(i, e.target.value)}
-                  style={{ minWidth: 200, flex: 1 }}
+                  sx={{ minWidth: 0 }}
                 />
 
-                <Button
-                  variant="text"
-                  size="small"
-                  disabled={!voiceReady || voBusy !== null}
-                  onClick={() => void handleGenerateVoiceForCue(i)}
-                >
-                  Voice
-                </Button>
-
-                {cueAudio[i] && (
-                  <audio
-                    controls
-                    src={cueAudio[i].url}
-                    style={{ height: 28, maxWidth: 200 }}
-                  />
-                )}
-
-                <Button
-                  variant="text"
-                  size="small"
-                  color="error"
-                  onClick={() => handleRemoveCaption(i)}
-                >
-                  Remove
-                </Button>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <Button
+                    variant="text"
+                    size="small"
+                    disabled={!voiceReady || voBusy !== null}
+                    onClick={() => void handleGenerateVoiceForCue(i)}
+                  >
+                    Voice
+                  </Button>
+                  {cueAudio[i] && (
+                    <audio
+                      controls
+                      src={cueAudio[i].url}
+                      style={{ height: 28, flex: 1, minWidth: 200 }}
+                    />
+                  )}
+                  <Button
+                    variant="text"
+                    size="small"
+                    color="error"
+                    onClick={() => handleRemoveCaption(i)}
+                  >
+                    Remove
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
 
-          <Button variant="outlined" size="small" onClick={handleAddCaptionAtPlayhead} style={{ marginTop: 12 }}>
+          <Button variant="outlined" size="small" onClick={handleAddCaptionAtPlayhead}>
             Add caption at playhead
           </Button>
 
@@ -1281,29 +1259,48 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
               Copy captions
             </Button>
           </div>
+        </div>
+      )}
 
-          <div className={styles.ghActions} style={{ marginTop: 12, alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+      {captions && (
+        <div className={styles.field}>
+          <p className={styles.adaptPanelSubtitle} style={{ marginBottom: 8 }}>3. Preview & export</p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+            <Button
+              variant="outlined"
+              size="small"
+              disabled={!voiceReady || voBusy !== null || !captions || captions.length === 0}
+              onClick={() => void handleGenerateAllVoices()}
+            >
+              {voBusy === "all" ? "Voicing cue..." : "Generate all voices"}
+            </Button>
             <TextField
               select
               size="small"
               label="Export audio"
               value={voMode}
               onChange={(e) => setVoMode(e.target.value as "original" | "voiceover" | "mix" | "none")}
-              style={{ minWidth: 170 }}
+              sx={{ minWidth: 170 }}
             >
               <MenuItem value="original">Original audio</MenuItem>
               <MenuItem value="voiceover">AI voiceover only</MenuItem>
               <MenuItem value="mix">Original + voiceover</MenuItem>
               <MenuItem value="none">No audio (strip)</MenuItem>
             </TextField>
+            {!voiceReady && (
+              <p className={styles.fieldHint} style={{ margin: 0 }}>
+                AI voice is not configured (set ELEVENLABS_API_KEY, and clone your voice on the Narrate a deck tab).
+              </p>
+            )}
+          </div>
+
+          {voError && <p className={styles.error}>{voError}</p>}
+
+          <div className={styles.ghActions} style={{ marginTop: 12, alignItems: "center", flexWrap: "wrap", gap: 12 }}>
             <Button variant="contained" size="small" disabled={!videoUrl || !captions || captions.length === 0 || burning} onClick={() => (previewing ? endPreview() : startPreview())}>
               {previewing ? "Stop preview" : "Preview"}
             </Button>
-            {previewing && <span className={styles.fieldHint} style={{ margin: 0 }}>Previewing with {voMode === "original" ? "the original audio" : voMode === "voiceover" ? "AI voiceover only" : voMode === "mix" ? "original audio plus voiceover" : "no audio"}.</span>}
-            {previewing && (voMode === "voiceover" || voMode === "mix") && Object.keys(cueAudio).length === 0 && (
-              <span className={styles.fieldHint} style={{ margin: 0, color: "var(--warning, #b45309)" }}>No generated voices yet - captions will be silent. Use Voice / Generate all voices.</span>
-            )}
-            <Button variant="outlined" size="small" disabled={burning} onClick={() => void handleBurnCaptions()}>
+            <Button variant="contained" size="small" disabled={!videoUrl || !captions || captions.length === 0 || burning} onClick={() => void handleBurnCaptions()}>
               {burning ? `Exporting... ${burnProgress}%` : "Export video with captions"}
             </Button>
             {burning && (
@@ -1311,12 +1308,20 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
                 Cancel
               </Button>
             )}
-            {burning && (
-              <span className={styles.fieldHint} style={{ margin: 0 }}>
-                The video plays through once (silently) while the captions are rendered in.
-              </span>
-            )}
           </div>
+
+          {previewing && (
+            <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
+              Previewing with {voMode === "original" ? "the original audio" : voMode === "voiceover" ? "AI voiceover only" : voMode === "mix" ? "original audio plus voiceover" : "no audio"}.
+              {(voMode === "voiceover" || voMode === "mix") && Object.keys(cueAudio).length === 0 && " No generated voices yet - captions will be silent. Use Generate all voices."}
+            </p>
+          )}
+
+          {burning && (
+            <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
+              The video plays through once (silently) while the captions are rendered in.
+            </p>
+          )}
 
           {burnError && <p className={styles.error}>{burnError}</p>}
 

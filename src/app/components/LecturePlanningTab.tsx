@@ -379,7 +379,19 @@ export default function LecturePlanningTab() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "lecture_plans.zip";
+      // Compute download name: use repo name if from GitHub, else zip filename, else fallback
+      let baseName = "lecture_plans";
+      if (githubRepo.trim()) {
+        const match = githubRepo.trim().match(/([^/]+)$/);
+        if (match) {
+          baseName = match[1];
+        }
+      } else if (zipFile) {
+        baseName = zipFile.name.replace(/\.zip$/i, "");
+      }
+      // Sanitize: allow only alphanumeric and underscore, collapse multiple underscores
+      baseName = baseName.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+      a.download = `${baseName}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

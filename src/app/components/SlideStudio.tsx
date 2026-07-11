@@ -900,21 +900,21 @@ export default function SlideStudio() {
         <>
           {error && <p className={styles.error}>{error}</p>}
 
-      <div className={styles.field}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Button variant="outlined" size="small" onClick={() => document.getElementById("pptx-input")?.click()}>
-            Choose PowerPoint
-          </Button>
-          {fileName && <span className={styles.ghMeta}>{fileName}</span>}
-        </div>
-        <input
-          id="pptx-input"
-          type="file"
-          accept=".pptx"
-          style={{ display: "none" }}
-          onChange={handleFileSelect}
-        />
-      </div>
+          <div className={styles.field}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <Button variant="outlined" size="small" onClick={() => document.getElementById("pptx-input")?.click()}>
+                Choose PowerPoint
+              </Button>
+              {fileName && <span className={styles.ghMeta}>{fileName}</span>}
+            </div>
+            <input
+              id="pptx-input"
+              type="file"
+              accept=".pptx"
+              style={{ display: "none" }}
+              onChange={handleFileSelect}
+            />
+          </div>
 
       {slides && (
         <>
@@ -1081,7 +1081,7 @@ export default function SlideStudio() {
           {applyError && <p className={styles.error}>{applyError}</p>}
           {genErrorV && <p className={styles.error}>{genErrorV}</p>}
 
-          <div className={styles.field}>
+          <div className={styles.field} style={{ marginTop: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <Button
                 variant="outlined"
@@ -1284,13 +1284,13 @@ export default function SlideStudio() {
         </>
       )}
 
-      <details className={styles.adaptDisclosure} style={{ marginTop: 4 }}>
+      <details className={styles.adaptDisclosure} style={{ marginTop: 16 }}>
         <summary>Record a voice sample</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div>
-              <h4 className={styles.fieldHint} style={{ marginBottom: 8, marginTop: 0 }}>1. Read</h4>
-              <p className={styles.fieldHint} style={{ marginBottom: 8, marginTop: 0 }}>Quiet room, mic at a constant distance, natural teaching pace - about 90 seconds.</p>
+              <h4 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 8px 0" }}>1. Read</h4>
+              <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>Quiet room, mic at a constant distance, natural teaching pace - about 90 seconds.</p>
               <div
                 style={{
                   padding: "14px 18px",
@@ -1316,7 +1316,7 @@ export default function SlideStudio() {
             </div>
 
             <div>
-              <h4 className={styles.fieldHint} style={{ marginBottom: 8, marginTop: 0 }}>2. Record</h4>
+              <h4 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 8px 0" }}>2. Record</h4>
               {sampleRecState === "idle" ? (
                 <Button
                   variant="contained"
@@ -1351,7 +1351,7 @@ export default function SlideStudio() {
 
             {sampleBlob && (
               <div>
-                <h4 className={styles.fieldHint} style={{ marginBottom: 8, marginTop: 0 }}>3. Create the clone</h4>
+                <h4 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 8px 0" }}>3. Create the clone</h4>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
                   <TextField
                     size="small"
@@ -1379,7 +1379,7 @@ export default function SlideStudio() {
         </div>
       </details>
 
-      <details className={styles.adaptDisclosure} style={{ marginTop: 4 }}>
+      <details className={styles.adaptDisclosure} style={{ marginTop: 16 }}>
         <summary>My voice clone</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
           {cloneVoiceId ? (

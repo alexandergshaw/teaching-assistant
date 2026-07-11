@@ -222,6 +222,7 @@ import {
   listPendingDeployments,
   reviewPendingDeployments,
   getRepoTree,
+  copyRepo,
   type GithubRepo,
   type RepoDigest,
   type WorkflowRunInfo,
@@ -240,6 +241,8 @@ import {
   type CopilotTask,
   type ArtifactInfo,
   type PendingDeployment,
+  type CopyRepoOptions,
+  type CopyRepoResult,
 } from "@/lib/github";
 import {
   listGithubModels,
@@ -7112,6 +7115,21 @@ export async function forkRepoAction(repoRef: string, org?: string): Promise<{ r
     return { repo };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not fork the repository." };
+  }
+}
+
+export async function copyRepoAction(
+  repoRef: string,
+  opts: CopyRepoOptions
+): Promise<{ result: CopyRepoResult } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    const result = await copyRepo(parsed.owner, parsed.repo, opts);
+    return { result };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not copy the repository." };
   }
 }
 

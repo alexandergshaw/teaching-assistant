@@ -41,6 +41,7 @@ import type { GithubRepo, RepoTreeEntry, PullRequestInfo, PullRequestReviewInfo,
 import RepoSettingsPanel from "./RepoSettingsPanel";
 import PublishToCanvasPage from "./PublishToCanvasPage";
 import CopilotChatPanel from "./CopilotChatPanel";
+import CopyRepoPanel from "./CopyRepoPanel";
 import { buildBulkFolderNames } from "@/lib/bulk-folders";
 import { useVcCounts } from "./VcCounts";
 import { formatRelative } from "../utils/time";
@@ -79,7 +80,7 @@ export default function RepoDetail() {
   const [branch, setBranch] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
   const [defaultBranch, setDefaultBranch] = useState("");
-  const [tab, setTab] = useState<"files" | "branches" | "pulls" | "actions" | "copilot" | "settings">("files");
+  const [tab, setTab] = useState<"files" | "branches" | "copy" | "pulls" | "actions" | "copilot" | "settings">("files");
   const [copilotTaskTitle, setCopilotTaskTitle] = useState("");
   const [copilotTaskBody, setCopilotTaskBody] = useState("");
   const [copilotBusy, setCopilotBusy] = useState(false);
@@ -1310,7 +1311,7 @@ export default function RepoDetail() {
         <>
           <Tabs
             value={tab}
-            onChange={(_, v) => setTab(v as "files" | "branches" | "pulls" | "actions" | "copilot" | "settings")}
+            onChange={(_, v) => setTab(v as "files" | "branches" | "copy" | "pulls" | "actions" | "copilot" | "settings")}
             sx={{
               marginTop: 2,
               minHeight: 40,
@@ -1330,6 +1331,7 @@ export default function RepoDetail() {
           >
             <Tab label="Files" value="files" disableRipple />
             <Tab label="Branches" value="branches" disableRipple />
+            <Tab label="Copy" value="copy" disableRipple />
             <Tab
               label={
                 <span className={styles.tabLabelWrap}>
@@ -1818,6 +1820,16 @@ export default function RepoDetail() {
               </div>
             </div>
           )}
+
+          {tab === "copy" && (
+            <CopyRepoPanel
+              repoRef={repoRef}
+              branches={branches}
+              defaultBranch={defaultBranch}
+              description={repos.find(r => r.fullName === repoRef)?.description}
+            />
+          )}
+
           {tab === "pulls" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
               <details className={styles.adaptDisclosure} style={{ marginTop: 0 }}>

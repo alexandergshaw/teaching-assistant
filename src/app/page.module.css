@@ -5161,3 +5161,49 @@ button.courseResourceValue:disabled {
   background: var(--field-background);
   cursor: pointer;
 }
+
+/* Copy Repository Panel */
+
+.copyTreeWrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.copyTreeRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  min-height: 28px;
+}
+
+.copyTreeRow:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.copyTreeName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copyTreeSize {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.copyTreeToolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+
+.copySummary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

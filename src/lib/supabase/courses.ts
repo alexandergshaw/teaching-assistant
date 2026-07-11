@@ -228,3 +228,25 @@ export async function updateCourseMaterials(
     throw new Error(`Could not update the course materials: ${error.message}`);
   }
 }
+
+/** Update a course's CSV metadata. */
+export async function updateCourseCsv(
+  userId: string,
+  id: string,
+  fields: {
+    csvName: string | null;
+    csvData: string | null;
+  }
+): Promise<void> {
+  const { error } = await table()
+    .update({
+      csv_name: fields.csvName,
+      csv_data: fields.csvData,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) {
+    throw new Error(`Could not update the course schedule CSV: ${error.message}`);
+  }
+}

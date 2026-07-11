@@ -11,6 +11,7 @@ import ContentTab from "./components/ContentTab";
 import GradingTab from "./components/GradingTab";
 import RecordingTab from "./components/RecordingTab";
 import FilesTab from "./components/FilesTab";
+import WorkflowsTab from "./components/WorkflowsTab";
 import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
 import LessonPlanningForm from "./components/LessonPlanningForm";
@@ -33,7 +34,7 @@ import { VIEW_KEY } from "./components/content-tab/constants";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "courses" | "course-planning" | "content" | "recording" | "files";
+type ActiveTab = "courses" | "course-planning" | "content" | "recording" | "files" | "workflows";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 type BuildView = "new" | "prebuilt";
 const BUILD_VIEW_KEY = "ta-build-view";
@@ -150,7 +151,7 @@ export default function Home() {
       localStorage.setItem(VIEW_KEY, "version-control");
       return "content";
     }
-    return saved === "courses" || saved === "course-planning" || saved === "content" || saved === "recording" || saved === "files" ? saved : "course-planning";
+    return saved === "courses" || saved === "course-planning" || saved === "content" || saved === "recording" || saved === "files" || saved === "workflows" ? saved : "course-planning";
   });
   const [buildView, setBuildViewState] = useState<BuildView>(() => {
     if (typeof window === "undefined") return "prebuilt";
@@ -708,6 +709,7 @@ export default function Home() {
             disableRipple
           />
           <Tab label="Build Courses" value="course-planning" disableRipple />
+          <Tab label="Workflows" value="workflows" disableRipple />
           <Tab
             label={<NavTabLabel text="Integrations" count={totalNeedsGrading + totalUnread + vcAttention} />}
             value="content"
@@ -784,6 +786,8 @@ export default function Home() {
         </div>
 
         {activeTab === "files" && <FilesTab />}
+
+        {activeTab === "workflows" && <WorkflowsTab />}
 
         {activeTab === "content" && (
           <ContentTab

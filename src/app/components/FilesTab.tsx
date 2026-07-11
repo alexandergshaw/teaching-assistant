@@ -15,7 +15,7 @@ import {
   getRecordingFileUrl,
   downloadRecordingFile,
   saveRecordingFile,
-  extForMime,
+  extForFile,
   type RecordingFile,
 } from "@/lib/recording-files";
 import { ensureFiniteDuration } from "@/lib/caption-burn";
@@ -50,6 +50,18 @@ const getDisplayKind = (file: RecordingFile): { label: string; badgeClass: strin
   if (file.mimeType.startsWith("audio/")) {
     return { label: "Audio", badgeClass: styles.ghBadgeNeutral };
   }
+  if (file.kind === "file") {
+    if (file.mimeType.includes("pdf")) {
+      return { label: "PDF", badgeClass: styles.ghBadgeNeutral };
+    }
+    if (file.mimeType.startsWith("image/")) {
+      return { label: "Image", badgeClass: styles.ghBadgeNeutral };
+    }
+    if (file.mimeType.includes("wordprocessingml") || file.mimeType.includes("presentationml") || file.mimeType.includes("spreadsheetml") || file.mimeType.includes("msword")) {
+      return { label: "Document", badgeClass: styles.ghBadgeNeutral };
+    }
+    return { label: "File", badgeClass: styles.ghBadgeNeutral };
+  }
   const baseLabel = kindLabels[file.kind] || file.kind;
   if (file.kind === "captioned") {
     return { label: baseLabel, badgeClass: styles.ghBadgeSuccess };
@@ -80,10 +92,10 @@ export default function FilesTab() {
     const stored = localStorage.getItem("ta-files-sort");
     return (stored as "newest" | "oldest" | "name" | "largest" | null) ?? "newest";
   });
-  const [filterKind, setFilterKind] = useState<"all" | "recording" | "captioned" | "narrated" | "audio" | "bundle">(() => {
+  const [filterKind, setFilterKind] = useState<"all" | "recording" | "captioned" | "narrated" | "audio" | "bundle" | "file">(() => {
     if (typeof window === "undefined") return "all";
     const stored = localStorage.getItem("ta-files-kind");
-    return (stored as "all" | "recording" | "captioned" | "narrated" | "audio" | "bundle" | null) ?? "all";
+    return (stored as "all" | "recording" | "captioned" | "narrated" | "audio" | "bundle" | "file" | null) ?? "all";
   });
 
   // Delete confirmation state
@@ -241,7 +253,7 @@ export default function FilesTab() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${file.name}.${extForMime(file.mimeType)}`;
+      a.download = `${file.name}.${extForFile(file)}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -309,7 +321,7 @@ export default function FilesTab() {
     const blob = await downloadRecordingFile(supabase, file);
 
     // Prepare upload
-    const fileName = `${file.name.replace(/[^a-z0-9 _-]/gi, "_")}.${extForMime(file.mimeType)}`;
+    const fileName = `${file.name.replace(/[^a-z0-9 _-]/gi, "_")}.${extForFile(file)}`;
     const ticket = await requestFileUploadAction(
       courseUrl,
       {
@@ -485,12 +497,33 @@ export default function FilesTab() {
     for (let i = 0; i < arr.length; i++) {
       const file = arr[i];
       try {
-        const durationSec = await readDuration(file);
+        // Derive extension from filename
+        const dotIdx = file.name.lastIndexOf(".");
+        const fileExt = dotIdx > 0 ? file.name.slice(dotIdx + 1).toLowerCase() : "";
+
+        // Decide kind and mime based on file.type
+        let kind: "recording" | "captioned" | "narrated" | "bundle" | "file" = "file";
+        let mimeType = file.type || "application/octet-stream";
+        let durationSec: number | null = null;
+
+        if (file.type.startsWith("video/")) {
+          kind = "recording";
+          mimeType = file.type;
+          durationSec = await readDuration(file);
+        } else if (file.type.startsWith("audio/")) {
+          kind = "recording";
+          mimeType = file.type;
+          durationSec = null;
+        } else if (mimeType.includes("zip")) {
+          kind = "bundle";
+        }
+
         await saveRecordingFile(supabase, user.id, file, {
           name: file.name.replace(/\.[^/.]+$/, "") || file.name,
-          kind: "recording",
-          mimeType: file.type || "video/webm",
+          kind,
+          mimeType,
           durationSec,
+          fileExt: fileExt || undefined,
         });
         setUploads((u) => u.map((row, idx) => (idx === i ? { ...row, status: "done" as const } : row)));
       } catch (err) {
@@ -544,6 +577,9 @@ export default function FilesTab() {
       if (filterKind === "bundle") {
         return f.kind === "bundle" || f.mimeType.includes("zip");
       }
+      if (filterKind === "file") {
+        return f.kind === "file";
+      }
       if (filterKind !== "all") {
         return f.kind === filterKind && !f.mimeType.startsWith("audio/");
       }
@@ -571,8 +607,8 @@ export default function FilesTab() {
     <section className={styles.card}>
       <TabHeader
         eyebrow="Files"
-        title="Your video library"
-        subtitle="Every video you record or caption is saved here. Play them back, download them, or add them to an LMS module."
+        title="Your file library"
+        subtitle="Recordings, audio, bundles, and any other files you save are kept here. Play or download them, or add them to an LMS module."
       />
 
       {note && (
@@ -596,8 +632,8 @@ export default function FilesTab() {
         <>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
             <label className={styles.downloadButton} style={{ cursor: "pointer" }}>
-              Upload videos
-              <input type="file" accept="video/*" multiple style={{ display: "none" }} onChange={(e) => { void handleUploadFiles(e.target.files); e.target.value = ""; }} />
+              Upload files
+              <input type="file" multiple style={{ display: "none" }} onChange={(e) => { void handleUploadFiles(e.target.files); e.target.value = ""; }} />
             </label>
             <Button
               variant="outlined"
@@ -620,7 +656,7 @@ export default function FilesTab() {
               <TextField
                 size="small"
                 type="search"
-                placeholder="Search videos by name..."
+                placeholder="Search files by name..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 sx={{ flex: "1 1 200px", maxWidth: 300 }}
@@ -641,7 +677,7 @@ export default function FilesTab() {
                 select
                 size="small"
                 value={filterKind}
-                onChange={(e) => setFilterKind(e.target.value as "all" | "recording" | "captioned" | "narrated" | "audio" | "bundle")}
+                onChange={(e) => setFilterKind(e.target.value as "all" | "recording" | "captioned" | "narrated" | "audio" | "bundle" | "file")}
                 sx={{ minWidth: 140 }}
               >
                 <MenuItem value="all">All kinds</MenuItem>
@@ -650,18 +686,19 @@ export default function FilesTab() {
                 <MenuItem value="narrated">Narrated</MenuItem>
                 <MenuItem value="audio">Audio</MenuItem>
                 <MenuItem value="bundle">Bundles</MenuItem>
+                <MenuItem value="file">Documents & other</MenuItem>
               </TextField>
             </div>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
             <span className={styles.fieldHint} style={{ margin: 0, whiteSpace: "nowrap" }}>
-              {shown.length} of {files.length} video{files.length === 1 ? "" : "s"}
+              {shown.length} of {files.length} file{files.length === 1 ? "" : "s"}
             </span>
           </div>
 
           <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void handleUploadFiles(e.dataTransfer.files); }} className={styles.ccDrop}>
-            <span className={styles.ccHint}>Drop video files here to add them to your library.</span>
+            <span className={styles.ccHint}>Drop files here to add them to your library.</span>
           </div>
 
           {uploads.length > 0 && (
@@ -786,7 +823,7 @@ export default function FilesTab() {
 
           {files.length === 0 ? (
             <div className={styles.emptyState}>
-              No videos yet. Record one on the Recording tab or upload files here.
+              No files yet. Record one on the Recording tab or upload files here.
             </div>
           ) : (
             <div className={styles.libTable}>
@@ -804,7 +841,7 @@ export default function FilesTab() {
 
               {shown.length === 0 ? (
                 <div style={{ padding: "12px", textAlign: "center", color: "var(--text-secondary)" }}>
-                  No videos match your search.
+                  No files match your search.
                 </div>
               ) : (
                 shown.map((file) => {
@@ -851,7 +888,7 @@ export default function FilesTab() {
                           {new Date(file.createdAt).toLocaleDateString()} {new Date(file.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                         </div>
                         <div className={styles.libActions}>
-                          {!displayKind.label.includes("Bundle") && (
+                          {(isAudio || ((file.mimeType.startsWith("video/") || ["recording", "captioned", "narrated"].includes(file.kind)) && displayKind.label !== "Bundle")) && (
                             <Button
                               size="small"
                               variant="outlined"
@@ -866,7 +903,7 @@ export default function FilesTab() {
                                     } catch (err) {
                                       setNote({
                                         kind: "error",
-                                        text: err instanceof Error ? err.message : "Failed to load video",
+                                        text: err instanceof Error ? err.message : "Failed to load file",
                                       });
                                     }
                                   })();
@@ -883,7 +920,7 @@ export default function FilesTab() {
                           >
                             Download
                           </Button>
-                          {!isAudio && displayKind.label !== "Bundle" && (
+                          {file.mimeType.startsWith("video/") && !isAudio && displayKind.label !== "Bundle" && (
                             <Button
                               size="small"
                               variant="outlined"

@@ -8,7 +8,7 @@ import type { Database } from "./supabase/types";
 export interface RecordingFile {
   id: string;
   name: string;
-  kind: "recording" | "captioned" | "narrated" | "bundle";
+  kind: "recording" | "captioned" | "narrated" | "bundle" | "file";
   mimeType: string;
   sizeBytes: number;
   durationSec: number | null;
@@ -18,6 +18,21 @@ export interface RecordingFile {
 
 export function extForMime(mime: string): string {
   const m = mime.toLowerCase();
+  if (m.includes("pdf")) return "pdf";
+  if (m.includes("png")) return "png";
+  if (m.includes("jpeg") || m.includes("jpg")) return "jpg";
+  if (m.includes("gif")) return "gif";
+  if (m.includes("svg")) return "svg";
+  if (m.includes("mpeg") && m.startsWith("audio/")) return "mp3";
+  if (m.includes("wav")) return "wav";
+  if (m.includes("csv")) return "csv";
+  if (m.includes("json")) return "json";
+  if (m.includes("plain")) return "txt";
+  if (m.includes("markdown")) return "md";
+  if (m.includes("wordprocessingml")) return "docx";
+  if (m.includes("presentationml")) return "pptx";
+  if (m.includes("spreadsheetml")) return "xlsx";
+  if (m.includes("html")) return "html";
   if (m.includes("mp4")) return "mp4";
   if (m.includes("quicktime")) return "mov";
   if (m.includes("matroska")) return "mkv";
@@ -25,14 +40,29 @@ export function extForMime(mime: string): string {
   return "webm";
 }
 
+export function extForFile(file: RecordingFile): string {
+  const lastSegment = file.storagePath.split("/").pop() || "";
+  const dotIdx = lastSegment.lastIndexOf(".");
+  if (dotIdx > 0) {
+    return lastSegment.slice(dotIdx + 1);
+  }
+  return extForMime(file.mimeType);
+}
+
 export async function saveRecordingFile(
   supabase: SupabaseClient<Database>,
   userId: string,
   blob: Blob,
-  meta: { name: string; kind: "recording" | "captioned" | "narrated" | "bundle"; mimeType: string; durationSec: number | null }
+  meta: { name: string; kind: "recording" | "captioned" | "narrated" | "bundle" | "file"; mimeType: string; durationSec: number | null; fileExt?: string }
 ): Promise<RecordingFile> {
   const id = crypto.randomUUID();
-  const path = `${userId}/${id}.${extForMime(meta.mimeType)}`;
+  let ext = meta.fileExt;
+  if (ext) {
+    ext = ext.toLowerCase().replace(/^\./, "");
+  } else {
+    ext = extForMime(meta.mimeType);
+  }
+  const path = `${userId}/${id}.${ext}`;
 
   const { error: uploadError } = await supabase.storage
     .from("recordings")

@@ -36,7 +36,7 @@ import { buildDocxFromPlainText } from "@/lib/docx";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { useSupabase } from "@/context/SupabaseProvider";
-import { listRecordingFiles, downloadRecordingFile, extForMime, type RecordingFile } from "@/lib/recording-files";
+import { listRecordingFiles, downloadRecordingFile, extForFile, type RecordingFile } from "@/lib/recording-files";
 import type {
   BulkKind,
   CanvasAddableContent,
@@ -2005,7 +2005,7 @@ export function ModulesView({
     setNote(null);
     try {
       const blob = await downloadRecordingFile(supabase, file);
-      const fileName = `${file.name.replace(/[^a-z0-9 _-]/gi, "_")}.${extForMime(file.mimeType)}`;
+      const fileName = `${file.name.replace(/[^a-z0-9 _-]/gi, "_")}.${extForFile(file)}`;
 
       const ticket = await requestFileUploadAction(
         courseUrl,

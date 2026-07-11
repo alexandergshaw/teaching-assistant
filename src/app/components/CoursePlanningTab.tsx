@@ -125,6 +125,7 @@ export default function CoursePlanningTab({ innerTabs }: { innerTabs?: ReactNode
   const [scheduleWeeks, setScheduleWeeks] = useState("");
   const [scheduleTests, setScheduleTests] = useState("");
   const [scheduleRows, setScheduleRows] = useState<CourseScheduleRow[]>([]);
+  const [scheduleTopics, setScheduleTopics] = useState<string[] | null>(null);
   const [isGeneratingSchedule, setIsGeneratingSchedule] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleGenerated, setScheduleGenerated] = useState(false);
@@ -286,24 +287,27 @@ export default function CoursePlanningTab({ innerTabs }: { innerTabs?: ReactNode
       setScheduleError("Please enter a course description.");
       return;
     }
-    if (!scheduleTerm.trim()) {
-      setScheduleError("Please enter the term (e.g. Fall 2026).");
-      return;
+
+    let weeksOrNull: number | null = null;
+    if (scheduleWeeks.trim()) {
+      const weeks = parseInt(scheduleWeeks, 10);
+      if (!weeks || weeks < 1 || weeks > 52) {
+        setScheduleError("Please enter a valid number of weeks (1–52).");
+        return;
+      }
+      weeksOrNull = weeks;
     }
-    if (!scheduleStartDate) {
-      setScheduleError("Please select the course start date.");
-      return;
+
+    let testsOrNull: number | null = null;
+    if (scheduleTests.trim()) {
+      const tests = parseInt(scheduleTests, 10);
+      if (isNaN(tests) || tests < 0) {
+        setScheduleError("Please enter a valid number of tests (0 or more).");
+        return;
+      }
+      testsOrNull = tests;
     }
-    const weeks = parseInt(scheduleWeeks, 10);
-    if (!weeks || weeks < 1 || weeks > 52) {
-      setScheduleError("Please enter a valid number of weeks (1–52).");
-      return;
-    }
-    const tests = parseInt(scheduleTests, 10);
-    if (isNaN(tests) || tests < 0) {
-      setScheduleError("Please enter a valid number of tests (0 or more).");
-      return;
-    }
+
     setIsGeneratingSchedule(true);
     setScheduleError(null);
     try {
@@ -311,8 +315,8 @@ export default function CoursePlanningTab({ innerTabs }: { innerTabs?: ReactNode
         courseDescription.trim(),
         scheduleTerm.trim(),
         scheduleStartDate,
-        weeks,
-        tests,
+        weeksOrNull,
+        testsOrNull,
         getStoredProvider()
       );
       if ("error" in result) {
@@ -320,6 +324,11 @@ export default function CoursePlanningTab({ innerTabs }: { innerTabs?: ReactNode
         return;
       }
       setScheduleRows(result.rows);
+      if ("topics" in result && result.topics) {
+        setScheduleTopics(result.topics);
+      } else {
+        setScheduleTopics(null);
+      }
       setScheduleGenerated(true);
     } catch (err) {
       setScheduleError(err instanceof Error ? err.message : "Failed to generate schedule.");
@@ -331,6 +340,7 @@ export default function CoursePlanningTab({ innerTabs }: { innerTabs?: ReactNode
   const resetSchedule = () => {
     setScheduleGenerated(false);
     setScheduleRows([]);
+    setScheduleTopics(null);
     setScheduleError(null);
   };
 
@@ -1200,10 +1210,13 @@ export default function CoursePlanningTab({ innerTabs }: { innerTabs?: ReactNode
                   onChange={(e) => { setCourseDescription(e.target.value); localStorage.setItem(LS_KEYS.courseDescription, e.target.value); }}
                 />
               </div>
+              <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginTop: -8, marginBottom: 16 }}>
+                Leave term, start date, weeks, and tests empty to get just an ordered topic list.
+              </p>
               <div className={styles.field}>
                 <TextField
                   id="scheduleTerm"
-                  label="Term"
+                  label="Term (optional)"
                   type="text"
                   size="small"
                   fullWidth
@@ -1215,7 +1228,7 @@ export default function CoursePlanningTab({ innerTabs }: { innerTabs?: ReactNode
               <div className={styles.field}>
                 <TextField
                   id="scheduleStartDate"
-                  label="Course Start Date"
+                  label="Course Start Date (optional)"
                   type="date"
                   size="small"
                   fullWidth
@@ -1227,7 +1240,7 @@ export default function CoursePlanningTab({ innerTabs }: { innerTabs?: ReactNode
               <div className={styles.field}>
                 <TextField
                   id="scheduleWeeks"
-                  label="Number of Weeks"
+                  label="Number of Weeks (optional)"
                   type="number"
                   size="small"
                   fullWidth
@@ -1240,7 +1253,7 @@ export default function CoursePlanningTab({ innerTabs }: { innerTabs?: ReactNode
               <div className={styles.field}>
                 <TextField
                   id="scheduleTests"
-                  label="Number of Tests"
+                  label="Number of Tests (optional)"
                   type="number"
                   size="small"
                   fullWidth
@@ -1255,63 +1268,109 @@ export default function CoursePlanningTab({ innerTabs }: { innerTabs?: ReactNode
                 variant="contained"
                 size="small"
                 onClick={handleGenerateSchedule}
-                disabled={isGeneratingSchedule || !courseDescription.trim() || !scheduleTerm.trim() || !scheduleStartDate || !scheduleWeeks || !scheduleTests}
+                disabled={isGeneratingSchedule || !courseDescription.trim()}
               >
                 {isGeneratingSchedule ? "Generating schedule…" : "Generate Schedule"}
               </Button>
             </>
           )}
 
-          {/* ── Schedule result table ── */}
+          {/* ── Schedule result table or topics list ── */}
           {planningMode === "schedule" && scheduleGenerated && (
             <>
-              <div className={styles.courseScheduleWrap}>
-                <table className={styles.courseScheduleTable}>
-                  <thead>
-                    <tr>
-                      <th>Week</th>
-                      <th>Dates</th>
-                      <th>Topics</th>
-                      <th>Assignment</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scheduleRows.map((row) => (
-                      <tr key={row.week}>
-                        <td>{row.week}</td>
-                        <td>{row.dates}</td>
-                        <td>{row.topics}</td>
-                        <td>{row.assignment}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className={styles.scheduleActions}>
-                <Button
-                  variant="contained"
-                  size="small"
-                  onClick={resetSchedule}
-                >
-                  Edit &amp; Regenerate
-                </Button>
-                <Button
-                  variant="contained"
-                  size="small"
-                  onClick={handleExportScheduleCsv}
-                >
-                  Export CSV
-                </Button>
-                <Button
-                  variant="contained"
-                  size="small"
-                  onClick={handleUseScheduleForProject}
-                  disabled={isGeneratingProjectPrompt}
-                  title="Use this schedule for Course Project Planning and generate the Copilot prompt"
-                >
-                  {isGeneratingProjectPrompt ? "Generating prompt…" : "Use for Project Planning"}
-                </Button>
-              </div>
+              {scheduleTopics && scheduleTopics.length > 0 ? (
+                <>
+                  <div className={styles.field}>
+                    <h3 style={{ marginTop: 0, marginBottom: 8 }}>Course Topics</h3>
+                    <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: 12 }}>
+                      {scheduleTopics.length} topics
+                    </p>
+                    <ol style={{ paddingLeft: 24, lineHeight: 1.6 }}>
+                      {scheduleTopics.map((topic, idx) => (
+                        <li key={idx}>{topic}</li>
+                      ))}
+                    </ol>
+                  </div>
+                  <div className={styles.scheduleActions}>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={() => {
+                        navigator.clipboard.writeText(scheduleTopics.join("\n"));
+                      }}
+                    >
+                      Copy
+                    </Button>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={() => {
+                        const blob = new Blob([scheduleTopics.join("\n")], { type: "text/plain;charset=utf-8" });
+                        triggerFileDownload(blob, "course-topics.txt");
+                      }}
+                    >
+                      Download .txt
+                    </Button>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={resetSchedule}
+                    >
+                      Edit &amp; Regenerate
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className={styles.courseScheduleWrap}>
+                    <table className={styles.courseScheduleTable}>
+                      <thead>
+                        <tr>
+                          <th>Week</th>
+                          <th>Dates</th>
+                          <th>Topics</th>
+                          <th>Assignment</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {scheduleRows.map((row) => (
+                          <tr key={row.week}>
+                            <td>{row.week}</td>
+                            <td>{row.dates || "—"}</td>
+                            <td>{row.topics}</td>
+                            <td>{row.assignment}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className={styles.scheduleActions}>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={resetSchedule}
+                    >
+                      Edit &amp; Regenerate
+                    </Button>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={handleExportScheduleCsv}
+                    >
+                      Export CSV
+                    </Button>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={handleUseScheduleForProject}
+                      disabled={isGeneratingProjectPrompt}
+                      title="Use this schedule for Course Project Planning and generate the Copilot prompt"
+                    >
+                      {isGeneratingProjectPrompt ? "Generating prompt…" : "Use for Project Planning"}
+                    </Button>
+                  </div>
+                </>
+              )}
             </>
           )}
 

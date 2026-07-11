@@ -239,6 +239,9 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [ownedReposLoading, setOwnedReposLoading] = useState(false);
   const [topicsRepoSel, setTopicsRepoSel] = useState<Record<string, string>>({});
   const [extractingTopicsId, setExtractingTopicsId] = useState<string | null>(null);
+  const [repoAddSel, setRepoAddSel] = useState("");
+  const [repoAddBranch, setRepoAddBranch] = useState("");
+  const [autoTopicsId, setAutoTopicsId] = useState<string | null>(null);
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
   const csvUploadRef = useRef<HTMLInputElement>(null);
@@ -580,6 +583,11 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       : field === "csv" ? ""
       : ((c[field as Exclude<InlineField, "csv">] ?? "") as string);
     setTileEdit({ id: c.id, field, value });
+    // Clear repo add states when opening a new tile edit
+    if (field === "repos") {
+      setRepoAddSel("");
+      setRepoAddBranch("");
+    }
   };
 
   const tileClick = (handler: () => void) => (e: React.MouseEvent) => {
@@ -604,12 +612,55 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       setError(r.error);
       return;
     }
+    // Update courses state with the saved course
+    const savedCourse = r.course;
     setCourses((prev) => {
-      const next = prev.map((c) => (c.id === r.course.id ? r.course : c));
+      const next = prev.map((c) => (c.id === savedCourse.id ? savedCourse : c));
       if (hubCache) hubCache = { ...hubCache, courses: next };
       return next;
     });
     setTileEdit(null);
+    setRepoAddSel("");
+    setRepoAddBranch("");
+
+    // Feature 2: After successful save of repos, extract topics if repos were saved and topics are empty
+    if (tileEdit.field === "repos" && patch.repos && patch.repos.length > 0) {
+      const topicsEmpty = !savedCourse.topics || savedCourse.topics.trim() === "";
+      if (topicsEmpty) {
+        const firstRepo = patch.repos[0].repo;
+        // Start background extraction without blocking the save
+        void (async () => {
+          setAutoTopicsId(savedCourse.id);
+          const extractResult = await extractTopicsFromRepoAction(firstRepo, getStoredProvider());
+          if ("error" in extractResult) {
+            setError(extractResult.error);
+            setAutoTopicsId(null);
+            return;
+          }
+          // Build update input from the saved course with extracted topics
+          const topicsText = extractResult.topics.join("\n");
+          const updatedInput = {
+            ...courseToInput(savedCourse),
+            repos: savedCourse.repos,
+            topics: topicsText,
+          };
+          const updateResult = await updateCourseHubAction(savedCourse.id, updatedInput);
+          if ("error" in updateResult) {
+            setError(updateResult.error);
+            setAutoTopicsId(null);
+            return;
+          }
+          // Update courses state with the new topics
+          setCourses((prev) => {
+            const next = prev.map((c) => (c.id === updateResult.course.id ? updateResult.course : c));
+            if (hubCache) hubCache = { ...hubCache, courses: next };
+            return next;
+          });
+          setAutoTopicsId(null);
+          setError(`Topics extracted from ${firstRepo}.`);
+        })();
+      }
+    }
   };
 
   // A course's total outstanding LMS notifications (unread inbox + needs grading).
@@ -627,6 +678,11 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       const el = e.target as HTMLElement;
       if (el.closest('[data-tile-editing="true"], .MuiPopover-root, .MuiMenu-root, [role="listbox"]')) return;
       setTileEdit(null);
+      // Clear repo add states when closing the editor
+      if (tileEdit.field === "repos") {
+        setRepoAddSel("");
+        setRepoAddBranch("");
+      }
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
@@ -1184,7 +1240,68 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         <PencilIcon />
                       </button>
                     </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "repos" ? tileEditor(true, "owner/repo#branch", "One repository per line: owner/repo or owner/repo#branch.") : (c.repos.length > 0 ? (
+                    {tileEdit?.id === c.id && tileEdit?.field === "repos" ? (
+                      <div className={styles.tileEditor}>
+                        <Autocomplete
+                          freeSolo
+                          options={ownedRepos ?? []}
+                          value={repoAddSel}
+                          onInputChange={(_, v) => setRepoAddSel(v)}
+                          sx={{ width: "100%" }}
+                          renderInput={(params) => (
+                            <TextField
+                              {...params}
+                              size="small"
+                              label="Add repository"
+                              placeholder="owner/name"
+                            />
+                          )}
+                        />
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, alignItems: "center" }}>
+                          <TextField
+                            size="small"
+                            label="Branch (optional)"
+                            placeholder="main"
+                            value={repoAddBranch}
+                            onChange={(e) => setRepoAddBranch(e.target.value)}
+                            sx={{ width: "160px" }}
+                          />
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            disabled={!/^[^/\s]+\/[^/\s]+$/.test(repoAddSel.trim())}
+                            onClick={() => {
+                              const newLine = `${repoAddSel.trim()}${repoAddBranch.trim() ? `#${repoAddBranch.trim()}` : ""}`;
+                              const updatedValue = tileEdit.value.trim() ? `${tileEdit.value}\n${newLine}` : newLine;
+                              setTileEdit((t) => (t ? { ...t, value: updatedValue } : t));
+                              setRepoAddSel("");
+                              setRepoAddBranch("");
+                            }}
+                          >
+                            Add
+                          </Button>
+                        </div>
+                        <TextField
+                          size="small"
+                          fullWidth
+                          multiline
+                          minRows={3}
+                          placeholder="owner/repo#branch"
+                          value={tileEdit.value}
+                          onChange={(e) => setTileEdit((t) => (t ? { ...t, value: e.target.value } : t))}
+                          sx={{ marginTop: 2 }}
+                        />
+                        <p className={styles.fieldHint} style={{ margin: 0 }}>One repository per line: owner/repo or owner/repo#branch.</p>
+                        <div className={styles.tileEditorActions}>
+                          <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
+                            {tileSaving ? "Saving…" : "Save"}
+                          </Button>
+                          <Button variant="text" size="small" disabled={tileSaving} onClick={() => setTileEdit(null)}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (c.repos.length > 0 ? (
                       c.repos.map((r, i) => (
                         <a
                           key={i}
@@ -1334,6 +1451,9 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "topics" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "topics"))}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Topics</span>
+                      {autoTopicsId === c.id && (
+                        <span className={styles.fieldHint} style={{ margin: 0, marginLeft: 8 }}>Extracting topics from the codebase...</span>
+                      )}
                       {c.topics && c.topics.trim() && (
                         <span className={styles.navBadge} style={{ marginLeft: 8 }}>{c.topics.split("\n").map((l) => l.trim()).filter(Boolean).length}</span>
                       )}

@@ -231,6 +231,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [tileSaving, setTileSaving] = useState(false);
   const [expandedRosterId, setExpandedRosterId] = useState<string | null>(null);
   const [expandedTopicsId, setExpandedTopicsId] = useState<string | null>(null);
+  const [topicsExtractOpen, setTopicsExtractOpen] = useState<string | null>(null);
   const [expandedCsvId, setExpandedCsvId] = useState<string | null>(null);
   const [csvRemoveConfirm, setCsvRemoveConfirm] = useState<string | null>(null);
   const [uploadingCsv, setUploadingCsv] = useState(false);
@@ -1345,76 +1346,165 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         <PencilIcon />
                       </button>
                     </div>
-                    {!tileEdit && (
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
-                        <Autocomplete
-                          freeSolo
-                          options={ownedRepos ?? []}
-                          inputValue={topicsRepoSel[c.id] ?? ""}
-                          onInputChange={(_, v) => setTopicsRepoSel((prev) => ({ ...prev, [c.id]: v }))}
-                          sx={{ minWidth: 220, flex: 1 }}
-                          renderInput={(params) => (
-                            <TextField
-                              {...params}
-                              size="small"
-                              label="Extract from repo"
-                              placeholder={ownedReposLoading ? "Loading repos..." : "owner/name"}
-                            />
-                          )}
-                        />
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          disabled={!/^[^/\s]+\/[^/\s]+$/.test((topicsRepoSel[c.id] ?? "").trim()) || extractingTopicsId !== null}
-                          onClick={async () => {
-                            setExtractingTopicsId(c.id);
-                            setError(null);
-                            const r = await extractTopicsFromRepoAction((topicsRepoSel[c.id] ?? "").trim(), getStoredProvider());
-                            setExtractingTopicsId(null);
-                            if ("error" in r) {
-                              setError(r.error);
-                            } else {
-                              setTileEdit({ id: c.id, field: "topics", value: r.topics.join("\n") });
-                            }
-                          }}
-                        >
-                          {extractingTopicsId === c.id ? "Extracting..." : "Extract topics"}
-                        </Button>
-                      </div>
-                    )}
-                    {!tileEdit && (
-                      <p className={styles.fieldHint} style={{ margin: "0 0 12px 0" }}>
-                        Extracted topics load into the editor for review - press Save to keep them.
-                      </p>
-                    )}
                     {tileEdit?.id === c.id && tileEdit?.field === "topics"
                       ? tileEditor(true, "One topic per line.", "One topic per line. Used to describe what the course covers.")
                       : c.topics && c.topics.trim()
-                        ? (
+                        ? (() => {
+                          const topics = c.topics.split("\n").map((l) => l.trim()).filter(Boolean);
+                          const topicCount = topics.length;
+                          const firstTopic = topics[0];
+                          const truncatedFirst = firstTopic.length > 40 ? firstTopic.slice(0, 40) + "…" : firstTopic;
+                          return (
+                            <>
+                              <span className={styles.courseResourceValue}>
+                                {topicCount} topic{topicCount === 1 ? "" : "s"} - starting with &quot;{truncatedFirst}&quot;
+                              </span>
+                              <div className={styles.courseResourceActions}>
+                                <button
+                                  type="button"
+                                  className={styles.linkButton}
+                                  onClick={() => setExpandedTopicsId(expandedTopicsId === c.id ? null : c.id)}
+                                >
+                                  {expandedTopicsId === c.id ? "Hide" : "View"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className={styles.linkButton}
+                                  onClick={() => void navigator.clipboard.writeText(c.topics ?? "")}
+                                >
+                                  Copy
+                                </button>
+                                <button
+                                  type="button"
+                                  className={styles.linkButton}
+                                  onClick={() => setTopicsExtractOpen(topicsExtractOpen === c.id ? null : c.id)}
+                                >
+                                  From repo
+                                </button>
+                              </div>
+                              {expandedTopicsId === c.id && (
+                                <ol className={styles.topicsList}>
+                                  {topics.map((t, i) => (
+                                    <li key={i}>{t}</li>
+                                  ))}
+                                </ol>
+                              )}
+                              {topicsExtractOpen === c.id && (
+                                <div className={styles.topicsExtract} onClick={(e) => e.stopPropagation()}>
+                                  <Autocomplete
+                                    freeSolo
+                                    options={ownedRepos ?? []}
+                                    inputValue={topicsRepoSel[c.id] ?? ""}
+                                    onInputChange={(_, v) => setTopicsRepoSel((prev) => ({ ...prev, [c.id]: v }))}
+                                    sx={{ width: "100%" }}
+                                    renderInput={(params) => (
+                                      <TextField
+                                        {...params}
+                                        size="small"
+                                        label="Extract from repo"
+                                        placeholder={ownedReposLoading ? "Loading repos..." : "owner/name"}
+                                      />
+                                    )}
+                                  />
+                                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                                    <Button
+                                      variant="outlined"
+                                      size="small"
+                                      disabled={!/^[^/\s]+\/[^/\s]+$/.test((topicsRepoSel[c.id] ?? "").trim()) || extractingTopicsId !== null}
+                                      onClick={async () => {
+                                        setExtractingTopicsId(c.id);
+                                        setError(null);
+                                        const r = await extractTopicsFromRepoAction((topicsRepoSel[c.id] ?? "").trim(), getStoredProvider());
+                                        setExtractingTopicsId(null);
+                                        if ("error" in r) {
+                                          setError(r.error);
+                                        } else {
+                                          setTileEdit({ id: c.id, field: "topics", value: r.topics.join("\n") });
+                                          setTopicsExtractOpen(null);
+                                        }
+                                      }}
+                                    >
+                                      {extractingTopicsId === c.id ? "Extracting..." : "Extract topics"}
+                                    </Button>
+                                    <button
+                                      type="button"
+                                      className={styles.linkButton}
+                                      onClick={() => setTopicsExtractOpen(null)}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                  <p className={styles.fieldHint} style={{ margin: 0 }}>
+                                    Extracted topics load into the editor for review - press Save to keep them.
+                                  </p>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()
+                        : (
                           <>
-                            <span className={styles.courseResourceValue}>
-                              {c.topics.split("\n").map((l) => l.trim()).filter(Boolean).length} topics
-                            </span>
+                            <span className={styles.courseResourceEmpty}>Not set</span>
                             <div className={styles.courseResourceActions}>
                               <button
                                 type="button"
                                 className={styles.linkButton}
-                                onClick={() => setExpandedTopicsId(expandedTopicsId === c.id ? null : c.id)}
+                                onClick={() => setTopicsExtractOpen(topicsExtractOpen === c.id ? null : c.id)}
                               >
-                                {expandedTopicsId === c.id ? "Hide" : "View"}
+                                From repo
                               </button>
                             </div>
-                            {expandedTopicsId === c.id && (
-                              <div className={styles.rosterPreview}>
-                                {(c.topics ?? "").split("\n").map((l) => l.trim()).filter(Boolean).map((l, i) => (
-                                  <div key={i}>{l}</div>
-                                ))}
+                            {topicsExtractOpen === c.id && (
+                              <div className={styles.topicsExtract} onClick={(e) => e.stopPropagation()}>
+                                <Autocomplete
+                                  freeSolo
+                                  options={ownedRepos ?? []}
+                                  inputValue={topicsRepoSel[c.id] ?? ""}
+                                  onInputChange={(_, v) => setTopicsRepoSel((prev) => ({ ...prev, [c.id]: v }))}
+                                  sx={{ width: "100%" }}
+                                  renderInput={(params) => (
+                                    <TextField
+                                      {...params}
+                                      size="small"
+                                      label="Extract from repo"
+                                      placeholder={ownedReposLoading ? "Loading repos..." : "owner/name"}
+                                    />
+                                  )}
+                                />
+                                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                                  <Button
+                                    variant="outlined"
+                                    size="small"
+                                    disabled={!/^[^/\s]+\/[^/\s]+$/.test((topicsRepoSel[c.id] ?? "").trim()) || extractingTopicsId !== null}
+                                    onClick={async () => {
+                                      setExtractingTopicsId(c.id);
+                                      setError(null);
+                                      const r = await extractTopicsFromRepoAction((topicsRepoSel[c.id] ?? "").trim(), getStoredProvider());
+                                      setExtractingTopicsId(null);
+                                      if ("error" in r) {
+                                        setError(r.error);
+                                      } else {
+                                        setTileEdit({ id: c.id, field: "topics", value: r.topics.join("\n") });
+                                        setTopicsExtractOpen(null);
+                                      }
+                                    }}
+                                  >
+                                    {extractingTopicsId === c.id ? "Extracting..." : "Extract topics"}
+                                  </Button>
+                                  <button
+                                    type="button"
+                                    className={styles.linkButton}
+                                    onClick={() => setTopicsExtractOpen(null)}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                                <p className={styles.fieldHint} style={{ margin: 0 }}>
+                                  Extracted topics load into the editor for review - press Save to keep them.
+                                </p>
                               </div>
                             )}
                           </>
-                        )
-                        : (
-                          <span className={styles.courseResourceEmpty}>Not set</span>
                         )}
                   </div>
 

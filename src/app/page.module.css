@@ -1088,6 +1088,42 @@ button.courseResourceValue:disabled {
   color: var(--text-primary);
 }
 
+/* Expanded topics list inside a course tile. */
+.topicsList {
+  margin: 10px 0 0;
+  padding: 8px 12px 8px 30px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--field-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--field-border) 10%, transparent);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.topicsList li {
+  padding: 3px 0;
+}
+
+.topicsList li + li {
+  border-top: 1px solid color-mix(in srgb, var(--field-border) 45%, transparent);
+}
+
+.topicsList li::marker {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+/* Extract topics panel inside a course tile. */
+.topicsExtract {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--field-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--field-border) 8%, transparent);
+}
+
 /* "Open in ..." row at the foot of a course card. */
 .courseOpenBar {
   display: flex;

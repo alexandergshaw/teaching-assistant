@@ -15,7 +15,13 @@ interface BulkRepoActionsPanelProps {
 }
 
 type CopilotRow = { repo: string; status: "pending" | "done" | "failed" | "skipped"; detail?: string };
-type PrMatch = { repo: string; pr: PullRequestInfo; include: boolean };
+type PrMatch = {
+  repo: string;
+  pr: PullRequestInfo;
+  include: boolean;
+  mergeOutcome?: "merged" | "failed";
+  mergeError?: string;
+};
 
 export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProps) {
   // Section 1: Repo Selection
@@ -237,6 +243,8 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
           match !== null &&
           typeof m.repo === "string" &&
           typeof m.include === "boolean" &&
+          (m.mergeOutcome === undefined || m.mergeOutcome === "merged" || m.mergeOutcome === "failed") &&
+          (m.mergeError === undefined || typeof m.mergeError === "string") &&
           typeof m.pr === "object" &&
           m.pr !== null &&
           typeof pr.number === "number" &&
@@ -347,7 +355,7 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
           setPrMatches((prev) =>
             prev.map((m) =>
               m.repo === match.repo && m.pr.number === match.pr.number
-                ? { ...m, pr: { ...m.pr, state: "closed" } }
+                ? { ...m, mergeOutcome: "failed" as const, mergeError: readyResult.error }
                 : m
             )
           );
@@ -364,7 +372,7 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
         setPrMatches((prev) =>
           prev.map((m) =>
             m.repo === match.repo && m.pr.number === match.pr.number
-              ? { ...m, pr: { ...m.pr, state: "closed" } }
+              ? { ...m, mergeOutcome: "failed" as const, mergeError: result.error }
               : m
           )
         );
@@ -373,7 +381,7 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
         setPrMatches((prev) =>
           prev.map((m) =>
             m.repo === match.repo && m.pr.number === match.pr.number
-              ? { ...m, pr: { ...m.pr, state: "merged" } }
+              ? { ...m, mergeOutcome: "merged" as const, mergeError: undefined }
               : m
           )
         );
@@ -916,6 +924,25 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
                   {match.pr.draft && (
                     <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ whiteSpace: "nowrap" }}>
                       Draft
+                    </span>
+                  )}
+                  {match.mergeOutcome === "merged" && (
+                    <span className={`${styles.ghBadge} ${styles.ghBadgeMerged}`} style={{ whiteSpace: "nowrap" }}>
+                      Merged
+                    </span>
+                  )}
+                  {match.mergeOutcome === "failed" && (
+                    <span
+                      className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}
+                      style={{ whiteSpace: "nowrap" }}
+                      title={match.mergeError}
+                    >
+                      Merge failed
+                    </span>
+                  )}
+                  {match.mergeOutcome === "failed" && match.mergeError && (
+                    <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }} title={match.mergeError}>
+                      {match.mergeError.split("\n")[0].slice(0, 60)}
                     </span>
                   )}
                   <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>

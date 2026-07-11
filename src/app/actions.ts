@@ -253,7 +253,7 @@ import {
 } from "@/lib/github-models";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
 import { filesToLlmParts } from "@/lib/llm-files";
-import { classifyFrontend } from "@/lib/frontend-detect";
+import { classifyFrontend, classifyBackend, type BackendInfo } from "@/lib/frontend-detect";
 import {
   courseEngineSchedule,
   courseEngineLecture,
@@ -7134,23 +7134,34 @@ export async function copyRepoAction(
   }
 }
 
-export async function detectRepoFrontendAction(fullName: string): Promise<{ frontend: { framework: string; devCommand: string } | null } | { error: string }> {
+export async function detectRepoFrontendAction(fullName: string): Promise<{ frontend: { framework: string; devCommand: string } | null; backend: BackendInfo | null } | { error: string }> {
   try {
     await requireOwner();
     const parts = fullName.split("/");
     if (parts.length !== 2) {
-      return { frontend: null };
+      return { frontend: null, backend: null };
     }
     const [owner, repo] = parts;
-    let text: string;
-    try {
-      text = await getFileText(owner, repo, "package.json");
-    } catch {
-      return { frontend: null };
-    }
-    return { frontend: classifyFrontend(text) };
+
+    // Fetch files in parallel with individual catches
+    const [packageJsonResult, requirementsTxtResult, pyprojectTomlResult, pipfileResult] = await Promise.all([
+      getFileText(owner, repo, "package.json").catch(() => undefined),
+      getFileText(owner, repo, "requirements.txt").catch(() => undefined),
+      getFileText(owner, repo, "pyproject.toml").catch(() => undefined),
+      getFileText(owner, repo, "Pipfile").catch(() => undefined),
+    ]);
+
+    const frontend = classifyFrontend(packageJsonResult ?? "");
+    const backend = classifyBackend({
+      packageJson: packageJsonResult,
+      requirementsTxt: requirementsTxtResult,
+      pyprojectToml: pyprojectTomlResult,
+      pipfile: pipfileResult,
+    });
+
+    return { frontend, backend };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not detect frontend framework." };
+    return { error: err instanceof Error ? err.message : "Could not detect frontend/backend framework." };
   }
 }
 

@@ -39,7 +39,7 @@ import {
   detectRepoFrontendAction,
 } from "../actions";
 import type { GithubRepo, RepoTreeEntry, PullRequestInfo, PullRequestReviewInfo, PullRequestFileInfo, WorkflowInfo, WorkflowRunInfo, WorkflowJobInfo, CopilotTask, ArtifactInfo, PendingDeployment } from "@/lib/github";
-import { sandboxUrls } from "@/lib/frontend-detect";
+import { sandboxUrls, codespacesUrl, type BackendInfo } from "@/lib/frontend-detect";
 import RepoSettingsPanel from "./RepoSettingsPanel";
 import PublishToCanvasPage from "./PublishToCanvasPage";
 import CopilotChatPanel from "./CopilotChatPanel";
@@ -84,6 +84,7 @@ export default function RepoDetail() {
   const [defaultBranch, setDefaultBranch] = useState("");
   const [tab, setTab] = useState<"files" | "branches" | "copy" | "pulls" | "actions" | "copilot" | "settings">("files");
   const [frontend, setFrontend] = useState<{ framework: string; devCommand: string } | null>(null);
+  const [backend, setBackend] = useState<BackendInfo | null>(null);
   const [frontendChecked, setFrontendChecked] = useState(false);
   const [copilotTaskTitle, setCopilotTaskTitle] = useState("");
   const [copilotTaskBody, setCopilotTaskBody] = useState("");
@@ -300,16 +301,18 @@ export default function RepoDetail() {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [repoRef]);
 
-  // Detect frontend framework when repo changes
+  // Detect frontend and backend frameworks when repo changes
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (!repoRef) {
       setFrontend(null);
+      setBackend(null);
       setFrontendChecked(false);
       return;
     }
     setFrontendChecked(false);
     setFrontend(null);
+    setBackend(null);
     (async () => {
       const r = await detectRepoFrontendAction(repoRef);
       if ("error" in r) {
@@ -317,6 +320,7 @@ export default function RepoDetail() {
         return;
       }
       setFrontend(r.frontend);
+      setBackend(r.backend);
       setFrontendChecked(true);
     })();
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -1239,6 +1243,39 @@ export default function RepoDetail() {
               <p className={styles.fieldHint} style={{ margin: 0, marginLeft: "auto", fontSize: "0.8rem" }}>
                 Boots the app&apos;s dev server in your browser (WebContainers). Private repos ask you to sign in to the sandbox with GitHub once.
               </p>
+            </div>
+          )}
+          {frontendChecked && backend && (
+            <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>{backend.framework}</span>
+              {backend.runtime === "node" ? (
+                <>
+                  <Button size="small" variant="outlined" component="a" href={sandboxUrls(selectedRepoInfo.fullName).stackblitz} target="_blank" rel="noreferrer">
+                    Spin up in StackBlitz
+                  </Button>
+                  <Button size="small" variant="outlined" component="a" href={sandboxUrls(selectedRepoInfo.fullName).codesandbox} target="_blank" rel="noreferrer">
+                    CodeSandbox
+                  </Button>
+                  <Button size="small" variant="outlined" component="a" href={codespacesUrl(selectedRepoInfo.fullName)} target="_blank" rel="noreferrer">
+                    Codespaces
+                  </Button>
+                  <p className={styles.fieldHint} style={{ margin: 0, marginLeft: "auto", fontSize: "0.8rem" }}>
+                    Boots the API in your browser (WebContainers) or a cloud dev environment.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Button size="small" variant="outlined" component="a" href={sandboxUrls(selectedRepoInfo.fullName).codesandbox} target="_blank" rel="noreferrer">
+                    CodeSandbox
+                  </Button>
+                  <Button size="small" variant="outlined" component="a" href={codespacesUrl(selectedRepoInfo.fullName)} target="_blank" rel="noreferrer">
+                    Codespaces
+                  </Button>
+                  <p className={styles.fieldHint} style={{ margin: 0, marginLeft: "auto", fontSize: "0.8rem" }}>
+                    Python APIs need a real VM: CodeSandbox Devboxes run free in the cloud; Codespaces uses your GitHub account. Start command: {backend.devCommand}
+                  </p>
+                </>
+              )}
             </div>
           )}
         </div>

@@ -85,3 +85,77 @@ export function sandboxUrls(fullName: string): { stackblitz: string; codesandbox
     codesandbox: `https://codesandbox.io/p/github/${fullName}`,
   };
 }
+
+export interface BackendInfo {
+  framework: string;
+  runtime: "node" | "python";
+  devCommand: string;
+}
+
+export function classifyBackend(files: {
+  packageJson?: string;
+  requirementsTxt?: string;
+  pyprojectToml?: string;
+  pipfile?: string;
+}): BackendInfo | null {
+  // Check Python first: concatenate all Python files lowercased
+  const pythonContent = ((files.requirementsTxt ?? "") + (files.pyprojectToml ?? "") + (files.pipfile ?? "")).toLowerCase();
+
+  if (pythonContent.includes("fastapi")) {
+    return { framework: "FastAPI", runtime: "python", devCommand: "uvicorn main:app --reload" };
+  }
+
+  if (pythonContent.includes("django")) {
+    return { framework: "Django", runtime: "python", devCommand: "python manage.py runserver" };
+  }
+
+  if (pythonContent.includes("flask")) {
+    return { framework: "Flask", runtime: "python", devCommand: "flask run" };
+  }
+
+  // Then check Node
+  let pkg: Record<string, unknown>;
+  try {
+    pkg = JSON.parse(files.packageJson ?? "");
+  } catch {
+    return null;
+  }
+
+  const allDeps = new Set<string>();
+  const deps = pkg.dependencies as Record<string, unknown> | undefined;
+  const devDeps = pkg.devDependencies as Record<string, unknown> | undefined;
+  const scripts = pkg.scripts as Record<string, string> | undefined;
+
+  if (deps && typeof deps === "object") {
+    for (const key of Object.keys(deps)) {
+      allDeps.add(key);
+    }
+  }
+  if (devDeps && typeof devDeps === "object") {
+    for (const key of Object.keys(devDeps)) {
+      allDeps.add(key);
+    }
+  }
+
+  if (allDeps.has("@nestjs/core")) {
+    return { framework: "NestJS", runtime: "node", devCommand: "nest start --watch" };
+  }
+
+  if (allDeps.has("fastify")) {
+    return { framework: "Fastify", runtime: "node", devCommand: scripts?.dev ?? "node server" };
+  }
+
+  if (allDeps.has("koa")) {
+    return { framework: "Koa", runtime: "node", devCommand: scripts?.dev ?? scripts?.start ?? "node server" };
+  }
+
+  if (allDeps.has("express")) {
+    return { framework: "Express", runtime: "node", devCommand: scripts?.dev ?? scripts?.start ?? "node server" };
+  }
+
+  return null;
+}
+
+export function codespacesUrl(fullName: string): string {
+  return `https://codespaces.new/${fullName}`;
+}

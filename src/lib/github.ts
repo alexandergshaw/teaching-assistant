@@ -108,10 +108,10 @@ export function parseRepoRef(ref: string): { owner: string; repo: string } | nul
   return null;
 }
 
-/** List repos the token can see (owner + collaborator + org member), newest first. */
+/** List repos the token can see (owner + collaborator + org member), newest first (up to 1000). */
 export async function listRepos(): Promise<GithubRepo[]> {
   const out: GithubRepo[] = [];
-  for (let page = 1; page <= 3; page += 1) {
+  for (let page = 1; page <= 10; page += 1) {
     const repos = await ghJson<RawRepo[]>(
       `/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member&page=${page}`
     );

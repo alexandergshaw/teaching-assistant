@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
-import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, generateLectureDeckAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData } from "./actions";
+import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, generateLectureDeckAction, listCourseHubAction, setCourseMaterialsAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData } from "./actions";
 import CoursePlanningTab from "./components/CoursePlanningTab";
 import CoursesTab from "./components/CoursesTab";
 import VersionControlTab from "./components/VersionControlTab";
@@ -22,6 +22,7 @@ import { buildSlidesPptx } from "@/lib/pptx";
 import { stampDocxAppProperties } from "@/lib/docx";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { useSupabase } from "@/context/SupabaseProvider";
+import { uploadCourseZip, removeCourseZip } from "@/lib/course-files";
 import styles from "./page.module.css";
 import { parseGeneratedRubric } from "./utils/rubric";
 import { VIEW_KEY } from "./components/content-tab/constants";
@@ -180,6 +181,9 @@ export default function Home() {
   const [homeworkText, setHomeworkText] = useState("");
   const homeworkFileRef = useRef<HTMLInputElement>(null);
   const [savedHomeworkFiles, setSavedHomeworkFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
+  const [hubCourses, setHubCourses] = useState<Array<{ id: string; name: string; materialsZipPath: string | null }> | null>(null);
+  const [attachBusy, setAttachBusy] = useState(false);
+  const [attachNote, setAttachNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     localStorage.setItem("ta-active-tab", activeTab);
@@ -192,6 +196,22 @@ export default function Home() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (lessonPlanPreview && !hubCourses) {
+      let cancelled = false;
+      (async () => {
+        const r = await listCourseHubAction();
+        if (cancelled) return;
+        if (!("error" in r)) {
+          setHubCourses(r.courses.map((c) => ({ id: c.id, name: c.name, materialsZipPath: c.materialsZipPath })));
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [lessonPlanPreview, hubCourses]);
 
   const handleOpenPreview = (student: string, file: PreviewFile) => {
     setSelectedPreview({ ...file, student });
@@ -354,8 +374,8 @@ export default function Home() {
     }
   };
 
-  const handleDownloadLessonPlan = async () => {
-    if (!lessonPlanPreview) return;
+  const buildLessonZip = async (): Promise<{ blob: Blob; fileName: string } | null> => {
+    if (!lessonPlanPreview) return null;
     try {
       const [{ default: JSZip }, docxModule] = await Promise.all([
         import("jszip"),
@@ -363,18 +383,14 @@ export default function Home() {
       ]);
       const { Document, Packer, Paragraph, TextRun, HeadingLevel } = docxModule;
 
-      // Author stamped into every file's core properties so the bundle reads as
-      // the user's own work, with no tooling defaults left behind.
       const author = resolveDocumentAuthor(user);
 
-      // ── Build PPTX ──────────────────────────────────────────────────
       const pptxData = await buildSlidesPptx({
         presentationTitle: lessonPlanPreview.presentationTitle,
         slides: lessonPlanPreview.slides,
         author,
       });
 
-      // ── Build introduction.docx ──────────────────────────────────────
       let introDocxBuffer: ArrayBuffer | null = null;
       if (introPreview) {
         const introDoc = new Document({
@@ -393,7 +409,6 @@ export default function Home() {
         introDocxBuffer = await stampDocxAppProperties(await Packer.toArrayBuffer(introDoc));
       }
 
-      // ── Build assignment.docx ────────────────────────────────────────
       let assignmentDocxBuffer: ArrayBuffer | null = null;
       if (assignmentPreview) {
         const assignmentChildren = [
@@ -416,7 +431,6 @@ export default function Home() {
         assignmentDocxBuffer = await stampDocxAppProperties(await Packer.toArrayBuffer(assignmentDoc));
       }
 
-      // ── Build rubric.txt ─────────────────────────────────────────────
       let rubricText = "";
       if (rubricPreview) {
         const rows = parseGeneratedRubric(rubricPreview);
@@ -436,7 +450,6 @@ export default function Home() {
         }
       }
 
-      // ── Build examples.txt ───────────────────────────────────────────
       let examplesText = "";
       if (examplesPreview && examplesPreview.examples.length > 0) {
         const lines: string[] = [];
@@ -462,7 +475,6 @@ export default function Home() {
         examplesText = lines.join("\n");
       }
 
-      // ── Build lecture.docx ──────────────────────────────────────────
       const lectureChildren = [
         new Paragraph({ text: lessonPlanPreview.presentationTitle, heading: HeadingLevel.HEADING_1 }),
       ];
@@ -475,7 +487,6 @@ export default function Home() {
       const lectureDoc = new Document({ creator: author, lastModifiedBy: author, sections: [{ children: lectureChildren }] });
       const lectureDocxBuffer = await stampDocxAppProperties(await Packer.toArrayBuffer(lectureDoc));
 
-      // ── Assemble ZIP ─────────────────────────────────────────────────
       const zip = new JSZip();
       if (introDocxBuffer) zip.file("introduction.docx", introDocxBuffer);
       zip.file("slides.pptx", pptxData);
@@ -486,16 +497,61 @@ export default function Home() {
 
       const safeName = lessonPlanPreview.presentationTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
       const blob = await zip.generateAsync({ type: "blob" });
-      const url = URL.createObjectURL(blob);
+      return { blob, fileName: `${safeName}.zip` };
+    } catch (err) {
+      setLessonError(err instanceof Error ? err.message : "Build failed.");
+      return null;
+    }
+  };
+
+  const handleDownloadLessonPlan = async () => {
+    const built = await buildLessonZip();
+    if (!built) return;
+    try {
+      const url = URL.createObjectURL(built.blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${safeName}.zip`;
+      a.download = built.fileName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err) {
       setLessonError(err instanceof Error ? err.message : "Download failed.");
+    }
+  };
+
+  const { supabase } = useSupabase();
+
+  const handleAttachToCourse = async (courseId: string) => {
+    const built = await buildLessonZip();
+    if (!built || !user) {
+      setAttachNote({ kind: "error", text: "Could not build lesson zip." });
+      return;
+    }
+    setAttachBusy(true);
+    try {
+      const target = hubCourses?.find((c) => c.id === courseId);
+      const courseName = target?.name ?? "Course";
+      const { path } = await uploadCourseZip(supabase, user.id, courseId, built.blob, target?.materialsZipPath ?? null);
+      const r = await setCourseMaterialsAction(courseId, {
+        materialsZipName: built.fileName,
+        materialsZipPath: path,
+        materialsZipSize: built.blob.size,
+      });
+      if ("error" in r) {
+        setAttachNote({ kind: "error", text: r.error });
+        await removeCourseZip(supabase, path);
+        return;
+      }
+      setAttachNote({ kind: "success", text: `Attached ${built.fileName} to ${courseName}.` });
+      setHubCourses((prev) =>
+        prev?.map((c) => c.id === courseId ? { ...c, materialsZipPath: path } : c) ?? null
+      );
+    } catch (err) {
+      setAttachNote({ kind: "error", text: err instanceof Error ? err.message : "Could not attach materials." });
+    } finally {
+      setAttachBusy(false);
     }
   };
 
@@ -748,6 +804,10 @@ export default function Home() {
           onSaveField={saveLessonFieldEdit}
           onRegenerate={handleRegenerateLesson}
           onDownload={handleDownloadLessonPlan}
+          attachCourses={hubCourses}
+          attachBusy={attachBusy}
+          attachNote={attachNote}
+          onAttach={handleAttachToCourse}
           icons={{ CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon }}
         />
       )}

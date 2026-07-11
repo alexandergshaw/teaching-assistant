@@ -1715,6 +1715,86 @@ button.courseResourceValue:disabled {
   overscroll-behavior-x: contain;
 }
 
+/* ── Files library grid table ──────────────────────────────────────────────── */
+
+.libTable {
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.libHead,
+.libRow {
+  display: grid;
+  grid-template-columns: 36px 92px minmax(180px, 1fr) 70px 84px 150px auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+}
+
+.libHead {
+  background: color-mix(in srgb, var(--field-border) 14%, transparent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--card-border);
+}
+
+.libRow {
+  border-bottom: 1px solid color-mix(in srgb, var(--card-border) 55%, transparent);
+  font-size: 0.86rem;
+}
+
+.libRow:last-child {
+  border-bottom: none;
+}
+
+.libRow:hover {
+  background: color-mix(in srgb, var(--field-border) 8%, transparent);
+}
+
+.libNum {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.libActions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.libExpand {
+  grid-column: 1 / -1;
+  padding: 10px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--card-border) 55%, transparent);
+  background: color-mix(in srgb, var(--field-border) 6%, transparent);
+}
+
+.libExpand:last-child {
+  border-bottom: none;
+}
+
+@media (max-width: 1000px) {
+  .libHead {
+    display: none;
+  }
+
+  .libRow {
+    grid-template-columns: 36px 1fr auto;
+  }
+
+  .libRow .libNum,
+  .libRow .libKindCell {
+    display: none;
+  }
+}
+
 /* ── Lecture-plan document editor ─────────────────────────────────────────── */
 
 .weekNav {

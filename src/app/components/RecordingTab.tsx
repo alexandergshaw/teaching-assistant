@@ -14,6 +14,7 @@ import type { DirHandle } from "@/lib/backup-dir";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { saveRecordingFile } from "@/lib/recording-files";
 import { startFrameTicker, type FrameTicker } from "@/lib/frame-ticker";
+import { extractAudioOnly } from "@/lib/strip-audio";
 import type { User } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
@@ -45,18 +46,6 @@ interface Stroke {
 type RecState = "idle" | "recording" | "paused";
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-
-const VOICE_SAMPLE_SCRIPT = `Hello, and welcome to today's session. This is a sample of my natural speaking voice, recorded so it can be cloned for course narration.
-
-When I teach, I try to keep things simple: one idea at a time, explained clearly, with room to breathe. Some sentences are short. Others stretch a little longer, winding through an example or two before they land, because that is how real explanations sound.
-
-Let's try some variety. How do computers store information? Why does a loop repeat, and when should it stop? Questions like these lift my tone at the end, while statements settle back down.
-
-Here are a few specifics: on March 3rd, 2026, at 9:45 in the morning, exactly 127 students submitted assignment number 6. About 83 percent passed on the first try - a strong result, though not a perfect one.
-
-Now for texture: the quick brown fox jumps over the lazy dog, while five jazzy wizards begin to quickly vex the judge. Think of thirty-three thankful thoughts, and measure the pleasure of a treasured vision.
-
-Finally, a calm close. Thank you for listening carefully. Take a breath, review your notes, and remember: steady practice beats last-minute cramming every single time.`;
 
 export default function RecordingTab({ active = true }: { active?: boolean }) {
   const { supabase, user } = useSupabase();
@@ -121,10 +110,10 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
     return localStorage.getItem("ta-rec-mirror") === "1";
   });
 
-  const [source, setSource] = useState<"camera" | "screen">(() => {
+  const [source, setSource] = useState<"camera" | "screen" | "audio">(() => {
     if (typeof window === "undefined") return "camera";
     const saved = localStorage.getItem("ta-rec-source");
-    return saved === "screen" || saved === "camera" ? saved : "camera";
+    return saved === "screen" || saved === "camera" || saved === "audio" ? saved : "camera";
   });
   // Zoom/Teams-style audio processing, mapped to native getUserMedia constraints.
   const [noiseSuppression, setNoiseSuppression] = useState(() => {
@@ -273,6 +262,9 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
 
   const [finishing, setFinishing] = useState(false);
 
+  // Audio extraction state
+  const [extractingAudioId, setExtractingAudioId] = useState<string | null>(null);
+
   // Lecture script generation and teleprompter
   const [scriptTopic, setScriptTopic] = useState<string>(() => {
     if (typeof window === "undefined") return "";
@@ -352,7 +344,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   }, [source, noiseSuppression, echoCancellation, autoGain, useCountdown, bgMode, pipEnabled, pipCorner, penColor, penSize, prompterOn, prompterSize]);
 
   // Mirror source state into ref
-  const sourceRef = useRef<"camera" | "screen">("camera");
+  const sourceRef = useRef<"camera" | "screen" | "audio">("camera");
 
   // Mirror muted state into ref
   const mutedRef = useRef(false);
@@ -978,7 +970,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
             autoGainControl: autoGain,
           },
         });
-      } else {
+      } else if (source === "screen") {
         const displayMediaDevices = navigator.mediaDevices as unknown as {
           getDisplayMedia: (constraints: { video: unknown; audio: unknown }) => Promise<MediaStream>;
         };
@@ -1000,6 +992,19 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
             console.warn("Could not add selected mic to screen share:", err);
           }
         }
+      } else {
+        if (micId === "off") {
+          setError("Pick a microphone - audio-only recording needs one.");
+          return;
+        }
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            ...(micId && micId !== "off" ? { deviceId: { exact: micId } } : {}),
+            noiseSuppression,
+            echoCancellation,
+            autoGainControl: autoGain,
+          },
+        });
       }
 
       streamRef.current = stream;
@@ -1012,13 +1017,15 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       setHasAudio(stream.getAudioTracks().length > 0);
       setMuted(false);
 
-      // Initialize canvas pipeline
-      initPipelineCanvas();
-      const vt = stream.getVideoTracks()[0];
-      const st = vt?.getSettings?.();
-      const w = st?.width ?? 1280;
-      const h = st?.height ?? 720;
-      sizeCanvases(w, h);
+      // Initialize canvas pipeline (audio-only doesn't need canvas sizing)
+      if (source !== "audio") {
+        initPipelineCanvas();
+        const vt = stream.getVideoTracks()[0];
+        const st = vt?.getSettings?.();
+        const w = st?.width ?? 1280;
+        const h = st?.height ?? 720;
+        sizeCanvases(w, h);
+      }
 
       setHasStream(true);
 
@@ -1118,6 +1125,14 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
     return "";
   };
 
+  const pickAudioMimeType = (): string => {
+    const types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+    for (const type of types) {
+      if (MediaRecorder.isTypeSupported(type)) return type;
+    }
+    return "";
+  };
+
   const beginRecording = () => {
     // Feature 3: Guard against starting while finishing
     if (finishing) return;
@@ -1151,18 +1166,25 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       elapsedRef.current = 0;
       setElapsed(0);
 
-      const mimeType = pickMimeType();
-
+      let mimeType: string;
       let recStream: MediaStream = streamRef.current;
-      const canvas = pipelineCanvasRef.current;
       let usedPipeline = false;
-      if (canvas && typeof (canvas as HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream }).captureStream === "function") {
-        startPipeline();
-        usedPipeline = true;
-        usedPipelineRef.current = true;
-        const canvasStream = (canvas as HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream }).captureStream?.(30);
-        if (canvasStream) {
-          recStream = new MediaStream([...canvasStream.getVideoTracks(), ...streamRef.current.getAudioTracks()]);
+
+      if (source === "audio") {
+        // Audio-only: skip pipeline, use audio mime
+        mimeType = pickAudioMimeType();
+      } else {
+        // Video recording with optional pipeline
+        mimeType = pickMimeType();
+        const canvas = pipelineCanvasRef.current;
+        if (canvas && typeof (canvas as HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream }).captureStream === "function") {
+          startPipeline();
+          usedPipeline = true;
+          usedPipelineRef.current = true;
+          const canvasStream = (canvas as HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream }).captureStream?.(30);
+          if (canvasStream) {
+            recStream = new MediaStream([...canvasStream.getVideoTracks(), ...streamRef.current.getAudioTracks()]);
+          }
         }
       }
 
@@ -1183,7 +1205,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
 
       recorder.onstop = () => {
         stopPipeline();
-        const actualMimeType = recorder.mimeType || mimeType || "video/webm";
+        const actualMimeType = recorder.mimeType || mimeType || (source === "audio" ? "audio/webm" : "video/webm");
         const blob = new Blob(chunksRef.current, { type: actualMimeType });
         const url = URL.createObjectURL(blob);
         const takeId = crypto.randomUUID();
@@ -1197,51 +1219,8 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           createdAt: Date.now(),
         };
 
-        // Feature 2: Backup folder integration
-        if (backupDirRef.current) {
-          newTake.backup = "pending";
-          setTakes((prev) => [...prev, newTake]);
-          void (async () => {
-            try {
-              const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
-              const ext = actualMimeType.includes("mp4") ? "mp4" : "webm";
-              const safeName = newTake.name.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
-              await writeToBackupDir(backupDirRef.current!, `${safeName}-${stamp}.${ext}`, blob);
-              setTakes((prev) => prev.map((t) => t.id === takeId ? { ...t, backup: "done" } : t));
-            } catch (err) {
-              console.error("Backup failed:", err);
-              setTakes((prev) => prev.map((t) => t.id === takeId ? { ...t, backup: "failed" } : t));
-            }
-          })();
-        } else {
-          setTakes((prev) => [...prev, newTake]);
-        }
-
-        // Auto-save to Supabase library
-        if (userRef.current && supabaseRef.current) {
-          newTake.dbSave = "pending";
-          setTakes((prev) =>
-            prev.map((t) => (t.id === takeId ? { ...t, dbSave: "pending" } : t))
-          );
-          void (async () => {
-            try {
-              await saveRecordingFile(supabaseRef.current!, userRef.current!.id, blob, {
-                name: newTake.name,
-                kind: "recording",
-                mimeType: actualMimeType,
-                durationSec: elapsedRef.current,
-              });
-              setTakes((prev) =>
-                prev.map((t) => (t.id === takeId ? { ...t, dbSave: "done" } : t))
-              );
-            } catch (err) {
-              console.error("Save to library failed:", err);
-              setTakes((prev) =>
-                prev.map((t) => (t.id === takeId ? { ...t, dbSave: "failed" } : t))
-              );
-            }
-          })();
-        }
+        setTakes((prev) => [...prev, newTake]);
+        void saveTakeToLibrary(newTake, blob);
       };
 
       recorderRef.current = recorder;
@@ -1364,7 +1343,12 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   };
 
   const handleDownload = (take: Take) => {
-    const ext = take.mimeType.includes("mp4") ? "mp4" : "webm";
+    let ext: string;
+    if (take.mimeType.startsWith("audio/")) {
+      ext = take.mimeType.includes("mp4") ? "m4a" : "webm";
+    } else {
+      ext = take.mimeType.includes("mp4") ? "mp4" : "webm";
+    }
     const safeName = take.name.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
     const a = document.createElement("a");
     a.href = take.url;
@@ -1394,6 +1378,42 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       return;
     }
     setScript(r.script);
+  };
+
+  const saveTakeToLibrary = async (take: Take, blob: Blob) => {
+    // Backup to folder
+    if (backupDirRef.current) {
+      const newTake = { ...take, backup: "pending" as const };
+      setTakes((prev) => prev.map((t) => t.id === take.id ? newTake : t));
+      try {
+        const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+        const ext = blob.type.includes("mp4") ? (blob.type.startsWith("audio/") ? "m4a" : "mp4") : "webm";
+        const safeName = take.name.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+        await writeToBackupDir(backupDirRef.current!, `${safeName}-${stamp}.${ext}`, blob);
+        setTakes((prev) => prev.map((t) => t.id === take.id ? { ...t, backup: "done" as const } : t));
+      } catch (err) {
+        console.error("Backup failed:", err);
+        setTakes((prev) => prev.map((t) => t.id === take.id ? { ...t, backup: "failed" as const } : t));
+      }
+    }
+
+    // Save to Supabase library
+    if (userRef.current && supabaseRef.current) {
+      const newTake = { ...take, dbSave: "pending" as const };
+      setTakes((prev) => prev.map((t) => t.id === take.id ? newTake : t));
+      try {
+        await saveRecordingFile(supabaseRef.current!, userRef.current!.id, blob, {
+          name: take.name,
+          kind: "recording",
+          mimeType: blob.type,
+          durationSec: take.durationSec,
+        });
+        setTakes((prev) => prev.map((t) => t.id === take.id ? { ...t, dbSave: "done" as const } : t));
+      } catch (err) {
+        console.error("Save to library failed:", err);
+        setTakes((prev) => prev.map((t) => t.id === take.id ? { ...t, dbSave: "failed" as const } : t));
+      }
+    }
   };
 
   // Unmount-only cleanup. Latest takes/stopEverything are read through refs so
@@ -1469,12 +1489,13 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
             select
             label="Source"
             value={source}
-            onChange={(e) => { userPickedRef.current = true; setSource(e.target.value as "camera" | "screen"); }}
+            onChange={(e) => { userPickedRef.current = true; setSource(e.target.value as "camera" | "screen" | "audio"); }}
             size="small"
             sx={{ minWidth: 160 }}
           >
             <MenuItem value="camera">Camera</MenuItem>
             <MenuItem value="screen">Screen</MenuItem>
+            <MenuItem value="audio">Audio only (microphone)</MenuItem>
           </TextField>
 
           <TextField
@@ -1484,7 +1505,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
             onChange={(e) => { userPickedRef.current = true; setCameraId(e.target.value); }}
             size="small"
             sx={{ minWidth: 160 }}
-            disabled={source === "screen"}
+            disabled={source !== "camera"}
           >
             {devices.cameras.length === 0 && <MenuItem value="">No cameras found</MenuItem>}
             {devices.cameras.length > 0 &&
@@ -1523,6 +1544,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
             onChange={(e) => { userPickedRef.current = true; setResolution(e.target.value as "720" | "1080"); }}
             size="small"
             sx={{ minWidth: 160 }}
+            disabled={source !== "camera"}
           >
             <MenuItem value="720">720p</MenuItem>
             <MenuItem value="1080">1080p</MenuItem>
@@ -1556,7 +1578,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
                   <Checkbox
                     checked={mirror}
                     onChange={(e) => setMirror(e.target.checked)}
-                    disabled={source === "screen"}
+                    disabled={source !== "camera"}
                     size="small"
                   />
                 }
@@ -1720,7 +1742,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
 
             <div className={styles.field} style={{ marginTop: 16 }}>
               <FormControlLabel
-                control={<Checkbox checked={cardsOn} onChange={(e) => setCardsOn(e.target.checked)} size="small" />}
+                control={<Checkbox checked={cardsOn} onChange={(e) => setCardsOn(e.target.checked)} size="small" disabled={source === "audio"} />}
                 label="Add title and closing cards"
               />
               {cardsOn && (
@@ -1886,27 +1908,6 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
         </div>
       </details>
 
-      <details className={styles.adaptDisclosure}>
-        <summary>Voice clone sample script</summary>
-        <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
-          <p className={styles.adaptPanelSubtitle} style={{ marginBottom: 8 }}>Read this aloud in one take to give the voice clone a clean, varied sample of your voice (about 90 seconds).</p>
-          <ul className={styles.fieldHint} style={{ margin: "0 0 10px", paddingLeft: 18 }}>
-            <li>Record in a quiet room, mic at a constant distance, no music.</li>
-            <li>Speak naturally at your normal teaching pace - do not read monotone.</li>
-            <li>Use the microphone-only setup: pick your mic, press Record, read, press Stop.</li>
-            <li>Then download the take and create the clone on Narrate a deck under voice cloning.</li>
-          </ul>
-          <div style={{ padding: "14px 18px", borderRadius: 12, background: "color-mix(in srgb, var(--field-border) 18%, transparent)", whiteSpace: "pre-wrap", lineHeight: 1.6, color: "var(--text-primary)", fontSize: "0.95rem" }}>
-            {VOICE_SAMPLE_SCRIPT}
-          </div>
-          <div className={styles.ghActions} style={{ marginTop: 10 }}>
-            <Button variant="contained" size="small" onClick={() => { setScript(VOICE_SAMPLE_SCRIPT); setPrompterOn(true); }}>Load into teleprompter</Button>
-            <Button variant="text" size="small" onClick={() => void navigator.clipboard.writeText(VOICE_SAMPLE_SCRIPT)}>Copy</Button>
-          </div>
-          <p className={styles.fieldHint} style={{ marginTop: 8 }}>Loading replaces the current lecture script in the teleprompter.</p>
-        </div>
-      </details>
-
       <div className={styles.adaptPanel}>
         <div className={styles.adaptPanelHeader}>
           <h2 className={styles.adaptPanelTitle}>Stage</h2>
@@ -1936,7 +1937,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
             muted
             playsInline
             style={{
-              display: "block",
+              display: source === "audio" ? "none" : "block",
               width: "100%",
               maxHeight: "48vh",
               objectFit: "contain",
@@ -1944,6 +1945,23 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
               transform: source === "camera" && mirror ? "scaleX(-1)" : undefined,
             }}
           />
+          {source === "audio" && hasStream && (
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: "200px",
+              maxHeight: "48vh",
+              background: "#0f172a",
+              padding: "20px",
+              textAlign: "center",
+            }}>
+              <div>
+                <div style={{ fontSize: "1.2rem", fontWeight: 600, marginBottom: "8px", color: "#f8fafc" }}>Audio-only recording</div>
+                <div className={styles.ghMeta}>The microphone level meter below shows your signal.</div>
+              </div>
+            </div>
+          )}
           <canvas
             ref={overlayCanvasRef}
             onPointerDown={handlePointerDown}
@@ -1958,6 +1976,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
               cursor: tool === "off" ? "default" : "crosshair",
               pointerEvents: tool === "off" ? "none" : "auto",
               touchAction: "none",
+              display: source === "audio" ? "none" : "auto",
             }}
           />
           {countdown !== null && (
@@ -2188,6 +2207,45 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
                       >
                         Download
                       </Button>
+                      {!take.mimeType.startsWith("audio/") && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={async () => {
+                            if (extractingAudioId === take.id) return;
+                            setExtractingAudioId(take.id);
+                            try {
+                              const response = await fetch(take.url);
+                              const blob = await response.blob();
+                              const audioBlob = await extractAudioOnly(blob, (pct) => {
+                                if (pct % 10 === 0) {
+                                  setExtractingAudioId(`${take.id}|${pct}`);
+                                }
+                              });
+                              const audioUrl = URL.createObjectURL(audioBlob);
+                              const audioTake: Take = {
+                                id: crypto.randomUUID(),
+                                name: `${take.name} (audio)`,
+                                url: audioUrl,
+                                mimeType: audioBlob.type || "audio/webm",
+                                sizeBytes: audioBlob.size,
+                                durationSec: take.durationSec,
+                                createdAt: Date.now(),
+                              };
+                              setTakes((prev) => [...prev, audioTake]);
+                              void saveTakeToLibrary(audioTake, audioBlob);
+                            } catch (err) {
+                              console.error("Audio extraction failed:", err);
+                              setError(`Audio extraction failed: ${err instanceof Error ? err.message : "unknown error"}`);
+                            } finally {
+                              setExtractingAudioId(null);
+                            }
+                          }}
+                          disabled={extractingAudioId !== null}
+                        >
+                          {extractingAudioId?.startsWith(take.id) ? `Audio... ${extractingAudioId.split("|")[1]}%` : "Audio only"}
+                        </Button>
+                      )}
                       <Button
                         size="small"
                         variant="outlined"
@@ -2211,16 +2269,27 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
                     <summary style={{ cursor: "pointer", color: "var(--accent-ink)", fontWeight: 600 }}>
                       Play
                     </summary>
-                    <video
-                      controls
-                      src={take.url}
-                      style={{
-                        maxWidth: "100%",
-                        borderRadius: 8,
-                        marginTop: 8,
-                        background: "#0f172a",
-                      }}
-                    />
+                    {take.mimeType.startsWith("audio/") ? (
+                      <audio
+                        controls
+                        src={take.url}
+                        style={{
+                          width: "100%",
+                          marginTop: 8,
+                        }}
+                      />
+                    ) : (
+                      <video
+                        controls
+                        src={take.url}
+                        style={{
+                          maxWidth: "100%",
+                          borderRadius: 8,
+                          marginTop: 8,
+                          background: "#0f172a",
+                        }}
+                      />
+                    )}
                   </details>
                 </div>
               ))

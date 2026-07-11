@@ -195,7 +195,7 @@ export default function VersionControlTab() {
       <div style={{ display: subTab === "bulk" ? undefined : "none" }}>
         {/* Bulk actions must offer every repo the token can see - personal and
         collaborator repos included - not just the selected org + templates. */}
-        <BulkRepoActionsPanel repos={[...new Set([...myRepos, ...mergedRepos].map((r) => r.fullName))].sort()} />
+        <BulkRepoActionsPanel repos={[...new Set([...myRepos, ...mergedRepos].map((r) => r.fullName))].sort()} active={subTab === "bulk"} />
       </div>
     </div>
   );

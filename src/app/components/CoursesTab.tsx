@@ -21,6 +21,7 @@ import {
   listCourseRosterAction,
   extractTopicsFromRepoAction,
   listGithubReposAction,
+  setCourseMaterialsAction,
 } from "../actions";
 import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
@@ -30,6 +31,8 @@ import SyllabusPreviewModal, { type SyllabusPreviewPara } from "./SyllabusPrevie
 import { getStoredProvider } from "@/lib/llm-provider";
 import { useInstitutions } from "@/lib/institutions";
 import { setCourseHandoff } from "@/lib/course-handoff";
+import { useSupabase } from "@/context/SupabaseProvider";
+import { uploadCourseZip, getCourseZipUrl, removeCourseZip } from "@/lib/course-files";
 import styles from "../page.module.css";
 
 // The editable form state (all strings; "" means "not set").
@@ -208,6 +211,7 @@ function PencilIcon() {
 
 export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-planning" | "version-control") => void }) {
   const institutions = useInstitutions();
+  const { supabase, user } = useSupabase();
   const [courses, setCourses] = useState<Course[]>(() => hubCache?.courses ?? []);
   const [syllabi, setSyllabi] = useState<FinalizedSyllabusMeta[]>(() => hubCache?.syllabi ?? []);
   const [orgs, setOrgs] = useState<string[]>(() => hubCache?.orgs ?? []);
@@ -242,9 +246,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [repoAddSel, setRepoAddSel] = useState("");
   const [repoAddBranch, setRepoAddBranch] = useState("");
   const [autoTopicsId, setAutoTopicsId] = useState<string | null>(null);
+  const [uploadingMaterials, setUploadingMaterials] = useState(false);
+  const [materialsRemoveConfirm, setMaterialsRemoveConfirm] = useState<string | null>(null);
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
   const csvUploadRef = useRef<HTMLInputElement>(null);
+  const materialsUploadRef = useRef<HTMLInputElement>(null);
 
   // Fetch everything and refresh the cache. `silent` skips the blocking spinner
   // (used for background revalidation and post-mutation refreshes).
@@ -503,6 +510,51 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       setError(err instanceof Error ? err.message : "Could not read the CSV file.");
     } finally {
       setUploadingCsv(false);
+    }
+  };
+
+  const handleMaterialsUpload = async (c: Course, file: File) => {
+    if (file.size > 50 * 1024 * 1024) {
+      setError("Zip is too large (max 50 MB).");
+      return;
+    }
+    if (!user) {
+      setError("You must be logged in.");
+      return;
+    }
+    setUploadingMaterials(true);
+    setError(null);
+    try {
+      const { path } = await uploadCourseZip(supabase, user.id, c.id, file, c.materialsZipPath ?? null);
+      const r = await setCourseMaterialsAction(c.id, {
+        materialsZipName: file.name,
+        materialsZipPath: path,
+        materialsZipSize: file.size,
+      });
+      if ("error" in r) {
+        setError(r.error);
+        await removeCourseZip(supabase, path);
+        return;
+      }
+      setCourses((prev) => {
+        const updated = prev.map((course) => {
+          if (course.id === c.id) {
+            return {
+              ...course,
+              materialsZipName: file.name,
+              materialsZipPath: path,
+              materialsZipSize: file.size,
+            };
+          }
+          return course;
+        });
+        if (hubCache) hubCache = { ...hubCache, courses: updated };
+        return updated;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not upload the materials.");
+    } finally {
+      setUploadingMaterials(false);
     }
   };
 
@@ -1776,6 +1828,123 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                                 </tbody>
                               </table>
                               <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>Preview uses simple comma splitting.</p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                  </div>
+
+                  <div className={`${styles.courseResource}${!c.materialsZipPath ? " " + styles.courseResourceClickable : ""}`}>
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>Materials</span>
+                    </div>
+                    {!c.materialsZipPath
+                      ? (
+                        <>
+                          <span className={styles.courseResourceEmpty}>Not set</span>
+                          <div className={styles.courseResourceActions}>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              disabled={uploadingMaterials}
+                              onClick={() => materialsUploadRef.current?.click()}
+                            >
+                              {uploadingMaterials ? "Uploading…" : "Upload zip"}
+                            </Button>
+                            <input
+                              ref={materialsUploadRef}
+                              type="file"
+                              accept=".zip,application/zip"
+                              style={{ display: "none" }}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) void handleMaterialsUpload(c, f);
+                                e.target.value = "";
+                              }}
+                            />
+                          </div>
+                        </>
+                      )
+                      : (
+                        <>
+                          <span className={styles.courseResourceValue}>{c.materialsZipName} - {((c.materialsZipSize || 0) / 1048576).toFixed(1)} MB</span>
+                          <div className={styles.courseResourceActions}>
+                            <button
+                              type="button"
+                              className={styles.linkButton}
+                              onClick={async () => {
+                                try {
+                                  const url = await getCourseZipUrl(supabase, c.materialsZipPath ?? "");
+                                  const a = document.createElement("a");
+                                  a.href = url;
+                                  a.download = c.materialsZipName || "materials.zip";
+                                  document.body.appendChild(a);
+                                  a.click();
+                                  document.body.removeChild(a);
+                                } catch (err) {
+                                  setError(err instanceof Error ? err.message : "Could not download the materials.");
+                                }
+                              }}
+                            >
+                              Download
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.linkButton}
+                              disabled={uploadingMaterials}
+                              onClick={() => materialsUploadRef.current?.click()}
+                            >
+                              {uploadingMaterials ? "Uploading…" : "Replace"}
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.linkButton}
+                              style={{ color: "var(--danger)" }}
+                              onClick={() => setMaterialsRemoveConfirm(materialsRemoveConfirm === c.id ? null : c.id)}
+                            >
+                              {materialsRemoveConfirm === c.id ? "Confirm" : "Remove"}
+                            </button>
+                          </div>
+                          {materialsRemoveConfirm === c.id && (
+                            <div style={{ marginTop: 8 }}>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                color="error"
+                                onClick={() => {
+                                  void removeCourseZip(supabase, c.materialsZipPath ?? "").then(async () => {
+                                    const r = await setCourseMaterialsAction(c.id, {
+                                      materialsZipName: null,
+                                      materialsZipPath: null,
+                                      materialsZipSize: null,
+                                    });
+                                    if (!("error" in r)) {
+                                      setCourses((prev) => {
+                                        const next = prev.map((course) => (course.id === c.id ? {
+                                          ...course,
+                                          materialsZipName: null,
+                                          materialsZipPath: null,
+                                          materialsZipSize: null,
+                                        } : course));
+                                        if (hubCache) hubCache = { ...hubCache, courses: next };
+                                        return next;
+                                      });
+                                      setMaterialsRemoveConfirm(null);
+                                    } else {
+                                      setError(r.error);
+                                    }
+                                  });
+                                }}
+                              >
+                                Delete materials
+                              </Button>
+                              <Button
+                                variant="text"
+                                size="small"
+                                onClick={() => setMaterialsRemoveConfirm(null)}
+                              >
+                                Cancel
+                              </Button>
                             </div>
                           )}
                         </>

@@ -308,6 +308,7 @@ import {
   createCourse as createCourseRow,
   updateCourse as updateCourseRow,
   deleteCourse as deleteCourseRow,
+  updateCourseMaterials,
   type Course as CourseHub,
   type CourseInput as CourseHubInput,
 } from "@/lib/supabase/courses";
@@ -3766,6 +3767,25 @@ export async function deleteCourseHubAction(id: string): Promise<{ ok: true } | 
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not delete the course." };
+  }
+}
+
+/** Update a course's materials zip metadata. */
+export async function setCourseMaterialsAction(
+  courseId: string,
+  fields: {
+    materialsZipName: string | null;
+    materialsZipPath: string | null;
+    materialsZipSize: number | null;
+  }
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!courseId.trim()) return { error: "Choose a course." };
+    await updateCourseMaterials(user.id, courseId, fields);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the course materials." };
   }
 }
 

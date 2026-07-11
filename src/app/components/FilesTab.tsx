@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Button, TextField, MenuItem, Checkbox, FormControlLabel } from "@mui/material";
+import { Button, TextField, MenuItem, Checkbox } from "@mui/material";
 import TabHeader from "./TabHeader";
 import CoursePicker from "./CoursePicker";
 import { CourseCopyModal } from "./content-tab/CourseCopyModal";
@@ -43,6 +43,20 @@ const kindLabels: Record<string, string> = {
   narrated: "Narrated",
 };
 
+const getDisplayKind = (file: RecordingFile): { label: string; badgeClass: string } => {
+  if (file.mimeType.startsWith("audio/")) {
+    return { label: "Audio", badgeClass: styles.ghBadgeNeutral };
+  }
+  const baseLabel = kindLabels[file.kind] || file.kind;
+  if (file.kind === "captioned") {
+    return { label: baseLabel, badgeClass: styles.ghBadgeSuccess };
+  }
+  if (file.kind === "narrated") {
+    return { label: baseLabel, badgeClass: styles.ghBadgeAccent };
+  }
+  return { label: baseLabel, badgeClass: styles.ghBadgeNeutral };
+};
+
 export default function FilesTab() {
   const { supabase, user } = useSupabase();
   const { active: activeInstitution } = useInstitutionSelection();
@@ -63,10 +77,10 @@ export default function FilesTab() {
     const stored = localStorage.getItem("ta-files-sort");
     return (stored as "newest" | "oldest" | "name" | "largest" | null) ?? "newest";
   });
-  const [filterKind, setFilterKind] = useState<"all" | "recording" | "captioned" | "narrated">(() => {
+  const [filterKind, setFilterKind] = useState<"all" | "recording" | "captioned" | "narrated" | "audio">(() => {
     if (typeof window === "undefined") return "all";
     const stored = localStorage.getItem("ta-files-kind");
-    return (stored as "all" | "recording" | "captioned" | "narrated" | null) ?? "all";
+    return (stored as "all" | "recording" | "captioned" | "narrated" | "audio" | null) ?? "all";
   });
 
   // Delete confirmation state
@@ -521,7 +535,12 @@ export default function FilesTab() {
       // Filter by search term
       if (!f.name.toLowerCase().includes(search.trim().toLowerCase())) return false;
       // Filter by kind
-      if (filterKind !== "all" && f.kind !== filterKind) return false;
+      if (filterKind === "audio") {
+        return f.mimeType.startsWith("audio/");
+      }
+      if (filterKind !== "all") {
+        return f.kind === filterKind && !f.mimeType.startsWith("audio/");
+      }
       return true;
     })
     .sort((a, b) => {
@@ -577,52 +596,58 @@ export default function FilesTab() {
             <Button
               variant="outlined"
               size="small"
-              onClick={() => void reload()}
-              disabled={adding}
-            >
-              Refresh
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
               onClick={() => setCopyOpen(true)}
               disabled={!courseId}
               title="Copy a page or file from another Canvas course into this course"
             >
               Copy from another course
             </Button>
-            <TextField
+            <Button
+              variant="outlined"
               size="small"
-              type="search"
-              placeholder="Search videos by name..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              sx={{ flex: "1 1 200px", maxWidth: 300 }}
-            />
-            <TextField
-              select
-              size="small"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as "newest" | "oldest" | "name" | "largest")}
-              sx={{ minWidth: 140 }}
+              onClick={() => void reload()}
+              disabled={adding}
             >
-              <MenuItem value="newest">Newest</MenuItem>
-              <MenuItem value="oldest">Oldest</MenuItem>
-              <MenuItem value="name">Name</MenuItem>
-              <MenuItem value="largest">Largest</MenuItem>
-            </TextField>
-            <TextField
-              select
-              size="small"
-              value={filterKind}
-              onChange={(e) => setFilterKind(e.target.value as "all" | "recording" | "captioned" | "narrated")}
-              sx={{ minWidth: 140 }}
-            >
-              <MenuItem value="all">All kinds</MenuItem>
-              <MenuItem value="recording">Recordings</MenuItem>
-              <MenuItem value="captioned">Captioned</MenuItem>
-              <MenuItem value="narrated">Narrated</MenuItem>
-            </TextField>
+              Refresh
+            </Button>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <TextField
+                size="small"
+                type="search"
+                placeholder="Search videos by name..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                sx={{ flex: "1 1 200px", maxWidth: 300 }}
+              />
+              <TextField
+                select
+                size="small"
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as "newest" | "oldest" | "name" | "largest")}
+                sx={{ minWidth: 140 }}
+              >
+                <MenuItem value="newest">Newest</MenuItem>
+                <MenuItem value="oldest">Oldest</MenuItem>
+                <MenuItem value="name">Name</MenuItem>
+                <MenuItem value="largest">Largest</MenuItem>
+              </TextField>
+              <TextField
+                select
+                size="small"
+                value={filterKind}
+                onChange={(e) => setFilterKind(e.target.value as "all" | "recording" | "captioned" | "narrated" | "audio")}
+                sx={{ minWidth: 140 }}
+              >
+                <MenuItem value="all">All kinds</MenuItem>
+                <MenuItem value="recording">Recordings</MenuItem>
+                <MenuItem value="captioned">Captioned</MenuItem>
+                <MenuItem value="narrated">Narrated</MenuItem>
+                <MenuItem value="audio">Audio</MenuItem>
+              </TextField>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
             <span className={styles.fieldHint} style={{ margin: 0, whiteSpace: "nowrap" }}>
               {shown.length} of {files.length} video{files.length === 1 ? "" : "s"}
             </span>
@@ -757,221 +782,243 @@ export default function FilesTab() {
               No videos yet. Record one on the Recording tab or upload files here.
             </div>
           ) : (
-            <div className={styles.ccModule}>
-              <FormControlLabel
-                className={styles.fieldHint}
-                style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0, padding: "8px 12px" }}
-                control={<Checkbox size="small" checked={allShownSelected} onChange={toggleSelectAll} disabled={shown.length === 0} />}
-                label="Select all"
-              />
-              <div className={styles.ccItems} style={{ borderTop: "1px solid var(--card-border)" }}>
-                {shown.length === 0 && (
-                  <p className={styles.ccHint} style={{ padding: "4px 6px" }}>
-                    No videos match your search.
-                  </p>
-                )}
-                {shown.map((file) => (
-                  <div key={file.id}>
-                    <div className={styles.ccItem}>
-                      <Checkbox
-                        size="small"
-                        className={styles.ccCheckbox}
-                        checked={selected.has(file.id)}
-                        onChange={() => setSelected((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(file.id)) next.delete(file.id);
-                          else next.add(file.id);
-                          return next;
-                        })}
-                        aria-label={`Select ${file.name}`}
-                      />
-                      <span className={styles.ccType} title={file.mimeType}>
-                        {kindLabels[file.kind] || file.kind}
-                      </span>
-                      <TextField
-                        size="small"
-                        type="text"
-                        className={styles.ccItemName}
-                        title={file.name}
-                        value={nameDrafts[file.id] ?? file.name}
-                        onChange={(e) => setNameDrafts((prev) => ({ ...prev, [file.id]: e.target.value }))}
-                        onBlur={() => void saveRename(file)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                        }}
-                      />
-                      <span className={styles.ccCount} style={{ width: 64, textAlign: "right", flexShrink: 0 }}>
-                        {fmt(file.durationSec)}
-                      </span>
-                      <span className={styles.ccCount} style={{ width: 78, textAlign: "right", flexShrink: 0 }}>
-                        {formatBytes(file.sizeBytes)} MB
-                      </span>
-                      <span className={styles.ccCount} style={{ width: 150, textAlign: "right", flexShrink: 0 }}>
-                        {new Date(file.createdAt).toLocaleDateString()} {new Date(file.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </span>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => {
-                          const opening = expandedPlay !== file.id;
-                          setExpandedPlay(opening ? file.id : null);
-                          if (opening && !playUrls[file.id]) {
-                            void (async () => {
-                              try {
-                                const url = await getRecordingFileUrl(supabase, file);
-                                setPlayUrls((prev) => ({ ...prev, [file.id]: url }));
-                              } catch (err) {
-                                setNote({
-                                  kind: "error",
-                                  text: err instanceof Error ? err.message : "Failed to load video",
-                                });
-                              }
-                            })();
-                          }
-                        }}
-                      >
-                        {expandedPlay === file.id ? "Close" : "Play"}
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => void handleDownload(file)}
-                      >
-                        Download
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        disabled={stripping !== null}
-                        onClick={() => void handleStripAudio(file)}
-                        title="Create a copy of this video without its audio track"
-                      >
-                        {stripping?.id === file.id ? `Stripping... ${stripping.pct}%` : "Strip audio"}
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => {
-                          const opening = addTarget !== file.id;
-                          setAddTarget(opening ? file.id : null);
-                          if (opening && courseUrl && modulesStatus === "idle") {
-                            void handleSelectCourse(courseUrl);
-                          }
-                        }}
-                      >
-                        Add to module
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        color="error"
-                        onClick={() => void handleDelete(file)}
-                      >
-                        {confirmDelete === file.id ? "Confirm" : "Delete"}
-                      </Button>
-                    </div>
-
-                    {expandedPlay === file.id && (
-                      <div style={{ padding: "12px 6px", borderTop: "1px solid var(--card-border)" }}>
-                        {!playUrls[file.id] ? (
-                          <span className={styles.ccHint}>Loading video...</span>
-                        ) : (
-                          <video
-                            controls
-                            src={playUrls[file.id]}
-                            style={{
-                              maxWidth: "100%",
-                              borderRadius: 8,
-                              background: "#0f172a",
-                            }}
-                          />
-                        )}
-                      </div>
-                    )}
-
-                    {addTarget === file.id && (
-                      <div className={styles.adaptPanel} style={{ marginTop: 8, margin: "8px 6px 0" }}>
-                        {!activeInstitution ? (
-                          <div className={styles.fieldHint}>
-                            Pick an institution in the top bar first.
-                          </div>
-                        ) : (
-                          <>
-                            <CoursePicker
-                              activeInstitution={activeInstitution}
-                              courseUrl={courseUrl}
-                              onSelect={handleSelectCourse}
-                              courseName={courseName}
-                            />
-
-                            {courseUrl && (
-                              <>
-                                <TextField
-                                  select
-                                  value={moduleId}
-                                  onChange={(e) => setModuleId(e.target.value === "" ? "" : Number(e.target.value))}
-                                  placeholder="Choose a module..."
-                                  size="small"
-                                  sx={{ minWidth: 220, marginTop: 1 }}
-                                  disabled={modulesStatus !== "ready"}
-                                >
-                                  {modulesStatus === "ready" && modules.length === 0 ? (
-                                    <MenuItem value="">No modules found</MenuItem>
-                                  ) : (
-                                    <>
-                                      <MenuItem value="">Choose a module...</MenuItem>
-                                      {modules.map((m) => (
-                                        <MenuItem key={m.id} value={m.id}>
-                                          {m.name}
-                                        </MenuItem>
-                                      ))}
-                                    </>
-                                  )}
-                                </TextField>
-
-                                <Button
-                                  variant="contained"
-                                  size="small"
-                                  onClick={() => void handleAddToModule(file)}
-                                  disabled={adding || moduleId === ""}
-                                  sx={{ marginTop: 1 }}
-                                >
-                                  {adding ? "Adding..." : "Add"}
-                                </Button>
-                              </>
-                            )}
-
-                            {addNote && (
-                              <div
-                                className={
-                                  addNote.kind === "error"
-                                    ? styles.error
-                                    : styles.fieldHint
-                                }
-                                style={{ marginTop: 8 }}
-                              >
-                                {addNote.text}
-                              </div>
-                            )}
-
-                            <Button
-                              variant="text"
-                              size="small"
-                              onClick={() => {
-                                setAddTarget(null);
-                                setAddNote(null);
-                              }}
-                              sx={{ marginTop: 1 }}
-                            >
-                              Close
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
+            <div className={styles.libTable}>
+              <div className={styles.libHead}>
+                <div style={{ display: "flex", alignItems: "center" }}>
+                  <Checkbox size="small" checked={allShownSelected} onChange={toggleSelectAll} disabled={shown.length === 0} />
+                </div>
+                <div>Kind</div>
+                <div>Name</div>
+                <div>Length</div>
+                <div>Size</div>
+                <div>Added</div>
+                <div>Actions</div>
               </div>
+
+              {shown.length === 0 ? (
+                <div style={{ padding: "12px", textAlign: "center", color: "var(--text-secondary)" }}>
+                  No videos match your search.
+                </div>
+              ) : (
+                shown.map((file) => {
+                  const displayKind = getDisplayKind(file);
+                  const isAudio = file.mimeType.startsWith("audio/");
+                  return (
+                    <div key={file.id}>
+                      <div className={styles.libRow}>
+                        <div>
+                          <Checkbox
+                            size="small"
+                            checked={selected.has(file.id)}
+                            onChange={() => setSelected((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(file.id)) next.delete(file.id);
+                              else next.add(file.id);
+                              return next;
+                            })}
+                            aria-label={`Select ${file.name}`}
+                          />
+                        </div>
+                        <div className={styles.libKindCell}>
+                          <span className={`${styles.ghBadge} ${displayKind.badgeClass}`}>
+                            {displayKind.label}
+                          </span>
+                        </div>
+                        <div>
+                          <TextField
+                            size="small"
+                            type="text"
+                            title={file.name}
+                            value={nameDrafts[file.id] ?? file.name}
+                            onChange={(e) => setNameDrafts((prev) => ({ ...prev, [file.id]: e.target.value }))}
+                            onBlur={() => void saveRename(file)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                            }}
+                            sx={{ width: "100%" }}
+                          />
+                        </div>
+                        <div className={styles.libNum}>{fmt(file.durationSec)}</div>
+                        <div className={styles.libNum}>{formatBytes(file.sizeBytes)} MB</div>
+                        <div className={styles.libNum}>
+                          {new Date(file.createdAt).toLocaleDateString()} {new Date(file.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                        <div className={styles.libActions}>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => {
+                              const opening = expandedPlay !== file.id;
+                              setExpandedPlay(opening ? file.id : null);
+                              if (opening && !playUrls[file.id]) {
+                                void (async () => {
+                                  try {
+                                    const url = await getRecordingFileUrl(supabase, file);
+                                    setPlayUrls((prev) => ({ ...prev, [file.id]: url }));
+                                  } catch (err) {
+                                    setNote({
+                                      kind: "error",
+                                      text: err instanceof Error ? err.message : "Failed to load video",
+                                    });
+                                  }
+                                })();
+                              }
+                            }}
+                          >
+                            {expandedPlay === file.id ? "Close" : "Play"}
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => void handleDownload(file)}
+                          >
+                            Download
+                          </Button>
+                          {!isAudio && (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              disabled={stripping !== null}
+                              onClick={() => void handleStripAudio(file)}
+                              title="Create a copy of this video without its audio track"
+                            >
+                              {stripping?.id === file.id ? `Stripping... ${stripping.pct}%` : "Strip audio"}
+                            </Button>
+                          )}
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => {
+                              const opening = addTarget !== file.id;
+                              setAddTarget(opening ? file.id : null);
+                              if (opening && courseUrl && modulesStatus === "idle") {
+                                void handleSelectCourse(courseUrl);
+                              }
+                            }}
+                          >
+                            Add to module
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color="error"
+                            onClick={() => void handleDelete(file)}
+                          >
+                            {confirmDelete === file.id ? "Confirm" : "Delete"}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {expandedPlay === file.id && (
+                        <div className={styles.libExpand}>
+                          {!playUrls[file.id] ? (
+                            <span className={styles.ccHint}>Loading...</span>
+                          ) : isAudio ? (
+                            <audio
+                              controls
+                              src={playUrls[file.id]}
+                              style={{
+                                width: "100%",
+                                maxWidth: "400px",
+                              }}
+                            />
+                          ) : (
+                            <video
+                              controls
+                              src={playUrls[file.id]}
+                              style={{
+                                maxWidth: "100%",
+                                borderRadius: 8,
+                                background: "#0f172a",
+                              }}
+                            />
+                          )}
+                        </div>
+                      )}
+
+                      {addTarget === file.id && (
+                        <div className={styles.libExpand}>
+                          {!activeInstitution ? (
+                            <div className={styles.fieldHint}>
+                              Pick an institution in the top bar first.
+                            </div>
+                          ) : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                              <CoursePicker
+                                activeInstitution={activeInstitution}
+                                courseUrl={courseUrl}
+                                onSelect={handleSelectCourse}
+                                courseName={courseName}
+                              />
+
+                              {courseUrl && (
+                                <>
+                                  <TextField
+                                    select
+                                    value={moduleId}
+                                    onChange={(e) => setModuleId(e.target.value === "" ? "" : Number(e.target.value))}
+                                    placeholder="Choose a module..."
+                                    size="small"
+                                    sx={{ minWidth: 220 }}
+                                    disabled={modulesStatus !== "ready"}
+                                  >
+                                    {modulesStatus === "ready" && modules.length === 0 ? (
+                                      <MenuItem value="">No modules found</MenuItem>
+                                    ) : (
+                                      <>
+                                        <MenuItem value="">Choose a module...</MenuItem>
+                                        {modules.map((m) => (
+                                          <MenuItem key={m.id} value={m.id}>
+                                            {m.name}
+                                          </MenuItem>
+                                        ))}
+                                      </>
+                                    )}
+                                  </TextField>
+
+                                  <div style={{ display: "flex", gap: 8 }}>
+                                    <Button
+                                      variant="contained"
+                                      size="small"
+                                      onClick={() => void handleAddToModule(file)}
+                                      disabled={adding || moduleId === ""}
+                                    >
+                                      {adding ? "Adding..." : "Add"}
+                                    </Button>
+                                    <Button
+                                      variant="outlined"
+                                      size="small"
+                                      onClick={() => {
+                                        setAddTarget(null);
+                                        setAddNote(null);
+                                      }}
+                                      disabled={adding}
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                </>
+                              )}
+
+                              {addNote && (
+                                <div
+                                  className={
+                                    addNote.kind === "error"
+                                      ? styles.error
+                                      : styles.fieldHint
+                                  }
+                                >
+                                  {addNote.text}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           )}
         </>

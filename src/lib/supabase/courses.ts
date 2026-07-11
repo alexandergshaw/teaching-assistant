@@ -39,6 +39,9 @@ export interface Course {
   topics: string | null;
   csvName: string | null;
   csvData: string | null;
+  materialsZipName: string | null;
+  materialsZipPath: string | null;
+  materialsZipSize: number | null;
   updatedAt: string;
 }
 
@@ -62,7 +65,7 @@ export interface CourseInput {
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, materials_zip_name, materials_zip_path, materials_zip_size, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -89,6 +92,9 @@ interface CourseRow {
   topics: string | null;
   csv_name: string | null;
   csv_data: string | null;
+  materials_zip_name: string | null;
+  materials_zip_path: string | null;
+  materials_zip_size: number | null;
   updated_at: string;
 }
 
@@ -110,6 +116,9 @@ function toCourse(r: CourseRow): Course {
     topics: r.topics,
     csvName: r.csv_name,
     csvData: r.csv_data,
+    materialsZipName: r.materials_zip_name,
+    materialsZipPath: r.materials_zip_path,
+    materialsZipSize: r.materials_zip_size,
     updatedAt: r.updated_at,
   };
 }
@@ -143,6 +152,9 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     topics: clean(input.topics),
     csv_name: clean(input.csvName),
     csv_data: clean(input.csvData),
+    materials_zip_name: null,
+    materials_zip_path: null,
+    materials_zip_size: null,
     updated_at: new Date().toISOString(),
   };
 }
@@ -190,5 +202,29 @@ export async function deleteCourse(userId: string, id: string): Promise<void> {
   const { error } = await table().delete().eq("user_id", userId).eq("id", id);
   if (error) {
     throw new Error(`Could not delete the course: ${error.message}`);
+  }
+}
+
+/** Update a course's materials zip metadata. */
+export async function updateCourseMaterials(
+  userId: string,
+  id: string,
+  fields: {
+    materialsZipName: string | null;
+    materialsZipPath: string | null;
+    materialsZipSize: number | null;
+  }
+): Promise<void> {
+  const { error } = await table()
+    .update({
+      materials_zip_name: fields.materialsZipName,
+      materials_zip_path: fields.materialsZipPath,
+      materials_zip_size: fields.materialsZipSize,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) {
+    throw new Error(`Could not update the course materials: ${error.message}`);
   }
 }

@@ -110,3 +110,102 @@ export async function stripAudio(source: Blob, onProgress?: (pct: number) => voi
     v.removeAttribute("src");
   }
 }
+
+export async function extractAudioOnly(source: Blob, onProgress?: (pct: number) => void): Promise<Blob> {
+  const url = URL.createObjectURL(source);
+  const v = document.createElement("video");
+  v.playsInline = true;
+  v.preload = "auto";
+  v.muted = false;
+  v.src = url;
+
+  try {
+    // Wait for metadata to be available
+    await new Promise<void>((resolve, reject) => {
+      if (v.readyState >= 1) {
+        resolve();
+        return;
+      }
+      const onLoaded = () => {
+        v.removeEventListener("loadedmetadata", onLoaded);
+        v.removeEventListener("error", onError);
+        resolve();
+      };
+      const onError = () => {
+        v.removeEventListener("loadedmetadata", onLoaded);
+        v.removeEventListener("error", onError);
+        reject(new Error("Failed to load video metadata"));
+      };
+      v.addEventListener("loadedmetadata", onLoaded);
+      v.addEventListener("error", onError);
+    });
+
+    const dur = await ensureFiniteDuration(v);
+
+    // Determine MIME type for the recorder
+    const mimeTypeCandidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+    let mimeType = "";
+    for (const candidate of mimeTypeCandidates) {
+      if (MediaRecorder.isTypeSupported(candidate)) {
+        mimeType = candidate;
+        break;
+      }
+    }
+
+    const chunks: Blob[] = [];
+    const audioCtx = new (window.AudioContext || (window as unknown as Record<string, unknown>).webkitAudioContext as typeof AudioContext)();
+    const source_ = audioCtx.createMediaElementSource(v);
+    const dest = audioCtx.createMediaStreamDestination();
+    source_.connect(dest);
+    const rec = new MediaRecorder(dest.stream, { mimeType });
+
+    rec.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        chunks.push(e.data);
+      }
+    };
+
+    let lastReportedPct = 0;
+
+    // Start recording
+    rec.start(1000);
+
+    // Play the video
+    try {
+      await v.play();
+    } catch (err) {
+      rec.stop();
+      audioCtx.close();
+      throw new Error(`Failed to play video: ${err instanceof Error ? err.message : "Unknown error"}`);
+    }
+
+    // Progress tracking loop
+    const progressInterval = setInterval(() => {
+      if (onProgress) {
+        const pct = Math.min(100, Math.round((v.currentTime / dur) * 100));
+        if (pct !== lastReportedPct) {
+          lastReportedPct = pct;
+          onProgress(pct);
+        }
+      }
+      if (v.ended) {
+        clearInterval(progressInterval);
+        rec.stop();
+      }
+    }, 100);
+
+    // Wait for recorder to stop
+    await new Promise<void>((resolve) => {
+      rec.onstop = () => resolve();
+    });
+
+    // Build output blob
+    const out = new Blob(chunks, { type: rec.mimeType || mimeType || "audio/webm" });
+
+    audioCtx.close();
+    return out;
+  } finally {
+    URL.revokeObjectURL(url);
+    v.removeAttribute("src");
+  }
+}

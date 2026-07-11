@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createCopilotTaskAction, listPullRequestsAction, mergePullRequestAction, markPullRequestReadyAction, listCopilotTasksAction } from "../actions";
 import type { PullRequestInfo, CopilotTask } from "@/lib/github";
 import Button from "@mui/material/Button";
@@ -12,6 +12,7 @@ import styles from "../page.module.css";
 
 interface BulkRepoActionsPanelProps {
   repos: string[];
+  active?: boolean;
 }
 
 type CopilotRow = { repo: string; status: "pending" | "done" | "failed" | "skipped"; detail?: string };
@@ -23,7 +24,7 @@ type PrMatch = {
   mergeError?: string;
 };
 
-export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProps) {
+export default function BulkRepoActionsPanel({ repos, active = true }: BulkRepoActionsPanelProps) {
   // Section 1: Repo Selection
   const [filterText, setFilterText] = useState(() =>
     typeof window !== "undefined" ? localStorage.getItem("ta-vc-bulk-filter") ?? "" : ""
@@ -179,9 +180,13 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
   const [agentStatus, setAgentStatus] = useState<Record<string, CopilotTask[]>>({});
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const [agentChecking, setAgentChecking] = useState(false);
+  const [lastRunManual, setLastRunManual] = useState(false);
   const agentCancelRef = useRef(false);
+  const autoPopulatedRef = useRef(false);
 
-  const handleCheckAgentStatus = async () => {
+  const runAgentCheck = useCallback(async (manual = false) => {
+    if (agentChecking) return;
+
     const reposToCheck = new Set<string>([
       ...selectedRepos,
       ...copilotRows.map((r) => r.repo),
@@ -189,6 +194,7 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
     if (reposToCheck.size === 0) return;
 
     setAgentChecking(true);
+    setLastRunManual(manual);
     agentCancelRef.current = false;
     const newStatus: Record<string, CopilotTask[]> = {};
 
@@ -206,11 +212,64 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
     setAgentStatus(newStatus);
     setCheckedAt(Date.now());
     setAgentChecking(false);
+  }, [selectedRepos, copilotRows, agentChecking]);
+
+  const handleCheckAgentStatus = async () => {
+    await runAgentCheck(true);
   };
 
   const handleCancelAgentCheck = () => {
     agentCancelRef.current = true;
   };
+
+  // Auto-populate agent status once when panel becomes active with non-empty repos.
+  // Deliberately keyed on sizes (not the collections) so per-item churn during a
+  // run cannot re-trigger it; the ref guards the once-per-activation semantics.
+  useEffect(() => {
+    if (!active || agentChecking) return;
+
+    const reposToCheck = new Set<string>([
+      ...selectedRepos,
+      ...copilotRows.map((r) => r.repo),
+    ]);
+
+    if (reposToCheck.size === 0 || Object.keys(agentStatus).length > 0) return;
+
+    if (!autoPopulatedRef.current) {
+      autoPopulatedRef.current = true;
+      runAgentCheck(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, selectedRepos.size, copilotRows.length, agentStatus, agentChecking, runAgentCheck]);
+
+  // Re-arm auto-population when active flips to false
+  useEffect(() => {
+    if (!active) {
+      autoPopulatedRef.current = false;
+    }
+  }, [active]);
+
+  // Refresh agent status after copilot tasks complete (when copilotRunning becomes false after being true)
+  const prevCopilotRunningRef = useRef(copilotRunning);
+  useEffect(() => {
+    if (prevCopilotRunningRef.current && !copilotRunning && copilotRows.some((r) => r.status === "done")) {
+      runAgentCheck(false);
+    }
+    prevCopilotRunningRef.current = copilotRunning;
+  }, [copilotRunning, copilotRows, runAgentCheck]);
+
+  // Periodic refresh every 90 seconds while active; agents change state on GitHub over minutes
+  useEffect(() => {
+    if (!active) return;
+
+    const interval = setInterval(() => {
+      if (!agentChecking) {
+        runAgentCheck(false);
+      }
+    }, 90000);
+
+    return () => clearInterval(interval);
+  }, [active, agentChecking, runAgentCheck]);
 
   // Section 3: Merge Pull Requests
   const [prTitleFilter, setPrTitleFilter] = useState(() =>
@@ -635,7 +694,7 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
               }
               onClick={handleCheckAgentStatus}
             >
-              Check agent status
+              {Object.keys(agentStatus).length > 0 ? "Refresh now" : "Check agent status"}
             </Button>
             {agentChecking && (
               <Button type="button" variant="outlined" size="small" color="error" onClick={handleCancelAgentCheck}>
@@ -646,7 +705,7 @@ export default function BulkRepoActionsPanel({ repos }: BulkRepoActionsPanelProp
 
           {checkedAt !== null && (
             <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: 8 }}>
-              Checked at {new Date(checkedAt).toLocaleString()}
+              Checked at {new Date(checkedAt).toLocaleString()}{!lastRunManual && " (auto)"}
             </p>
           )}
 

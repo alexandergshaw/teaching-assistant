@@ -9,6 +9,18 @@ import { listRecordingFiles, downloadRecordingFile, saveRecordingFile, extForMim
 import { extractVideoFrames, renderNarratedVideo, type NarrationClip } from "@/lib/narrate-video";
 import styles from "../page.module.css";
 
+const VOICE_SAMPLE_SCRIPT = `Hello, and welcome to today's session. This is a sample of my natural speaking voice, recorded so it can be cloned for course narration.
+
+When I teach, I try to keep things simple: one idea at a time, explained clearly, with room to breathe. Some sentences are short. Others stretch a little longer, winding through an example or two before they land, because that is how real explanations sound.
+
+Let's try some variety. How do computers store information? Why does a loop repeat, and when should it stop? Questions like these lift my tone at the end, while statements settle back down.
+
+Here are a few specifics: on March 3rd, 2026, at 9:45 in the morning, exactly 127 students submitted assignment number 6. About 83 percent passed on the first try - a strong result, though not a perfect one.
+
+Now for texture: the quick brown fox jumps over the lazy dog, while five jazzy wizards begin to quickly vex the judge. Think of thirty-three thankful thoughts, and measure the pleasure of a treasured vision.
+
+Finally, a calm close. Thank you for listening carefully. Take a breath, review your notes, and remember: steady practice beats last-minute cramming every single time.`;
+
 type BusyState = "idle" | "extracting" | "narrating";
 
 interface NarrationSegment {
@@ -114,6 +126,13 @@ export default function SlideStudio() {
   const [cloneBusy, setCloneBusy] = useState(false);
   const [cloneError, setCloneError] = useState<string | null>(null);
   const [cloneNote, setCloneNote] = useState<string | null>(null);
+  const [sampleRecState, setSampleRecState] = useState<"idle" | "recording">("idle");
+  const [sampleUrl, setSampleUrl] = useState<string | null>(null);
+  const [sampleBlob, setSampleBlob] = useState<Blob | null>(null);
+  const [sampleElapsed, setSampleElapsed] = useState(0);
+  const sampleRecRef = useRef<MediaRecorder | null>(null);
+  const sampleStreamRef = useRef<MediaStream | null>(null);
+  const sampleIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cancelledRef = useRef(false);
   const avatarPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cloneFileRef = useRef<HTMLInputElement>(null);
@@ -192,6 +211,27 @@ export default function SlideStudio() {
       if (avatarPollRef.current) clearInterval(avatarPollRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (sampleRecRef.current) {
+        try {
+          sampleRecRef.current.stop();
+        } catch {
+          // recorder already stopped
+        }
+      }
+      if (sampleStreamRef.current) {
+        sampleStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
+      if (sampleIntervalRef.current) {
+        clearInterval(sampleIntervalRef.current);
+      }
+      if (sampleUrl) {
+        URL.revokeObjectURL(sampleUrl);
+      }
+    };
+  }, [sampleUrl]);
 
   useEffect(() => {
     stitchUrlRef.current = stitchUrl;
@@ -445,6 +485,120 @@ export default function SlideStudio() {
       setCloneBusy(false);
     }
   };
+
+  const handleStartRecording = useCallback(async () => {
+    setCloneError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          noiseSuppression: true,
+          echoCancellation: true,
+          autoGainControl: true,
+        },
+      });
+      sampleStreamRef.current = stream;
+
+      const mimeType = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4",
+      ].find((type) => MediaRecorder.isTypeSupported(type));
+
+      if (!mimeType) {
+        setCloneError("Audio recording not supported in this browser.");
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      sampleRecRef.current = recorder;
+      setSampleRecState("recording");
+      setSampleElapsed(0);
+
+      sampleIntervalRef.current = setInterval(() => {
+        setSampleElapsed((prev) => prev + 1);
+      }, 1000);
+
+      recorder.onstop = () => {
+        if (sampleIntervalRef.current) {
+          clearInterval(sampleIntervalRef.current);
+          sampleIntervalRef.current = null;
+        }
+        stream.getTracks().forEach((t) => t.stop());
+        sampleStreamRef.current = null;
+      };
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          const blob = new Blob([e.data], { type: mimeType });
+          setSampleBlob(blob);
+          setSampleUrl(URL.createObjectURL(blob));
+        }
+      };
+
+      recorder.start();
+    } catch (err) {
+      setCloneError(err instanceof Error ? err.message : "Could not access microphone.");
+      setSampleRecState("idle");
+    }
+  }, []);
+
+  const handleStopRecording = useCallback(() => {
+    if (sampleRecRef.current && sampleRecState === "recording") {
+      sampleRecRef.current.stop();
+      setSampleRecState("idle");
+    }
+  }, [sampleRecState]);
+
+  const handleDiscardSample = useCallback(() => {
+    if (sampleUrl) {
+      URL.revokeObjectURL(sampleUrl);
+    }
+    setSampleUrl(null);
+    setSampleBlob(null);
+    setSampleElapsed(0);
+  }, [sampleUrl]);
+
+  const handleCreateCloneFromSample = useCallback(async () => {
+    if (!sampleBlob || !cloneName.trim()) return;
+    if (sampleBlob.size > 6.5 * 1024 * 1024) {
+      setCloneError("The sample is too large - keep it under about 90 seconds.");
+      return;
+    }
+    setCloneBusy(true);
+    setCloneError(null);
+    setCloneNote(null);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const rd = new FileReader();
+        rd.onload = () => {
+          const result = rd.result as string;
+          resolve(result.split(",")[1] ?? "");
+        };
+        rd.onerror = reject;
+        rd.readAsDataURL(sampleBlob);
+      });
+      const r = await createVoiceCloneAction(cloneName.trim(), [
+        {
+          base64,
+          mimeType: sampleBlob.type || "audio/webm",
+          fileName: "voice-sample.webm",
+        },
+      ]);
+      if ("error" in r) {
+        setCloneError(r.error);
+        return;
+      }
+      setCloneVoiceId(r.voiceId);
+      if (typeof window !== "undefined") localStorage.setItem("ta-voice-id", r.voiceId);
+      setCloneNote(`Voice created. All audio generation now uses "${cloneName.trim()}".`);
+      handleDiscardSample();
+    } catch (err) {
+      setCloneError(err instanceof Error ? err.message : "Could not create voice clone.");
+    } finally {
+      setCloneBusy(false);
+    }
+  }, [sampleBlob, cloneName, handleDiscardSample]);
 
   // Video mode handlers
   const adoptVideo = useCallback(
@@ -1131,6 +1285,101 @@ export default function SlideStudio() {
       )}
 
       <details className={styles.adaptDisclosure} style={{ marginTop: 4 }}>
+        <summary>Record a voice sample</summary>
+        <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div>
+              <h4 className={styles.fieldHint} style={{ marginBottom: 8, marginTop: 0 }}>1. Read</h4>
+              <p className={styles.fieldHint} style={{ marginBottom: 8, marginTop: 0 }}>Quiet room, mic at a constant distance, natural teaching pace - about 90 seconds.</p>
+              <div
+                style={{
+                  padding: "14px 18px",
+                  borderRadius: 12,
+                  backgroundColor: "color-mix(in srgb, var(--field-border) 18%, transparent)",
+                  whiteSpace: "pre-wrap",
+                  lineHeight: 1.6,
+                  fontSize: "0.95rem",
+                  marginBottom: 8,
+                }}
+              >
+                {VOICE_SAMPLE_SCRIPT}
+              </div>
+              <Button
+                variant="text"
+                size="small"
+                onClick={() => {
+                  navigator.clipboard.writeText(VOICE_SAMPLE_SCRIPT);
+                }}
+              >
+                Copy text
+              </Button>
+            </div>
+
+            <div>
+              <h4 className={styles.fieldHint} style={{ marginBottom: 8, marginTop: 0 }}>2. Record</h4>
+              {sampleRecState === "idle" ? (
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={() => void handleStartRecording()}
+                  disabled={!voiceReady}
+                >
+                  Start recording
+                </Button>
+              ) : (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span className={styles.navBadge}>REC</span>
+                    <span className={styles.ghMeta}>
+                      {Math.floor(sampleElapsed / 60)}:{String(sampleElapsed % 60).padStart(2, "0")}
+                    </span>
+                  </div>
+                  <Button variant="outlined" size="small" onClick={handleStopRecording}>
+                    Stop recording
+                  </Button>
+                </div>
+              )}
+              {sampleUrl && (
+                <>
+                  <audio controls src={sampleUrl} style={{ width: "100%", marginBottom: 8 }} />
+                  <Button variant="text" size="small" onClick={handleDiscardSample}>
+                    Discard
+                  </Button>
+                </>
+              )}
+            </div>
+
+            {sampleBlob && (
+              <div>
+                <h4 className={styles.fieldHint} style={{ marginBottom: 8, marginTop: 0 }}>3. Create the clone</h4>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                  <TextField
+                    size="small"
+                    label="Voice name"
+                    value={cloneName}
+                    onChange={(e) => setCloneName(e.target.value)}
+                    sx={{ flex: "1 1 180px" }}
+                    disabled={cloneBusy || !voiceReady}
+                  />
+                  <Button
+                    variant="contained"
+                    size="small"
+                    disabled={!sampleBlob || cloneBusy || !cloneName.trim() || !voiceReady}
+                    onClick={() => void handleCreateCloneFromSample()}
+                  >
+                    {cloneBusy ? "Creating..." : "Create voice clone"}
+                  </Button>
+                </div>
+                {!voiceReady && <p className={styles.fieldHint} style={{ margin: 0 }}>Requires ELEVENLABS_API_KEY.</p>}
+                {cloneError && <p className={styles.error}>{cloneError}</p>}
+                {cloneNote && <p className={styles.fieldHint}>{cloneNote}</p>}
+              </div>
+            )}
+          </div>
+        </div>
+      </details>
+
+      <details className={styles.adaptDisclosure} style={{ marginTop: 4 }}>
         <summary>My voice clone</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
           {cloneVoiceId ? (
@@ -1140,7 +1389,7 @@ export default function SlideStudio() {
             </p>
           ) : (
             <p className={styles.fieldHint} style={{ margin: 0 }}>
-              Record one to three minutes of clean speech (the recorder above works - download a take), then create your clone. Audio generation switches to your voice automatically.
+              Or upload existing audio files:
             </p>
           )}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>

@@ -14,6 +14,7 @@ import {
   Button,
   IconButton,
   TextField,
+  Autocomplete,
 } from "@mui/material";
 
 type PreviewTab = "intro" | "slides" | "assignment" | "rubric" | "examples";
@@ -37,6 +38,10 @@ type LessonPlanPreviewProps = {
   onSaveField: (key: string, draft: string) => void;
   onRegenerate: (revisionPrompt: string) => Promise<boolean>;
   onDownload: () => Promise<void>;
+  attachCourses?: Array<{ id: string; name: string }> | null;
+  attachBusy?: boolean;
+  attachNote?: { kind: "success" | "error"; text: string } | null;
+  onAttach?: (courseId: string) => void;
   icons: LessonPlanPreviewIcons;
 };
 
@@ -52,6 +57,10 @@ export default function LessonPlanPreview({
   onSaveField,
   onRegenerate,
   onDownload,
+  attachCourses,
+  attachBusy,
+  attachNote,
+  onAttach,
   icons,
 }: LessonPlanPreviewProps) {
   const { CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon } = icons;
@@ -63,6 +72,7 @@ export default function LessonPlanPreview({
   const [lockedLessonFields, setLockedLessonFields] = useState<Set<string>>(
     new Set()
   );
+  const [selectedCourse, setSelectedCourse] = useState<{ id: string; name: string } | null>(null);
 
   const startEditLessonField = (key: string, value: string) => {
     setEditingLessonField(key);
@@ -1291,20 +1301,57 @@ export default function LessonPlanPreview({
         </div>
 
         <div className={styles.lessonPreviewFooter}>
-          <Button
-            variant="contained"
-            size="small"
-            onClick={onDownload}
-          >
-            Download ZIP
-          </Button>
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={onClose}
-          >
-            Close
-          </Button>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <Button
+              variant="contained"
+              size="small"
+              onClick={onDownload}
+            >
+              Download ZIP
+            </Button>
+            {onAttach && attachCourses && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <Autocomplete
+                  options={attachCourses ?? []}
+                  value={selectedCourse}
+                  onChange={(_, newValue) => setSelectedCourse(newValue)}
+                  getOptionLabel={(option) => option.name}
+                  isOptionEqualToValue={(option, value) => option.id === value?.id}
+                  size="small"
+                  sx={{ width: 200 }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      placeholder={attachCourses === null ? "Loading…" : "Attach to course…"}
+                      disabled={attachCourses === null || attachBusy}
+                    />
+                  )}
+                />
+                <Button
+                  variant="contained"
+                  size="small"
+                  disabled={!selectedCourse || attachBusy}
+                  onClick={() => {
+                    if (selectedCourse) onAttach(selectedCourse.id);
+                  }}
+                >
+                  {attachBusy ? "Attaching…" : "Attach zip"}
+                </Button>
+              </div>
+            )}
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={onClose}
+            >
+              Close
+            </Button>
+          </div>
+          {attachNote && (
+            <p style={{ margin: "8px 0 0 0", fontSize: "0.875rem", color: attachNote.kind === "error" ? "var(--danger)" : "var(--success)" }}>
+              {attachNote.text}
+            </p>
+          )}
         </div>
       </section>
     </div>

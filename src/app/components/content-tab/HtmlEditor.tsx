@@ -22,9 +22,12 @@ export function HtmlEditor({
   ariaLabel?: string;
 }) {
   const editableRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isSourceMode, setIsSourceMode] = useState(false);
-  const lastHtmlRef = useRef<string>(value);
+  // Starts empty (not `value`) so the first effect pass seeds an initially
+  // non-empty value into the editable. React must never render the HTML as a
+  // child of the contentEditable: text children get escaped, painting literal
+  // tags, and React would fight the user's imperative edits on every render.
+  const lastHtmlRef = useRef<string>("");
 
   // Seed the contentEditable when the incoming value differs from what we last emitted.
   // Only update if not focused to prevent caret jumps.
@@ -54,18 +57,12 @@ export function HtmlEditor({
     emitChange(e.target.value);
   };
 
-  // When switching to source mode, seed the textarea with the current HTML.
-  useEffect(() => {
-    if (isSourceMode && textareaRef.current) {
-      textareaRef.current.value = editableRef.current?.innerHTML ?? value;
-    }
-  }, [isSourceMode, value]);
-
-  // When switching back to visual mode, update the editable from the textarea.
+  // The source textarea is controlled by `value`, so entering source mode
+  // needs no seeding. Leaving it, the visual editable mounts empty - force the
+  // seeding effect to repopulate it by clearing the last-emitted marker.
   const handleToggleSourceMode = () => {
-    if (isSourceMode && textareaRef.current && editableRef.current) {
-      editableRef.current.innerHTML = textareaRef.current.value;
-      lastHtmlRef.current = textareaRef.current.value;
+    if (isSourceMode) {
+      lastHtmlRef.current = "";
     }
     setIsSourceMode(!isSourceMode);
   };
@@ -160,8 +157,11 @@ export function HtmlEditor({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {!isSourceMode && (
-        <div className={styles.rteToolbar} role="toolbar" aria-label="Text formatting">
+      {/* The toolbar always renders so the HTML toggle can exit source mode;
+          only the formatting controls are hidden while viewing source. */}
+      <div className={styles.rteToolbar} role="toolbar" aria-label="Text formatting">
+        {!isSourceMode && (
+        <>
           <select
             className={styles.rteSizeSelect}
             onChange={handleBlockFormat}
@@ -258,16 +258,16 @@ export function HtmlEditor({
 
           {toolbarBtn("---", "Horizontal rule", () => execCmd("insertHorizontalRule"))}
           {toolbarBtn("Clear", "Clear formatting", () => execCmd("removeFormat"))}
+        </>
+        )}
 
-          <span style={{ flex: 1 }} />
+        <span style={{ flex: 1 }} />
 
-          {toolbarBtn("HTML", "Toggle source mode", handleToggleSourceMode)}
-        </div>
-      )}
+        {toolbarBtn(isSourceMode ? "Visual" : "HTML", isSourceMode ? "Back to the visual editor" : "Edit the raw HTML", handleToggleSourceMode)}
+      </div>
 
       {isSourceMode ? (
         <textarea
-          ref={textareaRef}
           value={value}
           onChange={handleSourceChange}
           style={{
@@ -308,9 +308,7 @@ export function HtmlEditor({
           aria-label={ariaLabel}
           role="textbox"
           aria-multiline="true"
-        >
-          {value}
-        </div>
+        />
       )}
 
       <style>{`

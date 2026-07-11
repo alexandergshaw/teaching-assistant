@@ -5207,3 +5207,96 @@ button.courseResourceValue:disabled {
   flex-direction: column;
   gap: 6px;
 }
+
+/* ── Responsive modules view: narrower viewports ──────────────────────────────
+   At 1100px: toolbars wrap; at 800px: metadata and type badges auto-size. */
+
+@media (max-width: 1100px) {
+  .ccBar {
+    row-gap: 12px;
+  }
+
+  .bulkRow {
+    row-gap: 10px;
+  }
+
+  .ccBarGroup {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .ccItem {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .ccItemActions {
+    flex-basis: 100%;
+    margin-top: 4px;
+  }
+}
+
+@media (max-width: 800px) {
+  .ccBar {
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .ccBarGroup {
+    flex-wrap: wrap;
+    width: 100%;
+    row-gap: 8px;
+  }
+
+  .ccBarDivider {
+    display: none;
+  }
+
+  .ccBarLabel {
+    width: 100%;
+    margin-bottom: 4px;
+    order: -1;
+  }
+
+  .bulkRow {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .bulkLabel {
+    flex: 0 0 auto;
+  }
+
+  .ccType {
+    width: auto;
+    min-width: 60px;
+  }
+
+  .ccCount {
+    width: auto;
+  }
+
+  .ccItem {
+    flex-wrap: wrap;
+  }
+
+  .ccItemName {
+    flex: 1 1 0;
+    min-width: 50px;
+  }
+
+  .ccItemActions {
+    flex-basis: 100%;
+    margin-top: 6px;
+  }
+
+  .ccStickyHeader {
+    top: var(--topbar-height, 64px);
+  }
+
+  .ccHeaderTop {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

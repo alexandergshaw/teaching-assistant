@@ -3067,6 +3067,83 @@ export async function generateVideoNarrationAction(
 }
 
 /**
+ * Extract an ordered list of course topics from a repository's file tree, README,
+ * and package.json. Used to prefill the Topics field for review and editing.
+ */
+export async function extractTopicsFromRepoAction(
+  repoRef: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ topics: string[] } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+
+    // Gather repo context: tree, README, and package.json (each with graceful fallback).
+    let tree = "";
+    try {
+      const treeData = await getRepoTree(parsed.owner, parsed.repo);
+      const blobs = treeData.filter((e) => e.type === "blob").map((e) => e.path);
+      tree = blobs.slice(0, 400).join("\n");
+    } catch {
+      // If tree fetch fails, that's okay; we'll try other sources.
+    }
+
+    let readmeContent = "";
+    try {
+      readmeContent = await getFileText(parsed.owner, parsed.repo, "README.md");
+    } catch {
+      // Try lowercase fallback.
+      try {
+        readmeContent = await getFileText(parsed.owner, parsed.repo, "readme.md");
+      } catch {
+        // No README found; continue without it.
+      }
+    }
+    if (readmeContent.length > 6000) readmeContent = readmeContent.slice(0, 6000);
+
+    let packageJsonContent = "";
+    try {
+      packageJsonContent = await getFileText(parsed.owner, parsed.repo, "package.json");
+    } catch {
+      // package.json not present or not readable; continue without it.
+    }
+    if (packageJsonContent.length > 2000) packageJsonContent = packageJsonContent.slice(0, 2000);
+
+    // Guard: insufficient content.
+    const blobCount = tree.split("\n").filter(Boolean).length;
+    if (!readmeContent && blobCount < 3) {
+      return { error: "The repo has too little content to extract topics from." };
+    }
+
+    // Build prompt for LLM.
+    const sections: string[] = [];
+    if (tree) sections.push(`FILE TREE:\n${tree}`);
+    if (readmeContent) sections.push(`README:\n${readmeContent}`);
+    if (packageJsonContent) sections.push(`PACKAGE.JSON:\n${packageJsonContent}`);
+
+    const prompt = [
+      "You are an expert curriculum designer. Below are the file tree and README of a course-related code repository. Derive the ordered list of TOPICS a course built on this repository covers. Return ONLY a JSON array of strings, one concise topic per entry (8-30 topics), ordered from foundational to advanced. No numbering inside the strings, no markdown.",
+      "",
+      sections.join("\n\n"),
+    ].join("\n\n");
+
+    const r = await callLlm(
+      { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.5, maxOutputTokens: 2048 } },
+      provider
+    );
+    if (!r.ok) return { error: "The model returned no topics. Try again." };
+    const raw = parseLenientJsonArray(r.text) as string[] | null;
+    if (!raw) return { error: "Could not parse topics from the model output. Try extracting again." };
+    const topics = raw.filter((t) => typeof t === "string" && t.trim()).map((t) => (t as string).trim());
+    if (!topics.length) return { error: "The model produced no usable topics." };
+    return { topics };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not extract topics from the repository." };
+  }
+}
+
+/**
  * Read a former syllabus (.docx) and a codebase zip. Pass 1 identifies the
  * class-specific NON-schedule fields and the weekly-schedule block's bounds; pass
  * 2 produces a complete replacement for EVERY paragraph in that block, so the old

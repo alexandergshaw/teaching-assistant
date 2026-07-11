@@ -19,6 +19,8 @@ import {
   listMyOrgsAction,
   getCourseNotificationsAction,
   listCourseRosterAction,
+  extractTopicsFromRepoAction,
+  listGithubReposAction,
 } from "../actions";
 import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
@@ -232,6 +234,10 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [expandedCsvId, setExpandedCsvId] = useState<string | null>(null);
   const [csvRemoveConfirm, setCsvRemoveConfirm] = useState<string | null>(null);
   const [uploadingCsv, setUploadingCsv] = useState(false);
+  const [ownedRepos, setOwnedRepos] = useState<string[] | null>(null);
+  const [ownedReposLoading, setOwnedReposLoading] = useState(false);
+  const [topicsRepoSel, setTopicsRepoSel] = useState<Record<string, string>>({});
+  const [extractingTopicsId, setExtractingTopicsId] = useState<string | null>(null);
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
   const csvUploadRef = useRef<HTMLInputElement>(null);
@@ -279,6 +285,24 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     } catch {
       /* ignore malformed state */
     }
+  }, []);
+
+  // Load the user's GitHub repos once on mount for the topic extraction dropdown.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setOwnedReposLoading(true);
+      const r = await listGithubReposAction();
+      if (cancelled) return;
+      if (!("error" in r)) {
+        const sorted = r.repos.map((repo) => repo.fullName).sort();
+        setOwnedRepos(sorted);
+      }
+      setOwnedReposLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Load per-course LMS notification counts for courses that have a Canvas URL
@@ -1321,6 +1345,48 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         <PencilIcon />
                       </button>
                     </div>
+                    {!tileEdit && (
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+                        <TextField
+                          select
+                          size="small"
+                          label="Extract from repo"
+                          value={topicsRepoSel[c.id] ?? ""}
+                          onChange={(e) => setTopicsRepoSel((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                          sx={{ minWidth: 220, flex: 1 }}
+                        >
+                          <MenuItem value="">
+                            {ownedReposLoading ? "Loading repos..." : "Choose a repo..."}
+                          </MenuItem>
+                          {ownedRepos?.map((repoName) => (
+                            <MenuItem key={repoName} value={repoName}>{repoName}</MenuItem>
+                          ))}
+                        </TextField>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          disabled={!topicsRepoSel[c.id] || extractingTopicsId !== null || ownedReposLoading}
+                          onClick={async () => {
+                            setExtractingTopicsId(c.id);
+                            setError(null);
+                            const r = await extractTopicsFromRepoAction(topicsRepoSel[c.id], getStoredProvider());
+                            setExtractingTopicsId(null);
+                            if ("error" in r) {
+                              setError(r.error);
+                            } else {
+                              setTileEdit({ id: c.id, field: "topics", value: r.topics.join("\n") });
+                            }
+                          }}
+                        >
+                          {extractingTopicsId === c.id ? "Extracting..." : "Extract topics"}
+                        </Button>
+                      </div>
+                    )}
+                    {!tileEdit && (
+                      <p className={styles.fieldHint} style={{ margin: "0 0 12px 0" }}>
+                        Extracted topics load into the editor for review - press Save to keep them.
+                      </p>
+                    )}
                     {tileEdit?.id === c.id && tileEdit?.field === "topics"
                       ? tileEditor(true, "One topic per line.", "One topic per line. Used to describe what the course covers.")
                       : c.topics && c.topics.trim()

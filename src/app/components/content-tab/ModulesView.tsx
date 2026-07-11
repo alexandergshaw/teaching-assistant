@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Button, IconButton, TextField, MenuItem, Checkbox, FormControlLabel } from "@mui/material";
+import { Button, IconButton, TextField, MenuItem, Checkbox, FormControlLabel, Autocomplete } from "@mui/material";
 import {
   bulkAssociateRubricAction,
   bulkDeleteAction,
@@ -20,6 +20,7 @@ import {
   generateSlidesAction,
   getGradableAction,
   listAssignmentGroupsAction,
+  listGithubReposAction,
   listRubricsAction,
   previewFileAction,
   requestFileUploadAction,
@@ -209,6 +210,15 @@ export function ModulesView({
   const [videoPickerLoading, setVideoPickerLoading] = useState(false);
   const [videoPickerError, setVideoPickerError] = useState<string | null>(null);
   const [videoPickerBusy, setVideoPickerBusy] = useState(false);
+  // Repo link picker state: which module has the picker open, owned repos list.
+  const [repoPickerModuleId, setRepoPickerModuleId] = useState<number | null>(null);
+  const [ownedRepos, setOwnedRepos] = useState<string[] | null>(null);
+  const [repoPickerLoading, setRepoPickerLoading] = useState(false);
+  const [repoPickerError, setRepoPickerError] = useState<string | null>(null);
+  const [repoPickerBusy, setRepoPickerBusy] = useState(false);
+  // Per-module repo link: selected repo and title.
+  const [addRepoValue, setAddRepoValue] = useState<Record<number, string>>({});
+  const [addRepoTitle, setAddRepoTitle] = useState<Record<number, string>>({});
 
   // ── Bulk selection across the module tree ──────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -1762,6 +1772,7 @@ export function ModulesView({
     if (type === "SubHeader") return !!(addTitle[m.id] ?? "").trim();
     if (type === "File") return (addFileContent[m.id] ?? "").trim() !== "";
     if (type === "VideoLibrary") return false;
+    if (type === "RepoLink") return false;
     return false;
   };
 
@@ -1920,6 +1931,72 @@ export function ModulesView({
     setVideoPickerModuleId(null);
     setVideoPickerFiles(null);
     setVideoPickerError(null);
+  };
+
+  // Open the repo picker for a module, loading owned repos.
+  const openRepoPicker = async (m: CanvasModule) => {
+    setRepoPickerModuleId(m.id);
+    setOwnedRepos(null);
+    setRepoPickerError(null);
+    setRepoPickerLoading(true);
+    try {
+      const r = await listGithubReposAction();
+      if ("error" in r) {
+        setRepoPickerError(r.error);
+        setRepoPickerLoading(false);
+        return;
+      }
+      const sorted = r.repos.map((repo) => repo.fullName).sort();
+      setOwnedRepos(sorted);
+      if (sorted.length === 0) {
+        setRepoPickerError("No repositories found. Create one on GitHub.");
+      }
+    } catch (err) {
+      setRepoPickerError(err instanceof Error ? err.message : "Failed to load repositories");
+    } finally {
+      setRepoPickerLoading(false);
+    }
+  };
+
+  // Close the repo picker.
+  const closeRepoPicker = () => {
+    setRepoPickerModuleId(null);
+    setOwnedRepos(null);
+    setRepoPickerError(null);
+  };
+
+  // Add a repo link to a module.
+  const addRepoLink = async (m: CanvasModule) => {
+    const repoValue = (addRepoValue[m.id] ?? "").trim();
+    const title = (addRepoTitle[m.id] ?? "").trim() || repoValue;
+    if (!repoValue || !repoValue.match(/^[^/\s]+\/[^/\s]+$/)) {
+      setNote({ kind: "error", text: "Please enter a valid repository in owner/name format" });
+      return;
+    }
+    setRepoPickerBusy(true);
+    setNote(null);
+    try {
+      const result = await createModuleItemAction(
+        courseUrl,
+        m.id,
+        {
+          type: "ExternalUrl",
+          externalUrl: `https://github.com/${repoValue}`,
+          title,
+        },
+        acronym
+      );
+      if ("error" in result) throw new Error(result.error);
+      setNote({ kind: "success", text: `Added repo link: ${title}` });
+      setAddRepoValue((p) => ({ ...p, [m.id]: "" }));
+      setAddRepoTitle((p) => ({ ...p, [m.id]: "" }));
+      closeRepoPicker();
+      reload();
+    } catch (err) {
+      setNote({ kind: "error", text: err instanceof Error ? err.message : "Failed to add repo link" });
+    } finally {
+      setRepoPickerBusy(false);
+    }
   };
 
   // Add a video from the library to a module.
@@ -3357,6 +3434,9 @@ export function ModulesView({
                       if (t === "VideoLibrary") {
                         void openVideoPicker(m);
                       }
+                      if (t === "RepoLink") {
+                        void openRepoPicker(m);
+                      }
                     }}
                     disabled={busy}
                     aria-label="Item type"
@@ -3366,6 +3446,7 @@ export function ModulesView({
                     <MenuItem value="ExternalUrl">External URL</MenuItem>
                     <MenuItem value="SubHeader">Text header</MenuItem>
                     <MenuItem value="VideoLibrary">Video from Files library</MenuItem>
+                    <MenuItem value="RepoLink">Link to GitHub repo</MenuItem>
                   </TextField>
 
                   {addType[m.id] === "File" && (
@@ -3490,6 +3571,54 @@ export function ModulesView({
                       <Button variant="text" size="small" onClick={() => closeVideoPicker()} disabled={videoPickerBusy || busy}>
                         Cancel
                       </Button>
+                    </div>
+                  )}
+
+                  {addType[m.id] === "RepoLink" && repoPickerModuleId === m.id && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: "1 1 100%", maxWidth: "100%" }}>
+                      {repoPickerLoading && <span style={{ fontSize: "0.875rem", color: "var(--muted-text, #666)" }}>Loading your repositories...</span>}
+                      {repoPickerError && <span style={{ fontSize: "0.875rem", color: "var(--error, #b91c1c)" }}>{repoPickerError}</span>}
+                      {!repoPickerLoading && ownedRepos && (
+                        <>
+                          <Autocomplete
+                            freeSolo
+                            options={ownedRepos}
+                            inputValue={addRepoValue[m.id] ?? ""}
+                            onInputChange={(_, v) => setAddRepoValue((p) => ({ ...p, [m.id]: v }))}
+                            onChange={(_, v) => {
+                              if (v) {
+                                const repoName = v.split("/")[1] || v;
+                                setAddRepoValue((p) => ({ ...p, [m.id]: v }));
+                                setAddRepoTitle((p) => ({ ...p, [m.id]: repoName }));
+                              }
+                            }}
+                            renderInput={(params) => <TextField {...params} label="Repository" placeholder="owner/name" size="small" />}
+                            disabled={repoPickerBusy || busy}
+                            sx={{ flex: "1 1 100%" }}
+                          />
+                          <TextField
+                            size="small"
+                            label="Title"
+                            placeholder={addRepoValue[m.id] || "Link text"}
+                            value={addRepoTitle[m.id] ?? ""}
+                            onChange={(e) => setAddRepoTitle((p) => ({ ...p, [m.id]: e.target.value }))}
+                            disabled={repoPickerBusy || busy}
+                          />
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <Button
+                              variant="contained"
+                              size="small"
+                              onClick={() => void addRepoLink(m)}
+                              disabled={repoPickerBusy || busy || !(addRepoValue[m.id] ?? "").match(/^[^/\s]+\/[^/\s]+$/)}
+                            >
+                              {repoPickerBusy ? "Adding..." : "Add"}
+                            </Button>
+                            <Button variant="text" size="small" onClick={() => closeRepoPicker()} disabled={repoPickerBusy || busy}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
 

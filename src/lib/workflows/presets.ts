@@ -65,7 +65,7 @@ export const COURSE_REFRESH: WorkflowDef = {
   preset: true,
   name: "Course Refresh",
   description:
-    "After the course repo changes (manually or via an agent task), regenerate the schedule CSV and contents zip onto the course tile and rebuild the LMS course from the new contents. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines. Leave the LMS course blank to stop after the zip is saved to the course tile.",
+    "After the course repo changes (manually or via an agent task), regenerate the schedule CSV and contents zip onto the course tile and rebuild the LMS course from the new contents. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines. Leave the LMS course blank to stop after the zip is saved to the course tile. A Blackboard-ready Common Cartridge export downloads at the end.",
   steps: [
     {
       type: "schedule-from-repo",
@@ -132,6 +132,15 @@ export const COURSE_REFRESH: WorkflowDef = {
         modules: { source: "step", stepIndex: 6, outputKey: "modules" },
         schedule: { source: "step", stepIndex: 0, outputKey: "schedule" },
         repo: { source: "runtime", fieldKey: "repo" },
+        startDate: { source: "runtime", fieldKey: "startDate" },
+      },
+    },
+    {
+      type: "blackboard-export",
+      bindings: {
+        files: { source: "step", stepIndex: 2, outputKey: "files" },
+        schedule: { source: "step", stepIndex: 0, outputKey: "schedule" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         startDate: { source: "runtime", fieldKey: "startDate" },
       },
     },

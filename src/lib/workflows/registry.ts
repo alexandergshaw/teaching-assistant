@@ -43,6 +43,7 @@ import type {
 import { scheduleToCsv } from "@/lib/workflows/types";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
 import type { RubricCriterionInput } from "@/lib/canvas-modules";
+import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
 
 // "Student" or "Student | github-username" (pipe-separated so commas in
 // names like "Last, First" never masquerade as usernames).
@@ -1311,6 +1312,178 @@ export const STEP_REGISTRY: StepDefinition[] = [
           kind: "list",
           label: `Created ${modules.length} assignment(s)`,
           items: lines,
+        },
+      };
+    },
+  },
+
+  {
+    type: "blackboard-export",
+    name: "Blackboard export (.imscc)",
+    description: "Package the generated materials as a Common Cartridge you can import into Blackboard (Import Package). Blackboard imports the folders, files, and instruction pages; it does not create gradebook columns from a plain cartridge.",
+    inputs: [
+      {
+        key: "files",
+        label: "Generated files",
+        type: "files",
+        required: true,
+      },
+      {
+        key: "schedule",
+        label: "Course schedule",
+        type: "schedule",
+        required: true,
+      },
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: false,
+        help: "Optional - names the export after this course tile.",
+      },
+      {
+        key: "startDate",
+        label: "Class start date",
+        type: "date",
+        required: false,
+        help: "Shown on each deliverable page as the end-of-week deadline.",
+      },
+      {
+        key: "name",
+        label: "Export name",
+        type: "text",
+        required: false,
+      },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const files = values.files as GeneratedCourseFile[];
+      const schedule = values.schedule as ScheduleWeekPlan[];
+
+      let baseName = String(values.name ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/gi, "_")
+        .replace(/_+/g, "_");
+
+      if (!baseName) {
+        const hubCourseId = String(values.hubCourse ?? "").trim();
+        if (hubCourseId) {
+          const list = await listCourseHubAction();
+          if (!("error" in list)) {
+            const tile = list.courses.find((c) => c.id === hubCourseId);
+            if (tile?.name?.trim()) {
+              baseName = tile.name
+                .trim()
+                .replace(/[^a-z0-9]/gi, "_")
+                .replace(/_+/g, "_");
+            }
+          }
+        }
+      }
+
+      if (!baseName) {
+        baseName = "course-export";
+      }
+
+      const startRaw = String(values.startDate ?? "").trim();
+      const start = startRaw ? new Date(`${startRaw}T00:00:00`) : null;
+
+      if (start && Number.isNaN(start.getTime())) {
+        throw new Error("Enter the class start date as a valid date.");
+      }
+
+      const esc = (s: string): string => {
+        return s
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      };
+
+      const weeksMap = new Map<number, GeneratedCourseFile[]>();
+      for (const file of files) {
+        if (!weeksMap.has(file.weekNumber)) {
+          weeksMap.set(file.weekNumber, []);
+        }
+        weeksMap.get(file.weekNumber)!.push(file);
+      }
+
+      const weeks = Array.from(weeksMap.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([week, weekFiles]) => {
+          const sw = schedule.find((w) => w.week === week);
+          const title = `Module ${String(week).padStart(2, "0")}${
+            sw?.topic ? `: ${sw.topic}` : ""
+          }`;
+
+          const sorted = [...weekFiles].sort((a, b) => a.sortOrder - b.sortOrder);
+          const cartridgeFiles = sorted.map((f) => ({
+            name: f.name,
+            blob: f.blob,
+          }));
+
+          const pages: Array<{ title: string; html: string }> = [];
+          if (sw?.assignmentTitle) {
+            let dueText = "";
+            if (start) {
+              const due = new Date(start);
+              due.setDate(start.getDate() + week * 7 - 1);
+              due.setHours(23, 59, 0, 0);
+              dueText = due.toLocaleString();
+            }
+
+            const html = `<h1>${esc(sw.assignmentTitle)}</h1><p>Submit the URL of your GitHub repository containing this week's deliverable.</p>${
+              sw.assignmentSlug
+                ? `<p>Read the README for this module in the course codebase (folder "${esc(
+                    sw.assignmentSlug
+                  )}").</p>`
+                : ""
+            }${dueText ? `<p><strong>Deadline:</strong> ${esc(dueText)}</p>` : ""}`;
+
+            pages.push({
+              title: sw.assignmentTitle,
+              html,
+            });
+          }
+
+          return {
+            week,
+            title,
+            files: cartridgeFiles,
+            pages,
+          };
+        });
+
+      onProgress("Building Common Cartridge...");
+      const blob = await buildCommonCartridge(
+        baseName.replace(/_/g, " "),
+        weeks
+      );
+
+      onProgress("Downloading .imscc...");
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${baseName}.imscc`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      if (helpers.saveBundle) {
+        try {
+          await helpers.saveBundle(blob, `${baseName}-blackboard`);
+        } catch (err) {
+          console.error("Library save failed:", err);
+        }
+      }
+
+      return {
+        outputs: {},
+        summary: {
+          kind: "text",
+          text: `Downloaded ${baseName}.imscc - import it in Blackboard via Course Content > Import Package. Folders, files, and instruction pages import; create graded columns in Blackboard separately.`,
         },
       };
     },

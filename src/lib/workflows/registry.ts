@@ -1246,11 +1246,18 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: true,
       },
       {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: false,
+        help: "The tile's start date drives the weekly deadlines.",
+      },
+      {
         key: "startDate",
         label: "Class start date",
         type: "date",
         required: false,
-        help: "Deadlines land at 11:59 PM on the last day of each week; leave blank for no due dates.",
+        help: "Overrides the course tile's start date for deadline calculation.",
       },
     ],
     outputs: [],
@@ -1273,7 +1280,19 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       const repoRef = String(values.repo);
       const schedule = values.schedule as ScheduleWeekPlan[];
-      const startRaw = String(values.startDate ?? "").trim();
+
+      // Deadlines key off the course tile's start date; the form field is an
+      // override.
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      const list = hubCourseId ? await listCourseHubAction() : null;
+      const tile =
+        list && !("error" in list)
+          ? list.courses.find((c) => c.id === hubCourseId)
+          : undefined;
+
+      const startRaw =
+        String(values.startDate ?? "").trim() ||
+        (tile?.startDate ?? "").trim();
       const start = startRaw
         ? new Date(`${startRaw}T00:00:00`)
         : null;
@@ -1315,7 +1334,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           {
             name,
             description: descriptionLines.join("\n\n"),
-            pointsPossible: null,
+            pointsPossible: 100,
             dueAt,
             submissionType: "online_text_entry",
             published: true,
@@ -1429,7 +1448,11 @@ export const STEP_REGISTRY: StepDefinition[] = [
         baseName = "course-export";
       }
 
-      const startRaw = String(values.startDate ?? "").trim();
+      // Deadline text keys off the course tile's start date; the form field
+      // is an override.
+      const startRaw =
+        String(values.startDate ?? "").trim() ||
+        (tile?.startDate ?? "").trim();
       const start = startRaw ? new Date(`${startRaw}T00:00:00`) : null;
 
       if (start && Number.isNaN(start.getTime())) {

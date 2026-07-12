@@ -133,6 +133,7 @@ export const COURSE_REFRESH: WorkflowDef = {
         modules: { source: "step", stepIndex: 6, outputKey: "modules" },
         schedule: { source: "step", stepIndex: 0, outputKey: "schedule" },
         repo: { source: "runtime", fieldKey: "repo" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         startDate: { source: "runtime", fieldKey: "startDate" },
       },
     },

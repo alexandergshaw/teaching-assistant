@@ -85,6 +85,11 @@ export type StepRunSummary =
 export interface StepRunResult {
   outputs: Record<string, unknown>;
   summary: StepRunSummary;
+  /**
+   * Optional confirmation prompt shown after the step's summary; the runner
+   * pauses until the user continues or cancels the workflow.
+   */
+  requireConfirmation?: string;
 }
 
 export interface StepDefinition {

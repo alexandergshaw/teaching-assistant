@@ -6,6 +6,14 @@
 
 import type { ScheduleWeekPlan } from "@/app/actions";
 
+/**
+ * Value types supported in workflows:
+ * - institution: an institution acronym (e.g., "UT", "OSU")
+ * - hubCourseList: newline-joined course-tile ids
+ * - uploads: runtime-only file uploads; never persisted to storage
+ * - lmsModule: a module id within the course chosen by the form's hubCourse field
+ * - courseList: an opaque JSON payload passed between workflow steps
+ */
 export type WorkflowValueType =
   | "text"
   | "longtext"
@@ -19,7 +27,12 @@ export type WorkflowValueType =
   | "modules"
   | "hubCourse"
   | "org"
-  | "boolean";
+  | "boolean"
+  | "institution"
+  | "hubCourseList"
+  | "uploads"
+  | "lmsModule"
+  | "courseList";
 
 export interface GeneratedCourseFile {
   name: string;

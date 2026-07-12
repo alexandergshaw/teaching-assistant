@@ -692,6 +692,62 @@ export async function listCourses(code: string): Promise<CanvasCourse[]> {
   return listTeacherCoursesForPicker(resolveInstitutionByCode(code));
 }
 
+interface CanvasCourseWithTermListItem {
+  id?: number;
+  name?: string;
+  course_code?: string | null;
+  term?: { id?: number; name?: string } | null;
+}
+
+/** List teacher courses with term information, optionally filtering by term name. */
+export async function listCoursesByTerm(
+  code: string,
+  term: string
+): Promise<
+  Array<{
+    id: string;
+    name: string;
+    courseCode: string | null;
+    termName: string | null;
+  }>
+> {
+  const ctx = resolveInstitutionByCode(code);
+  const { institution, token, baseUrl } = ctx;
+  let next: string | null = `${baseUrl}/api/v1/courses?enrollment_type=teacher&include[]=term&per_page=100`;
+  const courses: Array<{
+    id: string;
+    name: string;
+    courseCode: string | null;
+    termName: string | null;
+  }> = [];
+
+  while (next) {
+    const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) {
+      throw canvasError(response.status, institution);
+    }
+    const page = (await response.json()) as CanvasCourseWithTermListItem[];
+    for (const course of page) {
+      if (typeof course.id === "number") {
+        const termName = course.term?.name ?? null;
+        const shouldInclude =
+          !term.trim() || (termName && termName.toLowerCase().includes(term.toLowerCase()));
+
+        if (shouldInclude) {
+          courses.push({
+            id: String(course.id),
+            name: course.name?.trim() || `Course ${course.id}`,
+            courseCode: course.course_code ?? null,
+            termName,
+          });
+        }
+      }
+    }
+    next = parseNextLink(response.headers.get("link"));
+  }
+  return courses;
+}
+
 interface CanvasAssignmentListItemBrief {
   id?: number;
   name?: string;

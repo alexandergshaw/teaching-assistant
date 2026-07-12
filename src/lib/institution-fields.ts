@@ -16,6 +16,7 @@ export interface InstitutionField {
 export const DEFAULT_INSTITUTION_FIELDS: InstitutionField[] = [
   { id: "startDate", label: "Course start date", type: "date", value: "" },
   { id: "outlookUrl", label: "Outlook URL", type: "url", value: "" },
+  { id: "lmsUrl", label: "LMS URL", type: "url", value: "" },
 ];
 
 export async function loadInstitutionFields(

@@ -175,6 +175,7 @@ export interface Database {
           weeks: number | null;
           tests: number | null;
           lms: string | null;
+          day_time: string | null;
           materials_files: Json;
           materials_zip_name: string | null;
           materials_zip_path: string | null;
@@ -206,6 +207,7 @@ export interface Database {
           weeks?: number | null;
           tests?: number | null;
           lms?: string | null;
+          day_time?: string | null;
           materials_files?: Json;
           materials_zip_name?: string | null;
           materials_zip_path?: string | null;
@@ -237,6 +239,7 @@ export interface Database {
           weeks?: number | null;
           tests?: number | null;
           lms?: string | null;
+          day_time?: string | null;
           materials_files?: Json;
           materials_zip_name?: string | null;
           materials_zip_path?: string | null;

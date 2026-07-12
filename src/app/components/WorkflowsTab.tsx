@@ -14,7 +14,8 @@ import { resolveDocumentAuthor } from "@/lib/author";
 import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFile } from "@/lib/recording-files";
 import { uploadCourseZip, removeCourseZip } from "@/lib/course-files";
 import { loadCommonResources } from "@/lib/common-resources";
-import { listCourseHubAction, appendCourseMaterialFileAction, listMyOrgsAction, listCoursesAction } from "@/app/actions";
+import { listCourseHubAction, appendCourseMaterialFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction } from "@/app/actions";
+import type { CanvasModule } from "@/lib/canvas-modules";
 import {
   loadCustomWorkflows,
   collectRuntimeFields,
@@ -226,7 +227,7 @@ function SummaryView({ summary }: { summary: StepRunSummary }) {
 
 export default function WorkflowsTab() {
   const { supabase, user } = useSupabase();
-  const { active: activeInstitution } = useInstitutionSelection();
+  const { institutions, active: activeInstitution } = useInstitutionSelection();
 
   const pendingDefRef = useRef<WorkflowDef | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -269,6 +270,10 @@ export default function WorkflowsTab() {
 
   const [running, setRunning] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [runPause, setRunPause] = useState<{ stepIndex: number; message: string } | null>(null);
+  const pauseResolverRef = useRef<{ resolve: (go: boolean) => void } | null>(null);
+
+  const [uploadFiles, setUploadFiles] = useState<Record<string, File[]>>({});
 
   const [editing, setEditing] = useState(false);
   const [deleteArmed, setDeleteArmed] = useState(false);
@@ -285,6 +290,9 @@ export default function WorkflowsTab() {
 
   const [lmsCourseOptions, setLmsCourseOptions] = useState<Array<{ url: string; name: string }> | null>(null);
   const [lmsCourseOptionsError, setLmsCourseOptionsError] = useState<string | null>(null);
+
+  const [lmsModuleOptions, setLmsModuleOptions] = useState<Array<{ value: string; label: string }>>([]);
+  const [lmsModuleError, setLmsModuleError] = useState<string | null>(null);
 
   const [orgs, setOrgs] = useState<string[] | null>(null);
   const [orgsError, setOrgsError] = useState<string | null>(null);
@@ -326,6 +334,95 @@ export default function WorkflowsTab() {
         : [],
     [selectedDef, expanded]
   );
+
+  // Seed empty institution fields from the active institution during render
+  // (guarded by a marker so each field set seeds once), so no effect calls
+  // setState synchronously.
+  const [seededInstMarker, setSeededInstMarker] = useState("");
+  const unseededInstitutionKeys = runtimeFields
+    .filter(
+      (f) => f.type === "institution" && !(values[f.fieldKey] ?? "").trim()
+    )
+    .map((f) => f.fieldKey);
+  const seedKey =
+    activeInstitution && unseededInstitutionKeys.length > 0
+      ? `${activeInstitution}:${unseededInstitutionKeys.join(",")}`
+      : "";
+  if (seedKey && seedKey !== seededInstMarker) {
+    setSeededInstMarker(seedKey);
+    setValues((prev) => ({
+      ...prev,
+      ...Object.fromEntries(
+        unseededInstitutionKeys.map((k) => [k, activeInstitution])
+      ),
+    }));
+  }
+
+  // lmsModule options come from the course chosen by the form's FIRST
+  // hubCourse-typed field; a tile without a live LMS connection keeps an
+  // empty list and the renderer shows the export-fallback hint instead.
+  const lmsModuleNeeded = runtimeFields.some((x) => x.type === "lmsModule");
+  const firstHubCourseValue = (() => {
+    const f = runtimeFields.find((x) => x.type === "hubCourse");
+    return f ? (values[f.fieldKey] ?? "") : "";
+  })();
+  const lmsModuleCanvasUrl =
+    hubCourses?.find((c) => c.id === firstHubCourseValue.trim())?.canvasUrl ??
+    "";
+
+  // Reset the module options during render when the source course changes,
+  // so the fetch effect below never calls setState synchronously.
+  const moduleSource = lmsModuleNeeded
+    ? `${firstHubCourseValue}|${lmsModuleCanvasUrl}`
+    : "";
+  const [prevModuleSource, setPrevModuleSource] = useState(moduleSource);
+  if (moduleSource !== prevModuleSource) {
+    setPrevModuleSource(moduleSource);
+    setLmsModuleOptions([]);
+    setLmsModuleError(null);
+  }
+
+  useEffect(() => {
+    if (!lmsModuleNeeded) return;
+    // No live LMS connection: the render-phase reset above already cleared
+    // the options, so there is nothing to fetch.
+    if (!lmsModuleCanvasUrl) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const content = await listCourseContentAction(
+          lmsModuleCanvasUrl,
+          activeInstitution || undefined
+        );
+        if (cancelled) return;
+        if ("error" in content) {
+          setLmsModuleError(content.error);
+          setLmsModuleOptions([]);
+        } else {
+          setLmsModuleOptions(
+            content.modules.map((m: CanvasModule) => ({
+              value: String(m.id),
+              label: m.name,
+            }))
+          );
+          setLmsModuleError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setLmsModuleError(
+            err instanceof Error ? err.message : "Could not load modules."
+          );
+          setLmsModuleOptions([]);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lmsModuleNeeded, lmsModuleCanvasUrl, activeInstitution]);
 
   const updateCustom = (next: WorkflowDef[]) => {
     setCustom(next);
@@ -444,7 +541,7 @@ export default function WorkflowsTab() {
   }, [user, supabase]);
 
   useEffect(() => {
-    const needsHubCourse = runtimeFields.some((f) => f.type === "hubCourse");
+    const needsHubCourse = runtimeFields.some((f) => f.type === "hubCourse" || f.type === "hubCourseList");
     if (!needsHubCourse || hubCourses !== null) return;
 
     let cancelled = false;
@@ -597,22 +694,40 @@ export default function WorkflowsTab() {
     for (const field of runtimeFields) {
       if (!field.required) continue;
 
-      // Only the types the run form renders can be validated here; other
-      // types are filled from earlier step outputs.
-      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "lmsCourseList", "hubCourse", "org"];
+      // lmsModule stays out of the list: without a live LMS connection the
+      // field renders only a fallback hint, so a required flag on it must
+      // not block the run.
+      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "lmsCourseList", "hubCourse", "org", "institution", "hubCourseList", "uploads"];
       if (!fieldTypes.includes(field.type)) continue;
 
-      const value = values[field.fieldKey] ?? "";
-      if (!value.trim()) {
-        setValidationError(`${field.label} is required.`);
-        return false;
-      }
-
-      if (field.type === "number") {
-        const num = Number(value);
-        if (!Number.isFinite(num)) {
-          setValidationError(`${field.label} must be a valid number.`);
+      if (field.type === "uploads") {
+        const files = uploadFiles[field.fieldKey] ?? [];
+        if (files.length === 0) {
+          setValidationError(`${field.label} requires at least one file.`);
           return false;
+        }
+      } else if (field.type === "hubCourseList") {
+        const ids = values[field.fieldKey]
+          ?.split("\n")
+          .map((s: string) => s.trim())
+          .filter(Boolean) ?? [];
+        if (ids.length === 0) {
+          setValidationError(`${field.label} requires at least one course.`);
+          return false;
+        }
+      } else {
+        const value = values[field.fieldKey] ?? "";
+        if (!value.trim()) {
+          setValidationError(`${field.label} is required.`);
+          return false;
+        }
+
+        if (field.type === "number") {
+          const num = Number(value);
+          if (!Number.isFinite(num)) {
+            setValidationError(`${field.label} must be a valid number.`);
+            return false;
+          }
         }
       }
     }
@@ -719,7 +834,13 @@ export default function WorkflowsTab() {
           if (!binding) continue;
 
           if (binding.source === "runtime") {
-            resolvedInputs[spec.key] = values[binding.fieldKey] ?? "";
+            const field = runtimeFields.find((f) => f.fieldKey === binding.fieldKey);
+            if (field?.type === "uploads") {
+              // File objects cannot persist; resolve from non-persisted uploadFiles state.
+              resolvedInputs[spec.key] = uploadFiles[binding.fieldKey] ?? [];
+            } else {
+              resolvedInputs[spec.key] = values[binding.fieldKey] ?? "";
+            }
           } else if (binding.source === "step") {
             if (failedSteps.has(binding.stepIndex)) {
               const failedDef = getStepDefinition(expanded.steps[binding.stepIndex]?.type ?? "");
@@ -756,6 +877,25 @@ export default function WorkflowsTab() {
           };
           return next;
         });
+
+        if (result.requireConfirmation) {
+          await new Promise<void>((resolve) => {
+            setRunPause({ stepIndex: i, message: result.requireConfirmation! });
+            pauseResolverRef.current = {
+              resolve: (go: boolean) => {
+                setRunPause(null);
+                pauseResolverRef.current = null;
+                if (!go) {
+                  failedSteps.add(i);
+                }
+                resolve();
+              },
+            };
+          });
+          if (failedSteps.has(i)) {
+            break;
+          }
+        }
       } catch (err) {
         const errorMsg =
           err instanceof Error ? err.message : String(err);
@@ -1233,6 +1373,180 @@ export default function WorkflowsTab() {
                     )}
                   </div>
                 );
+              } else if (field.type === "institution") {
+                // Empty values seed from the active institution in a
+                // top-level effect; the renderer is a plain Typeahead.
+                return (
+                  <div key={field.fieldKey} className={styles.field}>
+                    <label>{field.label}</label>
+                    <Typeahead
+                      options={institutions.map((code) => ({
+                        value: code,
+                        label: code,
+                      }))}
+                      value={value}
+                      onChange={(v) => handleValueChange(field.fieldKey, v)}
+                      placeholder="Choose an institution..."
+                      noOptionsText="No institutions available"
+                    />
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {field.help}
+                      </p>
+                    )}
+                  </div>
+                );
+              } else if (field.type === "hubCourseList") {
+                const idArray = value.split("\n").map((s) => s.trim()).filter(Boolean);
+                // Unknown saved ids surface as placeholder options shaped
+                // like the hubCourses elements so no cast is needed.
+                const selectedOptions = idArray.map((id) => {
+                  const found = hubCourses?.find((c) => c.id === id);
+                  return (
+                    found ?? { id, name: id, canvasUrl: null, repos: [] as string[] }
+                  );
+                });
+                return (
+                  <div key={field.fieldKey} className={styles.field}>
+                    <label>{field.label}</label>
+                    <Autocomplete
+                      multiple
+                      options={hubCourses ?? []}
+                      getOptionLabel={(option) => option.name}
+                      isOptionEqualToValue={(option, val) => option.id === val.id}
+                      value={selectedOptions}
+                      onChange={(_, newValue) => {
+                        const ids = newValue.map((o) => o.id).join("\n");
+                        handleValueChange(field.fieldKey, ids);
+                      }}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          size="small"
+                          label={field.label}
+                          placeholder={
+                            hubCourses === null
+                              ? "Loading courses..."
+                              : "Select courses..."
+                          }
+                        />
+                      )}
+                      loading={hubCourses === null}
+                      noOptionsText="No courses available"
+                      disabled={hubCourses === null}
+                    />
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {field.help}
+                      </p>
+                    )}
+                    {hubCoursesError && (
+                      <p className={styles.error}>{hubCoursesError}</p>
+                    )}
+                  </div>
+                );
+              } else if (field.type === "uploads") {
+                const files = uploadFiles[field.fieldKey] ?? [];
+                return (
+                  <div key={field.fieldKey} className={styles.field}>
+                    <label>{field.label}</label>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => {
+                        const input = document.createElement("input");
+                        input.type = "file";
+                        input.multiple = true;
+                        input.accept = ".imscc,.zip";
+                        input.onchange = (e) => {
+                          const newFiles = Array.from((e.target as HTMLInputElement).files ?? []);
+                          setUploadFiles((prev) => ({
+                            ...prev,
+                            [field.fieldKey]: newFiles,
+                          }));
+                        };
+                        input.click();
+                      }}
+                    >
+                      Upload files
+                    </Button>
+                    {files.length > 0 && (
+                      <ul className={styles.fieldHint} style={{ margin: "8px 0 0 16px" }}>
+                        {files.map((f, idx) => (
+                          <li
+                            key={idx}
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              gap: 8,
+                            }}
+                          >
+                            {f.name}
+                            <button
+                              className={styles.linkButton}
+                              onClick={() => {
+                                setUploadFiles((prev) => ({
+                                  ...prev,
+                                  [field.fieldKey]: prev[field.fieldKey]?.filter(
+                                    (_, i) => i !== idx
+                                  ) ?? [],
+                                }));
+                              }}
+                              style={{ padding: 0, marginLeft: 4 }}
+                            >
+                              x
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
+                        {field.help}
+                      </p>
+                    )}
+                  </div>
+                );
+              } else if (field.type === "lmsModule") {
+                // Options load in a top-level effect keyed to the form's
+                // first hubCourse field; the renderer reads hoisted state.
+                return (
+                  <div key={field.fieldKey} className={styles.field}>
+                    <label>{field.label}</label>
+                    {!lmsModuleCanvasUrl ? (
+                      <p className={styles.fieldHint}>
+                        No live LMS connection - the step will fall back to the
+                        tile&apos;s export.
+                      </p>
+                    ) : (
+                      <Typeahead
+                        options={lmsModuleOptions}
+                        value={value}
+                        onChange={(v) => handleValueChange(field.fieldKey, v)}
+                        placeholder="Choose a module..."
+                        noOptionsText={
+                          lmsModuleError
+                            ? `Error: ${lmsModuleError}`
+                            : "No modules available"
+                        }
+                      />
+                    )}
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {field.help}
+                      </p>
+                    )}
+                  </div>
+                );
+              } else if (field.type === "courseList") {
+                return (
+                  <div key={field.fieldKey} className={styles.field}>
+                    <p className={styles.fieldHint}>
+                      {field.label}: this input can only come from a previous step.
+                    </p>
+                  </div>
+                );
               } else {
                 return (
                   <div key={field.fieldKey} className={styles.field}>
@@ -1251,7 +1565,7 @@ export default function WorkflowsTab() {
             <Button
               variant="contained"
               onClick={handleRun}
-              disabled={running || !!expanded.error}
+              disabled={running || !!runPause || !!expanded.error}
               size="small"
             >
               {running ? "Running..." : "Run"}
@@ -1328,6 +1642,32 @@ export default function WorkflowsTab() {
                 {state.summary && (
                   <div style={{ marginTop: 12 }}>
                     <SummaryView summary={state.summary} />
+                  </div>
+                )}
+
+                {runPause && runPause.stepIndex === i && (
+                  <div style={{ marginTop: 12 }}>
+                    <p className={styles.fieldHint}>{runPause.message}</p>
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        onClick={() => {
+                          pauseResolverRef.current?.resolve(true);
+                        }}
+                      >
+                        Continue
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => {
+                          pauseResolverRef.current?.resolve(false);
+                        }}
+                      >
+                        Cancel run
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>

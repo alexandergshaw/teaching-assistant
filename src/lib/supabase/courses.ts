@@ -61,6 +61,7 @@ export interface Course {
   weeks: number | null;
   tests: number | null;
   lms: string | null;
+  dayTime: string | null;
   materialsFiles: CourseMaterialFile[];
   materialsZipName: string | null;
   materialsZipPath: string | null;
@@ -91,11 +92,12 @@ export interface CourseInput {
   weeks?: number | null;
   tests?: number | null;
   lms?: string | null;
+  dayTime?: string | null;
   customTiles?: CourseCustomTile[];
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, start_date, description, weeks, tests, lms, materials_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, start_date, description, weeks, tests, lms, day_time, materials_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -127,6 +129,7 @@ interface CourseRow {
   weeks: number | null;
   tests: number | null;
   lms: string | null;
+  day_time: string | null;
   materials_files: Array<{ name: string; path: string; size: number; addedAt: string }> | null;
   materials_zip_name: string | null;
   materials_zip_path: string | null;
@@ -158,6 +161,7 @@ function toCourse(r: CourseRow): Course {
     weeks: r.weeks,
     tests: r.tests,
     lms: r.lms,
+    dayTime: r.day_time,
     materialsFiles: Array.isArray(r.materials_files) ? r.materials_files.filter((x) => x && x.path && x.name) : [],
     materialsZipName: r.materials_zip_name,
     materialsZipPath: r.materials_zip_path,
@@ -201,6 +205,7 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     weeks: typeof input.weeks === "number" && Number.isFinite(input.weeks) ? input.weeks : null,
     tests: typeof input.tests === "number" && Number.isFinite(input.tests) ? input.tests : null,
     lms: clean(input.lms),
+    day_time: clean(input.dayTime),
     custom_tiles: Array.isArray(input.customTiles) ? (input.customTiles as unknown as Json) : undefined,
     materials_zip_name: null,
     materials_zip_path: null,

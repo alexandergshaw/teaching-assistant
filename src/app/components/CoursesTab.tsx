@@ -64,10 +64,11 @@ interface CourseForm {
   weeks: string;
   tests: string;
   lms: string;
+  dayTime: string;
 }
 
 // Fields that can be edited inline on tiles.
-type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms";
+type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime";
 
 const EMPTY_FORM: CourseForm = {
   id: null,
@@ -89,6 +90,7 @@ const EMPTY_FORM: CourseForm = {
   weeks: "",
   tests: "",
   lms: "",
+  dayTime: "",
 };
 
 function formFromCourse(c: Course): CourseForm {
@@ -112,6 +114,7 @@ function formFromCourse(c: Course): CourseForm {
     weeks: c.weeks !== null ? String(c.weeks) : "",
     tests: c.tests !== null ? String(c.tests) : "",
     lms: c.lms ?? "",
+    dayTime: c.dayTime ?? "",
   };
 }
 
@@ -138,6 +141,7 @@ function courseToInput(c: Course) {
     weeks: c.weeks,
     tests: c.tests,
     lms: c.lms ?? "",
+    dayTime: c.dayTime ?? "",
     customTiles: c.customTiles,
   };
 }
@@ -592,6 +596,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       weeks: form.weeks.trim() ? (Number.isFinite(Number(form.weeks.trim())) ? Number(form.weeks.trim()) : null) : null,
       tests: form.tests.trim() ? (Number.isFinite(Number(form.tests.trim())) ? Number(form.tests.trim()) : null) : null,
       lms: form.lms,
+      dayTime: form.dayTime,
     };
     const result = form.id ? await updateCourseHubAction(form.id, input) : await createCourseHubAction(input);
     setSaving(false);
@@ -868,7 +873,8 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       : field === "weeks" ? (c.weeks !== null ? String(c.weeks) : "")
       : field === "tests" ? (c.tests !== null ? String(c.tests) : "")
       : field === "lms" ? (c.lms ?? "")
-      : ((c[field as Exclude<InlineField, "csv" | "startDate" | "description" | "weeks" | "tests" | "lms">] ?? "") as string);
+      : field === "dayTime" ? (c.dayTime ?? "")
+      : ((c[field as Exclude<InlineField, "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime">] ?? "") as string);
     setTileEdit({ id: c.id, field, value });
     if (field === "lms") {
       setLmsCourseDraft(null);
@@ -901,6 +907,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         lms: tileEdit.value || null,
         ...(lmsCourseDraft !== null ? { canvasUrl: lmsCourseDraft || null } : {}),
       }
+      : tileEdit.field === "dayTime" ? { dayTime: tileEdit.value }
       : { [tileEdit.field]: tileEdit.value };
     const r = await updateCourseHubAction(course.id, { ...courseToInput(course), ...patch });
     setTileSaving(false);
@@ -1803,6 +1810,31 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
               : c.tests !== null
                 ? (
                   <span className={styles.courseResourceValue}>{c.tests}</span>
+                )
+                : (
+                  <span className={styles.courseResourceEmpty}>Not set</span>
+                )}
+          </div>
+        );
+      case "dayTime":
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "dayTime" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "dayTime"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("dayTime")}Day/Time</span>
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "dayTime")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "dayTime"
+              ? tileEditor(false, "MW 10:00-11:15")
+              : c.dayTime
+                ? (
+                  <span className={styles.courseResourceValue}>{c.dayTime}</span>
                 )
                 : (
                   <span className={styles.courseResourceEmpty}>Not set</span>
@@ -2836,6 +2868,14 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
               type="number"
               value={form.tests}
               onChange={(e) => update({ tests: e.target.value })}
+            />
+            <TextField
+              label="Day/Time"
+              size="small"
+              fullWidth
+              placeholder="MW 10:00-11:15"
+              value={form.dayTime}
+              onChange={(e) => update({ dayTime: e.target.value })}
             />
           </div>
 

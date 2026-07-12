@@ -64,6 +64,7 @@ import {
   getUnreadCount,
   getCourseNotifications,
   listCourses,
+  listCoursesByTerm,
   setConversationWorkflowState,
   listAssignments,
   listStudents,
@@ -1161,6 +1162,243 @@ export async function createAnnouncementAction(
     return { announcement };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post the announcement." };
+  }
+}
+
+/** List courses by institution and term. */
+export async function listCoursesByTermAction(
+  institution: string,
+  term: string
+): Promise<
+  | {
+      courses: Array<{
+        id: string;
+        name: string;
+        courseCode: string | null;
+        termName: string | null;
+      }>;
+    }
+  | { error: string }
+> {
+  try {
+    await requireOwner();
+    if (!institution.trim()) {
+      return { error: "Enter an institution." };
+    }
+    const courses = await listCoursesByTerm(institution.trim().toUpperCase(), term);
+    return { courses };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list the term's courses." };
+  }
+}
+
+/** Create a scheduled announcement in a course. */
+export async function createScheduledAnnouncementAction(
+  courseUrl: string,
+  title: string,
+  message: string,
+  delayedPostAt: string | null,
+  acronym?: string
+): Promise<{ id: number } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!title.trim()) return { error: "An announcement needs a title." };
+    if (!message.trim()) return { error: "An announcement needs a message." };
+    const announcement = await createAnnouncement(courseUrl, title, message, acronym, delayedPostAt);
+    return { id: announcement.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the announcement." };
+  }
+}
+
+/** Generate a lecture deck with slides and announcement from course materials. */
+export async function generateLectureFromMaterialsAction(
+  courseName: string,
+  moduleName: string,
+  materialsText: string,
+  provider: LlmProvider = "gemini"
+): Promise<
+  | { presentationTitle: string; slides: SlideData[]; announcement: string }
+  | { error: string }
+> {
+  try {
+    await requireOwner();
+    const truncated = materialsText.slice(0, 24000);
+    const prompt = `You are an expert lecturer preparing course materials. Given the following module materials, produce a complete lecture presentation with slides and an announcement for students.
+
+MODULE: ${moduleName}
+COURSE: ${courseName}
+
+MATERIALS:
+${truncated}
+
+Return JSON ONLY with this exact structure:
+{
+  "presentationTitle": "string — a clear, professional title for the lecture",
+  "slides": [
+    {
+      "title": "string — concise slide heading",
+      "bullets": ["string", "string", ...],
+      "code": "optional code snippet",
+      "codeLanguage": "optional language like python, javascript, etc"
+    }
+  ],
+  "announcement": "2-3 short paragraphs of plain text summarizing the lecture for students"
+}
+
+Slide requirements:
+- Each slide must have a title and at least one bullet point.
+- Bullets should be concise, clear, and self-contained — students reading after class must understand without verbal explanation.
+- Include 8-12 slides total, scaling based on material complexity.
+- Include code examples when relevant (keep them complete and runnable).
+- End with a "Documentation & References" slide listing key resources.
+
+Announcement requirements:
+- 2-3 short paragraphs of plain text (no HTML or markdown).
+- Summarize the key topics and learning objectives.
+- Invite questions and next steps.
+
+Do not include any text outside the JSON object.`;
+
+    let parsed: {
+      presentationTitle?: string;
+      slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
+      announcement?: string;
+    } | null = null;
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const result = await callLlm(
+        {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.6, maxOutputTokens: 12288 },
+        },
+        provider
+      );
+
+      if (!result.ok) {
+        return {
+          error: `LLM API error for "${moduleName}": HTTP ${result.status} — ${result.body.slice(0, 200)}`,
+        };
+      }
+
+      const jsonText = jsonObjectSlice(result.text);
+      if (!jsonText) {
+        if (attempt === 1) {
+          console.error(`Lecture JSON parse failed for "${moduleName}" (attempt 1): no JSON object in the response`);
+          continue;
+        }
+        return { error: `Could not parse the lecture from the model output. Try again.` };
+      }
+
+      try {
+        parsed = JSON.parse(jsonText) as {
+          presentationTitle?: string;
+          slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
+          announcement?: string;
+        };
+        break;
+      } catch (err) {
+        if (attempt === 1) {
+          console.error(
+            `Lecture JSON parse failed for "${moduleName}" (attempt 1): ${err instanceof Error ? err.message : String(err)}`
+          );
+          continue;
+        }
+        return { error: `Could not parse the lecture from the model output. Try again.` };
+      }
+    }
+
+    if (!parsed) {
+      return { error: `Could not parse the lecture from the model output. Try again.` };
+    }
+
+    if (!parsed.slides || !Array.isArray(parsed.slides)) {
+      return { error: `Model did not return a valid slides array for "${moduleName}".` };
+    }
+
+    let slides: SlideData[] = parsed.slides
+      .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
+      .map((s) => toSlideData(s, 4));
+
+    slides = propagateExampleCodeToFollowups(slides);
+
+    return {
+      presentationTitle: parsed.presentationTitle ?? `${moduleName} Lecture`,
+      slides,
+      announcement: parsed.announcement ?? "",
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate the lecture." };
+  }
+}
+
+/** Analyze multiple courses for emerging technology opportunities and integration recommendations. */
+export async function analyzeCourseTechAction(
+  courses: Array<{
+    name: string;
+    topics: string;
+    syllabusText: string;
+    textbook: string;
+    repoDigest: string;
+    modulesSummary: string;
+    assignmentsSummary: string;
+  }>,
+  provider: LlmProvider = "gemini"
+): Promise<{ reports: Array<{ name: string; report: string }> } | { error: string }> {
+  try {
+    await requireOwner();
+    if (courses.length === 0) {
+      return { error: "Pick at least one course." };
+    }
+
+    const ANALYSIS_CONCURRENCY = 2;
+    const reports = await mapWithConcurrency(courses, ANALYSIS_CONCURRENCY, async (course) => {
+      const prompt = `You are an expert in CS and technology education. Analyze this course and provide actionable guidance on emerging technologies and integration strategies.
+
+COURSE: ${course.name}
+TOPICS: ${course.topics.slice(0, 4000)}
+SYLLABUS: ${course.syllabusText.slice(0, 4000)}
+TEXTBOOK/MATERIALS: ${course.textbook.slice(0, 4000)}
+CODE REPOSITORY: ${course.repoDigest.slice(0, 4000)}
+MODULES: ${course.modulesSummary.slice(0, 4000)}
+ASSIGNMENTS: ${course.assignmentsSummary.slice(0, 4000)}
+
+Provide a plain-text report with exactly two headed sections:
+
+1. EMERGING TECHNOLOGY OPPORTUNITIES
+   - List specific technologies/tools now relevant to students of this subject.
+   - For each, explain in one line why it matters for this course's students.
+
+2. INTEGRATION RECOMMENDATIONS
+   - Provide concrete, course-specific ways to fold each technology into modules or assignments.
+   - Be practical and specific to the content you reviewed above.
+
+Return only the plain-text report with these two sections. No JSON, no markdown formatting, no code fences.`;
+
+      const result = await callLlm(
+        {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.5, maxOutputTokens: 8192 },
+        },
+        provider
+      );
+
+      if (!result.ok) {
+        return {
+          name: course.name,
+          report: `Analysis failed: HTTP ${result.status}`,
+        };
+      }
+
+      return {
+        name: course.name,
+        report: result.text.trim(),
+      };
+    });
+
+    return { reports };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not analyze the courses." };
   }
 }
 

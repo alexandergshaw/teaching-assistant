@@ -915,6 +915,20 @@
   flex-shrink: 0;
 }
 
+.courseResourceGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.courseResourceGroupLabel {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
 .courseResources {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));

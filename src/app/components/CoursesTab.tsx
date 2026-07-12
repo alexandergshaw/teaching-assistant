@@ -1395,10 +1395,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   </div>
                 </div>
 
-                <div className={styles.courseResources}>
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "githubOrg" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "githubOrg"))}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>Organization</span>
+                <div className={styles.courseResourceGroup}>
+                  <span className={styles.courseResourceGroupLabel}>Codebase</span>
+                  <div className={styles.courseResources}>
+                    <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "githubOrg" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "githubOrg"))}>
+                      <div className={styles.courseResourceHead}>
+                        <span className={styles.courseResourceLabel}>Organization</span>
                       <button
                         type="button"
                         className={styles.tileEditBtn}
@@ -1511,10 +1513,15 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       <span className={styles.courseResourceEmpty}>Not set</span>
                     ))}
                   </div>
+                  </div>
+                </div>
 
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "syllabusId" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "syllabusId"))}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>Syllabus</span>
+                <div className={styles.courseResourceGroup}>
+                  <span className={styles.courseResourceGroupLabel}>Content</span>
+                  <div className={styles.courseResources}>
+                    <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "syllabusId" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "syllabusId"))}>
+                      <div className={styles.courseResourceHead}>
+                        <span className={styles.courseResourceLabel}>Syllabus</span>
                       <button
                         type="button"
                         className={styles.tileEditBtn}
@@ -1562,11 +1569,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         : (
                           <span className={styles.courseResourceEmpty}>Not set</span>
                         )}
+                    </div>
                   </div>
+                </div>
 
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "startDate" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "startDate"))}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>Start date</span>
+                <div className={styles.courseResourceGroup}>
+                  <span className={styles.courseResourceGroupLabel}>Schedule & LMS</span>
+                  <div className={styles.courseResources}>
+                    <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "startDate" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "startDate"))}>
+                      <div className={styles.courseResourceHead}>
+                        <span className={styles.courseResourceLabel}>Start date</span>
                       <button
                         type="button"
                         className={styles.tileEditBtn}
@@ -1617,11 +1629,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         : (
                           <span className={styles.courseResourceEmpty}>Not set</span>
                         )}
+                    </div>
                   </div>
+                </div>
 
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "integrations" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "integrations"))}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>Integration{c.integrations.length > 1 ? "s" : ""}</span>
+                <div className={styles.courseResourceGroup}>
+                  <span className={styles.courseResourceGroupLabel}>Class</span>
+                  <div className={styles.courseResources}>
+                    <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "integrations" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "integrations"))}>
+                      <div className={styles.courseResourceHead}>
+                        <span className={styles.courseResourceLabel}>Integration{c.integrations.length > 1 ? "s" : ""}</span>
                       <button
                         type="button"
                         className={styles.tileEditBtn}
@@ -1694,11 +1711,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         : (
                           <span className={styles.courseResourceEmpty}>Not set</span>
                         )}
+                    </div>
                   </div>
+                </div>
 
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "topics" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "topics"))}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>Topics</span>
+                <div className={styles.courseResourceGroup}>
+                  <span className={styles.courseResourceGroupLabel}>Generated</span>
+                  <div className={styles.courseResources}>
+                    <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "topics" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "topics"))}>
+                      <div className={styles.courseResourceHead}>
+                        <span className={styles.courseResourceLabel}>Topics</span>
                       {autoTopicsId === c.id && (
                         <span className={styles.fieldHint} style={{ margin: 0, marginLeft: 8 }}>Extracting topics from the codebase...</span>
                       )}
@@ -2145,8 +2167,11 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                           )}
                         </>
                       )}
+                    </div>
                   </div>
+                </div>
 
+                <div className={styles.courseResources}>
                   <div className={styles.courseResource}>
                     <span className={styles.courseResourceLabel}>Notifications</span>
                     {c.canvasUrl && c.institution ? (

@@ -10,14 +10,21 @@ export const COURSE_KICKOFF: WorkflowDef = {
   preset: true,
   name: "Course Kickoff",
   description:
-    "Generate the schedule, create the class repo from a template, write assignment READMEs - then run everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically).",
+    "Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile, the template repository, and the new repository's name. Generates the schedule, creates the class repo from the template, writes assignment READMEs - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically).",
   steps: [
+    {
+      type: "load-course-tile",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        allowMissingRepo: { source: "literal", value: "1" },
+      },
+    },
     {
       type: "generate-schedule",
       bindings: {
-        description: { source: "runtime", fieldKey: "courseDescription" },
-        weeks: { source: "runtime", fieldKey: "weeks" },
-        tests: { source: "runtime", fieldKey: "tests" },
+        description: { source: "step", stepIndex: 0, outputKey: "description" },
+        weeks: { source: "step", stepIndex: 0, outputKey: "weeks" },
+        tests: { source: "step", stepIndex: 0, outputKey: "tests" },
       },
     },
     {
@@ -30,9 +37,9 @@ export const COURSE_KICKOFF: WorkflowDef = {
     {
       type: "fill-readmes",
       bindings: {
-        repo: { source: "step", stepIndex: 1, outputKey: "repo" },
-        schedule: { source: "step", stepIndex: 0, outputKey: "schedule" },
-        description: { source: "runtime", fieldKey: "courseDescription" },
+        repo: { source: "step", stepIndex: 2, outputKey: "repo" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        description: { source: "step", stepIndex: 0, outputKey: "description" },
       },
     },
     {
@@ -42,13 +49,13 @@ export const COURSE_KICKOFF: WorkflowDef = {
         workflowId: "course-refresh",
         skipSteps: [0, 1],
         remap: {
-          "0.repo": { source: "step", stepIndex: 1, outputKey: "repo" },
-          "1.schedule": { source: "step", stepIndex: 0, outputKey: "schedule" },
-          "1.courseTitle": { source: "step", stepIndex: 0, outputKey: "courseTitle" },
-          "1.weeks": { source: "step", stepIndex: 0, outputKey: "weeks" },
-          "0.course": { source: "runtime", fieldKey: "lmsCourse" },
-          "0.startDate": { source: "runtime", fieldKey: "startDate" },
-          "0.description": { source: "runtime", fieldKey: "courseDescription" },
+          "0.repo": { source: "step", stepIndex: 2, outputKey: "repo" },
+          "0.course": { source: "step", stepIndex: 0, outputKey: "course" },
+          "0.startDate": { source: "step", stepIndex: 0, outputKey: "startDate" },
+          "0.description": { source: "step", stepIndex: 0, outputKey: "description" },
+          "1.schedule": { source: "step", stepIndex: 1, outputKey: "schedule" },
+          "1.courseTitle": { source: "step", stepIndex: 1, outputKey: "courseTitle" },
+          "1.weeks": { source: "step", stepIndex: 1, outputKey: "weeks" },
         },
       },
     },
@@ -60,12 +67,13 @@ export const COURSE_REFRESH: WorkflowDef = {
   preset: true,
   name: "Course Refresh",
   description:
-    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set. Finally the Starter Materials workflow runs against the tile's LMS course (dynamic - edits to it apply here).",
+    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. A tile without a linked repository pauses with an alert and, on continue, the schedule falls back to the tile's saved Schedule of Topics (CSV) or its topics; repo-driven materials steps are skipped in that case. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set. Finally the Starter Materials workflow runs against the tile's LMS course (dynamic - edits to it apply here).",
   steps: [
     {
       type: "load-course-tile",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        confirmMissingRepo: { source: "literal", value: "1" },
       },
     },
     {
@@ -73,6 +81,7 @@ export const COURSE_REFRESH: WorkflowDef = {
       bindings: {
         repo: { source: "step", stepIndex: 0, outputKey: "repo" },
         description: { source: "step", stepIndex: 0, outputKey: "description" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
       },
     },
     {

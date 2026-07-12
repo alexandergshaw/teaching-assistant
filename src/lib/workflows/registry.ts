@@ -56,7 +56,7 @@ import type {
   GeneratedCourseFile,
   EnsuredModule,
 } from "@/lib/workflows/types";
-import { scheduleToCsv } from "@/lib/workflows/types";
+import { scheduleToCsv, csvToSchedule } from "@/lib/workflows/types";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
 import type { RubricCriterionInput, DueDateUpdate } from "@/lib/canvas-modules";
 import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
@@ -287,6 +287,24 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const weeks = Number(values.weeks);
       const tests = Number(values.tests);
 
+      if (!description.trim()) {
+        throw new Error(
+          "Provide a course description (Course Kickoff reads it from the course tile)."
+        );
+      }
+
+      if (!Number.isInteger(weeks) || weeks < 1 || weeks > 52) {
+        throw new Error(
+          "Provide a valid number of weeks (1-52). Course Kickoff reads it from the course tile."
+        );
+      }
+
+      if (!Number.isInteger(tests) || tests < 0) {
+        throw new Error(
+          "Provide a valid number of tests (0 or more). Course Kickoff reads it from the course tile."
+        );
+      }
+
       onProgress("Generating schedule...");
       const r = await generateSchedulePlanAction(
         description,
@@ -451,8 +469,18 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "files", label: "Generated files", type: "files" },
     ],
     run: async (values, helpers, onProgress) => {
-      const repo = String(values.repo);
+      const repo = String(values.repo ?? "").trim();
       const minutes = Number(values.minutes);
+
+      if (!repo) {
+        return {
+          outputs: { files: [] },
+          summary: {
+            kind: "text",
+            text: "Skipped - no repository linked; no lecture materials were generated.",
+          },
+        };
+      }
 
       // Course Refresh pins this off via a literal binding; unbound custom
       // workflows keep instructions.
@@ -957,6 +985,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Steers the generated topics and summaries.",
       },
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: false,
+        help: "Used for the Schedule of Topics fallback when the repository is blank.",
+      },
     ],
     outputs: [
       { key: "schedule", label: "Course schedule", type: "schedule" },
@@ -964,38 +999,166 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "weeks", label: "Number of weeks", type: "number" },
     ],
     run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
       const rawWeeks = String(values.weeks ?? "").trim();
       const weeksOrNull = rawWeeks ? Number(rawWeeks) : null;
       const rawTests = String(values.tests ?? "").trim();
       const testsOrNull = rawTests ? Number(rawTests) : null;
 
-      onProgress("Generating schedule from repository...");
-      const r = await generateSchedulePlanFromRepoAction(
-        String(values.repo),
-        weeksOrNull,
-        testsOrNull,
-        helpers.provider,
-        String(values.description ?? "").trim() || undefined
-      );
+      // Normal path: repo is provided
+      if (repo) {
+        onProgress("Generating schedule from repository...");
+        const r = await generateSchedulePlanFromRepoAction(
+          repo,
+          weeksOrNull,
+          testsOrNull,
+          helpers.provider,
+          String(values.description ?? "").trim() || undefined
+        );
 
-      if ("error" in r) {
-        throw new Error(r.error);
+        if ("error" in r) {
+          throw new Error(r.error);
+        }
+
+        const csv = scheduleToCsv(r.schedule);
+        return {
+          outputs: {
+            schedule: r.schedule,
+            courseTitle: r.courseTitle,
+            weeks: r.schedule.length,
+          },
+          summary: {
+            kind: "schedule",
+            courseTitle: r.courseTitle,
+            schedule: r.schedule,
+            csv,
+          },
+        };
       }
 
-      const csv = scheduleToCsv(r.schedule);
-      return {
-        outputs: {
-          schedule: r.schedule,
-          courseTitle: r.courseTitle,
-          weeks: r.schedule.length,
-        },
-        summary: {
-          kind: "schedule",
-          courseTitle: r.courseTitle,
-          schedule: r.schedule,
-          csv,
-        },
-      };
+      // Fallback path: repo is empty, use hubCourse
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      if (!hubCourseId) {
+        throw new Error(
+          "Provide a repository or select a course tile for the Schedule of Topics fallback."
+        );
+      }
+
+      onProgress("Loading course tile...");
+      const listR = await listCourseHubAction();
+      if ("error" in listR) {
+        throw new Error(listR.error);
+      }
+
+      const tile = listR.courses.find((c) => c.id === hubCourseId);
+      if (!tile) {
+        throw new Error(
+          "The course tile could not be found. Provide a repository instead."
+        );
+      }
+
+      // Fallback 1: CSV data on the tile
+      if (tile.csvData?.trim()) {
+        onProgress("Loading schedule from tile...");
+        const schedule = csvToSchedule(tile.csvData);
+        if (schedule.length > 0) {
+          const csv = scheduleToCsv(schedule);
+          // Gapped Schedules of Topics keep their real week numbers, so the
+          // module count must cover the highest week, not the row count.
+          const weeks = Math.max(...schedule.map((w) => w.week));
+          return {
+            outputs: {
+              schedule,
+              courseTitle: tile.name || "Course",
+              weeks,
+            },
+            summary: {
+              kind: "schedule",
+              courseTitle: tile.name || "Course",
+              schedule,
+              csv,
+            },
+          };
+        }
+      }
+
+      // Fallback 2: Generate from topics or description
+      if (tile.description?.trim() || tile.topics?.trim()) {
+        const descriptionText = [
+          tile.description?.trim(),
+          tile.topics?.trim()
+            ? "Topics, one per line:\n" + tile.topics.trim()
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+
+        const tileWeeks =
+          typeof tile.weeks === "number" && Number.isFinite(tile.weeks)
+            ? tile.weeks
+            : null;
+        const tileTests =
+          typeof tile.tests === "number" &&
+          Number.isInteger(tile.tests) &&
+          tile.tests >= 0
+            ? tile.tests
+            : null;
+
+        const weeksForGen = weeksOrNull ?? tileWeeks;
+
+        if (
+          weeksForGen === null ||
+          !Number.isInteger(weeksForGen) ||
+          weeksForGen < 1 ||
+          weeksForGen > 52
+        ) {
+          throw new Error(
+            "No repository and no saved Schedule of Topics - set the number of weeks on the tile to generate from topics."
+          );
+        }
+
+        const testsForGen = testsOrNull ?? tileTests ?? 0;
+
+        onProgress("Generating schedule from topics...");
+        const r = await generateSchedulePlanAction(
+          descriptionText,
+          weeksForGen,
+          testsForGen,
+          helpers.provider
+        );
+
+        if ("error" in r) {
+          throw new Error(r.error);
+        }
+
+        // There is no repository for slugs to reference, so drop the
+        // LLM-generated assignmentSlug values; otherwise downstream steps
+        // would emit "read the README in folder ..." for a codebase-less tile.
+        const schedule = r.schedule.map((w) => ({
+          ...w,
+          assignmentSlug: null,
+        }));
+
+        const csv = scheduleToCsv(schedule);
+        return {
+          outputs: {
+            schedule,
+            courseTitle: r.courseTitle,
+            weeks: schedule.length,
+          },
+          summary: {
+            kind: "schedule",
+            courseTitle: r.courseTitle,
+            schedule,
+            csv,
+          },
+        };
+      }
+
+      // Fallback 3: nothing available
+      throw new Error(
+        "The tile has no repository, no saved Schedule of Topics (CSV), and no topics - link a repository or add a schedule to the tile."
+      );
     },
   },
 
@@ -1077,6 +1240,17 @@ export const STEP_REGISTRY: StepDefinition[] = [
     ],
     outputs: [],
     run: async (values, helpers, onProgress) => {
+      const files = values.files as GeneratedCourseFile[];
+      if (files.length === 0) {
+        return {
+          outputs: {},
+          summary: {
+            kind: "text",
+            text: "Skipped - no generated files to bundle.",
+          },
+        };
+      }
+
       if (!helpers.saveCourseMaterialFile) {
         throw new Error("Sign in to save course materials.");
       }
@@ -1084,7 +1258,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const { default: JSZip } = await import("jszip");
       const zip = new JSZip();
 
-      for (const file of values.files as GeneratedCourseFile[]) {
+      for (const file of files) {
         zip.file(file.name, file.blob);
       }
 
@@ -1355,8 +1529,19 @@ export const STEP_REGISTRY: StepDefinition[] = [
         };
       }
 
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) {
+        return {
+          outputs: {},
+          summary: {
+            kind: "text",
+            text: "Skipped - no repository linked; the rubric needs the course codebase.",
+          },
+        };
+      }
+
       onProgress("Downloading repository...");
-      const z = await getRepoZipAction(String(values.repo));
+      const z = await getRepoZipAction(repo);
       if ("error" in z) {
         throw new Error(z.error);
       }
@@ -1515,12 +1700,17 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
         const descriptionLines = [
           "Submit the URL of your GitHub repository containing this week's deliverable in the text box.",
-          `Before you start, read the README for this module in the course codebase${
-            sw?.assignmentSlug
-              ? ` (folder "${sw.assignmentSlug}")`
-              : ""
-          }: https://github.com/${repoRef}`,
         ];
+
+        if (repoRef) {
+          descriptionLines.push(
+            `Before you start, read the README for this module in the course codebase${
+              sw?.assignmentSlug
+                ? ` (folder "${sw.assignmentSlug}")`
+                : ""
+            }: https://github.com/${repoRef}`
+          );
+        }
 
         let dueAt = "";
         let dueDateStr = "";
@@ -2298,12 +2488,28 @@ export const STEP_REGISTRY: StepDefinition[] = [
         type: "hubCourse",
         required: true,
       },
+      {
+        key: "confirmMissingRepo",
+        label: "Pause when repository is missing",
+        type: "boolean",
+        required: false,
+        help: "Pause with an alert when the tile has no repository so the run can be cancelled.",
+      },
+      {
+        key: "allowMissingRepo",
+        label: "Allow a missing repository",
+        type: "boolean",
+        required: false,
+        help: "Proceed without pausing when the tile has no repository - Course Kickoff creates one later.",
+      },
     ],
     outputs: [
       { key: "repo", label: "Repository", type: "repo" },
       { key: "course", label: "LMS course", type: "lmsCourse" },
       { key: "startDate", label: "Start date", type: "date" },
       { key: "description", label: "Course description", type: "longtext" },
+      { key: "weeks", label: "Number of weeks", type: "number" },
+      { key: "tests", label: "Number of tests", type: "number" },
     ],
     run: async (values, helpers, onProgress) => {
       const hubCourseId = String(values.hubCourse ?? "").trim();
@@ -2320,21 +2526,59 @@ export const STEP_REGISTRY: StepDefinition[] = [
       }
 
       const repo = tile.repos[0]?.repo?.trim() ?? "";
-      if (!repo) {
+      const course = (tile.canvasUrl ?? "").trim();
+      const startDate = (tile.startDate ?? "").trim();
+      const lms = (tile.lms ?? "").trim();
+      const description = (tile.description ?? "").trim();
+      const weeks =
+        typeof tile.weeks === "number" && Number.isFinite(tile.weeks)
+          ? String(tile.weeks)
+          : "";
+      const tests =
+        typeof tile.tests === "number" && Number.isFinite(tile.tests)
+          ? String(tile.tests)
+          : "";
+
+      // Missing-repo handling defaults to a hard stop: a repo-less tile must
+      // never reach the destructive LMS steps with nothing to rebuild. The two
+      // opt-in flags relax that - allowMissingRepo skips the pause entirely
+      // (Course Kickoff creates the repo later); confirmMissingRepo pauses only
+      // when a schedule fallback can actually succeed.
+      let repoLine: string;
+      let confirmMessage = "";
+      if (repo) {
+        repoLine = `Repository: ${repo}${
+          tile.repos.length > 1 ? ` (first of ${tile.repos.length} linked)` : ""
+        }`;
+      } else if (String(values.allowMissingRepo ?? "") === "1") {
+        repoLine = "Note: no repository linked yet.";
+      } else if (String(values.confirmMissingRepo ?? "") === "1") {
+        const csvOk = csvToSchedule(tile.csvData ?? "").length > 0;
+        const topicsOk = Boolean(
+          (tile.description?.trim() || tile.topics?.trim()) &&
+            typeof tile.weeks === "number" &&
+            Number.isInteger(tile.weeks) &&
+            tile.weeks >= 1 &&
+            tile.weeks <= 52
+        );
+        if (!csvOk && !topicsOk) {
+          throw new Error(
+            "The course tile has no repository and no usable fallback - link a repository, save a Schedule of Topics (CSV), or add topics plus a week count to the tile."
+          );
+        }
+        repoLine =
+          "Alert: no repository linked to the tile - repo-driven steps will fall back to the tile's Schedule of Topics or skip.";
+        confirmMessage = csvOk
+          ? "This tile has no linked repository. Continue to fall back to the tile's saved Schedule of Topics (CSV) for the schedule, or cancel to link a repository first."
+          : "This tile has no linked repository. Continue to fall back to a schedule generated from the tile's topics and description, or cancel to link a repository first.";
+      } else {
         throw new Error(
           "The course tile has no repository linked - add one on the Courses tab."
         );
       }
 
-      const course = (tile.canvasUrl ?? "").trim();
-      const startDate = (tile.startDate ?? "").trim();
-      const lms = (tile.lms ?? "").trim();
-      const description = (tile.description ?? "").trim();
-
       const items = [
-        `Repository: ${repo}${
-          tile.repos.length > 1 ? ` (first of ${tile.repos.length} linked)` : ""
-        }`,
+        repoLine,
         course
           ? `LMS course: ${course}`
           : "Warning: no LMS course (Canvas URL) on the tile - the LMS steps will be skipped.",
@@ -2348,19 +2592,29 @@ export const STEP_REGISTRY: StepDefinition[] = [
           ? `Description: ${description.slice(0, 80)}${
               description.length > 80 ? "..." : ""
             }`
-          : "Note: no description on the tile - schedule topics come from the repo alone.",
+          : "Note: no description on the tile - Course Kickoff cannot generate a schedule without it.",
+        weeks
+          ? `Weeks: ${weeks}`
+          : "Note: no weeks on the tile - Course Kickoff needs it to generate a schedule.",
+        tests
+          ? `Tests: ${tests}`
+          : "Note: no tests count on the tile.",
       ];
 
-      // Empty strings pass through cleanly: downstream steps already skip on
-      // an empty course and treat an empty startDate as no deadline.
-      return {
-        outputs: { repo, course, startDate, description },
+      const result: StepRunResult = {
+        outputs: { repo, course, startDate, description, weeks, tests },
         summary: {
           kind: "list",
           label: `Loaded "${tile.name}"`,
           items,
         },
       };
+
+      if (confirmMessage) {
+        result.requireConfirmation = confirmMessage;
+      }
+
+      return result;
     },
   },
 

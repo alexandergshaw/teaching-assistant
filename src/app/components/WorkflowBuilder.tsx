@@ -8,6 +8,7 @@ import {
   type WorkflowStepConfig,
   type InputBinding,
   type StepInputSpec,
+  expandWorkflowDef,
 } from "@/lib/workflows/types";
 import {
   STEP_REGISTRY,
@@ -64,7 +65,12 @@ function normalizeBindings(def: WorkflowDef): WorkflowDef {
           };
         }
       } else if (binding.source === "literal") {
-        if (["text", "longtext", "number"].includes(input.type)) {
+        // Boolean literals ("1"/"" toggles like confirmMissingRepo and
+        // includeInstructions) are literal-capable too; their value is always
+        // a string, so preserve them rather than demote to a runtime field.
+        if (
+          ["text", "longtext", "number", "boolean"].includes(input.type)
+        ) {
           normalizedBindings[input.key] = binding;
         } else {
           normalizedBindings[input.key] = {
@@ -84,6 +90,58 @@ function normalizeBindings(def: WorkflowDef): WorkflowDef {
   return normalized;
 }
 
+// Rewrites every "step"-source index inside a step's own bindings AND, for an
+// include step, its include.remap and include.bindOverrides. mapIndex returns a
+// new index, or null to demote the binding to a runtime field so no reference
+// dangles after a structural edit. Plain-step binding behavior is unchanged.
+function remapStepReferences(
+  step: WorkflowStepConfig,
+  mapIndex: (oldIndex: number) => number | null
+): WorkflowStepConfig {
+  const remapRecord = (
+    record: Record<string, InputBinding>,
+    fieldKeyFor: (
+      recordKey: string,
+      binding: Extract<InputBinding, { source: "step" }>
+    ) => string
+  ): Record<string, InputBinding> => {
+    const out: Record<string, InputBinding> = {};
+    for (const [key, binding] of Object.entries(record)) {
+      if (binding.source === "step") {
+        const mapped = mapIndex(binding.stepIndex);
+        out[key] =
+          mapped === null
+            ? { source: "runtime", fieldKey: fieldKeyFor(key, binding) }
+            : { ...binding, stepIndex: mapped };
+      } else {
+        out[key] = binding;
+      }
+    }
+    return out;
+  };
+
+  // Own bindings demote to the input key they fill.
+  const bindings = remapRecord(step.bindings, (recordKey) => recordKey);
+
+  if (step.type === "include-workflow" && step.include) {
+    // remap/bindOverrides values demote to the binding's own outputKey.
+    const include = { ...step.include };
+    include.remap = remapRecord(
+      step.include.remap,
+      (_key, binding) => binding.outputKey
+    );
+    if (step.include.bindOverrides) {
+      include.bindOverrides = remapRecord(
+        step.include.bindOverrides,
+        (_key, binding) => binding.outputKey
+      );
+    }
+    return { ...step, bindings, include };
+  }
+
+  return { ...step, bindings };
+}
+
 export default function WorkflowBuilder({
   def,
   others,
@@ -98,6 +156,8 @@ export default function WorkflowBuilder({
   const [addStepOpen, setAddStepOpen] = useState(false);
   const [selectedStepType, setSelectedStepType] = useState<string>("");
   const [appendSourceId, setAppendSourceId] = useState<string>("");
+  const [includeSourceId, setIncludeSourceId] = useState<string>("");
+  const [includeError, setIncludeError] = useState<string>("");
 
   // Appends an independent snapshot of another workflow's steps - later
   // edits to the source workflow do not affect this one.
@@ -105,27 +165,67 @@ export default function WorkflowBuilder({
     const source = others.find((w) => w.id === appendSourceId);
     if (!source) return;
 
-    // Step bindings shift by this workflow's length BEFORE appending.
+    // Step references shift by this workflow's length BEFORE appending.
     // Runtime and literal bindings copy as-is: matching runtime fieldKeys
-    // merging into one shared run-form field is intentional.
+    // merging into one shared run-form field is intentional. include.remap /
+    // include.bindOverrides indices are offset the same way as own bindings.
     const offset = def.steps.length;
     const copied: WorkflowStepConfig[] = JSON.parse(
       JSON.stringify(source.steps)
     );
-    const remapped = copied.map((step) => {
-      const bindings: Record<string, InputBinding> = {};
-      for (const [key, binding] of Object.entries(step.bindings)) {
-        bindings[key] =
-          binding.source === "step"
-            ? { ...binding, stepIndex: binding.stepIndex + offset }
-            : binding;
-      }
-      return { ...step, bindings };
-    });
+    const remapped = copied.map((step) =>
+      remapStepReferences(step, (oldIndex) => oldIndex + offset)
+    );
 
     const next = { ...def, steps: [...def.steps, ...remapped] };
     onChange(normalizeBindings(next));
     setAppendSourceId("");
+  };
+
+  // Includes another workflow's steps dynamically - later edits to the source
+  // workflow apply here automatically. Validates via expandWorkflowDef to
+  // detect cycles.
+  const handleIncludeWorkflow = (sourceId: string) => {
+    const source = others.find((w) => w.id === sourceId);
+    if (!source) return;
+
+    const candidate: WorkflowDef = {
+      ...def,
+      steps: [
+        ...def.steps,
+        {
+          type: "include-workflow",
+          bindings: {},
+          include: {
+            workflowId: sourceId,
+            skipSteps: [],
+            remap: {},
+          },
+        },
+      ],
+    };
+
+    // Build a lookup that resolves ids from all available workflows.
+    const allDefs = [...others, candidate];
+    const lookup = (id: string): WorkflowDef | undefined => {
+      return allDefs.find((w) => w.id === id);
+    };
+
+    try {
+      expandWorkflowDef(candidate, lookup);
+      setIncludeError("");
+      onChange(normalizeBindings(candidate));
+      setIncludeSourceId("");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("include cycle")) {
+        setIncludeError(
+          `Including "${source.name}" would create a cycle - it already includes this workflow (directly or through another include).`
+        );
+      } else {
+        setIncludeError(msg);
+      }
+    }
   };
 
   const handleNameChange = (name: string) => {
@@ -161,33 +261,15 @@ export default function WorkflowBuilder({
       steps: def.steps.filter((_, i) => i !== index),
     };
 
-    const remappedSteps = next.steps.map((step) => {
-      const remappedBindings: Record<string, InputBinding> = {};
-      for (const [key, binding] of Object.entries(step.bindings)) {
-        if (binding.source === "step") {
-          if (binding.stepIndex > index) {
-            remappedBindings[key] = {
-              ...binding,
-              stepIndex: binding.stepIndex - 1,
-            };
-          } else if (binding.stepIndex === index) {
-            const stepDef = getStepDefinition(step.type);
-            const inputSpec = stepDef?.inputs.find((i) => i.key === key);
-            if (inputSpec) {
-              remappedBindings[key] = {
-                source: "runtime",
-                fieldKey: inputSpec.key,
-              };
-            }
-          } else {
-            remappedBindings[key] = binding;
-          }
-        } else {
-          remappedBindings[key] = binding;
-        }
-      }
-      return { ...step, bindings: remappedBindings };
-    });
+    // References above the removed step decrement; references TO it demote to a
+    // runtime field. Applies to include.remap / include.bindOverrides too.
+    const remappedSteps = next.steps.map((step) =>
+      remapStepReferences(step, (oldIndex) => {
+        if (oldIndex > index) return oldIndex - 1;
+        if (oldIndex === index) return null;
+        return oldIndex;
+      })
+    );
 
     next.steps = remappedSteps;
     const normalized = normalizeBindings(next);
@@ -201,23 +283,15 @@ export default function WorkflowBuilder({
     const swapped = [...def.steps];
     [swapped[index], swapped[newIndex]] = [swapped[newIndex], swapped[index]];
 
-    const remappedSteps = swapped.map((step) => {
-      const remappedBindings: Record<string, InputBinding> = {};
-      for (const [key, binding] of Object.entries(step.bindings)) {
-        if (binding.source === "step") {
-          let newStepIdx = binding.stepIndex;
-          if (binding.stepIndex === index) {
-            newStepIdx = newIndex;
-          } else if (binding.stepIndex === newIndex) {
-            newStepIdx = index;
-          }
-          remappedBindings[key] = { ...binding, stepIndex: newStepIdx };
-        } else {
-          remappedBindings[key] = binding;
-        }
-      }
-      return { ...step, bindings: remappedBindings };
-    });
+    // A swap never removes a step, so references only trade the two indices.
+    // Applies to include.remap / include.bindOverrides too.
+    const remappedSteps = swapped.map((step) =>
+      remapStepReferences(step, (oldIndex) => {
+        if (oldIndex === index) return newIndex;
+        if (oldIndex === newIndex) return index;
+        return oldIndex;
+      })
+    );
 
     const next = { ...def, steps: remappedSteps };
     const normalized = normalizeBindings(next);
@@ -394,6 +468,53 @@ export default function WorkflowBuilder({
           >
             Append
           </Button>
+
+          <div style={{ width: "260px" }}>
+            <Typeahead
+              options={others.map((w) => ({
+                value: w.id,
+                label: w.name,
+                hint: w.preset ? "Preset" : "Custom",
+              }))}
+              value={includeSourceId}
+              onChange={setIncludeSourceId}
+              label="Include workflow"
+              placeholder="Choose a workflow..."
+            />
+          </div>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => handleIncludeWorkflow(includeSourceId)}
+            disabled={!includeSourceId}
+          >
+            Include
+          </Button>
+        </div>
+
+        {includeError && (
+          <div
+            style={{
+              color: "var(--error-text, #d32f2f)",
+              marginTop: 8,
+              marginBottom: 8,
+              fontSize: "0.875rem",
+            }}
+          >
+            {includeError}
+          </div>
+        )}
+
+        <div
+          style={{
+            marginTop: 8,
+            fontSize: "0.875rem",
+            opacity: 0.75,
+            maxWidth: "500px",
+          }}
+        >
+          Append copies a snapshot; Include stays linked (runs the source
+          workflow steps as they are at run time - later edits apply here).
         </div>
 
         <Button

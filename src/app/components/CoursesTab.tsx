@@ -35,6 +35,7 @@ import { listRecordingFiles, type RecordingFile } from "@/lib/recording-files";
 import GithubRepoPicker from "./GithubRepoPicker";
 import TabHeader from "./TabHeader";
 import SyllabusPreviewModal, { type SyllabusPreviewPara } from "./SyllabusPreviewModal";
+import CsvPreviewModal from "./CsvPreviewModal";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { setCourseHandoff } from "@/lib/course-handoff";
@@ -69,7 +70,7 @@ interface CourseForm {
 }
 
 // Fields that can be edited inline on tiles.
-type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime";
+type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime";
 
 const EMPTY_FORM: CourseForm = {
   id: null,
@@ -313,18 +314,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [tileEdit, setTileEdit] = useState<{ id: string; field: InlineField; value: string } | null>(null);
   const [tileSaving, setTileSaving] = useState(false);
   const [expandedRosterId, setExpandedRosterId] = useState<string | null>(null);
-  const [expandedTopicsId, setExpandedTopicsId] = useState<string | null>(null);
-  const [topicsExtractOpen, setTopicsExtractOpen] = useState<string | null>(null);
-  const [expandedCsvId, setExpandedCsvId] = useState<string | null>(null);
+  const [csvPreview, setCsvPreview] = useState<{ name: string; csv: string } | null>(null);
   const [csvRemoveConfirm, setCsvRemoveConfirm] = useState<string | null>(null);
   const [uploadingCsv, setUploadingCsv] = useState(false);
   const [ownedRepos, setOwnedRepos] = useState<string[] | null>(null);
-  const [ownedReposLoading, setOwnedReposLoading] = useState(false);
-  const [topicsRepoSel, setTopicsRepoSel] = useState<Record<string, string>>({});
-  const [extractingTopicsId, setExtractingTopicsId] = useState<string | null>(null);
   const [repoAddSel, setRepoAddSel] = useState("");
   const [repoAddBranch, setRepoAddBranch] = useState("");
-  const [autoTopicsId, setAutoTopicsId] = useState<string | null>(null);
   const [uploadingMaterials, setUploadingMaterials] = useState(false);
   const [materialsRemoveConfirm, setMaterialsRemoveConfirm] = useState<string | null>(null);
   const [removingMaterialFile, setRemovingMaterialFile] = useState<string | null>(null);
@@ -406,18 +401,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     }
   }, []);
 
-  // Load the user's GitHub repos once on mount for the topic extraction dropdown.
+  // Load the user's GitHub repos once on mount for the repo picker dropdown.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setOwnedReposLoading(true);
       const r = await listGithubReposAction();
       if (cancelled) return;
       if (!("error" in r)) {
         const sorted = r.repos.map((repo) => repo.fullName).sort();
         setOwnedRepos(sorted);
       }
-      setOwnedReposLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -894,7 +887,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       field === "repos" ? reposToText(c)
       : field === "integrations" ? integrationsToText(c)
       : field === "syllabusId" ? (c.syllabusId ?? "")
-      : field === "topics" ? (c.topics ?? "")
       : field === "csv" ? ""
       : field === "startDate" ? (c.startDate ?? "")
       : field === "description" ? (c.description ?? "")
@@ -928,7 +920,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     const patch =
       tileEdit.field === "repos" ? { repos: parseRepoLines(tileEdit.value) }
       : tileEdit.field === "integrations" ? { integrations: parseIntegrationLines(tileEdit.value) }
-      : tileEdit.field === "topics" ? { topics: tileEdit.value }
       : tileEdit.field === "weeks" ? { weeks: tileEdit.value.trim() ? (Number.isFinite(Number(tileEdit.value.trim())) ? Number(tileEdit.value.trim()) : null) : null }
       : tileEdit.field === "tests" ? { tests: tileEdit.value.trim() ? (Number.isFinite(Number(tileEdit.value.trim())) ? Number(tileEdit.value.trim()) : null) : null }
       : tileEdit.field === "lms" ? {
@@ -966,11 +957,9 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       if (added.length > 0 || topicsEmpty) {
         // Start background extraction without blocking the save
         void (async () => {
-          setAutoTopicsId(savedCourse.id);
           const extractResult = await extractTopicsFromRepoAction(extractRepo, getStoredProvider());
           if ("error" in extractResult) {
             setError(extractResult.error);
-            setAutoTopicsId(null);
             return;
           }
           // Build update input from the saved course with extracted topics
@@ -983,7 +972,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
           const updateResult = await updateCourseHubAction(savedCourse.id, updatedInput);
           if ("error" in updateResult) {
             setError(updateResult.error);
-            setAutoTopicsId(null);
             return;
           }
           // Update courses state with the new topics
@@ -992,7 +980,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
             if (hubCache) hubCache = { ...hubCache, courses: next };
             return next;
           });
-          setAutoTopicsId(null);
           setError(`Topics extracted from ${extractRepo}.`);
         })();
       }
@@ -1999,193 +1986,11 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                 )}
           </div>
         );
-      case "topics":
-        return (
-          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "topics" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "topics"))}>
-            <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("topics")}Topics</span>
-              {autoTopicsId === c.id && (
-                <span className={styles.fieldHint} style={{ margin: 0, marginLeft: 8 }}>Extracting topics from the codebase...</span>
-              )}
-              {c.topics && c.topics.trim() && (
-                <span className={styles.navBadge} style={{ marginLeft: 8 }}>{c.topics.split("\n").map((l) => l.trim()).filter(Boolean).length}</span>
-              )}
-              <button
-                type="button"
-                className={styles.tileEditBtn}
-                title="Edit"
-                onClick={() => startTileEdit(c, "topics")}
-              >
-                <PencilIcon />
-              </button>
-            </div>
-            {tileEdit?.id === c.id && tileEdit?.field === "topics"
-              ? tileEditor(true, "One topic per line.", "One topic per line. Used to describe what the course covers.")
-              : c.topics && c.topics.trim()
-                ? (() => {
-                  const topics = c.topics.split("\n").map((l) => l.trim()).filter(Boolean);
-                  const topicCount = topics.length;
-                  const firstTopic = topics[0];
-                  const truncatedFirst = firstTopic.length > 40 ? firstTopic.slice(0, 40) + "…" : firstTopic;
-                  return (
-                    <>
-                      <span className={styles.courseResourceValue}>
-                        {topicCount} topic{topicCount === 1 ? "" : "s"} - starting with &quot;{truncatedFirst}&quot;
-                      </span>
-                      <div className={styles.courseResourceActions}>
-                        <button
-                          type="button"
-                          className={styles.linkButton}
-                          onClick={() => setExpandedTopicsId(expandedTopicsId === c.id ? null : c.id)}
-                        >
-                          {expandedTopicsId === c.id ? "Hide" : "View"}
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.linkButton}
-                          onClick={() => void navigator.clipboard.writeText(c.topics ?? "")}
-                        >
-                          Copy
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.linkButton}
-                          onClick={() => setTopicsExtractOpen(topicsExtractOpen === c.id ? null : c.id)}
-                        >
-                          From repo
-                        </button>
-                      </div>
-                      {expandedTopicsId === c.id && (
-                        <ol className={styles.topicsList}>
-                          {topics.map((t, i) => (
-                            <li key={i}>{t}</li>
-                          ))}
-                        </ol>
-                      )}
-                      {topicsExtractOpen === c.id && (
-                        <div className={styles.topicsExtract} onClick={(e) => e.stopPropagation()}>
-                          <Autocomplete
-                            freeSolo
-                            options={ownedRepos ?? []}
-                            inputValue={topicsRepoSel[c.id] ?? ""}
-                            onInputChange={(_, v) => setTopicsRepoSel((prev) => ({ ...prev, [c.id]: v }))}
-                            sx={{ width: "100%" }}
-                            renderInput={(params) => (
-                              <TextField
-                                {...params}
-                                size="small"
-                                label="Extract from repo"
-                                placeholder={ownedReposLoading ? "Loading repos..." : "owner/name"}
-                              />
-                            )}
-                          />
-                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              disabled={!/^[^/\s]+\/[^/\s]+$/.test((topicsRepoSel[c.id] ?? "").trim()) || extractingTopicsId !== null}
-                              onClick={async () => {
-                                setExtractingTopicsId(c.id);
-                                setError(null);
-                                const r = await extractTopicsFromRepoAction((topicsRepoSel[c.id] ?? "").trim(), getStoredProvider());
-                                setExtractingTopicsId(null);
-                                if ("error" in r) {
-                                  setError(r.error);
-                                } else {
-                                  setTileEdit({ id: c.id, field: "topics", value: r.topics.join("\n") });
-                                  setTopicsExtractOpen(null);
-                                }
-                              }}
-                            >
-                              {extractingTopicsId === c.id ? "Extracting..." : "Extract topics"}
-                            </Button>
-                            <button
-                              type="button"
-                              className={styles.linkButton}
-                              onClick={() => setTopicsExtractOpen(null)}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                          <p className={styles.fieldHint} style={{ margin: 0 }}>
-                            Extracted topics load into the editor for review - press Save to keep them.
-                          </p>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()
-                : (
-                  <>
-                    <span className={styles.courseResourceEmpty}>Not set</span>
-                    <div className={styles.courseResourceActions}>
-                      <button
-                        type="button"
-                        className={styles.linkButton}
-                        onClick={() => setTopicsExtractOpen(topicsExtractOpen === c.id ? null : c.id)}
-                      >
-                        From repo
-                      </button>
-                    </div>
-                    {topicsExtractOpen === c.id && (
-                      <div className={styles.topicsExtract} onClick={(e) => e.stopPropagation()}>
-                        <Autocomplete
-                          freeSolo
-                          options={ownedRepos ?? []}
-                          inputValue={topicsRepoSel[c.id] ?? ""}
-                          onInputChange={(_, v) => setTopicsRepoSel((prev) => ({ ...prev, [c.id]: v }))}
-                          sx={{ width: "100%" }}
-                          renderInput={(params) => (
-                            <TextField
-                              {...params}
-                              size="small"
-                              label="Extract from repo"
-                              placeholder={ownedReposLoading ? "Loading repos..." : "owner/name"}
-                            />
-                          )}
-                        />
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            disabled={!/^[^/\s]+\/[^/\s]+$/.test((topicsRepoSel[c.id] ?? "").trim()) || extractingTopicsId !== null}
-                            onClick={async () => {
-                              setExtractingTopicsId(c.id);
-                              setError(null);
-                              const r = await extractTopicsFromRepoAction((topicsRepoSel[c.id] ?? "").trim(), getStoredProvider());
-                              setExtractingTopicsId(null);
-                              if ("error" in r) {
-                                setError(r.error);
-                              } else {
-                                setTileEdit({ id: c.id, field: "topics", value: r.topics.join("\n") });
-                                setTopicsExtractOpen(null);
-                              }
-                            }}
-                          >
-                            {extractingTopicsId === c.id ? "Extracting..." : "Extract topics"}
-                          </Button>
-                          <button
-                            type="button"
-                            className={styles.linkButton}
-                            onClick={() => setTopicsExtractOpen(null)}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                        <p className={styles.fieldHint} style={{ margin: 0 }}>
-                          Extracted topics load into the editor for review - press Save to keep them.
-                        </p>
-                      </div>
-                    )}
-                  </>
-                )}
-          </div>
-        );
       case "csv":
         return (
           <div className={`${styles.courseResource}${!c.csvData ? " " + styles.courseResourceClickable : ""}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "csv" ? "true" : undefined}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("csv")}CSV</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("csv")}Schedule of Topics</span>
               {c.csvData && c.csvData.trim() && (
                 <span className={styles.navBadge} style={{ marginLeft: 8 }}>
                   {(() => {
@@ -2199,6 +2004,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
             {!c.csvData
               ? (
                 <>
+                  <span className={styles.courseResourceEmpty}>No schedule saved yet - Course Refresh saves one here, or upload a CSV.</span>
                   <Button
                     variant="outlined"
                     size="small"
@@ -2227,9 +2033,9 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                     <button
                       type="button"
                       className={styles.linkButton}
-                      onClick={() => setExpandedCsvId(expandedCsvId === c.id ? null : c.id)}
+                      onClick={() => setCsvPreview({ name: c.csvName || "course.csv", csv: c.csvData ?? "" })}
                     >
-                      {expandedCsvId === c.id ? "Hide" : "View"}
+                      Preview
                     </button>
                     <button
                       type="button"
@@ -2313,24 +2119,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       >
                         Cancel
                       </Button>
-                    </div>
-                  )}
-                  {expandedCsvId === c.id && c.csvData && (
-                    <div className={styles.rosterPreview} style={{ maxHeight: 400, overflow: "auto" }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85em" }}>
-                        <tbody>
-                          {c.csvData.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 20).map((line, i) => (
-                            <tr key={i} style={{ borderBottom: "1px solid var(--border-color)" }}>
-                              {line.split(",").map((cell, j) => (
-                                <td key={j} style={{ padding: "4px 8px", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                  {cell.trim()}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>Preview uses simple comma splitting.</p>
                     </div>
                   )}
                 </>
@@ -3502,6 +3290,10 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
 
       {preview && (
         <SyllabusPreviewModal name={preview.name} paragraphs={preview.paragraphs} onClose={() => setPreview(null)} />
+      )}
+
+      {csvPreview && (
+        <CsvPreviewModal name={csvPreview.name} csv={csvPreview.csv} onClose={() => setCsvPreview(null)} />
       )}
     </section>
   );

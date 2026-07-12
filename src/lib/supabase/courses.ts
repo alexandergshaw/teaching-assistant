@@ -207,9 +207,8 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     lms: clean(input.lms),
     day_time: clean(input.dayTime),
     custom_tiles: Array.isArray(input.customTiles) ? (input.customTiles as unknown as Json) : undefined,
-    materials_zip_name: null,
-    materials_zip_path: null,
-    materials_zip_size: null,
+    // Omit materials_zip_* fields: inserts use NULL defaults, updates preserve existing
+    // values. updateCourseMaterials is the sole writer of these columns.
     updated_at: new Date().toISOString(),
   };
 }

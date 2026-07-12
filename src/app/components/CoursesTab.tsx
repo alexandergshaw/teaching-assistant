@@ -24,6 +24,7 @@ import {
   setCourseMaterialsAction,
   removeCourseMaterialFileAction,
   listCoursesAction,
+  listSyllabusTemplatesAction,
 } from "../actions";
 import type { Course, CourseCustomTile } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
@@ -350,6 +351,11 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [instFields, setInstFields] = useState<Record<string, InstitutionField[] | undefined>>({});
   const [instFieldEdit, setInstFieldEdit] = useState<{ acronym: string; id: string; value: string } | null>(null);
   const [instFieldAdd, setInstFieldAdd] = useState<{ acronym: string; label: string; type: "text" | "date" | "url" } | null>(null);
+  // Syllabus templates for the syllabusTemplate field typeahead (null = not loaded yet).
+  const [syllabusTemplates, setSyllabusTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
+  // Ref mirror of saveInstFieldEdit so the mount-once click-outside listener
+  // always calls the latest closure (avoids TDZ/stale-closure issues).
+  const saveInstFieldEditRef = useRef<() => void>(() => {});
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
   const csvUploadRef = useRef<HTMLInputElement>(null);
@@ -530,6 +536,28 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       cancelled = true;
     };
   }, [user, supabase, courses, instFields]);
+
+  // Lazy-load syllabus templates once when user is present and any institution
+  // panel is visible (instFields has at least one loaded acronym).
+  useEffect(() => {
+    if (!user || syllabusTemplates !== null) return;
+    const hasLoadedField = Object.values(instFields).some((f) => f !== undefined);
+    if (!hasLoadedField) return;
+    let cancelled = false;
+    (async () => {
+      const result = await listSyllabusTemplatesAction();
+      if (cancelled) return;
+      if ("error" in result) {
+        console.error("Failed to load syllabus templates:", result.error);
+        setSyllabusTemplates([]);
+        return;
+      }
+      setSyllabusTemplates(result.templates.map((t) => ({ id: t.id, name: t.name })));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, syllabusTemplates, instFields]);
 
   const toggleGroup = (key: string) =>
     setCollapsed((prev) => {
@@ -995,6 +1023,21 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [tileEdit]);
+
+  // Click outside the currently-editing institution field to save and close.
+  // Mount-once; the ref indirection keeps the handler's closure fresh
+  // (saveInstFieldEdit itself no-ops when nothing is being edited).
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      // MUI Typeahead menus render in a body-level portal - do not treat
+      // picking an option as clicking away.
+      const el = e.target as HTMLElement;
+      if (el.closest('[data-inst-field-editing="true"], .MuiPopover-root, .MuiMenu-root, .MuiAutocomplete-popper, [role="listbox"]')) return;
+      saveInstFieldEditRef.current();
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
 
   // Render the inline tile editor (input + save/cancel).
   const tileEditor = (multiline: boolean, placeholder: string, hint?: string) =>
@@ -2605,6 +2648,11 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     applyInstFields(edit.acronym, list.map((f) => (f.id === edit.id ? { ...f, value: edit.value.trim() } : f)));
   };
 
+  // Keep the click-outside listener's ref pointing at the latest closure.
+  useEffect(() => {
+    saveInstFieldEditRef.current = saveInstFieldEdit;
+  });
+
   const submitInstFieldAdd = () => {
     if (!instFieldAdd || !instFieldAdd.label.trim()) return;
     const list = instFields[instFieldAdd.acronym];
@@ -2629,6 +2677,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                 <div
                   key={f.id}
                   className={styles.instFieldChip}
+                  data-inst-field-editing={editing ? "true" : "false"}
                   onClick={(e) => {
                     if ((e.target as HTMLElement).closest("a, button, input, textarea, select, label")) return;
                     if (!editing) setInstFieldEdit({ acronym, id: f.id, value: f.value });
@@ -2636,23 +2685,36 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                 >
                   <span className={styles.instFieldLabel}>{f.label}</span>
                   {editing ? (
-                    <TextField
-                      size="small"
-                      autoFocus
-                      type={f.type === "date" ? "date" : "text"}
-                      value={instFieldEdit.value}
-                      onChange={(e) => setInstFieldEdit((p) => (p ? { ...p, value: e.target.value } : p))}
-                      onBlur={saveInstFieldEdit}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") saveInstFieldEdit();
-                        if (e.key === "Escape") setInstFieldEdit(null);
-                      }}
-                    />
+                    f.type === "syllabusTemplate" ? (
+                      <Typeahead
+                        options={(syllabusTemplates ?? []).map((t) => ({ value: t.id, label: t.name }))}
+                        value={instFieldEdit.value}
+                        onChange={(v) => setInstFieldEdit((p) => (p ? { ...p, value: v } : p))}
+                        placeholder={syllabusTemplates === null ? "Loading templates..." : "Choose a template..."}
+                        loading={syllabusTemplates === null}
+                        noOptionsText="No templates available"
+                      />
+                    ) : (
+                      <TextField
+                        size="small"
+                        autoFocus
+                        type={f.type === "date" ? "date" : "text"}
+                        value={instFieldEdit.value}
+                        onChange={(e) => setInstFieldEdit((p) => (p ? { ...p, value: e.target.value } : p))}
+                        onBlur={saveInstFieldEdit}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveInstFieldEdit();
+                          if (e.key === "Escape") setInstFieldEdit(null);
+                        }}
+                      />
+                    )
                   ) : f.value ? (
                     f.type === "date" ? (
                       <span className={styles.instFieldValue}>{new Date(`${f.value}T00:00:00`).toLocaleDateString()}</span>
                     ) : f.type === "url" ? (
                       <a className={styles.instFieldValue} href={f.value} target="_blank" rel="noreferrer">{f.value}</a>
+                    ) : f.type === "syllabusTemplate" ? (
+                      <span className={styles.instFieldValue}>{(syllabusTemplates ?? []).find((t) => t.id === f.value)?.name ?? f.value}</span>
                     ) : (
                       <span className={styles.instFieldValue}>{f.value}</span>
                     )

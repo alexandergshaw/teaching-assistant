@@ -926,22 +926,24 @@ export default function WorkflowsTab() {
                         handleValueChange(field.fieldKey, e.target.value)
                       }
                     >
+                      {/* MUI Select rejects Fragment children (item clicks never register), so option lists are flat arrays. */}
                       {hubCourses === null ? (
                         <MenuItem disabled>Loading courses...</MenuItem>
                       ) : hubCourses.length > 0 ? (
-                        <>
-                          {hubCourses.map((course) => (
+                        [
+                          ...hubCourses.map((course) => (
                             <MenuItem key={course.id} value={course.id}>
                               {course.name}
                             </MenuItem>
-                          ))}
-                          {value &&
-                            !hubCourses.some((c) => c.id === value) && (
-                              <MenuItem value={value}>
-                                Previous course (reselect)
-                              </MenuItem>
-                            )}
-                        </>
+                          )),
+                          ...(value && !hubCourses.some((c) => c.id === value)
+                            ? [
+                                <MenuItem key="stale" value={value}>
+                                  Previous course (reselect)
+                                </MenuItem>,
+                              ]
+                            : []),
+                        ]
                       ) : (
                         <MenuItem disabled>No courses available</MenuItem>
                       )}

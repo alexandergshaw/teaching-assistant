@@ -781,14 +781,16 @@ export default function FilesTab() {
                             {modulesStatus === "ready" && modules.length === 0 ? (
                               <MenuItem value="">No modules found</MenuItem>
                             ) : (
-                              <>
-                                <MenuItem value="">Choose a module...</MenuItem>
-                                {modules.map((m) => (
+                              [
+                                <MenuItem key="none" value="">
+                                  Choose a module...
+                                </MenuItem>,
+                                ...modules.map((m) => (
                                   <MenuItem key={m.id} value={m.id}>
                                     {m.name}
                                   </MenuItem>
-                                ))}
-                              </>
+                                )),
+                              ]
                             )}
                           </TextField>
                           <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
@@ -1011,14 +1013,16 @@ export default function FilesTab() {
                                     {modulesStatus === "ready" && modules.length === 0 ? (
                                       <MenuItem value="">No modules found</MenuItem>
                                     ) : (
-                                      <>
-                                        <MenuItem value="">Choose a module...</MenuItem>
-                                        {modules.map((m) => (
+                                      [
+                                        <MenuItem key="none" value="">
+                                          Choose a module...
+                                        </MenuItem>,
+                                        ...modules.map((m) => (
                                           <MenuItem key={m.id} value={m.id}>
                                             {m.name}
                                           </MenuItem>
-                                        ))}
-                                      </>
+                                        )),
+                                      ]
                                     )}
                                   </TextField>
 

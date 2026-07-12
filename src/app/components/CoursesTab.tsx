@@ -22,6 +22,7 @@ import {
   extractTopicsFromRepoAction,
   listGithubReposAction,
   setCourseMaterialsAction,
+  listCoursesAction,
 } from "../actions";
 import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
@@ -29,10 +30,12 @@ import GithubRepoPicker from "./GithubRepoPicker";
 import TabHeader from "./TabHeader";
 import SyllabusPreviewModal, { type SyllabusPreviewPara } from "./SyllabusPreviewModal";
 import { getStoredProvider } from "@/lib/llm-provider";
-import { useInstitutions } from "@/lib/institutions";
+import { useInstitutionSelection } from "@/lib/institutions";
 import { setCourseHandoff } from "@/lib/course-handoff";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { uploadCourseZip, getCourseZipUrl, removeCourseZip } from "@/lib/course-files";
+import { parseCanvasCourseId } from "@/lib/canvas-url";
+import Typeahead from "./ui/Typeahead";
 import styles from "../page.module.css";
 
 // The editable form state (all strings; "" means "not set").
@@ -56,7 +59,7 @@ interface CourseForm {
 }
 
 // Fields that can be edited inline on tiles.
-type InlineField = "canvasUrl" | "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics" | "csv" | "startDate" | "lms";
+type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics" | "csv" | "startDate" | "lms";
 
 const EMPTY_FORM: CourseForm = {
   id: null,
@@ -218,7 +221,7 @@ function PencilIcon() {
 }
 
 export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-planning" | "version-control") => void }) {
-  const institutions = useInstitutions();
+  const { institutions, active: activeInstitution } = useInstitutionSelection();
   const { supabase, user } = useSupabase();
   const [courses, setCourses] = useState<Course[]>(() => hubCache?.courses ?? []);
   const [syllabi, setSyllabi] = useState<FinalizedSyllabusMeta[]>(() => hubCache?.syllabi ?? []);
@@ -256,6 +259,9 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [autoTopicsId, setAutoTopicsId] = useState<string | null>(null);
   const [uploadingMaterials, setUploadingMaterials] = useState(false);
   const [materialsRemoveConfirm, setMaterialsRemoveConfirm] = useState<string | null>(null);
+  const [lmsCourseOpts, setLmsCourseOpts] = useState<Array<{ url: string; name: string }> | null>(null);
+  const [lmsCourseOptsError, setLmsCourseOptsError] = useState<string | null>(null);
+  const [lmsCourseDraft, setLmsCourseDraft] = useState<string | null>(null);
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
   const csvUploadRef = useRef<HTMLInputElement>(null);
@@ -343,6 +349,32 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       cancelled = true;
     };
   }, [courses]);
+
+  // Load the institution's connected LMS courses while the LMS tile editor is
+  // open (await-first so no synchronous setState). Resets live in startTileEdit.
+  const lmsEditTileId = tileEdit?.field === "lms" ? tileEdit.id : null;
+  useEffect(() => {
+    if (!lmsEditTileId) return;
+    const institution = courses.find((c) => c.id === lmsEditTileId)?.institution || activeInstitution;
+    if (!institution) return;
+    let cancelled = false;
+    (async () => {
+      const result = await listCoursesAction(institution);
+      if (cancelled) return;
+      if ("error" in result) {
+        setLmsCourseOptsError(result.error);
+        setLmsCourseOpts([]);
+        return;
+      }
+      // The app stores relative course URLs; server actions resolve the
+      // institution's base URL from the acronym (mirrors CoursePicker).
+      setLmsCourseOpts(result.courses.map((c) => ({ url: `/courses/${c.id}`, name: c.name })));
+      setLmsCourseOptsError(null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lmsEditTileId, courses, activeInstitution]);
 
   const toggleGroup = (key: string) =>
     setCollapsed((prev) => {
@@ -647,8 +679,11 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       : field === "lms" ? (c.lms ?? "")
       : ((c[field as Exclude<InlineField, "csv" | "startDate" | "lms">] ?? "") as string);
     setTileEdit({ id: c.id, field, value });
-    // Clear repo add states when opening a new tile edit
-    if (field === "repos") {
+    if (field === "lms") {
+      setLmsCourseDraft(null);
+      setLmsCourseOpts(null);
+      setLmsCourseOptsError(null);
+    } else if (field === "repos") {
       setRepoAddSel("");
       setRepoAddBranch("");
     }
@@ -669,6 +704,10 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       tileEdit.field === "repos" ? { repos: parseRepoLines(tileEdit.value) }
       : tileEdit.field === "integrations" ? { integrations: parseIntegrationLines(tileEdit.value) }
       : tileEdit.field === "topics" ? { topics: tileEdit.value }
+      : tileEdit.field === "lms" ? {
+        lms: tileEdit.value || null,
+        ...(lmsCourseDraft !== null ? { canvasUrl: lmsCourseDraft || null } : {}),
+      }
       : { [tileEdit.field]: tileEdit.value };
     const r = await updateCourseHubAction(course.id, { ...courseToInput(course), ...patch });
     setTileSaving(false);
@@ -686,6 +725,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     setTileEdit(null);
     setRepoAddSel("");
     setRepoAddBranch("");
+    setLmsCourseDraft(null);
 
     // Feature 2: After successful save of repos, extract topics from the repo the user just linked
     if (tileEdit.field === "repos" && patch.repos && patch.repos.length > 0) {
@@ -828,8 +868,25 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     );
 
   // Render the inline LMS editor (select + save/cancel).
-  const tileLmsEditor = () =>
-    tileEdit && (
+  const tileLmsEditor = () => {
+    if (!tileEdit) return null;
+    const editingCourse = courses.find((c) => c.id === tileEdit.id);
+    if (!editingCourse) return null;
+
+    const institution = editingCourse.institution || activeInstitution;
+    const typeaheadOpts = (lmsCourseOpts ?? []).map((opt) => ({ value: opt.url, label: opt.name }));
+    // Match the draft/current URL to an option by course id (stored URLs may be
+    // absolute while options are relative); otherwise show the raw value.
+    const rawUrl = lmsCourseDraft ?? (editingCourse.canvasUrl ?? "");
+    const currentId = rawUrl ? parseCanvasCourseId(rawUrl) : null;
+    const matched = currentId ? typeaheadOpts.find((opt) => opt.value === `/courses/${currentId}`) : undefined;
+    const currentUrl = matched ? matched.value : rawUrl;
+
+    if (currentUrl && !matched && !typeaheadOpts.some((opt) => opt.value === currentUrl)) {
+      typeaheadOpts.push({ value: currentUrl, label: currentUrl });
+    }
+
+    return (
       <div className={styles.tileEditor}>
         <TextField
           select
@@ -842,6 +899,22 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
           <MenuItem value="canvas">Canvas</MenuItem>
           <MenuItem value="blackboard">Blackboard</MenuItem>
         </TextField>
+        <p className={styles.fieldHint} style={{ margin: "6px 0 0 0" }}>LMS course (optional)</p>
+        {institution ? (
+          <>
+            <Typeahead
+              options={typeaheadOpts}
+              value={currentUrl}
+              onChange={setLmsCourseDraft}
+              placeholder={lmsCourseOpts === null ? "Loading courses..." : "Choose a connected course..."}
+              loading={lmsCourseOpts === null}
+              noOptionsText="No connected courses"
+            />
+            {lmsCourseOptsError && <p className={styles.fieldHint} style={{ color: "var(--danger)", margin: "6px 0 0 0" }}>{lmsCourseOptsError}</p>}
+          </>
+        ) : (
+          <p className={styles.fieldHint}>Add an institution to pick a connected course.</p>
+        )}
         <div className={styles.tileEditorActions}>
           <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
             {tileSaving ? "Saving…" : "Save"}
@@ -852,6 +925,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         </div>
       </div>
     );
+  };
 
   // Render the roster table editor (student/username pairs + save/cancel).
   const rosterTableEditor = () => {
@@ -1322,31 +1396,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                 </div>
 
                 <div className={styles.courseResources}>
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "canvasUrl" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "canvasUrl"))}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>Canvas</span>
-                      <button
-                        type="button"
-                        className={styles.tileEditBtn}
-                        title="Edit"
-                        onClick={() => startTileEdit(c, "canvasUrl")}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "canvasUrl"
-                      ? tileEditor(false, "https://canvas.../courses/123")
-                      : c.canvasUrl
-                        ? (
-                          <a className={styles.courseResourceValue} href={c.canvasUrl} target="_blank" rel="noreferrer">
-                            Open course
-                          </a>
-                        )
-                        : (
-                          <span className={styles.courseResourceEmpty}>Not linked</span>
-                        )}
-                  </div>
-
                   <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "githubOrg" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "githubOrg"))}>
                     <div className={styles.courseResourceHead}>
                       <span className={styles.courseResourceLabel}>Organization</span>
@@ -1554,7 +1603,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       ? tileLmsEditor()
                       : c.lms
                         ? (
-                          <span className={styles.courseResourceValue}>{c.lms === "canvas" ? "Canvas" : c.lms === "blackboard" ? "Blackboard" : c.lms}</span>
+                          <>
+                            <span className={styles.courseResourceValue}>{c.lms === "canvas" ? "Canvas" : c.lms === "blackboard" ? "Blackboard" : c.lms}</span>
+                            {c.canvasUrl && (
+                              c.canvasUrl.startsWith("http") ? (
+                                <a className={styles.courseResourceValue} href={c.canvasUrl} target="_blank" rel="noreferrer">Open LMS course</a>
+                              ) : (
+                                <span className={styles.courseResourceValue}>Course {parseCanvasCourseId(c.canvasUrl)} linked</span>
+                              )
+                            )}
+                          </>
                         )
                         : (
                           <span className={styles.courseResourceEmpty}>Not set</span>

@@ -679,11 +679,14 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     if (tileEdit.field === "repos" && patch.repos && patch.repos.length > 0) {
       const topicsEmpty = !savedCourse.topics || savedCourse.topics.trim() === "";
       if (topicsEmpty) {
-        const firstRepo = patch.repos[0].repo;
+        // Extract from the repo the user just linked, not the tile's first repo; fall back to the last listed repo when nothing new was added.
+        const prevRepos = new Set(course.repos.map((x) => x.repo.toLowerCase()));
+        const added = patch.repos.filter((x) => !prevRepos.has(x.repo.toLowerCase()));
+        const extractRepo = (added.length > 0 ? added[added.length - 1] : patch.repos[patch.repos.length - 1]).repo;
         // Start background extraction without blocking the save
         void (async () => {
           setAutoTopicsId(savedCourse.id);
-          const extractResult = await extractTopicsFromRepoAction(firstRepo, getStoredProvider());
+          const extractResult = await extractTopicsFromRepoAction(extractRepo, getStoredProvider());
           if ("error" in extractResult) {
             setError(extractResult.error);
             setAutoTopicsId(null);
@@ -709,7 +712,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
             return next;
           });
           setAutoTopicsId(null);
-          setError(`Topics extracted from ${firstRepo}.`);
+          setError(`Topics extracted from ${extractRepo}.`);
         })();
       }
     }

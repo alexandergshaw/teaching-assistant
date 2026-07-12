@@ -387,6 +387,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         .pop()
         ?.replace(/[^a-z0-9]/gi, "_")
         .replace(/_+/g, "_") || "lecture_plans";
+      let tileLms = "";
       if (hubCourseId) {
         const list = await listCourseHubAction();
         if (!("error" in list)) {
@@ -396,18 +397,26 @@ export const STEP_REGISTRY: StepDefinition[] = [
               tile.name.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_") ||
               baseName;
           }
+          tileLms = (tile?.lms ?? "").trim().toLowerCase();
         }
       }
 
-      onProgress("Downloading zip...");
-      const url = URL.createObjectURL(zipBlob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${baseName}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Tile's LMS routes which format the browser downloads; files output
+      // and library save are unaffected.
+      let downloadSkipped = false;
+      if (tileLms !== "blackboard") {
+        onProgress("Downloading zip...");
+        const url = URL.createObjectURL(zipBlob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${baseName}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } else {
+        downloadSkipped = true;
+      }
 
       if (helpers.saveBundle) {
         try {
@@ -421,7 +430,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
         outputs: { files },
         summary: {
           kind: "list",
-          label: `Generated ${files.length} files (zip downloaded)`,
+          label: downloadSkipped
+            ? `Generated ${files.length} files (zip saved to your library - Blackboard tile, download comes from the Blackboard export step)`
+            : `Generated ${files.length} files (zip downloaded)`,
           items: files.map((f) => f.name),
         },
       };
@@ -1360,26 +1371,40 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const files = values.files as GeneratedCourseFile[];
       const schedule = values.schedule as ScheduleWeekPlan[];
 
+      // Resolve the tile once if a hubCourse is bound; used for both the skip
+      // check and the name default.
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      const list = hubCourseId ? await listCourseHubAction() : null;
+      const tile =
+        list && !("error" in list)
+          ? list.courses.find((c) => c.id === hubCourseId)
+          : undefined;
+
+      // Skip if the tile was provided but not found, or its LMS is not Blackboard.
+      if (hubCourseId) {
+        const tileLms = (tile?.lms ?? "").trim().toLowerCase();
+        if (!tile || tileLms !== "blackboard") {
+          return {
+            outputs: {},
+            summary: {
+              kind: "text",
+              text: "Skipped - the course tile's LMS is not Blackboard.",
+            },
+          };
+        }
+      }
+
       let baseName = String(values.name ?? "")
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]/gi, "_")
         .replace(/_+/g, "_");
 
-      if (!baseName) {
-        const hubCourseId = String(values.hubCourse ?? "").trim();
-        if (hubCourseId) {
-          const list = await listCourseHubAction();
-          if (!("error" in list)) {
-            const tile = list.courses.find((c) => c.id === hubCourseId);
-            if (tile?.name?.trim()) {
-              baseName = tile.name
-                .trim()
-                .replace(/[^a-z0-9]/gi, "_")
-                .replace(/_+/g, "_");
-            }
-          }
-        }
+      if (!baseName && tile?.name?.trim()) {
+        baseName = tile.name
+          .trim()
+          .replace(/[^a-z0-9]/gi, "_")
+          .replace(/_+/g, "_");
       }
 
       if (!baseName) {

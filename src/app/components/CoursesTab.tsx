@@ -52,10 +52,11 @@ interface CourseForm {
   notes: string;
   topics: string;
   startDate: string;
+  lms: string;
 }
 
 // Fields that can be edited inline on tiles.
-type InlineField = "canvasUrl" | "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics" | "csv" | "startDate";
+type InlineField = "canvasUrl" | "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics" | "csv" | "startDate" | "lms";
 
 const EMPTY_FORM: CourseForm = {
   id: null,
@@ -73,6 +74,7 @@ const EMPTY_FORM: CourseForm = {
   notes: "",
   topics: "",
   startDate: "",
+  lms: "",
 };
 
 function formFromCourse(c: Course): CourseForm {
@@ -92,6 +94,7 @@ function formFromCourse(c: Course): CourseForm {
     notes: c.notes ?? "",
     topics: c.topics ?? "",
     startDate: c.startDate ?? "",
+    lms: c.lms ?? "",
   };
 }
 
@@ -114,6 +117,7 @@ function courseToInput(c: Course) {
     csvName: c.csvName ?? "",
     csvData: c.csvData ?? "",
     startDate: c.startDate ?? "",
+    lms: c.lms ?? "",
   };
 }
 
@@ -401,6 +405,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       notes: form.notes,
       topics: form.topics,
       startDate: form.startDate,
+      lms: form.lms,
     };
     const result = form.id ? await updateCourseHubAction(form.id, input) : await createCourseHubAction(input);
     setSaving(false);
@@ -639,7 +644,8 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       : field === "topics" ? (c.topics ?? "")
       : field === "csv" ? ""
       : field === "startDate" ? (c.startDate ?? "")
-      : ((c[field as Exclude<InlineField, "csv" | "startDate">] ?? "") as string);
+      : field === "lms" ? (c.lms ?? "")
+      : ((c[field as Exclude<InlineField, "csv" | "startDate" | "lms">] ?? "") as string);
     setTileEdit({ id: c.id, field, value });
     // Clear repo add states when opening a new tile edit
     if (field === "repos") {
@@ -821,6 +827,32 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       </div>
     );
 
+  // Render the inline LMS editor (select + save/cancel).
+  const tileLmsEditor = () =>
+    tileEdit && (
+      <div className={styles.tileEditor}>
+        <TextField
+          select
+          size="small"
+          fullWidth
+          value={tileEdit.value}
+          onChange={(e) => setTileEdit((t) => (t ? { ...t, value: e.target.value } : t))}
+        >
+          <MenuItem value="">Not set</MenuItem>
+          <MenuItem value="canvas">Canvas</MenuItem>
+          <MenuItem value="blackboard">Blackboard</MenuItem>
+        </TextField>
+        <div className={styles.tileEditorActions}>
+          <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
+            {tileSaving ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="text" size="small" disabled={tileSaving} onClick={() => setTileEdit(null)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+
   // Render the roster table editor (student/username pairs + save/cancel).
   const rosterTableEditor = () => {
     if (!tileEdit) return null;
@@ -987,6 +1019,21 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
               onChange={(e) => update({ startDate: e.target.value })}
               slotProps={{ inputLabel: { shrink: true } }}
             />
+          </div>
+
+          <div className={styles.adaptFieldGrid3}>
+            <TextField
+              select
+              label="LMS"
+              size="small"
+              fullWidth
+              value={form.lms}
+              onChange={(e) => update({ lms: e.target.value })}
+            >
+              <MenuItem value="">Not set</MenuItem>
+              <MenuItem value="canvas">Canvas</MenuItem>
+              <MenuItem value="blackboard">Blackboard</MenuItem>
+            </TextField>
           </div>
 
           <div className={styles.adaptFieldGrid3}>
@@ -1485,6 +1532,29 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       : c.startDate
                         ? (
                           <span className={styles.courseResourceValue}>{new Date(`${c.startDate}T00:00:00`).toLocaleDateString()}</span>
+                        )
+                        : (
+                          <span className={styles.courseResourceEmpty}>Not set</span>
+                        )}
+                  </div>
+
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "lms" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "lms"))}>
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>LMS</span>
+                      <button
+                        type="button"
+                        className={styles.tileEditBtn}
+                        title="Edit"
+                        onClick={() => startTileEdit(c, "lms")}
+                      >
+                        <PencilIcon />
+                      </button>
+                    </div>
+                    {tileEdit?.id === c.id && tileEdit?.field === "lms"
+                      ? tileLmsEditor()
+                      : c.lms
+                        ? (
+                          <span className={styles.courseResourceValue}>{c.lms === "canvas" ? "Canvas" : c.lms === "blackboard" ? "Blackboard" : c.lms}</span>
                         )
                         : (
                           <span className={styles.courseResourceEmpty}>Not set</span>

@@ -171,6 +171,7 @@ export interface Database {
           csv_name: string | null;
           csv_data: string | null;
           start_date: string | null;
+          lms: string | null;
           materials_zip_name: string | null;
           materials_zip_path: string | null;
           materials_zip_size: bigint | null;
@@ -196,6 +197,7 @@ export interface Database {
           csv_name?: string | null;
           csv_data?: string | null;
           start_date?: string | null;
+          lms?: string | null;
           materials_zip_name?: string | null;
           materials_zip_path?: string | null;
           materials_zip_size?: bigint | null;
@@ -221,6 +223,7 @@ export interface Database {
           csv_name?: string | null;
           csv_data?: string | null;
           start_date?: string | null;
+          lms?: string | null;
           materials_zip_name?: string | null;
           materials_zip_path?: string | null;
           materials_zip_size?: bigint | null;

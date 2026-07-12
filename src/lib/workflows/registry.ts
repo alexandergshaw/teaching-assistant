@@ -24,10 +24,16 @@ import {
   createCourseAssignmentAction,
   createRubricAction,
   generateCourseRubricFromZipAction,
+  getFinalizedSyllabusAction,
+  placeSyllabusInModuleAction,
+  createGradableAction,
+  createQuizQuestionAction,
+  bulkUpdateAction,
 } from "@/app/actions";
 import type { RepoPermission } from "@/lib/github";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
+import { parseCanvasCourseId } from "@/lib/canvas-url";
 import type {
   StepInputSpec,
   StepOutputSpec,
@@ -269,6 +275,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         type: "number",
         required: true,
       },
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: false,
+        help: "Optional - names the zip after this course tile.",
+      },
     ],
     outputs: [
       { key: "files", label: "Generated files", type: "files" },
@@ -365,11 +378,25 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
 
-      const baseName = repo
+      // When a course tile is bound, the downloaded zip and library bundle
+      // carry the course's name.
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      let baseName = repo
         .split("/")
         .pop()
         ?.replace(/[^a-z0-9]/gi, "_")
         .replace(/_+/g, "_") || "lecture_plans";
+      if (hubCourseId) {
+        const list = await listCourseHubAction();
+        if (!("error" in list)) {
+          const tile = list.courses.find((c) => c.id === hubCourseId);
+          if (tile?.name?.trim()) {
+            baseName =
+              tile.name.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_") ||
+              baseName;
+          }
+        }
+      }
 
       onProgress("Downloading zip...");
       const url = URL.createObjectURL(zipBlob);
@@ -833,11 +860,29 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
 
-      const base = String(values.name ?? "")
+      // An explicit name wins; otherwise the zip defaults to the course
+      // tile's name so both Course Refresh zips share it, with
+      // "course_materials" as the last resort.
+      let base = String(values.name ?? "")
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]/gi, "_")
-        .replace(/_+/g, "_") || "course_materials";
+        .replace(/_+/g, "_");
+      if (!base) {
+        const list = await listCourseHubAction();
+        if (!("error" in list)) {
+          const tile = list.courses.find(
+            (c) => c.id === String(values.hubCourse)
+          );
+          if (tile?.name?.trim()) {
+            base = tile.name
+              .trim()
+              .replace(/[^a-z0-9]/gi, "_")
+              .replace(/_+/g, "_");
+          }
+        }
+      }
+      if (!base) base = "course_materials";
       const fileName = `${base}.zip`;
 
       onProgress(`Saving ${fileName}...`);
@@ -1265,6 +1310,226 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summary: {
           kind: "list",
           label: `Created ${modules.length} assignment(s)`,
+          items: lines,
+        },
+      };
+    },
+  },
+
+  {
+    type: "starter-materials",
+    name: "Seed Start Here modules",
+    description: "Create a Start Here module in each selected LMS course: the course tile's syllabus, a syllabus-acknowledgement quiz due 3 days after the tile's start date, and optionally a GitHub sign-up assignment.",
+    inputs: [
+      {
+        key: "courses",
+        label: "LMS courses",
+        type: "lmsCourseList",
+        required: true,
+      },
+      {
+        key: "includeGithub",
+        label: "Include GitHub Starter?",
+        type: "boolean",
+        required: false,
+        help: "Adds a 1-point text-entry assignment asking students to create a GitHub account and submit their username.",
+      },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const urls = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      if (urls.length === 0) {
+        throw new Error("Pick at least one LMS course.");
+      }
+
+      const includeGh = String(values.includeGithub ?? "") === "1";
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const lookup = new Map<string, (typeof hub.courses)[0]>();
+      for (const course of hub.courses) {
+        if (course.canvasUrl) {
+          const id = parseCanvasCourseId(course.canvasUrl);
+          if (id) {
+            lookup.set(id, course);
+          }
+        }
+      }
+
+      const lines: string[] = [];
+      let failures = 0;
+
+      for (const url of urls) {
+        try {
+          const inst = helpers.activeInstitution || undefined;
+          const id = parseCanvasCourseId(url);
+          const tile = id ? lookup.get(id) : undefined;
+
+          onProgress(`Preparing ${tile?.name ?? url}...`);
+
+          const content = await listCourseContentAction(url, inst);
+          if ("error" in content) {
+            throw new Error(content.error);
+          }
+
+          let startModule = content.modules.find(
+            (m) => m.name.trim().toLowerCase() === "start here"
+          );
+
+          if (!startModule) {
+            const made = await createModuleAction(url, "Start Here", 1, inst);
+            if ("error" in made) {
+              throw new Error(made.error);
+            }
+            startModule = made.module;
+          }
+
+          const startRaw = (tile?.startDate ?? "").trim();
+          let dueAt = "";
+          let dueNote = "no start date on the tile - no deadline";
+
+          if (startRaw) {
+            const start = new Date(`${startRaw}T00:00:00`);
+            if (!Number.isNaN(start.getTime())) {
+              const due = new Date(start);
+              due.setDate(start.getDate() + 3);
+              due.setHours(23, 59, 0, 0);
+              dueAt = due.toISOString();
+              dueNote = `due ${due.toLocaleDateString()}`;
+            }
+          }
+
+          let syllabusNote = "no syllabus on the tile - skipped";
+          if (tile?.syllabusId) {
+            const s = await getFinalizedSyllabusAction(tile.syllabusId);
+            if ("error" in s) {
+              syllabusNote = `syllabus error: ${s.error}`;
+            } else {
+              const fileName = `${s.syllabus.name || "Syllabus"}.docx`;
+              const placed = await placeSyllabusInModuleAction(
+                s.syllabus.content,
+                url,
+                startModule.id,
+                fileName,
+                undefined,
+                inst
+              );
+              if ("error" in placed) {
+                syllabusNote = `syllabus error: ${placed.error}`;
+              } else {
+                syllabusNote = "syllabus added";
+              }
+            }
+          }
+
+          const quiz = await createGradableAction(
+            url,
+            "Quiz",
+            {
+              title: "Syllabus Acknowledgement",
+              description: "Confirm you have read and understood the course syllabus.",
+              dueAt: dueAt || null,
+            },
+            inst
+          );
+          if ("error" in quiz) {
+            throw new Error(quiz.error);
+          }
+
+          const question = await createQuizQuestionAction(
+            url,
+            quiz.id,
+            {
+              name: "Syllabus acknowledgement",
+              text: "I read and understand the syllabus.",
+              type: "true_false_question",
+              points: 1,
+              answers: [
+                { text: "True", correct: true },
+                { text: "False", correct: false },
+              ],
+            },
+            inst
+          );
+          if ("error" in question) {
+            throw new Error(question.error);
+          }
+
+          const publish = await bulkUpdateAction(
+            url,
+            "Quiz",
+            [String(quiz.id)],
+            { published: true },
+            inst
+          );
+          if ("error" in publish) {
+            throw new Error(publish.error);
+          }
+
+          const item = await createModuleItemAction(
+            url,
+            startModule.id,
+            {
+              type: "Quiz",
+              contentId: quiz.id,
+              title: "Syllabus Acknowledgement",
+            },
+            inst
+          );
+          if ("error" in item) {
+            throw new Error(item.error);
+          }
+
+          if (includeGh) {
+            const ghAssignment = await createCourseAssignmentAction(
+              url,
+              {
+                name: "GitHub Sign Up",
+                description:
+                  "Sign up for a free account at https://github.com, then submit your GitHub username in the text box.",
+                pointsPossible: 1,
+                dueAt,
+                submissionType: "online_text_entry",
+                published: true,
+              },
+              startModule.id,
+              inst
+            );
+            if ("error" in ghAssignment) {
+              throw new Error(ghAssignment.error);
+            }
+          }
+
+          lines.push(
+            `${tile?.name ?? url}: Start Here ready (${syllabusNote}; quiz ${dueNote}${
+              includeGh ? "; GitHub Sign Up added" : ""
+            })`
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          lines.push(`${url}: ${message}`);
+          failures++;
+        }
+      }
+
+      if (failures === urls.length) {
+        throw new Error("Starter materials failed for every course.");
+      }
+
+      return {
+        outputs: {},
+        summary: {
+          kind: "list",
+          label: `Seeded ${urls.length - failures} course(s)${
+            failures ? `, ${failures} failed` : ""
+          }`,
           items: lines,
         },
       };

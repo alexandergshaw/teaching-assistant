@@ -13,11 +13,13 @@ export type WorkflowValueType =
   | "date"
   | "repo"
   | "lmsCourse"
+  | "lmsCourseList"
   | "schedule"
   | "files"
   | "modules"
   | "hubCourse"
-  | "org";
+  | "org"
+  | "boolean";
 
 export interface GeneratedCourseFile {
   name: string;

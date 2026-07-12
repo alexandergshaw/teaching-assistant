@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
-import { Button, TextField, MenuItem } from "@mui/material";
+import { Button, TextField, MenuItem, Autocomplete, FormControlLabel, Checkbox } from "@mui/material";
 import TabHeader from "./TabHeader";
 import WorkflowBuilder from "./WorkflowBuilder";
 import GithubRepoPicker from "./GithubRepoPicker";
@@ -13,7 +13,7 @@ import { getStoredProvider } from "@/lib/llm-provider";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { saveRecordingFile } from "@/lib/recording-files";
 import { uploadCourseZip } from "@/lib/course-files";
-import { listCourseHubAction, setCourseMaterialsAction, listMyOrgsAction } from "@/app/actions";
+import { listCourseHubAction, setCourseMaterialsAction, listMyOrgsAction, listCoursesAction } from "@/app/actions";
 import {
   loadCustomWorkflows,
   collectRuntimeFields,
@@ -281,6 +281,9 @@ export default function WorkflowsTab() {
   const [hubCourses, setHubCourses] = useState<Array<{ id: string; name: string; canvasUrl: string | null; repos: string[] }> | null>(null);
   const [hubCoursesError, setHubCoursesError] = useState<string | null>(null);
 
+  const [lmsCourseOptions, setLmsCourseOptions] = useState<Array<{ url: string; name: string }> | null>(null);
+  const [lmsCourseOptionsError, setLmsCourseOptionsError] = useState<string | null>(null);
+
   const [orgs, setOrgs] = useState<string[] | null>(null);
   const [orgsError, setOrgsError] = useState<string | null>(null);
 
@@ -441,6 +444,40 @@ export default function WorkflowsTab() {
   }, [runtimeFields, hubCourses]);
 
   useEffect(() => {
+    const needsLmsCourseList = runtimeFields.some((f) => f.type === "lmsCourseList");
+    if (!needsLmsCourseList || lmsCourseOptions !== null || !activeInstitution) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const result = await listCoursesAction(activeInstitution);
+        if (!cancelled) {
+          if ("error" in result) {
+            setLmsCourseOptionsError(result.error);
+          } else {
+            setLmsCourseOptions(
+              result.courses.map((c) => ({
+                url: `/courses/${c.id}`,
+                name: c.name,
+              }))
+            );
+            setLmsCourseOptionsError(null);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setLmsCourseOptionsError(err instanceof Error ? err.message : "Could not load courses.");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [runtimeFields, lmsCourseOptions, activeInstitution]);
+
+  useEffect(() => {
     const needsOrg = runtimeFields.some((f) => f.type === "org");
     if (!needsOrg || orgs !== null) return;
 
@@ -533,7 +570,7 @@ export default function WorkflowsTab() {
 
       // Only the types the run form renders can be validated here; other
       // types are filled from earlier step outputs.
-      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "hubCourse", "org"];
+      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "lmsCourseList", "hubCourse", "org"];
       if (!fieldTypes.includes(field.type)) continue;
 
       const value = values[field.fieldKey] ?? "";
@@ -1047,6 +1084,86 @@ export default function WorkflowsTab() {
                     </TextField>
                     {hubCoursesError && (
                       <p className={styles.error}>{hubCoursesError}</p>
+                    )}
+                  </div>
+                );
+              } else if (field.type === "lmsCourseList") {
+                if (!activeInstitution) {
+                  return (
+                    <div key={field.fieldKey} className={styles.field}>
+                      <p className={styles.fieldHint}>
+                        Pick an institution in the top bar first.
+                      </p>
+                      {field.help && (
+                        <p className={styles.fieldHint} style={{ margin: 0 }}>
+                          {field.help}
+                        </p>
+                      )}
+                    </div>
+                  );
+                }
+                const urlArray = value.split("\n").map((s) => s.trim()).filter(Boolean);
+                const selectedOptions = urlArray.map((url) => {
+                  const found = lmsCourseOptions?.find((o) => o.url === url);
+                  return found || { url, name: url };
+                });
+                return (
+                  <div key={field.fieldKey} className={styles.field}>
+                    <label>{field.label}</label>
+                    <Autocomplete
+                      multiple
+                      options={lmsCourseOptions ?? []}
+                      getOptionLabel={(option) => option.name}
+                      isOptionEqualToValue={(option, val) => option.url === val.url}
+                      value={selectedOptions}
+                      onChange={(_, newValue) => {
+                        const urls = newValue.map((o) => o.url).join("\n");
+                        handleValueChange(field.fieldKey, urls);
+                      }}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          size="small"
+                          label={field.label}
+                          placeholder={
+                            lmsCourseOptions === null
+                              ? "Loading courses..."
+                              : "Select courses..."
+                          }
+                        />
+                      )}
+                      loading={lmsCourseOptions === null}
+                      noOptionsText="No courses found"
+                      disabled={lmsCourseOptions === null}
+                    />
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {field.help}
+                      </p>
+                    )}
+                    {lmsCourseOptionsError && (
+                      <p className={styles.error}>{lmsCourseOptionsError}</p>
+                    )}
+                  </div>
+                );
+              } else if (field.type === "boolean") {
+                return (
+                  <div key={field.fieldKey} className={styles.field}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={value === "1"}
+                          onChange={(e) =>
+                            handleValueChange(field.fieldKey, e.target.checked ? "1" : "")
+                          }
+                        />
+                      }
+                      label={field.label}
+                    />
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {field.help}
+                      </p>
                     )}
                   </div>
                 );

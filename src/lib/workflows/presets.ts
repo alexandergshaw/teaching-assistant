@@ -86,6 +86,7 @@ export const COURSE_REFRESH: WorkflowDef = {
       bindings: {
         repo: { source: "runtime", fieldKey: "repo" },
         minutes: { source: "literal", value: "50" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
       },
     },
     {
@@ -93,7 +94,6 @@ export const COURSE_REFRESH: WorkflowDef = {
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         files: { source: "step", stepIndex: 2, outputKey: "files" },
-        name: { source: "step", stepIndex: 0, outputKey: "courseTitle" },
       },
     },
     {
@@ -156,6 +156,23 @@ export const REPO_AGENT_UPDATE: WorkflowDef = {
   ],
 };
 
+export const STARTER_MATERIALS: WorkflowDef = {
+  id: "starter-materials",
+  preset: true,
+  name: "Starter Materials",
+  description:
+    "Seed each selected LMS course with a Start Here module: the course tile's syllabus, a syllabus-acknowledgement quiz due three days after the tile's start date, and optionally a GitHub sign-up assignment.",
+  steps: [
+    {
+      type: "starter-materials",
+      bindings: {
+        courses: { source: "runtime", fieldKey: "lmsCourses" },
+        includeGithub: { source: "runtime", fieldKey: "includeGithub" },
+      },
+    },
+  ],
+};
+
 export const STUDENT_REPOS: WorkflowDef = {
   id: "student-repo-assignment",
   preset: true,
@@ -183,5 +200,5 @@ export const STUDENT_REPOS: WorkflowDef = {
  * Returns presets first, then custom workflows.
  */
 export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
-  return [COURSE_KICKOFF, COURSE_REFRESH, REPO_AGENT_UPDATE, STUDENT_REPOS, ...custom];
+  return [COURSE_KICKOFF, COURSE_REFRESH, STARTER_MATERIALS, REPO_AGENT_UPDATE, STUDENT_REPOS, ...custom];
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { cloneElement, useEffect, useRef, useState } from "react";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -25,9 +25,11 @@ import {
   removeCourseMaterialFileAction,
   listCoursesAction,
 } from "../actions";
-import type { Course } from "@/lib/supabase/courses";
+import type { Course, CourseCustomTile } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import { loadCommonResources, saveCommonResources, type CommonResourceItem } from "@/lib/common-resources";
+import { DEFAULT_CARD_LAYOUT, loadCardLayout, saveCardLayout, type CardLayoutGroup } from "@/lib/card-layout";
+import { DEFAULT_INSTITUTION_FIELDS, loadInstitutionFields, saveInstitutionFields, type InstitutionField } from "@/lib/institution-fields";
 import { listRecordingFiles, type RecordingFile } from "@/lib/recording-files";
 import GithubRepoPicker from "./GithubRepoPicker";
 import TabHeader from "./TabHeader";
@@ -136,6 +138,7 @@ function courseToInput(c: Course) {
     weeks: c.weeks,
     tests: c.tests,
     lms: c.lms ?? "",
+    customTiles: c.customTiles,
   };
 }
 
@@ -235,6 +238,51 @@ function PencilIcon() {
   );
 }
 
+// Six-dot grab glyph for the tile drag handles.
+function GrabDotsIcon() {
+  return (
+    <svg viewBox="0 0 10 16" width="8" height="12" fill="currentColor" aria-hidden="true" focusable="false">
+      <circle cx="3" cy="3" r="1.4" />
+      <circle cx="7" cy="3" r="1.4" />
+      <circle cx="3" cy="8" r="1.4" />
+      <circle cx="7" cy="8" r="1.4" />
+      <circle cx="3" cy="13" r="1.4" />
+      <circle cx="7" cy="13" r="1.4" />
+    </svg>
+  );
+}
+
+// Every built-in tile key; unknown keys in a saved layout are ignored at render.
+const BUILT_IN_TILE_KEYS = new Set(DEFAULT_CARD_LAYOUT.flatMap((g) => g.tiles));
+
+// Merge a saved card layout with the defaults: built-in tile keys missing from
+// the saved layout are appended to the group DEFAULT_CARD_LAYOUT places them in
+// (so future built-ins appear); a deleted default group is recreated when one of
+// its tiles has no other home. Unknown keys are left in place (ignored at render).
+function mergeCardLayout(saved: CardLayoutGroup[]): CardLayoutGroup[] {
+  if (saved.length === 0) return DEFAULT_CARD_LAYOUT.map((g) => ({ ...g, tiles: [...g.tiles] }));
+  const present = new Set(saved.flatMap((g) => g.tiles));
+  const groups = saved.map((g) => ({ ...g, tiles: [...g.tiles] }));
+  for (const def of DEFAULT_CARD_LAYOUT) {
+    for (const key of def.tiles) {
+      if (present.has(key)) continue;
+      const home = groups.find((g) => g.id === def.id);
+      if (home) home.tiles.push(key);
+      else groups.push({ id: def.id, label: def.label, tiles: [key] });
+    }
+  }
+  return groups;
+}
+
+// Merge saved institution fields with the defaults by id: defaults first (saved
+// values win), extra saved fields after - so new defaults appear for existing users.
+function mergeInstitutionFields(saved: InstitutionField[]): InstitutionField[] {
+  const byId = new Map(saved.map((f) => [f.id, f]));
+  const merged = DEFAULT_INSTITUTION_FIELDS.map((d) => byId.get(d.id) ?? { ...d });
+  const extras = saved.filter((f) => !DEFAULT_INSTITUTION_FIELDS.some((d) => d.id === f.id));
+  return [...merged, ...extras];
+}
+
 export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-planning" | "version-control") => void }) {
   const { institutions, active: activeInstitution } = useInstitutionSelection();
   const { supabase, user } = useSupabase();
@@ -285,6 +333,19 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [pageTitleDraft, setPageTitleDraft] = useState("");
   const [pageBodyDraft, setPageBodyDraft] = useState("");
   const [editingPageId, setEditingPageId] = useState<string | null>(null);
+  // Shared card layout (tile groups/order across every card) + drag state.
+  const [cardLayout, setCardLayout] = useState<CardLayoutGroup[]>(DEFAULT_CARD_LAYOUT);
+  const [dragTile, setDragTile] = useState<{ kind: "tile"; key: string; courseId?: string } | null>(null);
+  const [dropHint, setDropHint] = useState<{ cardId: string; groupId: string; index: number } | null>(null);
+  const [groupRename, setGroupRename] = useState<{ id: string; cardId: string; label: string } | null>(null);
+  const [groupDeleteConfirm, setGroupDeleteConfirm] = useState<{ id: string; cardId: string } | null>(null);
+  // Per-card custom tile add form + inline value editor.
+  const [tileAdd, setTileAdd] = useState<{ courseId: string; groupId: string; label: string; value: string } | null>(null);
+  const [customTileEdit, setCustomTileEdit] = useState<{ courseId: string; tileId: string; value: string } | null>(null);
+  // Per-institution common fields (undefined = not loaded yet) + edit/add forms.
+  const [instFields, setInstFields] = useState<Record<string, InstitutionField[] | undefined>>({});
+  const [instFieldEdit, setInstFieldEdit] = useState<{ acronym: string; id: string; value: string } | null>(null);
+  const [instFieldAdd, setInstFieldAdd] = useState<{ acronym: string; label: string; type: "text" | "date" | "url" } | null>(null);
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
   const csvUploadRef = useRef<HTMLInputElement>(null);
@@ -420,6 +481,51 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       cancelled = true;
     };
   }, [user, supabase]);
+
+  // Load the per-user card layout (empty result -> defaults; see mergeCardLayout).
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const saved = await loadCardLayout(supabase, user.id);
+        if (cancelled) return;
+        setCardLayout(mergeCardLayout(saved));
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Failed to load the card layout:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, supabase]);
+
+  // Lazy-load each institution's common fields the first time its section can
+  // render (await-first, cancelled flag; a failed load falls back to defaults).
+  useEffect(() => {
+    if (!user) return;
+    const acronyms = Array.from(new Set(courses.map((c) => (c.institution ?? "").trim()).filter(Boolean)));
+    const missing = acronyms.filter((a) => instFields[a] === undefined);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      for (const acronym of missing) {
+        let fields: InstitutionField[];
+        try {
+          fields = mergeInstitutionFields(await loadInstitutionFields(supabase, user.id, acronym));
+        } catch (err) {
+          console.error("Failed to load institution fields:", err);
+          fields = mergeInstitutionFields([]);
+        }
+        if (cancelled) return;
+        setInstFields((prev) => ({ ...prev, [acronym]: fields }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, supabase, courses, instFields]);
 
   const toggleGroup = (key: string) =>
     setCollapsed((prev) => {
@@ -1205,6 +1311,1380 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     }
   };
 
+  // Persist a card-layout mutation: state first, fire-and-forget save.
+  const applyLayout = (next: CardLayoutGroup[]) => {
+    setCardLayout(next);
+    if (user) void saveCardLayout(supabase, user.id, next).catch((err) => console.error("Failed to save the card layout:", err));
+  };
+
+  // Persist a course's custom tiles through the standard update action.
+  const persistCustomTiles = async (course: Course, nextTiles: CourseCustomTile[]) => {
+    const r = await updateCourseHubAction(course.id, { ...courseToInput(course), customTiles: nextTiles });
+    if ("error" in r) {
+      setError(r.error);
+      return;
+    }
+    setCourses((prev) => {
+      const next = prev.map((x) => (x.id === r.course.id ? r.course : x));
+      if (hubCache) hubCache = { ...hubCache, courses: next };
+      return next;
+    });
+  };
+
+  // Grab handle rendered inside a tile's label; courseId marks a custom tile.
+  const tileGrabHandle = (key: string, courseId?: string) => (
+    <span
+      className={styles.tileGrabHandle}
+      draggable
+      role="button"
+      aria-label="Drag to move"
+      onClick={(e) => e.stopPropagation()}
+      onDragStart={(e) => {
+        e.stopPropagation();
+        e.dataTransfer.setData("text/plain", key);
+        e.dataTransfer.effectAllowed = "move";
+        setDragTile({ kind: "tile", key, courseId });
+      }}
+      onDragEnd={() => {
+        setDragTile(null);
+        setDropHint(null);
+      }}
+    >
+      <GrabDotsIcon />
+    </span>
+  );
+
+  // Track the hovered drop position (index within the group's rendered tiles;
+  // index === tile count means "end of group").
+  const handleTileDragOver = (e: React.DragEvent, cardId: string, groupId: string, index: number) => {
+    if (!dragTile) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    setDropHint((h) => (h && h.cardId === cardId && h.groupId === groupId && h.index === index ? h : { cardId, groupId, index }));
+  };
+
+  // Drop a dragged tile at `index` in group `lg`. Built-in tiles move within the
+  // shared layout (applies to every card); custom tiles reorder/reassign within
+  // their own course only.
+  const handleTileDrop = (e: React.DragEvent, c: Course, lg: CardLayoutGroup, index: number) => {
+    if (!dragTile) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const drag = dragTile;
+    setDragTile(null);
+    setDropHint(null);
+    const builtins = lg.tiles.filter((k) => BUILT_IN_TILE_KEYS.has(k));
+    if (!drag.courseId) {
+      const next = cardLayout.map((g) => ({ ...g, tiles: [...g.tiles] }));
+      const src = next.find((g) => g.tiles.includes(drag.key));
+      const target = next.find((g) => g.id === lg.id);
+      if (!target) return;
+      // Clamp to the built-in slots and correct for removing the dragged key
+      // from before the insertion point when moving within the same group.
+      let validIdx = Math.min(index, builtins.length);
+      if (src && src.id === target.id) {
+        const oldIdx = builtins.indexOf(drag.key);
+        if (oldIdx !== -1 && oldIdx < validIdx) validIdx -= 1;
+      }
+      if (src) src.tiles = src.tiles.filter((k) => k !== drag.key);
+      const targetValid = target.tiles.filter((k) => BUILT_IN_TILE_KEYS.has(k));
+      const insertAt = validIdx >= targetValid.length ? target.tiles.length : target.tiles.indexOf(targetValid[validIdx]);
+      target.tiles.splice(insertAt, 0, drag.key);
+      applyLayout(next);
+    } else {
+      if (drag.courseId !== c.id) return;
+      const course = courses.find((x) => x.id === c.id);
+      if (!course) return;
+      const moving = course.customTiles.find((t) => t.id === drag.key);
+      if (!moving) return;
+      // Position among the group's custom tiles (rendered after the built-ins).
+      let at = Math.max(0, index - builtins.length);
+      if (moving.groupId === lg.id) {
+        const oldIdx = course.customTiles.filter((t) => t.groupId === lg.id).findIndex((t) => t.id === drag.key);
+        if (oldIdx !== -1 && oldIdx < at) at -= 1;
+      }
+      const others = course.customTiles.filter((t) => t.groupId !== lg.id && t.id !== drag.key);
+      const inGroup = course.customTiles.filter((t) => t.groupId === lg.id && t.id !== drag.key);
+      at = Math.min(at, inGroup.length);
+      inGroup.splice(at, 0, { ...moving, groupId: lg.id });
+      void persistCustomTiles(course, [...others, ...inGroup]);
+    }
+  };
+
+  const saveGroupRename = () => {
+    if (!groupRename) return;
+    const label = groupRename.label.trim() || "Untitled";
+    applyLayout(cardLayout.map((g) => (g.id === groupRename.id ? { ...g, label } : g)));
+    setGroupRename(null);
+  };
+
+  // Delete a layout group: its built-in tiles return to their DEFAULT_CARD_LAYOUT
+  // groups and custom tiles in it move to the first remaining group (every course).
+  const deleteLayoutGroup = (groupId: string) => {
+    const doomed = cardLayout.find((g) => g.id === groupId);
+    if (!doomed || cardLayout.length <= 1) return;
+    const remaining = cardLayout.filter((g) => g.id !== groupId).map((g) => ({ ...g, tiles: [...g.tiles] }));
+    for (const key of doomed.tiles) {
+      if (!BUILT_IN_TILE_KEYS.has(key)) continue;
+      const def = DEFAULT_CARD_LAYOUT.find((d) => d.tiles.includes(key));
+      const home = (def && remaining.find((g) => g.id === def.id)) ?? remaining[0];
+      if (!home.tiles.includes(key)) home.tiles.push(key);
+    }
+    applyLayout(remaining);
+    setGroupDeleteConfirm(null);
+    const fallback = remaining[0].id;
+    for (const course of courses) {
+      if (course.customTiles.some((t) => t.groupId === groupId)) {
+        void persistCustomTiles(course, course.customTiles.map((t) => (t.groupId === groupId ? { ...t, groupId: fallback } : t)));
+      }
+    }
+  };
+
+  // Append a new empty group and open its rename (from the card that clicked).
+  const addLayoutGroup = (cardId: string) => {
+    const id = crypto.randomUUID();
+    applyLayout([...cardLayout, { id, label: "New category", tiles: [] }]);
+    setGroupRename({ id, cardId, label: "New category" });
+  };
+
+  const submitTileAdd = async () => {
+    if (!tileAdd || !tileAdd.label.trim()) return;
+    const course = courses.find((x) => x.id === tileAdd.courseId);
+    if (!course) return;
+    const next = [...course.customTiles, { id: crypto.randomUUID(), label: tileAdd.label.trim(), value: tileAdd.value, groupId: tileAdd.groupId }];
+    setTileAdd(null);
+    await persistCustomTiles(course, next);
+  };
+
+  // Persist the inline custom-tile value edit (called on blur).
+  const saveCustomTileValue = () => {
+    if (!customTileEdit) return;
+    const edit = customTileEdit;
+    setCustomTileEdit(null);
+    const course = courses.find((x) => x.id === edit.courseId);
+    if (!course) return;
+    const current = course.customTiles.find((t) => t.id === edit.tileId);
+    if (!current || current.value === edit.value) return;
+    void persistCustomTiles(course, course.customTiles.map((t) => (t.id === edit.tileId ? { ...t, value: edit.value } : t)));
+  };
+
+  const removeCustomTile = (c: Course, tileId: string) => {
+    void persistCustomTiles(c, c.customTiles.filter((t) => t.id !== tileId));
+  };
+
+  // Render one custom tile (label header + value text, inline-editable, removable).
+  const renderCustomTile = (t: CourseCustomTile, c: Course) => {
+    const editing = customTileEdit && customTileEdit.courseId === c.id && customTileEdit.tileId === t.id;
+    return (
+      <div
+        className={`${styles.courseResource} ${styles.courseResourceClickable}`}
+        data-tile-editing={editing ? "true" : undefined}
+        onClick={tileClick(() => {
+          if (!editing) setCustomTileEdit({ courseId: c.id, tileId: t.id, value: t.value });
+        })}
+      >
+        <div className={styles.courseResourceHead}>
+          <span className={styles.courseResourceLabel}>{tileGrabHandle(t.id, c.id)}{t.label}</span>
+          <button
+            type="button"
+            className={styles.tileEditBtn}
+            title="Edit"
+            onClick={() => setCustomTileEdit({ courseId: c.id, tileId: t.id, value: t.value })}
+          >
+            <PencilIcon />
+          </button>
+        </div>
+        {editing ? (
+          <TextField
+            size="small"
+            fullWidth
+            multiline
+            minRows={2}
+            autoFocus
+            value={customTileEdit.value}
+            onChange={(e) => setCustomTileEdit((prev) => (prev ? { ...prev, value: e.target.value } : prev))}
+            onBlur={saveCustomTileValue}
+          />
+        ) : t.value ? (
+          <span className={styles.courseResourceValue}>{t.value}</span>
+        ) : (
+          <span className={styles.courseResourceEmpty}>Not set</span>
+        )}
+        <div className={styles.courseResourceActions}>
+          <button
+            type="button"
+            className={styles.linkButton}
+            style={{ color: "var(--danger)" }}
+            onClick={() => removeCustomTile(c, t.id)}
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // Render one built-in tile by its layout key. Returns null for unknown keys so
+  // stale entries in a saved layout are ignored at render.
+  const renderTile = (key: string, c: Course): React.ReactElement<React.HTMLAttributes<HTMLDivElement>> | null => {
+    switch (key) {
+      case "organization":
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "githubOrg" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "githubOrg"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("organization")}Organization</span>
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "githubOrg")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "githubOrg"
+              ? tileEditor(false, "e.g. my-university-org")
+              : c.githubOrg
+                ? (
+                  <a className={styles.courseResourceValue} href={`https://github.com/${c.githubOrg}`} target="_blank" rel="noreferrer">
+                    {c.githubOrg}
+                  </a>
+                )
+                : (
+                  <span className={styles.courseResourceEmpty}>Not set</span>
+                )}
+          </div>
+        );
+      case "codebases":
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "repos" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "repos"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("codebases")}Codebase{c.repos.length > 1 ? "s" : ""}</span>
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "repos")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "repos" ? (
+              <div className={styles.tileEditor}>
+                <Autocomplete
+                  freeSolo
+                  options={ownedRepos ?? []}
+                  value={repoAddSel}
+                  onInputChange={(_, v) => setRepoAddSel(v)}
+                  sx={{ width: "100%" }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      size="small"
+                      label="Add repository"
+                      placeholder="owner/name"
+                    />
+                  )}
+                />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, alignItems: "center" }}>
+                  <TextField
+                    size="small"
+                    label="Branch (optional)"
+                    placeholder="main"
+                    value={repoAddBranch}
+                    onChange={(e) => setRepoAddBranch(e.target.value)}
+                    sx={{ width: "160px" }}
+                  />
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={!/^[^/\s]+\/[^/\s]+$/.test(repoAddSel.trim())}
+                    onClick={() => {
+                      const newLine = `${repoAddSel.trim()}${repoAddBranch.trim() ? `#${repoAddBranch.trim()}` : ""}`;
+                      const updatedValue = tileEdit.value.trim() ? `${tileEdit.value}\n${newLine}` : newLine;
+                      setTileEdit((t) => (t ? { ...t, value: updatedValue } : t));
+                      setRepoAddSel("");
+                      setRepoAddBranch("");
+                    }}
+                  >
+                    Add
+                  </Button>
+                </div>
+                <TextField
+                  size="small"
+                  fullWidth
+                  multiline
+                  minRows={3}
+                  placeholder="owner/repo#branch"
+                  value={tileEdit.value}
+                  onChange={(e) => setTileEdit((t) => (t ? { ...t, value: e.target.value } : t))}
+                  sx={{ marginTop: 2 }}
+                />
+                <p className={styles.fieldHint} style={{ margin: 0 }}>One repository per line: owner/repo or owner/repo#branch.</p>
+                <div className={styles.tileEditorActions}>
+                  <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
+                    {tileSaving ? "Saving…" : "Save"}
+                  </Button>
+                  <Button variant="text" size="small" disabled={tileSaving} onClick={() => setTileEdit(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (c.repos.length > 0 ? (
+              c.repos.map((r, i) => (
+                <a
+                  key={i}
+                  className={styles.courseResourceValue}
+                  href={`https://github.com/${r.repo}${r.branch ? `/tree/${r.branch}` : ""}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {r.repo}
+                  {r.branch ? ` (${r.branch})` : ""}
+                </a>
+              ))
+            ) : (
+              <span className={styles.courseResourceEmpty}>Not set</span>
+            ))}
+          </div>
+        );
+      case "syllabus": {
+        const sName = syllabusName(c.syllabusId);
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "syllabusId" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "syllabusId"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("syllabus")}Syllabus</span>
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "syllabusId")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "syllabusId" ? tileSyllabusEditor() : (sName ? (
+              <>
+                <span className={styles.courseResourceValue}>{sName}</span>
+                <div className={styles.courseResourceActions}>
+                  <button type="button" className={styles.linkButton} onClick={() => handlePreviewSyllabus(c)} disabled={previewId === c.id}>
+                    {previewId === c.id ? "Opening…" : "Preview"}
+                  </button>
+                  <button type="button" className={styles.linkButton} onClick={() => handleDownloadSyllabus(c)} disabled={busyId === c.id}>
+                    {busyId === c.id ? "Downloading…" : "Download"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <span className={styles.courseResourceEmpty}>Not linked</span>
+            ))}
+          </div>
+        );
+      }
+      case "textbook":
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "textbook" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "textbook"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("textbook")}Textbook</span>
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "textbook")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "textbook"
+              ? tileEditor(true, "Title, author, edition, ISBN…")
+              : c.textbook
+                ? (
+                  <span className={styles.courseResourceValue}>{c.textbook}</span>
+                )
+                : (
+                  <span className={styles.courseResourceEmpty}>Not set</span>
+                )}
+          </div>
+        );
+      case "description":
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "description" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "description"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("description")}Description</span>
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "description")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "description"
+              ? tileTextAreaEditor()
+              : c.description
+                ? (
+                  <span className={styles.courseResourceValue} title={c.description}>
+                    {c.description.length > 90 ? c.description.slice(0, 90) + "…" : c.description}
+                  </span>
+                )
+                : (
+                  <span className={styles.courseResourceEmpty}>Not set</span>
+                )}
+          </div>
+        );
+      case "startDate":
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "startDate" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "startDate"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("startDate")}Start date</span>
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "startDate")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "startDate"
+              ? tileDateEditor()
+              : c.startDate
+                ? (
+                  <span className={styles.courseResourceValue}>{new Date(`${c.startDate}T00:00:00`).toLocaleDateString()}</span>
+                )
+                : (
+                  <span className={styles.courseResourceEmpty}>Not set</span>
+                )}
+          </div>
+        );
+      case "weeks":
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "weeks" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "weeks"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("weeks")}Weeks</span>
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "weeks")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "weeks"
+              ? tileNumberEditor()
+              : c.weeks !== null
+                ? (
+                  <span className={styles.courseResourceValue}>{c.weeks}</span>
+                )
+                : (
+                  <span className={styles.courseResourceEmpty}>Not set</span>
+                )}
+          </div>
+        );
+      case "tests":
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "tests" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "tests"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("tests")}Tests</span>
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "tests")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "tests"
+              ? tileNumberEditor()
+              : c.tests !== null
+                ? (
+                  <span className={styles.courseResourceValue}>{c.tests}</span>
+                )
+                : (
+                  <span className={styles.courseResourceEmpty}>Not set</span>
+                )}
+          </div>
+        );
+      case "lms":
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "lms" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "lms"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("lms")}LMS</span>
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "lms")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "lms"
+              ? tileLmsEditor()
+              : c.lms
+                ? (
+                  <>
+                    <span className={styles.courseResourceValue}>{c.lms === "canvas" ? "Canvas" : c.lms === "blackboard" ? "Blackboard" : c.lms}</span>
+                    {c.canvasUrl && (
+                      c.canvasUrl.startsWith("http") ? (
+                        <a className={styles.courseResourceValue} href={c.canvasUrl} target="_blank" rel="noreferrer">Open LMS course</a>
+                      ) : (
+                        <span className={styles.courseResourceValue}>Course {parseCanvasCourseId(c.canvasUrl)} linked</span>
+                      )
+                    )}
+                  </>
+                )
+                : (
+                  <span className={styles.courseResourceEmpty}>Not set</span>
+                )}
+          </div>
+        );
+      case "integrations":
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "integrations" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "integrations"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("integrations")}Integration{c.integrations.length > 1 ? "s" : ""}</span>
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "integrations")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "integrations" ? tileEditor(true, "Cengage | https://...", "One per line: Name | link (link optional).") : (c.integrations.length > 0 ? (
+              c.integrations.map((it, i) =>
+                it.url ? (
+                  <a key={i} className={styles.courseResourceValue} href={it.url} target="_blank" rel="noreferrer">
+                    {it.name || it.url}
+                  </a>
+                ) : (
+                  <span key={i} className={styles.courseResourceValue}>{it.name}</span>
+                )
+              )
+            ) : (
+              <span className={styles.courseResourceEmpty}>None</span>
+            ))}
+          </div>
+        );
+      case "roster":
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "roster" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "roster"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("roster")}Roster</span>
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "roster")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "roster"
+              ? rosterTableEditor()
+              : c.roster && c.roster.trim()
+                ? (
+                  <>
+                    <span className={styles.courseResourceValue}>
+                      {(() => { const s = rosterStats(c.roster ?? ""); return `${s.students} students${s.withUsernames > 0 ? ` - ${s.withUsernames} with GitHub usernames` : ""}`; })()}
+                    </span>
+                    <div className={styles.courseResourceActions}>
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        onClick={() => setExpandedRosterId(expandedRosterId === c.id ? null : c.id)}
+                      >
+                        {expandedRosterId === c.id ? "Hide" : "View"}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        onClick={() => void navigator.clipboard.writeText(c.roster ?? "")}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    {expandedRosterId === c.id && (
+                      <div className={styles.rosterPreview}>
+                        {(c.roster ?? "").split("\n").map((l) => l.trim()).filter(Boolean).map((l, i) => (
+                          <div key={i}>{l}</div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )
+                : (
+                  <span className={styles.courseResourceEmpty}>Not set</span>
+                )}
+          </div>
+        );
+      case "topics":
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "topics" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "topics"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("topics")}Topics</span>
+              {autoTopicsId === c.id && (
+                <span className={styles.fieldHint} style={{ margin: 0, marginLeft: 8 }}>Extracting topics from the codebase...</span>
+              )}
+              {c.topics && c.topics.trim() && (
+                <span className={styles.navBadge} style={{ marginLeft: 8 }}>{c.topics.split("\n").map((l) => l.trim()).filter(Boolean).length}</span>
+              )}
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "topics")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "topics"
+              ? tileEditor(true, "One topic per line.", "One topic per line. Used to describe what the course covers.")
+              : c.topics && c.topics.trim()
+                ? (() => {
+                  const topics = c.topics.split("\n").map((l) => l.trim()).filter(Boolean);
+                  const topicCount = topics.length;
+                  const firstTopic = topics[0];
+                  const truncatedFirst = firstTopic.length > 40 ? firstTopic.slice(0, 40) + "…" : firstTopic;
+                  return (
+                    <>
+                      <span className={styles.courseResourceValue}>
+                        {topicCount} topic{topicCount === 1 ? "" : "s"} - starting with &quot;{truncatedFirst}&quot;
+                      </span>
+                      <div className={styles.courseResourceActions}>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={() => setExpandedTopicsId(expandedTopicsId === c.id ? null : c.id)}
+                        >
+                          {expandedTopicsId === c.id ? "Hide" : "View"}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={() => void navigator.clipboard.writeText(c.topics ?? "")}
+                        >
+                          Copy
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={() => setTopicsExtractOpen(topicsExtractOpen === c.id ? null : c.id)}
+                        >
+                          From repo
+                        </button>
+                      </div>
+                      {expandedTopicsId === c.id && (
+                        <ol className={styles.topicsList}>
+                          {topics.map((t, i) => (
+                            <li key={i}>{t}</li>
+                          ))}
+                        </ol>
+                      )}
+                      {topicsExtractOpen === c.id && (
+                        <div className={styles.topicsExtract} onClick={(e) => e.stopPropagation()}>
+                          <Autocomplete
+                            freeSolo
+                            options={ownedRepos ?? []}
+                            inputValue={topicsRepoSel[c.id] ?? ""}
+                            onInputChange={(_, v) => setTopicsRepoSel((prev) => ({ ...prev, [c.id]: v }))}
+                            sx={{ width: "100%" }}
+                            renderInput={(params) => (
+                              <TextField
+                                {...params}
+                                size="small"
+                                label="Extract from repo"
+                                placeholder={ownedReposLoading ? "Loading repos..." : "owner/name"}
+                              />
+                            )}
+                          />
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              disabled={!/^[^/\s]+\/[^/\s]+$/.test((topicsRepoSel[c.id] ?? "").trim()) || extractingTopicsId !== null}
+                              onClick={async () => {
+                                setExtractingTopicsId(c.id);
+                                setError(null);
+                                const r = await extractTopicsFromRepoAction((topicsRepoSel[c.id] ?? "").trim(), getStoredProvider());
+                                setExtractingTopicsId(null);
+                                if ("error" in r) {
+                                  setError(r.error);
+                                } else {
+                                  setTileEdit({ id: c.id, field: "topics", value: r.topics.join("\n") });
+                                  setTopicsExtractOpen(null);
+                                }
+                              }}
+                            >
+                              {extractingTopicsId === c.id ? "Extracting..." : "Extract topics"}
+                            </Button>
+                            <button
+                              type="button"
+                              className={styles.linkButton}
+                              onClick={() => setTopicsExtractOpen(null)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                          <p className={styles.fieldHint} style={{ margin: 0 }}>
+                            Extracted topics load into the editor for review - press Save to keep them.
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()
+                : (
+                  <>
+                    <span className={styles.courseResourceEmpty}>Not set</span>
+                    <div className={styles.courseResourceActions}>
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        onClick={() => setTopicsExtractOpen(topicsExtractOpen === c.id ? null : c.id)}
+                      >
+                        From repo
+                      </button>
+                    </div>
+                    {topicsExtractOpen === c.id && (
+                      <div className={styles.topicsExtract} onClick={(e) => e.stopPropagation()}>
+                        <Autocomplete
+                          freeSolo
+                          options={ownedRepos ?? []}
+                          inputValue={topicsRepoSel[c.id] ?? ""}
+                          onInputChange={(_, v) => setTopicsRepoSel((prev) => ({ ...prev, [c.id]: v }))}
+                          sx={{ width: "100%" }}
+                          renderInput={(params) => (
+                            <TextField
+                              {...params}
+                              size="small"
+                              label="Extract from repo"
+                              placeholder={ownedReposLoading ? "Loading repos..." : "owner/name"}
+                            />
+                          )}
+                        />
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            disabled={!/^[^/\s]+\/[^/\s]+$/.test((topicsRepoSel[c.id] ?? "").trim()) || extractingTopicsId !== null}
+                            onClick={async () => {
+                              setExtractingTopicsId(c.id);
+                              setError(null);
+                              const r = await extractTopicsFromRepoAction((topicsRepoSel[c.id] ?? "").trim(), getStoredProvider());
+                              setExtractingTopicsId(null);
+                              if ("error" in r) {
+                                setError(r.error);
+                              } else {
+                                setTileEdit({ id: c.id, field: "topics", value: r.topics.join("\n") });
+                                setTopicsExtractOpen(null);
+                              }
+                            }}
+                          >
+                            {extractingTopicsId === c.id ? "Extracting..." : "Extract topics"}
+                          </Button>
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            onClick={() => setTopicsExtractOpen(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        <p className={styles.fieldHint} style={{ margin: 0 }}>
+                          Extracted topics load into the editor for review - press Save to keep them.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+          </div>
+        );
+      case "csv":
+        return (
+          <div className={`${styles.courseResource}${!c.csvData ? " " + styles.courseResourceClickable : ""}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "csv" ? "true" : undefined}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("csv")}CSV</span>
+              {c.csvData && c.csvData.trim() && (
+                <span className={styles.navBadge} style={{ marginLeft: 8 }}>
+                  {(() => {
+                    const lines = c.csvData.split("\n").map((l) => l.trim()).filter(Boolean);
+                    const count = lines.length > 1 ? lines.length - 1 : lines.length;
+                    return `${count} row${count !== 1 ? "s" : ""}`;
+                  })()}
+                </span>
+              )}
+            </div>
+            {!c.csvData
+              ? (
+                <>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={uploadingCsv}
+                    onClick={() => csvUploadRef.current?.click()}
+                  >
+                    {uploadingCsv ? "Uploading…" : "Upload CSV"}
+                  </Button>
+                  <input
+                    ref={csvUploadRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleCsvUpload(c, f);
+                      e.target.value = "";
+                    }}
+                  />
+                </>
+              )
+              : (
+                <>
+                  <span className={styles.courseResourceValue}>{c.csvName || "course.csv"}</span>
+                  <div className={styles.courseResourceActions}>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      onClick={() => setExpandedCsvId(expandedCsvId === c.id ? null : c.id)}
+                    >
+                      {expandedCsvId === c.id ? "Hide" : "View"}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      onClick={() => {
+                        const blob = new Blob([c.csvData ?? ""], { type: "text/csv;charset=utf-8" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = c.csvName || "course.csv";
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      }}
+                    >
+                      Download
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      disabled={uploadingCsv}
+                      onClick={() => csvUploadRef.current?.click()}
+                    >
+                      {uploadingCsv ? "Uploading…" : "Replace"}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      style={{ color: "var(--danger)" }}
+                      onClick={() => setCsvRemoveConfirm(csvRemoveConfirm === c.id ? null : c.id)}
+                    >
+                      {csvRemoveConfirm === c.id ? "Confirm" : "Remove"}
+                    </button>
+                    {csvRemoveConfirm === c.id && (
+                      <input
+                        type="hidden"
+                        onChange={() => {
+                          /* Trigger update on confirm */
+                          void updateCourseHubAction(c.id, { ...courseToInput(c), csvName: null, csvData: null }).then((r) => {
+                            if (!("error" in r)) {
+                              setCourses((prev) => {
+                                const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
+                                if (hubCache) hubCache = { ...hubCache, courses: next };
+                                return next;
+                              });
+                              setCsvRemoveConfirm(null);
+                            }
+                          });
+                        }}
+                      />
+                    )}
+                  </div>
+                  {csvRemoveConfirm === c.id && (
+                    <div style={{ marginTop: 8 }}>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        color="error"
+                        onClick={() => {
+                          void updateCourseHubAction(c.id, { ...courseToInput(c), csvName: null, csvData: null }).then((r) => {
+                            if (!("error" in r)) {
+                              setCourses((prev) => {
+                                const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
+                                if (hubCache) hubCache = { ...hubCache, courses: next };
+                                return next;
+                              });
+                              setCsvRemoveConfirm(null);
+                            } else {
+                              setError(r.error);
+                            }
+                          });
+                        }}
+                      >
+                        Delete CSV
+                      </Button>
+                      <Button
+                        variant="text"
+                        size="small"
+                        onClick={() => setCsvRemoveConfirm(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+                  {expandedCsvId === c.id && c.csvData && (
+                    <div className={styles.rosterPreview} style={{ maxHeight: 400, overflow: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85em" }}>
+                        <tbody>
+                          {c.csvData.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 20).map((line, i) => (
+                            <tr key={i} style={{ borderBottom: "1px solid var(--border-color)" }}>
+                              {line.split(",").map((cell, j) => (
+                                <td key={j} style={{ padding: "4px 8px", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  {cell.trim()}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>Preview uses simple comma splitting.</p>
+                    </div>
+                  )}
+                </>
+              )}
+          </div>
+        );
+      case "materials":
+        return (
+          <div className={`${styles.courseResource}${!c.materialsZipPath ? " " + styles.courseResourceClickable : ""}`}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("materials")}Materials</span>
+            </div>
+            {!c.materialsZipPath
+              ? (
+                <>
+                  <span className={styles.courseResourceEmpty}>Not set</span>
+                  <div className={styles.courseResourceActions}>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled={uploadingMaterials}
+                      onClick={() => materialsUploadRef.current?.click()}
+                    >
+                      {uploadingMaterials ? "Uploading…" : "Upload zip"}
+                    </Button>
+                    <input
+                      ref={materialsUploadRef}
+                      type="file"
+                      accept=".zip,application/zip"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void handleMaterialsUpload(c, f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </div>
+                </>
+              )
+              : (
+                <>
+                  <span className={styles.courseResourceValue}>{c.materialsZipName} - {((c.materialsZipSize || 0) / 1048576).toFixed(1)} MB</span>
+                  <div className={styles.courseResourceActions}>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      onClick={async () => {
+                        try {
+                          const url = await getCourseZipUrl(supabase, c.materialsZipPath ?? "");
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = c.materialsZipName || "materials.zip";
+                          document.body.appendChild(a);
+                          a.click();
+                          document.body.removeChild(a);
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : "Could not download the materials.");
+                        }
+                      }}
+                    >
+                      Download
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      disabled={uploadingMaterials}
+                      onClick={() => materialsUploadRef.current?.click()}
+                    >
+                      {uploadingMaterials ? "Uploading…" : "Replace"}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      style={{ color: "var(--danger)" }}
+                      onClick={() => setMaterialsRemoveConfirm(materialsRemoveConfirm === c.id ? null : c.id)}
+                    >
+                      {materialsRemoveConfirm === c.id ? "Confirm" : "Remove"}
+                    </button>
+                  </div>
+                  {materialsRemoveConfirm === c.id && (
+                    <div style={{ marginTop: 8 }}>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        color="error"
+                        onClick={() => {
+                          void removeCourseZip(supabase, c.materialsZipPath ?? "").then(async () => {
+                            const r = await setCourseMaterialsAction(c.id, {
+                              materialsZipName: null,
+                              materialsZipPath: null,
+                              materialsZipSize: null,
+                            });
+                            if (!("error" in r)) {
+                              setCourses((prev) => {
+                                const next = prev.map((course) => (course.id === c.id ? {
+                                  ...course,
+                                  materialsZipName: null,
+                                  materialsZipPath: null,
+                                  materialsZipSize: null,
+                                } : course));
+                                if (hubCache) hubCache = { ...hubCache, courses: next };
+                                return next;
+                              });
+                              setMaterialsRemoveConfirm(null);
+                            } else {
+                              setError(r.error);
+                            }
+                          });
+                        }}
+                      >
+                        Delete materials
+                      </Button>
+                      <Button
+                        variant="text"
+                        size="small"
+                        onClick={() => setMaterialsRemoveConfirm(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
+              {c.materialsFiles.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  {c.materialsFiles.map((f) => (
+                    <div key={f.path} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--border-color)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.9em" }}>
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {f.name} - {(f.size / 1048576).toFixed(1)} MB
+                        </span>
+                        <span style={{ color: "var(--text-secondary)", fontSize: "0.85em", marginLeft: 8 }}>
+                          {new Date(f.addedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={async () => {
+                            try {
+                              const url = await getCourseZipUrl(supabase, f.path);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download = f.name;
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : "Could not download the file.");
+                            }
+                          }}
+                        >
+                          Download
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          style={{ color: "var(--danger)" }}
+                          disabled={removingMaterialFile === f.path}
+                          onClick={() => void handleRemoveMaterialFile(c, f.path)}
+                        >
+                          {removingMaterialFile === f.path ? "Removing…" : "Remove"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
+  // Render one layout group inside a course card: label row with hover-revealed
+  // actions, the shared built-in tiles, then this card's custom tiles.
+  const renderCardGroup = (lg: CardLayoutGroup, c: Course) => {
+    const builtins = lg.tiles.filter((k) => BUILT_IN_TILE_KEYS.has(k));
+    const customs = c.customTiles.filter((t) => t.groupId === lg.id);
+    const total = builtins.length + customs.length;
+    const renaming = groupRename && groupRename.id === lg.id && groupRename.cardId === c.id;
+    const confirmingDelete = groupDeleteConfirm && groupDeleteConfirm.id === lg.id && groupDeleteConfirm.cardId === c.id;
+    const adding = tileAdd && tileAdd.courseId === c.id && tileAdd.groupId === lg.id;
+    const isDropGroup = dropHint && dropHint.cardId === c.id && dropHint.groupId === lg.id;
+    return (
+      <div
+        key={lg.id}
+        className={`${styles.courseResourceGroup}${isDropGroup ? " " + styles.groupDropTarget : ""}`}
+        onDragOver={(e) => handleTileDragOver(e, c.id, lg.id, total)}
+        onDrop={(e) => handleTileDrop(e, c, lg, total)}
+      >
+        <div className={styles.courseResourceGroupHead}>
+          {renaming ? (
+            <TextField
+              size="small"
+              autoFocus
+              value={groupRename.label}
+              onChange={(e) => setGroupRename((p) => (p ? { ...p, label: e.target.value } : p))}
+              onBlur={saveGroupRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveGroupRename();
+                if (e.key === "Escape") setGroupRename(null);
+              }}
+            />
+          ) : (
+            <>
+              <span className={styles.courseResourceGroupLabel}>{lg.label}</span>
+              <span className={styles.courseResourceGroupActions}>
+                <button type="button" className={styles.linkButton} style={{ fontSize: "0.75em" }} onClick={() => setGroupRename({ id: lg.id, cardId: c.id, label: lg.label })}>
+                  Rename
+                </button>
+                {confirmingDelete ? (
+                  <>
+                    <button type="button" className={styles.linkButton} style={{ fontSize: "0.75em", color: "var(--danger)" }} onClick={() => deleteLayoutGroup(lg.id)}>
+                      Delete group (tiles return to defaults)
+                    </button>
+                    <button type="button" className={styles.linkButton} style={{ fontSize: "0.75em" }} onClick={() => setGroupDeleteConfirm(null)}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  cardLayout.length > 1 && (
+                    <button type="button" className={styles.linkButton} style={{ fontSize: "0.75em" }} onClick={() => setGroupDeleteConfirm({ id: lg.id, cardId: c.id })}>
+                      Delete
+                    </button>
+                  )
+                )}
+                <button type="button" className={styles.linkButton} style={{ fontSize: "0.75em" }} onClick={() => setTileAdd({ courseId: c.id, groupId: lg.id, label: "", value: "" })}>
+                  + Tile
+                </button>
+              </span>
+            </>
+          )}
+        </div>
+        <div className={styles.courseResources}>
+          {builtins.map((tileKey, i) => {
+            const tile = renderTile(tileKey, c);
+            if (!tile) return null;
+            const dropBefore = dropHint && dropHint.cardId === c.id && dropHint.groupId === lg.id && dropHint.index === i;
+            const dragging = dragTile && !dragTile.courseId && dragTile.key === tileKey;
+            return cloneElement(tile, {
+              key: tileKey,
+              className: `${tile.props.className ?? ""}${dragging ? " " + styles.tileDragging : ""}${dropBefore ? " " + styles.tileDropBefore : ""}`,
+              onDragOver: (e: React.DragEvent<HTMLDivElement>) => handleTileDragOver(e, c.id, lg.id, i),
+              onDrop: (e: React.DragEvent<HTMLDivElement>) => handleTileDrop(e, c, lg, i),
+            });
+          })}
+          {customs.map((t, j) => {
+            const i = builtins.length + j;
+            const tile = renderCustomTile(t, c);
+            const dropBefore = dropHint && dropHint.cardId === c.id && dropHint.groupId === lg.id && dropHint.index === i;
+            const dragging = dragTile && dragTile.courseId === c.id && dragTile.key === t.id;
+            return cloneElement(tile, {
+              key: t.id,
+              className: `${tile.props.className ?? ""}${dragging ? " " + styles.tileDragging : ""}${dropBefore ? " " + styles.tileDropBefore : ""}`,
+              onDragOver: (e: React.DragEvent<HTMLDivElement>) => handleTileDragOver(e, c.id, lg.id, i),
+              onDrop: (e: React.DragEvent<HTMLDivElement>) => handleTileDrop(e, c, lg, i),
+            });
+          })}
+          {adding && (
+            <div className={styles.courseResource}>
+              <div className={styles.courseResourceHead}>
+                <span className={styles.courseResourceLabel}>New tile</span>
+              </div>
+              <div className={styles.tileEditor}>
+                <TextField
+                  size="small"
+                  autoFocus
+                  label="Label"
+                  value={tileAdd.label}
+                  onChange={(e) => setTileAdd((p) => (p ? { ...p, label: e.target.value } : p))}
+                />
+                <TextField
+                  size="small"
+                  fullWidth
+                  multiline
+                  minRows={2}
+                  label="Value"
+                  value={tileAdd.value}
+                  onChange={(e) => setTileAdd((p) => (p ? { ...p, value: e.target.value } : p))}
+                />
+                <div className={styles.tileEditorActions}>
+                  <Button variant="contained" size="small" disabled={!tileAdd.label.trim()} onClick={() => void submitTileAdd()}>
+                    Add
+                  </Button>
+                  <Button variant="text" size="small" onClick={() => setTileAdd(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Save the whole institution field list (state first, fire-and-forget save).
+  const applyInstFields = (acronym: string, next: InstitutionField[]) => {
+    setInstFields((prev) => ({ ...prev, [acronym]: next }));
+    if (user) void saveInstitutionFields(supabase, user.id, acronym, next).catch((err) => console.error("Failed to save institution fields:", err));
+  };
+
+  // Persist the inline institution-field edit (Enter/blur).
+  const saveInstFieldEdit = () => {
+    if (!instFieldEdit) return;
+    const edit = instFieldEdit;
+    setInstFieldEdit(null);
+    const list = instFields[edit.acronym];
+    if (!list) return;
+    const current = list.find((f) => f.id === edit.id);
+    if (!current || current.value === edit.value.trim()) return;
+    applyInstFields(edit.acronym, list.map((f) => (f.id === edit.id ? { ...f, value: edit.value.trim() } : f)));
+  };
+
+  const submitInstFieldAdd = () => {
+    if (!instFieldAdd || !instFieldAdd.label.trim()) return;
+    const list = instFields[instFieldAdd.acronym];
+    if (!list) return;
+    applyInstFields(instFieldAdd.acronym, [...list, { id: crypto.randomUUID(), label: instFieldAdd.label.trim(), type: instFieldAdd.type, value: "" }]);
+    setInstFieldAdd(null);
+  };
+
+  // Compact per-institution "Common fields" panel above the section's cards.
+  const renderInstitutionPanel = (acronym: string) => {
+    const fields = instFields[acronym];
+    const addingField = instFieldAdd && instFieldAdd.acronym === acronym;
+    return (
+      <div className={styles.instFieldsPanel}>
+        {fields === undefined ? (
+          <span className={styles.fieldHint}>Loading fields...</span>
+        ) : (
+          <>
+            {fields.map((f) => {
+              const editing = instFieldEdit && instFieldEdit.acronym === acronym && instFieldEdit.id === f.id;
+              return (
+                <div
+                  key={f.id}
+                  className={styles.instFieldChip}
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest("a, button, input, textarea, select, label")) return;
+                    if (!editing) setInstFieldEdit({ acronym, id: f.id, value: f.value });
+                  }}
+                >
+                  <span className={styles.instFieldLabel}>{f.label}</span>
+                  {editing ? (
+                    <TextField
+                      size="small"
+                      autoFocus
+                      type={f.type === "date" ? "date" : "text"}
+                      value={instFieldEdit.value}
+                      onChange={(e) => setInstFieldEdit((p) => (p ? { ...p, value: e.target.value } : p))}
+                      onBlur={saveInstFieldEdit}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveInstFieldEdit();
+                        if (e.key === "Escape") setInstFieldEdit(null);
+                      }}
+                    />
+                  ) : f.value ? (
+                    f.type === "date" ? (
+                      <span className={styles.instFieldValue}>{new Date(`${f.value}T00:00:00`).toLocaleDateString()}</span>
+                    ) : f.type === "url" ? (
+                      <a className={styles.instFieldValue} href={f.value} target="_blank" rel="noreferrer">{f.value}</a>
+                    ) : (
+                      <span className={styles.instFieldValue}>{f.value}</span>
+                    )
+                  ) : (
+                    <span className={styles.courseResourceEmpty}>Not set</span>
+                  )}
+                  {!DEFAULT_INSTITUTION_FIELDS.some((d) => d.id === f.id) && (
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      style={{ color: "var(--danger)", fontSize: "0.75em", textAlign: "left" }}
+                      onClick={() => applyInstFields(acronym, fields.filter((x) => x.id !== f.id))}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            {addingField ? (
+              <div className={styles.instFieldChip} style={{ cursor: "default" }}>
+                <TextField
+                  size="small"
+                  autoFocus
+                  label="Label"
+                  value={instFieldAdd.label}
+                  onChange={(e) => setInstFieldAdd((p) => (p ? { ...p, label: e.target.value } : p))}
+                />
+                <TextField
+                  select
+                  size="small"
+                  label="Type"
+                  value={instFieldAdd.type}
+                  onChange={(e) => setInstFieldAdd((p) => (p ? { ...p, type: e.target.value as "text" | "date" | "url" } : p))}
+                >
+                  <MenuItem value="text">Text</MenuItem>
+                  <MenuItem value="date">Date</MenuItem>
+                  <MenuItem value="url">URL</MenuItem>
+                </TextField>
+                <div className={styles.tileEditorActions}>
+                  <Button variant="contained" size="small" disabled={!instFieldAdd.label.trim()} onClick={submitInstFieldAdd}>
+                    Add
+                  </Button>
+                  <Button variant="text" size="small" onClick={() => setInstFieldAdd(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className={styles.linkButton}
+                style={{ fontSize: "0.85em", alignSelf: "center" }}
+                onClick={() => setInstFieldAdd({ acronym, label: "", type: "text" })}
+              >
+                Add field
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    );
+  };
+
   // Full-text filter across a course's searchable fields.
   const query = search.trim().toLowerCase();
   const matchesQuery = (c: Course): boolean => {
@@ -1631,10 +3111,11 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   {groupNotif > 0 && <span className={styles.navBadge} title="Outstanding LMS notifications">{groupNotif}</span>}
                   <span className={styles.courseGroupCount}>{g.courses.length}</span>
                 </button>
+                {/* Per-institution common fields (signed-in only; not for the "No institution" section). */}
+                {open && user && g.key !== NO_INSTITUTION && renderInstitutionPanel(g.key)}
                 {open && (
                   <div className={styles.courseGrid}>
                     {g.courses.map((c) => {
-                      const sName = syllabusName(c.syllabusId);
                       const notif = notifByCourse[c.id];
                       const notifTotal = notif ? notif.needsGrading + notif.unread : 0;
                       return (
@@ -1659,897 +3140,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   </div>
                 </div>
 
-                <div className={styles.courseResourceGroup}>
-                  <span className={styles.courseResourceGroupLabel}>Codebase</span>
-                  <div className={styles.courseResources}>
-                    <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "githubOrg" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "githubOrg"))}>
-                      <div className={styles.courseResourceHead}>
-                        <span className={styles.courseResourceLabel}>Organization</span>
-                      <button
-                        type="button"
-                        className={styles.tileEditBtn}
-                        title="Edit"
-                        onClick={() => startTileEdit(c, "githubOrg")}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "githubOrg"
-                      ? tileEditor(false, "e.g. my-university-org")
-                      : c.githubOrg
-                        ? (
-                          <a className={styles.courseResourceValue} href={`https://github.com/${c.githubOrg}`} target="_blank" rel="noreferrer">
-                            {c.githubOrg}
-                          </a>
-                        )
-                        : (
-                          <span className={styles.courseResourceEmpty}>Not set</span>
-                        )}
-                  </div>
+                {cardLayout.map((lg) => renderCardGroup(lg, c))}
 
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "repos" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "repos"))}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>Codebase{c.repos.length > 1 ? "s" : ""}</span>
-                      <button
-                        type="button"
-                        className={styles.tileEditBtn}
-                        title="Edit"
-                        onClick={() => startTileEdit(c, "repos")}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "repos" ? (
-                      <div className={styles.tileEditor}>
-                        <Autocomplete
-                          freeSolo
-                          options={ownedRepos ?? []}
-                          value={repoAddSel}
-                          onInputChange={(_, v) => setRepoAddSel(v)}
-                          sx={{ width: "100%" }}
-                          renderInput={(params) => (
-                            <TextField
-                              {...params}
-                              size="small"
-                              label="Add repository"
-                              placeholder="owner/name"
-                            />
-                          )}
-                        />
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, alignItems: "center" }}>
-                          <TextField
-                            size="small"
-                            label="Branch (optional)"
-                            placeholder="main"
-                            value={repoAddBranch}
-                            onChange={(e) => setRepoAddBranch(e.target.value)}
-                            sx={{ width: "160px" }}
-                          />
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            disabled={!/^[^/\s]+\/[^/\s]+$/.test(repoAddSel.trim())}
-                            onClick={() => {
-                              const newLine = `${repoAddSel.trim()}${repoAddBranch.trim() ? `#${repoAddBranch.trim()}` : ""}`;
-                              const updatedValue = tileEdit.value.trim() ? `${tileEdit.value}\n${newLine}` : newLine;
-                              setTileEdit((t) => (t ? { ...t, value: updatedValue } : t));
-                              setRepoAddSel("");
-                              setRepoAddBranch("");
-                            }}
-                          >
-                            Add
-                          </Button>
-                        </div>
-                        <TextField
-                          size="small"
-                          fullWidth
-                          multiline
-                          minRows={3}
-                          placeholder="owner/repo#branch"
-                          value={tileEdit.value}
-                          onChange={(e) => setTileEdit((t) => (t ? { ...t, value: e.target.value } : t))}
-                          sx={{ marginTop: 2 }}
-                        />
-                        <p className={styles.fieldHint} style={{ margin: 0 }}>One repository per line: owner/repo or owner/repo#branch.</p>
-                        <div className={styles.tileEditorActions}>
-                          <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
-                            {tileSaving ? "Saving…" : "Save"}
-                          </Button>
-                          <Button variant="text" size="small" disabled={tileSaving} onClick={() => setTileEdit(null)}>
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (c.repos.length > 0 ? (
-                      c.repos.map((r, i) => (
-                        <a
-                          key={i}
-                          className={styles.courseResourceValue}
-                          href={`https://github.com/${r.repo}${r.branch ? `/tree/${r.branch}` : ""}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {r.repo}
-                          {r.branch ? ` (${r.branch})` : ""}
-                        </a>
-                      ))
-                    ) : (
-                      <span className={styles.courseResourceEmpty}>Not set</span>
-                    ))}
-                  </div>
-                  </div>
-                </div>
-
-                <div className={styles.courseResourceGroup}>
-                  <span className={styles.courseResourceGroupLabel}>Content</span>
-                  <div className={styles.courseResources}>
-                    <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "syllabusId" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "syllabusId"))}>
-                      <div className={styles.courseResourceHead}>
-                        <span className={styles.courseResourceLabel}>Syllabus</span>
-                      <button
-                        type="button"
-                        className={styles.tileEditBtn}
-                        title="Edit"
-                        onClick={() => startTileEdit(c, "syllabusId")}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "syllabusId" ? tileSyllabusEditor() : (sName ? (
-                      <>
-                        <span className={styles.courseResourceValue}>{sName}</span>
-                        <div className={styles.courseResourceActions}>
-                          <button type="button" className={styles.linkButton} onClick={() => handlePreviewSyllabus(c)} disabled={previewId === c.id}>
-                            {previewId === c.id ? "Opening…" : "Preview"}
-                          </button>
-                          <button type="button" className={styles.linkButton} onClick={() => handleDownloadSyllabus(c)} disabled={busyId === c.id}>
-                            {busyId === c.id ? "Downloading…" : "Download"}
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <span className={styles.courseResourceEmpty}>Not linked</span>
-                    ))}
-                  </div>
-
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "textbook" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "textbook"))}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>Textbook</span>
-                      <button
-                        type="button"
-                        className={styles.tileEditBtn}
-                        title="Edit"
-                        onClick={() => startTileEdit(c, "textbook")}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "textbook"
-                      ? tileEditor(true, "Title, author, edition, ISBN…")
-                      : c.textbook
-                        ? (
-                          <span className={styles.courseResourceValue}>{c.textbook}</span>
-                        )
-                        : (
-                          <span className={styles.courseResourceEmpty}>Not set</span>
-                        )}
-                    </div>
-
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "description" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "description"))}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>Description</span>
-                      <button
-                        type="button"
-                        className={styles.tileEditBtn}
-                        title="Edit"
-                        onClick={() => startTileEdit(c, "description")}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "description"
-                      ? tileTextAreaEditor()
-                      : c.description
-                        ? (
-                          <span className={styles.courseResourceValue} title={c.description}>
-                            {c.description.length > 90 ? c.description.slice(0, 90) + "…" : c.description}
-                          </span>
-                        )
-                        : (
-                          <span className={styles.courseResourceEmpty}>Not set</span>
-                        )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className={styles.courseResourceGroup}>
-                  <span className={styles.courseResourceGroupLabel}>Schedule & LMS</span>
-                  <div className={styles.courseResources}>
-                    <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "startDate" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "startDate"))}>
-                      <div className={styles.courseResourceHead}>
-                        <span className={styles.courseResourceLabel}>Start date</span>
-                      <button
-                        type="button"
-                        className={styles.tileEditBtn}
-                        title="Edit"
-                        onClick={() => startTileEdit(c, "startDate")}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "startDate"
-                      ? tileDateEditor()
-                      : c.startDate
-                        ? (
-                          <span className={styles.courseResourceValue}>{new Date(`${c.startDate}T00:00:00`).toLocaleDateString()}</span>
-                        )
-                        : (
-                          <span className={styles.courseResourceEmpty}>Not set</span>
-                        )}
-                  </div>
-
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "weeks" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "weeks"))}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>Weeks</span>
-                      <button
-                        type="button"
-                        className={styles.tileEditBtn}
-                        title="Edit"
-                        onClick={() => startTileEdit(c, "weeks")}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "weeks"
-                      ? tileNumberEditor()
-                      : c.weeks !== null
-                        ? (
-                          <span className={styles.courseResourceValue}>{c.weeks}</span>
-                        )
-                        : (
-                          <span className={styles.courseResourceEmpty}>Not set</span>
-                        )}
-                  </div>
-
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "tests" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "tests"))}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>Tests</span>
-                      <button
-                        type="button"
-                        className={styles.tileEditBtn}
-                        title="Edit"
-                        onClick={() => startTileEdit(c, "tests")}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "tests"
-                      ? tileNumberEditor()
-                      : c.tests !== null
-                        ? (
-                          <span className={styles.courseResourceValue}>{c.tests}</span>
-                        )
-                        : (
-                          <span className={styles.courseResourceEmpty}>Not set</span>
-                        )}
-                  </div>
-
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "lms" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "lms"))}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>LMS</span>
-                      <button
-                        type="button"
-                        className={styles.tileEditBtn}
-                        title="Edit"
-                        onClick={() => startTileEdit(c, "lms")}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "lms"
-                      ? tileLmsEditor()
-                      : c.lms
-                        ? (
-                          <>
-                            <span className={styles.courseResourceValue}>{c.lms === "canvas" ? "Canvas" : c.lms === "blackboard" ? "Blackboard" : c.lms}</span>
-                            {c.canvasUrl && (
-                              c.canvasUrl.startsWith("http") ? (
-                                <a className={styles.courseResourceValue} href={c.canvasUrl} target="_blank" rel="noreferrer">Open LMS course</a>
-                              ) : (
-                                <span className={styles.courseResourceValue}>Course {parseCanvasCourseId(c.canvasUrl)} linked</span>
-                              )
-                            )}
-                          </>
-                        )
-                        : (
-                          <span className={styles.courseResourceEmpty}>Not set</span>
-                        )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className={styles.courseResourceGroup}>
-                  <span className={styles.courseResourceGroupLabel}>Class</span>
-                  <div className={styles.courseResources}>
-                    <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "integrations" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "integrations"))}>
-                      <div className={styles.courseResourceHead}>
-                        <span className={styles.courseResourceLabel}>Integration{c.integrations.length > 1 ? "s" : ""}</span>
-                      <button
-                        type="button"
-                        className={styles.tileEditBtn}
-                        title="Edit"
-                        onClick={() => startTileEdit(c, "integrations")}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "integrations" ? tileEditor(true, "Cengage | https://...", "One per line: Name | link (link optional).") : (c.integrations.length > 0 ? (
-                      c.integrations.map((it, i) =>
-                        it.url ? (
-                          <a key={i} className={styles.courseResourceValue} href={it.url} target="_blank" rel="noreferrer">
-                            {it.name || it.url}
-                          </a>
-                        ) : (
-                          <span key={i} className={styles.courseResourceValue}>{it.name}</span>
-                        )
-                      )
-                    ) : (
-                      <span className={styles.courseResourceEmpty}>None</span>
-                    ))}
-                  </div>
-
-                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "roster" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "roster"))}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>Roster</span>
-                      <button
-                        type="button"
-                        className={styles.tileEditBtn}
-                        title="Edit"
-                        onClick={() => startTileEdit(c, "roster")}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "roster"
-                      ? rosterTableEditor()
-                      : c.roster && c.roster.trim()
-                        ? (
-                          <>
-                            <span className={styles.courseResourceValue}>
-                              {(() => { const s = rosterStats(c.roster ?? ""); return `${s.students} students${s.withUsernames > 0 ? ` - ${s.withUsernames} with GitHub usernames` : ""}`; })()}
-                            </span>
-                            <div className={styles.courseResourceActions}>
-                              <button
-                                type="button"
-                                className={styles.linkButton}
-                                onClick={() => setExpandedRosterId(expandedRosterId === c.id ? null : c.id)}
-                              >
-                                {expandedRosterId === c.id ? "Hide" : "View"}
-                              </button>
-                              <button
-                                type="button"
-                                className={styles.linkButton}
-                                onClick={() => void navigator.clipboard.writeText(c.roster ?? "")}
-                              >
-                                Copy
-                              </button>
-                            </div>
-                            {expandedRosterId === c.id && (
-                              <div className={styles.rosterPreview}>
-                                {(c.roster ?? "").split("\n").map((l) => l.trim()).filter(Boolean).map((l, i) => (
-                                  <div key={i}>{l}</div>
-                                ))}
-                              </div>
-                            )}
-                          </>
-                        )
-                        : (
-                          <span className={styles.courseResourceEmpty}>Not set</span>
-                        )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className={styles.courseResourceGroup}>
-                  <span className={styles.courseResourceGroupLabel}>Generated</span>
-                  <div className={styles.courseResources}>
-                    <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "topics" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "topics"))}>
-                      <div className={styles.courseResourceHead}>
-                        <span className={styles.courseResourceLabel}>Topics</span>
-                      {autoTopicsId === c.id && (
-                        <span className={styles.fieldHint} style={{ margin: 0, marginLeft: 8 }}>Extracting topics from the codebase...</span>
-                      )}
-                      {c.topics && c.topics.trim() && (
-                        <span className={styles.navBadge} style={{ marginLeft: 8 }}>{c.topics.split("\n").map((l) => l.trim()).filter(Boolean).length}</span>
-                      )}
-                      <button
-                        type="button"
-                        className={styles.tileEditBtn}
-                        title="Edit"
-                        onClick={() => startTileEdit(c, "topics")}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </div>
-                    {tileEdit?.id === c.id && tileEdit?.field === "topics"
-                      ? tileEditor(true, "One topic per line.", "One topic per line. Used to describe what the course covers.")
-                      : c.topics && c.topics.trim()
-                        ? (() => {
-                          const topics = c.topics.split("\n").map((l) => l.trim()).filter(Boolean);
-                          const topicCount = topics.length;
-                          const firstTopic = topics[0];
-                          const truncatedFirst = firstTopic.length > 40 ? firstTopic.slice(0, 40) + "…" : firstTopic;
-                          return (
-                            <>
-                              <span className={styles.courseResourceValue}>
-                                {topicCount} topic{topicCount === 1 ? "" : "s"} - starting with &quot;{truncatedFirst}&quot;
-                              </span>
-                              <div className={styles.courseResourceActions}>
-                                <button
-                                  type="button"
-                                  className={styles.linkButton}
-                                  onClick={() => setExpandedTopicsId(expandedTopicsId === c.id ? null : c.id)}
-                                >
-                                  {expandedTopicsId === c.id ? "Hide" : "View"}
-                                </button>
-                                <button
-                                  type="button"
-                                  className={styles.linkButton}
-                                  onClick={() => void navigator.clipboard.writeText(c.topics ?? "")}
-                                >
-                                  Copy
-                                </button>
-                                <button
-                                  type="button"
-                                  className={styles.linkButton}
-                                  onClick={() => setTopicsExtractOpen(topicsExtractOpen === c.id ? null : c.id)}
-                                >
-                                  From repo
-                                </button>
-                              </div>
-                              {expandedTopicsId === c.id && (
-                                <ol className={styles.topicsList}>
-                                  {topics.map((t, i) => (
-                                    <li key={i}>{t}</li>
-                                  ))}
-                                </ol>
-                              )}
-                              {topicsExtractOpen === c.id && (
-                                <div className={styles.topicsExtract} onClick={(e) => e.stopPropagation()}>
-                                  <Autocomplete
-                                    freeSolo
-                                    options={ownedRepos ?? []}
-                                    inputValue={topicsRepoSel[c.id] ?? ""}
-                                    onInputChange={(_, v) => setTopicsRepoSel((prev) => ({ ...prev, [c.id]: v }))}
-                                    sx={{ width: "100%" }}
-                                    renderInput={(params) => (
-                                      <TextField
-                                        {...params}
-                                        size="small"
-                                        label="Extract from repo"
-                                        placeholder={ownedReposLoading ? "Loading repos..." : "owner/name"}
-                                      />
-                                    )}
-                                  />
-                                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-                                    <Button
-                                      variant="outlined"
-                                      size="small"
-                                      disabled={!/^[^/\s]+\/[^/\s]+$/.test((topicsRepoSel[c.id] ?? "").trim()) || extractingTopicsId !== null}
-                                      onClick={async () => {
-                                        setExtractingTopicsId(c.id);
-                                        setError(null);
-                                        const r = await extractTopicsFromRepoAction((topicsRepoSel[c.id] ?? "").trim(), getStoredProvider());
-                                        setExtractingTopicsId(null);
-                                        if ("error" in r) {
-                                          setError(r.error);
-                                        } else {
-                                          setTileEdit({ id: c.id, field: "topics", value: r.topics.join("\n") });
-                                          setTopicsExtractOpen(null);
-                                        }
-                                      }}
-                                    >
-                                      {extractingTopicsId === c.id ? "Extracting..." : "Extract topics"}
-                                    </Button>
-                                    <button
-                                      type="button"
-                                      className={styles.linkButton}
-                                      onClick={() => setTopicsExtractOpen(null)}
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
-                                  <p className={styles.fieldHint} style={{ margin: 0 }}>
-                                    Extracted topics load into the editor for review - press Save to keep them.
-                                  </p>
-                                </div>
-                              )}
-                            </>
-                          );
-                        })()
-                        : (
-                          <>
-                            <span className={styles.courseResourceEmpty}>Not set</span>
-                            <div className={styles.courseResourceActions}>
-                              <button
-                                type="button"
-                                className={styles.linkButton}
-                                onClick={() => setTopicsExtractOpen(topicsExtractOpen === c.id ? null : c.id)}
-                              >
-                                From repo
-                              </button>
-                            </div>
-                            {topicsExtractOpen === c.id && (
-                              <div className={styles.topicsExtract} onClick={(e) => e.stopPropagation()}>
-                                <Autocomplete
-                                  freeSolo
-                                  options={ownedRepos ?? []}
-                                  inputValue={topicsRepoSel[c.id] ?? ""}
-                                  onInputChange={(_, v) => setTopicsRepoSel((prev) => ({ ...prev, [c.id]: v }))}
-                                  sx={{ width: "100%" }}
-                                  renderInput={(params) => (
-                                    <TextField
-                                      {...params}
-                                      size="small"
-                                      label="Extract from repo"
-                                      placeholder={ownedReposLoading ? "Loading repos..." : "owner/name"}
-                                    />
-                                  )}
-                                />
-                                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-                                  <Button
-                                    variant="outlined"
-                                    size="small"
-                                    disabled={!/^[^/\s]+\/[^/\s]+$/.test((topicsRepoSel[c.id] ?? "").trim()) || extractingTopicsId !== null}
-                                    onClick={async () => {
-                                      setExtractingTopicsId(c.id);
-                                      setError(null);
-                                      const r = await extractTopicsFromRepoAction((topicsRepoSel[c.id] ?? "").trim(), getStoredProvider());
-                                      setExtractingTopicsId(null);
-                                      if ("error" in r) {
-                                        setError(r.error);
-                                      } else {
-                                        setTileEdit({ id: c.id, field: "topics", value: r.topics.join("\n") });
-                                        setTopicsExtractOpen(null);
-                                      }
-                                    }}
-                                  >
-                                    {extractingTopicsId === c.id ? "Extracting..." : "Extract topics"}
-                                  </Button>
-                                  <button
-                                    type="button"
-                                    className={styles.linkButton}
-                                    onClick={() => setTopicsExtractOpen(null)}
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                                <p className={styles.fieldHint} style={{ margin: 0 }}>
-                                  Extracted topics load into the editor for review - press Save to keep them.
-                                </p>
-                              </div>
-                            )}
-                          </>
-                        )}
-                  </div>
-
-                  <div className={`${styles.courseResource}${!c.csvData ? " " + styles.courseResourceClickable : ""}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "csv" ? "true" : undefined}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>CSV</span>
-                      {c.csvData && c.csvData.trim() && (
-                        <span className={styles.navBadge} style={{ marginLeft: 8 }}>
-                          {(() => {
-                            const lines = c.csvData.split("\n").map((l) => l.trim()).filter(Boolean);
-                            const count = lines.length > 1 ? lines.length - 1 : lines.length;
-                            return `${count} row${count !== 1 ? "s" : ""}`;
-                          })()}
-                        </span>
-                      )}
-                    </div>
-                    {!c.csvData
-                      ? (
-                        <>
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            disabled={uploadingCsv}
-                            onClick={() => csvUploadRef.current?.click()}
-                          >
-                            {uploadingCsv ? "Uploading…" : "Upload CSV"}
-                          </Button>
-                          <input
-                            ref={csvUploadRef}
-                            type="file"
-                            accept=".csv,text/csv"
-                            style={{ display: "none" }}
-                            onChange={(e) => {
-                              const f = e.target.files?.[0];
-                              if (f) void handleCsvUpload(c, f);
-                              e.target.value = "";
-                            }}
-                          />
-                        </>
-                      )
-                      : (
-                        <>
-                          <span className={styles.courseResourceValue}>{c.csvName || "course.csv"}</span>
-                          <div className={styles.courseResourceActions}>
-                            <button
-                              type="button"
-                              className={styles.linkButton}
-                              onClick={() => setExpandedCsvId(expandedCsvId === c.id ? null : c.id)}
-                            >
-                              {expandedCsvId === c.id ? "Hide" : "View"}
-                            </button>
-                            <button
-                              type="button"
-                              className={styles.linkButton}
-                              onClick={() => {
-                                const blob = new Blob([c.csvData ?? ""], { type: "text/csv;charset=utf-8" });
-                                const url = URL.createObjectURL(blob);
-                                const a = document.createElement("a");
-                                a.href = url;
-                                a.download = c.csvName || "course.csv";
-                                document.body.appendChild(a);
-                                a.click();
-                                document.body.removeChild(a);
-                                URL.revokeObjectURL(url);
-                              }}
-                            >
-                              Download
-                            </button>
-                            <button
-                              type="button"
-                              className={styles.linkButton}
-                              disabled={uploadingCsv}
-                              onClick={() => csvUploadRef.current?.click()}
-                            >
-                              {uploadingCsv ? "Uploading…" : "Replace"}
-                            </button>
-                            <button
-                              type="button"
-                              className={styles.linkButton}
-                              style={{ color: "var(--danger)" }}
-                              onClick={() => setCsvRemoveConfirm(csvRemoveConfirm === c.id ? null : c.id)}
-                            >
-                              {csvRemoveConfirm === c.id ? "Confirm" : "Remove"}
-                            </button>
-                            {csvRemoveConfirm === c.id && (
-                              <input
-                                type="hidden"
-                                onChange={() => {
-                                  /* Trigger update on confirm */
-                                  void updateCourseHubAction(c.id, { ...courseToInput(c), csvName: null, csvData: null }).then((r) => {
-                                    if (!("error" in r)) {
-                                      setCourses((prev) => {
-                                        const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
-                                        if (hubCache) hubCache = { ...hubCache, courses: next };
-                                        return next;
-                                      });
-                                      setCsvRemoveConfirm(null);
-                                    }
-                                  });
-                                }}
-                              />
-                            )}
-                          </div>
-                          {csvRemoveConfirm === c.id && (
-                            <div style={{ marginTop: 8 }}>
-                              <Button
-                                variant="outlined"
-                                size="small"
-                                color="error"
-                                onClick={() => {
-                                  void updateCourseHubAction(c.id, { ...courseToInput(c), csvName: null, csvData: null }).then((r) => {
-                                    if (!("error" in r)) {
-                                      setCourses((prev) => {
-                                        const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
-                                        if (hubCache) hubCache = { ...hubCache, courses: next };
-                                        return next;
-                                      });
-                                      setCsvRemoveConfirm(null);
-                                    } else {
-                                      setError(r.error);
-                                    }
-                                  });
-                                }}
-                              >
-                                Delete CSV
-                              </Button>
-                              <Button
-                                variant="text"
-                                size="small"
-                                onClick={() => setCsvRemoveConfirm(null)}
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                          )}
-                          {expandedCsvId === c.id && c.csvData && (
-                            <div className={styles.rosterPreview} style={{ maxHeight: 400, overflow: "auto" }}>
-                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85em" }}>
-                                <tbody>
-                                  {c.csvData.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 20).map((line, i) => (
-                                    <tr key={i} style={{ borderBottom: "1px solid var(--border-color)" }}>
-                                      {line.split(",").map((cell, j) => (
-                                        <td key={j} style={{ padding: "4px 8px", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                          {cell.trim()}
-                                        </td>
-                                      ))}
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                              <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>Preview uses simple comma splitting.</p>
-                            </div>
-                          )}
-                        </>
-                      )}
-                  </div>
-
-                  <div className={`${styles.courseResource}${!c.materialsZipPath ? " " + styles.courseResourceClickable : ""}`}>
-                    <div className={styles.courseResourceHead}>
-                      <span className={styles.courseResourceLabel}>Materials</span>
-                    </div>
-                    {!c.materialsZipPath
-                      ? (
-                        <>
-                          <span className={styles.courseResourceEmpty}>Not set</span>
-                          <div className={styles.courseResourceActions}>
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              disabled={uploadingMaterials}
-                              onClick={() => materialsUploadRef.current?.click()}
-                            >
-                              {uploadingMaterials ? "Uploading…" : "Upload zip"}
-                            </Button>
-                            <input
-                              ref={materialsUploadRef}
-                              type="file"
-                              accept=".zip,application/zip"
-                              style={{ display: "none" }}
-                              onChange={(e) => {
-                                const f = e.target.files?.[0];
-                                if (f) void handleMaterialsUpload(c, f);
-                                e.target.value = "";
-                              }}
-                            />
-                          </div>
-                        </>
-                      )
-                      : (
-                        <>
-                          <span className={styles.courseResourceValue}>{c.materialsZipName} - {((c.materialsZipSize || 0) / 1048576).toFixed(1)} MB</span>
-                          <div className={styles.courseResourceActions}>
-                            <button
-                              type="button"
-                              className={styles.linkButton}
-                              onClick={async () => {
-                                try {
-                                  const url = await getCourseZipUrl(supabase, c.materialsZipPath ?? "");
-                                  const a = document.createElement("a");
-                                  a.href = url;
-                                  a.download = c.materialsZipName || "materials.zip";
-                                  document.body.appendChild(a);
-                                  a.click();
-                                  document.body.removeChild(a);
-                                } catch (err) {
-                                  setError(err instanceof Error ? err.message : "Could not download the materials.");
-                                }
-                              }}
-                            >
-                              Download
-                            </button>
-                            <button
-                              type="button"
-                              className={styles.linkButton}
-                              disabled={uploadingMaterials}
-                              onClick={() => materialsUploadRef.current?.click()}
-                            >
-                              {uploadingMaterials ? "Uploading…" : "Replace"}
-                            </button>
-                            <button
-                              type="button"
-                              className={styles.linkButton}
-                              style={{ color: "var(--danger)" }}
-                              onClick={() => setMaterialsRemoveConfirm(materialsRemoveConfirm === c.id ? null : c.id)}
-                            >
-                              {materialsRemoveConfirm === c.id ? "Confirm" : "Remove"}
-                            </button>
-                          </div>
-                          {materialsRemoveConfirm === c.id && (
-                            <div style={{ marginTop: 8 }}>
-                              <Button
-                                variant="outlined"
-                                size="small"
-                                color="error"
-                                onClick={() => {
-                                  void removeCourseZip(supabase, c.materialsZipPath ?? "").then(async () => {
-                                    const r = await setCourseMaterialsAction(c.id, {
-                                      materialsZipName: null,
-                                      materialsZipPath: null,
-                                      materialsZipSize: null,
-                                    });
-                                    if (!("error" in r)) {
-                                      setCourses((prev) => {
-                                        const next = prev.map((course) => (course.id === c.id ? {
-                                          ...course,
-                                          materialsZipName: null,
-                                          materialsZipPath: null,
-                                          materialsZipSize: null,
-                                        } : course));
-                                        if (hubCache) hubCache = { ...hubCache, courses: next };
-                                        return next;
-                                      });
-                                      setMaterialsRemoveConfirm(null);
-                                    } else {
-                                      setError(r.error);
-                                    }
-                                  });
-                                }}
-                              >
-                                Delete materials
-                              </Button>
-                              <Button
-                                variant="text"
-                                size="small"
-                                onClick={() => setMaterialsRemoveConfirm(null)}
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                          )}
-                        </>
-                      )}
-                      {c.materialsFiles.length > 0 && (
-                        <div style={{ marginTop: 16 }}>
-                          {c.materialsFiles.map((f) => (
-                            <div key={f.path} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--border-color)" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.9em" }}>
-                                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                  {f.name} - {(f.size / 1048576).toFixed(1)} MB
-                                </span>
-                                <span style={{ color: "var(--text-secondary)", fontSize: "0.85em", marginLeft: 8 }}>
-                                  {new Date(f.addedAt).toLocaleDateString()}
-                                </span>
-                              </div>
-                              <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
-                                <button
-                                  type="button"
-                                  className={styles.linkButton}
-                                  onClick={async () => {
-                                    try {
-                                      const url = await getCourseZipUrl(supabase, f.path);
-                                      const a = document.createElement("a");
-                                      a.href = url;
-                                      a.download = f.name;
-                                      document.body.appendChild(a);
-                                      a.click();
-                                      document.body.removeChild(a);
-                                    } catch (err) {
-                                      setError(err instanceof Error ? err.message : "Could not download the file.");
-                                    }
-                                  }}
-                                >
-                                  Download
-                                </button>
-                                <button
-                                  type="button"
-                                  className={styles.linkButton}
-                                  style={{ color: "var(--danger)" }}
-                                  disabled={removingMaterialFile === f.path}
-                                  onClick={() => void handleRemoveMaterialFile(c, f.path)}
-                                >
-                                  {removingMaterialFile === f.path ? "Removing…" : "Remove"}
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                <div>
+                  <button type="button" className={styles.linkButton} style={{ fontSize: "0.85em" }} onClick={() => addLayoutGroup(c.id)}>
+                    Add category
+                  </button>
                 </div>
 
                 <div className={styles.courseResources}>

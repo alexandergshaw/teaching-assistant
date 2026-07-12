@@ -1783,6 +1783,76 @@ export const STEP_REGISTRY: StepDefinition[] = [
       };
     },
   },
+
+  {
+    type: "load-course-tile",
+    name: "Load course tile",
+    description: "Read the course tile's linked repository, LMS course, and start date so later steps need no separate inputs. Missing pieces surface as warnings.",
+    inputs: [
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: true,
+      },
+    ],
+    outputs: [
+      { key: "repo", label: "Repository", type: "repo" },
+      { key: "course", label: "LMS course", type: "lmsCourse" },
+      { key: "startDate", label: "Start date", type: "date" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+
+      onProgress("Loading course tile...");
+      const listR = await listCourseHubAction();
+      if ("error" in listR) {
+        throw new Error(listR.error);
+      }
+
+      const tile = listR.courses.find((c) => c.id === hubCourseId);
+      if (!tile) {
+        throw new Error("Choose a course tile.");
+      }
+
+      const repo = tile.repos[0]?.repo?.trim() ?? "";
+      if (!repo) {
+        throw new Error(
+          "The course tile has no repository linked - add one on the Courses tab."
+        );
+      }
+
+      const course = (tile.canvasUrl ?? "").trim();
+      const startDate = (tile.startDate ?? "").trim();
+      const lms = (tile.lms ?? "").trim();
+
+      const items = [
+        `Repository: ${repo}${
+          tile.repos.length > 1 ? ` (first of ${tile.repos.length} linked)` : ""
+        }`,
+        course
+          ? `LMS course: ${course}`
+          : "Warning: no LMS course (Canvas URL) on the tile - the LMS steps will be skipped.",
+        startDate
+          ? `Start date: ${startDate}`
+          : "Warning: no start date on the tile - generated assignments will have no deadlines.",
+        lms
+          ? `LMS: ${lms}`
+          : "Warning: no LMS set on the tile - the plain zip downloads instead of an LMS cartridge.",
+      ];
+
+      // Empty strings pass through cleanly: downstream steps already skip on
+      // an empty course and treat an empty startDate as no deadline.
+      return {
+        outputs: { repo, course, startDate },
+        summary: {
+          kind: "list",
+          label: `Loaded "${tile.name}"`,
+          items,
+        },
+      };
+    },
+  },
 ];
 
 export function getStepDefinition(type: string): StepDefinition | undefined {

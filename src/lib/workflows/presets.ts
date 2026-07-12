@@ -65,26 +65,32 @@ export const COURSE_REFRESH: WorkflowDef = {
   preset: true,
   name: "Course Refresh",
   description:
-    "After the course repo changes (manually or via an agent task), regenerate the schedule CSV and contents zip onto the course tile and rebuild the LMS course from the new contents. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines. Leave the LMS course blank to stop after the zip is saved to the course tile. A Blackboard-ready Common Cartridge export downloads at the end.",
+    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set.",
   steps: [
+    {
+      type: "load-course-tile",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+      },
+    },
     {
       type: "schedule-from-repo",
       bindings: {
-        repo: { source: "runtime", fieldKey: "repo" },
+        repo: { source: "step", stepIndex: 0, outputKey: "repo" },
       },
     },
     {
       type: "save-csv-to-course",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        schedule: { source: "step", stepIndex: 0, outputKey: "schedule" },
-        courseTitle: { source: "step", stepIndex: 0, outputKey: "courseTitle" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        courseTitle: { source: "step", stepIndex: 1, outputKey: "courseTitle" },
       },
     },
     {
       type: "lecture-zip",
       bindings: {
-        repo: { source: "runtime", fieldKey: "repo" },
+        repo: { source: "step", stepIndex: 0, outputKey: "repo" },
         minutes: { source: "literal", value: "50" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         includeInstructions: { source: "literal", value: "" },
@@ -94,56 +100,56 @@ export const COURSE_REFRESH: WorkflowDef = {
       type: "save-zip-to-course",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        files: { source: "step", stepIndex: 2, outputKey: "files" },
+        files: { source: "step", stepIndex: 3, outputKey: "files" },
       },
     },
     {
       type: "lms-wipe",
       bindings: {
-        course: { source: "runtime", fieldKey: "lmsCourse" },
+        course: { source: "step", stepIndex: 0, outputKey: "course" },
       },
     },
     {
       type: "lms-rubric",
       bindings: {
-        course: { source: "runtime", fieldKey: "lmsCourse" },
-        repo: { source: "runtime", fieldKey: "repo" },
-        title: { source: "step", stepIndex: 0, outputKey: "courseTitle" },
+        course: { source: "step", stepIndex: 0, outputKey: "course" },
+        repo: { source: "step", stepIndex: 0, outputKey: "repo" },
+        title: { source: "step", stepIndex: 1, outputKey: "courseTitle" },
       },
     },
     {
       type: "lms-modules",
       bindings: {
-        course: { source: "runtime", fieldKey: "lmsCourse" },
-        weeks: { source: "step", stepIndex: 0, outputKey: "weeks" },
+        course: { source: "step", stepIndex: 0, outputKey: "course" },
+        weeks: { source: "step", stepIndex: 1, outputKey: "weeks" },
       },
     },
     {
       type: "lms-populate",
       bindings: {
-        course: { source: "runtime", fieldKey: "lmsCourse" },
-        modules: { source: "step", stepIndex: 6, outputKey: "modules" },
-        files: { source: "step", stepIndex: 2, outputKey: "files" },
+        course: { source: "step", stepIndex: 0, outputKey: "course" },
+        modules: { source: "step", stepIndex: 7, outputKey: "modules" },
+        files: { source: "step", stepIndex: 3, outputKey: "files" },
       },
     },
     {
       type: "lms-assignments",
       bindings: {
-        course: { source: "runtime", fieldKey: "lmsCourse" },
-        modules: { source: "step", stepIndex: 6, outputKey: "modules" },
-        schedule: { source: "step", stepIndex: 0, outputKey: "schedule" },
-        repo: { source: "runtime", fieldKey: "repo" },
+        course: { source: "step", stepIndex: 0, outputKey: "course" },
+        modules: { source: "step", stepIndex: 7, outputKey: "modules" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        repo: { source: "step", stepIndex: 0, outputKey: "repo" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        startDate: { source: "runtime", fieldKey: "startDate" },
+        startDate: { source: "step", stepIndex: 0, outputKey: "startDate" },
       },
     },
     {
       type: "blackboard-export",
       bindings: {
-        files: { source: "step", stepIndex: 2, outputKey: "files" },
-        schedule: { source: "step", stepIndex: 0, outputKey: "schedule" },
+        files: { source: "step", stepIndex: 3, outputKey: "files" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        startDate: { source: "runtime", fieldKey: "startDate" },
+        startDate: { source: "step", stepIndex: 0, outputKey: "startDate" },
       },
     },
   ],

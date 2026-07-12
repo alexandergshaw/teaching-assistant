@@ -87,6 +87,7 @@ export const COURSE_REFRESH: WorkflowDef = {
         repo: { source: "runtime", fieldKey: "repo" },
         minutes: { source: "literal", value: "50" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        includeInstructions: { source: "literal", value: "" },
       },
     },
     {

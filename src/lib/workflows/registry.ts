@@ -283,6 +283,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Optional - names the zip after this course tile.",
       },
+      {
+        key: "includeInstructions",
+        label: "Include assignment instructions",
+        type: "boolean",
+        required: false,
+        help: "Adds each week's Instructions document to the materials.",
+      },
     ],
     outputs: [
       { key: "files", label: "Generated files", type: "files" },
@@ -290,6 +297,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
     run: async (values, helpers, onProgress) => {
       const repo = String(values.repo);
       const minutes = Number(values.minutes);
+
+      // Course Refresh pins this off via a literal binding; unbound custom
+      // workflows keep instructions.
+      const includeInstructions =
+        values.includeInstructions === undefined
+          ? true
+          : String(values.includeInstructions) === "1";
 
       onProgress("Downloading repository...");
       const z = await getRepoZipAction(repo);
@@ -350,7 +364,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           });
         }
 
-        if (plan.assignmentInstructions) {
+        if (includeInstructions && plan.assignmentInstructions) {
           const docxData = await buildDocxFromPlainText(
             plan.assignmentInstructions,
             plan.instructionsTemplateHeadings,
@@ -404,7 +418,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       // Tile's LMS routes which format the browser downloads; files output
       // and library save are unaffected.
       let downloadSkipped = false;
-      if (tileLms !== "blackboard") {
+      if (tileLms !== "blackboard" && tileLms !== "canvas") {
         onProgress("Downloading zip...");
         const url = URL.createObjectURL(zipBlob);
         const a = document.createElement("a");
@@ -431,7 +445,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summary: {
           kind: "list",
           label: downloadSkipped
-            ? `Generated ${files.length} files (zip saved to your library - Blackboard tile, download comes from the Blackboard export step)`
+            ? `Generated ${files.length} files (zip saved to your library - the ${tileLms} tile downloads a Common Cartridge instead)`
             : `Generated ${files.length} files (zip downloaded)`,
           items: files.map((f) => f.name),
         },
@@ -1329,9 +1343,11 @@ export const STEP_REGISTRY: StepDefinition[] = [
   },
 
   {
+    // The type id stays "blackboard-export" because saved custom workflows
+    // reference it; the step now serves any Common Cartridge LMS.
     type: "blackboard-export",
-    name: "Blackboard export (.imscc)",
-    description: "Package the generated materials as a Common Cartridge you can import into Blackboard (Import Package). Blackboard imports the folders, files, and instruction pages; it does not create gradebook columns from a plain cartridge.",
+    name: "LMS export (.imscc)",
+    description: "Package the generated materials as a Common Cartridge for the course tile's LMS. Canvas imports it via Settings > Import Course Content > Common Cartridge; Blackboard via Import Package. Content only - gradebook columns are not created.",
     inputs: [
       {
         key: "files",
@@ -1371,24 +1387,26 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const files = values.files as GeneratedCourseFile[];
       const schedule = values.schedule as ScheduleWeekPlan[];
 
-      // Resolve the tile once if a hubCourse is bound; used for both the skip
-      // check and the name default.
+      // Resolve the tile once if a hubCourse is bound; used for the skip
+      // check, the name default, and the LMS-specific save and summary.
       const hubCourseId = String(values.hubCourse ?? "").trim();
       const list = hubCourseId ? await listCourseHubAction() : null;
       const tile =
         list && !("error" in list)
           ? list.courses.find((c) => c.id === hubCourseId)
           : undefined;
+      const tileLms = (tile?.lms ?? "").trim().toLowerCase();
 
-      // Skip if the tile was provided but not found, or its LMS is not Blackboard.
+      // Skip if the tile was provided but not found, or it has no LMS set;
+      // both Canvas and Blackboard import Common Cartridge natively, so
+      // either builds. No hubCourse bound means always build.
       if (hubCourseId) {
-        const tileLms = (tile?.lms ?? "").trim().toLowerCase();
-        if (!tile || tileLms !== "blackboard") {
+        if (!tile || (tileLms !== "blackboard" && tileLms !== "canvas")) {
           return {
             outputs: {},
             summary: {
               kind: "text",
-              text: "Skipped - the course tile's LMS is not Blackboard.",
+              text: "Skipped - the course tile has no LMS set; the plain zip download covers it.",
             },
           };
         }
@@ -1498,17 +1516,26 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       if (helpers.saveBundle) {
         try {
-          await helpers.saveBundle(blob, `${baseName}-blackboard`);
+          await helpers.saveBundle(blob, `${baseName}-${tileLms || "cartridge"}`);
         } catch (err) {
           console.error("Library save failed:", err);
         }
+      }
+
+      let summaryText: string;
+      if (tileLms === "canvas") {
+        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package. Content imports; graded columns are created by the workflow's LMS steps instead.`;
+      } else if (tileLms === "blackboard") {
+        summaryText = `Downloaded ${baseName}.imscc - import it in Blackboard via Course Content > Import Package. Folders, files, and instruction pages import; create graded columns in Blackboard separately.`;
+      } else {
+        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package, or in Blackboard via Course Content > Import Package. Content imports; create graded columns in your LMS separately.`;
       }
 
       return {
         outputs: {},
         summary: {
           kind: "text",
-          text: `Downloaded ${baseName}.imscc - import it in Blackboard via Course Content > Import Package. Folders, files, and instruction pages import; create graded columns in Blackboard separately.`,
+          text: summaryText,
         },
       };
     },

@@ -834,6 +834,7 @@ export default function FilesTab() {
                   <Checkbox size="small" checked={allShownSelected} onChange={toggleSelectAll} disabled={shown.length === 0} />
                 </div>
                 <div>Kind</div>
+                <div>Type</div>
                 <div>Name</div>
                 <div>Length</div>
                 <div>Size</div>
@@ -870,6 +871,7 @@ export default function FilesTab() {
                             {displayKind.label}
                           </span>
                         </div>
+                        <div className={styles.libNum} style={{ textTransform: "uppercase" }} title={file.mimeType}>{extForFile(file)}</div>
                         <div>
                           <TextField
                             size="small"

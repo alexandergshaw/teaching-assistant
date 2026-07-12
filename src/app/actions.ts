@@ -3905,6 +3905,167 @@ export async function deleteSyllabusTemplateAction(
   }
 }
 
+/**
+ * Generate a complete filled syllabus .docx from a saved template and a block
+ * of course facts, in one shot. The model sees the template's paragraph list
+ * and returns per-paragraph replacements; policy boilerplate stays untouched,
+ * and the docx is rebuilt through the same helper the adapt flow uses.
+ */
+export async function generateCourseSyllabusAction(
+  templateId: string,
+  facts: {
+    courseName: string;
+    courseCode: string;
+    term: string;
+    description: string;
+    dayTime: string;
+    startDate: string;
+    weeks: string;
+    tests: string;
+    textbook: string;
+    email: string;
+    lmsUrl: string;
+    institution: string;
+  },
+  provider: LlmProvider = "gemini"
+): Promise<{ base64: string; name: string } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!templateId.trim()) return { error: "Choose a syllabus template." };
+    const template = await getTemplate(user.id, templateId);
+    if (!template) return { error: "Choose a syllabus template." };
+
+    const buffer = Buffer.from(template.content, "base64");
+    const paragraphs = await parseOfficeParagraphs("docx", buffer);
+    if (paragraphs.length === 0) {
+      return { error: "Could not read any text from that template. Save the template as a Word .docx." };
+    }
+
+    // Paragraph list for the model (id + text), capped at ~16000 chars overall
+    // so a long template cannot blow out the prompt.
+    const paraLines: string[] = [];
+    let paraChars = 0;
+    for (const p of paragraphs) {
+      const line = `[${p.id}] ${p.text}`;
+      if (paraChars + line.length + 1 > 16000) break;
+      paraLines.push(line);
+      paraChars += line.length + 1;
+    }
+    const paraList = paraLines.join("\n");
+
+    const factEntries: Array<[string, string]> = [
+      ["Course name", facts.courseName],
+      ["Course code", facts.courseCode],
+      ["Term/semester", facts.term],
+      ["Course description", facts.description],
+      ["Meeting days/times", facts.dayTime],
+      ["Start date", facts.startDate],
+      ["Number of weeks", facts.weeks],
+      ["Tests/exams", facts.tests],
+      ["Textbook/materials", facts.textbook],
+      ["Instructor email", facts.email],
+      ["LMS URL", facts.lmsUrl],
+      ["Institution", facts.institution],
+    ];
+    const factsBlock = factEntries
+      .map(([label, value]) => `${label}: ${value.trim() || "(not provided)"}`)
+      .join("\n");
+
+    const prompt = `You are filling in a course syllabus template for a new course offering.
+
+COURSE FACTS:
+${factsBlock}
+
+The syllabus template is a list of numbered paragraphs (id in brackets):
+${paraList}
+
+Identify every paragraph whose text should change to reflect the course facts above — course title/number, term, instructor contact info, meeting days and times, start and end dates, course description, weekly schedule rows, tests/exams, textbook and materials, LMS links, institution name, and similar class-specific content. Leave generic policy boilerplate untouched (university policies, academic integrity, accessibility/Title IX, grading-scale rules, and the like).
+
+Return ONLY a valid JSON array, where each element is:
+{ "id": "<paragraphId>", "text": "<the COMPLETE replacement text for that paragraph>" }
+
+Requirements:
+- Use exact paragraph id values from the list; "text" fully replaces that paragraph's text.
+- Keep each replacement in the same style and length register as the original paragraph (a short label line stays a short label line; a prose paragraph stays prose).
+- Never invent facts that were not provided. Where a needed fact is "(not provided)", leave that paragraph unchanged by omitting it from the array.
+- Only include paragraphs that actually change.
+- Do not include any text outside the JSON array.`;
+
+    // Guarded parse with one retry (same idiom as generateSlidesForAssignment):
+    // a raw JSON.parse error must never surface, and a malformed first response
+    // gets one fresh model call before giving up.
+    let replacements: Array<{ id: string; text: string }> | null = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const result = await callLlm(
+        {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
+        },
+        provider
+      );
+      if (!result.ok) {
+        return { error: `Syllabus generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+      }
+
+      const parsed = parseLenientJsonArray(result.text);
+      if (!parsed) {
+        if (attempt === 1) {
+          console.error(`Syllabus JSON parse failed for template "${template.name}" (attempt 1): no JSON array in the response`);
+          continue;
+        }
+        return { error: "Could not parse the syllabus from the model output. Try again." };
+      }
+
+      replacements = parsed
+        .map((r) => {
+          const o = (r ?? {}) as { id?: unknown; text?: unknown };
+          return {
+            id: typeof o.id === "string" ? o.id : "",
+            text: typeof o.text === "string" ? o.text : "",
+          };
+        })
+        .filter((r) => r.id && r.text.trim());
+      break;
+    }
+    if (!replacements) {
+      return { error: "Could not parse the syllabus from the model output. Try again." };
+    }
+
+    const byId = new Map(paragraphs.map((p) => [p.id, p]));
+    const replacementById = new Map<string, string>();
+    for (const r of replacements) {
+      if (byId.has(r.id)) replacementById.set(r.id, r.text.trim());
+    }
+
+    // Rebuild through the same helper the adapt flow uses. Every paragraph gets
+    // a section (applyOfficeSections deletes known paragraphs with no section);
+    // unchanged paragraphs pass their original runs so they stay byte-for-byte.
+    // Replaced paragraphs keep a leading bold label bold when the replacement
+    // still starts with it (the boldLabelSpans pattern from the adapt editor).
+    const sections = paragraphs.map((p) => {
+      const replacement = replacementById.get(p.id);
+      if (replacement === undefined || replacement === p.text) {
+        return { sourceId: p.id, spans: p.runs.length > 0 ? p.runs : [{ text: p.text }] };
+      }
+      let boldPrefix = "";
+      for (const run of p.runs) {
+        if (!run.bold) break;
+        boldPrefix += run.text;
+      }
+      const spans: RunSpan[] =
+        boldPrefix && replacement.startsWith(boldPrefix) && replacement.length > boldPrefix.length
+          ? [{ text: boldPrefix, bold: true }, { text: replacement.slice(boldPrefix.length) }]
+          : [{ text: replacement }];
+      return { sourceId: p.id, spans };
+    });
+
+    const out = await applyOfficeSections("docx", buffer, sections);
+    return { base64: out.toString("base64"), name: `${facts.courseName.trim() || "Course"} Syllabus` };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate the syllabus." };
+  }
+}
+
 // ── Finalized syllabi library (the completed .docx outputs) ──────────────
 
 /** List the owner's saved finalized syllabi (metadata only). */

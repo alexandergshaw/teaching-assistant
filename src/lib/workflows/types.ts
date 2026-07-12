@@ -86,10 +86,15 @@ export interface WorkflowStepConfig {
   // "<skippedStepIndex>.<outputKey>" in the SOURCE workflow's coordinates;
   // values are bindings in the INCLUDING workflow's coordinates ("step"
   // stepIndex values refer to the including workflow's own earlier steps).
+  // bindOverrides keys are "<sourceTopIndex>.<inputKey>" - unlike remap,
+  // whose keys name OUTPUT keys of DROPPED steps, bindOverrides targets the
+  // INPUT keys of KEPT steps; values are bindings in the INCLUDING
+  // workflow's coordinates, translated the same way remap values are.
   include?: {
     workflowId: string;
     skipSteps: number[];
     remap: Record<string, InputBinding>;
+    bindOverrides?: Record<string, InputBinding>;
   };
 }
 
@@ -277,6 +282,31 @@ function expandWithTopIndices(
               : replacement;
         } else {
           bindings[key] = replacement;
+        }
+      }
+
+      // bindOverrides apply AFTER the translation above: entries keyed
+      // "<sourceTopIndex>.<inputKey>" replace this kept step's input
+      // bindings. Values are written in the INCLUDING workflow's
+      // coordinates - runtime/literal used as-is, "step" indices
+      // translated through this walk's map exactly like remap values.
+      const overrides = include.bindOverrides;
+      if (overrides) {
+        const sourceTopIndex = expanded.topIndices[flatIndex];
+        for (const [oKey, oBinding] of Object.entries(overrides)) {
+          const dot = oKey.indexOf(".");
+          if (dot === -1) continue;
+          if (Number(oKey.slice(0, dot)) !== sourceTopIndex) continue;
+          const inputKey = oKey.slice(dot + 1);
+          if (oBinding.source === "step") {
+            const mapped = defToExpanded.get(oBinding.stepIndex);
+            bindings[inputKey] =
+              mapped !== undefined
+                ? { ...oBinding, stepIndex: mapped }
+                : oBinding;
+          } else {
+            bindings[inputKey] = oBinding;
+          }
         }
       }
 

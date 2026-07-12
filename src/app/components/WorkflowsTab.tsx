@@ -14,6 +14,7 @@ import { resolveDocumentAuthor } from "@/lib/author";
 import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFile } from "@/lib/recording-files";
 import { uploadCourseZip, removeCourseZip } from "@/lib/course-files";
 import { loadCommonResources } from "@/lib/common-resources";
+import { loadInstitutionFields } from "@/lib/institution-fields";
 import { listCourseHubAction, appendCourseMaterialFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction } from "@/app/actions";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import {
@@ -346,7 +347,7 @@ export default function WorkflowsTab() {
     .map((f) => f.fieldKey);
   const seedKey =
     activeInstitution && unseededInstitutionKeys.length > 0
-      ? `${activeInstitution}:${unseededInstitutionKeys.join(",")}`
+      ? `${selectedWorkflowId}:${activeInstitution}:${unseededInstitutionKeys.join(",")}`
       : "";
   if (seedKey && seedKey !== seededInstMarker) {
     setSeededInstMarker(seedKey);
@@ -684,6 +685,18 @@ export default function WorkflowsTab() {
       } else {
         setValues((prev) => ({ ...prev, [fieldKey]: value }));
       }
+    } else if (field?.type === "hubCourse") {
+      // When switching hubCourse, clear all lmsModule-typed fields in the same update.
+      // Module selections belong to the previously selected course.
+      setValues((prev) => {
+        const next = { ...prev, [fieldKey]: value };
+        for (const moduleField of runtimeFields) {
+          if (moduleField.type === "lmsModule") {
+            next[moduleField.fieldKey] = "";
+          }
+        }
+        return next;
+      });
     } else {
       setValues((prev) => ({ ...prev, [fieldKey]: value }));
     }
@@ -809,6 +822,11 @@ export default function WorkflowsTab() {
               };
             }
           : null,
+      getInstitutionFields:
+        user && supabase
+          ? async (acronym: string) =>
+              loadInstitutionFields(supabase, user.id, acronym)
+          : null,
     };
 
     // Expanded steps carry bindings already translated into expanded
@@ -913,6 +931,8 @@ export default function WorkflowsTab() {
       }
     }
 
+    // Re-arm the lazy fetch so runs that created/updated tiles refresh the pickers
+    setHubCourses(null);
     setRunning(false);
   };
 
@@ -928,6 +948,7 @@ export default function WorkflowsTab() {
         <div className={styles.field}>
           <label>Workflow</label>
           <Typeahead
+            disabled={running}
             options={workflows.map((w) => ({
               value: w.id,
               label: w.name,
@@ -986,6 +1007,7 @@ export default function WorkflowsTab() {
           <Button
             size="small"
             variant="outlined"
+            disabled={running}
             onClick={() => {
               const newDef: WorkflowDef = {
                 id: crypto.randomUUID(),
@@ -1007,6 +1029,7 @@ export default function WorkflowsTab() {
           <Button
             size="small"
             variant="outlined"
+            disabled={running}
             onClick={() => {
               if (!selectedDef) return;
               const copied: WorkflowDef = {
@@ -1031,6 +1054,7 @@ export default function WorkflowsTab() {
               <Button
                 size="small"
                 variant="outlined"
+                disabled={running}
                 onClick={() => setEditing(true)}
               >
                 Edit
@@ -1039,6 +1063,7 @@ export default function WorkflowsTab() {
               <Button
                 size="small"
                 variant="outlined"
+                disabled={running}
                 onClick={() => {
                   if (!deleteArmed) {
                     setDeleteArmed(true);

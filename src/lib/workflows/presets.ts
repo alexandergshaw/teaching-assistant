@@ -60,7 +60,7 @@ export const COURSE_REFRESH: WorkflowDef = {
   preset: true,
   name: "Course Refresh",
   description:
-    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set.",
+    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set. Finally the Starter Materials workflow runs against the tile's LMS course (dynamic - edits to it apply here).",
   steps: [
     {
       type: "load-course-tile",
@@ -148,6 +148,24 @@ export const COURSE_REFRESH: WorkflowDef = {
         startDate: { source: "step", stepIndex: 0, outputKey: "startDate" },
       },
     },
+    {
+      // Starter Materials runs last against the tile's LMS course. The
+      // absorbed step's courses input expects a newline-joined
+      // lmsCourseList; step 0's "course" output is a single URL, which is
+      // a valid one-item list as-is. Its includeGithub runtime binding
+      // passes through untouched, surfacing the "Include GitHub Starter?"
+      // checkbox on the Refresh run form.
+      type: "include-workflow",
+      bindings: {},
+      include: {
+        workflowId: "starter-materials",
+        skipSteps: [],
+        remap: {},
+        bindOverrides: {
+          "0.courses": { source: "step", stepIndex: 0, outputKey: "course" },
+        },
+      },
+    },
   ],
 };
 
@@ -174,13 +192,95 @@ export const STARTER_MATERIALS: WorkflowDef = {
   preset: true,
   name: "Starter Materials",
   description:
-    "Seed each selected LMS course with a Start Here module: the course tile's syllabus, a syllabus-acknowledgement quiz due three days after the tile's start date, and optionally a GitHub sign-up assignment.",
+    "Seed each selected LMS course with a Start Here module: the course tile's syllabus (generated from the institution's syllabus template when the tile has none), a syllabus-acknowledgement quiz due three days after the tile's start date, and optionally a GitHub sign-up assignment.",
   steps: [
     {
       type: "starter-materials",
       bindings: {
         courses: { source: "runtime", fieldKey: "lmsCourses" },
         includeGithub: { source: "runtime", fieldKey: "includeGithub" },
+      },
+    },
+  ],
+};
+
+export const IMPORT_COURSES: WorkflowDef = {
+  id: "import-courses",
+  preset: true,
+  name: "Import Courses",
+  description:
+    "Fetch all of a term's courses from the institution's LMS (optionally enriched by uploaded exports), preview them, then create a course card for each - existing cards are skipped.",
+  steps: [
+    {
+      type: "fetch-term-courses",
+      bindings: {
+        institution: { source: "runtime", fieldKey: "institution" },
+        term: { source: "runtime", fieldKey: "term" },
+        exports: { source: "runtime", fieldKey: "lmsExports" },
+      },
+    },
+    {
+      type: "create-course-cards",
+      bindings: {
+        courses: { source: "step", stepIndex: 0, outputKey: "courses" },
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+  ],
+};
+
+export const ASSIGN_DUE_DATES: WorkflowDef = {
+  id: "assign-due-dates",
+  preset: true,
+  name: "Assign Due Dates",
+  description:
+    "Set the start date on the selected course tiles, then give every module's assignments, quizzes, and discussions a deadline at the Sunday ending its week (Start Here and Module 1 end week one).",
+  steps: [
+    {
+      type: "set-course-start-dates",
+      bindings: {
+        startDate: { source: "runtime", fieldKey: "startDate" },
+        courses: { source: "runtime", fieldKey: "courses" },
+      },
+    },
+    {
+      type: "assign-week-deadlines",
+      bindings: {
+        courses: { source: "step", stepIndex: 0, outputKey: "courses" },
+        startDate: { source: "runtime", fieldKey: "startDate" },
+      },
+    },
+  ],
+};
+
+export const PREPARE_LECTURE: WorkflowDef = {
+  id: "prepare-lecture",
+  preset: true,
+  name: "Prepare Lecture",
+  description:
+    "Pick a course and module: builds a lecture deck in the app's slide style from the module's materials, saves it to the course tile, and schedules an LMS announcement summarizing the lecture for two hours after the next class meeting.",
+  steps: [
+    {
+      type: "prepare-lecture",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        moduleId: { source: "runtime", fieldKey: "lmsModule" },
+      },
+    },
+  ],
+};
+
+export const UPDATE_COURSE_TECH: WorkflowDef = {
+  id: "update-course-tech",
+  preset: true,
+  name: "Update Course with New Tech",
+  description:
+    "Scan the selected courses' topics, syllabus, textbook, repos, modules, and assignments, and produce a report of emerging-technology opportunities with concrete integration recommendations.",
+  steps: [
+    {
+      type: "tech-report",
+      bindings: {
+        courses: { source: "runtime", fieldKey: "courses" },
       },
     },
   ],
@@ -213,5 +313,16 @@ export const STUDENT_REPOS: WorkflowDef = {
  * Returns presets first, then custom workflows.
  */
 export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
-  return [COURSE_KICKOFF, COURSE_REFRESH, STARTER_MATERIALS, REPO_AGENT_UPDATE, STUDENT_REPOS, ...custom];
+  return [
+    COURSE_KICKOFF,
+    COURSE_REFRESH,
+    STARTER_MATERIALS,
+    IMPORT_COURSES,
+    ASSIGN_DUE_DATES,
+    PREPARE_LECTURE,
+    UPDATE_COURSE_TECH,
+    REPO_AGENT_UPDATE,
+    STUDENT_REPOS,
+    ...custom,
+  ];
 }

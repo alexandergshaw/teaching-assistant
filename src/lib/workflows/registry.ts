@@ -30,7 +30,21 @@ import {
   createQuizQuestionAction,
   bulkUpdateAction,
   createPageAction,
+  listCoursesByTermAction,
+  createCourseHubAction,
+  updateCourseHubAction,
+  setModuleDueDatesAction,
+  getPageAction,
+  previewFileAction,
+  createScheduledAnnouncementAction,
+  generateLectureFromMaterialsAction,
+  analyzeCourseTechAction,
+  previewFinalizedSyllabusAction,
+  generateCourseSyllabusAction,
+  createFinalizedSyllabusAction,
 } from "@/app/actions";
+import type { Course, CourseInput } from "@/lib/supabase/courses";
+import type { InstitutionField } from "@/lib/institution-fields";
 import type { RepoPermission } from "@/lib/github";
 import type { CommonResourceItem } from "@/lib/common-resources";
 import { buildSlidesPptx } from "@/lib/pptx";
@@ -44,8 +58,8 @@ import type {
 } from "@/lib/workflows/types";
 import { scheduleToCsv } from "@/lib/workflows/types";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
-import type { RubricCriterionInput } from "@/lib/canvas-modules";
-import { buildCommonCartridge, buildWeekCartridge } from "@/lib/workflows/common-cartridge";
+import type { RubricCriterionInput, DueDateUpdate } from "@/lib/canvas-modules";
+import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
 
 // "Student" or "Student | github-username" (pipe-separated so commas in
 // names like "Last, First" never masquerade as usernames).
@@ -61,6 +75,137 @@ function parseRosterLines(text: string): Array<{ student: string; username: stri
     });
 }
 
+// Client-side equivalent of CoursesTab's courseToInput: course tiles are
+// updated by full-input round-trips, so EVERY editable field must ride
+// along or the update would blank it.
+function courseToInputPayload(c: Course): CourseInput {
+  return {
+    name: c.name,
+    courseCode: c.courseCode,
+    term: c.term,
+    canvasUrl: c.canvasUrl,
+    repos: c.repos,
+    githubOrg: c.githubOrg,
+    textbook: c.textbook,
+    syllabusId: c.syllabusId,
+    institution: c.institution,
+    integrations: c.integrations,
+    roster: c.roster,
+    notes: c.notes,
+    topics: c.topics,
+    csvName: c.csvName,
+    csvData: c.csvData,
+    startDate: c.startDate,
+    description: c.description,
+    weeks: c.weeks,
+    tests: c.tests,
+    lms: c.lms,
+    dayTime: c.dayTime,
+    customTiles: c.customTiles,
+  };
+}
+
+// Steps run in the browser, so atob decodes stored base64 docx payloads
+// straight into Blobs.
+function base64ToBlob(base64: string, mimeType: string): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mimeType });
+}
+
+// Parse a tile's Day/Time (e.g. "MW 10:00-11:15", "TTh 2:00 PM") into
+// weekday numbers plus the FIRST start time. Day tokens only scan the text
+// before the first digit so the M in "PM" never reads as Monday; tokens are
+// case-insensitive, ordered longest-first (SU, SA, TH, TU before single
+// letters M, T, W, R, F), and "R" is the registrar shorthand for Thursday.
+// A time with no AM/PM and an hour of 7 or less is assumed PM - typical class times.
+function parseDayTime(
+  text: string
+): { days: Set<number>; hour: number; minute: number } | null {
+  const firstDigit = text.search(/\d/);
+  const dayPart = firstDigit === -1 ? text : text.slice(0, firstDigit);
+  const dayPartUpper = dayPart.toUpperCase();
+
+  // Longest-first token matching: SU, SA, TH, TU before single letters
+  const tokenMap: Record<string, number> = {
+    SU: 0,
+    SA: 6,
+    TH: 4,
+    TU: 2,
+    M: 1,
+    T: 2,
+    W: 3,
+    R: 4,
+    F: 5,
+  };
+
+  const days = new Set<number>();
+  const tokens = dayPartUpper.split(/[^A-Z]+/).filter(Boolean);
+  for (const token of tokens) {
+    // Try longest match first within this token
+    if (token.length >= 2) {
+      const twoChar = token.slice(0, 2);
+      if (twoChar in tokenMap) {
+        days.add(tokenMap[twoChar]);
+        continue;
+      }
+    }
+    // Fall back to single character
+    if (token.length >= 1) {
+      const oneChar = token[0];
+      if (oneChar in tokenMap) {
+        days.add(tokenMap[oneChar]);
+      }
+    }
+  }
+
+  if (days.size === 0) return null;
+
+  const timeMatch = text.match(/(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])?/);
+  if (!timeMatch) return null;
+
+  let hour = Number(timeMatch[1]);
+  const minute = timeMatch[2] ? Number(timeMatch[2]) : 0;
+  const meridiem = timeMatch[3]?.toLowerCase() ?? "";
+  if (meridiem === "pm" && hour < 12) {
+    hour += 12;
+  } else if (meridiem === "am" && hour === 12) {
+    hour = 0;
+  } else if (!meridiem && hour <= 7) {
+    hour += 12;
+  }
+  if (hour > 23 || minute > 59) return null;
+
+  return { days, hour, minute };
+}
+
+// Calculate the deadline for a given week, anchored on the Monday of the start date's week.
+// Deadlines land on the Sunday ending week N (23:59:00.000 local time), matching Assign Due Dates.
+function weekDeadline(start: Date, week: number): Date {
+  const monday0 = new Date(start);
+  const day = monday0.getDay();
+  monday0.setDate(monday0.getDate() + (day === 0 ? -6 : 1 - day));
+  const due = new Date(monday0);
+  due.setDate(monday0.getDate() + week * 7 - 1);
+  due.setHours(23, 59, 0, 0);
+  return due;
+}
+
+// The opaque courseList payload passed from fetch-term-courses to
+// create-course-cards; lmsId "" marks a row known only from an uploaded
+// export, and canvasUrl follows the app's relative /courses/<id> convention.
+export interface TermCoursePreviewRow {
+  lmsId: string;
+  name: string;
+  courseCode: string | null;
+  termName: string | null;
+  canvasUrl: string;
+  note: string;
+}
+
 export interface StepRunHelpers {
   activeInstitution: string | null;
   provider: LlmProvider;
@@ -69,6 +214,7 @@ export interface StepRunHelpers {
   saveCourseMaterialFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
   loadCommonResources: (() => Promise<CommonResourceItem[]>) | null;
   getLibraryFile: ((fileId: string) => Promise<{ blob: Blob; name: string; mimeType: string } | null>) | null;
+  getInstitutionFields: ((acronym: string) => Promise<InstitutionField[]>) | null;
 }
 
 export type StepRunSummary =
@@ -512,6 +658,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const existing = c.modules;
       const modules: EnsuredModule[] = [];
 
+      // Exactly N week modules are ensured by exact "Module NN" name match;
+      // a "Start Here" (or any other) module never matches, so extra
+      // starter modules cannot shift or count toward week numbering.
       for (let week = 1; week <= weeks; week++) {
         const name = `Module ${String(week).padStart(2, "0")}`;
         const found = existing.find(
@@ -610,6 +759,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
       );
 
       for (const file of ordered) {
+        // Modules are targeted by their own week number (set when they were
+        // ensured), never by list position, so unnumbered starter modules
+        // like "Start Here" cannot skew file placement.
         const targetWeek = Math.min(
           Math.max(file.weekNumber, 1),
           modules[modules.length - 1]?.week || 1
@@ -1372,9 +1524,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         let dueAt = "";
         let dueDateStr = "";
         if (start) {
-          const due = new Date(start);
-          due.setDate(start.getDate() + m.week * 7 - 1);
-          due.setHours(23, 59, 0, 0);
+          const due = weekDeadline(start, m.week);
           dueAt = due.toISOString();
           dueDateStr = ` (due ${due.toLocaleDateString()})`;
         }
@@ -1567,9 +1717,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           if (sw?.assignmentTitle) {
             let dueText = "";
             if (start) {
-              const due = new Date(start);
-              due.setDate(start.getDate() + week * 7 - 1);
-              due.setHours(23, 59, 0, 0);
+              const due = weekDeadline(start, week);
               dueText = due.toLocaleString();
             }
 
@@ -1597,73 +1745,51 @@ export const STEP_REGISTRY: StepDefinition[] = [
           };
         });
 
-      // Blackboard Ultra wraps every .imscc import in one content folder
-      // named after the package, so a full-course cartridge lands as a
-      // single module. One cartridge per week makes each import's wrapper
-      // the module itself; Canvas imports a full cartridge as top-level
-      // modules, so it keeps the single file.
-      if (tileLms === "blackboard") {
-        onProgress("Building one cartridge per module...");
-        const { default: JSZip } = await import("jszip");
-        const bundle = new JSZip();
-
-        for (const week of weeks) {
-          const inner = await buildWeekCartridge(
-            week.title,
-            week.files,
-            week.assignments,
-            week.pages
-          );
-          const topic = (
-            (schedule.find((w) => w.week === week.week)?.topic ?? "").trim() ||
-            "module"
-          ).replace(/[^a-zA-Z0-9._ -]/g, "_");
-          bundle.file(
-            `${String(week.week).padStart(2, "0")} ${topic}.imscc`,
-            inner
-          );
+      // A "Start Here" starter module rides as week 0, purely additive:
+      // buildCommonCartridge titles modules from each week's own title
+      // (never array position or a week count), so the extra entry cannot
+      // shift Module NN numbering. Both Blackboard and Canvas now import
+      // the same single full-course cartridge.
+      const starterFiles: Array<{ name: string; blob: Blob }> = [];
+      let starterNote = "";
+      if (tile?.syllabusId) {
+        const s = await getFinalizedSyllabusAction(tile.syllabusId);
+        if ("error" in s) {
+          starterNote = `; syllabus could not be read (${s.error}) - Start Here contains the acknowledgement only`;
+        } else {
+          starterFiles.push({
+            name: `${s.syllabus.name || "Syllabus"}.docx`,
+            blob: base64ToBlob(
+              s.syllabus.content,
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+          });
         }
-
-        const zipName = `${baseName}-blackboard-modules.zip`;
-        const zipBlob = await bundle.generateAsync({ type: "blob" });
-
-        onProgress(`Downloading ${zipName}...`);
-        const url = URL.createObjectURL(zipBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = zipName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        if (helpers.saveBundle) {
-          try {
-            await helpers.saveBundle(zipBlob, `${baseName}-blackboard-modules`);
-          } catch (err) {
-            console.error("Library save failed:", err);
-          }
-        }
-
-        let tileSaveNote = "";
-        if (hubCourseId && helpers.saveCourseMaterialFile) {
-          onProgress("Saving to the course tile...");
-          try {
-            await helpers.saveCourseMaterialFile(hubCourseId, zipBlob, zipName);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            tileSaveNote = `; saving to the course tile failed: ${msg}`;
-          }
-        }
-
-        return {
-          outputs: {},
-          summary: {
-            kind: "text",
-            text: `Downloaded ${zipName} - it contains one .imscc per module. In Blackboard, run Import Course Content once per file; each import creates that module at the top level (Ultra always wraps an import in a single folder). Deliverables import as assignments; introductions import as rendered documents.${tileSaveNote}`,
-          },
-        };
+      } else {
+        starterNote =
+          "; no syllabus on the tile - Start Here contains the acknowledgement only";
       }
+
+      // Cartridges cannot express the live path's true/false quiz without
+      // QTI; a 1-point acknowledgement assignment is the import-safe
+      // equivalent.
+      const starterAssignments = [
+        {
+          title: "Syllabus Acknowledgement",
+          html: "<p>Read the course syllabus, then submit confirming: I read and understand the syllabus.</p>",
+          points: 1,
+        },
+      ];
+
+      weeks.unshift({
+        week: 0,
+        title: "Start Here",
+        files: starterFiles,
+        pages: [],
+        assignments: starterAssignments,
+      });
+
+      const starterSummary = `Start Here included (acknowledgement as an assignment)${starterNote}.`;
 
       onProgress("Building Common Cartridge...");
       const blob = await buildCommonCartridge(
@@ -1711,7 +1837,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       if (tileLms === "canvas") {
         summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package. Deliverables import as assignments; introductions import as pages; files import into modules.`;
       } else if (tileLms === "blackboard") {
-        summaryText = `Downloaded ${baseName}.imscc - import it in Blackboard via Course Content > Import Package. Deliverables import as assignments; introductions import as rendered documents.`;
+        summaryText = `Downloaded ${baseName}.imscc - import it in Blackboard via Import Course Content; modules arrive inside a course folder. Deliverables import as assignments; introductions import as rendered documents.`;
       } else {
         summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package, or in Blackboard via Course Content > Import Package. Deliverables import as assignments; introductions import as pages.`;
       }
@@ -1720,7 +1846,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         outputs: {},
         summary: {
           kind: "text",
-          text: `${summaryText}${tileSaveNote}`,
+          text: `${summaryText} ${starterSummary}${tileSaveNote}`,
         },
       };
     },
@@ -1753,7 +1879,10 @@ export const STEP_REGISTRY: StepDefinition[] = [
         .filter(Boolean);
 
       if (urls.length === 0) {
-        throw new Error("Pick at least one LMS course.");
+        return {
+          outputs: {},
+          summary: { kind: "text", text: "Skipped - no LMS course selected." },
+        };
       }
 
       const includeGh = String(values.includeGithub ?? "") === "1";
@@ -1826,9 +1955,96 @@ export const STEP_REGISTRY: StepDefinition[] = [
             }
           }
 
+          // Tiles without a syllabus try the institution's template first:
+          // the generated syllabus is saved to the library, linked back to
+          // the tile, and then placed like a pre-existing one.
           let syllabusNote = "no syllabus on the tile - skipped";
-          if (tile?.syllabusId) {
-            const s = await getFinalizedSyllabusAction(tile.syllabusId);
+          let syllabusId = tile?.syllabusId?.trim() ?? "";
+          let generatedFromTemplate = false;
+          if (tile && !syllabusId) {
+            const instFields =
+              tile.institution && helpers.getInstitutionFields
+                ? await helpers
+                    .getInstitutionFields(tile.institution)
+                    .catch(() => [])
+                : [];
+            const templateId =
+              instFields
+                .find((f) => f.id === "syllabusTemplate")
+                ?.value?.trim() ?? "";
+            const instEmail =
+              instFields.find((f) => f.id === "email")?.value ?? "";
+            const instLmsUrl =
+              instFields.find((f) => f.id === "lmsUrl")?.value ?? "";
+
+            if (!templateId) {
+              syllabusNote =
+                "no syllabus on the tile and no institution syllabus template - skipped";
+            } else {
+              try {
+                onProgress(`Generating syllabus for ${tile.name}...`);
+                const g = await generateCourseSyllabusAction(
+                  templateId,
+                  {
+                    courseName: tile.name,
+                    courseCode: tile.courseCode ?? "",
+                    term: tile.term ?? "",
+                    description: tile.description ?? "",
+                    dayTime: tile.dayTime ?? "",
+                    startDate: tile.startDate ?? "",
+                    weeks: tile.weeks != null ? String(tile.weeks) : "",
+                    tests: tile.tests != null ? String(tile.tests) : "",
+                    textbook: tile.textbook ?? "",
+                    email: instEmail,
+                    lmsUrl: instLmsUrl,
+                    institution: tile.institution ?? "",
+                  },
+                  helpers.provider
+                );
+                if ("error" in g) {
+                  throw new Error(g.error);
+                }
+
+                const generatedFileName = /\.docx$/i.test(g.name)
+                  ? g.name
+                  : `${g.name}.docx`;
+                const saved = await createFinalizedSyllabusAction(
+                  g.name,
+                  generatedFileName,
+                  g.base64,
+                  tile.courseCode ?? undefined
+                );
+                if ("error" in saved) {
+                  throw new Error(saved.error);
+                }
+
+                syllabusId = saved.syllabus.id;
+                syllabusNote = "syllabus generated from the institution template";
+                generatedFromTemplate = true;
+
+                try {
+                  const linked = await updateCourseHubAction(tile.id, {
+                    ...courseToInputPayload(tile),
+                    syllabusId: saved.syllabus.id,
+                  });
+                  if ("error" in linked) {
+                    throw new Error(linked.error);
+                  }
+                } catch (err) {
+                  syllabusNote += `; linking the generated syllabus to the tile failed: ${
+                    err instanceof Error ? err.message : "unknown error"
+                  }`;
+                }
+              } catch (err) {
+                syllabusNote = `syllabus generation failed: ${
+                  err instanceof Error ? err.message : "unknown error"
+                }`;
+              }
+            }
+          }
+
+          if (syllabusId) {
+            const s = await getFinalizedSyllabusAction(syllabusId);
             if ("error" in s) {
               syllabusNote = `syllabus error: ${s.error}`;
             } else {
@@ -1844,7 +2060,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
               if ("error" in placed) {
                 syllabusNote = `syllabus error: ${placed.error}`;
               } else {
-                syllabusNote = "syllabus added";
+                syllabusNote = generatedFromTemplate
+                  ? "syllabus generated from the institution template and added"
+                  : "syllabus added";
               }
             }
           }
@@ -2135,6 +2353,878 @@ export const STEP_REGISTRY: StepDefinition[] = [
           kind: "list",
           label: `Loaded "${tile.name}"`,
           items,
+        },
+      };
+    },
+  },
+
+  {
+    type: "fetch-term-courses",
+    name: "Fetch term courses (preview)",
+    description:
+      "List every LMS course in the given term, optionally enriched by uploaded exports, and pause for review before any cards are created.",
+    inputs: [
+      {
+        key: "institution",
+        label: "Institution",
+        type: "institution",
+        required: true,
+      },
+      {
+        key: "term",
+        label: "Term",
+        type: "text",
+        required: true,
+        help: "Matched against the LMS term name, e.g. Fall 2026.",
+      },
+      {
+        key: "exports",
+        label: "LMS exports",
+        type: "uploads",
+        required: false,
+        help: "Optional .imscc/zip exports; parsed for extra tile details.",
+      },
+    ],
+    outputs: [{ key: "courses", label: "Course list", type: "courseList" }],
+    run: async (values, helpers, onProgress) => {
+      const institution = String(values.institution ?? "").trim();
+      const term = String(values.term ?? "").trim();
+
+      onProgress("Fetching the term's courses...");
+      const r = await listCoursesByTermAction(institution, term);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+      const rows = r.courses;
+
+      // The uploads value type resolves to a runtime File[] (never a
+      // persisted string); an unbound input stays undefined and skips the
+      // parsing pass entirely.
+      const exportFiles = Array.isArray(values.exports)
+        ? (values.exports as File[])
+        : [];
+
+      const warnings: string[] = [];
+      const noteByLmsId = new Map<string, string>();
+      const extraRows: Array<{
+        id: string;
+        name: string;
+        courseCode: string | null;
+        termName: string | null;
+      }> = [];
+
+      // Manifest titles were XML-escaped on export; undo the entities the
+      // cartridge writer emits before matching against LMS names.
+      const decodeEntities = (s: string): string =>
+        s
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"')
+          .replace(/&amp;/g, "&");
+
+      for (const file of exportFiles) {
+        try {
+          onProgress(`Reading ${file.name}...`);
+          const { default: JSZip } = await import("jszip");
+          const zip = await JSZip.loadAsync(await file.arrayBuffer());
+          const manifest = zip.file("imsmanifest.xml");
+          if (!manifest) {
+            warnings.push(`${file.name}: no imsmanifest.xml found - skipped`);
+            continue;
+          }
+
+          const xml = await manifest.async("string");
+          const m = xml.match(/<lomimscc:string>([^<]+)<\/lomimscc:string>/);
+          const title = m ? decodeEntities(m[1]).trim() : "";
+          if (!title) {
+            warnings.push(`${file.name}: no course title in manifest - skipped`);
+            continue;
+          }
+
+          // Loose containment match either direction so "CS 101" pairs with
+          // "CS 101 - Intro to Programming" and vice versa.
+          const lowered = title.toLowerCase();
+          const matched = rows.find((row) => {
+            const rowName = row.name.toLowerCase();
+            return rowName.includes(lowered) || lowered.includes(rowName);
+          });
+
+          if (matched) {
+            noteByLmsId.set(matched.id, "export attached");
+          } else {
+            extraRows.push({
+              id: "",
+              name: title,
+              courseCode: null,
+              termName: term,
+            });
+          }
+        } catch (err) {
+          // A bad export never fails the preview; it surfaces as a warning.
+          warnings.push(
+            `${file.name}: ${
+              err instanceof Error ? err.message : "could not read the export"
+            }`
+          );
+        }
+      }
+
+      const payload: TermCoursePreviewRow[] = [
+        ...rows.map((row) => ({
+          lmsId: row.id,
+          name: row.name,
+          courseCode: row.courseCode,
+          termName: row.termName,
+          canvasUrl: row.id ? `/courses/${row.id}` : "",
+          note: noteByLmsId.get(row.id) ?? "",
+        })),
+        ...extraRows.map((row) => ({
+          lmsId: row.id,
+          name: row.name,
+          courseCode: row.courseCode,
+          termName: row.termName,
+          canvasUrl: "",
+          note: "from export only",
+        })),
+      ];
+
+      return {
+        outputs: { courses: payload },
+        summary: {
+          kind: "list",
+          label: `${payload.length} course(s) ready to import`,
+          items: [
+            ...payload.map(
+              (c) =>
+                `${c.name}${c.courseCode ? ` [${c.courseCode}]` : ""}${
+                  c.termName ? ` - ${c.termName}` : ""
+                }${c.note ? ` (${c.note})` : ""}`
+            ),
+            ...warnings,
+          ],
+        },
+        requireConfirmation:
+          "Create a course card for each of these? Existing cards with the same LMS course are skipped.",
+      };
+    },
+  },
+
+  {
+    type: "create-course-cards",
+    name: "Create course cards",
+    description:
+      "Create a course tile for each previewed course; tiles whose LMS course already has a card are skipped.",
+    inputs: [
+      {
+        key: "courses",
+        label: "Course list",
+        type: "courseList",
+        required: true,
+      },
+      {
+        key: "institution",
+        label: "Institution",
+        type: "institution",
+        required: true,
+      },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const rows = values.courses as TermCoursePreviewRow[];
+      const institution = String(values.institution ?? "").trim();
+
+      onProgress("Loading existing course cards...");
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const wanted = String(institution ?? "").trim().toUpperCase();
+      const existingIds = new Set(
+        hub.courses
+          .filter((c) => (c.institution ?? "").trim().toUpperCase() === wanted)
+          .map((c) => parseCanvasCourseId(c.canvasUrl ?? ""))
+          .filter((id): id is string => Boolean(id))
+      );
+
+      const existingNameTerms = new Set(
+        hub.courses
+          .filter((c) => (c.institution ?? "").trim().toUpperCase() === wanted)
+          .map((c) => `${(c.name ?? "").trim().toLowerCase()}||${(c.term ?? "").trim().toLowerCase()}`)
+      );
+
+      const lines: string[] = [];
+      let created = 0;
+      let skipped = 0;
+      let failed = 0;
+
+      for (const row of rows) {
+        // Fail-forward: one bad row records its error and the loop moves on.
+        try {
+          const nameKey = `${(row.name ?? "").trim().toLowerCase()}||${(row.termName ?? "").trim().toLowerCase()}`;
+          if (row.lmsId ? existingIds.has(row.lmsId) : existingNameTerms.has(nameKey)) {
+            lines.push(`${row.name}: already exists`);
+            skipped++;
+            continue;
+          }
+
+          onProgress(`Creating "${row.name}"...`);
+          const made = await createCourseHubAction({
+            name: row.name,
+            courseCode: row.courseCode,
+            term: row.termName,
+            canvasUrl: row.canvasUrl || null,
+            institution,
+            lms: row.canvasUrl ? "canvas" : null,
+          });
+
+          if ("error" in made) {
+            throw new Error(made.error);
+          }
+
+          if (row.lmsId) {
+            existingIds.add(row.lmsId);
+          } else {
+            existingNameTerms.add(nameKey);
+          }
+          lines.push(`${row.name}: created`);
+          created++;
+        } catch (err) {
+          lines.push(
+            `${row.name}: ${err instanceof Error ? err.message : "failed"}`
+          );
+          failed++;
+        }
+      }
+
+      return {
+        outputs: {},
+        summary: {
+          kind: "list",
+          label: `${created} created, ${skipped} skipped${
+            failed ? `, ${failed} failed` : ""
+          }`,
+          items: lines,
+        },
+      };
+    },
+  },
+
+  {
+    type: "set-course-start-dates",
+    name: "Set course start dates",
+    description:
+      "Store the given start date on every selected course tile.",
+    inputs: [
+      {
+        key: "startDate",
+        label: "Course start",
+        type: "date",
+        required: true,
+      },
+      {
+        key: "courses",
+        label: "Courses",
+        type: "hubCourseList",
+        required: true,
+      },
+    ],
+    outputs: [{ key: "courses", label: "Courses", type: "hubCourseList" }],
+    run: async (values, helpers, onProgress) => {
+      const startRaw = String(values.startDate ?? "").trim();
+      const start = startRaw ? new Date(`${startRaw}T00:00:00`) : null;
+      if (!start || Number.isNaN(start.getTime())) {
+        throw new Error("Enter the course start as a valid date.");
+      }
+
+      const ids = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const lines: string[] = [];
+      let updated = 0;
+      let failed = 0;
+
+      for (const id of ids) {
+        const tile = hub.courses.find((c) => c.id === id);
+        // Fail-forward: one bad tile records its error and the loop moves on.
+        try {
+          if (!tile) {
+            lines.push(`${id}: not found`);
+            failed++;
+            continue;
+          }
+
+          onProgress(`Updating ${tile.name}...`);
+          const r = await updateCourseHubAction(id, {
+            ...courseToInputPayload(tile),
+            startDate: startRaw,
+          });
+          if ("error" in r) {
+            throw new Error(r.error);
+          }
+
+          lines.push(`${tile.name}: start date set`);
+          updated++;
+        } catch (err) {
+          lines.push(
+            `${tile?.name ?? id}: ${
+              err instanceof Error ? err.message : "failed"
+            }`
+          );
+          failed++;
+        }
+      }
+
+      return {
+        outputs: { courses: values.courses },
+        summary: {
+          kind: "list",
+          label: `${updated} start date(s) set${
+            failed ? `, ${failed} failed` : ""
+          }`,
+          items: lines,
+        },
+      };
+    },
+  },
+
+  {
+    type: "assign-week-deadlines",
+    name: "Assign weekly deadlines",
+    description:
+      "Give every module's assignments, quizzes, and discussions a deadline at the Sunday ending its week; Start Here and Module 1 end week one.",
+    inputs: [
+      {
+        key: "courses",
+        label: "Courses",
+        type: "hubCourseList",
+        required: true,
+      },
+      {
+        key: "startDate",
+        label: "Course start",
+        type: "date",
+        required: true,
+      },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const startRaw = String(values.startDate ?? "").trim();
+      const start = startRaw ? new Date(`${startRaw}T00:00:00`) : null;
+      if (!start || Number.isNaN(start.getTime())) {
+        throw new Error("Enter the course start as a valid date.");
+      }
+
+
+      const ids = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const lines: string[] = [];
+      let failed = 0;
+      let skipped = 0;
+
+      for (const id of ids) {
+        const tile = hub.courses.find((c) => c.id === id);
+        // Fail-forward: one bad course records its error and the loop moves on.
+        try {
+          if (!tile) {
+            lines.push(`${id}: not found`);
+            failed++;
+            continue;
+          }
+
+          const canvasUrl = (tile.canvasUrl ?? "").trim();
+          if (!canvasUrl) {
+            lines.push(`${tile.name}: no LMS course on the tile - skipped`);
+            skipped++;
+            continue;
+          }
+
+          const inst = tile.institution?.trim() || helpers.activeInstitution || undefined;
+
+          onProgress(`Loading modules for ${tile.name}...`);
+          const content = await listCourseContentAction(
+            canvasUrl,
+            inst
+          );
+          if ("error" in content) {
+            throw new Error(content.error);
+          }
+
+          // Each module's week comes from its OWN name - "Start Here" maps
+          // to week 1 and "Module NN" to N - never from list position, so
+          // extra or reordered modules cannot skew other modules' deadlines.
+          const updates: DueDateUpdate[] = [];
+          let moduleCount = 0;
+          for (const m of content.modules) {
+            let week: number | null = null;
+            if (/start\s*here/i.test(m.name)) {
+              week = 1;
+            } else {
+              const wm = m.name.match(/module\s*0*(\d+)/i);
+              if (wm) week = Number(wm[1]);
+            }
+            if (week === null) continue;
+
+            moduleCount++;
+            for (const item of m.items) {
+              if (item.contentId === null) continue;
+              if (
+                item.type !== "Assignment" &&
+                item.type !== "Quiz" &&
+                item.type !== "Discussion"
+              ) {
+                continue;
+              }
+              updates.push({
+                type: item.type,
+                contentId: item.contentId,
+                dueAt: weekDeadline(start, week).toISOString(),
+              });
+            }
+          }
+
+          onProgress(`Setting ${updates.length} deadline(s) in ${tile.name}...`);
+          const r = await setModuleDueDatesAction(
+            canvasUrl,
+            updates,
+            inst
+          );
+          if ("error" in r) {
+            throw new Error(r.error);
+          }
+
+          lines.push(
+            `${tile.name}: ${r.updated} deadline(s) across ${moduleCount} module(s)${
+              r.failures.length ? ` (${r.failures.length} failed)` : ""
+            }`
+          );
+        } catch (err) {
+          lines.push(
+            `${tile?.name ?? id}: ${
+              err instanceof Error ? err.message : "failed"
+            }`
+          );
+          failed++;
+        }
+      }
+
+      return {
+        outputs: {},
+        summary: {
+          kind: "list",
+          label: `Assigned deadlines in ${ids.length - failed - skipped} course(s)${
+            skipped ? `, ${skipped} skipped` : ""
+          }${failed ? `, ${failed} failed` : ""}`,
+          items: lines,
+        },
+      };
+    },
+  },
+
+  {
+    type: "prepare-lecture",
+    name: "Prepare lecture",
+    description:
+      "Build a lecture deck from a module's materials, save it to the course tile, and schedule a recap announcement after the next class meeting.",
+    inputs: [
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: true,
+      },
+      {
+        key: "moduleId",
+        label: "Module",
+        type: "lmsModule",
+        required: false,
+        help: "Pick from the live LMS connection; without one the step falls back to the tile's topics.",
+      },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      const list = await listCourseHubAction();
+      if ("error" in list) {
+        throw new Error(list.error);
+      }
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (!tile) {
+        throw new Error("Choose a course tile.");
+      }
+
+      const canvasUrl = (tile.canvasUrl ?? "").trim();
+      const inst = helpers.activeInstitution || undefined;
+      const moduleIdRaw = String(values.moduleId ?? "").trim();
+
+      // Materials cap at ~20000 chars so the deck prompt stays inside the
+      // action's own truncation budget; going over surfaces as a note.
+      const MATERIALS_CAP = 20000;
+      const chunks: string[] = [];
+      const notes: string[] = [];
+      let total = 0;
+      let truncated = false;
+      const push = (text: string) => {
+        if (!text) return;
+        if (total >= MATERIALS_CAP) {
+          truncated = true;
+          return;
+        }
+        const slice = text.slice(0, MATERIALS_CAP - total);
+        if (slice.length < text.length) truncated = true;
+        chunks.push(slice);
+        total += slice.length;
+      };
+
+      let moduleName = "Upcoming module";
+      let materialsSource = "";
+
+      if (canvasUrl && moduleIdRaw) {
+        onProgress("Loading module materials...");
+        const content = await listCourseContentAction(canvasUrl, inst);
+        if ("error" in content) {
+          throw new Error(content.error);
+        }
+        const courseModule = content.modules.find(
+          (m) => String(m.id) === moduleIdRaw
+        );
+        if (!courseModule) {
+          throw new Error("Pick a module.");
+        }
+        moduleName = courseModule.name;
+        materialsSource = `Materials read from LMS module "${courseModule.name}"`;
+
+        for (const item of courseModule.items) {
+          // Fail-forward per item: unreadable materials become notes.
+          try {
+            if (item.type === "Page" && item.pageUrl) {
+              const p = await getPageAction(canvasUrl, item.pageUrl, inst);
+              if ("error" in p) {
+                throw new Error(p.error);
+              }
+              const bodyText = p.page.body
+                .replace(/<[^>]+>/g, " ")
+                .replace(/\s+/g, " ")
+                .trim();
+              push(`# ${p.page.title}\n${bodyText}\n\n`);
+            } else if (item.type === "File" && item.contentId !== null) {
+              const f = await previewFileAction(canvasUrl, item.contentId, inst);
+              if ("error" in f) {
+                throw new Error(f.error);
+              }
+              if (f.preview.text.trim()) {
+                push(`# ${item.title}\n${f.preview.text}\n\n`);
+              }
+            } else if (
+              item.type === "Assignment" ||
+              item.type === "Quiz" ||
+              item.type === "Discussion"
+            ) {
+              push(`${item.type}: ${item.title}\n`);
+            }
+          } catch (err) {
+            notes.push(
+              `${item.title}: ${
+                err instanceof Error ? err.message : "could not read"
+              }`
+            );
+          }
+        }
+      } else {
+        push(
+          [tile.topics ?? "", tile.description ?? ""]
+            .filter(Boolean)
+            .join("\n\n")
+        );
+        notes.push("no live LMS module - using tile topics/description");
+        materialsSource = "Materials from the tile's topics/description";
+      }
+
+      if (truncated) {
+        notes.push("materials truncated to ~20000 characters");
+      }
+
+      onProgress("Generating lecture...");
+      const r = await generateLectureFromMaterialsAction(
+        tile.name,
+        moduleName,
+        chunks.join(""),
+        helpers.provider
+      );
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      const pptxData = await buildSlidesPptx({
+        presentationTitle: r.presentationTitle,
+        slides: r.slides,
+        subtitle: moduleName,
+        author: helpers.author,
+      });
+      const blob = new Blob([pptxData], {
+        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      });
+
+      const sanitize = (s: string) =>
+        s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+      const fileName = `${sanitize(tile.name)}_${sanitize(moduleName)}_Lecture.pptx`;
+
+      onProgress(`Downloading ${fileName}...`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      if (helpers.saveCourseMaterialFile) {
+        try {
+          await helpers.saveCourseMaterialFile(tile.id, blob, fileName);
+        } catch (err) {
+          notes.push(
+            `saving to the course tile failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          );
+        }
+      }
+
+      // Schedule the recap announcement for two hours after the next class
+      // meeting; a failure notes on the summary instead of failing the step.
+      let announcementLine: string;
+      const dayTime = (tile.dayTime ?? "").trim();
+      if (!canvasUrl) {
+        announcementLine =
+          "no LMS course on the tile - announcement not scheduled";
+      } else if (!dayTime) {
+        announcementLine = "no Day/Time on the tile - announcement not scheduled";
+      } else {
+        const parsed = parseDayTime(dayTime);
+        if (!parsed) {
+          announcementLine = `could not parse Day/Time "${dayTime}" - announcement not scheduled`;
+        } else {
+          const now = new Date();
+          const candidate = new Date(now);
+          candidate.setHours(parsed.hour, parsed.minute, 0, 0);
+          // Scan 8 candidate days (today through next week); accept the first
+          // whose class start time is strictly in the future.
+          let found = false;
+          for (let i = 0; i < 8; i++) {
+            if (
+              parsed.days.has(candidate.getDay()) &&
+              candidate.getTime() > now.getTime()
+            ) {
+              found = true;
+              break;
+            }
+            candidate.setDate(candidate.getDate() + 1);
+          }
+          if (!found) {
+            announcementLine = `could not find a future class meeting for Day/Time "${dayTime}" within 8 days - announcement not scheduled`;
+          } else {
+            const postAt = new Date(candidate.getTime() + 2 * 60 * 60 * 1000);
+            try {
+              onProgress("Scheduling the recap announcement...");
+              const ann = await createScheduledAnnouncementAction(
+                canvasUrl,
+                `Lecture recap: ${moduleName}`,
+                r.announcement,
+                postAt.toISOString(),
+                inst
+              );
+              if ("error" in ann) {
+                throw new Error(ann.error);
+              }
+              announcementLine = `announcement scheduled for ${postAt.toLocaleString()}`;
+            } catch (err) {
+              announcementLine = `announcement failed: ${
+                err instanceof Error ? err.message : "unknown error"
+              }`;
+            }
+          }
+        }
+      }
+
+      return {
+        outputs: {},
+        summary: {
+          kind: "list",
+          label: `Lecture ready for ${moduleName}`,
+          items: [
+            `${r.slides.length} slide(s) -> ${fileName}`,
+            materialsSource,
+            announcementLine,
+            ...notes,
+          ],
+        },
+      };
+    },
+  },
+
+  {
+    type: "tech-report",
+    name: "New-tech report",
+    description:
+      "Analyze the selected courses' materials and produce a report of emerging-technology opportunities with integration recommendations.",
+    inputs: [
+      {
+        key: "courses",
+        label: "Courses",
+        type: "hubCourseList",
+        required: true,
+      },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const ids = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const payloads: Array<{
+        name: string;
+        topics: string;
+        syllabusText: string;
+        textbook: string;
+        repoDigest: string;
+        modulesSummary: string;
+        assignmentsSummary: string;
+      }> = [];
+
+      const missing: string[] = [];
+
+      for (const id of ids) {
+        const tile = hub.courses.find((c) => c.id === id);
+        if (!tile) {
+          missing.push(`${id}: not found`);
+          continue;
+        }
+
+        onProgress(`Gathering ${tile.name}...`);
+
+        // Every enrichment fails forward to "" so a missing syllabus or a
+        // dead LMS connection never blocks the analysis.
+        let syllabusText = "";
+        if (tile.syllabusId?.trim()) {
+          try {
+            const s = await previewFinalizedSyllabusAction(tile.syllabusId);
+            if (!("error" in s)) {
+              syllabusText = s.paragraphs.map((p) => p.text).join("\n");
+            }
+          } catch {
+            // Fail-forward to "".
+          }
+        }
+
+        let modulesSummary = "";
+        let assignmentsSummary = "";
+        const canvasUrl = (tile.canvasUrl ?? "").trim();
+        if (canvasUrl) {
+          try {
+            const content = await listCourseContentAction(
+              canvasUrl,
+              helpers.activeInstitution || undefined
+            );
+            if (!("error" in content)) {
+              modulesSummary = content.modules.map((m) => m.name).join("\n");
+
+              const byType = new Map<string, string[]>();
+              for (const m of content.modules) {
+                for (const item of m.items) {
+                  if (!byType.has(item.type)) byType.set(item.type, []);
+                  byType.get(item.type)!.push(item.title);
+                }
+              }
+              assignmentsSummary = Array.from(byType.entries())
+                .map(([type, titles]) => `${type}: ${titles.join("; ")}`)
+                .join("\n");
+            }
+          } catch {
+            // Fail-forward to "".
+          }
+        }
+
+        payloads.push({
+          name: tile.name,
+          topics: tile.topics ?? "",
+          syllabusText,
+          textbook: tile.textbook ?? "",
+          repoDigest: tile.repos.map((r) => r.repo).join(", "),
+          modulesSummary,
+          assignmentsSummary,
+        });
+      }
+
+      if (payloads.length === 0) {
+        throw new Error("None of the selected course tiles exist anymore.");
+      }
+
+      onProgress("Analyzing courses...");
+      const r = await analyzeCourseTechAction(payloads, helpers.provider);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      const combined = r.reports
+        .map((rep) => `==== ${rep.name} ====\n\n${rep.report}`)
+        .join("\n\n");
+
+      onProgress("Building the report document...");
+      const docxData = await buildDocxFromPlainText(
+        combined,
+        undefined,
+        helpers.author
+      );
+      const blob = new Blob([docxData], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "new_tech_report.docx";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      return {
+        outputs: {},
+        summary: {
+          kind: "list",
+          label: `Analyzed ${r.reports.length} course(s)`,
+          items: [
+            ...r.reports.map(
+              (rep) =>
+                `${rep.name}: ${
+                  rep.report.split("\n").find((l) => l.trim())?.trim() ?? ""
+                }`
+            ),
+            "Full report downloaded (new_tech_report.docx)",
+            ...missing,
+          ],
         },
       };
     },

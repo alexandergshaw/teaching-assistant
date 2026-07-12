@@ -310,6 +310,8 @@ import {
   deleteCourse as deleteCourseRow,
   updateCourseMaterials,
   updateCourseCsv,
+  appendCourseMaterialFile,
+  removeCourseMaterialFile,
   type Course as CourseHub,
   type CourseInput as CourseHubInput,
 } from "@/lib/supabase/courses";
@@ -3852,6 +3854,39 @@ export async function setCourseCsvAction(
   }
 }
 
+/** Append a material file to a course's materials list. Returns the storage path of any replaced entry. */
+export async function appendCourseMaterialFileAction(
+  courseId: string,
+  file: { name: string; path: string; size: number }
+): Promise<{ replacedPath: string | null } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!courseId.trim()) return { error: "Choose a course." };
+    const replacedPath = await appendCourseMaterialFile(user.id, courseId, {
+      ...file,
+      addedAt: new Date().toISOString(),
+    });
+    return { replacedPath };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the file to the course materials." };
+  }
+}
+
+/** Remove a material file from a course's materials list. */
+export async function removeCourseMaterialFileAction(
+  courseId: string,
+  path: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!courseId.trim()) return { error: "Choose a course." };
+    await removeCourseMaterialFile(user.id, courseId, path);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not remove the file from the course materials." };
+  }
+}
+
 /** Per-course LMS notification counts (needs-grading + unread inbox) for its tile. */
 export async function getCourseNotificationsAction(
   canvasUrl: string,
@@ -7373,7 +7408,8 @@ export async function generateSchedulePlanFromRepoAction(
   repoRef: string,
   weeks: number | null,
   tests: number | null,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  courseDescription?: string
 ): Promise<{ courseTitle: string; schedule: ScheduleWeekPlan[] } | { error: string }> {
   try {
     await requireOwner();
@@ -7469,8 +7505,12 @@ Requirements:
 - Weeks beyond folder count should have review/consolidation topics with null assignment and null test.
 - Every non-test week must have an assignment.
 - Topics should progress from foundational to advanced.
+${courseDescription ? `- Topics and summaries should align with the course description provided below.` : ""}
 
-Repository README:
+${courseDescription ? `COURSE DESCRIPTION (context from the instructor):
+${courseDescription.length > 2000 ? courseDescription.slice(0, 2000) + "\n... (truncated)" : courseDescription}
+
+` : ""}Repository README:
 ${readmeContent}
 
 Assignment folders and their content:

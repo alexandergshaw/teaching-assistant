@@ -5,7 +5,7 @@
 // every query is explicitly scoped to the owning user_id.
 
 import { createServiceClient } from "./server";
-import type { Database } from "./types";
+import type { Database, Json } from "./types";
 
 type CoursesTable = Database["public"]["Tables"]["course_hub"];
 
@@ -19,6 +19,23 @@ export interface CourseRepo {
 export interface CourseIntegration {
   name: string;
   url: string | null;
+}
+
+/** A single material file (workflow-generated zip, LMS export, etc.). */
+export interface CourseMaterialFile {
+  name: string;
+  path: string;
+  size: number;
+  addedAt: string;
+}
+
+/** A custom tile in a course card. */
+export interface CourseCustomTile {
+  id: string;
+  label: string;
+  value: string;
+  /** layout group this tile lives in */
+  groupId: string;
 }
 
 /** A course and the resources bundled with it. */
@@ -40,10 +57,15 @@ export interface Course {
   csvName: string | null;
   csvData: string | null;
   startDate: string | null;
+  description: string | null;
+  weeks: number | null;
+  tests: number | null;
   lms: string | null;
+  materialsFiles: CourseMaterialFile[];
   materialsZipName: string | null;
   materialsZipPath: string | null;
   materialsZipSize: number | null;
+  customTiles: CourseCustomTile[];
   updatedAt: string;
 }
 
@@ -65,11 +87,15 @@ export interface CourseInput {
   csvName?: string | null;
   csvData?: string | null;
   startDate?: string | null;
+  description?: string | null;
+  weeks?: number | null;
+  tests?: number | null;
   lms?: string | null;
+  customTiles?: CourseCustomTile[];
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, start_date, lms, materials_zip_name, materials_zip_path, materials_zip_size, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, start_date, description, weeks, tests, lms, materials_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -97,10 +123,15 @@ interface CourseRow {
   csv_name: string | null;
   csv_data: string | null;
   start_date: string | null;
+  description: string | null;
+  weeks: number | null;
+  tests: number | null;
   lms: string | null;
+  materials_files: Array<{ name: string; path: string; size: number; addedAt: string }> | null;
   materials_zip_name: string | null;
   materials_zip_path: string | null;
   materials_zip_size: number | null;
+  custom_tiles: Array<{ id: string; label: string; value: string; groupId: string }> | null;
   updated_at: string;
 }
 
@@ -123,10 +154,15 @@ function toCourse(r: CourseRow): Course {
     csvName: r.csv_name,
     csvData: r.csv_data,
     startDate: r.start_date,
+    description: r.description,
+    weeks: r.weeks,
+    tests: r.tests,
     lms: r.lms,
+    materialsFiles: Array.isArray(r.materials_files) ? r.materials_files.filter((x) => x && x.path && x.name) : [],
     materialsZipName: r.materials_zip_name,
     materialsZipPath: r.materials_zip_path,
     materialsZipSize: r.materials_zip_size,
+    customTiles: Array.isArray(r.custom_tiles) ? r.custom_tiles.filter((x) => x && typeof x.id === "string" && typeof x.label === "string") : [],
     updatedAt: r.updated_at,
   };
 }
@@ -161,7 +197,11 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     csv_name: clean(input.csvName),
     csv_data: clean(input.csvData),
     start_date: clean(input.startDate),
+    description: clean(input.description),
+    weeks: typeof input.weeks === "number" && Number.isFinite(input.weeks) ? input.weeks : null,
+    tests: typeof input.tests === "number" && Number.isFinite(input.tests) ? input.tests : null,
     lms: clean(input.lms),
+    custom_tiles: Array.isArray(input.customTiles) ? (input.customTiles as unknown as Json) : undefined,
     materials_zip_name: null,
     materials_zip_path: null,
     materials_zip_size: null,
@@ -258,5 +298,81 @@ export async function updateCourseCsv(
     .eq("id", id);
   if (error) {
     throw new Error(`Could not update the course schedule CSV: ${error.message}`);
+  }
+}
+
+/** Append a material file to a course's materials list, deduplicating by name. Returns the storage path of any replaced entry, or null if none. */
+export async function appendCourseMaterialFile(
+  userId: string,
+  id: string,
+  file: CourseMaterialFile
+): Promise<string | null> {
+  const { data, error: selectError } = await table()
+    .select("materials_files")
+    .eq("user_id", userId)
+    .eq("id", id)
+    .single();
+  if (selectError) {
+    throw new Error(`Could not read the course materials: ${selectError.message}`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const current = Array.isArray((data as any).materials_files) ? (data as any).materials_files : [];
+  let replacedPath: string | null = null;
+
+  // Remove any existing entry with the same name, capturing its path.
+  const filtered = current.filter((x: CourseMaterialFile) => {
+    if (x && x.name === file.name) {
+      replacedPath = x.path;
+      return false;
+    }
+    return true;
+  });
+
+  // Append the new entry.
+  const updated = [...filtered, file];
+
+  const { error } = await table()
+    .update({
+      materials_files: updated,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) {
+    throw new Error(`Could not update the course materials: ${error.message}`);
+  }
+
+  return replacedPath;
+}
+
+/** Remove a material file from a course's materials list by path. */
+export async function removeCourseMaterialFile(
+  userId: string,
+  id: string,
+  path: string
+): Promise<void> {
+  const { data, error: selectError } = await table()
+    .select("materials_files")
+    .eq("user_id", userId)
+    .eq("id", id)
+    .single();
+  if (selectError) {
+    throw new Error(`Could not read the course materials: ${selectError.message}`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const current = Array.isArray((data as any).materials_files) ? (data as any).materials_files : [];
+  const filtered = current.filter((x: CourseMaterialFile) => x && x.path !== path);
+
+  const { error } = await table()
+    .update({
+      materials_files: filtered,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) {
+    throw new Error(`Could not update the course materials: ${error.message}`);
   }
 }

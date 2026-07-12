@@ -171,10 +171,15 @@ export interface Database {
           csv_name: string | null;
           csv_data: string | null;
           start_date: string | null;
+          description: string | null;
+          weeks: number | null;
+          tests: number | null;
           lms: string | null;
+          materials_files: Json;
           materials_zip_name: string | null;
           materials_zip_path: string | null;
           materials_zip_size: bigint | null;
+          custom_tiles: Json;
           created_at: string;
           updated_at: string;
         };
@@ -197,10 +202,15 @@ export interface Database {
           csv_name?: string | null;
           csv_data?: string | null;
           start_date?: string | null;
+          description?: string | null;
+          weeks?: number | null;
+          tests?: number | null;
           lms?: string | null;
+          materials_files?: Json;
           materials_zip_name?: string | null;
           materials_zip_path?: string | null;
           materials_zip_size?: bigint | null;
+          custom_tiles?: Json;
           created_at?: string;
           updated_at?: string;
         };
@@ -223,10 +233,15 @@ export interface Database {
           csv_name?: string | null;
           csv_data?: string | null;
           start_date?: string | null;
+          description?: string | null;
+          weeks?: number | null;
+          tests?: number | null;
           lms?: string | null;
+          materials_files?: Json;
           materials_zip_name?: string | null;
           materials_zip_path?: string | null;
           materials_zip_size?: bigint | null;
+          custom_tiles?: Json;
           created_at?: string;
           updated_at?: string;
         };
@@ -488,6 +503,60 @@ export interface Database {
           description?: string;
           steps?: Json;
           created_at?: string;
+          updated_at?: string;
+        };
+      };
+      common_resources: {
+        Row: {
+          user_id: string;
+          items: Json;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          items?: Json;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          items?: Json;
+          updated_at?: string;
+        };
+      };
+      course_card_layout: {
+        Row: {
+          user_id: string;
+          groups: Json;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          groups?: Json;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          groups?: Json;
+          updated_at?: string;
+        };
+      };
+      institution_fields: {
+        Row: {
+          user_id: string;
+          acronym: string;
+          fields: Json;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          acronym: string;
+          fields?: Json;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          acronym?: string;
+          fields?: Json;
           updated_at?: string;
         };
       };

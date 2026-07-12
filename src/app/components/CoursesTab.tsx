@@ -22,10 +22,13 @@ import {
   extractTopicsFromRepoAction,
   listGithubReposAction,
   setCourseMaterialsAction,
+  removeCourseMaterialFileAction,
   listCoursesAction,
 } from "../actions";
 import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
+import { loadCommonResources, saveCommonResources, type CommonResourceItem } from "@/lib/common-resources";
+import { listRecordingFiles, type RecordingFile } from "@/lib/recording-files";
 import GithubRepoPicker from "./GithubRepoPicker";
 import TabHeader from "./TabHeader";
 import SyllabusPreviewModal, { type SyllabusPreviewPara } from "./SyllabusPreviewModal";
@@ -55,11 +58,14 @@ interface CourseForm {
   notes: string;
   topics: string;
   startDate: string;
+  description: string;
+  weeks: string;
+  tests: string;
   lms: string;
 }
 
 // Fields that can be edited inline on tiles.
-type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics" | "csv" | "startDate" | "lms";
+type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms";
 
 const EMPTY_FORM: CourseForm = {
   id: null,
@@ -77,6 +83,9 @@ const EMPTY_FORM: CourseForm = {
   notes: "",
   topics: "",
   startDate: "",
+  description: "",
+  weeks: "",
+  tests: "",
   lms: "",
 };
 
@@ -97,6 +106,9 @@ function formFromCourse(c: Course): CourseForm {
     notes: c.notes ?? "",
     topics: c.topics ?? "",
     startDate: c.startDate ?? "",
+    description: c.description ?? "",
+    weeks: c.weeks !== null ? String(c.weeks) : "",
+    tests: c.tests !== null ? String(c.tests) : "",
     lms: c.lms ?? "",
   };
 }
@@ -120,6 +132,9 @@ function courseToInput(c: Course) {
     csvName: c.csvName ?? "",
     csvData: c.csvData ?? "",
     startDate: c.startDate ?? "",
+    description: c.description ?? "",
+    weeks: c.weeks,
+    tests: c.tests,
     lms: c.lms ?? "",
   };
 }
@@ -259,9 +274,17 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [autoTopicsId, setAutoTopicsId] = useState<string | null>(null);
   const [uploadingMaterials, setUploadingMaterials] = useState(false);
   const [materialsRemoveConfirm, setMaterialsRemoveConfirm] = useState<string | null>(null);
+  const [removingMaterialFile, setRemovingMaterialFile] = useState<string | null>(null);
   const [lmsCourseOpts, setLmsCourseOpts] = useState<Array<{ url: string; name: string }> | null>(null);
   const [lmsCourseOptsError, setLmsCourseOptsError] = useState<string | null>(null);
   const [lmsCourseDraft, setLmsCourseDraft] = useState<string | null>(null);
+  const [commonResources, setCommonResources] = useState<CommonResourceItem[]>([]);
+  const [commonResourcesLoading, setCommonResourcesLoading] = useState(false);
+  const [libFiles, setLibFiles] = useState<RecordingFile[] | null>(null);
+  const [filePickerValue, setFilePickerValue] = useState("");
+  const [pageTitleDraft, setPageTitleDraft] = useState("");
+  const [pageBodyDraft, setPageBodyDraft] = useState("");
+  const [editingPageId, setEditingPageId] = useState<string | null>(null);
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
   const csvUploadRef = useRef<HTMLInputElement>(null);
@@ -376,6 +399,28 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     };
   }, [lmsEditTileId, courses, activeInstitution]);
 
+  // Load common resources on mount when user is present
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      setCommonResourcesLoading(true);
+      try {
+        const items = await loadCommonResources(supabase, user.id);
+        if (cancelled) return;
+        setCommonResources(items);
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Failed to load common resources:", err);
+      } finally {
+        setCommonResourcesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, supabase]);
+
   const toggleGroup = (key: string) =>
     setCollapsed((prev) => {
       const next = { ...prev, [key]: !prev[key] };
@@ -437,6 +482,9 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       notes: form.notes,
       topics: form.topics,
       startDate: form.startDate,
+      description: form.description,
+      weeks: form.weeks.trim() ? (Number.isFinite(Number(form.weeks.trim())) ? Number(form.weeks.trim()) : null) : null,
+      tests: form.tests.trim() ? (Number.isFinite(Number(form.tests.trim())) ? Number(form.tests.trim()) : null) : null,
       lms: form.lms,
     };
     const result = form.id ? await updateCourseHubAction(form.id, input) : await createCourseHubAction(input);
@@ -600,6 +648,40 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     }
   };
 
+  const handleRemoveMaterialFile = async (c: Course, path: string) => {
+    if (!user) {
+      setError("You must be logged in.");
+      return;
+    }
+    setRemovingMaterialFile(path);
+    setError(null);
+    try {
+      await removeCourseZip(supabase, path);
+      const r = await removeCourseMaterialFileAction(c.id, path);
+      if (!("error" in r)) {
+        setCourses((prev) => {
+          const updated = prev.map((course) => {
+            if (course.id === c.id) {
+              return {
+                ...course,
+                materialsFiles: course.materialsFiles.filter((f) => f.path !== path),
+              };
+            }
+            return course;
+          });
+          if (hubCache) hubCache = { ...hubCache, courses: updated };
+          return updated;
+        });
+      } else {
+        setError(r.error);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove the file from the course materials.");
+    } finally {
+      setRemovingMaterialFile(null);
+    }
+  };
+
   const handleDelete = async (c: Course) => {
     if (typeof window !== "undefined" && !window.confirm(`Delete "${c.name}"? This cannot be undone.`)) return;
     setBusyId(c.id);
@@ -676,8 +758,11 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       : field === "topics" ? (c.topics ?? "")
       : field === "csv" ? ""
       : field === "startDate" ? (c.startDate ?? "")
+      : field === "description" ? (c.description ?? "")
+      : field === "weeks" ? (c.weeks !== null ? String(c.weeks) : "")
+      : field === "tests" ? (c.tests !== null ? String(c.tests) : "")
       : field === "lms" ? (c.lms ?? "")
-      : ((c[field as Exclude<InlineField, "csv" | "startDate" | "lms">] ?? "") as string);
+      : ((c[field as Exclude<InlineField, "csv" | "startDate" | "description" | "weeks" | "tests" | "lms">] ?? "") as string);
     setTileEdit({ id: c.id, field, value });
     if (field === "lms") {
       setLmsCourseDraft(null);
@@ -704,6 +789,8 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       tileEdit.field === "repos" ? { repos: parseRepoLines(tileEdit.value) }
       : tileEdit.field === "integrations" ? { integrations: parseIntegrationLines(tileEdit.value) }
       : tileEdit.field === "topics" ? { topics: tileEdit.value }
+      : tileEdit.field === "weeks" ? { weeks: tileEdit.value.trim() ? (Number.isFinite(Number(tileEdit.value.trim())) ? Number(tileEdit.value.trim()) : null) : null }
+      : tileEdit.field === "tests" ? { tests: tileEdit.value.trim() ? (Number.isFinite(Number(tileEdit.value.trim())) ? Number(tileEdit.value.trim()) : null) : null }
       : tileEdit.field === "lms" ? {
         lms: tileEdit.value || null,
         ...(lmsCourseDraft !== null ? { canvasUrl: lmsCourseDraft || null } : {}),
@@ -867,6 +954,51 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       </div>
     );
 
+  // Render the inline multiline text editor (textarea + save/cancel).
+  const tileTextAreaEditor = () =>
+    tileEdit && (
+      <div className={styles.tileEditor}>
+        <TextField
+          size="small"
+          fullWidth
+          multiline
+          minRows={3}
+          value={tileEdit.value}
+          onChange={(e) => setTileEdit((t) => (t ? { ...t, value: e.target.value } : t))}
+        />
+        <div className={styles.tileEditorActions}>
+          <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
+            {tileSaving ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="text" size="small" disabled={tileSaving} onClick={() => setTileEdit(null)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+
+  // Render the inline number editor (number input + save/cancel).
+  const tileNumberEditor = () =>
+    tileEdit && (
+      <div className={styles.tileEditor}>
+        <TextField
+          size="small"
+          fullWidth
+          type="number"
+          value={tileEdit.value}
+          onChange={(e) => setTileEdit((t) => (t ? { ...t, value: e.target.value } : t))}
+        />
+        <div className={styles.tileEditorActions}>
+          <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
+            {tileSaving ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="text" size="small" disabled={tileSaving} onClick={() => setTileEdit(null)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+
   // Render the inline LMS editor (select + save/cancel).
   const tileLmsEditor = () => {
     if (!tileEdit) return null;
@@ -969,6 +1101,108 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         </div>
       </div>
     );
+  };
+
+  // Load library files once for the file picker
+  const loadLibFiles = async () => {
+    if (libFiles !== null) return; // Already loaded
+    if (!user) return;
+    try {
+      const files = await listRecordingFiles(supabase, user.id);
+      setLibFiles(files);
+    } catch (err) {
+      console.error("Failed to load library files:", err);
+      setLibFiles([]);
+    }
+  };
+
+  const handleAddFile = async (fileId: string) => {
+    const file = libFiles?.find((f) => f.id === fileId);
+    if (!file) return;
+    const newItem: CommonResourceItem = {
+      id: crypto.randomUUID(),
+      type: "file",
+      title: file.name,
+      fileId,
+    };
+    const updated = [...commonResources, newItem];
+    setCommonResources(updated);
+    setFilePickerValue("");
+    if (user) {
+      saveCommonResources(supabase, user.id, updated).catch((err) => {
+        console.error("Failed to save common resources:", err);
+      });
+    }
+  };
+
+  const handleAddPage = () => {
+    if (!pageTitleDraft.trim()) return;
+    const newItem: CommonResourceItem = {
+      id: crypto.randomUUID(),
+      type: "page",
+      title: pageTitleDraft.trim(),
+      body: pageBodyDraft,
+    };
+    const updated = [...commonResources, newItem];
+    setCommonResources(updated);
+    setPageTitleDraft("");
+    setPageBodyDraft("");
+    if (user) {
+      saveCommonResources(supabase, user.id, updated).catch((err) => {
+        console.error("Failed to save common resources:", err);
+      });
+    }
+  };
+
+  const handleUpdateItemTitle = (id: string, title: string) => {
+    const updated = commonResources.map((item) =>
+      item.id === id ? { ...item, title } : item
+    );
+    setCommonResources(updated);
+    if (user) {
+      saveCommonResources(supabase, user.id, updated).catch((err) => {
+        console.error("Failed to save common resources:", err);
+      });
+    }
+  };
+
+  const handleUpdatePageBody = (id: string, body: string) => {
+    const updated = commonResources.map((item) =>
+      item.id === id ? { ...item, body } : item
+    );
+    setCommonResources(updated);
+    if (user) {
+      saveCommonResources(supabase, user.id, updated).catch((err) => {
+        console.error("Failed to save common resources:", err);
+      });
+    }
+  };
+
+  const handleRemoveItem = (id: string) => {
+    const updated = commonResources.filter((item) => item.id !== id);
+    setCommonResources(updated);
+    if (user) {
+      saveCommonResources(supabase, user.id, updated).catch((err) => {
+        console.error("Failed to save common resources:", err);
+      });
+    }
+  };
+
+  const handleMoveItem = (id: string, direction: "up" | "down") => {
+    const idx = commonResources.findIndex((item) => item.id === id);
+    if (idx === -1) return;
+    if (direction === "up" && idx === 0) return;
+    if (direction === "down" && idx === commonResources.length - 1) return;
+
+    const newIdx = direction === "up" ? idx - 1 : idx + 1;
+    const updated = [...commonResources];
+    [updated[idx], updated[newIdx]] = [updated[newIdx], updated[idx]];
+    setCommonResources(updated);
+    if (user) {
+      saveCommonResources(supabase, user.id, updated).catch((err) => {
+        console.error("Failed to save common resources:", err);
+      });
+    }
   };
 
   // Full-text filter across a course's searchable fields.
@@ -1092,6 +1326,36 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
               value={form.startDate}
               onChange={(e) => update({ startDate: e.target.value })}
               slotProps={{ inputLabel: { shrink: true } }}
+            />
+          </div>
+
+          <TextField
+            label="Description"
+            size="small"
+            fullWidth
+            multiline
+            minRows={2}
+            placeholder="Course overview, learning objectives, etc."
+            value={form.description}
+            onChange={(e) => update({ description: e.target.value })}
+          />
+
+          <div className={styles.adaptFieldGrid3}>
+            <TextField
+              label="Weeks"
+              size="small"
+              fullWidth
+              type="number"
+              value={form.weeks}
+              onChange={(e) => update({ weeks: e.target.value })}
+            />
+            <TextField
+              label="Tests"
+              size="small"
+              fullWidth
+              type="number"
+              value={form.tests}
+              onChange={(e) => update({ tests: e.target.value })}
             />
           </div>
 
@@ -1570,6 +1834,31 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                           <span className={styles.courseResourceEmpty}>Not set</span>
                         )}
                     </div>
+
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "description" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "description"))}>
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>Description</span>
+                      <button
+                        type="button"
+                        className={styles.tileEditBtn}
+                        title="Edit"
+                        onClick={() => startTileEdit(c, "description")}
+                      >
+                        <PencilIcon />
+                      </button>
+                    </div>
+                    {tileEdit?.id === c.id && tileEdit?.field === "description"
+                      ? tileTextAreaEditor()
+                      : c.description
+                        ? (
+                          <span className={styles.courseResourceValue} title={c.description}>
+                            {c.description.length > 90 ? c.description.slice(0, 90) + "…" : c.description}
+                          </span>
+                        )
+                        : (
+                          <span className={styles.courseResourceEmpty}>Not set</span>
+                        )}
+                    </div>
                   </div>
                 </div>
 
@@ -1593,6 +1882,52 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       : c.startDate
                         ? (
                           <span className={styles.courseResourceValue}>{new Date(`${c.startDate}T00:00:00`).toLocaleDateString()}</span>
+                        )
+                        : (
+                          <span className={styles.courseResourceEmpty}>Not set</span>
+                        )}
+                  </div>
+
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "weeks" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "weeks"))}>
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>Weeks</span>
+                      <button
+                        type="button"
+                        className={styles.tileEditBtn}
+                        title="Edit"
+                        onClick={() => startTileEdit(c, "weeks")}
+                      >
+                        <PencilIcon />
+                      </button>
+                    </div>
+                    {tileEdit?.id === c.id && tileEdit?.field === "weeks"
+                      ? tileNumberEditor()
+                      : c.weeks !== null
+                        ? (
+                          <span className={styles.courseResourceValue}>{c.weeks}</span>
+                        )
+                        : (
+                          <span className={styles.courseResourceEmpty}>Not set</span>
+                        )}
+                  </div>
+
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "tests" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "tests"))}>
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>Tests</span>
+                      <button
+                        type="button"
+                        className={styles.tileEditBtn}
+                        title="Edit"
+                        onClick={() => startTileEdit(c, "tests")}
+                      >
+                        <PencilIcon />
+                      </button>
+                    </div>
+                    {tileEdit?.id === c.id && tileEdit?.field === "tests"
+                      ? tileNumberEditor()
+                      : c.tests !== null
+                        ? (
+                          <span className={styles.courseResourceValue}>{c.tests}</span>
                         )
                         : (
                           <span className={styles.courseResourceEmpty}>Not set</span>
@@ -2167,6 +2502,52 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                           )}
                         </>
                       )}
+                      {c.materialsFiles.length > 0 && (
+                        <div style={{ marginTop: 16 }}>
+                          {c.materialsFiles.map((f) => (
+                            <div key={f.path} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--border-color)" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.9em" }}>
+                                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {f.name} - {(f.size / 1048576).toFixed(1)} MB
+                                </span>
+                                <span style={{ color: "var(--text-secondary)", fontSize: "0.85em", marginLeft: 8 }}>
+                                  {new Date(f.addedAt).toLocaleDateString()}
+                                </span>
+                              </div>
+                              <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+                                <button
+                                  type="button"
+                                  className={styles.linkButton}
+                                  onClick={async () => {
+                                    try {
+                                      const url = await getCourseZipUrl(supabase, f.path);
+                                      const a = document.createElement("a");
+                                      a.href = url;
+                                      a.download = f.name;
+                                      document.body.appendChild(a);
+                                      a.click();
+                                      document.body.removeChild(a);
+                                    } catch (err) {
+                                      setError(err instanceof Error ? err.message : "Could not download the file.");
+                                    }
+                                  }}
+                                >
+                                  Download
+                                </button>
+                                <button
+                                  type="button"
+                                  className={styles.linkButton}
+                                  style={{ color: "var(--danger)" }}
+                                  disabled={removingMaterialFile === f.path}
+                                  onClick={() => void handleRemoveMaterialFile(c, f.path)}
+                                >
+                                  {removingMaterialFile === f.path ? "Removing…" : "Remove"}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2222,6 +2603,202 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Common Resources section */}
+      {state === "idle" && !form && (
+        <div className={styles.card} style={{ marginTop: 32 }}>
+          <h3 style={{ fontSize: "1rem", marginBottom: 8, marginTop: 0 }}>Common Resources</h3>
+          <p className={styles.fieldHint}>The Starter Materials workflow adds these items to every course&apos;s Start Here module, in this order.</p>
+
+          {!user ? (
+            <p className={styles.fieldHint}>Sign in to manage common resources.</p>
+          ) : (
+            <>
+              {/* Items list */}
+              <div style={{ marginBottom: 20 }}>
+                {commonResources.length === 0 && (
+                  <p className={styles.fieldHint}>{commonResourcesLoading ? "Loading common resources..." : "No items yet. Add files or pages below."}</p>
+                )}
+                {commonResources.map((item, idx) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      display: "flex",
+                      gap: 12,
+                      alignItems: "flex-start",
+                      padding: "12px",
+                      borderBottom: "1px solid var(--border-color)",
+                    }}
+                  >
+                    <span
+                      className={styles.ghBadge}
+                      style={{
+                        backgroundColor: item.type === "file" ? "var(--badge-bg-neutral)" : "var(--badge-bg-neutral)",
+                        color: "var(--text-secondary)",
+                        fontSize: "0.75em",
+                        padding: "4px 8px",
+                        borderRadius: "3px",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {item.type === "file" ? "File" : "Page"}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {editingPageId === item.id && item.type === "page" ? (
+                        <>
+                          <TextField
+                            size="small"
+                            fullWidth
+                            value={item.title}
+                            onChange={(e) => handleUpdateItemTitle(item.id, e.target.value)}
+                            placeholder="Page title"
+                            sx={{ marginBottom: 1 }}
+                          />
+                          <TextField
+                            size="small"
+                            fullWidth
+                            multiline
+                            minRows={3}
+                            value={item.body || ""}
+                            onChange={(e) => handleUpdatePageBody(item.id, e.target.value)}
+                            placeholder="Page content"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <TextField
+                            size="small"
+                            fullWidth
+                            value={item.title}
+                            onChange={(e) => handleUpdateItemTitle(item.id, e.target.value)}
+                          />
+                          {item.type === "page" && item.body && (
+                            <button
+                              type="button"
+                              className={styles.linkButton}
+                              onClick={() => setEditingPageId(editingPageId === item.id ? null : item.id)}
+                              style={{ marginTop: 6, fontSize: "0.85em" }}
+                            >
+                              {editingPageId === item.id ? "Collapse" : "Edit content"}
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        disabled={idx === 0}
+                        onClick={() => handleMoveItem(item.id, "up")}
+                        title="Move up"
+                      >
+                        Up
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        disabled={idx === commonResources.length - 1}
+                        onClick={() => handleMoveItem(item.id, "down")}
+                        title="Move down"
+                      >
+                        Down
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        color="error"
+                        onClick={() => handleRemoveItem(item.id)}
+                        title="Remove"
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add file section */}
+              <div style={{ marginBottom: 16, paddingTop: 12, borderTop: "1px solid var(--border-color)" }}>
+                <p style={{ margin: "0 0 8px 0", fontSize: "0.9em", fontWeight: 500 }}>Add file</p>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <Typeahead
+                      placeholder="Search library files..."
+                      options={
+                        libFiles
+                          ? libFiles.map((f) => ({ value: f.id, label: f.name }))
+                          : []
+                      }
+                      value={filePickerValue}
+                      onChange={setFilePickerValue}
+                      loading={libFiles === null}
+                      noOptionsText={libFiles === null ? "Loading files..." : "No files found"}
+                    />
+                  </div>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={!filePickerValue || !libFiles}
+                    onClick={() => {
+                      const selected = filePickerValue;
+                      if (libFiles && selected) {
+                        handleAddFile(selected);
+                      }
+                    }}
+                    style={{ marginTop: 4 }}
+                  >
+                    Add
+                  </Button>
+                </div>
+                {libFiles === null && (
+                  <button
+                    type="button"
+                    className={styles.linkButton}
+                    onClick={loadLibFiles}
+                    style={{ marginTop: 8, fontSize: "0.85em" }}
+                  >
+                    Load files
+                  </button>
+                )}
+              </div>
+
+              {/* Add page section */}
+              <div style={{ paddingTop: 12, borderTop: "1px solid var(--border-color)" }}>
+                <p style={{ margin: "0 0 8px 0", fontSize: "0.9em", fontWeight: 500 }}>Add page</p>
+                <div style={{ display: "flex", gap: 8, flexDirection: "column" }}>
+                  <TextField
+                    size="small"
+                    label="Page title"
+                    placeholder="e.g. Welcome to this course"
+                    value={pageTitleDraft}
+                    onChange={(e) => setPageTitleDraft(e.target.value)}
+                  />
+                  <TextField
+                    size="small"
+                    label="Page content"
+                    placeholder="Enter page text here"
+                    multiline
+                    minRows={3}
+                    value={pageBodyDraft}
+                    onChange={(e) => setPageBodyDraft(e.target.value)}
+                  />
+                  <div>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled={!pageTitleDraft.trim()}
+                      onClick={handleAddPage}
+                    >
+                      Add page
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 

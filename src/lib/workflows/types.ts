@@ -10,6 +10,7 @@ export type WorkflowValueType =
   | "text"
   | "longtext"
   | "number"
+  | "date"
   | "repo"
   | "lmsCourse"
   | "schedule"

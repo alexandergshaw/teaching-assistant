@@ -21,6 +21,9 @@ import {
   deleteModuleAction,
   setupStudentRepoAction,
   listCourseHubAction,
+  createCourseAssignmentAction,
+  createRubricAction,
+  generateCourseRubricFromZipAction,
 } from "@/app/actions";
 import type { RepoPermission } from "@/lib/github";
 import { buildSlidesPptx } from "@/lib/pptx";
@@ -32,6 +35,8 @@ import type {
   EnsuredModule,
 } from "@/lib/workflows/types";
 import { scheduleToCsv } from "@/lib/workflows/types";
+import { parseGeneratedRubric } from "@/app/utils/rubric";
+import type { RubricCriterionInput } from "@/lib/canvas-modules";
 
 // "Student" or "Student | github-username" (pipe-separated so commas in
 // names like "Last, First" never masquerade as usernames).
@@ -1034,6 +1039,232 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summary: {
           kind: "list",
           label: `${createdCount} created, ${existedCount} already existed, ${failedCount} failed (of ${rows.length})`,
+          items: lines,
+        },
+      };
+    },
+  },
+
+  {
+    type: "lms-rubric",
+    name: "Save rubric to LMS",
+    description: "Generate a course-wide grading rubric from the repository's assignments and save it to the LMS course.",
+    inputs: [
+      {
+        key: "course",
+        label: "LMS course",
+        type: "lmsCourse",
+        required: false,
+        help: "Optional - leave blank to skip the LMS steps.",
+      },
+      {
+        key: "repo",
+        label: "Repository",
+        type: "repo",
+        required: true,
+      },
+      {
+        key: "title",
+        label: "Rubric title",
+        type: "text",
+        required: false,
+      },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const course = String(values.course ?? "").trim();
+      if (!course) {
+        return {
+          outputs: {},
+          summary: { kind: "text", text: "Skipped - no LMS course selected." },
+        };
+      }
+
+      onProgress("Downloading repository...");
+      const z = await getRepoZipAction(String(values.repo));
+      if ("error" in z) {
+        throw new Error(z.error);
+      }
+
+      onProgress("Generating rubric...");
+      const r = await generateCourseRubricFromZipAction(
+        z.base64,
+        helpers.provider
+      );
+
+      if (typeof r !== "string") {
+        throw new Error(r.error);
+      }
+
+      const rows = parseGeneratedRubric(r);
+      if (!rows || rows.length === 0) {
+        throw new Error("Could not parse the generated rubric. Try again.");
+      }
+
+      const criteria: RubricCriterionInput[] = rows.map((row) => {
+        const pointsValue =
+          Number(String(row.weight).replace(/[^0-9.]/g, "")) || 10;
+        return {
+          description: row.area,
+          longDescription: [
+            row.description,
+            ...row.subcategories.map((s) => `${s.label}: ${s.description}`),
+          ].join("\n"),
+          points: pointsValue,
+          ratings: [
+            { description: "Full marks", points: pointsValue },
+            {
+              description: "Partial credit",
+              points: Math.round(pointsValue / 2),
+            },
+            { description: "No marks", points: 0 },
+          ],
+        };
+      });
+
+      const title = String(values.title ?? "").trim() || "Course Rubric";
+      onProgress("Saving rubric...");
+      const created = await createRubricAction(
+        course,
+        { title, criteria },
+        helpers.activeInstitution || undefined
+      );
+
+      if ("error" in created) {
+        throw new Error(created.error);
+      }
+
+      return {
+        outputs: {},
+        summary: {
+          kind: "text",
+          text: `Saved rubric "${title}" (${criteria.length} criteria) to the course.`,
+        },
+      };
+    },
+  },
+
+  {
+    type: "lms-assignments",
+    name: "Create module assignments",
+    description: "Create one deliverable assignment per module: students submit their GitHub repository URL as a text entry, with the deadline at the end of each week.",
+    inputs: [
+      {
+        key: "course",
+        label: "LMS course",
+        type: "lmsCourse",
+        required: false,
+        help: "Optional - leave blank to skip the LMS steps.",
+      },
+      {
+        key: "modules",
+        label: "LMS modules",
+        type: "modules",
+        required: true,
+      },
+      {
+        key: "schedule",
+        label: "Course schedule",
+        type: "schedule",
+        required: true,
+      },
+      {
+        key: "repo",
+        label: "Repository",
+        type: "repo",
+        required: true,
+      },
+      {
+        key: "startDate",
+        label: "Class start date",
+        type: "date",
+        required: false,
+        help: "Deadlines land at 11:59 PM on the last day of each week; leave blank for no due dates.",
+      },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const course = String(values.course ?? "").trim();
+      if (!course) {
+        return {
+          outputs: {},
+          summary: { kind: "text", text: "Skipped - no LMS course selected." },
+        };
+      }
+
+      const modules = values.modules as EnsuredModule[];
+      if (modules.length === 0) {
+        return {
+          outputs: {},
+          summary: { kind: "text", text: "Skipped - no LMS course selected." },
+        };
+      }
+
+      const repoRef = String(values.repo);
+      const schedule = values.schedule as ScheduleWeekPlan[];
+      const startRaw = String(values.startDate ?? "").trim();
+      const start = startRaw
+        ? new Date(`${startRaw}T00:00:00`)
+        : null;
+
+      if (start && Number.isNaN(start.getTime())) {
+        throw new Error("Enter the class start date as a valid date.");
+      }
+
+      const lines: string[] = [];
+
+      for (const m of modules) {
+        const sw = schedule.find((w) => w.week === m.week);
+        const name =
+          sw?.assignmentTitle ||
+          `Week ${String(m.week).padStart(2, "0")} Deliverable`;
+
+        const descriptionLines = [
+          "Submit the URL of your GitHub repository containing this week's deliverable in the text box.",
+          `Before you start, read the README for this module in the course codebase${
+            sw?.assignmentSlug
+              ? ` (folder "${sw.assignmentSlug}")`
+              : ""
+          }: https://github.com/${repoRef}`,
+        ];
+
+        let dueAt = "";
+        let dueDateStr = "";
+        if (start) {
+          const due = new Date(start);
+          due.setDate(start.getDate() + m.week * 7 - 1);
+          due.setHours(23, 59, 0, 0);
+          dueAt = due.toISOString();
+          dueDateStr = ` (due ${due.toLocaleDateString()})`;
+        }
+
+        onProgress(`Creating "${name}" in ${m.name}...`);
+        const created = await createCourseAssignmentAction(
+          course,
+          {
+            name,
+            description: descriptionLines.join("\n\n"),
+            pointsPossible: null,
+            dueAt,
+            submissionType: "online_text_entry",
+            published: true,
+          },
+          m.id,
+          helpers.activeInstitution || undefined
+        );
+
+        if ("error" in created) {
+          throw new Error(created.error);
+        }
+
+        lines.push(`${name} -> ${m.name}${dueDateStr}`);
+      }
+
+      return {
+        outputs: {},
+        summary: {
+          kind: "list",
+          label: `Created ${modules.length} assignment(s)`,
           items: lines,
         },
       };

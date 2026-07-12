@@ -65,7 +65,7 @@ export const COURSE_REFRESH: WorkflowDef = {
   preset: true,
   name: "Course Refresh",
   description:
-    "After the course repo changes (manually or via an agent task), regenerate the schedule CSV and contents zip onto the course tile and rebuild the LMS course from the new contents. The LMS course's existing modules are deleted first. Leave the LMS course blank to stop after the zip is saved to the course tile.",
+    "After the course repo changes (manually or via an agent task), regenerate the schedule CSV and contents zip onto the course tile and rebuild the LMS course from the new contents. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines. Leave the LMS course blank to stop after the zip is saved to the course tile.",
   steps: [
     {
       type: "schedule-from-repo",
@@ -103,6 +103,14 @@ export const COURSE_REFRESH: WorkflowDef = {
       },
     },
     {
+      type: "lms-rubric",
+      bindings: {
+        course: { source: "runtime", fieldKey: "lmsCourse" },
+        repo: { source: "runtime", fieldKey: "repo" },
+        title: { source: "step", stepIndex: 0, outputKey: "courseTitle" },
+      },
+    },
+    {
       type: "lms-modules",
       bindings: {
         course: { source: "runtime", fieldKey: "lmsCourse" },
@@ -113,8 +121,18 @@ export const COURSE_REFRESH: WorkflowDef = {
       type: "lms-populate",
       bindings: {
         course: { source: "runtime", fieldKey: "lmsCourse" },
-        modules: { source: "step", stepIndex: 5, outputKey: "modules" },
+        modules: { source: "step", stepIndex: 6, outputKey: "modules" },
         files: { source: "step", stepIndex: 2, outputKey: "files" },
+      },
+    },
+    {
+      type: "lms-assignments",
+      bindings: {
+        course: { source: "runtime", fieldKey: "lmsCourse" },
+        modules: { source: "step", stepIndex: 6, outputKey: "modules" },
+        schedule: { source: "step", stepIndex: 0, outputKey: "schedule" },
+        repo: { source: "runtime", fieldKey: "repo" },
+        startDate: { source: "runtime", fieldKey: "startDate" },
       },
     },
   ],

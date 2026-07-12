@@ -533,7 +533,7 @@ export default function WorkflowsTab() {
 
       // Only the types the run form renders can be validated here; other
       // types are filled from earlier step outputs.
-      const fieldTypes = ["text", "longtext", "number", "repo", "lmsCourse", "hubCourse", "org"];
+      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "hubCourse", "org"];
       if (!fieldTypes.includes(field.type)) continue;
 
       const value = values[field.fieldKey] ?? "";
@@ -947,6 +947,27 @@ export default function WorkflowsTab() {
                       }
                       size="small"
                     />
+                  </div>
+                );
+              } else if (field.type === "date") {
+                return (
+                  <div key={field.fieldKey} className={styles.field}>
+                    <label>{field.label}</label>
+                    <TextField
+                      type="date"
+                      fullWidth
+                      value={value}
+                      onChange={(e) =>
+                        handleValueChange(field.fieldKey, e.target.value)
+                      }
+                      size="small"
+                      slotProps={{ inputLabel: { shrink: true } }}
+                    />
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {field.help}
+                      </p>
+                    )}
                   </div>
                 );
               } else if (field.type === "repo") {

@@ -11,13 +11,15 @@ import { useSupabase } from "@/context/SupabaseProvider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { resolveDocumentAuthor } from "@/lib/author";
-import { saveRecordingFile } from "@/lib/recording-files";
-import { uploadCourseZip } from "@/lib/course-files";
-import { listCourseHubAction, setCourseMaterialsAction, listMyOrgsAction, listCoursesAction } from "@/app/actions";
+import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFile } from "@/lib/recording-files";
+import { uploadCourseZip, removeCourseZip } from "@/lib/course-files";
+import { loadCommonResources } from "@/lib/common-resources";
+import { listCourseHubAction, appendCourseMaterialFileAction, listMyOrgsAction, listCoursesAction } from "@/app/actions";
 import {
   loadCustomWorkflows,
   collectRuntimeFields,
   saveCustomWorkflows,
+  expandWorkflowDef,
 } from "@/lib/workflows/types";
 import {
   listWorkflowDefs,
@@ -33,7 +35,7 @@ import {
   type StepRunSummary,
   type StepRunHelpers,
 } from "@/lib/workflows/registry";
-import type { WorkflowDef, RuntimeField } from "@/lib/workflows/types";
+import type { WorkflowDef, RuntimeField, WorkflowStepConfig } from "@/lib/workflows/types";
 import styles from "../page.module.css";
 
 // Summary renderer for a finished step. A separate component so `summary` is a
@@ -287,15 +289,42 @@ export default function WorkflowsTab() {
   const [orgs, setOrgs] = useState<string[] | null>(null);
   const [orgsError, setOrgsError] = useState<string | null>(null);
 
+  // Include steps expand before anything reads the step list: the run form,
+  // step overview, and runner all operate on expanded coordinates.
+  const expanded = useMemo<{
+    steps: WorkflowStepConfig[];
+    origins: Array<string | null>;
+    error: string | null;
+  }>(() => {
+    if (!selectedDef) return { steps: [], origins: [], error: null };
+    try {
+      return {
+        ...expandWorkflowDef(selectedDef, (id) =>
+          workflows.find((w) => w.id === id)
+        ),
+        error: null,
+      };
+    } catch (err) {
+      return {
+        steps: [],
+        origins: [],
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }, [selectedDef, workflows]);
+
   const runtimeFields: RuntimeField[] = useMemo(
     () =>
       selectedDef
-        ? collectRuntimeFields(selectedDef, (type) => {
-            const def = getStepDefinition(type);
-            return def?.inputs;
-          })
+        ? collectRuntimeFields(
+            { ...selectedDef, steps: expanded.steps },
+            (type) => {
+              const def = getStepDefinition(type);
+              return def?.inputs;
+            }
+          )
         : [],
-    [selectedDef]
+    [selectedDef, expanded]
   );
 
   const updateCustom = (next: WorkflowDef[]) => {
@@ -592,12 +621,13 @@ export default function WorkflowsTab() {
 
   const handleRun = async () => {
     if (!selectedDef) return;
+    if (expanded.error) return;
     if (!validateForm()) return;
 
     setRunning(true);
     setValidationError(null);
     setRunState(
-      selectedDef.steps.map(() => ({
+      expanded.steps.map(() => ({
         status: "pending",
         progress: null,
         summary: null,
@@ -623,31 +653,53 @@ export default function WorkflowsTab() {
               });
             }
           : null,
-      saveCourseZip:
+      // One storage object per artifact; the tile's materials list records
+      // it, and a same-named replacement cleans up the orphaned object.
+      saveCourseMaterialFile:
         user && supabase
           ? async (courseId: string, blob: Blob, fileName: string) => {
-              const list = await listCourseHubAction();
-              if ("error" in list) throw new Error(list.error);
-              const target = list.courses.find((c) => c.id === courseId);
               const { path } = await uploadCourseZip(
                 supabase,
                 user.id,
                 courseId,
                 blob,
-                target?.materialsZipPath ?? null
+                null
               );
-              const r = await setCourseMaterialsAction(courseId, {
-                materialsZipName: fileName,
-                materialsZipPath: path,
-                materialsZipSize: blob.size,
+              const r = await appendCourseMaterialFileAction(courseId, {
+                name: fileName,
+                path,
+                size: blob.size,
               });
               if ("error" in r) throw new Error(r.error);
+              if (r.replacedPath) {
+                await removeCourseZip(supabase, r.replacedPath);
+              }
+            }
+          : null,
+      loadCommonResources:
+        user && supabase
+          ? async () => loadCommonResources(supabase, user.id)
+          : null,
+      getLibraryFile:
+        user && supabase
+          ? async (fileId: string) => {
+              const files = await listRecordingFiles(supabase, user.id);
+              const f = files.find((x) => x.id === fileId);
+              if (!f) return null;
+              const blob = await downloadRecordingFile(supabase, f);
+              return {
+                blob,
+                name: `${f.name}.${extForFile(f)}`,
+                mimeType: f.mimeType,
+              };
             }
           : null,
     };
 
-    for (let i = 0; i < selectedDef.steps.length; i++) {
-      const step = selectedDef.steps[i];
+    // Expanded steps carry bindings already translated into expanded
+    // coordinates, so the runner indexes stepOutputs directly.
+    for (let i = 0; i < expanded.steps.length; i++) {
+      const step = expanded.steps[i];
       const def = getStepDefinition(step.type);
 
       setRunState((prev) => {
@@ -670,7 +722,7 @@ export default function WorkflowsTab() {
             resolvedInputs[spec.key] = values[binding.fieldKey] ?? "";
           } else if (binding.source === "step") {
             if (failedSteps.has(binding.stepIndex)) {
-              const failedDef = getStepDefinition(selectedDef.steps[binding.stepIndex]?.type);
+              const failedDef = getStepDefinition(expanded.steps[binding.stepIndex]?.type ?? "");
               throw new Error(`Skipped - depends on step ${binding.stepIndex + 1} ("${failedDef?.name ?? "unknown step"}"), which failed.`);
             }
             const output = stepOutputs[binding.stepIndex]?.[binding.outputKey];
@@ -750,9 +802,12 @@ export default function WorkflowsTab() {
           {selectedDef && (
             <>
               <p className={styles.fieldHint}>{selectedDef.description}</p>
+              {expanded.error && (
+                <p className={styles.error}>{expanded.error}</p>
+              )}
               {!editing && (
                 <div className={styles.fieldHint}>
-                  {selectedDef.steps.map((step, i) => {
+                  {expanded.steps.map((step, i) => {
                     const stepDef = getStepDefinition(step.type);
                     const bindings = Object.entries(step.bindings)
                       .map(([key, binding]) => {
@@ -770,6 +825,11 @@ export default function WorkflowsTab() {
                     return (
                       <div key={i}>
                         {i + 1}. {stepDef?.name ?? step.type}
+                        {expanded.origins[i] && (
+                          <span style={{ marginLeft: 6, opacity: 0.75 }}>
+                            (from {expanded.origins[i]})
+                          </span>
+                        )}
                         {bindings && (
                           <span style={{ marginLeft: 8 }}>({bindings})</span>
                         )}
@@ -875,6 +935,7 @@ export default function WorkflowsTab() {
         {editing && selectedDef && !selectedDef.preset && (
           <WorkflowBuilder
             def={selectedDef}
+            others={workflows.filter((w) => w.id !== selectedDef.id)}
             onChange={(next) => {
               updateCustom(custom.map((w) => (w.id === next.id ? next : w)));
               if (user && supabase) {
@@ -1190,7 +1251,7 @@ export default function WorkflowsTab() {
             <Button
               variant="contained"
               onClick={handleRun}
-              disabled={running}
+              disabled={running || !!expanded.error}
               size="small"
             >
               {running ? "Running..." : "Run"}
@@ -1203,9 +1264,7 @@ export default function WorkflowsTab() {
         <div style={{ marginTop: 28 }}>
           <h2 style={{ fontSize: "1rem", marginBottom: 16 }}>Run Progress</h2>
           {runState.map((state, i) => {
-            const stepDef = selectedDef
-              ? getStepDefinition(selectedDef.steps[i]?.type)
-              : null;
+            const stepDef = getStepDefinition(expanded.steps[i]?.type ?? "");
 
             const badgeClass =
               state.status === "pending"
@@ -1236,7 +1295,12 @@ export default function WorkflowsTab() {
                   }}
                 >
                   <span>
-                    {i + 1}. {stepDef?.name ?? selectedDef?.steps[i]?.type}
+                    {i + 1}. {stepDef?.name ?? expanded.steps[i]?.type}
+                    {expanded.origins[i] && (
+                      <span style={{ marginLeft: 6, opacity: 0.75 }}>
+                        (from {expanded.origins[i]})
+                      </span>
+                    )}
                   </span>
                   <span
                     className={`${styles.ghBadge} ${badgeClass}`}

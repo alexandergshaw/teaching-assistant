@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button, TextField, MenuItem } from "@mui/material";
+import Typeahead from "./ui/Typeahead";
 import {
   type WorkflowDef,
   type WorkflowStepConfig,
@@ -18,6 +19,10 @@ import styles from "../page.module.css";
 function normalizeBindings(def: WorkflowDef): WorkflowDef {
   const normalized = { ...def };
   normalized.steps = def.steps.map((step, stepIndex) => {
+    // Include steps have no own inputs to normalize; their remap is written
+    // in this workflow's coordinates and must pass through untouched.
+    if (step.type === "include-workflow") return step;
+
     const stepDef = getStepDefinition(step.type);
     if (!stepDef) return step;
 
@@ -81,15 +86,47 @@ function normalizeBindings(def: WorkflowDef): WorkflowDef {
 
 export default function WorkflowBuilder({
   def,
+  others,
   onChange,
   onDone,
 }: {
   def: WorkflowDef;
+  others: WorkflowDef[];
   onChange: (def: WorkflowDef) => void;
   onDone: () => void;
 }) {
   const [addStepOpen, setAddStepOpen] = useState(false);
   const [selectedStepType, setSelectedStepType] = useState<string>("");
+  const [appendSourceId, setAppendSourceId] = useState<string>("");
+
+  // Appends an independent snapshot of another workflow's steps - later
+  // edits to the source workflow do not affect this one.
+  const handleAppendWorkflow = () => {
+    const source = others.find((w) => w.id === appendSourceId);
+    if (!source) return;
+
+    // Step bindings shift by this workflow's length BEFORE appending.
+    // Runtime and literal bindings copy as-is: matching runtime fieldKeys
+    // merging into one shared run-form field is intentional.
+    const offset = def.steps.length;
+    const copied: WorkflowStepConfig[] = JSON.parse(
+      JSON.stringify(source.steps)
+    );
+    const remapped = copied.map((step) => {
+      const bindings: Record<string, InputBinding> = {};
+      for (const [key, binding] of Object.entries(step.bindings)) {
+        bindings[key] =
+          binding.source === "step"
+            ? { ...binding, stepIndex: binding.stepIndex + offset }
+            : binding;
+      }
+      return { ...step, bindings };
+    });
+
+    const next = { ...def, steps: [...def.steps, ...remapped] };
+    onChange(normalizeBindings(next));
+    setAppendSourceId("");
+  };
 
   const handleNameChange = (name: string) => {
     const next = { ...def, name };
@@ -267,6 +304,12 @@ export default function WorkflowBuilder({
             step={step}
             stepDef={getStepDefinition(step.type)}
             allSteps={def.steps}
+            includeSourceName={
+              step.type === "include-workflow"
+                ? others.find((w) => w.id === step.include?.workflowId)
+                    ?.name ?? step.include?.workflowId
+                : undefined
+            }
             onMove={handleMoveStep}
             onRemove={handleRemoveStep}
             onBindingChange={handleBindingChange}
@@ -329,6 +372,28 @@ export default function WorkflowBuilder({
               </Button>
             </>
           )}
+
+          <div style={{ width: "260px" }}>
+            <Typeahead
+              options={others.map((w) => ({
+                value: w.id,
+                label: w.name,
+                hint: w.preset ? "Preset" : "Custom",
+              }))}
+              value={appendSourceId}
+              onChange={setAppendSourceId}
+              label="Append steps from workflow"
+              placeholder="Choose a workflow..."
+            />
+          </div>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={handleAppendWorkflow}
+            disabled={!appendSourceId}
+          >
+            Append
+          </Button>
         </div>
 
         <Button
@@ -349,6 +414,7 @@ function StepCard({
   step,
   stepDef,
   allSteps,
+  includeSourceName,
   onMove,
   onRemove,
   onBindingChange,
@@ -357,6 +423,7 @@ function StepCard({
   step: WorkflowStepConfig;
   stepDef: StepDefinition | undefined;
   allSteps: WorkflowStepConfig[];
+  includeSourceName?: string;
   onMove: (index: number, direction: "up" | "down") => void;
   onRemove: (index: number) => void;
   onBindingChange: (
@@ -368,6 +435,63 @@ function StepCard({
     literalValue?: string
   ) => void;
 }) {
+  // Include steps have no binding rows to edit - they run the referenced
+  // workflow's CURRENT steps at run time.
+  if (step.type === "include-workflow") {
+    return (
+      <div
+        style={{
+          border: "1px solid var(--field-border)",
+          borderRadius: 12,
+          padding: 12,
+          background: "var(--field-background)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div>
+            <strong>
+              {stepIndex + 1}. Include workflow: {includeSourceName ?? "unknown"}
+            </strong>{" "}
+            <span style={{ opacity: 0.75 }}>
+              (dynamic - runs that workflow&apos;s current steps)
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => onMove(stepIndex, "up")}
+              disabled={stepIndex === 0}
+            >
+              Up
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => onMove(stepIndex, "down")}
+              disabled={stepIndex === allSteps.length - 1}
+            >
+              Down
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => onRemove(stepIndex)}
+            >
+              Remove
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!stepDef) {
     return (
       <div

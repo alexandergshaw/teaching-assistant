@@ -30,6 +30,10 @@ export interface GeneratedCourseFile {
   // 1 Slides, 2 Instructions); lms-populate uploads in (weekNumber, sortOrder)
   // order and Canvas appends module items in upload sequence.
   sortOrder: number;
+  // What the file is within its week; introductions carry their source text
+  // so LMS steps can create pages instead of uploading the docx.
+  role: "introduction" | "slides" | "instructions";
+  pageText?: string;
 }
 
 export interface EnsuredModule {
@@ -58,8 +62,22 @@ export type InputBinding =
   | { source: "literal"; value: string };
 
 export interface WorkflowStepConfig {
+  // A registry step type, or the special value "include-workflow": the step
+  // is replaced at run time by another workflow's CURRENT steps (dynamic -
+  // later edits to the source workflow apply wherever it is included). See
+  // expandWorkflowDef.
   type: string;
   bindings: Record<string, InputBinding>;
+  // Present only when type === "include-workflow". skipSteps lists the
+  // SOURCE workflow's own top-level step indices to drop. remap keys are
+  // "<skippedStepIndex>.<outputKey>" in the SOURCE workflow's coordinates;
+  // values are bindings in the INCLUDING workflow's coordinates ("step"
+  // stepIndex values refer to the including workflow's own earlier steps).
+  include?: {
+    workflowId: string;
+    skipSteps: number[];
+    remap: Record<string, InputBinding>;
+  };
 }
 
 export interface WorkflowDef {
@@ -112,6 +130,150 @@ export function collectRuntimeFields(
   }
 
   return fields;
+}
+
+/**
+ * Flatten a workflow, replacing every "include-workflow" step with the
+ * CURRENT steps of the workflow it references - dynamic composition: edits
+ * to the source workflow apply wherever it is included.
+ *
+ * The returned steps' "step" bindings are in EXPANDED coordinates and can be
+ * fed straight to the runner and to collectRuntimeFields. origins[i] is null
+ * for the workflow's own steps and the source workflow's name for absorbed
+ * steps.
+ */
+export function expandWorkflowDef(
+  def: WorkflowDef,
+  lookup: (id: string) => WorkflowDef | undefined,
+  visited: string[] = []
+): { steps: WorkflowStepConfig[]; origins: Array<string | null> } {
+  const r = expandWithTopIndices(def, lookup, visited);
+  return { steps: r.steps, origins: r.origins };
+}
+
+// Internal expansion that also reports, per flat step, the index of the
+// def's TOP-LEVEL step it came from. skipSteps and remap keys are written
+// in the source workflow's own top-level coordinates, so resolving them
+// against an already-flattened source (nested includes expand first) needs
+// this flat-index -> top-level-index mapping.
+function expandWithTopIndices(
+  def: WorkflowDef,
+  lookup: (id: string) => WorkflowDef | undefined,
+  visited: string[]
+): {
+  steps: WorkflowStepConfig[];
+  origins: Array<string | null>;
+  topIndices: number[];
+} {
+  if (visited.includes(def.id)) {
+    throw new Error(
+      `Workflow include cycle: ${[...visited, def.id].join(" -> ")}`
+    );
+  }
+
+  const steps: WorkflowStepConfig[] = [];
+  const origins: Array<string | null> = [];
+  const topIndices: number[] = [];
+  // def-local step index -> expanded index. Include steps never enter the
+  // map: they expand to many steps and expose no outputs, so no def-local
+  // binding can validly target one.
+  const defToExpanded = new Map<number, number>();
+
+  def.steps.forEach((step, defIndex) => {
+    if (step.type !== "include-workflow") {
+      // Own step: translate def-local "step" bindings to their expanded
+      // positions (earlier def steps are already mapped by the walk).
+      const bindings: Record<string, InputBinding> = {};
+      for (const [key, b] of Object.entries(step.bindings)) {
+        if (b.source === "step") {
+          const mapped = defToExpanded.get(b.stepIndex);
+          bindings[key] =
+            mapped !== undefined ? { ...b, stepIndex: mapped } : b;
+        } else {
+          bindings[key] = b;
+        }
+      }
+      defToExpanded.set(defIndex, steps.length);
+      steps.push({ ...step, bindings });
+      origins.push(null);
+      topIndices.push(defIndex);
+      return;
+    }
+
+    const include = step.include;
+    if (!include) {
+      // Malformed include with no target recorded: nothing to expand.
+      return;
+    }
+
+    const source = lookup(include.workflowId);
+    if (!source) {
+      throw new Error(`Included workflow not found: ${include.workflowId}`);
+    }
+
+    // Expand the FULL source first so nested includes are already flat by
+    // the time steps are dropped and rewired; expanded.topIndices maps each
+    // flat step back to the source's own top-level index.
+    const expanded = expandWithTopIndices(source, lookup, [
+      ...visited,
+      def.id,
+    ]);
+
+    const skip = new Set(include.skipSteps);
+
+    // Flat source index -> final expanded index for the kept steps.
+    const keptMap = new Map<number, number>();
+    let nextIndex = steps.length;
+    expanded.steps.forEach((_, flatIndex) => {
+      if (!skip.has(expanded.topIndices[flatIndex])) {
+        keptMap.set(flatIndex, nextIndex++);
+      }
+    });
+
+    expanded.steps.forEach((s, flatIndex) => {
+      if (skip.has(expanded.topIndices[flatIndex])) return;
+
+      const bindings: Record<string, InputBinding> = {};
+      for (const [key, b] of Object.entries(s.bindings)) {
+        if (b.source !== "step") {
+          bindings[key] = b;
+          continue;
+        }
+
+        const kept = keptMap.get(b.stepIndex);
+        if (kept !== undefined) {
+          // Points at another kept source step: follow it to its new home.
+          bindings[key] = { ...b, stepIndex: kept };
+          continue;
+        }
+
+        // Points at a dropped step: the include's remap supplies the
+        // replacement, written in the INCLUDING workflow's coordinates
+        // (runtime/literal used as-is; "step" indices translated through
+        // this walk's map). No remap entry falls back to a runtime field
+        // named after the missing output.
+        const droppedDefIndex = expanded.topIndices[b.stepIndex];
+        const replacement = include.remap[`${droppedDefIndex}.${b.outputKey}`];
+        if (!replacement) {
+          bindings[key] = { source: "runtime", fieldKey: b.outputKey };
+        } else if (replacement.source === "step") {
+          const mapped = defToExpanded.get(replacement.stepIndex);
+          bindings[key] =
+            mapped !== undefined
+              ? { ...replacement, stepIndex: mapped }
+              : replacement;
+        } else {
+          bindings[key] = replacement;
+        }
+      }
+
+      steps.push({ ...s, bindings });
+      origins.push(source.name);
+      topIndices.push(defIndex);
+    });
+  });
+
+  return { steps, origins, topIndices };
 }
 
 /**

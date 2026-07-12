@@ -29,8 +29,10 @@ import {
   createGradableAction,
   createQuizQuestionAction,
   bulkUpdateAction,
+  createPageAction,
 } from "@/app/actions";
 import type { RepoPermission } from "@/lib/github";
+import type { CommonResourceItem } from "@/lib/common-resources";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
@@ -43,7 +45,7 @@ import type {
 import { scheduleToCsv } from "@/lib/workflows/types";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
 import type { RubricCriterionInput } from "@/lib/canvas-modules";
-import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
+import { buildCommonCartridge, buildWeekCartridge } from "@/lib/workflows/common-cartridge";
 
 // "Student" or "Student | github-username" (pipe-separated so commas in
 // names like "Last, First" never masquerade as usernames).
@@ -64,7 +66,9 @@ export interface StepRunHelpers {
   provider: LlmProvider;
   author: string;
   saveBundle: ((blob: Blob, name: string) => Promise<void>) | null;
-  saveCourseZip: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
+  saveCourseMaterialFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
+  loadCommonResources: (() => Promise<CommonResourceItem[]>) | null;
+  getLibraryFile: ((fileId: string) => Promise<{ blob: Blob; name: string; mimeType: string } | null>) | null;
 }
 
 export type StepRunSummary =
@@ -344,6 +348,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
           weekNumber: plan.weekNumber,
           sortOrder: 1,
+          role: "slides",
         });
 
         if (plan.moduleIntroduction) {
@@ -361,6 +366,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             weekNumber: plan.weekNumber,
             sortOrder: 0,
+            role: "introduction",
+            pageText: plan.moduleIntroduction,
           });
         }
 
@@ -379,6 +386,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             weekNumber: plan.weekNumber,
             sortOrder: 2,
+            role: "instructions",
           });
         }
       }
@@ -609,6 +617,36 @@ export const STEP_REGISTRY: StepDefinition[] = [
           throw new Error("No modules available.");
         }
 
+        // Introductions become real LMS Pages instead of uploaded docx
+        // files; the docx still ships in the zip artifacts.
+        if (file.role === "introduction" && file.pageText) {
+          const pageTitle = file.name.replace(/\.[^.]+$/, "");
+          onProgress(`Creating page "${pageTitle}" in ${targetModule.name}...`);
+          const created = await createPageAction(
+            course,
+            { title: pageTitle, body: file.pageText },
+            helpers.activeInstitution || undefined
+          );
+
+          if ("error" in created) {
+            throw new Error(created.error);
+          }
+
+          const linked = await createModuleItemAction(
+            course,
+            targetModule.id,
+            { type: "Page", pageUrl: created.page.url },
+            helpers.activeInstitution || undefined
+          );
+
+          if ("error" in linked) {
+            throw new Error(linked.error);
+          }
+
+          uploadedLines.push(`${file.name} -> ${targetModule.name} (page)`);
+          continue;
+        }
+
         const sanitizedFileName = file.name.replace(/[^a-z0-9 ._-]/gi, "_");
 
         onProgress(`Uploading ${file.name} to ${targetModule.name}...`);
@@ -754,6 +792,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         type: "number",
         required: false,
       },
+      {
+        key: "description",
+        label: "Course description",
+        type: "longtext",
+        required: false,
+        help: "Steers the generated topics and summaries.",
+      },
     ],
     outputs: [
       { key: "schedule", label: "Course schedule", type: "schedule" },
@@ -771,7 +816,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
         String(values.repo),
         weeksOrNull,
         testsOrNull,
-        helpers.provider
+        helpers.provider,
+        String(values.description ?? "").trim() || undefined
       );
 
       if ("error" in r) {
@@ -850,7 +896,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "save-zip-to-course",
     name: "Save contents zip to course tile",
-    description: "Bundle the generated files into a zip and store it as the course tile's materials.",
+    description: "Bundle the generated files into a zip and add it to the course tile's materials list.",
     inputs: [
       {
         key: "hubCourse",
@@ -873,7 +919,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     ],
     outputs: [],
     run: async (values, helpers, onProgress) => {
-      if (!helpers.saveCourseZip) {
+      if (!helpers.saveCourseMaterialFile) {
         throw new Error("Sign in to save course materials.");
       }
 
@@ -912,13 +958,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const fileName = `${base}.zip`;
 
       onProgress(`Saving ${fileName}...`);
-      await helpers.saveCourseZip(String(values.hubCourse), zipBlob, fileName);
+      await helpers.saveCourseMaterialFile(String(values.hubCourse), zipBlob, fileName);
 
       return {
         outputs: {},
         summary: {
           kind: "text",
-          text: `Saved ${fileName} to the course materials tile.`,
+          text: `Saved ${fileName} to the course materials.`,
         },
       };
     },
@@ -1366,7 +1412,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     // reference it; the step now serves any Common Cartridge LMS.
     type: "blackboard-export",
     name: "LMS export (.imscc)",
-    description: "Package the generated materials as a Common Cartridge for the course tile's LMS. Canvas imports it via Settings > Import Course Content > Common Cartridge; Blackboard via Import Package. Content only - gradebook columns are not created.",
+    description: "Package the generated materials as a Common Cartridge for the course tile's LMS. Canvas imports it via Settings > Import Course Content > Common Cartridge; Blackboard via Import Package. Weekly deliverables import as real assignments with rendered instructions.",
     inputs: [
       {
         key: "files",
@@ -1484,12 +1530,35 @@ export const STEP_REGISTRY: StepDefinition[] = [
           }`;
 
           const sorted = [...weekFiles].sort((a, b) => a.sortOrder - b.sortOrder);
-          const cartridgeFiles = sorted.map((f) => ({
-            name: f.name,
-            blob: f.blob,
-          }));
 
+          // Introductions ride as wiki_content HTML pages (Canvas imports
+          // them as Pages; Blackboard renders the resulting Document inline
+          // when opened); slides and instructions stay plain files.
+          const cartridgeFiles: Array<{ name: string; blob: Blob }> = [];
           const pages: Array<{ title: string; html: string }> = [];
+          for (const f of sorted) {
+            if (f.role === "introduction" && f.pageText) {
+              pages.push({
+                title: f.name.replace(/\.[^.]+$/, ""),
+                html: f.pageText
+                  .split(/\r?\n/)
+                  .map((line) => line.trim())
+                  .filter(Boolean)
+                  .map((line) => `<p>${esc(line)}</p>`)
+                  .join(""),
+              });
+            } else {
+              cartridgeFiles.push({ name: f.name, blob: f.blob });
+            }
+          }
+
+          // Deliverables ride the CC assignment extension so the import
+          // creates real assignments with rendered instructions.
+          const assignments: Array<{
+            title: string;
+            html: string;
+            points: number;
+          }> = [];
           if (sw?.assignmentTitle) {
             let dueText = "";
             if (start) {
@@ -1499,7 +1568,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
               dueText = due.toLocaleString();
             }
 
-            const html = `<h1>${esc(sw.assignmentTitle)}</h1><p>Submit the URL of your GitHub repository containing this week's deliverable.</p>${
+            const html = `<p>Submit the URL of your GitHub repository containing this week's deliverable.</p>${
               sw.assignmentSlug
                 ? `<p>Read the README for this module in the course codebase (folder "${esc(
                     sw.assignmentSlug
@@ -1507,9 +1576,10 @@ export const STEP_REGISTRY: StepDefinition[] = [
                 : ""
             }${dueText ? `<p><strong>Deadline:</strong> ${esc(dueText)}</p>` : ""}`;
 
-            pages.push({
+            assignments.push({
               title: sw.assignmentTitle,
               html,
+              points: 100,
             });
           }
 
@@ -1518,8 +1588,77 @@ export const STEP_REGISTRY: StepDefinition[] = [
             title,
             files: cartridgeFiles,
             pages,
+            assignments,
           };
         });
+
+      // Blackboard Ultra wraps every .imscc import in one content folder
+      // named after the package, so a full-course cartridge lands as a
+      // single module. One cartridge per week makes each import's wrapper
+      // the module itself; Canvas imports a full cartridge as top-level
+      // modules, so it keeps the single file.
+      if (tileLms === "blackboard") {
+        onProgress("Building one cartridge per module...");
+        const { default: JSZip } = await import("jszip");
+        const bundle = new JSZip();
+
+        for (const week of weeks) {
+          const inner = await buildWeekCartridge(
+            week.title,
+            week.files,
+            week.assignments,
+            week.pages
+          );
+          const topic = (
+            (schedule.find((w) => w.week === week.week)?.topic ?? "").trim() ||
+            "module"
+          ).replace(/[^a-zA-Z0-9._ -]/g, "_");
+          bundle.file(
+            `${String(week.week).padStart(2, "0")} ${topic}.imscc`,
+            inner
+          );
+        }
+
+        const zipName = `${baseName}-blackboard-modules.zip`;
+        const zipBlob = await bundle.generateAsync({ type: "blob" });
+
+        onProgress(`Downloading ${zipName}...`);
+        const url = URL.createObjectURL(zipBlob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = zipName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        if (helpers.saveBundle) {
+          try {
+            await helpers.saveBundle(zipBlob, `${baseName}-blackboard-modules`);
+          } catch (err) {
+            console.error("Library save failed:", err);
+          }
+        }
+
+        let tileSaveNote = "";
+        if (hubCourseId && helpers.saveCourseMaterialFile) {
+          onProgress("Saving to the course tile...");
+          try {
+            await helpers.saveCourseMaterialFile(hubCourseId, zipBlob, zipName);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            tileSaveNote = `; saving to the course tile failed: ${msg}`;
+          }
+        }
+
+        return {
+          outputs: {},
+          summary: {
+            kind: "text",
+            text: `Downloaded ${zipName} - it contains one .imscc per module. In Blackboard, run Import Course Content once per file; each import creates that module at the top level (Ultra always wraps an import in a single folder). Deliverables import as assignments; introductions import as rendered documents.${tileSaveNote}`,
+          },
+        };
+      }
 
       onProgress("Building Common Cartridge...");
       const blob = await buildCommonCartridge(
@@ -1545,20 +1684,38 @@ export const STEP_REGISTRY: StepDefinition[] = [
         }
       }
 
+      // The export also lands in the course tile's materials list when a
+      // tile is bound; a failure notes on the summary instead of failing
+      // the step. No tile bound means no tile save.
+      let tileSaveNote = "";
+      if (hubCourseId && helpers.saveCourseMaterialFile) {
+        onProgress("Saving to the course tile...");
+        try {
+          await helpers.saveCourseMaterialFile(
+            hubCourseId,
+            blob,
+            `${baseName}.imscc`
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          tileSaveNote = `; saving to the course tile failed: ${msg}`;
+        }
+      }
+
       let summaryText: string;
       if (tileLms === "canvas") {
-        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package. Content imports; graded columns are created by the workflow's LMS steps instead.`;
+        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package. Deliverables import as assignments; introductions import as pages; files import into modules.`;
       } else if (tileLms === "blackboard") {
-        summaryText = `Downloaded ${baseName}.imscc - import it in Blackboard via Course Content > Import Package. Folders, files, and instruction pages import; create graded columns in Blackboard separately.`;
+        summaryText = `Downloaded ${baseName}.imscc - import it in Blackboard via Course Content > Import Package. Deliverables import as assignments; introductions import as rendered documents.`;
       } else {
-        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package, or in Blackboard via Course Content > Import Package. Content imports; create graded columns in your LMS separately.`;
+        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package, or in Blackboard via Course Content > Import Package. Deliverables import as assignments; introductions import as pages.`;
       }
 
       return {
         outputs: {},
         summary: {
           kind: "text",
-          text: summaryText,
+          text: `${summaryText}${tileSaveNote}`,
         },
       };
     },
@@ -1610,6 +1767,16 @@ export const STEP_REGISTRY: StepDefinition[] = [
           }
         }
       }
+
+      // Common Resources load once per run; library file payloads are
+      // cached so multi-course runs download each file only once.
+      const commonItems = helpers.loadCommonResources
+        ? await helpers.loadCommonResources().catch(() => [])
+        : [];
+      const libCache = new Map<
+        string,
+        { blob: Blob; name: string; mimeType: string } | null
+      >();
 
       const lines: string[] = [];
       let failures = 0;
@@ -1755,10 +1922,117 @@ export const STEP_REGISTRY: StepDefinition[] = [
             }
           }
 
+          // Common Resources import after the built-ins; a failed item
+          // notes on the course's summary line instead of failing the
+          // course.
+          let commonAdded = 0;
+          const notes: string[] = [];
+          for (const item of commonItems) {
+            onProgress(`Adding "${item.title}" to ${tile?.name ?? url}...`);
+            try {
+              if (item.type === "page") {
+                const created = await createPageAction(
+                  url,
+                  { title: item.title, body: item.body ?? "" },
+                  inst
+                );
+                if ("error" in created) {
+                  throw new Error(created.error);
+                }
+
+                const linked = await createModuleItemAction(
+                  url,
+                  startModule.id,
+                  { type: "Page", pageUrl: created.page.url },
+                  inst
+                );
+                if ("error" in linked) {
+                  throw new Error(linked.error);
+                }
+
+                commonAdded++;
+              } else if (item.type === "file" && item.fileId) {
+                let payload = libCache.get(item.fileId);
+                if (payload === undefined) {
+                  payload = helpers.getLibraryFile
+                    ? await helpers.getLibraryFile(item.fileId)
+                    : null;
+                  libCache.set(item.fileId, payload);
+                }
+
+                if (!payload) {
+                  notes.push(`${item.title}: library file missing - skipped`);
+                  continue;
+                }
+
+                const sanitizedFileName = payload.name.replace(
+                  /[^a-z0-9 ._-]/gi,
+                  "_"
+                );
+                const ticket = await requestFileUploadAction(
+                  url,
+                  {
+                    name: sanitizedFileName,
+                    size: payload.blob.size,
+                    contentType: payload.mimeType,
+                    folderPath: "uploads",
+                  },
+                  inst
+                );
+                if ("error" in ticket) {
+                  throw new Error(ticket.error);
+                }
+
+                const form = new FormData();
+                for (const [k, v] of Object.entries(
+                  ticket.ticket.uploadParams
+                )) {
+                  form.append(k, v);
+                }
+                form.append("file", payload.blob, sanitizedFileName);
+
+                const up = await fetch(ticket.ticket.uploadUrl, {
+                  method: "POST",
+                  body: form,
+                });
+                if (!up.ok) {
+                  throw new Error(`Upload to Canvas failed (HTTP ${up.status}).`);
+                }
+
+                const uploaded = (await up.json().catch(() => null)) as {
+                  id?: number;
+                } | null;
+                if (typeof uploaded?.id !== "number") {
+                  throw new Error("Canvas did not return the uploaded file id.");
+                }
+
+                const linked = await createModuleItemAction(
+                  url,
+                  startModule.id,
+                  { type: "File", contentId: uploaded.id, title: item.title },
+                  inst
+                );
+                if ("error" in linked) {
+                  throw new Error(linked.error);
+                }
+
+                commonAdded++;
+              }
+            } catch (err) {
+              const message =
+                err instanceof Error ? err.message : "Unknown error";
+              notes.push(`${item.title}: ${message}`);
+            }
+          }
+
           lines.push(
             `${tile?.name ?? url}: Start Here ready (${syllabusNote}; quiz ${dueNote}${
               includeGh ? "; GitHub Sign Up added" : ""
-            })`
+            }${
+              commonItems.length
+                ? `; ${commonAdded} common resource(s) added`
+                : ""
+            }${notes.length ? `; ${notes.join("; ")}` : ""})`
           );
         } catch (err) {
           const message = err instanceof Error ? err.message : "Unknown error";
@@ -1800,6 +2074,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "repo", label: "Repository", type: "repo" },
       { key: "course", label: "LMS course", type: "lmsCourse" },
       { key: "startDate", label: "Start date", type: "date" },
+      { key: "description", label: "Course description", type: "longtext" },
     ],
     run: async (values, helpers, onProgress) => {
       const hubCourseId = String(values.hubCourse ?? "").trim();
@@ -1825,6 +2100,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const course = (tile.canvasUrl ?? "").trim();
       const startDate = (tile.startDate ?? "").trim();
       const lms = (tile.lms ?? "").trim();
+      const description = (tile.description ?? "").trim();
 
       const items = [
         `Repository: ${repo}${
@@ -1839,12 +2115,17 @@ export const STEP_REGISTRY: StepDefinition[] = [
         lms
           ? `LMS: ${lms}`
           : "Warning: no LMS set on the tile - the plain zip downloads instead of an LMS cartridge.",
+        description
+          ? `Description: ${description.slice(0, 80)}${
+              description.length > 80 ? "..." : ""
+            }`
+          : "Note: no description on the tile - schedule topics come from the repo alone.",
       ];
 
       // Empty strings pass through cleanly: downstream steps already skip on
       // an empty course and treat an empty startDate as no deadline.
       return {
-        outputs: { repo, course, startDate },
+        outputs: { repo, course, startDate, description },
         summary: {
           kind: "list",
           label: `Loaded "${tile.name}"`,

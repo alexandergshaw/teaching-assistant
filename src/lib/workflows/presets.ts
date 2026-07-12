@@ -10,7 +10,7 @@ export const COURSE_KICKOFF: WorkflowDef = {
   preset: true,
   name: "Course Kickoff",
   description:
-    "Paste a course description and get a schedule, a GitHub repo built from your template with assignment directions, a lecture materials zip, and a populated LMS course.",
+    "Generate the schedule, create the class repo from a template, write assignment READMEs - then run everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically).",
   steps: [
     {
       type: "generate-schedule",
@@ -36,25 +36,20 @@ export const COURSE_KICKOFF: WorkflowDef = {
       },
     },
     {
-      type: "lecture-zip",
-      bindings: {
-        repo: { source: "step", stepIndex: 1, outputKey: "repo" },
-        minutes: { source: "literal", value: "50" },
-      },
-    },
-    {
-      type: "lms-modules",
-      bindings: {
-        course: { source: "runtime", fieldKey: "lmsCourse" },
-        weeks: { source: "runtime", fieldKey: "weeks" },
-      },
-    },
-    {
-      type: "lms-populate",
-      bindings: {
-        course: { source: "runtime", fieldKey: "lmsCourse" },
-        modules: { source: "step", stepIndex: 4, outputKey: "modules" },
-        files: { source: "step", stepIndex: 3, outputKey: "files" },
+      type: "include-workflow",
+      bindings: {},
+      include: {
+        workflowId: "course-refresh",
+        skipSteps: [0, 1],
+        remap: {
+          "0.repo": { source: "step", stepIndex: 1, outputKey: "repo" },
+          "1.schedule": { source: "step", stepIndex: 0, outputKey: "schedule" },
+          "1.courseTitle": { source: "step", stepIndex: 0, outputKey: "courseTitle" },
+          "1.weeks": { source: "step", stepIndex: 0, outputKey: "weeks" },
+          "0.course": { source: "runtime", fieldKey: "lmsCourse" },
+          "0.startDate": { source: "runtime", fieldKey: "startDate" },
+          "0.description": { source: "runtime", fieldKey: "courseDescription" },
+        },
       },
     },
   ],
@@ -77,6 +72,7 @@ export const COURSE_REFRESH: WorkflowDef = {
       type: "schedule-from-repo",
       bindings: {
         repo: { source: "step", stepIndex: 0, outputKey: "repo" },
+        description: { source: "step", stepIndex: 0, outputKey: "description" },
       },
     },
     {

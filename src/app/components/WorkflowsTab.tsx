@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Button, TextField, MenuItem } from "@mui/material";
 import TabHeader from "./TabHeader";
 import WorkflowBuilder from "./WorkflowBuilder";
@@ -18,6 +18,11 @@ import {
   collectRuntimeFields,
   saveCustomWorkflows,
 } from "@/lib/workflows/types";
+import {
+  listWorkflowDefs,
+  upsertWorkflowDef,
+  deleteWorkflowDef,
+} from "@/lib/workflow-defs";
 import {
   allWorkflows,
   COURSE_KICKOFF,
@@ -220,6 +225,9 @@ export default function WorkflowsTab() {
   const { supabase, user } = useSupabase();
   const { active: activeInstitution } = useInstitutionSelection();
 
+  const pendingDefRef = useRef<WorkflowDef | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [custom, setCustom] = useState<WorkflowDef[]>(() =>
     typeof window === "undefined" ? [] : loadCustomWorkflows()
   );
@@ -262,6 +270,13 @@ export default function WorkflowsTab() {
   const [editing, setEditing] = useState(false);
   const [deleteArmed, setDeleteArmed] = useState(false);
 
+  // Mirror `editing` into a ref so the focus refetch handler can skip
+  // reloading while the builder is open without re-registering listeners.
+  const editingRef = useRef(editing);
+  useEffect(() => {
+    editingRef.current = editing;
+  }, [editing]);
+
   const [hubCourses, setHubCourses] = useState<Array<{ id: string; name: string }> | null>(null);
   const [hubCoursesError, setHubCoursesError] = useState<string | null>(null);
 
@@ -278,8 +293,57 @@ export default function WorkflowsTab() {
 
   const updateCustom = (next: WorkflowDef[]) => {
     setCustom(next);
-    saveCustomWorkflows(next);
+    if (!user) {
+      saveCustomWorkflows(next);
+    }
   };
+
+  useEffect(() => {
+    if (!user || !supabase) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const dbRows = await listWorkflowDefs(supabase, user.id);
+
+        if (!cancelled) {
+          if (dbRows.length === 0) {
+            const localRows = loadCustomWorkflows();
+            if (localRows.length > 0) {
+              let allUpserted = true;
+              for (const def of localRows) {
+                try {
+                  await upsertWorkflowDef(supabase, user.id, def);
+                } catch (err) {
+                  console.error("Failed to migrate workflow:", def.id, err);
+                  allUpserted = false;
+                }
+              }
+
+              if (allUpserted) {
+                try {
+                  localStorage.removeItem("ta-workflows");
+                } catch {
+                  // Ignore storage failures.
+                }
+                const migratedRows = await listWorkflowDefs(supabase, user.id);
+                setCustom(migratedRows);
+              }
+            }
+          } else {
+            setCustom(dbRows);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load workflows from database:", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, supabase]);
 
   useEffect(() => {
     localStorage.setItem("ta-workflows-selected", selectedWorkflowId);
@@ -295,18 +359,53 @@ export default function WorkflowsTab() {
   }, [values, selectedDef]);
 
   useEffect(() => {
-    const handleStorageChange = () => {
-      setCustom(loadCustomWorkflows());
-    };
+    if (user && supabase) {
+      const handleFocus = () => {
+        // Skip while the builder is open: a refetch could overwrite edits
+        // still waiting inside the debounced save window.
+        if (editingRef.current) return;
 
-    window.addEventListener("storage", handleStorageChange);
-    window.addEventListener("focus", handleStorageChange);
+        (async () => {
+          try {
+            const dbRows = await listWorkflowDefs(supabase, user.id);
+            setCustom(dbRows);
+          } catch (err) {
+            console.error("Failed to reload workflows from database:", err);
+          }
+        })();
+      };
 
+      window.addEventListener("focus", handleFocus);
+      return () => {
+        window.removeEventListener("focus", handleFocus);
+      };
+    } else {
+      const handleStorageChange = () => {
+        setCustom(loadCustomWorkflows());
+      };
+
+      window.addEventListener("storage", handleStorageChange);
+      window.addEventListener("focus", handleStorageChange);
+
+      return () => {
+        window.removeEventListener("storage", handleStorageChange);
+        window.removeEventListener("focus", handleStorageChange);
+      };
+    }
+  }, [user, supabase]);
+
+  useEffect(() => {
     return () => {
-      window.removeEventListener("storage", handleStorageChange);
-      window.removeEventListener("focus", handleStorageChange);
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+      if (user && supabase && pendingDefRef.current) {
+        void upsertWorkflowDef(supabase, user.id, pendingDefRef.current).catch(
+          console.error
+        );
+      }
     };
-  }, []);
+  }, [user, supabase]);
 
   useEffect(() => {
     const needsHubCourse = runtimeFields.some((f) => f.type === "hubCourse");
@@ -587,6 +686,9 @@ export default function WorkflowsTab() {
                 steps: [],
               };
               updateCustom([...custom, newDef]);
+              if (user && supabase) {
+                void upsertWorkflowDef(supabase, user.id, newDef).catch(console.error);
+              }
               handleWorkflowChange(newDef.id);
               setEditing(true);
             }}
@@ -606,6 +708,9 @@ export default function WorkflowsTab() {
                 steps: JSON.parse(JSON.stringify(selectedDef.steps)),
               };
               updateCustom([...custom, copied]);
+              if (user && supabase) {
+                void upsertWorkflowDef(supabase, user.id, copied).catch(console.error);
+              }
               handleWorkflowChange(copied.id);
               setEditing(true);
             }}
@@ -630,6 +735,9 @@ export default function WorkflowsTab() {
                   if (!deleteArmed) {
                     setDeleteArmed(true);
                   } else {
+                    if (user && supabase) {
+                      void deleteWorkflowDef(supabase, selectedDef.id).catch(console.error);
+                    }
                     updateCustom(custom.filter((w) => w.id !== selectedDef.id));
                     try {
                       localStorage.removeItem(
@@ -659,10 +767,35 @@ export default function WorkflowsTab() {
         {editing && selectedDef && !selectedDef.preset && (
           <WorkflowBuilder
             def={selectedDef}
-            onChange={(next) =>
-              updateCustom(custom.map((w) => (w.id === next.id ? next : w)))
-            }
-            onDone={() => setEditing(false)}
+            onChange={(next) => {
+              updateCustom(custom.map((w) => (w.id === next.id ? next : w)));
+              if (user && supabase) {
+                pendingDefRef.current = next;
+                if (saveTimerRef.current) {
+                  clearTimeout(saveTimerRef.current);
+                }
+                saveTimerRef.current = setTimeout(() => {
+                  if (pendingDefRef.current) {
+                    void upsertWorkflowDef(supabase, user.id, pendingDefRef.current).catch(
+                      console.error
+                    );
+                  }
+                  pendingDefRef.current = null;
+                }, 800);
+              }
+            }}
+            onDone={() => {
+              if (user && supabase && saveTimerRef.current) {
+                clearTimeout(saveTimerRef.current);
+                if (pendingDefRef.current) {
+                  void upsertWorkflowDef(supabase, user.id, pendingDefRef.current).catch(
+                    console.error
+                  );
+                }
+                pendingDefRef.current = null;
+              }
+              setEditing(false);
+            }}
           />
         )}
 

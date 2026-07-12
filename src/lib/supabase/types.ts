@@ -423,7 +423,7 @@ export interface Database {
           id: string;
           user_id: string;
           name: string;
-          kind: "recording" | "captioned" | "narrated" | "bundle";
+          kind: "recording" | "captioned" | "narrated" | "bundle" | "file";
           mime_type: string;
           size_bytes: number;
           duration_sec: number | null;
@@ -435,7 +435,7 @@ export interface Database {
           id?: string;
           user_id: string;
           name: string;
-          kind?: "recording" | "captioned" | "narrated" | "bundle";
+          kind?: "recording" | "captioned" | "narrated" | "bundle" | "file";
           mime_type?: string;
           size_bytes?: number;
           duration_sec?: number | null;
@@ -447,11 +447,40 @@ export interface Database {
           id?: string;
           user_id?: string;
           name?: string;
-          kind?: "recording" | "captioned" | "narrated" | "bundle";
+          kind?: "recording" | "captioned" | "narrated" | "bundle" | "file";
           mime_type?: string;
           size_bytes?: number;
           duration_sec?: number | null;
           storage_path?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      workflow_defs: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          description: string;
+          steps: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          user_id: string;
+          name: string;
+          description?: string;
+          steps?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          description?: string;
+          steps?: Json;
           created_at?: string;
           updated_at?: string;
         };

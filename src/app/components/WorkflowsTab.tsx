@@ -6,13 +6,14 @@ import TabHeader from "./TabHeader";
 import WorkflowBuilder from "./WorkflowBuilder";
 import GithubRepoPicker from "./GithubRepoPicker";
 import CoursePicker from "./CoursePicker";
+import Typeahead from "./ui/Typeahead";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { saveRecordingFile } from "@/lib/recording-files";
 import { uploadCourseZip } from "@/lib/course-files";
-import { listCourseHubAction, setCourseMaterialsAction } from "@/app/actions";
+import { listCourseHubAction, setCourseMaterialsAction, listMyOrgsAction } from "@/app/actions";
 import {
   loadCustomWorkflows,
   collectRuntimeFields,
@@ -280,6 +281,9 @@ export default function WorkflowsTab() {
   const [hubCourses, setHubCourses] = useState<Array<{ id: string; name: string; canvasUrl: string | null; repos: string[] }> | null>(null);
   const [hubCoursesError, setHubCoursesError] = useState<string | null>(null);
 
+  const [orgs, setOrgs] = useState<string[] | null>(null);
+  const [orgsError, setOrgsError] = useState<string | null>(null);
+
   const runtimeFields: RuntimeField[] = useMemo(
     () =>
       selectedDef
@@ -436,6 +440,35 @@ export default function WorkflowsTab() {
     };
   }, [runtimeFields, hubCourses]);
 
+  useEffect(() => {
+    const needsOrg = runtimeFields.some((f) => f.type === "org");
+    if (!needsOrg || orgs !== null) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const r = await listMyOrgsAction();
+        if (!cancelled) {
+          if ("error" in r) {
+            setOrgsError(r.error);
+          } else {
+            setOrgs(r.orgs);
+            setOrgsError(null);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setOrgsError(err instanceof Error ? err.message : "Could not load organizations.");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [runtimeFields, orgs]);
+
   const handleWorkflowChange = (newId: string) => {
     setSelectedWorkflowId(newId);
     setEditing(false);
@@ -500,7 +533,7 @@ export default function WorkflowsTab() {
 
       // Only the types the run form renders can be validated here; other
       // types are filled from earlier step outputs.
-      const fieldTypes = ["text", "longtext", "number", "repo", "lmsCourse", "hubCourse"];
+      const fieldTypes = ["text", "longtext", "number", "repo", "lmsCourse", "hubCourse", "org"];
       if (!fieldTypes.includes(field.type)) continue;
 
       const value = values[field.fieldKey] ?? "";
@@ -660,19 +693,18 @@ export default function WorkflowsTab() {
       <div className={styles.form}>
         <div className={styles.field}>
           <label>Workflow</label>
-          <TextField
-            select
+          <Typeahead
+            options={workflows.map((w) => ({
+              value: w.id,
+              label: w.name,
+              hint: w.preset ? "Preset" : "Custom",
+            }))}
             value={selectedWorkflowId}
-            onChange={(e) => handleWorkflowChange(e.target.value)}
-            size="small"
-            fullWidth
-          >
-            {workflows.map((w) => (
-              <MenuItem key={w.id} value={w.id}>
-                {w.name}
-              </MenuItem>
-            ))}
-          </TextField>
+            onChange={(v) => {
+              if (v) handleWorkflowChange(v);
+            }}
+            placeholder="Choose a workflow..."
+          />
           {selectedDef && (
             <>
               <p className={styles.fieldHint}>{selectedDef.description}</p>
@@ -838,7 +870,31 @@ export default function WorkflowsTab() {
             {runtimeFields.map((field) => {
               const value = values[field.fieldKey] ?? "";
 
-              if (field.type === "longtext") {
+              if (field.type === "org") {
+                return (
+                  <div key={field.fieldKey} className={styles.field}>
+                    <label>{field.label}</label>
+                    <Typeahead
+                      options={(orgs ?? []).map((o) => ({ value: o, label: o }))}
+                      value={value}
+                      onChange={(v) => handleValueChange(field.fieldKey, v)}
+                      placeholder={
+                        orgs === null
+                          ? "Loading organizations..."
+                          : "Choose an organization..."
+                      }
+                      loading={orgs === null}
+                      noOptionsText="No organizations"
+                    />
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {field.help}
+                      </p>
+                    )}
+                    {orgsError && <p className={styles.error}>{orgsError}</p>}
+                  </div>
+                );
+              } else if (field.type === "longtext") {
                 return (
                   <div key={field.fieldKey} className={styles.field}>
                     <label>{field.label}</label>
@@ -852,6 +908,11 @@ export default function WorkflowsTab() {
                       }
                       size="small"
                     />
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {field.help}
+                      </p>
+                    )}
                   </div>
                 );
               } else if (field.type === "text") {
@@ -866,6 +927,11 @@ export default function WorkflowsTab() {
                       }
                       size="small"
                     />
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {field.help}
+                      </p>
+                    )}
                   </div>
                 );
               } else if (field.type === "number") {

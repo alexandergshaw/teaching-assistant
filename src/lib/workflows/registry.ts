@@ -19,7 +19,10 @@ import {
   generateSchedulePlanFromRepoAction,
   setCourseCsvAction,
   deleteModuleAction,
+  setupStudentRepoAction,
+  listCourseHubAction,
 } from "@/app/actions";
+import type { RepoPermission } from "@/lib/github";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import type {
@@ -29,6 +32,20 @@ import type {
   EnsuredModule,
 } from "@/lib/workflows/types";
 import { scheduleToCsv } from "@/lib/workflows/types";
+
+// "Student" or "Student | github-username" (pipe-separated so commas in
+// names like "Last, First" never masquerade as usernames).
+function parseRosterLines(text: string): Array<{ student: string; username: string }> {
+  return text
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((row) => {
+      const idx = row.lastIndexOf("|");
+      if (idx === -1) return { student: row, username: "" };
+      return { student: row.slice(0, idx).trim(), username: row.slice(idx + 1).trim().replace(/^@/, "") };
+    });
+}
 
 export interface StepRunHelpers {
   activeInstitution: string | null;
@@ -884,6 +901,140 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summary: {
           kind: "text",
           text: `Deleted ${c.modules.length} module(s).`,
+        },
+      };
+    },
+  },
+
+  {
+    type: "assign-student-repos",
+    name: "Assign students to repos",
+    description: "Create one repo per student from a template and invite each student as an outside collaborator - the GitHub Classroom pattern. Existing repos are skipped, so re-running is safe.",
+    inputs: [
+      {
+        key: "org",
+        label: "Organization",
+        type: "org",
+        required: true,
+      },
+      {
+        key: "templateRepo",
+        label: "Template repository",
+        type: "repo",
+        required: true,
+      },
+      {
+        key: "roster",
+        label: "Students",
+        type: "longtext",
+        required: false,
+        help: 'One student per line: "Student" or "Student | github-username". The student text names the repo; the username receives the invite.',
+      },
+      {
+        key: "rosterCourse",
+        label: "Course tile roster",
+        type: "hubCourse",
+        required: false,
+        help: "Optional - fills the student list from this tile's roster when the Students box is empty.",
+      },
+      {
+        key: "prefix",
+        label: "Repo name prefix",
+        type: "text",
+        required: false,
+        help: "Repos become <prefix>-<student>.",
+      },
+      {
+        key: "permission",
+        label: "Student access",
+        type: "text",
+        required: false,
+        help: "push (default), pull, or maintain.",
+      },
+      {
+        key: "visibility",
+        label: "Visibility",
+        type: "text",
+        required: false,
+        help: "private (default) or public.",
+      },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      let rosterText = String(values.roster ?? "").trim();
+
+      if (!rosterText && values.rosterCourse) {
+        const courseId = String(values.rosterCourse);
+        const list = await listCourseHubAction();
+        if ("error" in list) {
+          throw new Error(list.error);
+        }
+        const course = list.courses.find((c) => c.id === courseId);
+        rosterText = (course?.roster ?? "").trim();
+      }
+
+      const rows = parseRosterLines(rosterText);
+      if (rows.length === 0) {
+        throw new Error("Enter at least one student (or pick a course tile with a roster).");
+      }
+
+      const permRaw = String(values.permission ?? "").trim().toLowerCase();
+      const permission = (["push", "pull", "maintain"].includes(permRaw)
+        ? permRaw
+        : "push") as RepoPermission;
+
+      const isPrivate =
+        String(values.visibility ?? "").trim().toLowerCase() !== "public";
+
+      const lines: string[] = [];
+      let createdCount = 0;
+      let existedCount = 0;
+      let failedCount = 0;
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        onProgress(
+          `Setting up ${i + 1} of ${rows.length}: ${row.student || row.username}`
+        );
+
+        const r = await setupStudentRepoAction(
+          String(values.org),
+          String(values.templateRepo),
+          String(values.prefix ?? "").trim(),
+          row.student,
+          row.username,
+          isPrivate,
+          permission
+        );
+
+        if ("error" in r) {
+          lines.push(`${row.student || row.username}: ${r.error}`);
+          failedCount++;
+        } else {
+          const parts: string[] = [r.repo];
+          parts.push(r.created);
+          if (r.invited) parts.push("invited");
+          if (r.inviteError) parts.push(`invite failed: ${r.inviteError}`);
+          if (!row.username && r.created !== "failed") parts.push("no username yet");
+
+          lines.push(parts.join(", "));
+
+          if (r.created === "created") createdCount++;
+          else if (r.created === "existed") existedCount++;
+          else if (r.created === "failed") failedCount++;
+        }
+      }
+
+      if (failedCount === rows.length) {
+        throw new Error(`All ${rows.length} student setups failed.`);
+      }
+
+      return {
+        outputs: {},
+        summary: {
+          kind: "list",
+          label: `${createdCount} created, ${existedCount} already existed, ${failedCount} failed (of ${rows.length})`,
+          items: lines,
         },
       };
     },

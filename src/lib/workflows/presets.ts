@@ -138,10 +138,32 @@ export const REPO_AGENT_UPDATE: WorkflowDef = {
   ],
 };
 
+export const STUDENT_REPOS: WorkflowDef = {
+  id: "student-repo-assignment",
+  preset: true,
+  name: "Student Repo Assignment",
+  description:
+    "Create one repository per student from a template and invite each student to theirs. Fill the roster by hand or from a course tile.",
+  steps: [
+    {
+      type: "assign-student-repos",
+      bindings: {
+        org: { source: "runtime", fieldKey: "org" },
+        templateRepo: { source: "runtime", fieldKey: "templateRepo" },
+        roster: { source: "runtime", fieldKey: "roster" },
+        rosterCourse: { source: "runtime", fieldKey: "rosterCourse" },
+        prefix: { source: "runtime", fieldKey: "prefix" },
+        permission: { source: "runtime", fieldKey: "permission" },
+        visibility: { source: "runtime", fieldKey: "visibility" },
+      },
+    },
+  ],
+};
+
 /**
  * Merge built-in presets with custom workflows.
  * Returns presets first, then custom workflows.
  */
 export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
-  return [COURSE_KICKOFF, COURSE_REFRESH, REPO_AGENT_UPDATE, ...custom];
+  return [COURSE_KICKOFF, COURSE_REFRESH, REPO_AGENT_UPDATE, STUDENT_REPOS, ...custom];
 }

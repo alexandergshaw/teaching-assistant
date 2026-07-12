@@ -8,18 +8,15 @@ import {
 } from "../actions";
 import type { GithubRepo } from "@/lib/github";
 import OrgManagementPanel from "./OrgManagementPanel";
-import { ClassroomWizard } from "./ClassroomWizard";
 import RepoDetail from "./RepoDetail";
 import BulkRepoActionsPanel from "./BulkRepoActionsPanel";
+import Typeahead from "./ui/Typeahead";
 import { takeCourseHandoff } from "@/lib/course-handoff";
 import { useVcCounts } from "./VcCounts";
 import styles from "../page.module.css";
 
 const VC_SUBTAB_KEY = "ta-vc-subtab";
 const VC_ORG_KEY = "ta-vc-org";
-const VC_TEMPLATE_KEY = "ta-vc-template";
-const VC_PREFIX_KEY = "ta-vc-prefix";
-const VC_PRIVATE_KEY = "ta-vc-private";
 
 /**
  * Version Control Integration: pick a GitHub org and a template repo within it,
@@ -32,12 +29,8 @@ export default function VersionControlTab() {
   const [orgsState, setOrgsState] = useState<"loading" | "ready" | "unconfigured">("loading");
   const [selectedOrg, setSelectedOrg] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_ORG_KEY) ?? "" : ""));
   const [repos, setRepos] = useState<GithubRepo[]>([]);
-  const [reposLoading, setReposLoading] = useState(false);
   const [orgReposNonce, setOrgReposNonce] = useState(0);
   const [myRepos, setMyRepos] = useState<GithubRepo[]>([]);
-  const [templateRepo, setTemplateRepo] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_TEMPLATE_KEY) ?? "" : ""));
-  const [prefix, setPrefix] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_PREFIX_KEY) ?? "" : ""));
-  const [isPrivate, setIsPrivate] = useState(() => (typeof window !== "undefined" ? localStorage.getItem(VC_PRIVATE_KEY) !== "0" : true));
   const [subTab, setSubTab] = useState<"orgs" | "repos" | "bulk">(() => {
     if (typeof window === "undefined") return "orgs";
     const stored = localStorage.getItem(VC_SUBTAB_KEY);
@@ -53,20 +46,16 @@ export default function VersionControlTab() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     localStorage.setItem(VC_ORG_KEY, selectedOrg);
-    localStorage.setItem(VC_TEMPLATE_KEY, templateRepo);
-    localStorage.setItem(VC_PREFIX_KEY, prefix);
-    localStorage.setItem(VC_PRIVATE_KEY, isPrivate ? "1" : "0");
-  }, [selectedOrg, templateRepo, prefix, isPrivate]);
+  }, [selectedOrg]);
 
   // Arriving from a course in the Courses hub: open the Repos subtab with the
-  // course's GitHub org (and template repo) prefilled.
+  // course's GitHub org prefilled.
   useEffect(() => {
     const h = takeCourseHandoff("version-control");
     if (!h) return;
     /* eslint-disable react-hooks/set-state-in-effect */
     setSubTab("repos");
     if (h.githubOrg) setSelectedOrg(h.githubOrg);
-    if (h.repo) setTemplateRepo(h.repo);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
@@ -98,15 +87,12 @@ export default function VersionControlTab() {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (!selectedOrg) {
       setRepos([]);
-      setTemplateRepo("");
       return;
     }
     let cancelled = false;
-    setReposLoading(true);
     (async () => {
       const r = await listOrgReposAction(selectedOrg);
       if (cancelled) return;
-      setReposLoading(false);
       if (!("error" in r)) setRepos(r.repos);
     })();
     return () => {
@@ -118,10 +104,6 @@ export default function VersionControlTab() {
 
   const externalTemplates = myRepos.filter((r) => r.isTemplate && !repos.some((o) => o.fullName === r.fullName));
   const mergedRepos = [...repos, ...externalTemplates];
-  const templates = mergedRepos.filter((r) => r.isTemplate);
-  const templateOptions = (templates.length > 0 ? templates : mergedRepos)
-    .slice()
-    .sort((a, b) => Number(b.isTemplate) - Number(a.isTemplate) || a.fullName.localeCompare(b.fullName));
 
   if (orgsState === "unconfigured") {
     return (
@@ -171,20 +153,24 @@ export default function VersionControlTab() {
 
       {subTab === "orgs" && (
         <>
-          <ClassroomWizard
-            orgs={orgs}
-            orgsLoading={orgsState === "loading"}
-            org={selectedOrg}
-            onOrgChange={setSelectedOrg}
-            templateOptions={templateOptions.map((r) => ({ value: r.fullName, label: `${r.fullName}${r.isTemplate ? " (template)" : ""}` }))}
-            reposLoading={reposLoading}
-            templateRepo={templateRepo}
-            onTemplateChange={setTemplateRepo}
-            prefix={prefix}
-            onPrefixChange={setPrefix}
-            isPrivate={isPrivate}
-            onPrivateChange={setIsPrivate}
-          />
+          <div className={styles.field}>
+            <label>Organization</label>
+            <Typeahead
+              options={orgs.map((o) => ({ value: o, label: o }))}
+              value={selectedOrg}
+              onChange={setSelectedOrg}
+              placeholder={
+                orgsState === "loading"
+                  ? "Loading organizations..."
+                  : "Choose an organization..."
+              }
+              loading={orgsState === "loading"}
+              noOptionsText="No organizations"
+            />
+            <p className={styles.fieldHint}>
+              Student repo assignment moved to the Workflows tab - run the &quot;Student Repo Assignment&quot; workflow.
+            </p>
+          </div>
           {selectedOrg && <OrgManagementPanel org={selectedOrg} repos={repos} onReposChanged={() => setOrgReposNonce((n) => n + 1)} />}
         </>
       )}

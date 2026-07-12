@@ -15,7 +15,8 @@ export type WorkflowValueType =
   | "schedule"
   | "files"
   | "modules"
-  | "hubCourse";
+  | "hubCourse"
+  | "org";
 
 export interface GeneratedCourseFile {
   name: string;

@@ -2031,7 +2031,7 @@ export async function previewFileAction(
 export async function createGradableAction(
   courseUrl: string,
   kind: GradableKind,
-  fields: { title: string; description?: string; pointsPossible?: number; dueAt?: string | null },
+  fields: { title: string; description?: string; pointsPossible?: number; dueAt?: string | null; submissionType?: string },
   acronym?: string
 ): Promise<{ id: number } | { error: string }> {
   try {

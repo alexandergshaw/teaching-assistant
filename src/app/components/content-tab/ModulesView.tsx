@@ -256,6 +256,16 @@ export function ModulesView({
   const [bulkAddFileId, setBulkAddFileId] = useState<number | "">("");
   const [bulkAddFileContent, setBulkAddFileContent] = useState("");
   const [bulkAddFileFormat, setBulkAddFileFormat] = useState<"docx" | "pptx">("docx");
+  // Submission type for assignments created via bulk add; persisted across reloads.
+  const [bulkAddSubType, setBulkAddSubType] = useState<string>(() => {
+    if (typeof window === "undefined") return "online_text_entry";
+    const n = localStorage.getItem("ta-modules-bulkadd-stype");
+    return n && ["online_text_entry", "online_upload", "online_url", "on_paper", "none"].includes(n) ? n : "online_text_entry";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("ta-modules-bulkadd-stype", bulkAddSubType);
+  }, [bulkAddSubType]);
   // AI prompt + busy flag for generating the item's content (description/body/file).
   const [bulkAiPrompt, setBulkAiPrompt] = useState("");
   const [bulkAiBusy, setBulkAiBusy] = useState(false);
@@ -761,6 +771,7 @@ export function ModulesView({
       fileId?: number;
       fileContent?: string;
       fileFormat?: "docx" | "pptx";
+      submissionType?: string;
     }
   ): Promise<boolean> => {
     try {
@@ -811,10 +822,11 @@ export function ModulesView({
       }
       // Assignment / Quiz / Discussion: create with the optional details, link it,
       // then attach a rubric (assignments) and questions (quizzes) once it exists.
-      const fields: { title: string; description?: string; pointsPossible?: number; dueAt?: string | null } = { title: name };
+      const fields: { title: string; description?: string; pointsPossible?: number; dueAt?: string | null; submissionType?: string } = { title: name };
       if (opts?.description) fields.description = opts.description;
       if (opts?.points != null && Number.isFinite(opts.points)) fields.pointsPossible = opts.points;
       if (opts?.dueAt) fields.dueAt = opts.dueAt;
+      if (opts?.submissionType && type === "Assignment") fields.submissionType = opts.submissionType;
       const created = await createGradableAction(courseUrl, type as GradableKind, fields, acronym);
       if ("error" in created) return false;
       const linked = await createModuleItemAction(courseUrl, moduleId, { type, contentId: created.id }, acronym);
@@ -896,6 +908,7 @@ export function ModulesView({
           fileId,
           fileContent,
           fileFormat: bulkAddFileFormat,
+          submissionType: type === "Assignment" ? bulkAddSubType : undefined,
         });
         if (ok) added += 1;
         else failed += 1;
@@ -2277,6 +2290,22 @@ export function ModulesView({
                   onChange={(e) => setBulkAddPattern(e.target.value)}
                   aria-label="Name pattern for the new items"
                 />
+                {bulkAddType === "Assignment" && (
+                  <TextField
+                    select
+                    size="small"
+                    sx={{ minWidth: 170 }}
+                    value={bulkAddSubType}
+                    onChange={(e) => setBulkAddSubType(e.target.value)}
+                    aria-label="Submission type for the new assignments"
+                  >
+                    <MenuItem value="online_text_entry">Text entry</MenuItem>
+                    <MenuItem value="online_upload">File upload</MenuItem>
+                    <MenuItem value="online_url">Website URL</MenuItem>
+                    <MenuItem value="on_paper">On paper</MenuItem>
+                    <MenuItem value="none">No submission</MenuItem>
+                  </TextField>
+                )}
                 <Button
                   variant="contained"
                   size="small"

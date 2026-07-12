@@ -1987,7 +1987,7 @@ export async function updateGradable(
 export async function createGradable(
   courseUrl: string,
   kind: GradableKind,
-  fields: { title: string; description?: string; pointsPossible?: number; dueAt?: string | null },
+  fields: { title: string; description?: string; pointsPossible?: number; dueAt?: string | null; submissionType?: string },
   code?: string
 ): Promise<{ id: number }> {
   const ctx = resolveCourse(courseUrl, code);
@@ -2001,7 +2001,7 @@ export async function createGradable(
     if (description !== undefined) params.append("assignment[description]", description);
     if (fields.pointsPossible !== undefined) params.append("assignment[points_possible]", String(fields.pointsPossible));
     if (due) params.append("assignment[due_at]", due);
-    params.append("assignment[submission_types][]", "online_text_entry");
+    params.append("assignment[submission_types][]", fields.submissionType || "online_text_entry");
     params.append("assignment[published]", "false");
     const data = await writeJson<{ id?: number }>(`${base}/assignments`, "POST", ctx, params);
     if (typeof data.id !== "number") throw new Error("Canvas did not return the new assignment id.");

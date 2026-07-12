@@ -606,6 +606,7 @@ export default function WorkflowsTab() {
     );
 
     const stepOutputs: Array<Record<string, unknown>> = [];
+    const failedSteps = new Set<number>();
 
     const helpers: StepRunHelpers = {
       activeInstitution: activeInstitution || null,
@@ -668,9 +669,13 @@ export default function WorkflowsTab() {
           if (binding.source === "runtime") {
             resolvedInputs[spec.key] = values[binding.fieldKey] ?? "";
           } else if (binding.source === "step") {
+            if (failedSteps.has(binding.stepIndex)) {
+              const failedDef = getStepDefinition(selectedDef.steps[binding.stepIndex]?.type);
+              throw new Error(`Skipped - depends on step ${binding.stepIndex + 1} ("${failedDef?.name ?? "unknown step"}"), which failed.`);
+            }
             const output = stepOutputs[binding.stepIndex]?.[binding.outputKey];
             if (output === undefined) {
-              throw new Error(`Missing output from step ${binding.stepIndex}.`);
+              throw new Error(`Missing output from step ${binding.stepIndex + 1}.`);
             }
             resolvedInputs[spec.key] = output;
           } else if (binding.source === "literal") {
@@ -712,7 +717,7 @@ export default function WorkflowsTab() {
           };
           return next;
         });
-        break;
+        failedSteps.add(i);
       }
     }
 

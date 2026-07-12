@@ -170,6 +170,7 @@ export interface Database {
           topics: string | null;
           csv_name: string | null;
           csv_data: string | null;
+          start_date: string | null;
           materials_zip_name: string | null;
           materials_zip_path: string | null;
           materials_zip_size: bigint | null;
@@ -194,6 +195,7 @@ export interface Database {
           topics?: string | null;
           csv_name?: string | null;
           csv_data?: string | null;
+          start_date?: string | null;
           materials_zip_name?: string | null;
           materials_zip_path?: string | null;
           materials_zip_size?: bigint | null;
@@ -218,6 +220,7 @@ export interface Database {
           topics?: string | null;
           csv_name?: string | null;
           csv_data?: string | null;
+          start_date?: string | null;
           materials_zip_name?: string | null;
           materials_zip_path?: string | null;
           materials_zip_size?: bigint | null;

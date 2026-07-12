@@ -51,10 +51,11 @@ interface CourseForm {
   roster: string;
   notes: string;
   topics: string;
+  startDate: string;
 }
 
 // Fields that can be edited inline on tiles.
-type InlineField = "canvasUrl" | "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics" | "csv";
+type InlineField = "canvasUrl" | "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "topics" | "csv" | "startDate";
 
 const EMPTY_FORM: CourseForm = {
   id: null,
@@ -71,6 +72,7 @@ const EMPTY_FORM: CourseForm = {
   roster: "",
   notes: "",
   topics: "",
+  startDate: "",
 };
 
 function formFromCourse(c: Course): CourseForm {
@@ -89,6 +91,7 @@ function formFromCourse(c: Course): CourseForm {
     roster: c.roster ?? "",
     notes: c.notes ?? "",
     topics: c.topics ?? "",
+    startDate: c.startDate ?? "",
   };
 }
 
@@ -110,6 +113,7 @@ function courseToInput(c: Course) {
     topics: c.topics ?? "",
     csvName: c.csvName ?? "",
     csvData: c.csvData ?? "",
+    startDate: c.startDate ?? "",
   };
 }
 
@@ -396,6 +400,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       roster: form.roster,
       notes: form.notes,
       topics: form.topics,
+      startDate: form.startDate,
     };
     const result = form.id ? await updateCourseHubAction(form.id, input) : await createCourseHubAction(input);
     setSaving(false);
@@ -633,7 +638,8 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       : field === "syllabusId" ? (c.syllabusId ?? "")
       : field === "topics" ? (c.topics ?? "")
       : field === "csv" ? ""
-      : ((c[field as Exclude<InlineField, "csv">] ?? "") as string);
+      : field === "startDate" ? (c.startDate ?? "")
+      : ((c[field as Exclude<InlineField, "csv" | "startDate">] ?? "") as string);
     setTileEdit({ id: c.id, field, value });
     // Clear repo add states when opening a new tile edit
     if (field === "repos") {
@@ -781,6 +787,29 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
             <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>
           ))}
         </TextField>
+        <div className={styles.tileEditorActions}>
+          <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
+            {tileSaving ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="text" size="small" disabled={tileSaving} onClick={() => setTileEdit(null)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+
+  // Render the inline date editor (date picker + save/cancel).
+  const tileDateEditor = () =>
+    tileEdit && (
+      <div className={styles.tileEditor}>
+        <TextField
+          size="small"
+          fullWidth
+          type="date"
+          value={tileEdit.value}
+          onChange={(e) => setTileEdit((t) => (t ? { ...t, value: e.target.value } : t))}
+          slotProps={{ inputLabel: { shrink: true } }}
+        />
         <div className={styles.tileEditorActions}>
           <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
             {tileSaving ? "Saving…" : "Save"}
@@ -949,6 +978,18 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
               value={form.term}
               onChange={(e) => update({ term: e.target.value })}
             />
+            <TextField
+              label="Start date"
+              size="small"
+              fullWidth
+              type="date"
+              value={form.startDate}
+              onChange={(e) => update({ startDate: e.target.value })}
+              slotProps={{ inputLabel: { shrink: true } }}
+            />
+          </div>
+
+          <div className={styles.adaptFieldGrid3}>
             <Autocomplete
               freeSolo
               options={institutions}
@@ -1421,6 +1462,29 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       : c.textbook
                         ? (
                           <span className={styles.courseResourceValue}>{c.textbook}</span>
+                        )
+                        : (
+                          <span className={styles.courseResourceEmpty}>Not set</span>
+                        )}
+                  </div>
+
+                  <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "startDate" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "startDate"))}>
+                    <div className={styles.courseResourceHead}>
+                      <span className={styles.courseResourceLabel}>Start date</span>
+                      <button
+                        type="button"
+                        className={styles.tileEditBtn}
+                        title="Edit"
+                        onClick={() => startTileEdit(c, "startDate")}
+                      >
+                        <PencilIcon />
+                      </button>
+                    </div>
+                    {tileEdit?.id === c.id && tileEdit?.field === "startDate"
+                      ? tileDateEditor()
+                      : c.startDate
+                        ? (
+                          <span className={styles.courseResourceValue}>{new Date(`${c.startDate}T00:00:00`).toLocaleDateString()}</span>
                         )
                         : (
                           <span className={styles.courseResourceEmpty}>Not set</span>

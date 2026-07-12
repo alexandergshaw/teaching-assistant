@@ -39,6 +39,7 @@ export interface Course {
   topics: string | null;
   csvName: string | null;
   csvData: string | null;
+  startDate: string | null;
   materialsZipName: string | null;
   materialsZipPath: string | null;
   materialsZipSize: number | null;
@@ -62,10 +63,11 @@ export interface CourseInput {
   topics?: string | null;
   csvName?: string | null;
   csvData?: string | null;
+  startDate?: string | null;
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, materials_zip_name, materials_zip_path, materials_zip_size, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, start_date, materials_zip_name, materials_zip_path, materials_zip_size, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -92,6 +94,7 @@ interface CourseRow {
   topics: string | null;
   csv_name: string | null;
   csv_data: string | null;
+  start_date: string | null;
   materials_zip_name: string | null;
   materials_zip_path: string | null;
   materials_zip_size: number | null;
@@ -116,6 +119,7 @@ function toCourse(r: CourseRow): Course {
     topics: r.topics,
     csvName: r.csv_name,
     csvData: r.csv_data,
+    startDate: r.start_date,
     materialsZipName: r.materials_zip_name,
     materialsZipPath: r.materials_zip_path,
     materialsZipSize: r.materials_zip_size,
@@ -152,6 +156,7 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     topics: clean(input.topics),
     csv_name: clean(input.csvName),
     csv_data: clean(input.csvData),
+    start_date: clean(input.startDate),
     materials_zip_name: null,
     materials_zip_path: null,
     materials_zip_size: null,

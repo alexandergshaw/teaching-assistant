@@ -5351,29 +5351,56 @@ Requirements:
   C. DOCUMENTATION AND REFERENCES: a final slide titled exactly "Documentation & References" that lists authoritative resources for the topics: name the official documentation for each language, library, or tool used, plus 2-4 suggested further-reading resources. Name only real, well-known resources (official language/library documentation, MDN, the tool's own docs); do NOT fabricate specific URLs or invent facts.
 - Do not include any text outside the JSON object.`;
 
-  const result = await callLlm(
-    {
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.6, maxOutputTokens: 12288 },
-    },
-    provider
-  );
-
-  if (!result.ok) {
-    return { error: `LLM API error for "${assignmentName}": HTTP ${result.status} — ${result.body.slice(0, 200)}` };
-  }
-
-  const raw = result.text;
-
-  const jsonText = jsonObjectSlice(raw);
-  if (!jsonText) {
-    return { error: `Could not parse slide data for "${assignmentName}".` };
-  }
-
-  const parsed = JSON.parse(jsonText) as {
+  // The parse below is guarded and retried once because a thrown parse error
+  // would bypass buildAssignmentPlan's slidesFailed tolerance and fail the
+  // entire generation run.
+  let parsed: {
     presentationTitle?: string;
     slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
-  };
+  } | null = null;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.6, maxOutputTokens: 12288 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { error: `LLM API error for "${assignmentName}": HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+
+    const jsonText = jsonObjectSlice(result.text);
+    if (!jsonText) {
+      if (attempt === 1) {
+        console.error(`Slide JSON parse failed for "${assignmentName}" (attempt 1): no JSON object in the response`);
+        continue;
+      }
+      return { error: `Could not parse slide data for "${assignmentName}".` };
+    }
+
+    try {
+      parsed = JSON.parse(jsonText) as {
+        presentationTitle?: string;
+        slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
+      };
+      break;
+    } catch (err) {
+      if (attempt === 1) {
+        console.error(
+          `Slide JSON parse failed for "${assignmentName}" (attempt 1): ${err instanceof Error ? err.message : String(err)}`
+        );
+        continue;
+      }
+      return { error: `Could not parse slide data for "${assignmentName}".` };
+    }
+  }
+
+  if (!parsed) {
+    return { error: `Could not parse slide data for "${assignmentName}".` };
+  }
 
   if (!parsed.slides || !Array.isArray(parsed.slides)) {
     return { error: `Model did not return a valid slides array for "${assignmentName}".` };

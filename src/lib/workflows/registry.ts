@@ -293,6 +293,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           mimeType:
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
           weekNumber: plan.weekNumber,
+          sortOrder: 1,
         });
 
         if (plan.moduleIntroduction) {
@@ -309,6 +310,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
             mimeType:
               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             weekNumber: plan.weekNumber,
+            sortOrder: 0,
           });
         }
 
@@ -326,6 +328,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
             mimeType:
               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             weekNumber: plan.weekNumber,
+            sortOrder: 2,
           });
         }
       }
@@ -384,7 +387,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
         key: "course",
         label: "LMS course",
         type: "lmsCourse",
-        required: true,
+        required: false,
+        help: "Optional - leave blank to skip the LMS steps.",
       },
       {
         key: "weeks",
@@ -397,7 +401,14 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "modules", label: "LMS modules", type: "modules" },
     ],
     run: async (values, helpers, onProgress) => {
-      const course = String(values.course);
+      const course = String(values.course ?? "").trim();
+      if (!course) {
+        return {
+          outputs: { modules: [] },
+          summary: { kind: "text", text: "Skipped - no LMS course selected." },
+        };
+      }
+
       const weeks = Number(values.weeks);
 
       onProgress("Loading existing modules...");
@@ -466,7 +477,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
         key: "course",
         label: "LMS course",
         type: "lmsCourse",
-        required: true,
+        required: false,
+        help: "Optional - leave blank to skip the LMS steps.",
       },
       {
         key: "modules",
@@ -483,17 +495,33 @@ export const STEP_REGISTRY: StepDefinition[] = [
     ],
     outputs: [],
     run: async (values, helpers, onProgress) => {
-      const course = String(values.course);
+      const course = String(values.course ?? "").trim();
       const modules = values.modules as EnsuredModule[];
       const files = values.files as GeneratedCourseFile[];
 
+      if (!course) {
+        return {
+          outputs: {},
+          summary: { kind: "text", text: "Skipped - no LMS course selected." },
+        };
+      }
+
       if (modules.length === 0) {
-        throw new Error("No modules available.");
+        return {
+          outputs: {},
+          summary: { kind: "text", text: "Skipped - no LMS course selected." },
+        };
       }
 
       const uploadedLines: string[] = [];
 
-      for (const file of files) {
+      // Canvas appends module items in upload sequence, so upload in the
+      // order the items should appear: by week, then by in-module position.
+      const ordered = [...files].sort(
+        (a, b) => a.weekNumber - b.weekNumber || a.sortOrder - b.sortOrder
+      );
+
+      for (const file of ordered) {
         const targetWeek = Math.min(
           Math.max(file.weekNumber, 1),
           modules[modules.length - 1]?.week || 1
@@ -812,14 +840,25 @@ export const STEP_REGISTRY: StepDefinition[] = [
         key: "course",
         label: "LMS course",
         type: "lmsCourse",
-        required: true,
+        required: false,
+        help: "Optional - leave blank to skip the LMS steps.",
       },
     ],
     outputs: [],
     run: async (values, helpers, onProgress) => {
+      // An empty LMS course skips the LMS steps so repo/tile-only runs
+      // finish cleanly.
+      const course = String(values.course ?? "").trim();
+      if (!course) {
+        return {
+          outputs: {},
+          summary: { kind: "text", text: "Skipped - no LMS course selected." },
+        };
+      }
+
       onProgress("Loading modules...");
       const c = await listCourseContentAction(
-        String(values.course),
+        course,
         helpers.activeInstitution || undefined
       );
 
@@ -830,7 +869,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       for (const m of c.modules) {
         onProgress(`Deleting ${m.name}...`);
         const d = await deleteModuleAction(
-          String(values.course),
+          course,
           m.id,
           helpers.activeInstitution || undefined
         );

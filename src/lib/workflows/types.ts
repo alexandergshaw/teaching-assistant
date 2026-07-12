@@ -22,6 +22,10 @@ export interface GeneratedCourseFile {
   blob: Blob;
   mimeType: string;
   weekNumber: number;
+  // Position of the file within its week's LMS module (0 Introduction,
+  // 1 Slides, 2 Instructions); lms-populate uploads in (weekNumber, sortOrder)
+  // order and Canvas appends module items in upload sequence.
+  sortOrder: number;
 }
 
 export interface EnsuredModule {

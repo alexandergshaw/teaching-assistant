@@ -900,6 +900,11 @@ export default function WorkflowsTab() {
                       <p className={styles.fieldHint}>
                         Pick an institution in the top bar first.
                       </p>
+                      {field.help && (
+                        <p className={styles.fieldHint} style={{ margin: 0 }}>
+                          {field.help}
+                        </p>
+                      )}
                     </div>
                   );
                 }
@@ -911,6 +916,11 @@ export default function WorkflowsTab() {
                       courseUrl={value}
                       onSelect={(url) => handleValueChange(field.fieldKey, url)}
                     />
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {field.help}
+                      </p>
+                    )}
                   </div>
                 );
               } else if (field.type === "hubCourse") {

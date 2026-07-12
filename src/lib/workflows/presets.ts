@@ -65,7 +65,7 @@ export const COURSE_REFRESH: WorkflowDef = {
   preset: true,
   name: "Course Refresh",
   description:
-    "After the course repo changes (manually or via an agent task), regenerate the schedule CSV and contents zip onto the course tile and rebuild the LMS course from the new contents. The LMS course's existing modules are deleted first.",
+    "After the course repo changes (manually or via an agent task), regenerate the schedule CSV and contents zip onto the course tile and rebuild the LMS course from the new contents. The LMS course's existing modules are deleted first. Leave the LMS course blank to stop after the zip is saved to the course tile.",
   steps: [
     {
       type: "schedule-from-repo",

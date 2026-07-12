@@ -333,6 +333,7 @@ import {
   removeDismissal,
 } from "@/lib/grading-dismissals";
 import { humanizeAssignmentName, stripAssignmentSlugPrefix, looksLikeAssignmentSlug } from "@/lib/assignment-name";
+import { assignWeekNumbers, renumberWeekLabel } from "@/lib/week-numbering";
 import type JSZip from "jszip";
 
 // Standard submission guidance appended to every repo-generated assignment instruction
@@ -5576,9 +5577,10 @@ export interface AssignmentPlan {
   slidesFailed?: boolean;
   moduleIntroduction: string;
   assignmentInstructions: string;
-  // The week number parsed from the assignment folder name in the codebase
-  // (e.g. "week3" -> 3). Falls back to the assignment's position in the sorted
-  // list when the folder name contains no number.
+  // Normalized week number (1-based) aligned with the course schedule. Zero-based
+  // folder sets (week-00, week-01, ...) are shifted up by one; 1-based sets keep
+  // their numbers exactly (gaps preserved, no compaction). A folder without digits
+  // falls back to its own position in the sorted list.
   weekNumber: number;
   // The exact heading lines found in the supplied templates (paragraphs styled
   // as headings/titles in the .docx). When a template is provided, only these
@@ -6519,6 +6521,20 @@ export async function generateLecturePlansAction(
       return { error: "No assignments could be generated from the uploaded zip." };
     }
 
+    // Normalize week numbers to match the course schedule: file/module numbering
+    // downstream is 1-based and schedule-aligned, so zero-based folder sets are
+    // shifted up by one. renumberWeekLabel only rewrites a "week NN" token that
+    // is exactly one behind, so already-correct labels pass through unchanged.
+    const weekMap = assignWeekNumbers(folders);
+    for (const plan of plans) {
+      const week = weekMap.get(plan.assignmentName);
+      if (week !== undefined) {
+        plan.label = renumberWeekLabel(plan.label, week);
+        plan.presentationTitle = renumberWeekLabel(plan.presentationTitle, week);
+        plan.weekNumber = week;
+      }
+    }
+
     return plans;
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
@@ -6550,7 +6566,14 @@ export async function listAssignmentFoldersAction(
       return { error: "No assignment subfolders found inside the assignments folder." };
     }
 
-    return { folders: folders.map((slug) => ({ slug, label: humanizeAssignmentName(slug) })) };
+    const weekMap = assignWeekNumbers(folders);
+    return {
+      folders: folders.map((slug) => {
+        const week = weekMap.get(slug);
+        const base = humanizeAssignmentName(slug);
+        return { slug, label: week === undefined ? base : renumberWeekLabel(base, week) };
+      }),
+    };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
@@ -6597,7 +6620,18 @@ export async function generateLecturePlanForAssignmentAction(
 
     // Preserve the assignment's natural ordering (its position in the sorted
     // folder list) so a single module sorts correctly if merged into a list.
-    return await buildAssignmentPlan(bundle, index, lectureDurationMinutes, templates, provider);
+    const plan = await buildAssignmentPlan(bundle, index, lectureDurationMinutes, templates, provider);
+
+    // Normalize week numbers to match the course schedule, same as generateLecturePlansAction.
+    const weekMap = assignWeekNumbers(folders);
+    const week = weekMap.get(slug);
+    if (week !== undefined) {
+      plan.label = renumberWeekLabel(plan.label, week);
+      plan.presentationTitle = renumberWeekLabel(plan.presentationTitle, week);
+      plan.weekNumber = week;
+    }
+
+    return plan;
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }

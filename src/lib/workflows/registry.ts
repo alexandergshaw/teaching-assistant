@@ -60,6 +60,7 @@ import { scheduleToCsv } from "@/lib/workflows/types";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
 import type { RubricCriterionInput, DueDateUpdate } from "@/lib/canvas-modules";
 import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
+import { planCartridgeModules } from "@/lib/week-numbering";
 
 // "Student" or "Student | github-username" (pipe-separated so commas in
 // names like "Last, First" never masquerade as usernames).
@@ -1567,7 +1568,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     // reference it; the step now serves any Common Cartridge LMS.
     type: "blackboard-export",
     name: "LMS export (.imscc)",
-    description: "Package the generated materials as a Common Cartridge for the course tile's LMS. Canvas imports it via Settings > Import Course Content > Common Cartridge; Blackboard via Import Package. Weekly deliverables import as real assignments with rendered instructions.",
+    description: "Package the generated materials as a Common Cartridge for the course tile's LMS. Canvas imports it via Settings > Import Course Content > Common Cartridge; Blackboard via Import Package. Modules are numbered 01 through the number of scheduled weeks; every module includes its deliverable assignment with the end-of-week deadline.",
     inputs: [
       {
         key: "files",
@@ -1676,74 +1677,72 @@ export const STEP_REGISTRY: StepDefinition[] = [
         weeksMap.get(file.weekNumber)!.push(file);
       }
 
-      const weeks = Array.from(weeksMap.entries())
-        .sort(([a], [b]) => a - b)
-        .map(([week, weekFiles]) => {
-          const sw = schedule.find((w) => w.week === week);
-          const title = `Module ${String(week).padStart(2, "0")}${
-            sw?.topic ? `: ${sw.topic}` : ""
-          }`;
+      // Modules are numbered 01 through the number of scheduled weeks; file weeks
+      // are already normalized 1-based upstream. Every numbered module ships exactly
+      // one deliverable assignment so imports never produce an assignment-less module.
+      const modulePlans = planCartridgeModules(schedule, Array.from(weeksMap.keys()));
 
-          const sorted = [...weekFiles].sort((a, b) => a.sortOrder - b.sortOrder);
+      const weeks = modulePlans.map((plan) => {
+        const weekFiles = weeksMap.get(plan.week) ?? [];
+        const sorted = [...weekFiles].sort((a, b) => a.sortOrder - b.sortOrder);
 
-          // Introductions ride as wiki_content HTML pages (Canvas imports
-          // them as Pages; Blackboard renders the resulting Document inline
-          // when opened); slides and instructions stay plain files.
-          const cartridgeFiles: Array<{ name: string; blob: Blob }> = [];
-          const pages: Array<{ title: string; html: string }> = [];
-          for (const f of sorted) {
-            if (f.role === "introduction" && f.pageText) {
-              pages.push({
-                title: f.name.replace(/\.[^.]+$/, ""),
-                html: f.pageText
-                  .split(/\r?\n/)
-                  .map((line) => line.trim())
-                  .filter(Boolean)
-                  .map((line) => `<p>${esc(line)}</p>`)
-                  .join(""),
-              });
-            } else {
-              cartridgeFiles.push({ name: f.name, blob: f.blob });
-            }
-          }
-
-          // Deliverables ride the CC assignment extension so the import
-          // creates real assignments with rendered instructions.
-          const assignments: Array<{
-            title: string;
-            html: string;
-            points: number;
-          }> = [];
-          if (sw?.assignmentTitle) {
-            let dueText = "";
-            if (start) {
-              const due = weekDeadline(start, week);
-              dueText = due.toLocaleString();
-            }
-
-            const html = `<p>Submit the URL of your GitHub repository containing this week's deliverable.</p>${
-              sw.assignmentSlug
-                ? `<p>Read the README for this module in the course codebase (folder "${esc(
-                    sw.assignmentSlug
-                  )}").</p>`
-                : ""
-            }${dueText ? `<p><strong>Deadline:</strong> ${esc(dueText)}</p>` : ""}`;
-
-            assignments.push({
-              title: sw.assignmentTitle,
-              html,
-              points: 100,
+        // Introductions ride as wiki_content HTML pages (Canvas imports
+        // them as Pages; Blackboard renders the resulting Document inline
+        // when opened); slides and instructions stay plain files.
+        const cartridgeFiles: Array<{ name: string; blob: Blob }> = [];
+        const pages: Array<{ title: string; html: string }> = [];
+        for (const f of sorted) {
+          if (f.role === "introduction" && f.pageText) {
+            pages.push({
+              title: f.name.replace(/\.[^.]+$/, ""),
+              html: f.pageText
+                .split(/\r?\n/)
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .map((line) => `<p>${esc(line)}</p>`)
+                .join(""),
             });
+          } else {
+            cartridgeFiles.push({ name: f.name, blob: f.blob });
           }
+        }
 
-          return {
-            week,
-            title,
-            files: cartridgeFiles,
-            pages,
-            assignments,
-          };
-        });
+        // Deliverables ride the CC assignment extension so the import
+        // creates real assignments with rendered instructions.
+        let dueText = "";
+        if (start) {
+          const due = weekDeadline(start, plan.week);
+          dueText = due.toLocaleString();
+        }
+
+        const html = `<p>Submit the URL of your GitHub repository containing this week's deliverable.</p>${
+          plan.assignmentSlug
+            ? `<p>Read the README for this module in the course codebase (folder "${esc(
+                plan.assignmentSlug
+              )}").</p>`
+            : ""
+        }${dueText ? `<p><strong>Deadline:</strong> ${esc(dueText)}</p>` : ""}`;
+
+        const assignments: Array<{
+          title: string;
+          html: string;
+          points: number;
+        }> = [
+          {
+            title: plan.assignmentTitle,
+            html,
+            points: 100,
+          },
+        ];
+
+        return {
+          week: plan.week,
+          title: plan.title,
+          files: cartridgeFiles,
+          pages,
+          assignments,
+        };
+      });
 
       // A "Start Here" starter module rides as week 0, purely additive:
       // buildCommonCartridge titles modules from each week's own title
@@ -1773,10 +1772,17 @@ export const STEP_REGISTRY: StepDefinition[] = [
       // Cartridges cannot express the live path's true/false quiz without
       // QTI; a 1-point acknowledgement assignment is the import-safe
       // equivalent.
+      let acknowledgementHtml = "<p>Read the course syllabus, then submit confirming: I read and understand the syllabus.</p>";
+      if (start) {
+        const ackDue = new Date(start);
+        ackDue.setDate(start.getDate() + 3);
+        ackDue.setHours(23, 59, 0, 0);
+        acknowledgementHtml += `<p><strong>Deadline:</strong> ${esc(ackDue.toLocaleString())}</p>`;
+      }
       const starterAssignments = [
         {
           title: "Syllabus Acknowledgement",
-          html: "<p>Read the course syllabus, then submit confirming: I read and understand the syllabus.</p>",
+          html: acknowledgementHtml,
           points: 1,
         },
       ];
@@ -2768,6 +2774,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
           // Each module's week comes from its OWN name - "Start Here" maps
           // to week 1 and "Module NN" to N - never from list position, so
           // extra or reordered modules cannot skew other modules' deadlines.
+          // Legacy "Module 00" exports clamp to week one so no deadline can land
+          // before the course starts.
           const updates: DueDateUpdate[] = [];
           let moduleCount = 0;
           for (const m of content.modules) {
@@ -2776,7 +2784,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
               week = 1;
             } else {
               const wm = m.name.match(/module\s*0*(\d+)/i);
-              if (wm) week = Number(wm[1]);
+              if (wm) week = Math.max(1, Number(wm[1]));
             }
             if (week === null) continue;
 

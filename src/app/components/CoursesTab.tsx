@@ -675,14 +675,15 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     setRepoAddSel("");
     setRepoAddBranch("");
 
-    // Feature 2: After successful save of repos, extract topics if repos were saved and topics are empty
+    // Feature 2: After successful save of repos, extract topics from the repo the user just linked
     if (tileEdit.field === "repos" && patch.repos && patch.repos.length > 0) {
+      // Extract from the repo the user just linked, not the tile's first repo; fall back to the last listed repo when nothing new was added.
+      const prevRepos = new Set(course.repos.map((x) => x.repo.toLowerCase()));
+      const added = patch.repos.filter((x) => !prevRepos.has(x.repo.toLowerCase()));
+      const extractRepo = (added.length > 0 ? added[added.length - 1] : patch.repos[patch.repos.length - 1]).repo;
       const topicsEmpty = !savedCourse.topics || savedCourse.topics.trim() === "";
-      if (topicsEmpty) {
-        // Extract from the repo the user just linked, not the tile's first repo; fall back to the last listed repo when nothing new was added.
-        const prevRepos = new Set(course.repos.map((x) => x.repo.toLowerCase()));
-        const added = patch.repos.filter((x) => !prevRepos.has(x.repo.toLowerCase()));
-        const extractRepo = (added.length > 0 ? added[added.length - 1] : patch.repos[patch.repos.length - 1]).repo;
+      // A newly linked repo re-extracts and replaces the topics so they always describe the repo just linked; a repos edit that adds nothing new only fills topics when they are empty.
+      if (added.length > 0 || topicsEmpty) {
         // Start background extraction without blocking the save
         void (async () => {
           setAutoTopicsId(savedCourse.id);

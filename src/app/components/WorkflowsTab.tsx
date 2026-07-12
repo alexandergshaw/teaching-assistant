@@ -277,7 +277,7 @@ export default function WorkflowsTab() {
     editingRef.current = editing;
   }, [editing]);
 
-  const [hubCourses, setHubCourses] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [hubCourses, setHubCourses] = useState<Array<{ id: string; name: string; canvasUrl: string | null; repos: string[] }> | null>(null);
   const [hubCoursesError, setHubCoursesError] = useState<string | null>(null);
 
   const runtimeFields: RuntimeField[] = useMemo(
@@ -420,7 +420,7 @@ export default function WorkflowsTab() {
           if ("error" in list) {
             setHubCoursesError(list.error);
           } else {
-            setHubCourses(list.courses.map((c) => ({ id: c.id, name: c.name })));
+            setHubCourses(list.courses.map((c) => ({ id: c.id, name: c.name, canvasUrl: c.canvasUrl ?? null, repos: (c.repos || []).map((x) => x.repo) })));
             setHubCoursesError(null);
           }
         }
@@ -456,7 +456,41 @@ export default function WorkflowsTab() {
   };
 
   const handleValueChange = (fieldKey: string, value: string) => {
-    setValues((prev) => ({ ...prev, [fieldKey]: value }));
+    const field = runtimeFields.find((f) => f.fieldKey === fieldKey);
+
+    // Picking a repo that is attached to a course tile pre-selects that tile
+    // (and its LMS course when empty); later manual changes are respected
+    // because this only runs when the repo field itself changes.
+    if (field?.type === "repo" && hubCourses && value.trim()) {
+      const m = value.match(/github\.com\/([^/\s]+\/[^/\s#?]+)/);
+      const ref = (m ? m[1] : value).trim().replace(/\.git$/, "").toLowerCase();
+
+      const match = hubCourses.find((c) => c.repos.some((r) => r.toLowerCase() === ref));
+
+      if (match) {
+        setValues((prev) => {
+          const next = { ...prev, [fieldKey]: value };
+
+          // Find first hubCourse field and set it
+          const hubCourseField = runtimeFields.find((f) => f.type === "hubCourse");
+          if (hubCourseField) {
+            next[hubCourseField.fieldKey] = match.id;
+          }
+
+          // Find first lmsCourse field, set it if empty and canvasUrl exists
+          const lmsCourseField = runtimeFields.find((f) => f.type === "lmsCourse");
+          if (lmsCourseField && !prev[lmsCourseField.fieldKey] && match.canvasUrl) {
+            next[lmsCourseField.fieldKey] = match.canvasUrl;
+          }
+
+          return next;
+        });
+      } else {
+        setValues((prev) => ({ ...prev, [fieldKey]: value }));
+      }
+    } else {
+      setValues((prev) => ({ ...prev, [fieldKey]: value }));
+    }
   };
 
   const validateForm = (): boolean => {

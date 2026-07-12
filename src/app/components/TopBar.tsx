@@ -7,9 +7,10 @@ import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import TextField from "@mui/material/TextField";
 import ProviderToggle from "./ProviderToggle";
+import InstitutionSwitcher from "./InstitutionSwitcher";
 import { useAccessibility } from "./AccessibilityProvider";
 import { useSupabase } from "@/context/SupabaseProvider";
-import { useInstitutions, writeInstitutions } from "@/lib/institutions";
+import { useInstitutions, writeInstitutions, useInstitutionSelection } from "@/lib/institutions";
 import { useThemePreference } from "@/hooks/useThemePreference";
 import { checkInstitutionsAction } from "../actions";
 import styles from "./TopBar.module.css";
@@ -326,6 +327,7 @@ function SettingsMenu() {
 export default function TopBar() {
   const { supabase, user } = useSupabase();
   const router = useRouter();
+  const { institutions } = useInstitutionSelection();
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -340,6 +342,7 @@ export default function TopBar() {
         <span className={styles.name}>Teaching Assistant</span>
       </Link>
       <nav className={styles.actions}>
+        {institutions.length > 0 && <InstitutionSwitcher metric="both" />}
         <AccessibilityPill />
         <SettingsMenu />
         {user && (

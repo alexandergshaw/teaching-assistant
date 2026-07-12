@@ -71,8 +71,6 @@ export const COURSE_REFRESH: WorkflowDef = {
       type: "schedule-from-repo",
       bindings: {
         repo: { source: "runtime", fieldKey: "repo" },
-        weeks: { source: "runtime", fieldKey: "weeks" },
-        tests: { source: "runtime", fieldKey: "tests" },
       },
     },
     {

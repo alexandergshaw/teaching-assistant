@@ -60,6 +60,10 @@ const FALLBACK_VERSIONS: Record<string, string> = {
 const PISTON_URL =
   process.env.PISTON_API_URL?.trim().replace(/\/+$/, "") || "https://emkc.org/api/v2/piston";
 
+// Optional API key sent as the Authorization header. emkc.org issues keys; self-hosted
+// Piston instances may also require one. No "Bearer" prefix—send the bare token.
+const PISTON_KEY = process.env.PISTON_API_KEY?.trim() || "";
+
 // Module-level cache for runtimes lookup.
 let runtimesCache: Array<{ language: string; version: string; aliases?: string[] }> | null = null;
 
@@ -98,8 +102,15 @@ function compareVersions(a: string, b: string): number {
 async function resolveVersion(language: string): Promise<string> {
   if (!runtimesCache) {
     try {
-      const res = await fetch(`${PISTON_URL}/runtimes`);
+      const headers: Record<string, string> = {};
+      if (PISTON_KEY) {
+        headers.Authorization = PISTON_KEY;
+      }
+      const res = await fetch(`${PISTON_URL}/runtimes`, { headers });
       if (!res.ok) {
+        if (res.status === 401) {
+          throw new Error("Piston rejected the request (401 unauthorized). Set PISTON_API_KEY (for the public emkc.org API) or point PISTON_API_URL at a self-hosted Piston instance.");
+        }
         throw new Error(`Runtimes lookup returned ${res.status}`);
       }
       runtimesCache = (await res.json()) as Array<{
@@ -258,9 +269,13 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
 
   let result: PistonResponse;
   try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (PISTON_KEY) {
+      headers.Authorization = PISTON_KEY;
+    }
     const res = await fetch(`${PISTON_URL}/execute`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         language: dominantLanguage,
         version,
@@ -270,6 +285,12 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
     });
 
     if (!res.ok) {
+      if (res.status === 401) {
+        throw new Error("Piston rejected the request (401 unauthorized). Set PISTON_API_KEY (for the public emkc.org API) or point PISTON_API_URL at a self-hosted Piston instance.");
+      }
+      if (res.status === 429) {
+        throw new Error("Piston rate-limited the request (429). Try again in a few seconds or configure PISTON_API_URL/PISTON_API_KEY.");
+      }
       throw new Error(`Piston returned ${res.status}`);
     }
 

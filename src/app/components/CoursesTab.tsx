@@ -925,7 +925,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         await removeCourseZip(supabase, appendResult.replacedPath);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not export from LMS.");
+      const message = err instanceof Error ? err.message : "Could not export from LMS.";
+      if (/exceeded the maximum allowed size|payload too large|entity too large/i.test(message)) {
+        setError("This export exceeds the storage upload limit. Raise \"Upload file size limit\" in Supabase Storage settings (currently the project default is 50 MB), then retry.");
+      } else {
+        setError(message);
+      }
     } finally {
       setLmsBusyTile(null);
     }
@@ -1253,7 +1258,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         await removeCourseZip(supabase, r.replacedPath);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not upload the export.");
+      const message = err instanceof Error ? err.message : "Could not upload the export.";
+      if (/exceeded the maximum allowed size|payload too large|entity too large/i.test(message)) {
+        setError("This export exceeds the storage upload limit. Raise \"Upload file size limit\" in Supabase Storage settings (currently the project default is 50 MB), then retry.");
+      } else {
+        setError(message);
+      }
     } finally {
       setUploadingExport(false);
     }

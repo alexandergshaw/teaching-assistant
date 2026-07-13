@@ -274,6 +274,19 @@ export default function WorkflowsTab() {
   const [runPause, setRunPause] = useState<{ stepIndex: number; message: string } | null>(null);
   const pauseResolverRef = useRef<{ resolve: (go: boolean) => void } | null>(null);
 
+  const [runInput, setRunInput] = useState<{
+    stepIndex: number;
+    message: string;
+    kind: "text" | "choice" | "upload" | "workflow";
+    options: Array<{ value: string; label: string }>;
+    optional: boolean;
+  } | null>(null);
+  const inputResolverRef = useRef<{ resolve: (value: string | File[] | null) => void } | null>(null);
+  const [runInputText, setRunInputText] = useState("");
+  const [runInputChoice, setRunInputChoice] = useState("");
+  const [runInputFiles, setRunInputFiles] = useState<File[]>([]);
+  const [pendingHandoff, setPendingHandoff] = useState<{ workflowId: string; prefill: Record<string, string> } | null>(null);
+
   const [uploadFiles, setUploadFiles] = useState<Record<string, File[]>>({});
 
   const [editing, setEditing] = useState(false);
@@ -754,6 +767,8 @@ export default function WorkflowsTab() {
 
     setRunning(true);
     setValidationError(null);
+    setRunInput(null);
+    inputResolverRef.current = null;
     setRunState(
       expanded.steps.map(() => ({
         status: "pending",
@@ -914,6 +929,59 @@ export default function WorkflowsTab() {
             break;
           }
         }
+
+        if (result.requireInput) {
+          const inputOptions =
+            result.requireInput.kind === "workflow"
+              ? workflows
+                  .filter((w) => w.id !== selectedWorkflowId)
+                  .map((w) => ({ value: w.id, label: w.name }))
+              : result.requireInput.options ?? [];
+
+          setRunInputText("");
+          setRunInputChoice("");
+          setRunInputFiles([]);
+
+          await new Promise<void>((resolve) => {
+            setRunInput({
+              stepIndex: i,
+              message: result.requireInput!.message,
+              kind: result.requireInput!.kind,
+              options: inputOptions,
+              optional: !!result.requireInput!.optional,
+            });
+            inputResolverRef.current = {
+              resolve: (value) => {
+                setRunInput(null);
+                inputResolverRef.current = null;
+                if (value === null) {
+                  if (!result.requireInput!.optional) {
+                    failedSteps.add(i);
+                  }
+                } else {
+                  stepOutputs[i] = {
+                    ...stepOutputs[i],
+                    [result.requireInput!.key]: value,
+                  };
+                  if (
+                    result.requireInput!.kind === "workflow" &&
+                    typeof value === "string" &&
+                    value
+                  ) {
+                    setPendingHandoff({
+                      workflowId: value,
+                      prefill: result.requireInput!.handoffPrefill ?? {},
+                    });
+                  }
+                }
+                resolve();
+              },
+            };
+          });
+          if (failedSteps.has(i)) {
+            break;
+          }
+        }
       } catch (err) {
         const errorMsg =
           err instanceof Error ? err.message : String(err);
@@ -931,10 +999,40 @@ export default function WorkflowsTab() {
       }
     }
 
+    // A cancelled or failed run must not fire the mid-run handoff.
+    if (failedSteps.size > 0) {
+      setPendingHandoff(null);
+    }
+
     // Re-arm the lazy fetch so runs that created/updated tiles refresh the pickers
     setHubCourses(null);
     setRunning(false);
   };
+
+  // Fire a workflow handoff chosen mid-run: select the target workflow, set its
+  // values to ONLY the handoff prefill, and auto-run on the settled render.
+  // handleWorkflowChange rehydrates the target's saved values from localStorage;
+  // we then overwrite that map entirely with the prefill so stale saved values
+  // (e.g. an lmsModule id from a different course) never ride along. Any missing
+  // required field then fails validateForm, stopping the auto-run at the form.
+  // Declared after handleRun so the effect references it post-declaration; the
+  // two-phase ref dance runs handleRun only once selection/values have settled.
+  const handoffArmedRef = useRef(false);
+  useEffect(() => {
+    if (!pendingHandoff || running) return;
+    if (!handoffArmedRef.current) {
+      handoffArmedRef.current = true;
+      handleWorkflowChange(pendingHandoff.workflowId);
+      setValues(pendingHandoff.prefill);
+      return;
+    }
+    handoffArmedRef.current = false;
+    setPendingHandoff(null);
+    void handleRun();
+    // handleRun is recreated every render; depending on it would refire the
+    // effect mid-dance, so the deps list is intentionally narrower.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingHandoff, running, selectedWorkflowId, values]);
 
   return (
     <div className={styles.card}>
@@ -1590,7 +1688,7 @@ export default function WorkflowsTab() {
             <Button
               variant="contained"
               onClick={handleRun}
-              disabled={running || !!runPause || !!expanded.error}
+              disabled={running || !!runPause || !!runInput || !!expanded.error}
               size="small"
             >
               {running ? "Running..." : "Run"}
@@ -1692,6 +1790,130 @@ export default function WorkflowsTab() {
                       >
                         Cancel run
                       </Button>
+                    </div>
+                  </div>
+                )}
+
+                {runInput && runInput.stepIndex === i && (
+                  <div style={{ marginTop: 12 }}>
+                    <p className={styles.fieldHint}>{runInput.message}</p>
+
+                    {runInput.kind === "text" && (
+                      <TextField
+                        size="small"
+                        fullWidth
+                        multiline
+                        minRows={3}
+                        value={runInputText}
+                        onChange={(e) => setRunInputText(e.target.value)}
+                        style={{ marginTop: 8 }}
+                      />
+                    )}
+
+                    {(runInput.kind === "choice" || runInput.kind === "workflow") && (
+                      <TextField
+                        size="small"
+                        fullWidth
+                        select
+                        value={runInputChoice}
+                        onChange={(e) => setRunInputChoice(e.target.value)}
+                        style={{ marginTop: 8 }}
+                      >
+                        <MenuItem value="" disabled>
+                          Choose...
+                        </MenuItem>
+                        {runInput.options.map((opt) => (
+                          <MenuItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    )}
+
+                    {runInput.kind === "upload" && (
+                      <>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => {
+                            const input = document.createElement("input");
+                            input.type = "file";
+                            input.multiple = true;
+                            input.accept = ".zip";
+                            input.onchange = (e) => {
+                              const newFiles = Array.from(
+                                (e.target as HTMLInputElement).files ?? []
+                              );
+                              setRunInputFiles(newFiles);
+                            };
+                            input.click();
+                          }}
+                          style={{ marginTop: 8 }}
+                        >
+                          Choose zip...
+                        </Button>
+                        {runInputFiles.length > 0 && (
+                          <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
+                            {runInputFiles.map((f) => f.name).join(", ")}
+                          </p>
+                        )}
+                      </>
+                    )}
+
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        marginTop: 8,
+                        alignItems: "center",
+                      }}
+                    >
+                      <Button
+                        size="small"
+                        variant="contained"
+                        disabled={
+                          runInput.kind === "text"
+                            ? !runInputText.trim()
+                            : runInput.kind === "choice" || runInput.kind === "workflow"
+                              ? !runInputChoice
+                              : runInputFiles.length === 0
+                        }
+                        onClick={() => {
+                          const value =
+                            runInput.kind === "text"
+                              ? runInputText
+                              : runInput.kind === "choice" || runInput.kind === "workflow"
+                                ? runInputChoice
+                                : runInputFiles;
+                          inputResolverRef.current?.resolve(value as string | File[]);
+                        }}
+                      >
+                        {runInput.kind === "workflow"
+                          ? "Run selected workflow after this run"
+                          : "Submit"}
+                      </Button>
+                      {runInput.optional && (
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={() => {
+                            inputResolverRef.current?.resolve(null);
+                          }}
+                        >
+                          Skip
+                        </Button>
+                      )}
+                      {!runInput.optional && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => {
+                            inputResolverRef.current?.resolve(null);
+                          }}
+                        >
+                          Cancel run
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )}

@@ -43,13 +43,19 @@ import {
   previewFinalizedSyllabusAction,
   generateCourseSyllabusAction,
   createFinalizedSyllabusAction,
+  gradeAction,
+  generateAssignmentRubricAction,
+  listGradingQueueAction,
+  postCanvasGradesAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
+import type { GradingRun } from "@/lib/grade";
 import type { InstitutionField } from "@/lib/institution-fields";
 import type { RepoPermission } from "@/lib/github";
 import type { CommonResourceItem } from "@/lib/common-resources";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
+import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import type {
   StepInputSpec,
@@ -240,6 +246,28 @@ export interface StepRunResult {
    * pauses until the user continues or cancels the workflow.
    */
   requireConfirmation?: string;
+  /**
+   * Optional mid-run input request shown after the step's summary. The runner
+   * pauses and collects a value, merging it into this step's outputs under
+   * `key` before dependent steps run:
+   * - "text": a textarea; resolves to the entered string.
+   * - "choice": one of `options`; resolves to the chosen value.
+   * - "upload": a file picker; resolves to the File[] (runtime-only).
+   * - "workflow": a picker over the user's workflows; choosing one records a
+   *   post-run handoff to that workflow with `handoffPrefill` as its run-form
+   *   values (the chosen id is also merged into outputs under `key`).
+   * Cancel fails the step and stops the run unless `optional` is true, in
+   * which case the run simply continues with no value merged.
+   * A step must not set both requireConfirmation and requireInput.
+   */
+  requireInput?: {
+    message: string;
+    key: string;
+    kind: "text" | "choice" | "upload" | "workflow";
+    options?: Array<{ value: string; label: string }>;
+    optional?: boolean;
+    handoffPrefill?: Record<string, string>;
+  };
 }
 
 export interface StepDefinition {
@@ -467,6 +495,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Adds each week's Instructions document to the materials.",
       },
+      {
+        key: "schedule",
+        label: "Course schedule",
+        type: "schedule",
+        required: false,
+        help: "When bound, each deck is titled with its module's topic.",
+      },
     ],
     outputs: [
       { key: "files", label: "Generated files", type: "files" },
@@ -509,6 +544,17 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       if ("error" in plans) {
         throw new Error(plans.error);
+      }
+
+      // When schedule is bound, use each module's topic to title the deck.
+      const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
+      if (schedule.length > 0) {
+        for (const plan of plans) {
+          const scheduleEntry = schedule.find((s) => s.week === plan.weekNumber);
+          if (scheduleEntry && scheduleEntry.topic.trim()) {
+            plan.presentationTitle = scheduleEntry.topic;
+          }
+        }
       }
 
       const files: GeneratedCourseFile[] = [];
@@ -824,7 +870,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           onProgress(`Creating page "${pageTitle}" in ${targetModule.name}...`);
           const created = await createPageAction(
             course,
-            { title: pageTitle, body: file.pageText },
+            { title: pageTitle, body: markdownLiteToHtml(file.pageText) },
             helpers.activeInstitution || undefined
           );
 
@@ -1820,7 +1866,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     // reference it; the step now serves any Common Cartridge LMS.
     type: "blackboard-export",
     name: "LMS export (.imscc)",
-    description: "Package the generated materials as a Common Cartridge for the course tile's LMS. Canvas imports it via Settings > Import Course Content > Common Cartridge; Blackboard via Import Package. Modules are numbered 01 through the number of scheduled weeks; every module includes its deliverable assignment with the end-of-week deadline.",
+    description: "Package the generated materials as a Common Cartridge for the course tile's LMS. Canvas imports it via Settings > Import Course Content > Common Cartridge; Blackboard via Import Package. Modules are numbered 01 through the number of scheduled weeks; every module includes its deliverable assignment with the end-of-week deadline. Canvas exports carry real assignment due dates; Blackboard imports show the deadline in each assignment's instructions.",
     inputs: [
       {
         key: "files",
@@ -1934,6 +1980,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
           .replace(/"/g, "&quot;");
       };
 
+      // Canvas parses zoneless due_at values as UTC, so the timestamp must
+      // be the UTC instant (suffix stripped); Canvas renders it back in the
+      // course timezone. A local wall-clock string would shift the imported
+      // deadline earlier by the exporter's UTC offset.
+      const toUtcTimestamp = (d: Date): string =>
+        d.toISOString().replace(/\.\d{3}Z$/, "");
+
       const weeksMap = new Map<number, GeneratedCourseFile[]>();
       for (const file of files) {
         if (!weeksMap.has(file.weekNumber)) {
@@ -1951,33 +2004,23 @@ export const STEP_REGISTRY: StepDefinition[] = [
         const weekFiles = weeksMap.get(plan.week) ?? [];
         const sorted = [...weekFiles].sort((a, b) => a.sortOrder - b.sortOrder);
 
-        // Introductions ride as wiki_content HTML pages (Canvas imports
-        // them as Pages; Blackboard renders the resulting Document inline
-        // when opened); slides and instructions stay plain files.
+        // Introductions ship as .docx files in the cartridge (like slides and
+        // instructions); the live path (lms-populate) converts intro text to
+        // proper HTML via markdown-lite. All files go into cartridgeFiles.
         const cartridgeFiles: Array<{ name: string; blob: Blob }> = [];
         const pages: Array<{ title: string; html: string }> = [];
         for (const f of sorted) {
-          if (f.role === "introduction" && f.pageText) {
-            pages.push({
-              title: f.name.replace(/\.[^.]+$/, ""),
-              html: f.pageText
-                .split(/\r?\n/)
-                .map((line) => line.trim())
-                .filter(Boolean)
-                .map((line) => `<p>${esc(line)}</p>`)
-                .join(""),
-            });
-          } else {
-            cartridgeFiles.push({ name: f.name, blob: f.blob });
-          }
+          cartridgeFiles.push({ name: f.name, blob: f.blob });
         }
 
         // Deliverables ride the CC assignment extension so the import
         // creates real assignments with rendered instructions.
         let dueText = "";
+        let dueAt: string | undefined;
         if (start) {
           const due = weekDeadline(start, plan.week);
           dueText = due.toLocaleString();
+          dueAt = toUtcTimestamp(due);
         }
 
         const html = `<p>Submit the URL of your GitHub repository containing this week's deliverable.</p>${
@@ -1992,11 +2035,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
           title: string;
           html: string;
           points: number;
+          dueAt?: string;
         }> = [
           {
             title: plan.assignmentTitle,
             html,
             points: 100,
+            dueAt,
           },
         ];
 
@@ -2038,17 +2083,25 @@ export const STEP_REGISTRY: StepDefinition[] = [
       // QTI; a 1-point acknowledgement assignment is the import-safe
       // equivalent.
       let acknowledgementHtml = "<p>Read the course syllabus, then submit confirming: I read and understand the syllabus.</p>";
+      let ackDueAt: string | undefined;
       if (start) {
         const ackDue = new Date(start);
         ackDue.setDate(start.getDate() + 3);
         ackDue.setHours(23, 59, 0, 0);
         acknowledgementHtml += `<p><strong>Deadline:</strong> ${esc(ackDue.toLocaleString())}</p>`;
+        ackDueAt = toUtcTimestamp(ackDue);
       }
-      const starterAssignments = [
+      const starterAssignments: Array<{
+        title: string;
+        html: string;
+        points: number;
+        dueAt?: string;
+      }> = [
         {
           title: "Syllabus Acknowledgement",
           html: acknowledgementHtml,
           points: 1,
+          dueAt: ackDueAt,
         },
       ];
 
@@ -2070,7 +2123,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
       onProgress("Building Common Cartridge...");
       const blob = await buildCommonCartridge(
         baseName.replace(/_/g, " "),
-        weeks
+        weeks,
+        { flavor: tileLms === "canvas" ? "canvas" : "cc" }
       );
 
       onProgress("Downloading .imscc...");
@@ -2111,11 +2165,11 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       let summaryText: string;
       if (tileLms === "canvas") {
-        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package. Deliverables import as assignments; introductions import as pages; files import into modules.`;
+        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package. Deliverables import as assignments; introductions import as module documents (Word files); files import into modules.`;
       } else if (tileLms === "blackboard") {
-        summaryText = `Downloaded ${baseName}.imscc - import it in Blackboard via Import Course Content; modules arrive inside a course folder. Deliverables import as assignments; introductions import as rendered documents.`;
+        summaryText = `Downloaded ${baseName}.imscc - import it in Blackboard via Import Course Content; modules arrive inside a course folder. Deliverables import as assignments; introductions import as module documents (Word files).`;
       } else {
-        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package, or in Blackboard via Course Content > Import Package. Deliverables import as assignments; introductions import as pages.`;
+        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package, or in Blackboard via Course Content > Import Package. Deliverables import as assignments; introductions import as module documents (Word files).`;
       }
 
       return {
@@ -3432,8 +3486,18 @@ export const STEP_REGISTRY: StepDefinition[] = [
         type: "hubCourseList",
         required: true,
       },
+      {
+        key: "collectImprovements",
+        label: "Ask for improvements",
+        type: "boolean",
+        required: false,
+        help: "Pause after the report to collect improvement instructions for the Copilot step.",
+      },
     ],
-    outputs: [],
+    outputs: [
+      { key: "report", label: "Report text", type: "longtext" },
+      { key: "improvements", label: "Improvements", type: "longtext" },
+    ],
     run: async (values, helpers, onProgress) => {
       const ids = String(values.courses ?? "")
         .split("\n")
@@ -3530,7 +3594,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       }
 
       const combined = r.reports
-        .map((rep) => `==== ${rep.name} ====\n\n${rep.report}`)
+        .map((rep) => `# ${rep.name}\n${rep.report}`)
         .join("\n\n");
 
       onProgress("Building the report document...");
@@ -3552,8 +3616,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      return {
-        outputs: {},
+      const result: StepRunResult = {
+        outputs: { report: combined, improvements: "" },
         summary: {
           kind: "list",
           label: `Analyzed ${r.reports.length} course(s)`,
@@ -3568,6 +3632,677 @@ export const STEP_REGISTRY: StepDefinition[] = [
             ...missing,
           ],
         },
+      };
+
+      if (String(values.collectImprovements ?? "") === "1") {
+        result.requireInput = {
+          message:
+            "Review the report, then list the improvements the Copilot agent should make to the course repositories - one per line.",
+          key: "improvements",
+          kind: "text",
+        };
+      }
+
+      return result;
+    },
+  },
+
+  {
+    type: "agent-improve-repos",
+    name: "Improve repos via Copilot agent",
+    description:
+      "Fire a GitHub Copilot agent task on each course's linked repository with the listed improvements; courses without a repository can hand off to another workflow.",
+    inputs: [
+      {
+        key: "courses",
+        label: "Courses",
+        type: "hubCourseList",
+        required: true,
+      },
+      {
+        key: "improvements",
+        label: "Improvements",
+        type: "longtext",
+        required: true,
+        help: "One improvement per line.",
+      },
+      {
+        key: "report",
+        label: "Report context",
+        type: "longtext",
+        required: false,
+        help: "Optional context appended to the agent instructions.",
+      },
+    ],
+    outputs: [{ key: "workflowChoice", label: "Follow-up workflow", type: "text" }],
+    run: async (values, helpers, onProgress) => {
+      const improvements = String(values.improvements ?? "").trim();
+      if (!improvements) {
+        return {
+          outputs: { workflowChoice: "" },
+          summary: { kind: "text", text: "Skipped - no improvements provided." },
+        };
+      }
+
+      const ids = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const lines: string[] = [];
+      const noRepo: Array<{ id: string; name: string }> = [];
+      let taskCount = 0;
+
+      for (const id of ids) {
+        try {
+          const tile = hub.courses.find((c) => c.id === id);
+          if (!tile) {
+            lines.push(`${id}: not found`);
+            continue;
+          }
+
+          const repo = (tile.repos[0]?.repo ?? "").trim();
+          if (!repo) {
+            noRepo.push({ id: tile.id, name: tile.name });
+            lines.push(`${tile.name}: no repository on the tile`);
+            continue;
+          }
+
+          const reportContext = String(values.report ?? "").trim();
+          const body =
+            improvements +
+            (reportContext
+              ? `\n\nContext from the technology report:\n${reportContext.slice(0, 4000)}`
+              : "");
+
+          onProgress(`Firing Copilot task for ${tile.name}...`);
+          const r = await createCopilotTaskAction(
+            repo,
+            "Course technology improvements",
+            body
+          );
+
+          if ("error" in r) {
+            lines.push(`${tile.name}: ${r.error}`);
+          } else {
+            taskCount++;
+            lines.push(`${tile.name}: Copilot task #${r.issueNumber}`);
+          }
+        } catch (err) {
+          lines.push(
+            `${hub.courses.find((c) => c.id === id)?.name ?? id}: ${
+              err instanceof Error ? err.message : "failed"
+            }`
+          );
+        }
+      }
+
+      const result: StepRunResult = {
+        outputs: { workflowChoice: "" },
+        summary: {
+          kind: "list",
+          label: `Fired ${taskCount} Copilot task(s)`,
+          items: lines,
+        },
+      };
+
+      if (noRepo.length > 0) {
+        const noRepoNames = noRepo.map((t) => t.name).join(", ");
+        result.requireInput = {
+          message: `${noRepoNames} ${
+            noRepo.length === 1 ? "has" : "have"
+          } no linked repository. Choose a workflow to run for ${
+            noRepo.length === 1 ? "it" : "them"
+          } next, or skip to finish.`,
+          key: "workflowChoice",
+          kind: "workflow",
+          optional: true,
+          handoffPrefill: {
+            hubCourse: noRepo[0].id,
+            courses: noRepo.map((t) => t.id).join("\n"),
+          },
+        };
+      }
+
+      return result;
+    },
+  },
+
+  {
+    type: "grading-preflight",
+    name: "Find work needing grading",
+    description:
+      "List the selected courses' assignments with ungraded submissions and their rubric status.",
+    inputs: [
+      {
+        key: "courses",
+        label: "Courses",
+        type: "hubCourseList",
+        required: true,
+      },
+    ],
+    outputs: [{ key: "plan", label: "Grading plan", type: "courseList" }],
+    run: async (values, helpers, onProgress) => {
+      const ids = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const lines: string[] = [];
+
+      // Fail-forward: a deleted tile records a line and drops out of the plan.
+      const tiles: Course[] = [];
+      for (const id of ids) {
+        const tile = hub.courses.find((c) => c.id === id);
+        if (!tile) {
+          lines.push(`${id}: not found`);
+          continue;
+        }
+        tiles.push(tile);
+      }
+
+      const withLms = tiles.filter((t) => (t.canvasUrl ?? "").trim());
+      const offline = tiles.filter((t) => !(t.canvasUrl ?? "").trim());
+
+      // Uppercase before dedup: listGradingQueueAction uppercases acronyms, so
+      // "ut" and "UT" are the same institution and must scan once, not twice.
+      const resolveAcronym = (t: Course): string =>
+        (t.institution || helpers.activeInstitution || "").trim().toUpperCase();
+      const acronyms = [...new Set(withLms.map(resolveAcronym).filter(Boolean))];
+
+      interface PlanRow {
+        courseId: string;
+        courseName: string;
+        institution?: string;
+        canvasUrl?: string;
+        assignmentName?: string;
+        needsGrading?: number;
+        hasRubric?: boolean;
+        rubricText?: string;
+        description?: string;
+        pointsPossible?: number | null;
+        offline?: boolean;
+      }
+
+      const plan: PlanRow[] = [];
+      const queueErrors: Array<{ acronym: string; error: string }> = [];
+
+      if (withLms.length > 0) {
+        onProgress("Loading grading queue...");
+        const queueResult = await listGradingQueueAction(acronyms);
+        if ("error" in queueResult) {
+          throw new Error(queueResult.error);
+        }
+
+        const { rows: queueRows, errors } = queueResult;
+        // An expired token must surface, never read as "nothing needs grading".
+        queueErrors.push(...errors);
+        for (const e of errors) {
+          lines.push(`Institution ${e.acronym}: ${e.error}`);
+        }
+
+        for (const tile of withLms) {
+          const tileCanvasId = parseCanvasCourseId(tile.canvasUrl ?? "");
+          if (!tileCanvasId) {
+            lines.push(`${tile.name}: the LMS URL has no /courses/<id> - skipped`);
+            continue;
+          }
+
+          // Match on institution + numeric course id: ids alone collide
+          // across institutions and would duplicate rows.
+          const tileAcronym = resolveAcronym(tile);
+          const tileRows = queueRows.filter((row) => {
+            const rowCanvasId = parseCanvasCourseId(row.canvasUrl);
+            return (
+              rowCanvasId === tileCanvasId &&
+              row.institution.trim().toUpperCase() === tileAcronym
+            );
+          });
+
+          for (const row of tileRows) {
+            const hasRubric = !!(row.rubricText && row.rubricText.trim());
+            plan.push({
+              courseId: tile.id,
+              courseName: tile.name,
+              institution: row.institution,
+              canvasUrl: row.canvasUrl,
+              assignmentName: row.title,
+              needsGrading: row.needsGradingCount,
+              hasRubric,
+              rubricText: row.rubricText ?? "",
+              description: row.description ?? "",
+              pointsPossible: row.pointsPossible,
+            });
+
+            lines.push(
+              `${tile.name} - ${row.title}: ${row.needsGradingCount} to grade${
+                hasRubric ? "" : " (no rubric)"
+              }`
+            );
+          }
+        }
+      }
+
+      for (const tile of offline) {
+        plan.push({ courseId: tile.id, courseName: tile.name, offline: true });
+        lines.push(`${tile.name}: no LMS - submissions can be uploaded as a zip in the next step`);
+      }
+
+      if (plan.length === 0 && queueErrors.length > 0) {
+        throw new Error(
+          `The grading queue could not be loaded for ${queueErrors
+            .map((e) => e.acronym)
+            .join(", ")}: ${queueErrors.map((e) => e.error).join("; ")}`
+        );
+      }
+
+      if (lines.length === 0) {
+        lines.push("Nothing needs grading in the selected courses.");
+      }
+
+      const result: StepRunResult = {
+        outputs: { plan },
+        summary: { kind: "list", label: "Grading queue", items: lines },
+      };
+
+      // Offline tiles without a saved rubric also grade against an
+      // LLM-generated one, so they count toward the confirmation too.
+      const offlineNoRubric = offline.filter((t) => !(t.rubricData ?? "").trim()).length;
+      const noRubricCount =
+        plan.filter((p) => !p.offline && !p.hasRubric).length + offlineNoRubric;
+      if (noRubricCount > 0) {
+        result.requireConfirmation = `${noRubricCount} assignment(s) or offline course(s) have no rubric - rubrics will be generated via the LLM where missing. Continue to grade with them, or cancel to stop.`;
+      }
+
+      return result;
+    },
+  },
+
+  {
+    type: "collect-offline-submissions",
+    name: "Collect offline submissions",
+    description: "When a selected course has no LMS, pause to upload its submissions as a zip.",
+    inputs: [
+      {
+        key: "courses",
+        label: "Courses",
+        type: "hubCourseList",
+        required: true,
+      },
+    ],
+    outputs: [{ key: "submissionsZip", label: "Submissions zip", type: "uploads" }],
+    run: async (values) => {
+      const ids = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const offline = ids
+        .map((id) => hub.courses.find((c) => c.id === id))
+        .filter((t): t is typeof hub.courses[0] => !!t && !(t.canvasUrl ?? "").trim());
+
+      if (offline.length === 0) {
+        return {
+          outputs: { submissionsZip: [] },
+          summary: { kind: "text" as const, text: "Skipped - every selected course has an LMS." },
+        };
+      }
+
+      const offlineNames = offline.map((t) => t.name).join(", ");
+      // One zip grades one course: with several offline courses the upload is
+      // applied to the first listed one only, and the prompt says so.
+      const message =
+        offline.length === 1
+          ? `${offlineNames} has no LMS. Upload a zip of submissions to grade offline, or skip to grade only the LMS courses.`
+          : `${offlineNames} have no LMS. Upload a zip of submissions to grade offline - it is graded against ${offline[0].name} (the first listed); run Grade Submissions again for the others. Skip to grade only the LMS courses.`;
+      return {
+        outputs: { submissionsZip: [] },
+        summary: {
+          kind: "text" as const,
+          text: `${offline.length} course(s) have no LMS: ${offlineNames}.`,
+        },
+        requireInput: {
+          message,
+          key: "submissionsZip",
+          kind: "upload",
+          optional: true,
+        },
+      };
+    },
+  },
+
+  {
+    type: "grade-submissions",
+    name: "Grade submissions",
+    description:
+      "Grade every ungraded submission per assignment using its rubric (generating one via the LLM when missing) and prepare the grades for posting.",
+    inputs: [
+      {
+        key: "plan",
+        label: "Grading plan",
+        type: "courseList",
+        required: true,
+      },
+      {
+        key: "submissionsZip",
+        label: "Submissions zip",
+        type: "uploads",
+        required: false,
+      },
+      {
+        key: "courses",
+        label: "Courses",
+        type: "hubCourseList",
+        required: true,
+      },
+    ],
+    outputs: [{ key: "runs", label: "Grading runs", type: "courseList" }],
+    run: async (values, helpers, onProgress) => {
+      interface PlanRow {
+        courseId: string;
+        courseName: string;
+        institution?: string;
+        canvasUrl?: string;
+        assignmentName?: string;
+        rubricText?: string;
+        description?: string;
+        offline?: boolean;
+      }
+
+      const plan = Array.isArray(values.plan)
+        ? (values.plan as PlanRow[])
+        : [];
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const tileMap = new Map(hub.courses.map((c) => [c.id, c]));
+      const zips = Array.isArray(values.submissionsZip) ? (values.submissionsZip as File[]) : [];
+
+      interface RunEntry {
+        courseName: string;
+        assignmentName: string;
+        canvasUrl: string;
+        run: GradingRun;
+        offline?: boolean;
+      }
+
+      const runs: RunEntry[] = [];
+      const lines: string[] = [];
+
+      for (const row of plan) {
+        if (row.offline) continue;
+
+        try {
+          let rubricText = (row.rubricText ?? "").trim();
+
+          if (!rubricText) {
+            onProgress(
+              `Generating rubric for ${row.courseName} - ${row.assignmentName}...`
+            );
+            const rubricResult = await generateAssignmentRubricAction(
+              row.assignmentName ?? "",
+              row.description ?? "",
+              helpers.provider
+            );
+
+            if (typeof rubricResult === "string") {
+              rubricText = rubricResult;
+            } else {
+              lines.push(
+                `${row.courseName} - ${row.assignmentName}: rubric generation failed: ${
+                  rubricResult.error
+                }`
+              );
+              continue;
+            }
+          }
+
+          onProgress(
+            `Grading ${row.courseName} - ${row.assignmentName}...`
+          );
+
+          const formData = new FormData();
+          formData.set("canvasUrl", row.canvasUrl ?? "");
+          formData.set("provider", helpers.provider);
+          formData.set("rubric", rubricText);
+          // Canvas descriptions are often empty and the LLM path requires
+          // instructions, so fall back to the assignment name (Live Feed style).
+          formData.set(
+            "assignmentInstructions",
+            row.description ||
+              row.assignmentName ||
+              "Grade each submission against the rubric."
+          );
+          formData.set("institution", row.institution ?? "");
+
+          const gradeResult = await gradeAction({ run: null, error: null }, formData);
+
+          if (gradeResult.error) {
+            lines.push(
+              `${row.courseName} - ${row.assignmentName}: ${gradeResult.error}`
+            );
+            continue;
+          }
+
+          if (!gradeResult.run) {
+            lines.push(
+              `${row.courseName} - ${row.assignmentName}: no submissions to grade`
+            );
+            continue;
+          }
+
+          runs.push({
+            courseName: row.courseName,
+            assignmentName: row.assignmentName ?? "",
+            canvasUrl: row.canvasUrl ?? "",
+            run: gradeResult.run,
+          });
+
+          lines.push(
+            `${row.courseName} - ${row.assignmentName}: graded ${gradeResult.run.results.length} submission(s)`
+          );
+        } catch (err) {
+          lines.push(
+            `${row.courseName} - ${row.assignmentName ?? "unknown"}: ${
+              err instanceof Error ? err.message : "failed"
+            }`
+          );
+        }
+      }
+
+      if (zips.length > 0) {
+        try {
+          // One zip = one course: the upload grades the first offline row and
+          // every further offline row gets an honest "not graded" line.
+          const offlineRows = plan.filter((r) => r.offline);
+          const offlineRow = offlineRows[0];
+          if (offlineRow) {
+            const courseTile = tileMap.get(offlineRow.courseId);
+            const rubric = courseTile?.rubricData ?? "";
+
+            onProgress("Grading offline submissions...");
+            const formData = new FormData();
+            formData.set("studentSubmissions", zips[0]);
+            formData.set("rubric", rubric);
+            formData.set("provider", helpers.provider);
+            // The zip grading path requires instructions even when the rubric
+            // is empty (one is generated from them in that case).
+            formData.set(
+              "assignmentInstructions",
+              "Grade each student submission against the rubric."
+            );
+
+            const gradeResult = await gradeAction({ run: null, error: null }, formData);
+
+            if (gradeResult.error) {
+              lines.push(`Offline grading: ${gradeResult.error}`);
+            } else if (gradeResult.run) {
+              runs.push({
+                courseName: offlineRow.courseName,
+                assignmentName: "Offline submission",
+                canvasUrl: "",
+                run: gradeResult.run,
+                offline: true,
+              });
+              lines.push(
+                `${offlineRow.courseName}: graded ${gradeResult.run.results.length} submission(s)`
+              );
+            }
+
+            for (const skippedRow of offlineRows.slice(1)) {
+              lines.push(
+                `${skippedRow.courseName}: not graded - run Grade Submissions again with only this course selected.`
+              );
+            }
+
+            if (zips.length > 1) {
+              lines.push("Note: only the first zip was graded");
+            }
+          }
+        } catch (err) {
+          lines.push(
+            `Offline grading failed: ${err instanceof Error ? err.message : "unknown error"}`
+          );
+        }
+      }
+
+      // Only rows with a numeric Canvas user id can be posted; promising
+      // run.results.length posts would overcount on providers that return none.
+      const nonOfflineRuns = runs.filter((r) => !r.offline);
+      const postable = nonOfflineRuns.reduce(
+        (sum, r) =>
+          sum + r.run.results.filter((row) => typeof row.userId === "number").length,
+        0
+      );
+      if (nonOfflineRuns.length > 0 && postable === 0) {
+        lines.push(
+          "No rows carry a Canvas user id - nothing can be posted (provider limitation)"
+        );
+      }
+
+      const result: StepRunResult = {
+        outputs: { runs },
+        summary: { kind: "list", label: "Grading complete", items: lines },
+      };
+
+      if (postable > 0) {
+        result.requireConfirmation = `Ready to post grades for ${postable} submission(s) across ${nonOfflineRuns.length} assignment(s). Continue to post to the LMS, or cancel to stop without posting.`;
+      }
+
+      return result;
+    },
+  },
+
+  {
+    type: "post-grades",
+    name: "Post grades to the LMS",
+    description: "Post the prepared grades and rubric scores back to each assignment.",
+    inputs: [
+      {
+        key: "runs",
+        label: "Grading runs",
+        type: "courseList",
+        required: true,
+      },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      interface RunEntry {
+        courseName: string;
+        assignmentName: string;
+        canvasUrl: string;
+        run: GradingRun;
+        offline?: boolean;
+      }
+
+      const runs = Array.isArray(values.runs)
+        ? (values.runs as RunEntry[])
+        : [];
+
+      const lines: string[] = [];
+
+      for (const entry of runs) {
+        try {
+          if (entry.offline) {
+            lines.push(`${entry.courseName}: offline grades not posted (no LMS)`);
+            continue;
+          }
+
+          onProgress(`Posting grades for ${entry.courseName} - ${entry.assignmentName}...`);
+
+          const payload: Array<{
+            userId: number;
+            grade?: string;
+            comment?: string;
+            rubricAreas?: Array<{ area: string; score: string; comment: string }>;
+          }> = [];
+
+          for (const row of entry.run.results) {
+            if (typeof row.userId !== "number") continue;
+
+            const fraction = row.totalScore.match(/(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/);
+            const earned = fraction
+              ? fraction[1]
+              : (row.totalScore.match(/-?\d+(?:\.\d+)?/) ?? [])[0] ?? "";
+
+            payload.push({
+              userId: row.userId,
+              grade: earned,
+              comment: row.overallComment,
+              rubricAreas: row.rubricAreas.map((a) => ({
+                area: a.area,
+                score: a.score,
+                comment: "",
+              })),
+            });
+          }
+
+          if (payload.length === 0) {
+            lines.push(`${entry.courseName} - ${entry.assignmentName}: no gradable submissions`);
+            continue;
+          }
+
+          const postResult = await postCanvasGradesAction(entry.canvasUrl, payload);
+
+          if ("error" in postResult) {
+            lines.push(`${entry.courseName} - ${entry.assignmentName}: ${postResult.error}`);
+          } else {
+            lines.push(
+              `${entry.courseName} - ${entry.assignmentName}: posted ${postResult.posted}${
+                postResult.failures.length ? `, ${postResult.failures.length} failed` : ""
+              }`
+            );
+          }
+        } catch (err) {
+          lines.push(
+            `${entry.courseName} - ${entry.assignmentName ?? "unknown"}: ${
+              err instanceof Error ? err.message : "failed"
+            }`
+          );
+        }
+      }
+
+      return {
+        outputs: {},
+        summary: { kind: "list" as const, label: "Grades posted", items: lines },
       };
     },
   },

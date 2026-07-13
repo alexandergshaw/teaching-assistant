@@ -99,6 +99,7 @@ export const COURSE_REFRESH: WorkflowDef = {
         minutes: { source: "literal", value: "50" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         includeInstructions: { source: "literal", value: "" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
       },
     },
     {
@@ -286,12 +287,57 @@ export const UPDATE_COURSE_TECH: WorkflowDef = {
   preset: true,
   name: "Update Course with New Tech",
   description:
-    "Scan the selected courses' topics, syllabus, textbook, repos, modules, and assignments, and produce a report of emerging-technology opportunities with concrete integration recommendations.",
+    "Scan the selected courses' topics, syllabus, textbook, repos, modules, and assignments, and produce a report of emerging-technology opportunities with concrete integration recommendations; after the report, the user lists improvements and a Copilot agent is fired on each course repository; courses without a repository offer a workflow handoff.",
   steps: [
     {
       type: "tech-report",
       bindings: {
         courses: { source: "runtime", fieldKey: "courses" },
+        collectImprovements: { source: "literal", value: "1" },
+      },
+    },
+    {
+      type: "agent-improve-repos",
+      bindings: {
+        courses: { source: "runtime", fieldKey: "courses" },
+        improvements: { source: "step", stepIndex: 0, outputKey: "improvements" },
+        report: { source: "step", stepIndex: 0, outputKey: "report" },
+      },
+    },
+  ],
+};
+
+export const GRADE_SUBMISSIONS: WorkflowDef = {
+  id: "grade-submissions",
+  preset: true,
+  name: "Grade Submissions",
+  description:
+    "Pick one or more courses; assignments with ungraded submissions are pulled from the LMS and graded against their associated rubrics. Assignments without a rubric pause for approval and get an LLM-generated rubric. Courses without an LMS pause for a zip upload of submissions and are graded offline. Grades post to the LMS only after a final confirmation.",
+  steps: [
+    {
+      type: "grading-preflight",
+      bindings: {
+        courses: { source: "runtime", fieldKey: "courses" },
+      },
+    },
+    {
+      type: "collect-offline-submissions",
+      bindings: {
+        courses: { source: "runtime", fieldKey: "courses" },
+      },
+    },
+    {
+      type: "grade-submissions",
+      bindings: {
+        plan: { source: "step", stepIndex: 0, outputKey: "plan" },
+        submissionsZip: { source: "step", stepIndex: 1, outputKey: "submissionsZip" },
+        courses: { source: "runtime", fieldKey: "courses" },
+      },
+    },
+    {
+      type: "post-grades",
+      bindings: {
+        runs: { source: "step", stepIndex: 2, outputKey: "runs" },
       },
     },
   ],
@@ -330,6 +376,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     STARTER_MATERIALS,
     IMPORT_COURSES,
     ASSIGN_DUE_DATES,
+    GRADE_SUBMISSIONS,
     PREPARE_LECTURE,
     UPDATE_COURSE_TECH,
     REPO_AGENT_UPDATE,

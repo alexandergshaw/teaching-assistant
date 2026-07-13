@@ -278,8 +278,9 @@ export interface StepRunResult {
     regenerate?: () => Promise<string>;
     /** kind "table" only: column definitions; rows render read-only unless a
      * column is editable. Row keys not listed in columns pass through the edit
-     * untouched (useful for hidden join keys). */
-    columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean }>;
+     * untouched (useful for hidden join keys). Link columns render cell values as
+     * external "View" links when non-empty; link columns are never editable. */
+    columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean; link?: boolean }>;
     /** kind "table" only: the rows to review; the resolved value is the edited
      * array in the same shape. */
     rows?: Array<Record<string, string>>;
@@ -4522,6 +4523,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
               course: entry.courseName,
               assignment: entry.assignmentName,
               student: row.student,
+              submission: entry.run.speedGraderUrl && typeof row.userId === "number"
+                ? `${entry.run.speedGraderUrl}&student_id=${row.userId}`
+                : "",
               grade: earned,
               comment: row.overallComment,
             });
@@ -4529,7 +4533,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         }
 
         result.requireInput = {
-          message: `Review the grades below - edit scores or comments, then approve to post ${postable} grade(s) to the LMS. Skip to finish without posting.`,
+          message: `Review the grades below - open a submission to check the student's work, edit scores or comments, then approve to post ${postable} grade(s) to the LMS. Skip to finish without posting.`,
           key: "approvedGrades",
           kind: "table",
           optional: true,
@@ -4538,6 +4542,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
             { key: "course", label: "Course" },
             { key: "assignment", label: "Assignment" },
             { key: "student", label: "Student" },
+            { key: "submission", label: "Submission", link: true },
             { key: "grade", label: "Grade", editable: true },
             { key: "comment", label: "Comment", editable: true, multiline: true },
           ],

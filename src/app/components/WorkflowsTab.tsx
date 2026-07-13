@@ -283,7 +283,7 @@ export default function WorkflowsTab() {
     initialValue?: string;
     submitLabel?: string;
     regenerate?: () => Promise<string>;
-    columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean }>;
+    columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean; link?: boolean }>;
     selectable?: boolean;
     transform?: (value: string | File[] | Array<Record<string, string>>) => unknown;
   } | null>(null);
@@ -1991,7 +1991,13 @@ export default function WorkflowsTab() {
                                       padding: "6px 8px",
                                     }}
                                   >
-                                    {col.editable ? (
+                                    {col.link ? (
+                                      row[col.key] ? (
+                                        <a href={row[col.key]} target="_blank" rel="noreferrer" className={styles.linkButton}>
+                                          View
+                                        </a>
+                                      ) : null
+                                    ) : col.editable ? (
                                       <TextField
                                         size="small"
                                         fullWidth

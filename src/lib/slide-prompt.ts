@@ -3,7 +3,7 @@
  * Every deck-generation prompt composes these constants so all decks (assignment
  * lectures, module lectures, etc.) share one pedagogical contract: Example →
  * Walkthrough → Practice → Answer coding sequences, Case Study engagement,
- * Additional Practice closers, and Documentation sections.
+ * Additional Practice closers, Modern Tech exploration, and Documentation sections.
  */
 
 export const SLIDE_DECK_JSON_SHAPE = `{
@@ -18,6 +18,7 @@ export const SLIDE_DECK_JSON_SHAPE = `{
     { "title": "Additional Practice: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
     { "title": "Answer: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
     { "title": "Documentation: Key Concepts", "bullets": ["...", "..."] },
+    { "title": "Modern Tech: ...", "bullets": ["...", "..."] },
     { "title": "Documentation & References", "bullets": ["...", "..."] }
   ]
 }`;
@@ -38,7 +39,8 @@ export const SLIDE_STRUCTURE_REQUIREMENTS = `- Each slide must have a "title" an
 - CLOSING SECTIONS: after all the coverage slides above, ALWAYS append these closing sections at the very END of the deck, in this exact order:
   A. ADDITIONAL PRACTICE: for EACH coding concept you introduced in this deck, add 2-3 NEW slides whose "title" begins with "Additional Practice:" that pose fresh, self-contained challenges on that concept (clearly different from the earlier inline Practice slide). IMMEDIATELY follow each "Additional Practice:" slide with its own "Answer:" slide giving the correct, runnable solution in "code" with "codeLanguage" set. The "Additional Practice:" slide states the task in its bullets and must NOT reveal the solution (it may include a short reference/starter snippet in "code", but never the answer). For a non-programming module, make these 2-3 additional conceptual practice questions per concept, each followed by an "Answer:" slide, with no code fields.
   B. DOCUMENTATION - KEY CONCEPTS: one or more slides whose "title" begins with "Documentation:" that recap the key concepts, terms, and syntax taught in this deck as a concise study reference the student can revise from (use bullets; short code snippets are allowed).
-  C. DOCUMENTATION AND REFERENCES: a final slide titled exactly "Documentation & References" that lists authoritative resources for the topics: name the official documentation for each language, library, or tool used, plus 2-4 suggested further-reading resources. Name only real, well-known resources (official language/library documentation, MDN, the tool's own docs); do NOT fabricate specific URLs or invent facts.
+  C. MODERN TECH TO EXPLORE: 1-2 slides whose "title" begins with "Modern Tech:" that connect this deck's concepts to current, real-world technology students can investigate to dig deeper. Each bullet names one real, widely used modern technology, framework, tool, or service (for example a popular library, cloud service, or AI tool that builds on these concepts), states in a sentence how it relates to a concept taught in this deck, and suggests what to explore first. Name only real, well-known technologies; never invent products or overstate what they do. No "code" on these slides.
+  D. DOCUMENTATION AND REFERENCES: a final slide titled exactly "Documentation & References" that lists authoritative resources for the topics: name the official documentation for each language, library, or tool used, plus 2-4 suggested further-reading resources. Name only real, well-known resources (official language/library documentation, MDN, the tool's own docs); do NOT fabricate specific URLs or invent facts.
 - Do not include any text outside the JSON object.`;
 
 /**

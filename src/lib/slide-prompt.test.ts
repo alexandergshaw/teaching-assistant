@@ -31,6 +31,14 @@ describe("slide-prompt shared pedagogical contract", () => {
       expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("Documentation & References");
     });
 
+    it("contains Modern Tech marker", () => {
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("Modern Tech:");
+    });
+
+    it("contains MODERN TECH TO EXPLORE section", () => {
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("MODERN TECH TO EXPLORE");
+    });
+
     it("contains bullet limit requirement", () => {
       expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("Maximum 4 bullets");
     });
@@ -51,6 +59,22 @@ describe("slide-prompt shared pedagogical contract", () => {
 
     it("contains Answer example slide", () => {
       expect(SLIDE_DECK_JSON_SHAPE).toContain("Answer: ");
+    });
+
+    it("contains Modern Tech example slide", () => {
+      expect(SLIDE_DECK_JSON_SHAPE).toContain("Modern Tech: ");
+    });
+
+    it("positions Modern Tech slide after Documentation: Key Concepts", () => {
+      const keyConceptsIndex = SLIDE_DECK_JSON_SHAPE.indexOf("Documentation: Key Concepts");
+      const modernTechIndex = SLIDE_DECK_JSON_SHAPE.indexOf("Modern Tech: ");
+      expect(modernTechIndex).toBeGreaterThan(keyConceptsIndex);
+    });
+
+    it("positions Modern Tech slide before Documentation & References", () => {
+      const modernTechIndex = SLIDE_DECK_JSON_SHAPE.indexOf("Modern Tech: ");
+      const referencesIndex = SLIDE_DECK_JSON_SHAPE.indexOf("Documentation & References");
+      expect(modernTechIndex).toBeLessThan(referencesIndex);
     });
 
     it("has balanced braces", () => {

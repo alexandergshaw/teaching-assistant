@@ -224,6 +224,7 @@ export interface StepRunHelpers {
   author: string;
   saveBundle: ((blob: Blob, name: string) => Promise<void>) | null;
   saveCourseMaterialFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
+  saveCourseExportFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
   loadCommonResources: (() => Promise<CommonResourceItem[]>) | null;
   getLibraryFile: ((fileId: string) => Promise<{ blob: Blob; name: string; mimeType: string } | null>) | null;
   getInstitutionFields: ((acronym: string) => Promise<InstitutionField[]>) | null;
@@ -2222,14 +2223,14 @@ export const STEP_REGISTRY: StepDefinition[] = [
         }
       }
 
-      // The export also lands in the course tile's materials list when a
+      // The export also lands in the course tile's LMS Exports tile when a
       // tile is bound; a failure notes on the summary instead of failing
       // the step. No tile bound means no tile save.
       let tileSaveNote = "";
-      if (hubCourseId && helpers.saveCourseMaterialFile) {
+      if (hubCourseId && helpers.saveCourseExportFile) {
         onProgress("Saving to the course tile...");
         try {
-          await helpers.saveCourseMaterialFile(
+          await helpers.saveCourseExportFile(
             hubCourseId,
             blob,
             `${baseName}.imscc`

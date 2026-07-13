@@ -15,7 +15,7 @@ import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFil
 import { uploadCourseZip, removeCourseZip } from "@/lib/course-files";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
-import { listCourseHubAction, appendCourseMaterialFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction } from "@/app/actions";
+import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction } from "@/app/actions";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import {
   loadCustomWorkflows,
@@ -823,6 +823,27 @@ export default function WorkflowsTab() {
                 null
               );
               const r = await appendCourseMaterialFileAction(courseId, {
+                name: fileName,
+                path,
+                size: blob.size,
+              });
+              if ("error" in r) throw new Error(r.error);
+              if (r.replacedPath) {
+                await removeCourseZip(supabase, r.replacedPath);
+              }
+            }
+          : null,
+      saveCourseExportFile:
+        user && supabase
+          ? async (courseId: string, blob: Blob, fileName: string) => {
+              const { path } = await uploadCourseZip(
+                supabase,
+                user.id,
+                courseId,
+                blob,
+                null
+              );
+              const r = await appendCourseExportFileAction(courseId, {
                 name: fileName,
                 path,
                 size: blob.size,

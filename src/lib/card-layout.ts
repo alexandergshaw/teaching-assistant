@@ -17,7 +17,7 @@ export const DEFAULT_CARD_LAYOUT: CardLayoutGroup[] = [
   { id: "content", label: "Content", tiles: ["syllabus", "textbook", "description"] },
   { id: "schedule", label: "Schedule & LMS", tiles: ["startDate", "dayTime", "weeks", "tests", "lms"] },
   { id: "class", label: "Class", tiles: ["integrations", "roster"] },
-  { id: "generated", label: "Generated", tiles: ["csv", "rubric", "materials"] },
+  { id: "generated", label: "Generated", tiles: ["csv", "rubric", "lmsExports", "materials"] },
 ];
 
 export async function loadCardLayout(

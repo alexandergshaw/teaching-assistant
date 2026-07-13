@@ -23,6 +23,8 @@ import {
   listGithubReposAction,
   setCourseMaterialsAction,
   removeCourseMaterialFileAction,
+  appendCourseExportFileAction,
+  removeCourseExportFileAction,
   listCoursesAction,
   listSyllabusTemplatesAction,
 } from "../actions";
@@ -335,6 +337,8 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [uploadingMaterials, setUploadingMaterials] = useState(false);
   const [materialsRemoveConfirm, setMaterialsRemoveConfirm] = useState<string | null>(null);
   const [removingMaterialFile, setRemovingMaterialFile] = useState<string | null>(null);
+  const [uploadingExport, setUploadingExport] = useState(false);
+  const [exportRemoveConfirm, setExportRemoveConfirm] = useState<string | null>(null);
   const [lmsCourseOpts, setLmsCourseOpts] = useState<Array<{ url: string; name: string }> | null>(null);
   const [lmsCourseOptsError, setLmsCourseOptsError] = useState<string | null>(null);
   const [lmsCourseDraft, setLmsCourseDraft] = useState<string | null>(null);
@@ -860,6 +864,92 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       setError(err instanceof Error ? err.message : "Could not remove the file from the course materials.");
     } finally {
       setRemovingMaterialFile(null);
+    }
+  };
+
+  const handleExportUpload = async (c: Course, file: File) => {
+    if (file.size > 100 * 1024 * 1024) {
+      setError("Export is too large (max 100 MB).");
+      return;
+    }
+    if (!user) {
+      setError("You must be logged in.");
+      return;
+    }
+    setUploadingExport(true);
+    setError(null);
+    try {
+      const { path } = await uploadCourseZip(supabase, user.id, c.id, file, null);
+      const r = await appendCourseExportFileAction(c.id, {
+        name: file.name,
+        path,
+        size: file.size,
+      });
+      if ("error" in r) {
+        setError(r.error);
+        await removeCourseZip(supabase, path);
+        return;
+      }
+      setCourses((prev) => {
+        const updated = prev.map((course) => {
+          if (course.id === c.id) {
+            const filtered = course.exportFiles.filter((f) => f.name !== file.name);
+            return {
+              ...course,
+              exportFiles: [
+                ...filtered,
+                {
+                  name: file.name,
+                  path,
+                  size: file.size,
+                  addedAt: new Date().toISOString(),
+                },
+              ],
+            };
+          }
+          return course;
+        });
+        if (hubCache) hubCache = { ...hubCache, courses: updated };
+        return updated;
+      });
+      if (r.replacedPath) {
+        await removeCourseZip(supabase, r.replacedPath);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not upload the export.");
+    } finally {
+      setUploadingExport(false);
+    }
+  };
+
+  const handleRemoveExportFile = async (c: Course, path: string) => {
+    if (!user) {
+      setError("You must be logged in.");
+      return;
+    }
+    try {
+      await removeCourseZip(supabase, path);
+      const r = await removeCourseExportFileAction(c.id, path);
+      if (!("error" in r)) {
+        setCourses((prev) => {
+          const updated = prev.map((course) => {
+            if (course.id === c.id) {
+              return {
+                ...course,
+                exportFiles: course.exportFiles.filter((f) => f.path !== path),
+              };
+            }
+            return course;
+          });
+          if (hubCache) hubCache = { ...hubCache, courses: updated };
+          return updated;
+        });
+        setExportRemoveConfirm(null);
+      } else {
+        setError(r.error);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove the export file.");
     }
   };
 
@@ -2299,6 +2389,130 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   )}
                 </>
               )}
+          </div>
+        );
+      case "lmsExports":
+        return (
+          <div className={styles.courseResource}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("lmsExports")}LMS Exports</span>
+              {c.exportFiles.length > 0 && (
+                <span style={{ marginLeft: "auto", fontSize: "0.85em", color: "var(--text-secondary)" }}>
+                  {c.exportFiles.length} file(s)
+                </span>
+              )}
+            </div>
+            {c.exportFiles.length === 0 ? (
+              <>
+                <span className={styles.courseResourceEmpty}>No exports yet - Course Refresh saves its cartridge here, or upload an LMS export.</span>
+                <div className={styles.courseResourceActions}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={uploadingExport}
+                    onClick={() => {
+                      const input = document.createElement("input");
+                      input.type = "file";
+                      input.accept = ".imscc,.zip,application/zip";
+                      input.onchange = () => {
+                        const f = input.files?.[0];
+                        if (f) void handleExportUpload(c, f);
+                      };
+                      input.click();
+                    }}
+                  >
+                    {uploadingExport ? "Uploading..." : "Upload export"}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ marginTop: 8 }}>
+                  {c.exportFiles.map((f) => (
+                    <div key={f.path} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--border-color)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.9em" }}>
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {f.name} - {(f.size / 1048576).toFixed(1)} MB
+                        </span>
+                        <span style={{ color: "var(--text-secondary)", fontSize: "0.85em", marginLeft: 8 }}>
+                          {new Date(f.addedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={async () => {
+                            try {
+                              const url = await getCourseZipUrl(supabase, f.path);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download = f.name;
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : "Could not download the file.");
+                            }
+                          }}
+                        >
+                          Download
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          style={{ color: "var(--danger)" }}
+                          onClick={() => {
+                            const confirmKey = `${c.id}:${f.path}`;
+                            setExportRemoveConfirm(exportRemoveConfirm === confirmKey ? null : confirmKey);
+                          }}
+                        >
+                          {exportRemoveConfirm === `${c.id}:${f.path}` ? "Confirm" : "Remove"}
+                        </button>
+                      </div>
+                      {exportRemoveConfirm === `${c.id}:${f.path}` && (
+                        <div style={{ marginTop: 8 }}>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            color="error"
+                            onClick={() => void handleRemoveExportFile(c, f.path)}
+                          >
+                            Delete export
+                          </Button>
+                          <Button
+                            variant="text"
+                            size="small"
+                            onClick={() => setExportRemoveConfirm(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className={styles.courseResourceActions} style={{ marginTop: 12 }}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={uploadingExport}
+                    onClick={() => {
+                      const input = document.createElement("input");
+                      input.type = "file";
+                      input.accept = ".imscc,.zip,application/zip";
+                      input.onchange = () => {
+                        const f = input.files?.[0];
+                        if (f) void handleExportUpload(c, f);
+                      };
+                      input.click();
+                    }}
+                  >
+                    {uploadingExport ? "Uploading..." : "Upload export"}
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         );
       case "materials":

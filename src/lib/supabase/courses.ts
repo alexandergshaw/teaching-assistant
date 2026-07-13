@@ -65,6 +65,7 @@ export interface Course {
   lms: string | null;
   dayTime: string | null;
   materialsFiles: CourseMaterialFile[];
+  exportFiles: CourseMaterialFile[];
   materialsZipName: string | null;
   materialsZipPath: string | null;
   materialsZipSize: number | null;
@@ -101,7 +102,7 @@ export interface CourseInput {
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, materials_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, materials_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -137,6 +138,7 @@ interface CourseRow {
   lms: string | null;
   day_time: string | null;
   materials_files: Array<{ name: string; path: string; size: number; addedAt: string }> | null;
+  export_files: Array<{ name: string; path: string; size: number; addedAt: string }> | null;
   materials_zip_name: string | null;
   materials_zip_path: string | null;
   materials_zip_size: number | null;
@@ -171,6 +173,7 @@ function toCourse(r: CourseRow): Course {
     lms: r.lms,
     dayTime: r.day_time,
     materialsFiles: Array.isArray(r.materials_files) ? r.materials_files.filter((x) => x && x.path && x.name) : [],
+    exportFiles: Array.isArray(r.export_files) ? r.export_files.filter((x) => x && x.path && x.name) : [],
     materialsZipName: r.materials_zip_name,
     materialsZipPath: r.materials_zip_path,
     materialsZipSize: r.materials_zip_size,
@@ -219,6 +222,8 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     custom_tiles: Array.isArray(input.customTiles) ? (input.customTiles as unknown as Json) : undefined,
     // Omit materials_zip_* fields: inserts use NULL defaults, updates preserve existing
     // values. updateCourseMaterials is the sole writer of these columns.
+    // Omit materials_files and export_files: dedicated writers only (appendCourseMaterialFile,
+    // removeCourseMaterialFile, appendCourseExportFile, removeCourseExportFile).
     updated_at: new Date().toISOString(),
   };
 }
@@ -410,5 +415,81 @@ export async function removeCourseMaterialFile(
     .eq("id", id);
   if (error) {
     throw new Error(`Could not update the course materials: ${error.message}`);
+  }
+}
+
+/** Append an export file to a course's exports list, deduplicating by name. Returns the storage path of any replaced entry, or null if none. */
+export async function appendCourseExportFile(
+  userId: string,
+  id: string,
+  file: CourseMaterialFile
+): Promise<string | null> {
+  const { data, error: selectError } = await table()
+    .select("export_files")
+    .eq("user_id", userId)
+    .eq("id", id)
+    .single();
+  if (selectError) {
+    throw new Error(`Could not read the course exports: ${selectError.message}`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const current = Array.isArray((data as any).export_files) ? (data as any).export_files : [];
+  let replacedPath: string | null = null;
+
+  // Remove any existing entry with the same name, capturing its path.
+  const filtered = current.filter((x: CourseMaterialFile) => {
+    if (x && x.name === file.name) {
+      replacedPath = x.path;
+      return false;
+    }
+    return true;
+  });
+
+  // Append the new entry.
+  const updated = [...filtered, file];
+
+  const { error } = await table()
+    .update({
+      export_files: updated,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) {
+    throw new Error(`Could not update the course exports: ${error.message}`);
+  }
+
+  return replacedPath;
+}
+
+/** Remove an export file from a course's exports list by path. */
+export async function removeCourseExportFile(
+  userId: string,
+  id: string,
+  path: string
+): Promise<void> {
+  const { data, error: selectError } = await table()
+    .select("export_files")
+    .eq("user_id", userId)
+    .eq("id", id)
+    .single();
+  if (selectError) {
+    throw new Error(`Could not read the course exports: ${selectError.message}`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const current = Array.isArray((data as any).export_files) ? (data as any).export_files : [];
+  const filtered = current.filter((x: CourseMaterialFile) => x && x.path !== path);
+
+  const { error } = await table()
+    .update({
+      export_files: filtered,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) {
+    throw new Error(`Could not update the course exports: ${error.message}`);
   }
 }

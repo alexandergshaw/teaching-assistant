@@ -315,6 +315,8 @@ import {
   updateCourseRubric,
   appendCourseMaterialFile,
   removeCourseMaterialFile,
+  appendCourseExportFile,
+  removeCourseExportFile,
   type Course as CourseHub,
   type CourseInput as CourseHubInput,
 } from "@/lib/supabase/courses";
@@ -4383,6 +4385,39 @@ export async function removeCourseMaterialFileAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not remove the file from the course materials." };
+  }
+}
+
+/** Append an export file to a course's exports list. Returns the storage path of any replaced entry. */
+export async function appendCourseExportFileAction(
+  courseId: string,
+  file: { name: string; path: string; size: number }
+): Promise<{ replacedPath: string | null } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!courseId.trim()) return { error: "Choose a course." };
+    const replacedPath = await appendCourseExportFile(user.id, courseId, {
+      ...file,
+      addedAt: new Date().toISOString(),
+    });
+    return { replacedPath };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the file to the course exports." };
+  }
+}
+
+/** Remove an export file from a course's exports list. */
+export async function removeCourseExportFileAction(
+  courseId: string,
+  path: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!courseId.trim()) return { error: "Choose a course." };
+    await removeCourseExportFile(user.id, courseId, path);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not remove the file from the course exports." };
   }
 }
 

@@ -179,6 +179,7 @@ export interface Database {
           lms: string | null;
           day_time: string | null;
           materials_files: Json;
+          export_files: Json | null;
           materials_zip_name: string | null;
           materials_zip_path: string | null;
           materials_zip_size: bigint | null;
@@ -213,6 +214,7 @@ export interface Database {
           lms?: string | null;
           day_time?: string | null;
           materials_files?: Json;
+          export_files?: Json | null;
           materials_zip_name?: string | null;
           materials_zip_path?: string | null;
           materials_zip_size?: bigint | null;
@@ -247,6 +249,7 @@ export interface Database {
           lms?: string | null;
           day_time?: string | null;
           materials_files?: Json;
+          export_files?: Json | null;
           materials_zip_name?: string | null;
           materials_zip_path?: string | null;
           materials_zip_size?: bigint | null;

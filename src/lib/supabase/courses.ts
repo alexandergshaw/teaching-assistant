@@ -27,6 +27,9 @@ export interface CourseMaterialFile {
   path: string;
   size: number;
   addedAt: string;
+  /** Storage object paths when the file is stored as chunked parts (large
+   * exports above the per-object upload limit); absent for single objects. */
+  parts?: string[];
 }
 
 /** A custom tile in a course card. */
@@ -137,8 +140,8 @@ interface CourseRow {
   tests: number | null;
   lms: string | null;
   day_time: string | null;
-  materials_files: Array<{ name: string; path: string; size: number; addedAt: string }> | null;
-  export_files: Array<{ name: string; path: string; size: number; addedAt: string }> | null;
+  materials_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
+  export_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
   materials_zip_name: string | null;
   materials_zip_path: string | null;
   materials_zip_size: number | null;
@@ -418,12 +421,12 @@ export async function removeCourseMaterialFile(
   }
 }
 
-/** Append an export file to a course's exports list, deduplicating by name. Returns the storage path of any replaced entry, or null if none. */
+/** Append an export file to a course's exports list, deduplicating by name. Returns the storage object paths of any replaced entry (its parts, or its single path). */
 export async function appendCourseExportFile(
   userId: string,
   id: string,
   file: CourseMaterialFile
-): Promise<string | null> {
+): Promise<string[]> {
   const { data, error: selectError } = await table()
     .select("export_files")
     .eq("user_id", userId)
@@ -435,12 +438,13 @@ export async function appendCourseExportFile(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const current = Array.isArray((data as any).export_files) ? (data as any).export_files : [];
-  let replacedPath: string | null = null;
+  const replacedPaths: string[] = [];
 
-  // Remove any existing entry with the same name, capturing its path.
+  // Remove every existing entry with the same name, capturing all object paths
+  // (legacy rows may hold duplicates).
   const filtered = current.filter((x: CourseMaterialFile) => {
     if (x && x.name === file.name) {
-      replacedPath = x.path;
+      replacedPaths.push(...(Array.isArray(x.parts) && x.parts.length > 0 ? x.parts : [x.path]));
       return false;
     }
     return true;
@@ -460,7 +464,7 @@ export async function appendCourseExportFile(
     throw new Error(`Could not update the course exports: ${error.message}`);
   }
 
-  return replacedPath;
+  return replacedPaths;
 }
 
 /** Remove an export file from a course's exports list by path. */

@@ -4391,19 +4391,19 @@ export async function removeCourseMaterialFileAction(
   }
 }
 
-/** Append an export file to a course's exports list. Returns the storage path of any replaced entry. */
+/** Append an export file to a course's exports list. Returns the storage object paths of any replaced entry. */
 export async function appendCourseExportFileAction(
   courseId: string,
-  file: { name: string; path: string; size: number }
-): Promise<{ replacedPath: string | null } | { error: string }> {
+  file: { name: string; path: string; size: number; parts?: string[] }
+): Promise<{ replacedPaths: string[] } | { error: string }> {
   try {
     const user = await requireOwner();
     if (!courseId.trim()) return { error: "Choose a course." };
-    const replacedPath = await appendCourseExportFile(user.id, courseId, {
+    const replacedPaths = await appendCourseExportFile(user.id, courseId, {
       ...file,
       addedAt: new Date().toISOString(),
     });
-    return { replacedPath };
+    return { replacedPaths };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the file to the course exports." };
   }
@@ -4479,33 +4479,60 @@ export async function importLmsSyllabusAction(
   try {
     await requireOwner();
     const info = await getCourseInfo(courseUrl, acronym?.trim());
-    if (!info.syllabusBody.trim()) {
-      return { error: "The LMS course has no syllabus content." };
-    }
-
-    const text = info.syllabusBody
-      .replace(/<\/p>/gi, "\n")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/li>/gi, "\n")
-      .replace(/<\/h[1-6]>/gi, "\n")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .join("\n");
-
-    const docxBuffer = await buildDocxFromPlainText(text, [], undefined);
-    const base64 = Buffer.from(docxBuffer).toString("base64");
-    const syllabusName = `${courseName} syllabus (LMS import)`;
-    const result = await createFinalizedSyllabusAction(syllabusName, "lms-syllabus.docx", base64);
-    if ("error" in result) {
-      return result;
-    }
-    return { syllabusId: result.syllabus.id, name: result.syllabus.name };
+    return await saveSyllabusHtmlAsFinalized(courseName, info.syllabusBody);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not import the syllabus from the LMS." };
   }
+}
+
+/**
+ * Convert syllabus HTML pulled from an uploaded LMS export package into a Word
+ * document in the finalized library. The client parses the cartridge (the
+ * archive can exceed server action payload limits); only the small HTML body
+ * crosses the wire.
+ */
+export async function importSyllabusHtmlAction(
+  courseName: string,
+  syllabusHtml: string
+): Promise<{ syllabusId: string; name: string } | { error: string }> {
+  try {
+    await requireOwner();
+    return await saveSyllabusHtmlAsFinalized(courseName, syllabusHtml);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not import the syllabus from the export." };
+  }
+}
+
+/** Shared tail of the LMS/export syllabus imports: HTML to .docx to library. */
+async function saveSyllabusHtmlAsFinalized(
+  courseName: string,
+  syllabusHtml: string
+): Promise<{ syllabusId: string; name: string } | { error: string }> {
+  if (!syllabusHtml.trim()) {
+    return { error: "The LMS course has no syllabus content." };
+  }
+
+  const text = syllabusHtml
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<\/h[1-6]>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    // Collapse runs of spaces/tabs but keep the paragraph breaks added above.
+    .replace(/[^\S\n]+/g, " ")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n");
+
+  const docxBuffer = await buildDocxFromPlainText(text, [], undefined);
+  const base64 = Buffer.from(docxBuffer).toString("base64");
+  const syllabusName = `${courseName} syllabus (LMS import)`;
+  const result = await createFinalizedSyllabusAction(syllabusName, "lms-syllabus.docx", base64);
+  if ("error" in result) {
+    return result;
+  }
+  return { syllabusId: result.syllabus.id, name: result.syllabus.name };
 }
 
 /** Forget the owner's Outlook connection for one school. */

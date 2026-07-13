@@ -12,7 +12,7 @@ import { useInstitutionSelection } from "@/lib/institutions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFile } from "@/lib/recording-files";
-import { uploadCourseZip, removeCourseZip } from "@/lib/course-files";
+import { uploadCourseZip, uploadCourseZipChunked, removeCourseZip, removeCourseZipObjects } from "@/lib/course-files";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
 import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction, runSubmissionCodeAction } from "@/app/actions";
@@ -838,22 +838,23 @@ export default function WorkflowsTab() {
       saveCourseExportFile:
         user && supabase
           ? async (courseId: string, blob: Blob, fileName: string) => {
-              const { path } = await uploadCourseZip(
+              const { path, parts } = await uploadCourseZipChunked(
                 supabase,
                 user.id,
                 courseId,
-                blob,
-                null
+                blob
               );
               const r = await appendCourseExportFileAction(courseId, {
                 name: fileName,
                 path,
                 size: blob.size,
+                ...(parts ? { parts } : {}),
               });
-              if ("error" in r) throw new Error(r.error);
-              if (r.replacedPath) {
-                await removeCourseZip(supabase, r.replacedPath);
+              if ("error" in r) {
+                await removeCourseZipObjects(supabase, parts ?? [path]);
+                throw new Error(r.error);
               }
+              await removeCourseZipObjects(supabase, r.replacedPaths);
             }
           : null,
       loadCommonResources:

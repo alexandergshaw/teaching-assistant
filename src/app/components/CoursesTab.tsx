@@ -27,15 +27,17 @@ import {
   removeCourseExportFileAction,
   listCoursesAction,
   listSyllabusTemplatesAction,
+  createSyllabusTemplateAction,
   getCourseInfoAction,
   exportCourseCartridgeAction,
   importLmsSyllabusAction,
+  importSyllabusHtmlAction,
   listCourseContentAction,
   listRubricsAction,
   getRubricAction,
   type ScheduleWeekPlan,
 } from "../actions";
-import type { Course, CourseCustomTile } from "@/lib/supabase/courses";
+import type { Course, CourseCustomTile, CourseInput, CourseMaterialFile } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import { loadCommonResources, saveCommonResources, type CommonResourceItem } from "@/lib/common-resources";
 import { DEFAULT_CARD_LAYOUT, loadCardLayout, saveCardLayout, type CardLayoutGroup } from "@/lib/card-layout";
@@ -52,7 +54,16 @@ import { getStoredProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { setCourseHandoff } from "@/lib/course-handoff";
 import { useSupabase } from "@/context/SupabaseProvider";
-import { uploadCourseZip, getCourseZipUrl, removeCourseZip } from "@/lib/course-files";
+import {
+  uploadCourseZip,
+  uploadCourseZipChunked,
+  getCourseZipUrl,
+  downloadCourseZipBlob,
+  removeCourseZip,
+  removeCourseZipObjects,
+  courseZipObjectPaths,
+} from "@/lib/course-files";
+import { parseCartridgeBlob, type CartridgeCourseData } from "@/lib/cartridge-import";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import Typeahead from "./ui/Typeahead";
 import styles from "../page.module.css";
@@ -249,6 +260,14 @@ let hubCache: { courses: Course[]; syllabi: FinalizedSyllabusMeta[]; orgs: strin
 const COLLAPSE_KEY = "ta-courses-collapsed";
 const NO_INSTITUTION = "__none__";
 
+// Parsed LMS export packages keyed by storage path; module-level (like
+// hubCache) so tab switches do not re-download. Values are promises so
+// concurrent tile clicks share a single download+parse.
+const cartridgeCache = new Map<string, Promise<CartridgeCourseData>>();
+
+const NO_COURSE_SETTINGS_ERROR =
+  "This export package has no Canvas course settings, so tiles cannot be populated from it.";
+
 function PencilIcon() {
   return (
     <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor" aria-hidden="true" focusable="false">
@@ -373,9 +392,14 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [instFieldAdd, setInstFieldAdd] = useState<{ acronym: string; label: string; type: "text" | "date" | "url" } | null>(null);
   // Syllabus templates for the syllabusTemplate field typeahead (null = not loaded yet).
   const [syllabusTemplates, setSyllabusTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
+  // Acronym whose institution template chip is uploading a new .docx.
+  const [instTemplateUploading, setInstTemplateUploading] = useState<string | null>(null);
   // Ref mirror of saveInstFieldEdit so the mount-once click-outside listener
   // always calls the latest closure (avoids TDZ/stale-closure issues).
   const saveInstFieldEditRef = useRef<() => void>(() => {});
+  // Ref mirror of instFields so async handlers (template upload) read the
+  // latest field list after their awaits instead of a stale render snapshot.
+  const instFieldsRef = useRef(instFields);
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
   const csvUploadRef = useRef<HTMLInputElement>(null);
@@ -595,8 +619,10 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const reloadSyllabi = async () => {
     const s = await listFinalizedSyllabiAction();
     if (!("error" in s)) {
-      setSyllabi(s.syllabi);
-      if (hubCache) hubCache = { ...hubCache, syllabi: s.syllabi };
+      setSyllabi(() => {
+        if (hubCache) hubCache = { ...hubCache, syllabi: s.syllabi };
+        return s.syllabi;
+      });
     }
   };
 
@@ -604,6 +630,198 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     id ? syllabi.find((s) => s.id === id)?.name ?? "Linked syllabus" : null;
 
   const canLms = (c: Course) => Boolean((c.canvasUrl ?? "").trim() && (c.institution ?? "").trim());
+
+  // Tiles fall back to the newest uploaded LMS export when the course has no
+  // live LMS connection (no Canvas URL/institution) but does have an export.
+  const canImport = (c: Course) => !canLms(c) && c.exportFiles.length > 0;
+
+  const latestExportFile = (c: Course): CourseMaterialFile | null => {
+    if (c.exportFiles.length === 0) return null;
+    return c.exportFiles.reduce((latest, f) => (f.addedAt > latest.addedAt ? f : latest));
+  };
+
+  // Download (chunk-aware) and parse the course's newest LMS export, caching
+  // the in-flight promise per storage path so parallel clicks share one fetch.
+  const getCourseCartridge = (c: Course): Promise<CartridgeCourseData> => {
+    const file = latestExportFile(c);
+    if (!file) return Promise.reject(new Error("This course has no LMS export to import from."));
+    const cached = cartridgeCache.get(file.path);
+    if (cached) return cached;
+    const promise = (async () => {
+      const blob = await downloadCourseZipBlob(supabase, file);
+      return await parseCartridgeBlob(blob);
+    })();
+    cartridgeCache.set(file.path, promise);
+    // Evict failed downloads so a retry can succeed.
+    promise.catch(() => cartridgeCache.delete(file.path));
+    return promise;
+  };
+
+  // Shared tail of the from-import tile handlers: persist one patched field.
+  const saveCourseFromImport = async (c: Course, patch: Partial<CourseInput>) => {
+    const result = await updateCourseHubAction(c.id, { ...courseToInput(c), ...patch });
+    if ("error" in result) {
+      setError(result.error);
+      return;
+    }
+    setCourses((prev) => {
+      const next = prev.map((course) => (course.id === result.course.id ? result.course : course));
+      if (hubCache) hubCache = { ...hubCache, courses: next };
+      return next;
+    });
+  };
+
+  const handleImportStartDateFromTile = async (c: Course) => {
+    const tileKey = `${c.id}:startDate`;
+    setLmsBusyTile(tileKey);
+    setError(null);
+    try {
+      const data = await getCourseCartridge(c);
+      if (!data.hasCourseSettings) {
+        setError(NO_COURSE_SETTINGS_ERROR);
+        return;
+      }
+      if (!data.startAt) {
+        setError("The LMS export has no start date.");
+        return;
+      }
+      await saveCourseFromImport(c, { startDate: data.startAt.slice(0, 10) });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read the start date from the export.");
+    } finally {
+      setLmsBusyTile(null);
+    }
+  };
+
+  const handleImportWeeksFromTile = async (c: Course) => {
+    const tileKey = `${c.id}:weeks`;
+    setLmsBusyTile(tileKey);
+    setError(null);
+    try {
+      const data = await getCourseCartridge(c);
+      if (!data.hasCourseSettings) {
+        setError(NO_COURSE_SETTINGS_ERROR);
+        return;
+      }
+      const weekNumbers = new Set<number>();
+      for (const courseModule of data.modules) {
+        const match = courseModule.name.match(/module\s*0*(\d+)/i);
+        if (match) {
+          weekNumbers.add(parseInt(match[1], 10));
+        }
+      }
+      if (weekNumbers.size === 0) {
+        setError("No Module NN modules found in the LMS export.");
+        return;
+      }
+      await saveCourseFromImport(c, { weeks: weekNumbers.size });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read the modules from the export.");
+    } finally {
+      setLmsBusyTile(null);
+    }
+  };
+
+  const handleImportCsvFromTile = async (c: Course) => {
+    const tileKey = `${c.id}:csv`;
+    setLmsBusyTile(tileKey);
+    setError(null);
+    try {
+      const data = await getCourseCartridge(c);
+      if (!data.hasCourseSettings) {
+        setError(NO_COURSE_SETTINGS_ERROR);
+        return;
+      }
+      const rows: ScheduleWeekPlan[] = [];
+      for (const courseModule of data.modules) {
+        const match = courseModule.name.match(/module\s*0*(\d+)/i);
+        if (!match) continue;
+        const week = parseInt(match[1], 10);
+        const topicText = courseModule.name.split(":").slice(1).join(":").trim();
+        const assignmentItem = courseModule.items.find((item) => item.type.toLowerCase() === "assignment");
+        rows.push({
+          week,
+          topic: topicText || "",
+          summary: "",
+          assignmentTitle: assignmentItem?.title ?? null,
+          assignmentSlug: null,
+          testName: null,
+        });
+      }
+      if (rows.length === 0) {
+        setError("No Module NN modules found in the LMS export.");
+        return;
+      }
+      rows.sort((a, b) => a.week - b.week);
+      await saveCourseFromImport(c, { csvName: "lms-schedule.csv", csvData: scheduleToCsv(rows) });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read the modules from the export.");
+    } finally {
+      setLmsBusyTile(null);
+    }
+  };
+
+  const handleImportRubricFromTile = async (c: Course) => {
+    const tileKey = `${c.id}:rubric`;
+    setLmsBusyTile(tileKey);
+    setError(null);
+    try {
+      const data = await getCourseCartridge(c);
+      if (!data.hasCourseSettings) {
+        setError(NO_COURSE_SETTINGS_ERROR);
+        return;
+      }
+      if (data.rubrics.length === 0) {
+        setError("The LMS export has no rubrics.");
+        return;
+      }
+      const rubric = data.rubrics[0];
+      const lines: string[] = [];
+      for (const criterion of rubric.criteria) {
+        const firstRating = criterion.ratings[0] ?? null;
+        const summary = firstRating
+          ? `${criterion.description} (${criterion.points}): ${criterion.longDescription?.split("\n")[0] ?? ""}`
+          : `${criterion.description} (${criterion.points}): `;
+        lines.push(summary);
+        for (const rating of criterion.ratings) {
+          lines.push(`  - ${rating.description}: ${rating.points} pts`);
+        }
+      }
+      await saveCourseFromImport(c, { rubricName: `${rubric.title}.md`, rubricData: lines.join("\n") });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read the rubric from the export.");
+    } finally {
+      setLmsBusyTile(null);
+    }
+  };
+
+  const handleImportSyllabusFromTile = async (c: Course) => {
+    const tileKey = `${c.id}:syllabus`;
+    setLmsBusyTile(tileKey);
+    setError(null);
+    try {
+      const data = await getCourseCartridge(c);
+      if (!data.hasCourseSettings) {
+        setError(NO_COURSE_SETTINGS_ERROR);
+        return;
+      }
+      if (!data.syllabusHtml) {
+        setError("The LMS export has no syllabus content.");
+        return;
+      }
+      const r = await importSyllabusHtmlAction(c.name, data.syllabusHtml);
+      if ("error" in r) {
+        setError(r.error);
+        return;
+      }
+      await saveCourseFromImport(c, { syllabusId: r.syllabusId });
+      await reloadSyllabi();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not import the syllabus from the export.");
+    } finally {
+      setLmsBusyTile(null);
+    }
+  };
 
   const handleLmsRosterFromTile = async (c: Course) => {
     if (!canLms(c)) {
@@ -888,15 +1106,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       }
       const bytes = Uint8Array.from(atob(r.base64), (ch) => ch.charCodeAt(0));
       const blob = new Blob([bytes], { type: "application/octet-stream" });
-      const { path } = await uploadCourseZip(supabase, user.id, c.id, blob, null);
+      const { path, parts } = await uploadCourseZipChunked(supabase, user.id, c.id, blob);
       const appendResult = await appendCourseExportFileAction(c.id, {
         name: r.fileName,
         path,
         size: blob.size,
+        ...(parts ? { parts } : {}),
       });
       if ("error" in appendResult) {
         setError(appendResult.error);
-        await removeCourseZip(supabase, path);
+        await removeCourseZipObjects(supabase, parts ?? [path]);
         return;
       }
       setCourses((prev) => {
@@ -912,6 +1131,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   path,
                   size: blob.size,
                   addedAt: new Date().toISOString(),
+                  ...(parts ? { parts } : {}),
                 },
               ],
             };
@@ -921,9 +1141,8 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         if (hubCache) hubCache = { ...hubCache, courses: updated };
         return updated;
       });
-      if (appendResult.replacedPath) {
-        await removeCourseZip(supabase, appendResult.replacedPath);
-      }
+      await removeCourseZipObjects(supabase, appendResult.replacedPaths);
+      for (const p of appendResult.replacedPaths) cartridgeCache.delete(p);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not export from LMS.";
       if (/exceeded the maximum allowed size|payload too large|entity too large/i.test(message)) {
@@ -1221,15 +1440,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     setUploadingExport(true);
     setError(null);
     try {
-      const { path } = await uploadCourseZip(supabase, user.id, c.id, file, null);
+      const { path, parts } = await uploadCourseZipChunked(supabase, user.id, c.id, file);
       const r = await appendCourseExportFileAction(c.id, {
         name: file.name,
         path,
         size: file.size,
+        ...(parts ? { parts } : {}),
       });
       if ("error" in r) {
         setError(r.error);
-        await removeCourseZip(supabase, path);
+        await removeCourseZipObjects(supabase, parts ?? [path]);
         return;
       }
       setCourses((prev) => {
@@ -1245,6 +1465,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   path,
                   size: file.size,
                   addedAt: new Date().toISOString(),
+                  ...(parts ? { parts } : {}),
                 },
               ],
             };
@@ -1254,9 +1475,8 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         if (hubCache) hubCache = { ...hubCache, courses: updated };
         return updated;
       });
-      if (r.replacedPath) {
-        await removeCourseZip(supabase, r.replacedPath);
-      }
+      await removeCourseZipObjects(supabase, r.replacedPaths);
+      for (const p of r.replacedPaths) cartridgeCache.delete(p);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not upload the export.";
       if (/exceeded the maximum allowed size|payload too large|entity too large/i.test(message)) {
@@ -1269,21 +1489,22 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     }
   };
 
-  const handleRemoveExportFile = async (c: Course, path: string) => {
+  const handleRemoveExportFile = async (c: Course, file: CourseMaterialFile) => {
     if (!user) {
       setError("You must be logged in.");
       return;
     }
     try {
-      await removeCourseZip(supabase, path);
-      const r = await removeCourseExportFileAction(c.id, path);
+      await removeCourseZipObjects(supabase, courseZipObjectPaths(file));
+      cartridgeCache.delete(file.path);
+      const r = await removeCourseExportFileAction(c.id, file.path);
       if (!("error" in r)) {
         setCourses((prev) => {
           const updated = prev.map((course) => {
             if (course.id === c.id) {
               return {
                 ...course,
-                exportFiles: course.exportFiles.filter((f) => f.path !== path),
+                exportFiles: course.exportFiles.filter((f) => f.path !== file.path),
               };
             }
             return course;
@@ -1297,6 +1518,33 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not remove the export file.");
+    }
+  };
+
+  // Download an export entry; chunked entries are reassembled client-side.
+  const handleDownloadExportFile = async (file: CourseMaterialFile) => {
+    try {
+      if (file.parts && file.parts.length > 0) {
+        const blob = await downloadCourseZipBlob(supabase, file);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = file.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        return;
+      }
+      const url = await getCourseZipUrl(supabase, file.path);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not download the file.");
     }
   };
 
@@ -2217,21 +2465,43 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       {lmsBusyTile === `${c.id}:syllabus` ? "Loading..." : "From LMS"}
                     </button>
                   )}
+                  {canImport(c) && (
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      disabled={lmsBusyTile !== null && lmsBusyTile.startsWith(`${c.id}:`)}
+                      onClick={() => void handleImportSyllabusFromTile(c)}
+                    >
+                      {lmsBusyTile === `${c.id}:syllabus` ? "Loading..." : "From import"}
+                    </button>
+                  )}
                 </div>
               </>
             ) : (
               <>
                 <span className={styles.courseResourceEmpty}>Not linked</span>
-                {canLms(c) && (
+                {(canLms(c) || canImport(c)) && (
                   <div className={styles.courseResourceActions}>
-                    <button
-                      type="button"
-                      className={styles.linkButton}
-                      disabled={lmsBusyTile === `${c.id}:syllabus`}
-                      onClick={() => void handleLmsSyllabusFromTile(c)}
-                    >
-                      {lmsBusyTile === `${c.id}:syllabus` ? "Loading..." : "From LMS"}
-                    </button>
+                    {canLms(c) && (
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        disabled={lmsBusyTile === `${c.id}:syllabus`}
+                        onClick={() => void handleLmsSyllabusFromTile(c)}
+                      >
+                        {lmsBusyTile === `${c.id}:syllabus` ? "Loading..." : "From LMS"}
+                      </button>
+                    )}
+                    {canImport(c) && (
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        disabled={lmsBusyTile !== null && lmsBusyTile.startsWith(`${c.id}:`)}
+                        onClick={() => void handleImportSyllabusFromTile(c)}
+                      >
+                        {lmsBusyTile === `${c.id}:syllabus` ? "Loading..." : "From import"}
+                      </button>
+                    )}
                   </div>
                 )}
               </>
@@ -2311,16 +2581,28 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                 ? (
                   <>
                     <span className={styles.courseResourceValue}>{new Date(`${c.startDate}T00:00:00`).toLocaleDateString()}</span>
-                    {canLms(c) && (
+                    {(canLms(c) || canImport(c)) && (
                       <div className={styles.courseResourceActions}>
-                        <button
-                          type="button"
-                          className={styles.linkButton}
-                          disabled={lmsBusyTile === `${c.id}:startDate`}
-                          onClick={() => void handleLmsStartDateFromTile(c)}
-                        >
-                          {lmsBusyTile === `${c.id}:startDate` ? "Loading..." : "From LMS"}
-                        </button>
+                        {canLms(c) && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            disabled={lmsBusyTile === `${c.id}:startDate`}
+                            onClick={() => void handleLmsStartDateFromTile(c)}
+                          >
+                            {lmsBusyTile === `${c.id}:startDate` ? "Loading..." : "From LMS"}
+                          </button>
+                        )}
+                        {canImport(c) && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            disabled={lmsBusyTile !== null && lmsBusyTile.startsWith(`${c.id}:`)}
+                            onClick={() => void handleImportStartDateFromTile(c)}
+                          >
+                            {lmsBusyTile === `${c.id}:startDate` ? "Loading..." : "From import"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </>
@@ -2328,16 +2610,28 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                 : (
                   <>
                     <span className={styles.courseResourceEmpty}>Not set</span>
-                    {canLms(c) && (
+                    {(canLms(c) || canImport(c)) && (
                       <div className={styles.courseResourceActions}>
-                        <button
-                          type="button"
-                          className={styles.linkButton}
-                          disabled={lmsBusyTile === `${c.id}:startDate`}
-                          onClick={() => void handleLmsStartDateFromTile(c)}
-                        >
-                          {lmsBusyTile === `${c.id}:startDate` ? "Loading..." : "From LMS"}
-                        </button>
+                        {canLms(c) && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            disabled={lmsBusyTile === `${c.id}:startDate`}
+                            onClick={() => void handleLmsStartDateFromTile(c)}
+                          >
+                            {lmsBusyTile === `${c.id}:startDate` ? "Loading..." : "From LMS"}
+                          </button>
+                        )}
+                        {canImport(c) && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            disabled={lmsBusyTile !== null && lmsBusyTile.startsWith(`${c.id}:`)}
+                            onClick={() => void handleImportStartDateFromTile(c)}
+                          >
+                            {lmsBusyTile === `${c.id}:startDate` ? "Loading..." : "From import"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </>
@@ -2364,16 +2658,28 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                 ? (
                   <>
                     <span className={styles.courseResourceValue}>{c.weeks}</span>
-                    {canLms(c) && (
+                    {(canLms(c) || canImport(c)) && (
                       <div className={styles.courseResourceActions}>
-                        <button
-                          type="button"
-                          className={styles.linkButton}
-                          disabled={lmsBusyTile === `${c.id}:weeks`}
-                          onClick={() => void handleLmsWeeksFromTile(c)}
-                        >
-                          {lmsBusyTile === `${c.id}:weeks` ? "Loading..." : "From LMS"}
-                        </button>
+                        {canLms(c) && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            disabled={lmsBusyTile === `${c.id}:weeks`}
+                            onClick={() => void handleLmsWeeksFromTile(c)}
+                          >
+                            {lmsBusyTile === `${c.id}:weeks` ? "Loading..." : "From LMS"}
+                          </button>
+                        )}
+                        {canImport(c) && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            disabled={lmsBusyTile !== null && lmsBusyTile.startsWith(`${c.id}:`)}
+                            onClick={() => void handleImportWeeksFromTile(c)}
+                          >
+                            {lmsBusyTile === `${c.id}:weeks` ? "Loading..." : "From import"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </>
@@ -2381,16 +2687,28 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                 : (
                   <>
                     <span className={styles.courseResourceEmpty}>Not set</span>
-                    {canLms(c) && (
+                    {(canLms(c) || canImport(c)) && (
                       <div className={styles.courseResourceActions}>
-                        <button
-                          type="button"
-                          className={styles.linkButton}
-                          disabled={lmsBusyTile === `${c.id}:weeks`}
-                          onClick={() => void handleLmsWeeksFromTile(c)}
-                        >
-                          {lmsBusyTile === `${c.id}:weeks` ? "Loading..." : "From LMS"}
-                        </button>
+                        {canLms(c) && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            disabled={lmsBusyTile === `${c.id}:weeks`}
+                            onClick={() => void handleLmsWeeksFromTile(c)}
+                          >
+                            {lmsBusyTile === `${c.id}:weeks` ? "Loading..." : "From LMS"}
+                          </button>
+                        )}
+                        {canImport(c) && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            disabled={lmsBusyTile !== null && lmsBusyTile.startsWith(`${c.id}:`)}
+                            onClick={() => void handleImportWeeksFromTile(c)}
+                          >
+                            {lmsBusyTile === `${c.id}:weeks` ? "Loading..." : "From import"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </>
@@ -2631,6 +2949,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         {lmsBusyTile === `${c.id}:csv` ? "Loading..." : "From LMS"}
                       </button>
                     )}
+                    {canImport(c) && (
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        disabled={lmsBusyTile !== null && lmsBusyTile.startsWith(`${c.id}:`)}
+                        onClick={() => void handleImportCsvFromTile(c)}
+                      >
+                        {lmsBusyTile === `${c.id}:csv` ? "Loading..." : "From import"}
+                      </button>
+                    )}
                   </div>
                   <input
                     ref={csvUploadRef}
@@ -2697,6 +3025,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         onClick={() => void handleLmsCsvFromTile(c)}
                       >
                         {lmsBusyTile === `${c.id}:csv` ? "Loading..." : "From LMS"}
+                      </button>
+                    )}
+                    {canImport(c) && (
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        disabled={lmsBusyTile !== null && lmsBusyTile.startsWith(`${c.id}:`)}
+                        onClick={() => void handleImportCsvFromTile(c)}
+                      >
+                        {lmsBusyTile === `${c.id}:csv` ? "Loading..." : "From import"}
                       </button>
                     )}
                     {csvRemoveConfirm === c.id && (
@@ -2792,6 +3130,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         {lmsBusyTile === `${c.id}:rubric` ? "Loading..." : "From LMS"}
                       </button>
                     )}
+                    {canImport(c) && (
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        disabled={lmsBusyTile !== null && lmsBusyTile.startsWith(`${c.id}:`)}
+                        onClick={() => void handleImportRubricFromTile(c)}
+                      >
+                        {lmsBusyTile === `${c.id}:rubric` ? "Loading..." : "From import"}
+                      </button>
+                    )}
                   </div>
                 </>
               )
@@ -2847,6 +3195,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         onClick={() => void handleLmsRubricFromTile(c)}
                       >
                         {lmsBusyTile === `${c.id}:rubric` ? "Loading..." : "From LMS"}
+                      </button>
+                    )}
+                    {canImport(c) && (
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        disabled={lmsBusyTile !== null && lmsBusyTile.startsWith(`${c.id}:`)}
+                        onClick={() => void handleImportRubricFromTile(c)}
+                      >
+                        {lmsBusyTile === `${c.id}:rubric` ? "Loading..." : "From import"}
                       </button>
                     )}
                   </div>
@@ -2947,19 +3305,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         <button
                           type="button"
                           className={styles.linkButton}
-                          onClick={async () => {
-                            try {
-                              const url = await getCourseZipUrl(supabase, f.path);
-                              const a = document.createElement("a");
-                              a.href = url;
-                              a.download = f.name;
-                              document.body.appendChild(a);
-                              a.click();
-                              document.body.removeChild(a);
-                            } catch (err) {
-                              setError(err instanceof Error ? err.message : "Could not download the file.");
-                            }
-                          }}
+                          onClick={() => void handleDownloadExportFile(f)}
                         >
                           Download
                         </button>
@@ -2981,7 +3327,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                             variant="outlined"
                             size="small"
                             color="error"
-                            onClick={() => void handleRemoveExportFile(c, f.path)}
+                            onClick={() => void handleRemoveExportFile(c, f)}
                           >
                             Delete export
                           </Button>
@@ -3336,12 +3682,66 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     saveInstFieldEditRef.current = saveInstFieldEdit;
   });
 
+  useEffect(() => {
+    instFieldsRef.current = instFields;
+  });
+
   const submitInstFieldAdd = () => {
     if (!instFieldAdd || !instFieldAdd.label.trim()) return;
     const list = instFields[instFieldAdd.acronym];
     if (!list) return;
     applyInstFields(instFieldAdd.acronym, [...list, { id: crypto.randomUUID(), label: instFieldAdd.label.trim(), type: instFieldAdd.type, value: "" }]);
     setInstFieldAdd(null);
+  };
+
+  // Upload a .docx straight from the institution's template chip: save it to
+  // the template library, then select it as the chip's value.
+  const handleInstTemplateUpload = async (acronym: string, fieldId: string, file: File) => {
+    if (!/\.docx$/i.test(file.name)) {
+      setError("The template must be a Word .docx file.");
+      return;
+    }
+    setInstTemplateUploading(acronym);
+    setError(null);
+    try {
+      const base64 = await readFileBase64(file);
+      if (base64.length > 8 * 1024 * 1024) {
+        setError("That file is too large (limit ~6 MB).");
+        return;
+      }
+      const name = file.name.replace(/\.docx$/i, "").trim() || file.name;
+      const r = await createSyllabusTemplateAction(name, file.name, base64);
+      if ("error" in r) {
+        setError(r.error);
+        return;
+      }
+      setSyllabusTemplates((prev) => [
+        { id: r.template.id, name: r.template.name },
+        ...(prev ?? []).filter((t) => t.id !== r.template.id),
+      ]);
+      setInstFieldEdit(null);
+      // Read through the ref: other field edits may have saved while the
+      // upload was in flight, and a render-time snapshot would revert them.
+      const list = instFieldsRef.current[acronym];
+      if (list) {
+        applyInstFields(acronym, list.map((f) => (f.id === fieldId ? { ...f, value: r.template.id } : f)));
+      }
+      // Reconcile with the server list: the optimistic prepend above flips
+      // syllabusTemplates from null, which cancels the initial lazy load. The
+      // upload itself succeeded, so a failed refetch stays silent.
+      try {
+        const listResult = await listSyllabusTemplatesAction();
+        if (!("error" in listResult)) {
+          setSyllabusTemplates(listResult.templates.map((t) => ({ id: t.id, name: t.name })));
+        }
+      } catch {
+        // Keep the optimistic entry.
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not upload the template.");
+    } finally {
+      setInstTemplateUploading(null);
+    }
   };
 
   // Compact per-institution "Common fields" panel above the section's cards.
@@ -3369,14 +3769,36 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   <span className={styles.instFieldLabel}>{f.label}</span>
                   {editing ? (
                     f.type === "syllabusTemplate" ? (
-                      <Typeahead
-                        options={(syllabusTemplates ?? []).map((t) => ({ value: t.id, label: t.name }))}
-                        value={instFieldEdit.value}
-                        onChange={(v) => setInstFieldEdit((p) => (p ? { ...p, value: v } : p))}
-                        placeholder={syllabusTemplates === null ? "Loading templates..." : "Choose a template..."}
-                        loading={syllabusTemplates === null}
-                        noOptionsText="No templates available"
-                      />
+                      <div>
+                        <Typeahead
+                          options={(syllabusTemplates ?? []).map((t) => ({ value: t.id, label: t.name }))}
+                          value={instFieldEdit.value}
+                          onChange={(v) => setInstFieldEdit((p) => (p ? { ...p, value: v } : p))}
+                          placeholder={syllabusTemplates === null ? "Loading templates..." : "Choose a template..."}
+                          loading={syllabusTemplates === null}
+                          noOptionsText="No templates available"
+                        />
+                        <input
+                          id={`inst-template-upload-${acronym}-${f.id}`}
+                          type="file"
+                          accept=".docx"
+                          style={{ display: "none" }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) void handleInstTemplateUpload(acronym, f.id, file);
+                            e.target.value = "";
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          style={{ marginTop: 6, fontSize: "0.85em" }}
+                          disabled={instTemplateUploading === acronym}
+                          onClick={() => document.getElementById(`inst-template-upload-${acronym}-${f.id}`)?.click()}
+                        >
+                          {instTemplateUploading === acronym ? "Uploading..." : "Upload new template (.docx)"}
+                        </button>
+                      </div>
                     ) : f.type === "lms" ? (
                       <div>
                         <Typeahead

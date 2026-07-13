@@ -5574,3 +5574,64 @@ a.instFieldValue:hover {
     align-items: stretch;
   }
 }
+
+/* Workflow run/review-table facelift (grade review pause in WorkflowsTab).
+   Kept as classes rather than inline styles only where a pseudo-class
+   (:hover) is needed - everything else in that panel stays inline style,
+   matching the rest of the file. */
+
+.workflowReviewHeading {
+  margin: 0 0 2px;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.workflowActionBar {
+  padding-top: 12px;
+  border-top: 1px solid var(--field-border);
+}
+
+.workflowTableRow {
+  transition: background-color 0.12s ease;
+}
+
+.workflowTableRow:hover {
+  background: var(--surface-subtle);
+}
+
+.workflowTableRowSelected {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.workflowTableRowSelected:hover {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+
+.workflowTableRowUnselected {
+  opacity: 0.6;
+}
+
+.workflowDetailCell {
+  background: var(--surface-subtle);
+  border-left: 3px solid var(--accent);
+}
+
+.workflowDetailSectionHeader {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.workflowDetailSectionDivider {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--field-border);
+}
+
+.workflowCard {
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--card-background);
+}

@@ -35,7 +35,10 @@ import {
   collectRuntimeFields,
   saveCustomWorkflows,
   expandWorkflowDef,
+  loadDisabledSteps,
+  saveDisabledSteps,
 } from "@/lib/workflows/types";
+import { splitDetailSections } from "@/lib/workflows/detail-sections";
 import {
   listWorkflowDefs,
   upsertWorkflowDef,
@@ -271,6 +274,70 @@ function tableGradeIssue(row: Record<string, string>): string | null {
   return null;
 }
 
+type GradeBand = "success" | "accent" | "warning" | "danger" | "neutral";
+
+// Visual banding for the Grade badge/distribution bar: percentage bands when
+// grade/outOf are both usable numbers, else a neutral "unbanded" pill (empty,
+// invalid, or no outOf to compute a percentage against).
+function tableGradeBand(row: Record<string, string>): { band: GradeBand; pct: number | null } {
+  const raw = (row.grade ?? "").trim();
+  if (raw === "" || tableGradeIssue(row) !== null) return { band: "neutral", pct: null };
+  const outOf = parseFloat((row.outOf ?? "").trim());
+  if (!Number.isFinite(outOf) || outOf <= 0) return { band: "neutral", pct: null };
+  const pct = (parseFloat(raw) / outOf) * 100;
+  const band: GradeBand =
+    pct >= 90 ? "success" : pct >= 80 ? "accent" : pct >= 70 ? "warning" : "danger";
+  return { band, pct };
+}
+
+const GRADE_BAND_BADGE_CLASS: Record<GradeBand, string> = {
+  success: styles.ghBadgeSuccess,
+  accent: styles.ghBadgeAccent,
+  warning: styles.ghBadgeWarning,
+  danger: styles.ghBadgeDanger,
+  neutral: styles.ghBadgeNeutral,
+};
+
+// Compact read-out beside the editable Grade cell - a visual summary only,
+// the TextField above it stays the actual (and only) way to edit the value.
+function GradeBadge({ row }: { row: Record<string, string> }) {
+  const raw = (row.grade ?? "").trim();
+  if (raw === "") {
+    return (
+      <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>No grade</span>
+    );
+  }
+  const { band, pct } = tableGradeBand(row);
+  const label = pct !== null ? `${Math.round(pct)}%` : raw;
+  return (
+    <span className={`${styles.ghBadge} ${GRADE_BAND_BADGE_CLASS[band]}`}>{label}</span>
+  );
+}
+
+// Presentation for a row-detail text blob: headed sections when the
+// registry's rowDetail text has recognizable section labels ("Rubric
+// breakdown:", "AI feedback:", ...), otherwise the original single
+// pre-wrap block untouched (no headers to show, so no dividers either).
+function DetailSectionsView({ text }: { text: string }) {
+  const sections = splitDetailSections(text);
+  const hasHeaders = sections.some((s) => s.header !== null);
+  if (!hasHeaders) {
+    return <div style={{ whiteSpace: "pre-wrap" }}>{text}</div>;
+  }
+  return (
+    <>
+      {sections.map((section, idx) => (
+        <div key={idx} className={idx > 0 ? styles.workflowDetailSectionDivider : undefined}>
+          {section.header && (
+            <div className={styles.workflowDetailSectionHeader}>{section.header}</div>
+          )}
+          {section.body && <div style={{ whiteSpace: "pre-wrap" }}>{section.body}</div>}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export default function WorkflowsTab() {
   const { supabase, user } = useSupabase();
   const { institutions, active: activeInstitution } = useInstitutionSelection();
@@ -311,9 +378,17 @@ export default function WorkflowsTab() {
     return {};
   });
 
+  // Per-user overlay of disabled TOP-LEVEL step indices for the selected
+  // workflow (see expandWorkflowDef's topIndices). Persisted per workflow id;
+  // never mutates the workflow def itself. Loaded/saved the same way as
+  // `values` above.
+  const [disabledSteps, setDisabledSteps] = useState<Set<number>>(() =>
+    selectedDef ? new Set(loadDisabledSteps(selectedDef.id)) : new Set()
+  );
+
   const [runState, setRunState] = useState<
     Array<{
-      status: "pending" | "running" | "done" | "error";
+      status: "pending" | "running" | "done" | "error" | "disabled";
       progress: string | null;
       summary: StepRunSummary | null;
       error: string | null;
@@ -408,6 +483,37 @@ export default function WorkflowsTab() {
     return { invalid, missing, avg, median, min: sorted[0], max: sorted[sorted.length - 1] };
   }, [tableHasGrade, runInputRows]);
 
+  // Compact distribution bar data: counts per percentage band, current rows,
+  // recomputed as grades are edited. Rows that cannot be percentage-banded
+  // (no grade, invalid, or no outOf) are excluded from the bar entirely -
+  // null when there is nothing bandable yet, so the bar can hide itself.
+  const tableGradeDist = useMemo(() => {
+    if (!tableHasGrade) return null;
+    const counts: Record<Exclude<GradeBand, "neutral">, number> = {
+      success: 0,
+      accent: 0,
+      warning: 0,
+      danger: 0,
+    };
+    for (const row of runInputRows) {
+      const { band } = tableGradeBand(row);
+      if (band !== "neutral") counts[band] += 1;
+    }
+    const total = counts.success + counts.accent + counts.warning + counts.danger;
+    if (total === 0) return null;
+    const segments: Array<{ band: Exclude<GradeBand, "neutral">; label: string; count: number }> = [
+      { band: "success", label: "90%+", count: counts.success },
+      { band: "accent", label: "80-89%", count: counts.accent },
+      { band: "warning", label: "70-79%", count: counts.warning },
+      { band: "danger", label: "below 70%", count: counts.danger },
+    ];
+    return {
+      total,
+      segments,
+      ariaLabel: segments.map((s) => `${s.count} at ${s.label}`).join(", "),
+    };
+  }, [tableHasGrade, runInputRows]);
+
   // Selected rows with invalid grades block approval (a typo would otherwise
   // surface only as a silent per-student skip after posting).
   const tableCheckedInvalid = tableHasGrade
@@ -457,9 +563,10 @@ export default function WorkflowsTab() {
   const expanded = useMemo<{
     steps: WorkflowStepConfig[];
     origins: Array<string | null>;
+    topIndices: number[];
     error: string | null;
   }>(() => {
-    if (!selectedDef) return { steps: [], origins: [], error: null };
+    if (!selectedDef) return { steps: [], origins: [], topIndices: [], error: null };
     try {
       return {
         ...expandWorkflowDef(selectedDef, (id) =>
@@ -471,24 +578,59 @@ export default function WorkflowsTab() {
       return {
         steps: [],
         origins: [],
+        topIndices: [],
         error: err instanceof Error ? err.message : String(err),
       };
     }
   }, [selectedDef, workflows]);
 
+  // Steps whose top-level index the user has disabled are excluded here so
+  // the run form never asks for inputs needed only by a disabled step (a
+  // field shared with an enabled step still appears - first-occurrence-wins
+  // in collectRuntimeFields naturally handles that once disabled steps are
+  // simply absent from the list it walks).
+  const enabledExpandedSteps = useMemo(
+    () => expanded.steps.filter((_, i) => !disabledSteps.has(expanded.topIndices[i])),
+    [expanded, disabledSteps]
+  );
+
   const runtimeFields: RuntimeField[] = useMemo(
     () =>
       selectedDef
         ? collectRuntimeFields(
-            { ...selectedDef, steps: expanded.steps },
+            { ...selectedDef, steps: enabledExpandedSteps },
             (type) => {
               const def = getStepDefinition(type);
               return def?.inputs;
             }
           )
         : [],
-    [selectedDef, expanded]
+    [selectedDef, enabledExpandedSteps]
   );
+
+  // Run requires at least one enabled step - a workflow with every step
+  // toggled off would run the loop and finish having done nothing.
+  const allStepsDisabled = expanded.steps.length > 0 && enabledExpandedSteps.length === 0;
+
+  // Top-level indices of disabled steps that an ENABLED step still binds to
+  // by "step" output - surfaced in the overview as a subtle heads-up (not a
+  // block: disabling stays allowed, dependents just cascade-skip at run
+  // time with their own clear message).
+  const disabledStepsWithEnabledDependents = useMemo(() => {
+    const result = new Set<number>();
+    expanded.steps.forEach((step, i) => {
+      if (disabledSteps.has(expanded.topIndices[i])) return;
+      for (const binding of Object.values(step.bindings)) {
+        if (binding.source === "step") {
+          const producerTop = expanded.topIndices[binding.stepIndex];
+          if (producerTop !== undefined && disabledSteps.has(producerTop)) {
+            result.add(producerTop);
+          }
+        }
+      }
+    });
+    return result;
+  }, [expanded, disabledSteps]);
 
   // Seed empty institution fields from the active institution during render
   // (guarded by a marker so each field set seeds once), so no effect calls
@@ -712,6 +854,12 @@ export default function WorkflowsTab() {
       );
     }
   }, [values, selectedDef]);
+
+  useEffect(() => {
+    if (selectedDef) {
+      saveDisabledSteps(selectedDef.id, Array.from(disabledSteps));
+    }
+  }, [disabledSteps, selectedDef]);
 
   useEffect(() => {
     if (user && supabase) {
@@ -943,6 +1091,9 @@ export default function WorkflowsTab() {
     } else {
       setValues({});
     }
+    // Same lifecycle as values: the disabled-step overlay is per workflow id,
+    // so it is rehydrated (not carried over) whenever the selection changes.
+    setDisabledSteps(new Set(loadDisabledSteps(newId)));
   };
 
   const handleValueChange = (fieldKey: string, value: string) => {
@@ -1043,6 +1194,11 @@ export default function WorkflowsTab() {
   const handleRun = async () => {
     if (!selectedDef) return;
     if (expanded.error) return;
+    // Scheduled runs and workflow handoffs land here too (both call
+    // handleRun directly); reading disabledSteps at call time - rather than
+    // snapshotting it into the schedule - means a scheduled run always
+    // honors the user's CURRENT step toggles for this workflow.
+    if (allStepsDisabled) return;
     if (!validateForm()) return;
 
     setRunning(true);
@@ -1062,6 +1218,10 @@ export default function WorkflowsTab() {
 
     const stepOutputs: Array<Record<string, unknown>> = [];
     const failedSteps = new Set<number>();
+    // Steps the user disabled are added to failedSteps too (so dependents
+    // cascade-skip), but a disable is not a genuine failure. Tracked
+    // separately so the post-run handoff guard can tell the two apart.
+    const disabledRunIndices = new Set<number>();
 
     const helpers: StepRunHelpers = {
       activeInstitution: activeInstitution || null,
@@ -1155,6 +1315,26 @@ export default function WorkflowsTab() {
       const step = expanded.steps[i];
       const def = getStepDefinition(step.type);
 
+      // A step whose top-level index the user disabled is never run: mark it
+      // and add it to failedSteps so any later step binding to its output
+      // fails-forward through the existing cascade below, with a message
+      // that calls out the disabled step specifically.
+      if (disabledSteps.has(expanded.topIndices[i])) {
+        setRunState((prev) => {
+          const next = [...prev];
+          next[i] = {
+            status: "disabled",
+            progress: null,
+            summary: null,
+            error: null,
+          };
+          return next;
+        });
+        failedSteps.add(i);
+        disabledRunIndices.add(i);
+        continue;
+      }
+
       setRunState((prev) => {
         const next = [...prev];
         next[i] = { ...next[i], status: "running" };
@@ -1182,7 +1362,12 @@ export default function WorkflowsTab() {
           } else if (binding.source === "step") {
             if (failedSteps.has(binding.stepIndex)) {
               const failedDef = getStepDefinition(expanded.steps[binding.stepIndex]?.type ?? "");
-              throw new Error(`Skipped - depends on step ${binding.stepIndex + 1} ("${failedDef?.name ?? "unknown step"}"), which failed.`);
+              const dependsOnDisabled = disabledSteps.has(expanded.topIndices[binding.stepIndex]);
+              throw new Error(
+                dependsOnDisabled
+                  ? `Skipped - depends on step ${binding.stepIndex + 1} ("${failedDef?.name ?? "unknown step"}"), which is disabled.`
+                  : `Skipped - depends on step ${binding.stepIndex + 1} ("${failedDef?.name ?? "unknown step"}"), which failed.`
+              );
             }
             const output = stepOutputs[binding.stepIndex]?.[binding.outputKey];
             if (output === undefined) {
@@ -1327,8 +1512,12 @@ export default function WorkflowsTab() {
       }
     }
 
-    // A cancelled or failed run must not fire the mid-run handoff.
-    if (failedSteps.size > 0) {
+    // A genuine failure or cancel must not fire the mid-run handoff - but
+    // user-disabled steps sit in failedSteps only to drive the dependency
+    // cascade, so they do not count as failures here. If the only entries
+    // are the disabled steps, the run had no real failure and a handoff
+    // emitted by a step that actually ran should still fire.
+    if (failedSteps.size > disabledRunIndices.size) {
       setPendingHandoff(null);
     }
 
@@ -1470,8 +1659,15 @@ export default function WorkflowsTab() {
               )}
               {!editing && (
                 <div className={styles.fieldHint}>
+                  <div style={{ marginBottom: 6 }}>
+                    Turn a step off to skip it in your own runs - this only
+                    affects you; the workflow itself (and other users) is
+                    unchanged.
+                  </div>
                   {expanded.steps.map((step, i) => {
                     const stepDef = getStepDefinition(step.type);
+                    const topIndex = expanded.topIndices[i];
+                    const isDisabled = disabledSteps.has(topIndex);
                     const bindings = Object.entries(step.bindings)
                       .map(([key, binding]) => {
                         if (binding.source === "runtime") {
@@ -1486,16 +1682,60 @@ export default function WorkflowsTab() {
                       .filter(Boolean)
                       .join(" | ");
                     return (
-                      <div key={i}>
-                        {i + 1}. {stepDef?.name ?? step.type}
-                        {expanded.origins[i] && (
-                          <span style={{ marginLeft: 6, opacity: 0.75 }}>
-                            (from {expanded.origins[i]})
+                      <div
+                        key={i}
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: 2,
+                          opacity: isDisabled ? 0.6 : 1,
+                        }}
+                      >
+                        <Checkbox
+                          size="small"
+                          checked={!isDisabled}
+                          onChange={() => {
+                            setDisabledSteps((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(topIndex)) next.delete(topIndex);
+                              else next.add(topIndex);
+                              return next;
+                            });
+                          }}
+                          title={
+                            isDisabled
+                              ? "Enable this step for your runs"
+                              : "Disable this step for your runs"
+                          }
+                          style={{ padding: 2, marginTop: -3 }}
+                        />
+                        <div>
+                          <span style={{ textDecoration: isDisabled ? "line-through" : undefined }}>
+                            {i + 1}. {stepDef?.name ?? step.type}
                           </span>
-                        )}
-                        {bindings && (
-                          <span style={{ marginLeft: 8 }}>({bindings})</span>
-                        )}
+                          {expanded.origins[i] && (
+                            <span style={{ marginLeft: 6, opacity: 0.75 }}>
+                              (from {expanded.origins[i]})
+                            </span>
+                          )}
+                          {bindings && (
+                            <span style={{ marginLeft: 8 }}>({bindings})</span>
+                          )}
+                          {isDisabled && (
+                            <span
+                              className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}
+                              style={{ marginLeft: 8 }}
+                            >
+                              Disabled
+                            </span>
+                          )}
+                          {isDisabled && disabledStepsWithEnabledDependents.has(topIndex) && (
+                            <div style={{ fontSize: "0.9em", opacity: 0.85 }}>
+                              A later enabled step depends on this step&apos;s output and will
+                              be skipped when you run.
+                            </div>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -2103,7 +2343,7 @@ export default function WorkflowsTab() {
               <Button
                 variant="contained"
                 onClick={handleRun}
-                disabled={running || !!runPause || !!runInput || !!expanded.error}
+                disabled={running || !!runPause || !!runInput || !!expanded.error || allStepsDisabled}
                 size="small"
               >
                 {running ? "Running..." : "Run"}
@@ -2122,6 +2362,11 @@ export default function WorkflowsTab() {
               >
                 {scheduleForm ? "Cancel schedule" : "Schedule..."}
               </Button>
+              {allStepsDisabled && (
+                <span className={styles.fieldHint} style={{ color: "var(--danger)" }}>
+                  Enable at least one step.
+                </span>
+              )}
             </div>
 
             {scheduleForm && (
@@ -2253,7 +2498,9 @@ export default function WorkflowsTab() {
                   ? styles.ghBadgeAccent
                   : state.status === "done"
                     ? styles.ghBadgeSuccess
-                    : "";
+                    : state.status === "disabled"
+                      ? styles.ghBadgeNeutral
+                      : "";
 
             return (
               <div
@@ -2293,7 +2540,11 @@ export default function WorkflowsTab() {
                         : {}
                     }
                   >
-                    {state.status === "error" ? "Failed" : state.status}
+                    {state.status === "error"
+                      ? "Failed"
+                      : state.status === "disabled"
+                        ? "Disabled"
+                        : state.status}
                   </span>
                 </div>
 
@@ -2437,6 +2688,9 @@ export default function WorkflowsTab() {
 
                     {runInput.kind === "table" && runInput.columns && (
                       <>
+                        <h3 className={styles.workflowReviewHeading}>
+                          {tableHasGrade ? "Grade review" : "Review table"}
+                        </h3>
                         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
                           <TextField
                             size="small"
@@ -2457,6 +2711,34 @@ export default function WorkflowsTab() {
                                 </span>
                               )}
                             </span>
+                          )}
+                          {tableGradeDist && (
+                            <div
+                              role="img"
+                              aria-label={`Grade distribution - ${tableGradeDist.ariaLabel}`}
+                              title={tableGradeDist.ariaLabel}
+                              style={{
+                                display: "flex",
+                                height: 8,
+                                width: 140,
+                                borderRadius: 999,
+                                overflow: "hidden",
+                                background: "var(--surface-subtle)",
+                                flex: "none",
+                              }}
+                            >
+                              {tableGradeDist.segments
+                                .filter((s) => s.count > 0)
+                                .map((s) => (
+                                  <div
+                                    key={s.band}
+                                    style={{
+                                      width: `${(s.count / tableGradeDist.total) * 100}%`,
+                                      background: `var(--${s.band})`,
+                                    }}
+                                  />
+                                ))}
+                            </div>
                           )}
                           <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
                             {tableHasGrade && tableGradeStats && tableGradeStats.invalid > 0 && runInput.selectable && (
@@ -2522,7 +2804,7 @@ export default function WorkflowsTab() {
                                   style={{
                                     textAlign: "center",
                                     borderBottom: "1px solid var(--field-border)",
-                                    padding: "6px 8px",
+                                    padding: "8px 10px",
                                     fontWeight: "bold",
                                     width: 32,
                                     position: "sticky",
@@ -2552,7 +2834,7 @@ export default function WorkflowsTab() {
                                   style={{
                                     textAlign: "left",
                                     borderBottom: "1px solid var(--field-border)",
-                                    padding: "6px 8px",
+                                    padding: "8px 10px",
                                     fontWeight: "bold",
                                     width: col.width,
                                     position: "sticky",
@@ -2587,7 +2869,7 @@ export default function WorkflowsTab() {
                                   style={{
                                     textAlign: "center",
                                     borderBottom: "1px solid var(--field-border)",
-                                    padding: "6px 8px",
+                                    padding: "8px 10px",
                                     fontWeight: "bold",
                                     width: 80,
                                     position: "sticky",
@@ -2601,7 +2883,7 @@ export default function WorkflowsTab() {
                             </tr>
                           </thead>
                           <tbody>
-                            {tableDisplay.map(({ row, index: rowIndex }, displayIndex) => {
+                            {tableDisplay.map(({ row, index: rowIndex }) => {
                               const detail = runInputDetails[rowIndex];
                               const hasDetail = runInput.rowDetail !== undefined;
                               const colSpan = (runInput.selectable ? 1 : 0) + (runInput.columns?.length ?? 0) + (hasDetail ? 1 : 0);
@@ -2611,14 +2893,23 @@ export default function WorkflowsTab() {
                                 (runInput.columns ?? []).some(
                                   (c) => c.editable && (row[c.key] ?? "") !== (initialRow[c.key] ?? "")
                                 );
+                              const rowSelected = runInputChecked[rowIndex] ?? true;
                               return (
                                 <Fragment key={rowIndex}>
-                                  <tr style={{ background: displayIndex % 2 === 1 ? "var(--surface-subtle)" : undefined }}>
+                                  <tr
+                                    className={`${styles.workflowTableRow} ${
+                                      runInput.selectable
+                                        ? rowSelected
+                                          ? styles.workflowTableRowSelected
+                                          : styles.workflowTableRowUnselected
+                                        : ""
+                                    }`}
+                                  >
                                     {runInput.selectable && (
                                       <td
                                         style={{
                                           borderBottom: "1px solid var(--field-border)",
-                                          padding: "6px 8px",
+                                          padding: "8px 10px",
                                           textAlign: "center",
                                         }}
                                       >
@@ -2640,7 +2931,7 @@ export default function WorkflowsTab() {
                                         key={col.key}
                                         style={{
                                           borderBottom: "1px solid var(--field-border)",
-                                          padding: "6px 8px",
+                                          padding: "8px 10px",
                                           width: col.width,
                                         }}
                                       >
@@ -2680,13 +2971,18 @@ export default function WorkflowsTab() {
                                         ) : (
                                           row[col.key] ?? ""
                                         )}
+                                        {tableHasGrade && col.key === "grade" && (
+                                          <div style={{ marginTop: 4 }}>
+                                            <GradeBadge row={row} />
+                                          </div>
+                                        )}
                                       </td>
                                     ))}
                                     {hasDetail && (
                                       <td
                                         style={{
                                           borderBottom: "1px solid var(--field-border)",
-                                          padding: "6px 8px",
+                                          padding: "8px 10px",
                                           textAlign: "center",
                                           whiteSpace: "nowrap",
                                         }}
@@ -2752,9 +3048,10 @@ export default function WorkflowsTab() {
                                     <tr>
                                       <td
                                         colSpan={colSpan}
+                                        className={styles.workflowDetailCell}
                                         style={{
                                           borderBottom: "1px solid var(--field-border)",
-                                          padding: "8px",
+                                          padding: "10px 12px 10px 20px",
                                         }}
                                       >
                                         {detail.status === "loading" && <div>Loading submission...</div>}
@@ -2767,15 +3064,15 @@ export default function WorkflowsTab() {
                                               style={{
                                                 maxHeight: 300,
                                                 overflow: "auto",
-                                                whiteSpace: "pre-wrap",
                                                 fontSize: "0.85rem",
-                                                padding: "8px",
-                                                background: "var(--surface-subtle)",
-                                                borderRadius: "4px",
+                                                padding: "10px 12px",
+                                                background: "var(--card-background)",
+                                                border: "1px solid var(--field-border)",
+                                                borderRadius: "6px",
                                                 marginBottom: "12px",
                                               }}
                                             >
-                                              {detail.detail.text}
+                                              <DetailSectionsView text={detail.detail.text} />
                                             </div>
                                             {detail.detail.files && detail.detail.files.length > 0 && (
                                               <div>
@@ -2796,20 +3093,16 @@ export default function WorkflowsTab() {
                                                       })()
                                                     : "(binary file - download via SpeedGrader)";
                                                   return (
-                                                    <div key={file.name}>
-                                                      <div style={{ fontWeight: "bold", marginTop: "8px", marginBottom: "4px" }}>{file.name}</div>
+                                                    <div key={file.name} className={styles.workflowCard} style={{ marginTop: "8px" }}>
+                                                      <div style={{ fontWeight: "bold", marginBottom: "4px" }}>{file.name}</div>
                                                       <pre
                                                         style={{
                                                           fontFamily: "monospace",
                                                           fontSize: "0.8rem",
                                                           whiteSpace: "pre-wrap",
-                                                          margin: "4px 0 12px",
+                                                          margin: 0,
                                                           maxHeight: 240,
                                                           overflow: "auto",
-                                                          padding: 8,
-                                                          background: "var(--card-background)",
-                                                          border: "1px solid var(--field-border)",
-                                                          borderRadius: 4,
                                                         }}
                                                       >
                                                         {content}
@@ -2863,7 +3156,7 @@ export default function WorkflowsTab() {
                                                   {detail.run?.status === "running" ? "Running..." : detail.run?.result ? "Run again" : "Run code"}
                                                 </Button>
                                                 {detail.run?.result && (
-                                                  <div style={{ marginTop: "12px" }}>
+                                                  <div className={styles.workflowCard} style={{ marginTop: "12px" }}>
                                                     <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
                                                       {detail.run.result.language} - {detail.run.result.ran ? `ran (exit ${detail.run.result.exitCode})` : `failed${detail.run.result.exitCode !== null ? ` (exit ${detail.run.result.exitCode})` : ""}`}
                                                     </div>
@@ -2981,11 +3274,13 @@ export default function WorkflowsTab() {
                     )}
 
                     <div
+                      className={runInput.kind === "table" ? styles.workflowActionBar : undefined}
                       style={{
                         display: "flex",
                         gap: 8,
                         marginTop: 8,
                         alignItems: "center",
+                        flexWrap: "wrap",
                       }}
                     >
                       <Button
@@ -3055,17 +3350,17 @@ export default function WorkflowsTab() {
                           Cancel run
                         </Button>
                       )}
+                      {runInput.kind === "table" && runInput.selectable && (
+                        <span style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginLeft: "auto" }}>
+                          {runInputChecked.filter(Boolean).length} of {runInputRows.length} row(s) selected
+                          {tableCheckedInvalid > 0 && (
+                            <span style={{ color: "var(--danger)" }}>
+                              {` - ${tableCheckedInvalid} selected row(s) have an invalid grade; fix them or uncheck them to enable ${runInput.submitLabel ?? "Submit"}`}
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </div>
-                    {runInput.kind === "table" && runInput.selectable && (
-                      <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginTop: "8px" }}>
-                        {runInputChecked.filter(Boolean).length} of {runInputRows.length} row(s) selected
-                        {tableCheckedInvalid > 0 && (
-                          <span style={{ color: "var(--danger)" }}>
-                            {` - ${tableCheckedInvalid} selected row(s) have an invalid grade; fix them or uncheck them to enable ${runInput.submitLabel ?? "Submit"}`}
-                          </span>
-                        )}
-                      </div>
-                    )}
                   </div>
                 )}
               </div>

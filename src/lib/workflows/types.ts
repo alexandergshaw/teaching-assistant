@@ -165,15 +165,22 @@ export function collectRuntimeFields(
  * The returned steps' "step" bindings are in EXPANDED coordinates and can be
  * fed straight to the runner and to collectRuntimeFields. origins[i] is null
  * for the workflow's own steps and the source workflow's name for absorbed
- * steps.
+ * steps. topIndices[i] is the index of def's own TOP-LEVEL step that expanded
+ * step i came from (an include-workflow step's absorbed steps all report the
+ * include step's own index in def) - used to map per-top-level-step UI state
+ * (e.g. per-user enable/disable toggles) onto the expanded step list.
  */
 export function expandWorkflowDef(
   def: WorkflowDef,
   lookup: (id: string) => WorkflowDef | undefined,
   visited: string[] = []
-): { steps: WorkflowStepConfig[]; origins: Array<string | null> } {
+): {
+  steps: WorkflowStepConfig[];
+  origins: Array<string | null>;
+  topIndices: number[];
+} {
   const r = expandWithTopIndices(def, lookup, visited);
-  return { steps: r.steps, origins: r.origins };
+  return { steps: r.steps, origins: r.origins, topIndices: r.topIndices };
 }
 
 // Internal expansion that also reports, per flat step, the index of the
@@ -448,6 +455,45 @@ export function saveCustomWorkflows(defs: WorkflowDef[]): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(WORKFLOWS_KEY, JSON.stringify(defs));
+  } catch {
+    // Silently fail if localStorage is unavailable.
+  }
+}
+
+// Per-user, per-workflow overlay of disabled TOP-LEVEL step indices (see
+// expandWorkflowDef's topIndices). Never edits the workflow def itself -
+// presets and custom workflows both stay read-only; this is purely a local
+// "skip this step for my runs" preference, mirroring ta-workflow-values-<id>.
+const DISABLED_STEPS_PREFIX = "ta-workflow-disabled-";
+
+// Pure parse step, split out from loadDisabledSteps so the JSON-shape
+// handling (malformed JSON, non-array payloads, non-number entries) is
+// testable without a DOM/localStorage-backed environment.
+export function parseDisabledSteps(raw: string | null): number[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((n): n is number => typeof n === "number");
+  } catch {
+    return [];
+  }
+}
+
+export function loadDisabledSteps(workflowId: string): number[] {
+  if (typeof window === "undefined") return [];
+  return parseDisabledSteps(
+    localStorage.getItem(`${DISABLED_STEPS_PREFIX}${workflowId}`)
+  );
+}
+
+export function saveDisabledSteps(workflowId: string, indices: number[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(
+      `${DISABLED_STEPS_PREFIX}${workflowId}`,
+      JSON.stringify(indices)
+    );
   } catch {
     // Silently fail if localStorage is unavailable.
   }

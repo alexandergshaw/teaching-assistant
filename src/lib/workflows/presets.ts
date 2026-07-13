@@ -271,13 +271,21 @@ export const PREPARE_LECTURE: WorkflowDef = {
   preset: true,
   name: "Prepare Lecture",
   description:
-    "Pick a course and module: builds a lecture deck in the app's slide style from the module's materials, saves it to the course tile, and schedules an LMS announcement summarizing the lecture for two hours after the next class meeting.",
+    "Pick a course and module: builds a lecture deck in the app's slide style from the module's materials, saves it to the course tile, pauses for announcement review where you can edit, regenerate with AI, or approve it - then schedules the approved announcement for two hours after the next class meeting.",
   steps: [
     {
       type: "prepare-lecture",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         moduleId: { source: "runtime", fieldKey: "lmsModule" },
+      },
+    },
+    {
+      type: "schedule-lecture-announcement",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        announcement: { source: "step", stepIndex: 0, outputKey: "announcement" },
+        moduleName: { source: "step", stepIndex: 0, outputKey: "moduleName" },
       },
     },
   ],

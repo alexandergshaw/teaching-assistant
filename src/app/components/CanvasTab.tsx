@@ -222,6 +222,63 @@ function AnnouncementsPanel() {
         <p className={styles.fieldHint}>Loading announcements…</p>
       )}
 
+      {courseUrl && (
+        <div className={styles.results}>
+          <div className={styles.resultsHeader}>
+            <h2>{courseName ? `Announcements - ${courseName}` : "Announcements"}</h2>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => void loadAnnouncements(courseUrl)}
+              disabled={loadState.status === "loading"}
+            >
+              {loadState.status === "loading" ? "Refreshing…" : "Refresh"}
+            </Button>
+          </div>
+          {announcements.length === 0 ? (
+            loadState.status === "idle" ? (
+              <p className={styles.fieldHint}>No announcements in this course yet.</p>
+            ) : null
+          ) : (
+            announcements.map((a) => (
+              <div key={a.id} className={styles.syllabusSectionCard}>
+                <div className={styles.syllabusSectionTopRow}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1 }}>
+                    {!a.postedAt && a.delayedPostAt && (
+                      <span className={styles.navBadge}>Scheduled</span>
+                    )}
+                    <h3 className={styles.lessonSlideTitle}>{a.title}</h3>
+                  </div>
+                  {a.htmlUrl && (
+                    <a
+                      className={styles.downloadButton}
+                      href={a.htmlUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Open in Canvas
+                    </a>
+                  )}
+                </div>
+                <p className={styles.fieldHint}>
+                  {[
+                    a.author,
+                    a.postedAt
+                      ? formatWhen(a.postedAt)
+                      : a.delayedPostAt
+                        ? `Scheduled for ${formatWhen(a.delayedPostAt)}`
+                        : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+                {a.message && <p className={styles.syllabusSectionContent}>{a.message}</p>}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
       <div className={styles.field}>
         <label htmlFor="canvas-ann-draft">Draft with AI (optional)</label>
         <TextField
@@ -348,44 +405,6 @@ function AnnouncementsPanel() {
             </>
           )}
         </p>
-      )}
-
-      {announcements.length > 0 && (
-        <div className={styles.results}>
-          <div className={styles.resultsHeader}>
-            <h2>{courseName ? `Recent announcements — ${courseName}` : "Recent announcements"}</h2>
-          </div>
-          {announcements.map((a) => (
-            <div key={a.id} className={styles.syllabusSectionCard}>
-              <div className={styles.syllabusSectionTopRow}>
-                <h3 className={styles.lessonSlideTitle}>{a.title}</h3>
-                {a.htmlUrl && (
-                  <a
-                    className={styles.downloadButton}
-                    href={a.htmlUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Open in Canvas
-                  </a>
-                )}
-              </div>
-              <p className={styles.fieldHint}>
-                {[
-                  a.author,
-                  a.postedAt
-                    ? formatWhen(a.postedAt)
-                    : a.delayedPostAt
-                      ? `Scheduled for ${formatWhen(a.delayedPostAt)}`
-                      : "",
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-              {a.message && <p className={styles.syllabusSectionContent}>{a.message}</p>}
-            </div>
-          ))}
-        </div>
       )}
     </div>
   );

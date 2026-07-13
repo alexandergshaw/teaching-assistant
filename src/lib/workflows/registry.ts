@@ -39,6 +39,7 @@ import {
   previewFileAction,
   createScheduledAnnouncementAction,
   generateLectureFromMaterialsAction,
+  regenerateAnnouncementAction,
   analyzeCourseTechAction,
   previewFinalizedSyllabusAction,
   generateCourseSyllabusAction,
@@ -267,6 +268,14 @@ export interface StepRunResult {
     options?: Array<{ value: string; label: string }>;
     optional?: boolean;
     handoffPrefill?: Record<string, string>;
+    /** kind "text" only: prefill for the textarea (e.g. a generated draft). */
+    initialValue?: string;
+    /** Label for the submit button (default "Submit"). */
+    submitLabel?: string;
+    /** kind "text" only: regenerates the draft; the UI replaces the textarea
+     * content with the resolved string. Steps run in-browser, so a closure is
+     * valid here. */
+    regenerate?: () => Promise<string>;
   };
 }
 
@@ -3283,7 +3292,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "prepare-lecture",
     name: "Prepare lecture",
     description:
-      "Build a lecture deck from a module's materials, save it to the course tile, and schedule a recap announcement after the next class meeting.",
+      "Build a lecture deck from a module's materials, save it to the course tile, and pause for announcement review - edit, regenerate with AI, or approve before it is scheduled.",
     inputs: [
       {
         key: "hubCourse",
@@ -3299,7 +3308,10 @@ export const STEP_REGISTRY: StepDefinition[] = [
         help: "Pick from the live LMS connection; without one the step falls back to the tile's topics.",
       },
     ],
-    outputs: [],
+    outputs: [
+      { key: "announcement", label: "Announcement", type: "longtext" },
+      { key: "moduleName", label: "Module", type: "text" },
+    ],
     run: async (values, helpers, onProgress) => {
       const hubCourseId = String(values.hubCourse ?? "").trim();
       const list = await listCourseHubAction();
@@ -3449,25 +3461,117 @@ export const STEP_REGISTRY: StepDefinition[] = [
         }
       }
 
-      // Schedule the recap announcement for two hours after the next class
-      // meeting; a failure notes on the summary instead of failing the step.
-      let announcementLine: string;
+      const result: StepRunResult = {
+        outputs: {
+          announcement: r.announcement,
+          moduleName,
+        },
+        summary: {
+          kind: "list",
+          label: `Lecture ready for ${moduleName}`,
+          items: [
+            `${r.slides.length} slide(s) -> ${fileName}`,
+            materialsSource,
+            ...notes,
+          ],
+        },
+      };
+
+      const materialsForPrompt = chunks.join("");
+      let latestDraft = r.announcement;
+
+      result.requireInput = {
+        message: "Review the recap announcement below. Edit it directly, regenerate it with AI, or approve it to schedule; skip to finish without scheduling.",
+        key: "announcement",
+        kind: "text",
+        optional: true,
+        initialValue: r.announcement,
+        submitLabel: "Approve announcement",
+        regenerate: async () => {
+          const regen = await regenerateAnnouncementAction(
+            tile.name,
+            moduleName,
+            materialsForPrompt,
+            latestDraft,
+            helpers.provider
+          );
+          if ("error" in regen) throw new Error(regen.error);
+          latestDraft = regen.announcement;
+          return regen.announcement;
+        },
+      };
+
+      return result;
+    },
+  },
+
+  {
+    type: "schedule-lecture-announcement",
+    name: "Schedule lecture announcement",
+    description: "Schedule the approved recap announcement for two hours after the next class meeting.",
+    inputs: [
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: true,
+      },
+      {
+        key: "announcement",
+        label: "Announcement text",
+        type: "longtext",
+        required: false,
+      },
+      {
+        key: "moduleName",
+        label: "Module name",
+        type: "text",
+        required: false,
+      },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const announcement = String(values.announcement ?? "").trim();
+
+      if (!announcement) {
+        return {
+          outputs: {},
+          summary: {
+            kind: "text",
+            text: "Skipped - announcement not approved.",
+          },
+        };
+      }
+
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      const list = await listCourseHubAction();
+      if ("error" in list) {
+        throw new Error(list.error);
+      }
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (!tile) {
+        throw new Error("Choose a course tile.");
+      }
+
+      const canvasUrl = (tile.canvasUrl ?? "").trim();
+      const inst = helpers.activeInstitution || undefined;
+      const moduleName = String(values.moduleName ?? "").trim() || "Upcoming module";
       const dayTime = (tile.dayTime ?? "").trim();
+
+      let summaryLine: string;
+
       if (!canvasUrl) {
-        announcementLine =
-          "no LMS course on the tile - announcement not scheduled";
+        summaryLine = "no LMS course on the tile - announcement skipped";
       } else if (!dayTime) {
-        announcementLine = "no Day/Time on the tile - announcement not scheduled";
+        summaryLine = "no Day/Time on the tile - announcement not scheduled";
       } else {
         const parsed = parseDayTime(dayTime);
         if (!parsed) {
-          announcementLine = `could not parse Day/Time "${dayTime}" - announcement not scheduled`;
+          summaryLine = `could not parse Day/Time "${dayTime}" - announcement not scheduled`;
         } else {
           const now = new Date();
           const candidate = new Date(now);
           candidate.setHours(parsed.hour, parsed.minute, 0, 0);
-          // Scan 8 candidate days (today through next week); accept the first
-          // whose class start time is strictly in the future.
           let found = false;
           for (let i = 0; i < 8; i++) {
             if (
@@ -3480,7 +3584,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
             candidate.setDate(candidate.getDate() + 1);
           }
           if (!found) {
-            announcementLine = `could not find a future class meeting for Day/Time "${dayTime}" within 8 days - announcement not scheduled`;
+            summaryLine = `could not find a future class meeting for Day/Time "${dayTime}" within 8 days - announcement not scheduled`;
           } else {
             const postAt = new Date(candidate.getTime() + 2 * 60 * 60 * 1000);
             try {
@@ -3488,16 +3592,16 @@ export const STEP_REGISTRY: StepDefinition[] = [
               const ann = await createScheduledAnnouncementAction(
                 canvasUrl,
                 `Lecture recap: ${moduleName}`,
-                r.announcement,
+                announcement,
                 postAt.toISOString(),
                 inst
               );
               if ("error" in ann) {
                 throw new Error(ann.error);
               }
-              announcementLine = `announcement scheduled for ${postAt.toLocaleString()}`;
+              summaryLine = `announcement scheduled for ${postAt.toLocaleString()}`;
             } catch (err) {
-              announcementLine = `announcement failed: ${
+              summaryLine = `announcement failed: ${
                 err instanceof Error ? err.message : "unknown error"
               }`;
             }
@@ -3508,14 +3612,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: {},
         summary: {
-          kind: "list",
-          label: `Lecture ready for ${moduleName}`,
-          items: [
-            `${r.slides.length} slide(s) -> ${fileName}`,
-            materialsSource,
-            announcementLine,
-            ...notes,
-          ],
+          kind: "text",
+          text: summaryLine,
         },
       };
     },

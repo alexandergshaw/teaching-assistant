@@ -280,11 +280,16 @@ export default function WorkflowsTab() {
     kind: "text" | "choice" | "upload" | "workflow";
     options: Array<{ value: string; label: string }>;
     optional: boolean;
+    initialValue?: string;
+    submitLabel?: string;
+    regenerate?: () => Promise<string>;
   } | null>(null);
   const inputResolverRef = useRef<{ resolve: (value: string | File[] | null) => void } | null>(null);
   const [runInputText, setRunInputText] = useState("");
   const [runInputChoice, setRunInputChoice] = useState("");
   const [runInputFiles, setRunInputFiles] = useState<File[]>([]);
+  const [runInputBusy, setRunInputBusy] = useState(false);
+  const [runInputError, setRunInputError] = useState<string | null>(null);
   const [pendingHandoff, setPendingHandoff] = useState<{ workflowId: string; prefill: Record<string, string> } | null>(null);
 
   const [uploadFiles, setUploadFiles] = useState<Record<string, File[]>>({});
@@ -768,6 +773,8 @@ export default function WorkflowsTab() {
     setRunning(true);
     setValidationError(null);
     setRunInput(null);
+    setRunInputBusy(false);
+    setRunInputError(null);
     inputResolverRef.current = null;
     setRunState(
       expanded.steps.map(() => ({
@@ -938,9 +945,10 @@ export default function WorkflowsTab() {
                   .map((w) => ({ value: w.id, label: w.name }))
               : result.requireInput.options ?? [];
 
-          setRunInputText("");
+          setRunInputText(result.requireInput!.initialValue ?? "");
           setRunInputChoice("");
           setRunInputFiles([]);
+          setRunInputError(null);
 
           await new Promise<void>((resolve) => {
             setRunInput({
@@ -949,6 +957,9 @@ export default function WorkflowsTab() {
               kind: result.requireInput!.kind,
               options: inputOptions,
               optional: !!result.requireInput!.optional,
+              initialValue: result.requireInput!.initialValue,
+              submitLabel: result.requireInput!.submitLabel,
+              regenerate: result.requireInput!.regenerate,
             });
             inputResolverRef.current = {
               resolve: (value) => {
@@ -1799,15 +1810,47 @@ export default function WorkflowsTab() {
                     <p className={styles.fieldHint}>{runInput.message}</p>
 
                     {runInput.kind === "text" && (
-                      <TextField
-                        size="small"
-                        fullWidth
-                        multiline
-                        minRows={3}
-                        value={runInputText}
-                        onChange={(e) => setRunInputText(e.target.value)}
-                        style={{ marginTop: 8 }}
-                      />
+                      <>
+                        <TextField
+                          size="small"
+                          fullWidth
+                          multiline
+                          minRows={3}
+                          value={runInputText}
+                          onChange={(e) => setRunInputText(e.target.value)}
+                          disabled={runInputBusy}
+                          style={{ marginTop: 8 }}
+                        />
+                        {runInput.regenerate && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            disabled={runInputBusy}
+                            onClick={async () => {
+                              setRunInputBusy(true);
+                              setRunInputError(null);
+                              try {
+                                const result = await runInput.regenerate!();
+                                setRunInputText(result);
+                              } catch (err) {
+                                setRunInputError(
+                                  err instanceof Error ? err.message : "Regeneration failed"
+                                );
+                              } finally {
+                                setRunInputBusy(false);
+                              }
+                            }}
+                            style={{ marginTop: 8 }}
+                          >
+                            Regenerate with AI
+                          </Button>
+                        )}
+                        {runInputError && (
+                          <p className={styles.error} style={{ marginTop: 8 }}>
+                            {runInputError}
+                          </p>
+                        )}
+                      </>
                     )}
 
                     {(runInput.kind === "choice" || runInput.kind === "workflow") && (
@@ -1872,11 +1915,12 @@ export default function WorkflowsTab() {
                         size="small"
                         variant="contained"
                         disabled={
-                          runInput.kind === "text"
+                          runInputBusy ||
+                          (runInput.kind === "text"
                             ? !runInputText.trim()
                             : runInput.kind === "choice" || runInput.kind === "workflow"
                               ? !runInputChoice
-                              : runInputFiles.length === 0
+                              : runInputFiles.length === 0)
                         }
                         onClick={() => {
                           const value =
@@ -1890,12 +1934,13 @@ export default function WorkflowsTab() {
                       >
                         {runInput.kind === "workflow"
                           ? "Run selected workflow after this run"
-                          : "Submit"}
+                          : runInput.submitLabel ?? "Submit"}
                       </Button>
                       {runInput.optional && (
                         <Button
                           size="small"
                           variant="text"
+                          disabled={runInputBusy}
                           onClick={() => {
                             inputResolverRef.current?.resolve(null);
                           }}
@@ -1907,6 +1952,7 @@ export default function WorkflowsTab() {
                         <Button
                           size="small"
                           variant="outlined"
+                          disabled={runInputBusy}
                           onClick={() => {
                             inputResolverRef.current?.resolve(null);
                           }}

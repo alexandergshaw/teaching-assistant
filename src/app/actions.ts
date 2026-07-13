@@ -1337,6 +1337,85 @@ Announcement requirements:
   }
 }
 
+/** Regenerate only the recap announcement for a prepared lecture. */
+export async function regenerateAnnouncementAction(
+  courseName: string,
+  moduleName: string,
+  materialsText: string,
+  previousAnnouncement: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ announcement: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const truncated = materialsText.slice(0, 24000);
+
+    if (provider === "embedded") {
+      return { announcement: previousAnnouncement };
+    }
+
+    const prompt = `You are an expert lecturer. Given the following module materials and the previous draft announcement, write a NEW, improved 2-3 short paragraph plain-text announcement for students that is clearly different in wording and structure from the previous draft.
+
+MODULE: ${moduleName}
+COURSE: ${courseName}
+
+MATERIALS:
+${truncated}
+
+PREVIOUS DRAFT:
+${previousAnnouncement}
+
+Return ONLY valid JSON: { "announcement": "..." }`;
+
+    let parsed: { announcement?: string } | null = null;
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const result = await callLlm(
+        {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+        },
+        provider
+      );
+
+      if (!result.ok) {
+        return {
+          error: `LLM API error for "${moduleName}": HTTP ${result.status}`,
+        };
+      }
+
+      const jsonText = jsonObjectSlice(result.text);
+      if (!jsonText) {
+        if (attempt === 1) {
+          console.error(`Announcement regeneration JSON parse failed for "${moduleName}" (attempt 1)`);
+          continue;
+        }
+        return { error: `Could not parse the announcement from the model output.` };
+      }
+
+      try {
+        parsed = JSON.parse(jsonText) as { announcement?: string };
+        break;
+      } catch (err) {
+        if (attempt === 1) {
+          console.error(
+            `Announcement regeneration JSON parse failed for "${moduleName}" (attempt 1): ${err instanceof Error ? err.message : String(err)}`
+          );
+          continue;
+        }
+        return { error: `Could not parse the announcement from the model output.` };
+      }
+    }
+
+    if (!parsed || !parsed.announcement || typeof parsed.announcement !== "string" || !parsed.announcement.trim()) {
+      return { error: "Generated announcement is empty. Try again." };
+    }
+
+    return { announcement: parsed.announcement };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not regenerate the announcement." };
+  }
+}
+
 /** Analyze multiple courses for emerging technology opportunities and integration recommendations. */
 export async function analyzeCourseTechAction(
   courses: Array<{

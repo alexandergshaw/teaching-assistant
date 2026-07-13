@@ -1336,10 +1336,30 @@ export async function listAnnouncements(
     throw canvasError(response.status, institution);
   }
   const topics = (await response.json()) as CanvasDiscussionTopicListItem[];
-  return topics
+  const announcements = topics
     .filter((t) => typeof t.id === "number")
-    .map((t) => toAnnouncement(t))
-    .sort((a, b) => (b.postedAt ?? "").localeCompare(a.postedAt ?? ""));
+    .map((t) => toAnnouncement(t));
+
+  // Sort: upcoming scheduled recaps must surface at the top of the panel.
+  // Scheduled items (no postedAt, delayedPostAt set) sort first by soonest delayedPostAt.
+  // Posted items (has postedAt) sort second by newest postedAt.
+  announcements.sort((a, b) => {
+    const aIsScheduled = !a.postedAt && a.delayedPostAt;
+    const bIsScheduled = !b.postedAt && b.delayedPostAt;
+
+    // Both scheduled: sort by delayedPostAt ascending (soonest first)
+    if (aIsScheduled && bIsScheduled) {
+      return (a.delayedPostAt ?? "").localeCompare(b.delayedPostAt ?? "");
+    }
+    // Only a is scheduled: a comes first
+    if (aIsScheduled) return -1;
+    // Only b is scheduled: b comes first
+    if (bIsScheduled) return 1;
+    // Both posted: sort by postedAt descending (newest first)
+    return (b.postedAt ?? "").localeCompare(a.postedAt ?? "");
+  });
+
+  return announcements;
 }
 
 /**

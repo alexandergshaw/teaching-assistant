@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, Fragment } from "react";
 import { Button, TextField, MenuItem, Autocomplete, FormControlLabel, Checkbox } from "@mui/material";
 import TabHeader from "./TabHeader";
 import WorkflowBuilder from "./WorkflowBuilder";
@@ -285,6 +285,7 @@ export default function WorkflowsTab() {
     regenerate?: () => Promise<string>;
     columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean; link?: boolean }>;
     selectable?: boolean;
+    rowDetail?: (row: Record<string, string>) => Promise<string>;
     transform?: (value: string | File[] | Array<Record<string, string>>) => unknown;
   } | null>(null);
   const inputResolverRef = useRef<{ resolve: (value: string | File[] | Array<Record<string, string>> | null) => void } | null>(null);
@@ -295,6 +296,7 @@ export default function WorkflowsTab() {
   const [runInputChecked, setRunInputChecked] = useState<boolean[]>([]);
   const [runInputBusy, setRunInputBusy] = useState(false);
   const [runInputError, setRunInputError] = useState<string | null>(null);
+  const [runInputDetails, setRunInputDetails] = useState<Record<number, { open: boolean; status: "loading" | "done" | "error"; text: string }>>({});
   const [pendingHandoff, setPendingHandoff] = useState<{ workflowId: string; prefill: Record<string, string> } | null>(null);
 
   const [uploadFiles, setUploadFiles] = useState<Record<string, File[]>>({});
@@ -957,6 +959,7 @@ export default function WorkflowsTab() {
           const rows = result.requireInput!.rows ?? [];
           setRunInputChecked(rows.map(() => true));
           setRunInputError(null);
+          setRunInputDetails({});
 
           await new Promise<void>((resolve) => {
             setRunInput({
@@ -970,6 +973,7 @@ export default function WorkflowsTab() {
               regenerate: result.requireInput!.regenerate,
               columns: result.requireInput!.columns,
               selectable: result.requireInput!.selectable,
+              rowDetail: result.requireInput!.rowDetail,
               transform: result.requireInput!.transform,
             });
             inputResolverRef.current = {
@@ -1957,70 +1961,162 @@ export default function WorkflowsTab() {
                                   {col.label}
                                 </th>
                               ))}
+                              {runInput.rowDetail && (
+                                <th
+                                  style={{
+                                    textAlign: "center",
+                                    borderBottom: "1px solid var(--field-border)",
+                                    padding: "6px 8px",
+                                    fontWeight: "bold",
+                                    width: 80,
+                                  }}
+                                >
+                                </th>
+                              )}
                             </tr>
                           </thead>
                           <tbody>
-                            {runInputRows.map((row, rowIndex) => (
-                              <tr key={rowIndex}>
-                                {runInput.selectable && (
-                                  <td
-                                    style={{
-                                      borderBottom: "1px solid var(--field-border)",
-                                      padding: "6px 8px",
-                                      textAlign: "center",
-                                    }}
-                                  >
-                                    <Checkbox
-                                      size="small"
-                                      checked={runInputChecked[rowIndex] ?? true}
-                                      onChange={() => {
-                                        setRunInputChecked((prev) =>
-                                          prev.map((c, idx) =>
-                                            idx === rowIndex ? !c : c
-                                          )
-                                        );
-                                      }}
-                                    />
-                                  </td>
-                                )}
-                                {runInput.columns!.map((col) => (
-                                  <td
-                                    key={col.key}
-                                    style={{
-                                      borderBottom: "1px solid var(--field-border)",
-                                      padding: "6px 8px",
-                                    }}
-                                  >
-                                    {col.link ? (
-                                      row[col.key] ? (
-                                        <a href={row[col.key]} target="_blank" rel="noreferrer" className={styles.linkButton}>
-                                          View
-                                        </a>
-                                      ) : null
-                                    ) : col.editable ? (
-                                      <TextField
-                                        size="small"
-                                        fullWidth
-                                        multiline={col.multiline}
-                                        minRows={col.multiline ? 2 : 1}
-                                        value={row[col.key] ?? ""}
-                                        onChange={(e) => {
-                                          setRunInputRows((prev) =>
-                                            prev.map((r, idx) =>
-                                              idx === rowIndex
-                                                ? { ...r, [col.key]: e.target.value }
-                                                : r
-                                            )
-                                          );
+                            {runInputRows.map((row, rowIndex) => {
+                              const detail = runInputDetails[rowIndex];
+                              const hasDetail = runInput.rowDetail !== undefined;
+                              const colSpan = (runInput.selectable ? 1 : 0) + (runInput.columns?.length ?? 0) + (hasDetail ? 1 : 0);
+                              return (
+                                <Fragment key={rowIndex}>
+                                  <tr>
+                                    {runInput.selectable && (
+                                      <td
+                                        style={{
+                                          borderBottom: "1px solid var(--field-border)",
+                                          padding: "6px 8px",
+                                          textAlign: "center",
                                         }}
-                                      />
-                                    ) : (
-                                      row[col.key] ?? ""
+                                      >
+                                        <Checkbox
+                                          size="small"
+                                          checked={runInputChecked[rowIndex] ?? true}
+                                          onChange={() => {
+                                            setRunInputChecked((prev) =>
+                                              prev.map((c, idx) =>
+                                                idx === rowIndex ? !c : c
+                                              )
+                                            );
+                                          }}
+                                        />
+                                      </td>
                                     )}
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
+                                    {runInput.columns!.map((col) => (
+                                      <td
+                                        key={col.key}
+                                        style={{
+                                          borderBottom: "1px solid var(--field-border)",
+                                          padding: "6px 8px",
+                                        }}
+                                      >
+                                        {col.link ? (
+                                          row[col.key] ? (
+                                            <a href={row[col.key]} target="_blank" rel="noreferrer" className={styles.linkButton}>
+                                              View
+                                            </a>
+                                          ) : null
+                                        ) : col.editable ? (
+                                          <TextField
+                                            size="small"
+                                            fullWidth
+                                            multiline={col.multiline}
+                                            minRows={col.multiline ? 2 : 1}
+                                            value={row[col.key] ?? ""}
+                                            onChange={(e) => {
+                                              setRunInputRows((prev) =>
+                                                prev.map((r, idx) =>
+                                                  idx === rowIndex
+                                                    ? { ...r, [col.key]: e.target.value }
+                                                    : r
+                                                )
+                                              );
+                                            }}
+                                          />
+                                        ) : (
+                                          row[col.key] ?? ""
+                                        )}
+                                      </td>
+                                    ))}
+                                    {hasDetail && (
+                                      <td
+                                        style={{
+                                          borderBottom: "1px solid var(--field-border)",
+                                          padding: "6px 8px",
+                                          textAlign: "center",
+                                        }}
+                                      >
+                                        <button
+                                          className={styles.linkButton}
+                                          onClick={async () => {
+                                            if (detail?.open) {
+                                              setRunInputDetails((prev) => ({
+                                                ...prev,
+                                                [rowIndex]: { ...prev[rowIndex]!, open: false },
+                                              }));
+                                            } else {
+                                              setRunInputDetails((prev) => ({
+                                                ...prev,
+                                                [rowIndex]: { open: true, status: "loading", text: "" },
+                                              }));
+                                              try {
+                                                const text = await runInput.rowDetail!(row);
+                                                setRunInputDetails((prev) => ({
+                                                  ...prev,
+                                                  [rowIndex]: { open: true, status: "done", text },
+                                                }));
+                                              } catch (err) {
+                                                setRunInputDetails((prev) => ({
+                                                  ...prev,
+                                                  [rowIndex]: {
+                                                    open: true,
+                                                    status: "error",
+                                                    text: err instanceof Error ? err.message : "Error loading submission",
+                                                  },
+                                                }));
+                                              }
+                                            }
+                                          }}
+                                        >
+                                          {detail?.open ? "Hide" : "Preview"}
+                                        </button>
+                                      </td>
+                                    )}
+                                  </tr>
+                                  {hasDetail && detail?.open && (
+                                    <tr>
+                                      <td
+                                        colSpan={colSpan}
+                                        style={{
+                                          borderBottom: "1px solid var(--field-border)",
+                                          padding: "8px",
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            maxHeight: 300,
+                                            overflow: "auto",
+                                            whiteSpace: "pre-wrap",
+                                            fontSize: "0.85rem",
+                                            padding: "8px",
+                                            background: "var(--surface-subtle)",
+                                            borderRadius: "4px",
+                                          }}
+                                        >
+                                          {detail.status === "loading" && "Loading submission..."}
+                                          {detail.status === "done" && detail.text}
+                                          {detail.status === "error" && (
+                                            <span style={{ color: "var(--danger)" }}>{detail.text}</span>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </Fragment>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

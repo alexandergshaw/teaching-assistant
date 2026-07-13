@@ -48,6 +48,7 @@ import {
   generateAssignmentRubricAction,
   listGradingQueueAction,
   postCanvasGradesAction,
+  pullSubmissionAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun } from "@/lib/grade";
@@ -287,6 +288,10 @@ export interface StepRunResult {
     /** kind "table" only: render a leading checkbox per row (all checked by
      * default); the resolved value contains only the checked rows. */
     selectable?: boolean;
+    /** kind "table" only: fetches an inline detail text for a row (e.g. the
+     * student's submission) when the user expands it. Steps run in-browser,
+     * so a closure is valid here. */
+    rowDetail?: (row: Record<string, string>) => Promise<string>;
     /** Maps the collected value before it is merged into the step's outputs -
      * e.g. selected display rows back to the step's real payload. Steps run
      * in-browser, so a closure is valid here. The workflow-kind handoff always
@@ -3991,6 +3996,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         institution?: string;
         canvasUrl?: string;
         assignmentName?: string;
+        assignmentId?: string;
         needsGrading?: number;
         hasRubric?: boolean;
         rubricText?: string;
@@ -4031,6 +4037,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
             institution: row.institution,
             canvasUrl: row.canvasUrl,
             assignmentName: row.title,
+            assignmentId: row.assignmentId,
             needsGrading: row.needsGradingCount,
             hasRubric,
             rubricText: row.rubricText ?? "",
@@ -4120,6 +4127,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
                 institution: row.institution,
                 canvasUrl: row.canvasUrl,
                 assignmentName: row.title,
+                assignmentId: row.assignmentId,
                 needsGrading: row.needsGradingCount,
                 hasRubric,
                 rubricText: row.rubricText ?? "",
@@ -4317,6 +4325,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         institution?: string;
         canvasUrl?: string;
         assignmentName?: string;
+        assignmentId?: string;
         rubricText?: string;
         description?: string;
         offline?: boolean;
@@ -4339,6 +4348,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
         assignmentName: string;
         canvasUrl: string;
         run: GradingRun;
+        institution?: string;
+        assignmentId?: string;
         offline?: boolean;
       }
 
@@ -4412,6 +4423,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
             assignmentName: row.assignmentName ?? "",
             canvasUrl: row.canvasUrl ?? "",
             run: gradeResult.run,
+            institution: row.institution,
+            assignmentId: row.assignmentId,
           });
 
           lines.push(
@@ -4547,6 +4560,28 @@ export const STEP_REGISTRY: StepDefinition[] = [
             { key: "comment", label: "Comment", editable: true, multiline: true },
           ],
           rows: reviewRows,
+          rowDetail: async (row) => {
+            const entry = nonOfflineRuns[Number(row.runIndex)];
+            const result = entry?.run.results[Number(row.resultIndex)];
+            if (!entry || !result || typeof result.userId !== "number") {
+              throw new Error("Submission details are unavailable for this row.");
+            }
+            const courseId = parseCanvasCourseId(entry.canvasUrl ?? "");
+            if (!entry.institution || !courseId || !entry.assignmentId) {
+              throw new Error("Submission lookup needs the course id, assignment id, and institution.");
+            }
+            const pulled = await pullSubmissionAction(entry.institution, courseId, entry.assignmentId, result.userId);
+            if ("error" in pulled) throw new Error(pulled.error);
+            const s = pulled.submission;
+            const parts = [
+              `${s.student}${s.submittedAt ? ` - submitted ${new Date(s.submittedAt).toLocaleString()}` : ""}`,
+              s.text?.trim() ? s.text.trim() : "(no text submission)",
+            ];
+            if (s.files?.length) {
+              parts.push(`Attached files: ${s.files.map((f) => f.name).join(", ")}`);
+            }
+            return parts.join("\n\n");
+          },
         };
       }
 

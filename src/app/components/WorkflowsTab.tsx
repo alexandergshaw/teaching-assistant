@@ -284,12 +284,15 @@ export default function WorkflowsTab() {
     submitLabel?: string;
     regenerate?: () => Promise<string>;
     columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean }>;
+    selectable?: boolean;
+    transform?: (value: string | File[] | Array<Record<string, string>>) => unknown;
   } | null>(null);
   const inputResolverRef = useRef<{ resolve: (value: string | File[] | Array<Record<string, string>> | null) => void } | null>(null);
   const [runInputText, setRunInputText] = useState("");
   const [runInputChoice, setRunInputChoice] = useState("");
   const [runInputFiles, setRunInputFiles] = useState<File[]>([]);
   const [runInputRows, setRunInputRows] = useState<Array<Record<string, string>>>([]);
+  const [runInputChecked, setRunInputChecked] = useState<boolean[]>([]);
   const [runInputBusy, setRunInputBusy] = useState(false);
   const [runInputError, setRunInputError] = useState<string | null>(null);
   const [pendingHandoff, setPendingHandoff] = useState<{ workflowId: string; prefill: Record<string, string> } | null>(null);
@@ -951,6 +954,8 @@ export default function WorkflowsTab() {
           setRunInputChoice("");
           setRunInputFiles([]);
           setRunInputRows(result.requireInput!.rows ?? []);
+          const rows = result.requireInput!.rows ?? [];
+          setRunInputChecked(rows.map(() => true));
           setRunInputError(null);
 
           await new Promise<void>((resolve) => {
@@ -964,6 +969,8 @@ export default function WorkflowsTab() {
               submitLabel: result.requireInput!.submitLabel,
               regenerate: result.requireInput!.regenerate,
               columns: result.requireInput!.columns,
+              selectable: result.requireInput!.selectable,
+              transform: result.requireInput!.transform,
             });
             inputResolverRef.current = {
               resolve: (value) => {
@@ -974,9 +981,16 @@ export default function WorkflowsTab() {
                     failedSteps.add(i);
                   }
                 } else {
+                  const merged =
+                    result.requireInput!.kind !== "workflow" &&
+                    result.requireInput!.transform
+                      ? result.requireInput!.transform(
+                          value as string | File[] | Array<Record<string, string>>
+                        )
+                      : value;
                   stepOutputs[i] = {
                     ...stepOutputs[i],
-                    [result.requireInput!.key]: value,
+                    [result.requireInput!.key]: merged,
                   };
                   if (
                     result.requireInput!.kind === "workflow" &&
@@ -1918,6 +1932,18 @@ export default function WorkflowsTab() {
                         >
                           <thead>
                             <tr>
+                              {runInput.selectable && (
+                                <th
+                                  style={{
+                                    textAlign: "center",
+                                    borderBottom: "1px solid var(--field-border)",
+                                    padding: "6px 8px",
+                                    fontWeight: "bold",
+                                    width: 32,
+                                  }}
+                                >
+                                </th>
+                              )}
                               {runInput.columns.map((col) => (
                                 <th
                                   key={col.key}
@@ -1936,6 +1962,27 @@ export default function WorkflowsTab() {
                           <tbody>
                             {runInputRows.map((row, rowIndex) => (
                               <tr key={rowIndex}>
+                                {runInput.selectable && (
+                                  <td
+                                    style={{
+                                      borderBottom: "1px solid var(--field-border)",
+                                      padding: "6px 8px",
+                                      textAlign: "center",
+                                    }}
+                                  >
+                                    <Checkbox
+                                      size="small"
+                                      checked={runInputChecked[rowIndex] ?? true}
+                                      onChange={() => {
+                                        setRunInputChecked((prev) =>
+                                          prev.map((c, idx) =>
+                                            idx === rowIndex ? !c : c
+                                          )
+                                        );
+                                      }}
+                                    />
+                                  </td>
+                                )}
                                 {runInput.columns!.map((col) => (
                                   <td
                                     key={col.key}
@@ -1992,18 +2039,31 @@ export default function WorkflowsTab() {
                               ? !runInputChoice
                               : runInput.kind === "upload"
                                 ? runInputFiles.length === 0
-                                : runInputRows.length === 0)
+                                : runInput.kind === "table" && runInput.selectable
+                                  ? runInputRows.filter((_, idx) => runInputChecked[idx]).length === 0
+                                  : runInputRows.length === 0)
                         }
                         onClick={() => {
-                          const value =
-                            runInput.kind === "text"
-                              ? runInputText
-                              : runInput.kind === "choice" || runInput.kind === "workflow"
-                                ? runInputChoice
-                                : runInput.kind === "upload"
-                                  ? runInputFiles
-                                  : runInputRows;
-                          inputResolverRef.current?.resolve(value as string | File[] | Array<Record<string, string>>);
+                          let value: string | File[] | Array<Record<string, string>>;
+                          if (runInput.kind === "text") {
+                            value = runInputText;
+                          } else if (
+                            runInput.kind === "choice" ||
+                            runInput.kind === "workflow"
+                          ) {
+                            value = runInputChoice;
+                          } else if (runInput.kind === "upload") {
+                            value = runInputFiles;
+                          } else if (runInput.kind === "table") {
+                            value = runInput.selectable
+                              ? runInputRows.filter((_, idx) => runInputChecked[idx])
+                              : runInputRows;
+                          } else {
+                            value = runInputRows;
+                          }
+                          inputResolverRef.current?.resolve(
+                            value as string | File[] | Array<Record<string, string>>
+                          );
                         }}
                       >
                         {runInput.kind === "workflow"

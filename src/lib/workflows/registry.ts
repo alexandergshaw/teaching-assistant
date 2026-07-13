@@ -283,6 +283,14 @@ export interface StepRunResult {
     /** kind "table" only: the rows to review; the resolved value is the edited
      * array in the same shape. */
     rows?: Array<Record<string, string>>;
+    /** kind "table" only: render a leading checkbox per row (all checked by
+     * default); the resolved value contains only the checked rows. */
+    selectable?: boolean;
+    /** Maps the collected value before it is merged into the step's outputs -
+     * e.g. selected display rows back to the step's real payload. Steps run
+     * in-browser, so a closure is valid here. The workflow-kind handoff always
+     * uses the RAW chosen id, not the transformed value. */
+    transform?: (value: string | File[] | Array<Record<string, string>>) => unknown;
   };
 }
 
@@ -4134,13 +4142,64 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summary: { kind: "list", label: "Grading queue", items: lines },
       };
 
-      // Offline tiles without a saved rubric also grade against an
-      // LLM-generated one, so they count toward the confirmation too.
-      const offlineNoRubric = offline.filter((t) => !(t.rubricData ?? "").trim()).length;
-      const noRubricCount =
-        plan.filter((p) => !p.offline && !p.hasRubric).length + offlineNoRubric;
-      if (noRubricCount > 0) {
-        result.requireConfirmation = `${noRubricCount} assignment(s) or offline course(s) have no rubric - rubrics will be generated via the LLM where missing. Continue to grade with them, or cancel to stop.`;
+      // Build display rows from LMS plan rows only (skip offline rows).
+      const displayRows: Array<Record<string, string>> = [];
+      for (let idx = 0; idx < plan.length; idx++) {
+        const p = plan[idx];
+        if (!p.offline) {
+          displayRows.push({
+            planIndex: String(idx),
+            course: p.courseName,
+            assignment: p.assignmentName ?? "",
+            toGrade: String(p.needsGrading ?? 0),
+            rubric: p.hasRubric ? "yes" : "generated at grading",
+          });
+        }
+      }
+
+      // When there are LMS rows, use selectable table; otherwise check for offline rows with missing rubrics.
+      if (displayRows.length > 0) {
+        const noRubricLmsCount = displayRows.filter(
+          (r) => r.rubric !== "yes"
+        ).length;
+        const offlineNoRubric = offline.filter((t) => !(t.rubricData ?? "").trim()).length;
+
+        let message = "Uncheck any assignments you do not want graded, then proceed.";
+        if (noRubricLmsCount > 0) {
+          message += ` ${noRubricLmsCount} assignment(s) have no rubric - a rubric is generated via the LLM for each at grading time.`;
+          if (offlineNoRubric > 0) {
+            message += ` ${offlineNoRubric} offline course(s) also have no saved rubric.`;
+          }
+        }
+
+        result.requireInput = {
+          message,
+          key: "plan",
+          kind: "table",
+          selectable: true,
+          submitLabel: "Proceed with selected",
+          columns: [
+            { key: "course", label: "Course" },
+            { key: "assignment", label: "Assignment" },
+            { key: "toGrade", label: "To grade" },
+            { key: "rubric", label: "Rubric" },
+          ],
+          rows: displayRows,
+          transform: (value) => {
+            const rows = Array.isArray(value)
+              ? (value as Array<Record<string, string>>)
+              : [];
+            const keep = new Set(rows.map((r) => Number(r.planIndex)));
+            // Offline rows always ride along; only LMS rows are selectable.
+            return plan.filter((p, idx) => p.offline || keep.has(idx));
+          },
+        };
+      } else if (offline.length > 0) {
+        // No LMS rows but offline rows exist - keep old requireConfirmation logic
+        const offlineNoRubric = offline.filter((t) => !(t.rubricData ?? "").trim()).length;
+        if (offlineNoRubric > 0) {
+          result.requireConfirmation = `${offlineNoRubric} offline course(s) have no saved rubric - rubrics will be generated via the LLM where missing. Continue to grade with them, or cancel to stop.`;
+        }
       }
 
       return result;

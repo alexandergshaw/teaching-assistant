@@ -1,5 +1,30 @@
 import { describe, it, expect } from "vitest";
-import { computeNextRunAt } from "./workflow-schedules";
+import { computeNextRunAt, mapSchedule } from "./workflow-schedules";
+import type { Database } from "./supabase/types";
+
+type ScheduleRow = Database["public"]["Tables"]["workflow_schedules"]["Row"];
+
+function makeRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
+  return {
+    id: "s1",
+    user_id: "u1",
+    workflow_id: "wf1",
+    workflow_name: "My Workflow",
+    field_values: { a: "1", b: 2, c: null } as ScheduleRow["field_values"],
+    next_run_at: "2026-07-20T00:00:00.000Z",
+    repeat: "weekly",
+    enabled: true,
+    course_id: null,
+    institution: null,
+    last_run_at: null,
+    created_at: "2026-07-13T00:00:00.000Z",
+    updated_at: "2026-07-13T00:00:00.000Z",
+    unattended: false,
+    provider: null,
+    disabled_steps: [],
+    ...overrides,
+  };
+}
 
 describe("computeNextRunAt", () => {
   it("returns null for one-shot schedules", () => {
@@ -54,5 +79,48 @@ describe("computeNextRunAt", () => {
     const nextLocal = new Date(next!);
     expect(nextLocal.getHours()).toBe(9);
     expect(nextLocal.getDate()).toBe(8);
+  });
+});
+
+describe("mapSchedule", () => {
+  it("maps the unattended/provider/disabledSteps columns and carries userId", () => {
+    const row = makeRow({ unattended: true, provider: "gemini", disabled_steps: [1, 3] });
+    const s = mapSchedule(row);
+    expect(s.userId).toBe("u1");
+    expect(s.unattended).toBe(true);
+    expect(s.provider).toBe("gemini");
+    expect(s.disabledSteps).toEqual([1, 3]);
+  });
+
+  it("defaults unattended to false and provider to null for legacy rows", () => {
+    const row = makeRow({ unattended: false, provider: null, disabled_steps: [] });
+    const s = mapSchedule(row);
+    expect(s.unattended).toBe(false);
+    expect(s.provider).toBeNull();
+    expect(s.disabledSteps).toEqual([]);
+  });
+
+  it("filters non-number entries out of disabled_steps", () => {
+    const row = makeRow({ disabled_steps: [0, "1", 2, null, 2.5] as unknown as ScheduleRow["disabled_steps"] });
+    const s = mapSchedule(row);
+    expect(s.disabledSteps).toEqual([0, 2, 2.5]);
+  });
+
+  it("treats a non-array disabled_steps value as empty", () => {
+    const row = makeRow({ disabled_steps: { not: "an array" } as unknown as ScheduleRow["disabled_steps"] });
+    const s = mapSchedule(row);
+    expect(s.disabledSteps).toEqual([]);
+  });
+
+  it("keeps only string values from field_values", () => {
+    const row = makeRow();
+    const s = mapSchedule(row);
+    expect(s.fieldValues).toEqual({ a: "1" });
+  });
+
+  it("coerces an unrecognized repeat value to none", () => {
+    const row = makeRow({ repeat: "monthly" });
+    const s = mapSchedule(row);
+    expect(s.repeat).toBe("none");
   });
 });

@@ -1,0 +1,364 @@
+import { describe, it, expect, vi } from "vitest";
+import { runWorkflowUnattended } from "./server-runner";
+import type { StepDefinition, StepRunHelpers } from "./registry";
+import type { WorkflowDef } from "./types";
+
+// A tiny fake step catalog + fake helpers, injected via runWorkflowUnattended's
+// stepLookup override, so the run loop (binding resolution, disabled-step
+// cascade, dependency-failure cascade, requireInput abort) is exercised with
+// no network calls and none of registry.ts's real (heavy) step catalog.
+
+function fakeHelpers(): StepRunHelpers {
+  return {
+    activeInstitution: null,
+    provider: "gemini",
+    author: "Test Author",
+    saveBundle: vi.fn(async () => {}),
+    saveCourseMaterialFile: vi.fn(async () => {}),
+    saveCourseExportFile: vi.fn(async () => {}),
+    loadCommonResources: vi.fn(async () => []),
+    getLibraryFile: vi.fn(async () => null),
+    getInstitutionFields: vi.fn(async () => []),
+    loadCourseExport: vi.fn(async () => null),
+  };
+}
+
+function lookupOf(defs: Record<string, StepDefinition>) {
+  return (type: string) => defs[type];
+}
+
+describe("runWorkflowUnattended", () => {
+  it("resolves runtime, step-output, and literal bindings in order", async () => {
+    const defs: Record<string, StepDefinition> = {
+      greet: {
+        type: "greet",
+        name: "Greet",
+        description: "",
+        inputs: [{ key: "name", label: "Name", type: "text", required: true }],
+        outputs: [{ key: "greeting", label: "Greeting", type: "text" }],
+        run: async (values) => ({
+          outputs: { greeting: `Hello ${values.name}` },
+          summary: { kind: "text", text: "" },
+        }),
+      },
+      echo: {
+        type: "echo",
+        name: "Echo",
+        description: "",
+        inputs: [
+          { key: "text", label: "Text", type: "text", required: true },
+          { key: "suffix", label: "Suffix", type: "text", required: false },
+        ],
+        outputs: [{ key: "out", label: "Out", type: "text" }],
+        run: async (values) => ({
+          outputs: { out: `${values.text}${values.suffix}` },
+          summary: { kind: "text", text: "" },
+        }),
+      },
+    };
+
+    const def: WorkflowDef = {
+      id: "test",
+      name: "Test",
+      description: "",
+      steps: [
+        { type: "greet", bindings: { name: { source: "runtime", fieldKey: "who" } } },
+        {
+          type: "echo",
+          bindings: {
+            text: { source: "step", stepIndex: 0, outputKey: "greeting" },
+            suffix: { source: "literal", value: "!" },
+          },
+        },
+      ],
+    };
+
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: { who: "World" },
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.steps.map((s) => s.status)).toEqual(["done", "done"]);
+  });
+
+  it("resolves an uploads-type runtime binding to an empty array (uploads are never snapshotted)", async () => {
+    let captured: unknown = "not set";
+    const defs: Record<string, StepDefinition> = {
+      needsFiles: {
+        type: "needsFiles",
+        name: "Needs files",
+        description: "",
+        inputs: [{ key: "files", label: "Files", type: "uploads", required: false }],
+        outputs: [],
+        run: async (values) => {
+          captured = values.files;
+          return { outputs: {}, summary: { kind: "text", text: "" } };
+        },
+      },
+    };
+    const def: WorkflowDef = {
+      id: "t",
+      name: "t",
+      description: "",
+      steps: [{ type: "needsFiles", bindings: { files: { source: "runtime", fieldKey: "upload" } } }],
+    };
+
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+    });
+
+    expect(captured).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("cascade-skips a step that depends on a disabled step, but still runs an independent later step", async () => {
+    const defs: Record<string, StepDefinition> = {
+      a: {
+        type: "a",
+        name: "A",
+        description: "",
+        inputs: [],
+        outputs: [{ key: "v", label: "V", type: "text" }],
+        run: async () => ({ outputs: { v: "x" }, summary: { kind: "text", text: "" } }),
+      },
+      b: {
+        type: "b",
+        name: "B",
+        description: "",
+        inputs: [{ key: "v", label: "V", type: "text", required: true }],
+        outputs: [],
+        run: async () => ({ outputs: {}, summary: { kind: "text", text: "" } }),
+      },
+      c: {
+        type: "c",
+        name: "C",
+        description: "",
+        inputs: [],
+        outputs: [],
+        run: async () => ({ outputs: {}, summary: { kind: "text", text: "" } }),
+      },
+    };
+    const def: WorkflowDef = {
+      id: "t",
+      name: "t",
+      description: "",
+      steps: [
+        { type: "a", bindings: {} },
+        { type: "b", bindings: { v: { source: "step", stepIndex: 0, outputKey: "v" } } },
+        { type: "c", bindings: {} },
+      ],
+    };
+
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set([0]),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+    });
+
+    expect(result.steps[0].status).toBe("disabled");
+    expect(result.steps[1].status).toBe("error");
+    expect(result.steps[1].error).toContain("disabled");
+    expect(result.steps[2].status).toBe("done");
+    // Step b genuinely could not run (its input producer was disabled), so
+    // this run is reported as not fully successful - only the disabled step
+    // ITSELF is exempted from counting against `ok`, not steps that cascade
+    // from it.
+    expect(result.ok).toBe(false);
+  });
+
+  it("marks the run ok when a disabled step has no enabled dependents", async () => {
+    const defs: Record<string, StepDefinition> = {
+      a: {
+        type: "a",
+        name: "A",
+        description: "",
+        inputs: [],
+        outputs: [{ key: "v", label: "V", type: "text" }],
+        run: async () => ({ outputs: { v: "x" }, summary: { kind: "text", text: "" } }),
+      },
+      c: {
+        type: "c",
+        name: "C",
+        description: "",
+        inputs: [],
+        outputs: [],
+        run: async () => ({ outputs: {}, summary: { kind: "text", text: "" } }),
+      },
+    };
+    const def: WorkflowDef = {
+      id: "t",
+      name: "t",
+      description: "",
+      steps: [
+        { type: "a", bindings: {} },
+        { type: "c", bindings: {} },
+      ],
+    };
+
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set([0]),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+    });
+
+    expect(result.steps[0].status).toBe("disabled");
+    expect(result.steps[1].status).toBe("done");
+    expect(result.ok).toBe(true);
+  });
+
+  it("aborts the whole run instead of hanging when a step unexpectedly requires input", async () => {
+    const defs: Record<string, StepDefinition> = {
+      pauser: {
+        type: "pauser",
+        name: "Pauser",
+        description: "",
+        inputs: [],
+        outputs: [],
+        run: async () => ({
+          outputs: {},
+          summary: { kind: "text", text: "" },
+          requireInput: { message: "need a value", key: "x", kind: "text" },
+        }),
+      },
+      after: {
+        type: "after",
+        name: "After",
+        description: "",
+        inputs: [],
+        outputs: [],
+        run: async () => ({ outputs: {}, summary: { kind: "text", text: "" } }),
+      },
+    };
+    const def: WorkflowDef = {
+      id: "t",
+      name: "t",
+      description: "",
+      steps: [
+        { type: "pauser", bindings: {} },
+        { type: "after", bindings: {} },
+      ],
+    };
+
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+    });
+
+    // The run stopped at the pausing step - "after" never ran at all.
+    expect(result.steps).toHaveLength(1);
+    expect(result.steps[0].status).toBe("needs-interaction");
+    expect(result.ok).toBe(false);
+  });
+
+  it("aborts the whole run when a step unexpectedly requires confirmation", async () => {
+    const defs: Record<string, StepDefinition> = {
+      confirmer: {
+        type: "confirmer",
+        name: "Confirmer",
+        description: "",
+        inputs: [],
+        outputs: [],
+        run: async () => ({
+          outputs: {},
+          summary: { kind: "text", text: "" },
+          requireConfirmation: "Are you sure?",
+        }),
+      },
+    };
+    const def: WorkflowDef = { id: "t", name: "t", description: "", steps: [{ type: "confirmer", bindings: {} }] };
+
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+    });
+
+    expect(result.steps[0].status).toBe("needs-interaction");
+    expect(result.ok).toBe(false);
+  });
+
+  it("fails a step whose type is not in the step catalog, and cascades to its dependents", async () => {
+    const defs: Record<string, StepDefinition> = {
+      after: {
+        type: "after",
+        name: "After",
+        description: "",
+        inputs: [{ key: "v", label: "V", type: "text", required: false }],
+        outputs: [],
+        run: async () => ({ outputs: {}, summary: { kind: "text", text: "" } }),
+      },
+    };
+    const def: WorkflowDef = {
+      id: "t",
+      name: "t",
+      description: "",
+      steps: [
+        { type: "unknown-step", bindings: {} },
+        { type: "after", bindings: { v: { source: "step", stepIndex: 0, outputKey: "out" } } },
+      ],
+    };
+
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+    });
+
+    expect(result.steps[0].status).toBe("error");
+    expect(result.steps[1].status).toBe("error");
+    expect(result.ok).toBe(false);
+  });
+
+  it("reports a run error instead of throwing when the workflow has an unresolvable include", async () => {
+    const def: WorkflowDef = {
+      id: "broken",
+      name: "Broken",
+      description: "",
+      steps: [
+        {
+          type: "include-workflow",
+          bindings: {},
+          include: { workflowId: "missing", skipSteps: [], remap: {} },
+        },
+      ],
+    };
+
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf({}),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.steps[0].status).toBe("error");
+  });
+});

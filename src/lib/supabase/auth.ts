@@ -1,5 +1,7 @@
+import type { User } from "@supabase/supabase-js";
 import { createClient as createServerSupabaseClient } from "./server";
 import { isOwnerEmail } from "../owner";
+import { getImpersonatedOwner, type OwnerIdentity } from "./owner-context";
 
 /**
  * Server-side auth helpers. For client-side auth, use the browser client
@@ -18,8 +20,25 @@ export async function getCurrentUser() {
  * not signed in as an allowlisted owner (see OWNER_EMAILS), or when they have MFA
  * enrolled but haven't completed it this session (AAL2). Call this at the top of
  * any action that uses privileged credentials (e.g. the Canvas API token).
+ *
+ * Returns an object with at least `id`/`email` - every caller in this
+ * codebase reads only those two fields off the result (verified by grep), so
+ * the impersonation branch below can return a minimal object instead of a
+ * full Supabase `User`.
  */
-export async function requireOwner() {
+export async function requireOwner(): Promise<User | OwnerIdentity> {
+  // SECURITY: this is the ONLY bypass of the cookie+MFA check below, and it
+  // can only fire when src/lib/supabase/owner-context.ts's ALS store has been
+  // populated. The ONLY code allowed to populate it is the cron route
+  // (src/app/api/cron/run-schedules/route.ts), which does so after verifying
+  // CRON_SECRET and isOwnerEmail itself - see owner-context.ts for the full
+  // writeup. No browser-reachable code path can set this context, so normal
+  // (non-cron) requests always fall through to the cookie+MFA path unchanged.
+  const impersonated = getImpersonatedOwner();
+  if (impersonated) {
+    return impersonated;
+  }
+
   const supabase = await createServerSupabaseClient();
   const {
     data: { user },

@@ -48,6 +48,7 @@ import {
   allWorkflows,
   COURSE_KICKOFF,
 } from "@/lib/workflows/presets";
+import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
 import {
   getStepDefinition,
   type StepRunSummary,
@@ -547,7 +548,7 @@ export default function WorkflowsTab() {
   // Scheduled runs for the signed-in user (null = not loaded yet).
   const [schedules, setSchedules] = useState<WorkflowSchedule[] | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
-  const [scheduleForm, setScheduleForm] = useState<{ runAt: string; repeat: ScheduleRepeat; courseId: string; institution: string } | null>(null);
+  const [scheduleForm, setScheduleForm] = useState<{ runAt: string; repeat: ScheduleRepeat; courseId: string; institution: string; unattended: boolean } | null>(null);
   const [scheduleBusy, setScheduleBusy] = useState(false);
   const [scheduleRemoveConfirm, setScheduleRemoveConfirm] = useState<string | null>(null);
 
@@ -583,6 +584,17 @@ export default function WorkflowsTab() {
       };
     }
   }, [selectedDef, workflows]);
+
+  // Whether the selected workflow is eligible for the "run unattended" opt-in
+  // on the schedule form - every expanded step must be headless-safe (see
+  // workflows/headless.ts). Interactive workflows never show the checkbox.
+  const selectedHeadlessSafe = useMemo(
+    () =>
+      selectedDef
+        ? isHeadlessSafeWorkflow(selectedDef, (id) => workflows.find((w) => w.id === id))
+        : false,
+    [selectedDef, workflows]
+  );
 
   // Steps whose top-level index the user has disabled are excluded here so
   // the run form never asks for inputs needed only by a disabled step (a
@@ -1574,6 +1586,13 @@ export default function WorkflowsTab() {
         repeat: scheduleForm.repeat,
         courseId: scheduleForm.courseId || null,
         institution: scheduleForm.institution || null,
+        // Only meaningful when selectedHeadlessSafe gated the checkbox
+        // visible; otherwise scheduleForm.unattended stays false. provider
+        // and disabledSteps are snapshotted regardless - harmless for
+        // app-open schedules, which never read them.
+        unattended: selectedHeadlessSafe && scheduleForm.unattended,
+        provider: getStoredProvider(),
+        disabledSteps: Array.from(disabledSteps),
       });
       setSchedules((prev) =>
         [...(prev ?? []), created].sort((a, b) => a.nextRunAt.localeCompare(b.nextRunAt))
@@ -2356,7 +2375,7 @@ export default function WorkflowsTab() {
                   setScheduleForm((prev) =>
                     prev
                       ? null
-                      : { runAt: "", repeat: "none", courseId: "", institution: activeInstitution || "" }
+                      : { runAt: "", repeat: "none", courseId: "", institution: activeInstitution || "", unattended: false }
                   )
                 }
               >
@@ -2378,6 +2397,29 @@ export default function WorkflowsTab() {
                 {runtimeFields.some((f) => f.type === "uploads" && f.required) && (
                   <p className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)" }}>
                     This workflow requires a file upload at run time, which cannot be saved with a schedule - the scheduled run will stop at the form.
+                  </p>
+                )}
+                {selectedHeadlessSafe ? (
+                  <div>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={scheduleForm.unattended}
+                          onChange={(e) =>
+                            setScheduleForm((p) => (p ? { ...p, unattended: e.target.checked } : p))
+                          }
+                        />
+                      }
+                      label="Run unattended in the cloud (even when the app is closed)"
+                    />
+                    <p className={styles.fieldHint} style={{ margin: 0 }}>
+                      Unattended runs use the current run-form values and provider snapshot; interactive workflows are not eligible.
+                    </p>
+                  </div>
+                ) : (
+                  <p className={styles.fieldHint} style={{ margin: 0 }}>
+                    This workflow pauses for input, so it can only run while the app is open.
                   </p>
                 )}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -2453,6 +2495,9 @@ export default function WorkflowsTab() {
                   return (
                     <div key={s.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--field-border)", fontSize: "0.85em" }}>
                       <span style={{ fontWeight: 600 }}>{s.workflowName}</span>
+                      {s.unattended && (
+                        <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>Unattended</span>
+                      )}
                       <span style={{ color: "var(--text-secondary)" }}>
                         {s.enabled
                           ? `next run ${new Date(s.nextRunAt).toLocaleString()} (${repeatLabel})`

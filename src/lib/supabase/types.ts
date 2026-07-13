@@ -590,6 +590,9 @@ export interface Database {
           last_run_at: string | null;
           created_at: string;
           updated_at: string;
+          unattended: boolean;
+          provider: string | null;
+          disabled_steps: Json;
         };
         Insert: {
           id?: string;
@@ -605,6 +608,9 @@ export interface Database {
           last_run_at?: string | null;
           created_at?: string;
           updated_at?: string;
+          unattended?: boolean;
+          provider?: string | null;
+          disabled_steps?: Json;
         };
         Update: {
           id?: string;
@@ -620,6 +626,9 @@ export interface Database {
           last_run_at?: string | null;
           created_at?: string;
           updated_at?: string;
+          unattended?: boolean;
+          provider?: string | null;
+          disabled_steps?: Json;
         };
       };
     };

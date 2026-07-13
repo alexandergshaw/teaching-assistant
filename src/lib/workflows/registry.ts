@@ -880,9 +880,11 @@ export const STEP_REGISTRY: StepDefinition[] = [
       }
 
       // Tile's LMS routes which format the browser downloads; files output
-      // and library save are unaffected.
+      // and library save are unaffected. Headless (server) runs have no
+      // `document` to build a download link with, so they always skip the
+      // download itself and rely on the library/tile save below.
       let downloadSkipped = false;
-      if (tileLms !== "blackboard" && tileLms !== "canvas") {
+      if (typeof document !== "undefined" && tileLms !== "blackboard" && tileLms !== "canvas") {
         onProgress("Downloading zip...");
         const url = URL.createObjectURL(zipBlob);
         const a = document.createElement("a");
@@ -2389,15 +2391,20 @@ export const STEP_REGISTRY: StepDefinition[] = [
         { flavor: tileLms === "canvas" ? "canvas" : "cc" }
       );
 
-      onProgress("Downloading .imscc...");
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${baseName}.imscc`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Headless (server) runs have no `document` to build a download link
+      // with; the library/tile saves below still carry the file.
+      const downloadSkipped = typeof document === "undefined";
+      if (!downloadSkipped) {
+        onProgress("Downloading .imscc...");
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${baseName}.imscc`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
 
       if (helpers.saveBundle) {
         try {
@@ -2441,13 +2448,14 @@ export const STEP_REGISTRY: StepDefinition[] = [
         }
       }
 
+      const fileVerb = downloadSkipped ? "Saved" : "Downloaded";
       let summaryText: string;
       if (tileLms === "canvas") {
-        summaryText = `Built for Canvas - deliverables import as assignments with due dates; introductions import as module documents (Word files); files import into modules. Downloaded ${baseName}.imscc${lmsSourceSuffix} - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package.`;
+        summaryText = `Built for Canvas - deliverables import as assignments with due dates; introductions import as module documents (Word files); files import into modules. ${fileVerb} ${baseName}.imscc${lmsSourceSuffix} - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package.`;
       } else if (tileLms === "blackboard") {
-        summaryText = `Built for Blackboard - each deliverable imports as a gradable test (one essay submission) with the deadline in its instructions; introductions import as module documents (Word files); files import into modules. Downloaded ${baseName}.imscc${lmsSourceSuffix} - import it in Blackboard via Import Course Content.`;
+        summaryText = `Built for Blackboard - each deliverable imports as a gradable test (one essay submission) with the deadline in its instructions; introductions import as module documents (Word files); files import into modules. ${fileVerb} ${baseName}.imscc${lmsSourceSuffix} - import it in Blackboard via Import Course Content.`;
       } else {
-        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package (Canvas imports deliverables as assignments with due dates), or in Blackboard via Course Content > Import Package (Blackboard imports deliverables as gradable tests with deadlines in instructions).`;
+        summaryText = `${fileVerb} ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package (Canvas imports deliverables as assignments with due dates), or in Blackboard via Course Content > Import Package (Blackboard imports deliverables as gradable tests with deadlines in instructions).`;
       }
 
       return {
@@ -3869,15 +3877,19 @@ export const STEP_REGISTRY: StepDefinition[] = [
         s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
       const fileName = `${sanitize(tile.name)}_${sanitize(moduleName)}_QA.docx`;
 
-      onProgress(`Downloading ${fileName}...`);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Headless (server) runs have no `document` to build a download link
+      // with; the course-tile save below still carries the file.
+      if (typeof document !== "undefined") {
+        onProgress(`Downloading ${fileName}...`);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
 
       if (helpers.saveCourseMaterialFile) {
         try {

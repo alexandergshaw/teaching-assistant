@@ -10,6 +10,10 @@ export type ScheduleRepeat = "none" | "daily" | "weekly";
 
 export interface WorkflowSchedule {
   id: string;
+  /** Owning user; only populated by row-mapping (mapSchedule) - needed by the
+   * cron route, which reads schedules across ALL users and has no single
+   * `userId` of its own to scope a query by. */
+  userId: string;
   workflowId: string;
   workflowName: string;
   /** Snapshot of the run form's values at scheduling time (uploads excluded). */
@@ -21,6 +25,18 @@ export interface WorkflowSchedule {
   courseId: string | null;
   institution: string | null;
   lastRunAt: string | null;
+  /** Opt-in: run this schedule server-side (Vercel Cron) even when the app is
+   * closed. Only ever true for a workflow that was headless-safe at the time
+   * the schedule was created - see isHeadlessSafeWorkflow. */
+  unattended: boolean;
+  /** LLM provider snapshot at scheduling time (ta-llm-provider); null for
+   * schedules created before this column existed, or for app-open schedules
+   * that never needed one. The unattended runner defaults this to "gemini". */
+  provider: string | null;
+  /** Top-level disabled-step-index snapshot (ta-workflow-disabled-<id>) at
+   * scheduling time; only meaningful for unattended runs, which have no live
+   * localStorage to re-read the user's current toggles from. */
+  disabledSteps: number[];
 }
 
 /**
@@ -58,7 +74,11 @@ export function reenableSchedule(schedule: WorkflowSchedule): { ok: boolean; nex
 
 type ScheduleRow = Database["public"]["Tables"]["workflow_schedules"]["Row"];
 
-function mapSchedule(row: ScheduleRow): WorkflowSchedule {
+// Exported (not just used internally) so the row-shape handling - string-only
+// field_values, repeat coercion, disabled_steps filtering - is unit-testable
+// without a live Supabase client, mirroring parseDisabledSteps in
+// workflows/types.ts.
+export function mapSchedule(row: ScheduleRow): WorkflowSchedule {
   const values: Record<string, string> = {};
   if (row.field_values && typeof row.field_values === "object" && !Array.isArray(row.field_values)) {
     for (const [k, v] of Object.entries(row.field_values as Record<string, unknown>)) {
@@ -66,8 +86,12 @@ function mapSchedule(row: ScheduleRow): WorkflowSchedule {
     }
   }
   const repeat = row.repeat === "daily" || row.repeat === "weekly" ? row.repeat : "none";
+  const disabledSteps = Array.isArray(row.disabled_steps)
+    ? row.disabled_steps.filter((n): n is number => typeof n === "number")
+    : [];
   return {
     id: row.id,
+    userId: row.user_id,
     workflowId: row.workflow_id,
     workflowName: row.workflow_name,
     fieldValues: values,
@@ -77,6 +101,9 @@ function mapSchedule(row: ScheduleRow): WorkflowSchedule {
     courseId: row.course_id,
     institution: row.institution,
     lastRunAt: row.last_run_at,
+    unattended: row.unattended,
+    provider: row.provider,
+    disabledSteps,
   };
 }
 
@@ -111,6 +138,11 @@ export async function createWorkflowSchedule(
     repeat: ScheduleRepeat;
     courseId?: string | null;
     institution?: string | null;
+    /** Opt-in for server-side (Vercel Cron) execution; defaults to false so
+     * every existing call site keeps creating app-open-only schedules. */
+    unattended?: boolean;
+    provider?: string | null;
+    disabledSteps?: number[];
   }
 ): Promise<WorkflowSchedule> {
   const { data, error } = await table(supabase)
@@ -123,6 +155,9 @@ export async function createWorkflowSchedule(
       repeat: input.repeat,
       course_id: input.courseId ?? null,
       institution: input.institution ?? null,
+      unattended: input.unattended ?? false,
+      provider: input.provider ?? null,
+      disabled_steps: (input.disabledSteps ?? []) as unknown as Json,
     })
     .select("*")
     .single();
@@ -172,6 +207,31 @@ export async function listDueWorkflowSchedules(
     .lte("next_run_at", now.toISOString())
     .order("next_run_at", { ascending: true })
     .limit(5);
+  if (error) {
+    throw new Error(error.message);
+  }
+  return ((data ?? []) as ScheduleRow[]).map(mapSchedule);
+}
+
+/**
+ * Due, enabled, unattended schedules across ALL users, soonest first, capped
+ * to a small batch. Server-only (the Vercel Cron route): unlike
+ * listDueWorkflowSchedules above, this is not scoped to a single signed-in
+ * user - the caller must pass a service-role client (RLS would otherwise
+ * hide every other user's rows).
+ */
+export async function listDueUnattendedWorkflowSchedules(
+  supabase: SupabaseClient<Database>,
+  now: Date,
+  limit = 5
+): Promise<WorkflowSchedule[]> {
+  const { data, error } = await table(supabase)
+    .select("*")
+    .eq("enabled", true)
+    .eq("unattended", true)
+    .lte("next_run_at", now.toISOString())
+    .order("next_run_at", { ascending: true })
+    .limit(limit);
   if (error) {
     throw new Error(error.message);
   }

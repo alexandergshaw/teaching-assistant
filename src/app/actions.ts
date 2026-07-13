@@ -26,6 +26,7 @@ import {
   gradeDiscussion,
   renderDiscussionRubric,
 } from "@/lib/embedded-grader";
+import { SLIDE_DECK_JSON_SHAPE, SLIDE_STRUCTURE_REQUIREMENTS, slideDeckJsonShapeWith } from "@/lib/slide-prompt";
 import { detectMeetingRequestEmbedded } from "@/lib/embedded/meeting";
 import { scaffoldModuleIntro, scaffoldAssignment } from "@/lib/embedded/content";
 import { scaffoldLessonPlan, scaffoldExamples } from "@/lib/embedded/deck";
@@ -1226,7 +1227,24 @@ export async function generateLectureFromMaterialsAction(
   try {
     await requireOwner();
     const truncated = materialsText.slice(0, 24000);
-    const prompt = `You are an expert lecturer preparing course materials. Given the following module materials, produce a complete lecture presentation with slides and an announcement for students.
+
+    // Embedded Deterministic Engine: template a deck outline from the
+    // materials (scaffoldLessonPlan never errors), with a plain announcement
+    // derived from the slide titles.
+    if (provider === "embedded") {
+      const scaffold = await scaffoldLessonPlan(truncated);
+      const announcement =
+        "This lecture covers: " +
+        scaffold.slides.map((s) => s.title).join("; ") +
+        ". Review the slides and bring questions to class.";
+      return {
+        presentationTitle: scaffold.presentationTitle,
+        slides: scaffold.slides,
+        announcement,
+      };
+    }
+
+    const prompt = `You are an expert lecturer preparing course materials. Given the following module materials, produce a complete lecture presentation with slides and an announcement for students. The slides must be fully self-contained - students reading them after class must be able to understand every concept without relying on any verbal explanation from the instructor.
 
 MODULE: ${moduleName}
 COURSE: ${courseName}
@@ -1234,33 +1252,18 @@ COURSE: ${courseName}
 MATERIALS:
 ${truncated}
 
-Return JSON ONLY with this exact structure:
-{
-  "presentationTitle": "string — a clear, professional title for the lecture",
-  "slides": [
-    {
-      "title": "string — concise slide heading",
-      "bullets": ["string", "string", ...],
-      "code": "optional code snippet",
-      "codeLanguage": "optional language like python, javascript, etc"
-    }
-  ],
-  "announcement": "2-3 short paragraphs of plain text summarizing the lecture for students"
-}
+Cover every concept the materials introduce; the structure requirements below determine the slide count.
 
-Slide requirements:
-- Each slide must have a title and at least one bullet point.
-- Bullets should be concise, clear, and self-contained — students reading after class must understand without verbal explanation.
-- Include 8-12 slides total, scaling based on material complexity.
-- Include code examples when relevant (keep them complete and runnable).
-- End with a "Documentation & References" slide listing key resources.
+Return ONLY valid JSON matching this structure, plus an "announcement" field:
+${slideDeckJsonShapeWith('"announcement": "2-3 short paragraphs of plain text summarizing the lecture for students"')}
+
+Requirements:
+${SLIDE_STRUCTURE_REQUIREMENTS}
 
 Announcement requirements:
 - 2-3 short paragraphs of plain text (no HTML or markdown).
 - Summarize the key topics and learning objectives.
-- Invite questions and next steps.
-
-Do not include any text outside the JSON object.`;
+- Invite questions and next steps.`;
 
     let parsed: {
       presentationTitle?: string;
@@ -5767,42 +5770,11 @@ ${content}
 Based on the assignment content above, create a complete lecture slide deck that teaches students the concepts they need to understand and complete this assignment. Scale the number of slides to fit a ${lectureDurationMinutes}-minute lecture (roughly 1–2 minutes per slide on average).
 
 Return ONLY valid JSON:
-{
-  "presentationTitle": "...",
-  "slides": [
-    { "title": "...", "bullets": ["...", "...", "..."] },
-    { "title": "Case Study: ...", "bullets": ["...", "...", "..."] },
-    { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
-    { "title": "Walkthrough: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
-    { "title": "Practice: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
-    { "title": "Answer: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
-    { "title": "Additional Practice: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
-    { "title": "Answer: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
-    { "title": "Documentation: Key Concepts", "bullets": ["...", "..."] },
-    { "title": "Documentation & References", "bullets": ["...", "..."] }
-  ]
-}
+${SLIDE_DECK_JSON_SHAPE}
 
 Requirements:
-- Each slide must have a "title" and a "bullets" array.
-- Maximum 4 bullets per slide.
-- Each bullet must be a complete, self-explanatory sentence (or two) that a student can fully understand without any verbal elaboration. Define every term you introduce, explain how each concept works, and state why it matters for the assignment. Never use bare keywords or vague one-liners — write as if the student is reading the slide alone with no instructor present.
-- The first slide should be a title/overview slide listing the key topics covered in the lecture.
-- The SECOND slide MUST be a real-world case study or news story about this lecture's subject, with "title" beginning with "Case Study:". Name a specific, well-known, widely-documented real event (the organization or product involved and roughly when it happened). Prefer a dramatic, motivating story — a high-profile failure, security breach, or outage, OR an impressive system that was built — to show students why this matters. Use the bullets to summarize what happened, and make the last bullet connect the story to what students are about to learn. Do not put "code" on this slide. Stick to established facts; never invent events or fabricate specifics.
 - Cover the concepts introduced in the README or assignment description, highlight what students must implement, and explain any relevant patterns shown in the unit tests or code comments.
-- Use real-world analogies and concrete examples that students will recognise; integrate the analogy into the bullet itself so it is self-contained.
-- For every concept-focused slide, immediately follow it with a concrete example slide and a step-by-step walkthrough slide that explains each step or line in plain English so the student understands the reasoning without needing the instructor to narrate it. Label these slides clearly (e.g. "Example: <concept>" and "Walkthrough: <concept>").
-- CODING CONCEPTS: When the concept being introduced is a coding concept (a loop, conditional, variable, function, class, data structure, etc.), follow it with exactly these four slides, in this order:
-  1. Example slide — "title" begins with "Example:"; demonstrate that exact concept with a short, correct, self-contained snippet in "code" (use real newlines) and "codeLanguage" set; keep "bullets" to at most one short caption.
-  2. Walkthrough slide — "title" begins with "Walkthrough:"; explain the example code line by line in "bullets" while showing the same code in the "code" field; use the exact code from the Example slide so students can read both the code and the explanation together.
-  3. Practice slide — "title" begins with "Practice:"; pose a simple, self-contained coding challenge on the same concept for the student to attempt. State the task in 1-2 "bullets" and set "codeLanguage". Its "code" field MUST repeat the SAME reference code shown on the Example/Walkthrough slide so the student has a worked example to reference — it must NOT contain the solution to the practice challenge or any code that gives away the answer.
-  4. Answer slide — "title" begins with "Answer:"; give the correct, runnable solution to that exact practice challenge in "code" with "codeLanguage" set, plus at most one "bullets" caption.
-- All of Example, Walkthrough, Practice, and Answer slides must include "code"/"codeLanguage". Do not omit "code" on Walkthrough or Practice slides. Omit code only on conceptual slides.
-- CLOSING SECTIONS: after all the coverage slides above, ALWAYS append these closing sections at the very END of the deck, in this exact order:
-  A. ADDITIONAL PRACTICE: for EACH coding concept you introduced in this deck, add 2-3 NEW slides whose "title" begins with "Additional Practice:" that pose fresh, self-contained challenges on that concept (clearly different from the earlier inline Practice slide). IMMEDIATELY follow each "Additional Practice:" slide with its own "Answer:" slide giving the correct, runnable solution in "code" with "codeLanguage" set. The "Additional Practice:" slide states the task in its bullets and must NOT reveal the solution (it may include a short reference/starter snippet in "code", but never the answer). For a non-programming module, make these 2-3 additional conceptual practice questions per concept, each followed by an "Answer:" slide, with no code fields.
-  B. DOCUMENTATION - KEY CONCEPTS: one or more slides whose "title" begins with "Documentation:" that recap the key concepts, terms, and syntax taught in this deck as a concise study reference the student can revise from (use bullets; short code snippets are allowed).
-  C. DOCUMENTATION AND REFERENCES: a final slide titled exactly "Documentation & References" that lists authoritative resources for the topics: name the official documentation for each language, library, or tool used, plus 2-4 suggested further-reading resources. Name only real, well-known resources (official language/library documentation, MDN, the tool's own docs); do NOT fabricate specific URLs or invent facts.
-- Do not include any text outside the JSON object.`;
+${SLIDE_STRUCTURE_REQUIREMENTS}`;
 
   // The parse below is guarded and retried once because a thrown parse error
   // would bypass buildAssignmentPlan's slidesFailed tolerance and fail the

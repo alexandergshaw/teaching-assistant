@@ -1,0 +1,50 @@
+name: Run scheduled workflows
+
+# Fires the app's unattended (headless) workflow runner on a schedule by
+# calling the deployed, CRON_SECRET-guarded endpoint. This exists because
+# Vercel Cron only runs sub-daily schedules on the Pro plan (on Hobby it
+# silently throttles to once per day), whereas GitHub's scheduled workflows
+# are not plan-limited. The atomic claim in the endpoint means it is safe for
+# this and any Vercel Cron / in-app watcher to fire at the same time - an
+# occurrence can only ever run once.
+#
+# SETUP (one time): add a repository secret named CRON_SECRET
+# (Settings -> Secrets and variables -> Actions -> New repository secret) whose
+# value EXACTLY matches the CRON_SECRET env var set in Vercel.
+#
+# Note: GitHub scheduled runs are best-effort and can lag several minutes under
+# load; they also auto-pause after ~60 days of no repo activity.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+# Never run two overlapping ticks.
+concurrency:
+  group: run-schedules
+  cancel-in-progress: false
+
+jobs:
+  run-schedules:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the unattended-run endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "The CRON_SECRET repository secret is not set."
+            echo "Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "https://teaching-assistant-pi.vercel.app/api/cron/run-schedules")
+          echo "HTTP $code"
+          cat /tmp/resp.json 2>/dev/null || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "Endpoint returned $code (expected 200 with a Bearer CRON_SECRET)."
+            exit 1
+          fi

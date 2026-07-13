@@ -56,6 +56,8 @@ export interface Course {
   topics: string | null;
   csvName: string | null;
   csvData: string | null;
+  rubricName: string | null;
+  rubricData: string | null;
   startDate: string | null;
   description: string | null;
   weeks: number | null;
@@ -87,6 +89,8 @@ export interface CourseInput {
   topics?: string | null;
   csvName?: string | null;
   csvData?: string | null;
+  rubricName?: string | null;
+  rubricData?: string | null;
   startDate?: string | null;
   description?: string | null;
   weeks?: number | null;
@@ -97,7 +101,7 @@ export interface CourseInput {
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, start_date, description, weeks, tests, lms, day_time, materials_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, materials_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -124,6 +128,8 @@ interface CourseRow {
   topics: string | null;
   csv_name: string | null;
   csv_data: string | null;
+  rubric_name: string | null;
+  rubric_data: string | null;
   start_date: string | null;
   description: string | null;
   weeks: number | null;
@@ -156,6 +162,8 @@ function toCourse(r: CourseRow): Course {
     topics: r.topics,
     csvName: r.csv_name,
     csvData: r.csv_data,
+    rubricName: r.rubric_name,
+    rubricData: r.rubric_data,
     startDate: r.start_date,
     description: r.description,
     weeks: r.weeks,
@@ -200,6 +208,8 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     topics: clean(input.topics),
     csv_name: clean(input.csvName),
     csv_data: clean(input.csvData),
+    rubric_name: clean(input.rubricName),
+    rubric_data: clean(input.rubricData),
     start_date: clean(input.startDate),
     description: clean(input.description),
     weeks: typeof input.weeks === "number" && Number.isFinite(input.weeks) ? input.weeks : null,
@@ -302,6 +312,28 @@ export async function updateCourseCsv(
     .eq("id", id);
   if (error) {
     throw new Error(`Could not update the course schedule CSV: ${error.message}`);
+  }
+}
+
+/** Update a course's rubric metadata. */
+export async function updateCourseRubric(
+  userId: string,
+  id: string,
+  fields: {
+    rubricName: string | null;
+    rubricData: string | null;
+  }
+): Promise<void> {
+  const { error } = await table()
+    .update({
+      rubric_name: fields.rubricName,
+      rubric_data: fields.rubricData,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) {
+    throw new Error(`Could not update the course rubric: ${error.message}`);
   }
 }
 

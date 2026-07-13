@@ -67,7 +67,7 @@ export const COURSE_REFRESH: WorkflowDef = {
   preset: true,
   name: "Course Refresh",
   description:
-    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. A tile without a linked repository pauses with an alert and, on continue, the schedule falls back to the tile's saved Schedule of Topics (CSV) or its topics; repo-driven materials steps are skipped in that case. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set. Finally the Starter Materials workflow runs against the tile's LMS course (dynamic - edits to it apply here).",
+    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. A tile without a linked repository pauses with an alert and, on continue, the schedule falls back to the tile's saved Schedule of Topics (CSV) or its topics; repo-driven materials steps are skipped in that case. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved to the LMS course, onto the course tile, and as a document in the LMS export's Start Here module. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set. Finally the Starter Materials workflow runs against the tile's LMS course (dynamic - edits to it apply here).",
   steps: [
     {
       type: "load-course-tile",
@@ -120,6 +120,7 @@ export const COURSE_REFRESH: WorkflowDef = {
         course: { source: "step", stepIndex: 0, outputKey: "course" },
         repo: { source: "step", stepIndex: 0, outputKey: "repo" },
         title: { source: "step", stepIndex: 1, outputKey: "courseTitle" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
       },
     },
     {
@@ -155,6 +156,7 @@ export const COURSE_REFRESH: WorkflowDef = {
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         startDate: { source: "step", stepIndex: 0, outputKey: "startDate" },
+        rubricFiles: { source: "step", stepIndex: 6, outputKey: "rubricFiles" },
       },
     },
     {

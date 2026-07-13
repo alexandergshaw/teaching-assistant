@@ -36,6 +36,8 @@ import GithubRepoPicker from "./GithubRepoPicker";
 import TabHeader from "./TabHeader";
 import SyllabusPreviewModal, { type SyllabusPreviewPara } from "./SyllabusPreviewModal";
 import CsvPreviewModal from "./CsvPreviewModal";
+import RubricPreviewModal from "./RubricPreviewModal";
+import { parseGeneratedRubric } from "@/app/utils/rubric";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { setCourseHandoff } from "@/lib/course-handoff";
@@ -138,6 +140,8 @@ function courseToInput(c: Course) {
     topics: c.topics ?? "",
     csvName: c.csvName ?? "",
     csvData: c.csvData ?? "",
+    rubricName: c.rubricName ?? "",
+    rubricData: c.rubricData ?? "",
     startDate: c.startDate ?? "",
     description: c.description ?? "",
     weeks: c.weeks,
@@ -322,6 +326,9 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [csvPreview, setCsvPreview] = useState<{ name: string; csv: string } | null>(null);
   const [csvRemoveConfirm, setCsvRemoveConfirm] = useState<string | null>(null);
   const [uploadingCsv, setUploadingCsv] = useState(false);
+  const [rubricPreview, setRubricPreview] = useState<{ name: string; rubric: string } | null>(null);
+  const [rubricRemoveConfirm, setRubricRemoveConfirm] = useState<string | null>(null);
+  const [uploadingRubric, setUploadingRubric] = useState(false);
   const [ownedRepos, setOwnedRepos] = useState<string[] | null>(null);
   const [repoAddSel, setRepoAddSel] = useState("");
   const [repoAddBranch, setRepoAddBranch] = useState("");
@@ -738,6 +745,43 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     } finally {
       setUploadingCsv(false);
     }
+  };
+
+  const handleRubricUpload = async (c: Course, file: File) => {
+    if (file.size > 2 * 1024 * 1024) {
+      setError("Rubric file is too large (max 2 MB).");
+      return;
+    }
+    setUploadingRubric(true);
+    setError(null);
+    try {
+      const text = await readFileText(file);
+      const r = await updateCourseHubAction(c.id, { ...courseToInput(c), rubricName: file.name, rubricData: text });
+      if ("error" in r) {
+        setError(r.error);
+        return;
+      }
+      setCourses((prev) => {
+        const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
+        if (hubCache) hubCache = { ...hubCache, courses: next };
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read the rubric file.");
+    } finally {
+      setUploadingRubric(false);
+    }
+  };
+
+  const openRubricPicker = (c: Course) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".md,.markdown,.txt,text/plain,text/markdown";
+    input.onchange = () => {
+      const f = input.files?.[0];
+      if (f) void handleRubricUpload(c, f);
+    };
+    input.click();
   };
 
   const handleMaterialsUpload = async (c: Course, file: File) => {
@@ -2147,6 +2191,116 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
               )}
           </div>
         );
+      case "rubric":
+        return (
+          <div className={`${styles.courseResource}${!c.rubricData ? " " + styles.courseResourceClickable : ""}`}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("rubric")}Rubric</span>
+              {c.rubricData && c.rubricData.trim() && (
+                <span className={styles.navBadge} style={{ marginLeft: 8 }}>
+                  {(() => {
+                    const rows = parseGeneratedRubric(c.rubricData ?? "");
+                    const count = rows?.length ?? 0;
+                    return `${count} criteri${count === 1 ? "on" : "a"}`;
+                  })()}
+                </span>
+              )}
+            </div>
+            {!c.rubricData
+              ? (
+                <>
+                  <span className={styles.courseResourceEmpty}>No rubric yet - Course Refresh generates one here, or upload a rubric.</span>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={uploadingRubric}
+                    onClick={() => openRubricPicker(c)}
+                  >
+                    {uploadingRubric ? "Uploading…" : "Upload rubric"}
+                  </Button>
+                </>
+              )
+              : (
+                <>
+                  <span className={styles.courseResourceValue}>{c.rubricName || "rubric.md"}</span>
+                  <div className={styles.courseResourceActions}>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      onClick={() => setRubricPreview({ name: c.rubricName || "rubric.md", rubric: c.rubricData ?? "" })}
+                    >
+                      Preview
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      onClick={() => {
+                        const blob = new Blob([c.rubricData ?? ""], { type: "text/markdown;charset=utf-8" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = c.rubricName || "rubric.md";
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      }}
+                    >
+                      Download
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      disabled={uploadingRubric}
+                      onClick={() => openRubricPicker(c)}
+                    >
+                      {uploadingRubric ? "Uploading…" : "Replace"}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      style={{ color: "var(--danger)" }}
+                      onClick={() => setRubricRemoveConfirm(rubricRemoveConfirm === c.id ? null : c.id)}
+                    >
+                      {rubricRemoveConfirm === c.id ? "Confirm" : "Remove"}
+                    </button>
+                  </div>
+                  {rubricRemoveConfirm === c.id && (
+                    <div style={{ marginTop: 8 }}>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        color="error"
+                        onClick={() => {
+                          void updateCourseHubAction(c.id, { ...courseToInput(c), rubricName: null, rubricData: null }).then((r) => {
+                            if (!("error" in r)) {
+                              setCourses((prev) => {
+                                const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
+                                if (hubCache) hubCache = { ...hubCache, courses: next };
+                                return next;
+                              });
+                              setRubricRemoveConfirm(null);
+                            } else {
+                              setError(r.error);
+                            }
+                          });
+                        }}
+                      >
+                        Delete rubric
+                      </Button>
+                      <Button
+                        variant="text"
+                        size="small"
+                        onClick={() => setRubricRemoveConfirm(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
+          </div>
+        );
       case "materials":
         return (
           <div className={`${styles.courseResource}${!c.materialsZipPath ? " " + styles.courseResourceClickable : ""}`}>
@@ -3353,6 +3507,10 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
 
       {csvPreview && (
         <CsvPreviewModal name={csvPreview.name} csv={csvPreview.csv} onClose={() => setCsvPreview(null)} />
+      )}
+
+      {rubricPreview && (
+        <RubricPreviewModal name={rubricPreview.name} rubric={rubricPreview.rubric} onClose={() => setRubricPreview(null)} />
       )}
     </section>
   );

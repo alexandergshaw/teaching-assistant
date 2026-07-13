@@ -311,6 +311,7 @@ import {
   deleteCourse as deleteCourseRow,
   updateCourseMaterials,
   updateCourseCsv,
+  updateCourseRubric,
   appendCourseMaterialFile,
   removeCourseMaterialFile,
   type Course as CourseHub,
@@ -4251,6 +4252,22 @@ export async function setCourseCsvAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not update the course schedule CSV." };
+  }
+}
+
+/** Update a course's rubric metadata. */
+export async function setCourseRubricAction(
+  courseId: string,
+  rubricName: string | null,
+  rubricData: string | null
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!courseId.trim()) return { error: "Choose a course." };
+    await updateCourseRubric(user.id, courseId, { rubricName, rubricData });
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the course rubric." };
   }
 }
 

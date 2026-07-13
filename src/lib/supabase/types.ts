@@ -170,6 +170,8 @@ export interface Database {
           topics: string | null;
           csv_name: string | null;
           csv_data: string | null;
+          rubric_name: string | null;
+          rubric_data: string | null;
           start_date: string | null;
           description: string | null;
           weeks: number | null;
@@ -202,6 +204,8 @@ export interface Database {
           topics?: string | null;
           csv_name?: string | null;
           csv_data?: string | null;
+          rubric_name?: string | null;
+          rubric_data?: string | null;
           start_date?: string | null;
           description?: string | null;
           weeks?: number | null;
@@ -234,6 +238,8 @@ export interface Database {
           topics?: string | null;
           csv_name?: string | null;
           csv_data?: string | null;
+          rubric_name?: string | null;
+          rubric_data?: string | null;
           start_date?: string | null;
           description?: string | null;
           weeks?: number | null;

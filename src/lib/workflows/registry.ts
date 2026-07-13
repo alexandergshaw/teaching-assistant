@@ -18,6 +18,7 @@ import {
   createCopilotTaskAction,
   generateSchedulePlanFromRepoAction,
   setCourseCsvAction,
+  setCourseRubricAction,
   deleteModuleAction,
   setupStudentRepoAction,
   listCourseHubAction,
@@ -96,6 +97,8 @@ function courseToInputPayload(c: Course): CourseInput {
     topics: c.topics,
     csvName: c.csvName,
     csvData: c.csvData,
+    rubricName: c.rubricName,
+    rubricData: c.rubricData,
     startDate: c.startDate,
     description: c.description,
     weeks: c.weeks,
@@ -1508,7 +1511,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "lms-rubric",
     name: "Save rubric to LMS",
-    description: "Generate a course-wide grading rubric from the repository's assignments and save it to the LMS course.",
+    description: "Generate a course-wide grading rubric from the repository's assignments; save it to the LMS course, onto the course tile, and as a document in the LMS export.",
     inputs: [
       {
         key: "course",
@@ -1529,88 +1532,136 @@ export const STEP_REGISTRY: StepDefinition[] = [
         type: "text",
         required: false,
       },
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: false,
+        help: "Optional - saves the generated rubric onto this course tile.",
+      },
     ],
-    outputs: [],
+    outputs: [
+      { key: "rubricFiles", label: "Rubric files", type: "files" },
+    ],
     run: async (values, helpers, onProgress) => {
       const course = String(values.course ?? "").trim();
-      if (!course) {
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      const repo = String(values.repo ?? "").trim();
+
+      if (!repo) {
         return {
-          outputs: {},
-          summary: { kind: "text", text: "Skipped - no LMS course selected." },
+          outputs: { rubricFiles: [] },
+          summary: { kind: "text", text: "Skipped - no repository linked; the rubric needs the course codebase." },
         };
       }
 
-      const repo = String(values.repo ?? "").trim();
-      if (!repo) {
+      if (!course && !hubCourseId) {
         return {
-          outputs: {},
+          outputs: { rubricFiles: [] },
+          summary: { kind: "text", text: "Skipped - no LMS course or course tile to receive the rubric." },
+        };
+      }
+
+      const title = String(values.title ?? "").trim() || "Course Rubric";
+
+      // Generation is best-effort: a rubric hiccup must never block the LMS
+      // export (which now consumes rubricFiles) or the rest of the refresh, so
+      // any failure here degrades to an empty rubricFiles.
+      const DOCX_MIME =
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      let rubricText: string;
+      let rubricFiles: GeneratedCourseFile[];
+      let criteria: RubricCriterionInput[];
+      try {
+        onProgress("Downloading repository...");
+        const z = await getRepoZipAction(repo);
+        if ("error" in z) throw new Error(z.error);
+
+        onProgress("Generating rubric...");
+        const gen = await generateCourseRubricFromZipAction(z.base64, helpers.provider);
+        if (typeof gen !== "string") throw new Error(gen.error);
+        rubricText = gen;
+
+        const rows = parseGeneratedRubric(rubricText);
+        if (!rows || rows.length === 0) {
+          throw new Error("Could not parse the generated rubric.");
+        }
+
+        criteria = rows.map((row) => {
+          const pointsValue =
+            Number(String(row.weight).replace(/[^0-9.]/g, "")) || 10;
+          return {
+            description: row.area,
+            longDescription: [
+              row.description,
+              ...row.subcategories.map((s) => `${s.label}: ${s.description}`),
+            ].join("\n"),
+            points: pointsValue,
+            ratings: [
+              { description: "Full marks", points: pointsValue },
+              { description: "Partial credit", points: Math.round(pointsValue / 2) },
+              { description: "No marks", points: 0 },
+            ],
+          };
+        });
+
+        const docxData = await buildDocxFromPlainText(rubricText, [], helpers.author);
+        rubricFiles = [
+          {
+            name: "Grading Rubric.docx",
+            blob: new Blob([docxData], { type: DOCX_MIME }),
+            mimeType: DOCX_MIME,
+            weekNumber: 0,
+            sortOrder: 0,
+            role: "instructions",
+          },
+        ];
+      } catch (err) {
+        return {
+          outputs: { rubricFiles: [] },
           summary: {
             kind: "text",
-            text: "Skipped - no repository linked; the rubric needs the course codebase.",
+            text: `Rubric skipped - ${err instanceof Error ? err.message : "could not generate the rubric."}`,
           },
         };
       }
 
-      onProgress("Downloading repository...");
-      const z = await getRepoZipAction(repo);
-      if ("error" in z) {
-        throw new Error(z.error);
+      const notes: string[] = [];
+
+      if (hubCourseId) {
+        try {
+          onProgress("Saving rubric to the course tile...");
+          const slug =
+            title.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 60) ||
+            "course-rubric";
+          const saved = await setCourseRubricAction(hubCourseId, `${slug}.md`, rubricText);
+          if ("error" in saved) throw new Error(saved.error);
+          notes.push("saved to the course tile");
+        } catch (err) {
+          notes.push(`tile save failed (${err instanceof Error ? err.message : "unknown error"})`);
+        }
       }
 
-      onProgress("Generating rubric...");
-      const r = await generateCourseRubricFromZipAction(
-        z.base64,
-        helpers.provider
-      );
-
-      if (typeof r !== "string") {
-        throw new Error(r.error);
-      }
-
-      const rows = parseGeneratedRubric(r);
-      if (!rows || rows.length === 0) {
-        throw new Error("Could not parse the generated rubric. Try again.");
-      }
-
-      const criteria: RubricCriterionInput[] = rows.map((row) => {
-        const pointsValue =
-          Number(String(row.weight).replace(/[^0-9.]/g, "")) || 10;
-        return {
-          description: row.area,
-          longDescription: [
-            row.description,
-            ...row.subcategories.map((s) => `${s.label}: ${s.description}`),
-          ].join("\n"),
-          points: pointsValue,
-          ratings: [
-            { description: "Full marks", points: pointsValue },
-            {
-              description: "Partial credit",
-              points: Math.round(pointsValue / 2),
-            },
-            { description: "No marks", points: 0 },
-          ],
-        };
-      });
-
-      const title = String(values.title ?? "").trim() || "Course Rubric";
-      onProgress("Saving rubric...");
-      const created = await createRubricAction(
-        course,
-        { title, criteria },
-        helpers.activeInstitution || undefined
-      );
-
-      if ("error" in created) {
-        throw new Error(created.error);
+      if (course) {
+        try {
+          onProgress("Saving rubric to the LMS...");
+          const created = await createRubricAction(
+            course,
+            { title, criteria },
+            helpers.activeInstitution || undefined
+          );
+          if ("error" in created) throw new Error(created.error);
+          notes.push(`saved to the LMS (${criteria.length} criteria)`);
+        } catch (err) {
+          notes.push(`LMS save failed (${err instanceof Error ? err.message : "unknown error"})`);
+        }
+      } else {
+        notes.push("no LMS course - LMS save skipped");
       }
 
       return {
-        outputs: {},
-        summary: {
-          kind: "text",
-          text: `Saved rubric "${title}" (${criteria.length} criteria) to the course.`,
-        },
+        outputs: { rubricFiles },
+        summary: { kind: "text", text: `Rubric "${title}" ${notes.join("; ")}.` },
       };
     },
   },
@@ -1803,6 +1854,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         type: "text",
         required: false,
       },
+      {
+        key: "rubricFiles",
+        label: "Rubric files",
+        type: "files",
+        required: false,
+        help: "Optional - rubric documents to include in the Start Here module.",
+      },
     ],
     outputs: [],
     run: async (values, helpers, onProgress) => {
@@ -1993,6 +2051,11 @@ export const STEP_REGISTRY: StepDefinition[] = [
           points: 1,
         },
       ];
+
+      const rubricFiles = (values.rubricFiles as GeneratedCourseFile[] | undefined) ?? [];
+      for (const rf of rubricFiles) {
+        starterFiles.push({ name: rf.name, blob: rf.blob });
+      }
 
       weeks.unshift({
         week: 0,

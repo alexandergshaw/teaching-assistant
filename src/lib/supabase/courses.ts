@@ -73,6 +73,8 @@ export interface Course {
   materialsZipPath: string | null;
   materialsZipSize: number | null;
   customTiles: CourseCustomTile[];
+  /** Built-in tile keys hidden on this course's card only. */
+  hiddenTiles: string[];
   updatedAt: string;
 }
 
@@ -102,10 +104,11 @@ export interface CourseInput {
   lms?: string | null;
   dayTime?: string | null;
   customTiles?: CourseCustomTile[];
+  hiddenTiles?: string[];
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, materials_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, materials_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -146,6 +149,7 @@ interface CourseRow {
   materials_zip_path: string | null;
   materials_zip_size: number | null;
   custom_tiles: Array<{ id: string; label: string; value: string; groupId: string }> | null;
+  hidden_tiles: string[] | null;
   updated_at: string;
 }
 
@@ -181,6 +185,7 @@ function toCourse(r: CourseRow): Course {
     materialsZipPath: r.materials_zip_path,
     materialsZipSize: r.materials_zip_size,
     customTiles: Array.isArray(r.custom_tiles) ? r.custom_tiles.filter((x) => x && typeof x.id === "string" && typeof x.label === "string") : [],
+    hiddenTiles: Array.isArray(r.hidden_tiles) ? r.hidden_tiles.filter((x) => typeof x === "string") : [],
     updatedAt: r.updated_at,
   };
 }
@@ -223,6 +228,7 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     lms: clean(input.lms),
     day_time: clean(input.dayTime),
     custom_tiles: Array.isArray(input.customTiles) ? (input.customTiles as unknown as Json) : undefined,
+    hidden_tiles: Array.isArray(input.hiddenTiles) ? (input.hiddenTiles as unknown as Json) : undefined,
     // Omit materials_zip_* fields: inserts use NULL defaults, updates preserve existing
     // values. updateCourseMaterials is the sole writer of these columns.
     // Omit materials_files and export_files: dedicated writers only (appendCourseMaterialFile,

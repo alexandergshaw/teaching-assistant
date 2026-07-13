@@ -1077,6 +1077,36 @@ button.courseResourceValue:disabled {
   color: var(--accent-ink);
 }
 
+/* Per-course tile remove button: hidden until the tile is hovered or the
+   button is keyboard-focused; sits beside the drag handle. */
+.tileHideBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  opacity: 0;
+  cursor: pointer;
+  vertical-align: -1px;
+}
+
+.courseResource:hover .tileHideBtn,
+.tileHideBtn:focus-visible {
+  opacity: 0.55;
+}
+
+.courseResource .tileHideBtn:hover {
+  opacity: 1;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
 /* Drag-and-drop tiles: grab handle, drag ghost, insertion indicator, group target. */
 .tileGrabHandle {
   display: inline-flex;

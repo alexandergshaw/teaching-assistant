@@ -170,6 +170,7 @@ function courseToInput(c: Course) {
     lms: c.lms ?? "",
     dayTime: c.dayTime ?? "",
     customTiles: c.customTiles,
+    hiddenTiles: c.hiddenTiles,
   };
 }
 
@@ -268,11 +269,40 @@ const cartridgeCache = new Map<string, Promise<CartridgeCourseData>>();
 const NO_COURSE_SETTINGS_ERROR =
   "This export package has no Canvas course settings, so tiles cannot be populated from it.";
 
+// Display names for the built-in tile keys (used by the hidden-tiles row).
+const TILE_LABELS: Record<string, string> = {
+  organization: "Organization",
+  codebases: "Codebases",
+  syllabus: "Syllabus",
+  textbook: "Textbook",
+  description: "Description",
+  startDate: "Start date",
+  dayTime: "Day/Time",
+  weeks: "Weeks",
+  tests: "Tests",
+  lms: "LMS",
+  integrations: "Integrations",
+  roster: "Roster",
+  csv: "Schedule of Topics",
+  rubric: "Rubric",
+  lmsExports: "LMS Exports",
+  materials: "Materials",
+};
+
 function PencilIcon() {
   return (
     <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor" aria-hidden="true" focusable="false">
       <path d="m5.433 13.917 1.262-3.155A4 4 0 0 1 7.58 9.42l6.92-6.918a2.121 2.121 0 0 1 3 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 0 1-.65-.65Z" />
       <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0 0 10 3H4.75A2.75 2.75 0 0 0 2 5.75v9.5A2.75 2.75 0 0 0 4.75 18h9.5A2.75 2.75 0 0 0 17 15.25V10a.75.75 0 0 0-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5Z" />
+    </svg>
+  );
+}
+
+// Small cross glyph for the per-course tile remove buttons.
+function CrossIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="11" height="11" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M4.22 4.22a.75.75 0 0 1 1.06 0L10 8.94l4.72-4.72a.75.75 0 1 1 1.06 1.06L11.06 10l4.72 4.72a.75.75 0 1 1-1.06 1.06L10 11.06l-4.72 4.72a.75.75 0 0 1-1.06-1.06L8.94 10 4.22 5.28a.75.75 0 0 1 0-1.06Z" />
     </svg>
   );
 }
@@ -400,6 +430,8 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   // Ref mirror of instFields so async handlers (template upload) read the
   // latest field list after their awaits instead of a stale render snapshot.
   const instFieldsRef = useRef(instFields);
+  // Ref mirror of courses for the same reason (hidden-tile mutations).
+  const coursesRef = useRef(courses);
   const syllabusUploadRef = useRef<HTMLInputElement>(null);
   const textbookPhotoRef = useRef<HTMLInputElement>(null);
   const csvUploadRef = useRef<HTMLInputElement>(null);
@@ -2135,6 +2167,67 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     </span>
   );
 
+  // Mutate a course's hidden-tile list against the LATEST course row (ref, not
+  // the click-time closure) with an optimistic update, so hiding two tiles in
+  // quick succession cannot drop one to a stale full-row save.
+  const mutateHiddenTiles = async (courseId: string, mutate: (prev: string[]) => string[]) => {
+    const current = coursesRef.current.find((x) => x.id === courseId);
+    if (!current) return;
+    const next = mutate(current.hiddenTiles);
+    const optimistic = { ...current, hiddenTiles: next };
+    setCourses((prev) => {
+      const updated = prev.map((course) => (course.id === courseId ? optimistic : course));
+      if (hubCache) hubCache = { ...hubCache, courses: updated };
+      return updated;
+    });
+    const result = await updateCourseHubAction(courseId, { ...courseToInput(optimistic), hiddenTiles: next });
+    if ("error" in result) {
+      setError(result.error);
+      // Roll the optimistic change back.
+      setCourses((prev) => {
+        const updated = prev.map((course) => (course.id === courseId ? current : course));
+        if (hubCache) hubCache = { ...hubCache, courses: updated };
+        return updated;
+      });
+      return;
+    }
+    setCourses((prev) => {
+      const updated = prev.map((course) => (course.id === result.course.id ? result.course : course));
+      if (hubCache) hubCache = { ...hubCache, courses: updated };
+      return updated;
+    });
+  };
+
+  // Hide a built-in tile on this course's card only (data is untouched).
+  const hideTile = (c: Course, key: string) => {
+    void mutateHiddenTiles(c.id, (prev) => (prev.includes(key) ? prev : [...prev, key]));
+  };
+
+  const restoreTile = (c: Course, key: string) => {
+    void mutateHiddenTiles(c.id, (prev) => prev.filter((k) => k !== key));
+  };
+
+  // Hover-revealed remove control shown next to each built-in tile's drag handle.
+  const tileHideButton = (key: string, c: Course) => (
+    <button
+      type="button"
+      className={styles.tileHideBtn}
+      title="Remove tile from this card"
+      aria-label={`Remove the ${TILE_LABELS[key] ?? key} tile from this card`}
+      onClick={(e) => {
+        e.stopPropagation();
+        hideTile(c, key);
+      }}
+    >
+      <CrossIcon />
+    </button>
+  );
+
+  // The group's built-in tiles as rendered on this card (hidden keys excluded).
+  // Drag/drop indexes are relative to this list, so the drop handler uses it too.
+  const visibleGroupBuiltins = (lg: CardLayoutGroup, c: Course) =>
+    lg.tiles.filter((k) => BUILT_IN_TILE_KEYS.has(k) && !c.hiddenTiles.includes(k));
+
   // Track the hovered drop position (index within the group's rendered tiles;
   // index === tile count means "end of group").
   const handleTileDragOver = (e: React.DragEvent, cardId: string, groupId: string, index: number) => {
@@ -2155,7 +2248,9 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     const drag = dragTile;
     setDragTile(null);
     setDropHint(null);
-    const builtins = lg.tiles.filter((k) => BUILT_IN_TILE_KEYS.has(k));
+    // Indexes from render are relative to this card's VISIBLE built-in tiles
+    // (per-course hidden tiles are not rendered), so resolve through them.
+    const builtins = visibleGroupBuiltins(lg, c);
     if (!drag.courseId) {
       const next = cardLayout.map((g) => ({ ...g, tiles: [...g.tiles] }));
       const src = next.find((g) => g.tiles.includes(drag.key));
@@ -2169,7 +2264,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         if (oldIdx !== -1 && oldIdx < validIdx) validIdx -= 1;
       }
       if (src) src.tiles = src.tiles.filter((k) => k !== drag.key);
-      const targetValid = target.tiles.filter((k) => BUILT_IN_TILE_KEYS.has(k));
+      const targetValid = target.tiles.filter((k) => BUILT_IN_TILE_KEYS.has(k) && !c.hiddenTiles.includes(k));
       const insertAt = validIdx >= targetValid.length ? target.tiles.length : target.tiles.indexOf(targetValid[validIdx]);
       target.tiles.splice(insertAt, 0, drag.key);
       applyLayout(next);
@@ -2314,7 +2409,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "githubOrg" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "githubOrg"))}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("organization")}Organization</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("organization")}{tileHideButton("organization", c)}Organization</span>
               <button
                 type="button"
                 className={styles.tileEditBtn}
@@ -2341,7 +2436,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "repos" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "repos"))}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("codebases")}Codebase{c.repos.length > 1 ? "s" : ""}</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("codebases")}{tileHideButton("codebases", c)}Codebase{c.repos.length > 1 ? "s" : ""}</span>
               <button
                 type="button"
                 className={styles.tileEditBtn}
@@ -2435,7 +2530,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "syllabusId" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "syllabusId"))}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("syllabus")}Syllabus</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("syllabus")}{tileHideButton("syllabus", c)}Syllabus</span>
               <button
                 type="button"
                 className={styles.tileEditBtn}
@@ -2513,7 +2608,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "textbook" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "textbook"))}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("textbook")}Textbook</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("textbook")}{tileHideButton("textbook", c)}Textbook</span>
               <button
                 type="button"
                 className={styles.tileEditBtn}
@@ -2538,7 +2633,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "description" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "description"))}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("description")}Description</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("description")}{tileHideButton("description", c)}Description</span>
               <button
                 type="button"
                 className={styles.tileEditBtn}
@@ -2565,7 +2660,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "startDate" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "startDate"))}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("startDate")}Start date</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("startDate")}{tileHideButton("startDate", c)}Start date</span>
               <button
                 type="button"
                 className={styles.tileEditBtn}
@@ -2642,7 +2737,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "weeks" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "weeks"))}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("weeks")}Weeks</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("weeks")}{tileHideButton("weeks", c)}Weeks</span>
               <button
                 type="button"
                 className={styles.tileEditBtn}
@@ -2719,7 +2814,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "tests" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "tests"))}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("tests")}Tests</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("tests")}{tileHideButton("tests", c)}Tests</span>
               <button
                 type="button"
                 className={styles.tileEditBtn}
@@ -2744,7 +2839,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "dayTime" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "dayTime"))}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("dayTime")}Day/Time</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("dayTime")}{tileHideButton("dayTime", c)}Day/Time</span>
               <button
                 type="button"
                 className={styles.tileEditBtn}
@@ -2769,7 +2864,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "lms" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "lms"))}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("lms")}LMS</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("lms")}{tileHideButton("lms", c)}LMS</span>
               <button
                 type="button"
                 className={styles.tileEditBtn}
@@ -2810,7 +2905,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "integrations" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "integrations"))}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("integrations")}Integration{c.integrations.length > 1 ? "s" : ""}</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("integrations")}{tileHideButton("integrations", c)}Integration{c.integrations.length > 1 ? "s" : ""}</span>
               <button
                 type="button"
                 className={styles.tileEditBtn}
@@ -2839,7 +2934,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "roster" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "roster"))}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("roster")}Roster</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("roster")}{tileHideButton("roster", c)}Roster</span>
               <button
                 type="button"
                 className={styles.tileEditBtn}
@@ -2915,7 +3010,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource}${!c.csvData ? " " + styles.courseResourceClickable : ""}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "csv" ? "true" : undefined}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("csv")}Schedule of Topics</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("csv")}{tileHideButton("csv", c)}Schedule of Topics</span>
               {c.csvData && c.csvData.trim() && (
                 <span className={styles.navBadge} style={{ marginLeft: 8 }}>
                   {(() => {
@@ -3096,7 +3191,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource}${!c.rubricData ? " " + styles.courseResourceClickable : ""}`}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("rubric")}Rubric</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("rubric")}{tileHideButton("rubric", c)}Rubric</span>
               {c.rubricData && c.rubricData.trim() && (
                 <span className={styles.navBadge} style={{ marginLeft: 8 }}>
                   {(() => {
@@ -3248,7 +3343,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={styles.courseResource}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("lmsExports")}LMS Exports</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("lmsExports")}{tileHideButton("lmsExports", c)}LMS Exports</span>
               {c.exportFiles.length > 0 && (
                 <span style={{ marginLeft: "auto", fontSize: "0.85em", color: "var(--text-secondary)" }}>
                   {c.exportFiles.length} file(s)
@@ -3370,7 +3465,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         return (
           <div className={`${styles.courseResource}${!c.materialsZipPath ? " " + styles.courseResourceClickable : ""}`}>
             <div className={styles.courseResourceHead}>
-              <span className={styles.courseResourceLabel}>{tileGrabHandle("materials")}Materials</span>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("materials")}{tileHideButton("materials", c)}Materials</span>
             </div>
             {!c.materialsZipPath
               ? (
@@ -3539,7 +3634,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   // Render one layout group inside a course card: label row with hover-revealed
   // actions, the shared built-in tiles, then this card's custom tiles.
   const renderCardGroup = (lg: CardLayoutGroup, c: Course) => {
-    const builtins = lg.tiles.filter((k) => BUILT_IN_TILE_KEYS.has(k));
+    const builtins = visibleGroupBuiltins(lg, c);
     const customs = c.customTiles.filter((t) => t.groupId === lg.id);
     const total = builtins.length + customs.length;
     const renaming = groupRename && groupRename.id === lg.id && groupRename.cardId === c.id;
@@ -3684,6 +3779,10 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
 
   useEffect(() => {
     instFieldsRef.current = instFields;
+  });
+
+  useEffect(() => {
+    coursesRef.current = courses;
   });
 
   const submitInstFieldAdd = () => {
@@ -4385,6 +4484,24 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                 </div>
 
                 {cardLayout.map((lg) => renderCardGroup(lg, c))}
+
+                {c.hiddenTiles.some((k) => BUILT_IN_TILE_KEYS.has(k)) && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: "0.8em", color: "var(--text-secondary)" }}>
+                    <span>Hidden tiles:</span>
+                    {c.hiddenTiles.filter((k) => BUILT_IN_TILE_KEYS.has(k)).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        className={styles.linkButton}
+                        style={{ fontSize: "inherit" }}
+                        title="Restore this tile"
+                        onClick={() => restoreTile(c, k)}
+                      >
+                        {TILE_LABELS[k] ?? k}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 <div>
                   <button type="button" className={styles.linkButton} style={{ fontSize: "0.85em" }} onClick={() => addLayoutGroup(c.id)}>

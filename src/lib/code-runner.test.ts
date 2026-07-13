@@ -441,6 +441,113 @@ describe("code-runner", () => {
       expect(result!.ran).toBe(false);
     });
 
+    it("sends plain-text data files along with the code (Piston)", async () => {
+      global.fetch = vi.fn(async (url, init) => {
+        const urlStr = String(url);
+        if (urlStr.includes("/runtimes")) {
+          return new Response(
+            JSON.stringify([{ language: "python", version: "3.10.0" }]),
+            { status: 200 }
+          );
+        }
+        if (urlStr.includes("/execute")) {
+          const body = JSON.parse(String(init?.body));
+          expect(body.files).toEqual([
+            { name: "main.py", content: 'print(open("story.txt").read())' },
+            { name: "story.txt", content: "Once upon a time" },
+          ]);
+          return new Response(
+            JSON.stringify({
+              language: "python",
+              version: "3.10.0",
+              run: { stdout: "Once upon a time\n", stderr: "", code: 0, signal: null, output: "" },
+            }),
+            { status: 200 }
+          );
+        }
+        throw new Error(`Unexpected URL: ${urlStr}`);
+      });
+
+      const result = await runSubmittedCode([
+        { name: "main.py", extension: "py", previewContent: 'print(open("story.txt").read())' },
+        { name: "story.txt", extension: "txt", previewContent: "Once upon a time" },
+      ]);
+      expect(result).not.toBeNull();
+      expect(result!.ran).toBe(true);
+      expect(result!.files).toEqual(["main.py", "story.txt"]);
+      expect(result!.language).toBe("python");
+    });
+
+    it("sends data files to the Wandbox fallback via codes[]", async () => {
+      global.fetch = vi.fn(async (url, init) => {
+        const urlStr = String(url);
+        if (urlStr.includes("/runtimes")) {
+          return new Response(
+            JSON.stringify([{ language: "python", version: "3.10.0" }]),
+            { status: 200 }
+          );
+        }
+        if (urlStr.includes("/execute")) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+        if (urlStr.includes("list.json")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        if (urlStr.includes("compile.json")) {
+          const body = JSON.parse(String(init?.body));
+          expect(body.code).toBe('print(open("story.txt").read())');
+          expect(body.codes).toEqual([{ file: "story.txt", code: "Once upon a time" }]);
+          expect(body["compiler-option-raw"]).toBeUndefined();
+          return new Response(
+            JSON.stringify({ status: "0", signal: "", program_output: "Once upon a time\n", program_error: "" }),
+            { status: 200 }
+          );
+        }
+        throw new Error(`Unexpected URL: ${urlStr}`);
+      });
+
+      const result = await runSubmittedCode([
+        { name: "main.py", extension: "py", previewContent: 'print(open("story.txt").read())' },
+        { name: "story.txt", extension: "txt", previewContent: "Once upon a time" },
+      ]);
+      expect(result).not.toBeNull();
+      expect(result!.ran).toBe(true);
+      expect(result!.files).toEqual(["main.py", "story.txt"]);
+    });
+
+    it("skips oversized data files and unknown binary extensions", async () => {
+      global.fetch = vi.fn(async (url, init) => {
+        const urlStr = String(url);
+        if (urlStr.includes("/runtimes")) {
+          return new Response(
+            JSON.stringify([{ language: "python", version: "3.10.0" }]),
+            { status: 200 }
+          );
+        }
+        if (urlStr.includes("/execute")) {
+          const body = JSON.parse(String(init?.body));
+          expect(body.files.map((f: { name: string }) => f.name)).toEqual(["main.py"]);
+          return new Response(
+            JSON.stringify({
+              language: "python",
+              version: "3.10.0",
+              run: { stdout: "", stderr: "", code: 0, signal: null, output: "" },
+            }),
+            { status: 200 }
+          );
+        }
+        throw new Error(`Unexpected URL: ${urlStr}`);
+      });
+
+      const result = await runSubmittedCode([
+        { name: "main.py", extension: "py", previewContent: "print(1)" },
+        { name: "huge.txt", extension: "txt", previewContent: "x".repeat(200_001) },
+        { name: "photo.png", extension: "png", previewContent: "binary-ish" },
+      ]);
+      expect(result).not.toBeNull();
+      expect(result!.files).toEqual(["main.py"]);
+    });
+
     it("falls back to Wandbox when Piston returns 401 (whitelist-only public API)", async () => {
       const pythonContent = 'print("via wandbox")';
 

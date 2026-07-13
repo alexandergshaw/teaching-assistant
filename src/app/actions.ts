@@ -1019,6 +1019,9 @@ export async function postCanvasGradesAction(
 export async function runSubmissionCodeAction(
   files: Array<{ name: string; extension: string; rawBase64?: string; previewContent?: string }>
 ): Promise<CodeRunResult | null> {
+  // Owner-gated like the rest of the file: this relays code execution through
+  // the server's sandbox credentials.
+  await requireOwner();
   return runSubmittedCode(files);
 }
 

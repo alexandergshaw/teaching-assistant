@@ -74,6 +74,17 @@ import { planCartridgeModules } from "@/lib/week-numbering";
 import { parseLmsModuleValue } from "@/lib/workflows/module-value";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
 
+// Base64-encode UTF-8 text in the browser (btoa alone rejects non-latin1).
+function encodeTextBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
 // "Student" or "Student | github-username" (pipe-separated so commas in
 // names like "Last, First" never masquerade as usernames).
 function parseRosterLines(text: string): Array<{ student: string; username: string }> {
@@ -4812,28 +4823,69 @@ export const STEP_REGISTRY: StepDefinition[] = [
           rows: reviewRows,
           rowDetail: async (row) => {
             const entry = runs[Number(row.runIndex)];
-            if (!entry || entry.offline) {
+            const gradeResult = entry?.run.results[Number(row.resultIndex)];
+            if (!entry || !gradeResult) {
               throw new Error("Submission details are unavailable for this row.");
             }
-            const result = entry?.run.results[Number(row.resultIndex)];
-            if (!result || typeof result.userId !== "number") {
-              throw new Error("Submission details are unavailable for this row.");
+            // Everything the grader saw is still in memory: rubric breakdown,
+            // formatted feedback, the grading-time code run, and the submitted
+            // files. Canvas is contacted only when no files were kept (a
+            // text-only submission) to recover the text body.
+            const sections: string[] = [gradeResult.student];
+            if (gradeResult.rubricAreas.length > 0) {
+              sections.push(
+                [
+                  "Rubric breakdown:",
+                  ...gradeResult.rubricAreas.map(
+                    (a) => `- ${a.area}: ${a.score}${a.comment ? ` (${a.comment})` : ""}`
+                  ),
+                ].join("\n")
+              );
             }
-            const courseId = parseCanvasCourseId(entry.canvasUrl ?? "");
-            if (!entry.institution || !courseId || !entry.assignmentId) {
-              throw new Error("Submission lookup needs the course id, assignment id, and institution.");
+            if (gradeResult.feedback.trim()) {
+              sections.push(`AI feedback:\n${gradeResult.feedback.trim()}`);
             }
-            const pulled = await pullSubmissionAction(entry.institution, courseId, entry.assignmentId, result.userId);
-            if ("error" in pulled) throw new Error(pulled.error);
-            const s = pulled.submission;
-            const parts = [
-              `${s.student}${s.submittedAt ? ` - submitted ${new Date(s.submittedAt).toLocaleString()}` : ""}`,
-              s.text?.trim() ? s.text.trim() : "(no text submission)",
-            ];
-            return {
-              text: parts.join("\n\n"),
-              files: s.files ?? [],
-            };
+            if (gradeResult.codeExecution) {
+              const ce = gradeResult.codeExecution;
+              const status = ce.error
+                ? `could not run (${ce.error})`
+                : ce.ran
+                  ? "ran cleanly (exit 0)"
+                  : `failed (exit ${ce.exitCode ?? "unknown"})`;
+              const output = (ce.stdout || ce.stderr || ce.compileOutput || "").trim();
+              sections.push(
+                `Code run during grading: ${status}${output ? `\n${output.slice(0, 2000)}` : ""}`
+              );
+            }
+            if (gradeResult.submittedFiles.length > 0) {
+              return {
+                text: sections.join("\n\n"),
+                files: gradeResult.submittedFiles.map((f) => ({
+                  name: f.name,
+                  base64: f.rawBase64 ?? encodeTextBase64(f.previewContent),
+                  mimeType: f.mimeType ?? "text/plain",
+                })),
+              };
+            }
+            if (!entry.offline && typeof gradeResult.userId === "number") {
+              const courseId = parseCanvasCourseId(entry.canvasUrl ?? "");
+              if (entry.institution && courseId && entry.assignmentId) {
+                const pulled = await pullSubmissionAction(
+                  entry.institution,
+                  courseId,
+                  entry.assignmentId,
+                  gradeResult.userId
+                );
+                if (!("error" in pulled)) {
+                  const s = pulled.submission;
+                  sections.push(
+                    s.text?.trim() ? `Text submission:\n${s.text.trim()}` : "(no text submission)"
+                  );
+                  return { text: sections.join("\n\n"), files: s.files ?? [] };
+                }
+              }
+            }
+            return { text: sections.join("\n\n"), files: [] };
           },
         };
       }
@@ -4959,15 +5011,36 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
             const comment = approvedRow.comment ?? result.overallComment;
 
+            // When the reviewer edited the total, the AI's per-criterion
+            // breakdown no longer adds up to it - post the total alone rather
+            // than a contradictory rubric.
+            const originalGrade = (() => {
+              const m =
+                result.totalScore.match(/(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/) ??
+                result.totalScore.match(/-?\d+(?:\.\d+)?/);
+              return m ? m[1] ?? m[0] : "";
+            })();
+            // An unparseable AI total counts as edited too: the reviewer's
+            // typed grade cannot be reconciled with the AI's breakdown.
+            const gradeEdited =
+              grade !== "" && (originalGrade === "" || parseFloat(grade) !== parseFloat(originalGrade));
+            if (gradeEdited) {
+              lines.push(
+                `${approvedRow.student}: total edited (${originalGrade || "unparsed"} -> ${grade}) - rubric breakdown omitted`
+              );
+            }
+
             payload.push({
               userId,
               grade: grade || undefined,
               comment,
-              rubricAreas: result.rubricAreas.map((a) => ({
-                area: a.area,
-                score: a.score,
-                comment: "",
-              })),
+              rubricAreas: gradeEdited
+                ? undefined
+                : result.rubricAreas.map((a) => ({
+                    area: a.area,
+                    score: a.score,
+                    comment: "",
+                  })),
             });
           }
 

@@ -392,17 +392,35 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // Run a single submission's code on demand via the sandbox server action.
   const handleRunCode = async (row: GradeRow) => {
     setCodeRunning((prev) => ({ ...prev, [row.student]: true }));
-    const res = await runSubmissionCodeAction(
-      row.submittedFiles.map((f) => ({
-        name: f.name,
-        extension: f.extension,
-        rawBase64: f.rawBase64,
-        previewContent: f.previewContent,
-      }))
-    );
-    setCodeRuns((prev) => ({ ...prev, [row.student]: res }));
-    setCodeRunning((prev) => ({ ...prev, [row.student]: false }));
-    setCodeOutputStudent(row.student);
+    try {
+      const res = await runSubmissionCodeAction(
+        row.submittedFiles.map((f) => ({
+          name: f.name,
+          extension: f.extension,
+          rawBase64: f.rawBase64,
+          previewContent: f.previewContent,
+        }))
+      );
+      setCodeRuns((prev) => ({ ...prev, [row.student]: res }));
+      setCodeOutputStudent(row.student);
+    } catch (err) {
+      // Surface a failed run (e.g. an expired session) instead of a stuck spinner.
+      setCodeRuns((prev) => ({
+        ...prev,
+        [row.student]: {
+          language: "",
+          files: [],
+          ran: false,
+          exitCode: null,
+          stdout: "",
+          stderr: "",
+          error: err instanceof Error ? err.message : "Run failed.",
+        },
+      }));
+      setCodeOutputStudent(row.student);
+    } finally {
+      setCodeRunning((prev) => ({ ...prev, [row.student]: false }));
+    }
   };
 
   // The run to show for a row: a fresh manual run wins, else the grading-time run.

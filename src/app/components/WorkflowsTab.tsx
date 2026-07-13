@@ -240,6 +240,37 @@ function SummaryView({ summary }: { summary: StepRunSummary }) {
   return <p className={styles.fieldHint}>{summary.text}</p>;
 }
 
+// Numeric-aware comparison for review-table sorting: numbers sort numerically
+// and before non-numbers; everything else sorts lexicographically.
+function compareTableValues(a: string, b: string): number {
+  const na = parseFloat(a);
+  const nb = parseFloat(b);
+  const aNum = a.trim() !== "" && Number.isFinite(na);
+  const bNum = b.trim() !== "" && Number.isFinite(nb);
+  if (aNum && bNum) return na - nb;
+  if (aNum) return -1;
+  if (bNum) return 1;
+  return a.localeCompare(b);
+}
+
+function csvCell(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+// Validity of a review-table grade cell (tables with grade/outOf columns):
+// null when fine, else a short problem description. An EMPTY grade is valid -
+// post-grades deliberately supports comment-only posting with no score.
+function tableGradeIssue(row: Record<string, string>): string | null {
+  const raw = (row.grade ?? "").trim();
+  if (raw === "") return null;
+  if (!/^-?\d+(\.\d+)?$/.test(raw)) return "not a number";
+  const grade = parseFloat(raw);
+  const outOf = parseFloat((row.outOf ?? "").trim());
+  if (grade < 0) return "below 0";
+  if (Number.isFinite(outOf) && grade > outOf) return `above ${outOf}`;
+  return null;
+}
+
 export default function WorkflowsTab() {
   const { supabase, user } = useSupabase();
   const { institutions, active: activeInstitution } = useInstitutionSelection();
@@ -316,7 +347,72 @@ export default function WorkflowsTab() {
   const [runInputChecked, setRunInputChecked] = useState<boolean[]>([]);
   const [runInputBusy, setRunInputBusy] = useState(false);
   const [runInputError, setRunInputError] = useState<string | null>(null);
-  const [runInputDetails, setRunInputDetails] = useState<Record<number, { open: boolean; status: "loading" | "done" | "error"; detail: TableRowDetail | null; error: string; run?: { status: "running" | "done"; result: CodeRunResult | null } }>>({});
+  const [runInputDetails, setRunInputDetails] = useState<Record<number, { open: boolean; status: "loading" | "done" | "error"; detail: TableRowDetail | null; error: string; run?: { status: "running" | "done"; result: CodeRunResult | null; error?: string } }>>({});
+  // Review-table QoL state: search filter, column sort, and the pristine rows
+  // snapshot for dirty-tracking/reset. All die with the pause, so none persist.
+  const [runInputSearch, setRunInputSearch] = useState("");
+  const [runInputSort, setRunInputSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const [runInputInitialRows, setRunInputInitialRows] = useState<Array<Record<string, string>>>([]);
+
+  // Grade-aware behavior (stats, validation) applies to tables carrying a
+  // grade column (the grading review); everything else stays generic.
+  const tableHasGrade =
+    runInput?.kind === "table" && (runInput.columns ?? []).some((c) => c.key === "grade");
+
+  // While an editable cell has focus, the display order/membership is frozen
+  // to these original indices so typing in a sorted/searched column does not
+  // reorder or hide the row mid-edit (which would also steal focus).
+  const [tableFrozenOrder, setTableFrozenOrder] = useState<number[] | null>(null);
+
+  // The display list: original indices ride along so selection, details, and
+  // edits stay keyed to the underlying rows while the view filters/sorts.
+  const tableDisplay = useMemo(() => {
+    if (!runInput || runInput.kind !== "table") return [];
+    if (tableFrozenOrder) {
+      return tableFrozenOrder
+        .map((index) => ({ row: runInputRows[index], index }))
+        .filter((entry) => entry.row !== undefined);
+    }
+    const query = runInputSearch.trim().toLowerCase();
+    let list = runInputRows.map((row, index) => ({ row, index }));
+    if (query) {
+      const keys = (runInput.columns ?? []).filter((c) => !c.link).map((c) => c.key);
+      list = list.filter(({ row }) => keys.some((k) => (row[k] ?? "").toLowerCase().includes(query)));
+    }
+    if (runInputSort) {
+      const { key, dir } = runInputSort;
+      list = [...list].sort(
+        (a, b) => (dir === "asc" ? 1 : -1) * compareTableValues(a.row[key] ?? "", b.row[key] ?? "")
+      );
+    }
+    return list;
+  }, [runInput, runInputRows, runInputSearch, runInputSort, tableFrozenOrder]);
+
+  const tableGradeStats = useMemo(() => {
+    if (!tableHasGrade) return null;
+    const values: number[] = [];
+    let invalid = 0;
+    let missing = 0;
+    for (const row of runInputRows) {
+      if ((row.grade ?? "").trim() === "") missing += 1;
+      else if (tableGradeIssue(row)) invalid += 1;
+      else values.push(parseFloat(row.grade));
+    }
+    if (values.length === 0) return { invalid, missing, avg: null as number | null, median: null as number | null, min: null as number | null, max: null as number | null };
+    const sorted = [...values].sort((x, y) => x - y);
+    const avg = values.reduce((s, v) => s + v, 0) / values.length;
+    const median =
+      sorted.length % 2 === 1
+        ? sorted[(sorted.length - 1) / 2]
+        : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+    return { invalid, missing, avg, median, min: sorted[0], max: sorted[sorted.length - 1] };
+  }, [tableHasGrade, runInputRows]);
+
+  // Selected rows with invalid grades block approval (a typo would otherwise
+  // surface only as a silent per-student skip after posting).
+  const tableCheckedInvalid = tableHasGrade
+    ? runInputRows.filter((row, i) => (runInputChecked[i] ?? true) && tableGradeIssue(row)).length
+    : 0;
   const [pendingHandoff, setPendingHandoff] = useState<{ workflowId: string; prefill: Record<string, string> } | null>(null);
 
   const [uploadFiles, setUploadFiles] = useState<Record<string, File[]>>({});
@@ -1155,6 +1251,10 @@ export default function WorkflowsTab() {
           setRunInputChecked(rows.map(() => true));
           setRunInputError(null);
           setRunInputDetails({});
+          setRunInputSearch("");
+          setRunInputSort(null);
+          setTableFrozenOrder(null);
+          setRunInputInitialRows(rows.map((r) => ({ ...r })));
 
           await new Promise<void>((resolve) => {
             setRunInput({
@@ -2336,7 +2436,78 @@ export default function WorkflowsTab() {
                     )}
 
                     {runInput.kind === "table" && runInput.columns && (
-                      <div style={{ maxHeight: 400, overflow: "auto", marginTop: 8 }}>
+                      <>
+                        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                          <TextField
+                            size="small"
+                            placeholder="Search rows..."
+                            value={runInputSearch}
+                            onChange={(e) => setRunInputSearch(e.target.value)}
+                            sx={{ width: 220 }}
+                          />
+                          {tableGradeStats && (
+                            <span style={{ fontSize: "0.8rem", color: "var(--hint-text)" }}>
+                              {tableGradeStats.avg !== null
+                                ? `avg ${tableGradeStats.avg.toFixed(1)} - median ${tableGradeStats.median!.toFixed(1)} - min ${tableGradeStats.min} - max ${tableGradeStats.max}`
+                                : "no valid grades yet"}
+                              {tableGradeStats.missing > 0 && ` - ${tableGradeStats.missing} without a grade (comment-only)`}
+                              {tableGradeStats.invalid > 0 && (
+                                <span style={{ color: "var(--danger)" }}>
+                                  {` - ${tableGradeStats.invalid} invalid grade(s)`}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                          <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
+                            {tableHasGrade && tableGradeStats && tableGradeStats.invalid > 0 && runInput.selectable && (
+                              <button
+                                type="button"
+                                className={styles.linkButton}
+                                onClick={() =>
+                                  setRunInputChecked((prev) =>
+                                    prev.map((c, i) => (tableGradeIssue(runInputRows[i] ?? {}) ? false : c))
+                                  )
+                                }
+                              >
+                                Uncheck invalid
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className={styles.linkButton}
+                              onClick={() => {
+                                const cols = (runInput.columns ?? []).filter((c) => !c.link);
+                                const header = [...cols.map((c) => c.label), ...(runInput.selectable ? ["Selected"] : [])];
+                                const lines = [header.map(csvCell).join(",")];
+                                for (const { row, index } of tableDisplay) {
+                                  lines.push(
+                                    [
+                                      ...cols.map((c) => csvCell(row[c.key] ?? "")),
+                                      ...(runInput.selectable ? [(runInputChecked[index] ?? true) ? "yes" : "no"] : []),
+                                    ].join(",")
+                                  );
+                                }
+                                const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement("a");
+                                a.href = url;
+                                a.download = "review-table.csv";
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                URL.revokeObjectURL(url);
+                              }}
+                            >
+                              Download CSV
+                            </button>
+                          </span>
+                        </div>
+                        {runInputSearch.trim() && (
+                          <p className={styles.fieldHint} style={{ margin: "6px 0 0 0" }}>
+                            Showing {tableDisplay.length} of {runInputRows.length} row(s); selection actions and the CSV export cover only the visible rows.
+                          </p>
+                        )}
+                      <div style={{ maxHeight: "min(65vh, 720px)", overflow: "auto", marginTop: 8 }}>
                         <table
                           style={{
                             width: "100%",
@@ -2362,11 +2533,15 @@ export default function WorkflowsTab() {
                                 >
                                   <Checkbox
                                     size="small"
-                                    checked={runInputChecked.every((c) => c)}
-                                    indeterminate={runInputChecked.some((c) => c) && !runInputChecked.every((c) => c)}
+                                    checked={tableDisplay.length > 0 && tableDisplay.every(({ index }) => runInputChecked[index] ?? true)}
+                                    indeterminate={
+                                      tableDisplay.some(({ index }) => runInputChecked[index] ?? true) &&
+                                      !tableDisplay.every(({ index }) => runInputChecked[index] ?? true)
+                                    }
                                     onChange={() => {
-                                      const allChecked = runInputChecked.every((c) => c);
-                                      setRunInputChecked(runInputChecked.map(() => !allChecked));
+                                      const allChecked = tableDisplay.every(({ index }) => runInputChecked[index] ?? true);
+                                      const visible = new Set(tableDisplay.map(({ index }) => index));
+                                      setRunInputChecked((prev) => prev.map((c, i) => (visible.has(i) ? !allChecked : c)));
                                     }}
                                   />
                                 </th>
@@ -2384,9 +2559,27 @@ export default function WorkflowsTab() {
                                     top: 0,
                                     background: "var(--card-background)",
                                     zIndex: 1,
+                                    cursor: col.link ? undefined : "pointer",
+                                    userSelect: "none",
+                                  }}
+                                  title={col.link ? undefined : "Sort by this column"}
+                                  onClick={() => {
+                                    if (col.link) return;
+                                    setRunInputSort((prev) =>
+                                      prev?.key !== col.key
+                                        ? { key: col.key, dir: "asc" }
+                                        : prev.dir === "asc"
+                                          ? { key: col.key, dir: "desc" }
+                                          : null
+                                    );
                                   }}
                                 >
                                   {col.label}
+                                  {runInputSort?.key === col.key && (
+                                    <span style={{ marginLeft: 4, fontSize: "0.7em", color: "var(--hint-text)" }}>
+                                      {runInputSort.dir === "asc" ? "(asc)" : "(desc)"}
+                                    </span>
+                                  )}
                                 </th>
                               ))}
                               {runInput.rowDetail && (
@@ -2408,13 +2601,19 @@ export default function WorkflowsTab() {
                             </tr>
                           </thead>
                           <tbody>
-                            {runInputRows.map((row, rowIndex) => {
+                            {tableDisplay.map(({ row, index: rowIndex }, displayIndex) => {
                               const detail = runInputDetails[rowIndex];
                               const hasDetail = runInput.rowDetail !== undefined;
                               const colSpan = (runInput.selectable ? 1 : 0) + (runInput.columns?.length ?? 0) + (hasDetail ? 1 : 0);
+                              const initialRow = runInputInitialRows[rowIndex];
+                              const rowDirty =
+                                initialRow !== undefined &&
+                                (runInput.columns ?? []).some(
+                                  (c) => c.editable && (row[c.key] ?? "") !== (initialRow[c.key] ?? "")
+                                );
                               return (
                                 <Fragment key={rowIndex}>
-                                  <tr style={{ background: rowIndex % 2 === 1 ? "var(--surface-subtle)" : undefined }}>
+                                  <tr style={{ background: displayIndex % 2 === 1 ? "var(--surface-subtle)" : undefined }}>
                                     {runInput.selectable && (
                                       <td
                                         style={{
@@ -2458,6 +2657,16 @@ export default function WorkflowsTab() {
                                             multiline={col.multiline}
                                             minRows={col.multiline ? 2 : 1}
                                             value={row[col.key] ?? ""}
+                                            error={tableHasGrade && col.key === "grade" && tableGradeIssue(row) !== null}
+                                            sx={
+                                              initialRow !== undefined && (row[col.key] ?? "") !== (initialRow[col.key] ?? "")
+                                                ? { "& .MuiInputBase-root": { background: "color-mix(in srgb, var(--accent) 8%, transparent)" } }
+                                                : undefined
+                                            }
+                                            onFocus={() =>
+                                              setTableFrozenOrder((prev) => prev ?? tableDisplay.map(({ index }) => index))
+                                            }
+                                            onBlur={() => setTableFrozenOrder(null)}
                                             onChange={(e) => {
                                               setRunInputRows((prev) =>
                                                 prev.map((r, idx) =>
@@ -2479,8 +2688,23 @@ export default function WorkflowsTab() {
                                           borderBottom: "1px solid var(--field-border)",
                                           padding: "6px 8px",
                                           textAlign: "center",
+                                          whiteSpace: "nowrap",
                                         }}
                                       >
+                                        {rowDirty && (
+                                          <button
+                                            className={styles.linkButton}
+                                            style={{ marginRight: 8 }}
+                                            title="Restore this row's original values"
+                                            onClick={() => {
+                                              setRunInputRows((prev) =>
+                                                prev.map((r, idx) => (idx === rowIndex ? { ...runInputInitialRows[rowIndex] } : r))
+                                              );
+                                            }}
+                                          >
+                                            Reset
+                                          </button>
+                                        )}
                                         <button
                                           className={styles.linkButton}
                                           onClick={async () => {
@@ -2620,12 +2844,16 @@ export default function WorkflowsTab() {
                                                           run: { status: "done", result },
                                                         },
                                                       }));
-                                                    } catch {
+                                                    } catch (err) {
                                                       setRunInputDetails((prev) => ({
                                                         ...prev,
                                                         [rowIndex]: {
                                                           ...prev[rowIndex]!,
-                                                          run: { status: "done", result: null },
+                                                          run: {
+                                                            status: "done",
+                                                            result: null,
+                                                            error: err instanceof Error ? err.message : "Run failed.",
+                                                          },
                                                         },
                                                       }));
                                                     }
@@ -2726,9 +2954,15 @@ export default function WorkflowsTab() {
                                                   </div>
                                                 )}
                                                 {detail.run?.result === null && detail.run?.status === "done" && (
-                                                  <div style={{ marginTop: "12px", color: "var(--hint-text)", fontSize: "0.85rem" }}>
-                                                    No runnable code detected.
-                                                  </div>
+                                                  detail.run.error ? (
+                                                    <div style={{ marginTop: "12px", color: "var(--danger)", fontSize: "0.85rem" }}>
+                                                      Run failed: {detail.run.error}
+                                                    </div>
+                                                  ) : (
+                                                    <div style={{ marginTop: "12px", color: "var(--hint-text)", fontSize: "0.85rem" }}>
+                                                      No runnable code detected.
+                                                    </div>
+                                                  )
                                                 )}
                                               </div>
                                             )}
@@ -2743,6 +2977,7 @@ export default function WorkflowsTab() {
                           </tbody>
                         </table>
                       </div>
+                      </>
                     )}
 
                     <div
@@ -2765,7 +3000,8 @@ export default function WorkflowsTab() {
                               : runInput.kind === "upload"
                                 ? runInputFiles.length === 0
                                 : runInput.kind === "table" && runInput.selectable
-                                  ? runInputRows.filter((_, idx) => runInputChecked[idx]).length === 0
+                                  ? runInputRows.filter((_, idx) => runInputChecked[idx]).length === 0 ||
+                                    tableCheckedInvalid > 0
                                   : runInputRows.length === 0)
                         }
                         onClick={() => {
@@ -2823,6 +3059,11 @@ export default function WorkflowsTab() {
                     {runInput.kind === "table" && runInput.selectable && (
                       <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginTop: "8px" }}>
                         {runInputChecked.filter(Boolean).length} of {runInputRows.length} row(s) selected
+                        {tableCheckedInvalid > 0 && (
+                          <span style={{ color: "var(--danger)" }}>
+                            {` - ${tableCheckedInvalid} selected row(s) have an invalid grade; fix them or uncheck them to enable ${runInput.submitLabel ?? "Submit"}`}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>

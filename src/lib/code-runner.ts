@@ -51,6 +51,25 @@ const EXTENSION_MAP: Record<string, string> = {
   js: "javascript",
 };
 
+// Plain-text data files that ride along with the code so programs that read
+// them (open("story.txt")) find them in the sandbox working directory.
+const DATA_EXTENSIONS = new Set([
+  "txt",
+  "csv",
+  "tsv",
+  "json",
+  "dat",
+  "md",
+  "xml",
+  "yaml",
+  "yml",
+  "in",
+]);
+
+// Oversized data files are skipped rather than truncated (a truncated input
+// corrupts program behavior more confusingly than a missing one).
+const MAX_DATA_FILE_CHARS = 200_000;
+
 const FALLBACK_VERSIONS: Record<string, string> = {
   python: "3.10.0",
   typescript: "5.0.3",
@@ -243,7 +262,11 @@ async function runViaWandbox(
   let mainCode: string;
   let extraFiles: Array<{ name: string; content: string }>;
   if (language === "java") {
-    const mainFile = files.find((f) => /public\s+static\s+void\s+main/.test(f.content)) ?? files[0];
+    // Only source files can host the entry point (data files ride along too).
+    const mainFile =
+      files.find(
+        (f) => f.name.toLowerCase().endsWith(".java") && /public\s+static\s+void\s+main/.test(f.content)
+      ) ?? files[0];
     // Pick the type that owns main(): the type named after the file (the Java
     // convention, and mandatory for public classes), else the first public
     // type, else the first declared type. Interfaces/enums/records can carry a
@@ -360,11 +383,18 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
     decodedFiles.push({ name: file.name, content, language: lang });
   }
 
-  // Step 2: Keep only files with recognized languages.
+  // Step 2: Keep only files with recognized languages. Plain-text data files
+  // (txt/csv/json/...) are collected separately and sent alongside the code.
   const validFiles = decodedFiles.filter((f) => f.language !== null);
   if (validFiles.length === 0) {
     return null;
   }
+  const dataFiles = decodedFiles.filter(
+    (f) =>
+      f.language === null &&
+      DATA_EXTENSIONS.has(f.name.split(".").pop()?.toLowerCase() ?? "") &&
+      f.content.length <= MAX_DATA_FILE_CHARS
+  );
 
   // Step 3: Select the dominant language (most files, or by total content length).
   const byLanguage = new Map<string, Array<{ name: string; content: string }>>();
@@ -394,6 +424,10 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
     }
   }
 
+  // The run payload: the dominant language's code first (the first file is
+  // the entry point for both runners), then supporting data files.
+  const runFiles = [...dominantFiles, ...dataFiles.map((f) => ({ name: f.name, content: f.content }))];
+
   // Step 4: Resolve version and execute.
   let version: string;
   try {
@@ -402,7 +436,7 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
     const message = err instanceof Error ? err.message : String(err);
     return {
       language: dominantLanguage,
-      files: dominantFiles.map((f) => f.name),
+      files: runFiles.map((f) => f.name),
       ran: false,
       exitCode: null,
       stdout: "",
@@ -411,7 +445,7 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
     };
   }
 
-  const pistonFiles: PistonFile[] = dominantFiles.map((f) => ({
+  const pistonFiles: PistonFile[] = runFiles.map((f) => ({
     name: f.name,
     content: f.content,
   }));
@@ -442,7 +476,7 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
             ? "Piston rate-limited the request (429)."
             : `Piston rejected the request (${res.status}): the public emkc.org API is whitelist-only. Set PISTON_API_KEY if whitelisted, or point PISTON_API_URL at a self-hosted Piston instance.`;
         try {
-          return await runViaWandbox(dominantLanguage, dominantFiles);
+          return await runViaWandbox(dominantLanguage, runFiles);
         } catch (fallbackErr) {
           const fallbackMessage =
             fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
@@ -457,7 +491,7 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
     const message = err instanceof Error ? err.message : String(err);
     return {
       language: dominantLanguage,
-      files: dominantFiles.map((f) => f.name),
+      files: runFiles.map((f) => f.name),
       ran: false,
       exitCode: null,
       stdout: "",
@@ -478,7 +512,7 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
 
   return {
     language: dominantLanguage,
-    files: dominantFiles.map((f) => f.name),
+    files: runFiles.map((f) => f.name),
     ran,
     exitCode,
     stdout,

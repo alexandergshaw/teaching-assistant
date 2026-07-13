@@ -38,19 +38,24 @@ export default function FilePreviewModal({
     setRunning(true);
     setRunError(null);
     setRunResult(null);
-    const res = await runSubmissionCodeAction([
-      {
-        name: selectedPreview.name,
-        extension: selectedPreview.extension,
-        rawBase64: selectedPreview.rawBase64,
-        previewContent: selectedPreview.content,
-      },
-    ]);
-    setRunning(false);
-    if (!res) {
-      setRunError("This file has no runnable code.");
-    } else {
-      setRunResult(res);
+    try {
+      const res = await runSubmissionCodeAction([
+        {
+          name: selectedPreview.name,
+          extension: selectedPreview.extension,
+          rawBase64: selectedPreview.rawBase64,
+          previewContent: selectedPreview.content,
+        },
+      ]);
+      if (!res) {
+        setRunError("This file has no runnable code.");
+      } else {
+        setRunResult(res);
+      }
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : "Run failed.");
+    } finally {
+      setRunning(false);
     }
   };
 

@@ -616,6 +616,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
             weekNumber: plan.weekNumber,
             sortOrder: 2,
             role: "instructions",
+            pageText: plan.assignmentInstructions,
           });
         }
       }
@@ -890,6 +891,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
           }
 
           uploadedLines.push(`${file.name} -> ${targetModule.name} (page)`);
+          continue;
+        }
+
+        // Instructions files with pageText ride the module assignment, not uploaded as files.
+        // lms-assignments puts the text in the assignment description.
+        if (file.role === "instructions" && file.pageText) {
+          uploadedLines.push(`${file.name} -> ${targetModule.name} (rides the module assignment)`);
           continue;
         }
 
@@ -1756,6 +1764,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Overrides the course tile's start date for deadline calculation.",
       },
+      {
+        key: "files",
+        label: "Generated files",
+        type: "files",
+        required: false,
+        help: "When bound, each module's generated instructions become the assignment description.",
+      },
     ],
     outputs: [],
     run: async (values, helpers, onProgress) => {
@@ -1777,6 +1792,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       const repoRef = String(values.repo);
       const schedule = values.schedule as ScheduleWeekPlan[];
+      const genFiles = Array.isArray(values.files) ? (values.files as GeneratedCourseFile[]) : [];
 
       // Deadlines key off the course tile's start date; the form field is an
       // override.
@@ -1806,18 +1822,29 @@ export const STEP_REGISTRY: StepDefinition[] = [
           sw?.assignmentTitle ||
           `Week ${String(m.week).padStart(2, "0")} Deliverable`;
 
-        const descriptionLines = [
-          "Submit the URL of your GitHub repository containing this week's deliverable in the text box.",
-        ];
+        const instructionsFile = genFiles.find(
+          (f) => f.weekNumber === m.week && f.role === "instructions" && f.pageText
+        );
 
-        if (repoRef) {
-          descriptionLines.push(
-            `Before you start, read the README for this module in the course codebase${
-              sw?.assignmentSlug
-                ? ` (folder "${sw.assignmentSlug}")`
-                : ""
-            }: https://github.com/${repoRef}`
-          );
+        let description: string;
+        if (instructionsFile?.pageText) {
+          description = instructionsFile.pageText;
+        } else {
+          const descriptionLines = [
+            "Submit the URL of your GitHub repository containing this week's deliverable in the text box.",
+          ];
+
+          if (repoRef) {
+            descriptionLines.push(
+              `Before you start, read the README for this module in the course codebase${
+                sw?.assignmentSlug
+                  ? ` (folder "${sw.assignmentSlug}")`
+                  : ""
+              }: https://github.com/${repoRef}`
+            );
+          }
+
+          description = descriptionLines.join("\n\n");
         }
 
         let dueAt = "";
@@ -1833,7 +1860,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           course,
           {
             name,
-            description: descriptionLines.join("\n\n"),
+            description,
             pointsPossible: 100,
             dueAt,
             submissionType: "online_text_entry",
@@ -2004,12 +2031,22 @@ export const STEP_REGISTRY: StepDefinition[] = [
         const weekFiles = weeksMap.get(plan.week) ?? [];
         const sorted = [...weekFiles].sort((a, b) => a.sortOrder - b.sortOrder);
 
+        // Find and exclude the instructions file if it carries pageText; it becomes
+        // the assignment body instead of a module file.
+        const instructionsFile = sorted.find(
+          (f) => f.role === "instructions" && f.pageText
+        );
+
         // Introductions ship as .docx files in the cartridge (like slides and
         // instructions); the live path (lms-populate) converts intro text to
-        // proper HTML via markdown-lite. All files go into cartridgeFiles.
+        // proper HTML via markdown-lite. Exclude instructions files that carry pageText
+        // (they ride the assignment). All other files go into cartridgeFiles.
         const cartridgeFiles: Array<{ name: string; blob: Blob }> = [];
         const pages: Array<{ title: string; html: string }> = [];
         for (const f of sorted) {
+          if (instructionsFile && f === instructionsFile) {
+            continue;
+          }
           cartridgeFiles.push({ name: f.name, blob: f.blob });
         }
 
@@ -2023,13 +2060,23 @@ export const STEP_REGISTRY: StepDefinition[] = [
           dueAt = toUtcTimestamp(due);
         }
 
-        const html = `<p>Submit the URL of your GitHub repository containing this week's deliverable.</p>${
-          plan.assignmentSlug
-            ? `<p>Read the README for this module in the course codebase (folder "${esc(
-                plan.assignmentSlug
-              )}").</p>`
-            : ""
-        }${dueText ? `<p><strong>Deadline:</strong> ${esc(dueText)}</p>` : ""}`;
+        let html: string;
+        if (instructionsFile) {
+          // Each module's assignment is the generated instructions document itself -
+          // a standalone artifact, not duplicated as a module file.
+          html = markdownLiteToHtml(instructionsFile.pageText ?? "");
+          if (dueText) {
+            html += `<p><strong>Deadline:</strong> ${esc(dueText)}</p>`;
+          }
+        } else {
+          html = `<p>Submit the URL of your GitHub repository containing this week's deliverable.</p>${
+            plan.assignmentSlug
+              ? `<p>Read the README for this module in the course codebase (folder "${esc(
+                  plan.assignmentSlug
+                )}").</p>`
+              : ""
+          }${dueText ? `<p><strong>Deadline:</strong> ${esc(dueText)}</p>` : ""}`;
+        }
 
         const assignments: Array<{
           title: string;

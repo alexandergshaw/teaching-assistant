@@ -6,7 +6,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "./supabase/types";
 
-export type ScheduleRepeat = "none" | "daily" | "weekly";
+export type ScheduleRepeat = "none" | "interval" | "daily" | "weekly";
+
+// The shortest interval the app offers: unattended runs are polled about every
+// 15 minutes (the GitHub Action cadence), so a finer interval would not
+// actually fire more often. Enforced in the UI and treated as the floor here.
+export const MIN_INTERVAL_MINUTES = 15;
 
 export interface WorkflowSchedule {
   id: string;
@@ -25,6 +30,8 @@ export interface WorkflowSchedule {
   courseId: string | null;
   institution: string | null;
   lastRunAt: string | null;
+  /** Minutes between runs when repeat === "interval"; null for none/daily/weekly. */
+  intervalMinutes: number | null;
   /** Opt-in: run this schedule server-side (Vercel Cron) even when the app is
    * closed. Only ever true for a workflow that was headless-safe at the time
    * the schedule was created - see isHeadlessSafeWorkflow. */
@@ -45,11 +52,26 @@ export interface WorkflowSchedule {
  * one. Uses local calendar arithmetic (setDate) so the wall-clock time is
  * preserved across DST changes. Returns null for one-shot schedules.
  */
-export function computeNextRunAt(fromIso: string, repeat: ScheduleRepeat, now: Date): string | null {
-  if (repeat !== "daily" && repeat !== "weekly") return null;
-  const stepDays = repeat === "daily" ? 1 : 7;
+export function computeNextRunAt(
+  fromIso: string,
+  repeat: ScheduleRepeat,
+  now: Date,
+  intervalMinutes: number | null = null
+): string | null {
   const next = new Date(fromIso);
   if (Number.isNaN(next.getTime())) return null;
+  if (repeat === "interval") {
+    // Fixed-minute steps (no calendar arithmetic): a sub-day cadence has no
+    // DST wall-clock to preserve, so plain time addition is correct here.
+    const step = intervalMinutes && intervalMinutes > 0 ? intervalMinutes : 0;
+    if (step <= 0) return null;
+    do {
+      next.setTime(next.getTime() + step * 60_000);
+    } while (next.getTime() <= now.getTime());
+    return next.toISOString();
+  }
+  if (repeat !== "daily" && repeat !== "weekly") return null;
+  const stepDays = repeat === "daily" ? 1 : 7;
   do {
     next.setDate(next.getDate() + stepDays);
   } while (next.getTime() <= now.getTime());
@@ -69,7 +91,10 @@ export function reenableSchedule(schedule: WorkflowSchedule): { ok: boolean; nex
   if (schedule.repeat === "none") {
     return { ok: false };
   }
-  return { ok: true, nextRunAt: computeNextRunAt(schedule.nextRunAt, schedule.repeat, now) ?? undefined };
+  return {
+    ok: true,
+    nextRunAt: computeNextRunAt(schedule.nextRunAt, schedule.repeat, now, schedule.intervalMinutes) ?? undefined,
+  };
 }
 
 type ScheduleRow = Database["public"]["Tables"]["workflow_schedules"]["Row"];
@@ -85,7 +110,8 @@ export function mapSchedule(row: ScheduleRow): WorkflowSchedule {
       if (typeof v === "string") values[k] = v;
     }
   }
-  const repeat = row.repeat === "daily" || row.repeat === "weekly" ? row.repeat : "none";
+  const repeat =
+    row.repeat === "daily" || row.repeat === "weekly" || row.repeat === "interval" ? row.repeat : "none";
   const disabledSteps = Array.isArray(row.disabled_steps)
     ? row.disabled_steps.filter((n): n is number => typeof n === "number")
     : [];
@@ -101,6 +127,7 @@ export function mapSchedule(row: ScheduleRow): WorkflowSchedule {
     courseId: row.course_id,
     institution: row.institution,
     lastRunAt: row.last_run_at,
+    intervalMinutes: typeof row.interval_minutes === "number" ? row.interval_minutes : null,
     unattended: row.unattended,
     provider: row.provider,
     disabledSteps,
@@ -136,6 +163,7 @@ export async function createWorkflowSchedule(
     fieldValues: Record<string, string>;
     nextRunAt: string;
     repeat: ScheduleRepeat;
+    intervalMinutes?: number | null;
     courseId?: string | null;
     institution?: string | null;
     /** Opt-in for server-side (Vercel Cron) execution; defaults to false so
@@ -153,6 +181,7 @@ export async function createWorkflowSchedule(
       field_values: input.fieldValues as unknown as Json,
       next_run_at: input.nextRunAt,
       repeat: input.repeat,
+      interval_minutes: input.intervalMinutes ?? null,
       course_id: input.courseId ?? null,
       institution: input.institution ?? null,
       unattended: input.unattended ?? false,
@@ -250,7 +279,7 @@ export async function claimWorkflowSchedule(
   schedule: WorkflowSchedule,
   now: Date
 ): Promise<boolean> {
-  const next = computeNextRunAt(schedule.nextRunAt, schedule.repeat, now);
+  const next = computeNextRunAt(schedule.nextRunAt, schedule.repeat, now, schedule.intervalMinutes);
   const patch: Record<string, unknown> = {
     last_run_at: now.toISOString(),
     updated_at: now.toISOString(),

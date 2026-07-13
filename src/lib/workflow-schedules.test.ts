@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeNextRunAt, mapSchedule } from "./workflow-schedules";
+import { computeNextRunAt, mapSchedule, reenableSchedule, type WorkflowSchedule } from "./workflow-schedules";
 import type { Database } from "./supabase/types";
 
 type ScheduleRow = Database["public"]["Tables"]["workflow_schedules"]["Row"];
@@ -22,6 +22,7 @@ function makeRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
     unattended: false,
     provider: null,
     disabled_steps: [],
+    interval_minutes: null,
     ...overrides,
   };
 }
@@ -82,6 +83,39 @@ describe("computeNextRunAt", () => {
   });
 });
 
+describe("computeNextRunAt interval", () => {
+  it("advances by the given minutes, collapsing missed occurrences past now", () => {
+    // First run 40 min ago, every 30 min -> next lands strictly in the future.
+    const from = "2026-07-13T14:00:00.000Z";
+    const now = new Date("2026-07-13T14:40:00Z");
+    const next = computeNextRunAt(from, "interval", now, 30);
+    expect(next).toBe("2026-07-13T15:00:00.000Z");
+    expect(new Date(next!).getTime()).toBeGreaterThan(now.getTime());
+  });
+
+  it("supports hour-scale intervals", () => {
+    const next = computeNextRunAt("2026-07-13T14:00:00.000Z", "interval", new Date("2026-07-13T14:05:00Z"), 120);
+    expect(next).toBe("2026-07-13T16:00:00.000Z");
+  });
+
+  it("returns null when the interval is missing or non-positive", () => {
+    const now = new Date("2026-07-13T14:05:00Z");
+    expect(computeNextRunAt("2026-07-13T14:00:00.000Z", "interval", now, null)).toBeNull();
+    expect(computeNextRunAt("2026-07-13T14:00:00.000Z", "interval", now, 0)).toBeNull();
+  });
+
+  it("re-enabling a past interval schedule advances to the next future slot", () => {
+    const schedule = {
+      repeat: "interval",
+      intervalMinutes: 60,
+      nextRunAt: "2000-01-01T00:00:00.000Z",
+    } as WorkflowSchedule;
+    const r = reenableSchedule(schedule);
+    expect(r.ok).toBe(true);
+    expect(new Date(r.nextRunAt!).getTime()).toBeGreaterThan(Date.now());
+  });
+});
+
 describe("mapSchedule", () => {
   it("maps the unattended/provider/disabledSteps columns and carries userId", () => {
     const row = makeRow({ unattended: true, provider: "gemini", disabled_steps: [1, 3] });
@@ -122,5 +156,17 @@ describe("mapSchedule", () => {
     const row = makeRow({ repeat: "monthly" });
     const s = mapSchedule(row);
     expect(s.repeat).toBe("none");
+  });
+
+  it("maps an interval schedule and its interval_minutes", () => {
+    const row = makeRow({ repeat: "interval", interval_minutes: 30 });
+    const s = mapSchedule(row);
+    expect(s.repeat).toBe("interval");
+    expect(s.intervalMinutes).toBe(30);
+  });
+
+  it("defaults interval_minutes to null when absent", () => {
+    const s = mapSchedule(makeRow());
+    expect(s.intervalMinutes).toBeNull();
   });
 });

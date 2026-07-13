@@ -593,6 +593,7 @@ export interface Database {
           unattended: boolean;
           provider: string | null;
           disabled_steps: Json;
+          interval_minutes: number | null;
         };
         Insert: {
           id?: string;
@@ -611,6 +612,7 @@ export interface Database {
           unattended?: boolean;
           provider?: string | null;
           disabled_steps?: Json;
+          interval_minutes?: number | null;
         };
         Update: {
           id?: string;
@@ -629,6 +631,7 @@ export interface Database {
           unattended?: boolean;
           provider?: string | null;
           disabled_steps?: Json;
+          interval_minutes?: number | null;
         };
       };
     };

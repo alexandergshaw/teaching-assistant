@@ -21,6 +21,7 @@ import {
   updateWorkflowSchedule,
   deleteWorkflowSchedule,
   computeNextRunAt,
+  MIN_INTERVAL_MINUTES,
   type WorkflowSchedule,
   type ScheduleRepeat,
 } from "@/lib/workflow-schedules";
@@ -548,7 +549,7 @@ export default function WorkflowsTab() {
   // Scheduled runs for the signed-in user (null = not loaded yet).
   const [schedules, setSchedules] = useState<WorkflowSchedule[] | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
-  const [scheduleForm, setScheduleForm] = useState<{ runAt: string; repeat: ScheduleRepeat; courseId: string; institution: string; unattended: boolean } | null>(null);
+  const [scheduleForm, setScheduleForm] = useState<{ runAt: string; repeat: ScheduleRepeat; intervalValue: string; intervalUnit: "minutes" | "hours"; courseId: string; institution: string; unattended: boolean } | null>(null);
   const [scheduleBusy, setScheduleBusy] = useState(false);
   const [scheduleRemoveConfirm, setScheduleRemoveConfirm] = useState<string | null>(null);
 
@@ -1575,6 +1576,19 @@ export default function WorkflowsTab() {
       setScheduleError("Pick a time in the future.");
       return;
     }
+    let intervalMinutes: number | null = null;
+    if (scheduleForm.repeat === "interval") {
+      const raw = Number(scheduleForm.intervalValue);
+      if (!Number.isFinite(raw) || raw <= 0) {
+        setScheduleError("Enter how often it should repeat.");
+        return;
+      }
+      intervalMinutes = scheduleForm.intervalUnit === "hours" ? Math.round(raw * 60) : Math.round(raw);
+      if (intervalMinutes < MIN_INTERVAL_MINUTES) {
+        setScheduleError(`The shortest interval is ${MIN_INTERVAL_MINUTES} minutes.`);
+        return;
+      }
+    }
     setScheduleBusy(true);
     setScheduleError(null);
     try {
@@ -1584,6 +1598,7 @@ export default function WorkflowsTab() {
         fieldValues: values,
         nextRunAt: runAt.toISOString(),
         repeat: scheduleForm.repeat,
+        intervalMinutes,
         courseId: scheduleForm.courseId || null,
         institution: scheduleForm.institution || null,
         // Only meaningful when selectedHeadlessSafe gated the checkbox
@@ -1616,7 +1631,7 @@ export default function WorkflowsTab() {
         setScheduleError("That one-time schedule is in the past - create a new one instead.");
         return;
       }
-      nextRunAt = computeNextRunAt(s.nextRunAt, s.repeat, new Date()) ?? undefined;
+      nextRunAt = computeNextRunAt(s.nextRunAt, s.repeat, new Date(), s.intervalMinutes) ?? undefined;
     }
     try {
       await updateWorkflowSchedule(supabase, user.id, s.id, {
@@ -2375,7 +2390,7 @@ export default function WorkflowsTab() {
                   setScheduleForm((prev) =>
                     prev
                       ? null
-                      : { runAt: "", repeat: "none", courseId: "", institution: activeInstitution || "", unattended: false }
+                      : { runAt: "", repeat: "none", intervalValue: "30", intervalUnit: "minutes", courseId: "", institution: activeInstitution || "", unattended: false }
                   )
                 }
               >
@@ -2397,6 +2412,11 @@ export default function WorkflowsTab() {
                 {runtimeFields.some((f) => f.type === "uploads" && f.required) && (
                   <p className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)" }}>
                     This workflow requires a file upload at run time, which cannot be saved with a schedule - the scheduled run will stop at the form.
+                  </p>
+                )}
+                {scheduleForm.repeat === "interval" && (
+                  <p className={styles.fieldHint} style={{ margin: 0 }}>
+                    Set any interval from {MIN_INTERVAL_MINUTES} minutes up. Unattended runs are checked about every {MIN_INTERVAL_MINUTES} minutes, so that is the shortest that fires reliably.
                   </p>
                 )}
                 {selectedHeadlessSafe ? (
@@ -2440,9 +2460,34 @@ export default function WorkflowsTab() {
                     sx={{ minWidth: 150 }}
                   >
                     <MenuItem value="none">Does not repeat</MenuItem>
+                    <MenuItem value="interval">Every...</MenuItem>
                     <MenuItem value="daily">Daily</MenuItem>
                     <MenuItem value="weekly">Weekly</MenuItem>
                   </TextField>
+                  {scheduleForm.repeat === "interval" && (
+                    <>
+                      <TextField
+                        size="small"
+                        label="Every"
+                        type="number"
+                        value={scheduleForm.intervalValue}
+                        onChange={(e) => setScheduleForm((p) => (p ? { ...p, intervalValue: e.target.value } : p))}
+                        slotProps={{ htmlInput: { min: 1, step: 1 } }}
+                        sx={{ width: 90 }}
+                      />
+                      <TextField
+                        select
+                        size="small"
+                        label="Unit"
+                        value={scheduleForm.intervalUnit}
+                        onChange={(e) => setScheduleForm((p) => (p ? { ...p, intervalUnit: e.target.value as "minutes" | "hours" } : p))}
+                        sx={{ minWidth: 110 }}
+                      >
+                        <MenuItem value="minutes">minutes</MenuItem>
+                        <MenuItem value="hours">hours</MenuItem>
+                      </TextField>
+                    </>
+                  )}
                   <TextField
                     select
                     size="small"
@@ -2491,7 +2536,16 @@ export default function WorkflowsTab() {
                     ? hubCourses?.find((c) => c.id === s.courseId)?.name ?? "course"
                     : null;
                   const attachment = [courseName, s.institution].filter(Boolean).join(", ");
-                  const repeatLabel = s.repeat === "daily" ? "daily" : s.repeat === "weekly" ? "weekly" : "once";
+                  const repeatLabel =
+                    s.repeat === "daily"
+                      ? "daily"
+                      : s.repeat === "weekly"
+                        ? "weekly"
+                        : s.repeat === "interval" && s.intervalMinutes
+                          ? s.intervalMinutes % 60 === 0
+                            ? `every ${s.intervalMinutes / 60} hr`
+                            : `every ${s.intervalMinutes} min`
+                          : "once";
                   return (
                     <div key={s.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--field-border)", fontSize: "0.85em" }}>
                       <span style={{ fontWeight: 600 }}>{s.workflowName}</span>

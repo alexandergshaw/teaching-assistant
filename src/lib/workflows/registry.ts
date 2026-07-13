@@ -241,6 +241,13 @@ export type StepRunSummary =
   | { kind: "list"; label: string; items: string[] }
   | { kind: "text"; text: string };
 
+export interface TableRowDetail {
+  text: string;
+  /** Submitted files (base64) so the pause UI can render text/code content
+   * and feed the existing code-run tooling. */
+  files?: Array<{ name: string; base64: string; mimeType: string }>;
+}
+
 export interface StepRunResult {
   outputs: Record<string, unknown>;
   summary: StepRunSummary;
@@ -281,8 +288,9 @@ export interface StepRunResult {
     /** kind "table" only: column definitions; rows render read-only unless a
      * column is editable. Row keys not listed in columns pass through the edit
      * untouched (useful for hidden join keys). Link columns render cell values as
-     * external "View" links when non-empty; link columns are never editable. */
-    columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean; link?: boolean }>;
+     * external "View" links when non-empty; link columns are never editable. Width
+     * is optional in px. */
+    columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean; link?: boolean; width?: number }>;
     /** kind "table" only: the rows to review; the resolved value is the edited
      * array in the same shape. */
     rows?: Array<Record<string, string>>;
@@ -292,7 +300,7 @@ export interface StepRunResult {
     /** kind "table" only: fetches an inline detail text for a row (e.g. the
      * student's submission) when the user expands it. Steps run in-browser,
      * so a closure is valid here. */
-    rowDetail?: (row: Record<string, string>) => Promise<string>;
+    rowDetail?: (row: Record<string, string>) => Promise<TableRowDetail>;
     /** Maps the collected value before it is merged into the step's outputs -
      * e.g. selected display rows back to the step's real payload. Steps run
      * in-browser, so a closure is valid here. The workflow-kind handoff always
@@ -4329,6 +4337,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         assignmentId?: string;
         rubricText?: string;
         description?: string;
+        pointsPossible?: number | null;
         offline?: boolean;
       }
 
@@ -4351,6 +4360,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         run: GradingRun;
         institution?: string;
         assignmentId?: string;
+        pointsPossible?: number | null;
         offline?: boolean;
       }
 
@@ -4426,6 +4436,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
             run: gradeResult.run,
             institution: row.institution,
             assignmentId: row.assignmentId,
+            pointsPossible: row.pointsPossible,
           });
 
           lines.push(
@@ -4516,12 +4527,14 @@ export const STEP_REGISTRY: StepDefinition[] = [
       };
 
       if (postable > 0) {
-        // Build review rows from postable entries
+        // Build review rows from postable entries; runIndex indexes the FULL runs array
+        // so post-grades and rowDetail lookups agree when any offline run is present.
         const reviewRows: Array<Record<string, string>> = [];
         const fractionRegex = /(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/;
 
-        for (let i = 0; i < nonOfflineRuns.length; i++) {
-          const entry = nonOfflineRuns[i];
+        for (let i = 0; i < runs.length; i++) {
+          const entry = runs[i];
+          if (entry.offline) continue;
           for (let j = 0; j < entry.run.results.length; j++) {
             const row = entry.run.results[j];
             if (typeof row.userId !== "number") continue;
@@ -4541,30 +4554,36 @@ export const STEP_REGISTRY: StepDefinition[] = [
                 ? `${entry.run.speedGraderUrl}&student_id=${row.userId}`
                 : "",
               grade: earned,
+              outOf: entry.pointsPossible != null ? String(entry.pointsPossible) : "",
               comment: row.overallComment,
             });
           }
         }
 
         result.requireInput = {
-          message: `Review the grades below - open a submission to check the student's work, edit scores or comments, then approve to post ${postable} grade(s) to the LMS. Skip to finish without posting.`,
+          message: `Review the grades below - open a submission to check the student's work, edit scores or comments, then approve to post ${postable} grade(s) to the LMS. Uncheck a row to leave that student out of the post. Skip to finish without posting.`,
           key: "approvedGrades",
           kind: "table",
           optional: true,
+          selectable: true,
           submitLabel: "Approve grades",
           columns: [
             { key: "course", label: "Course" },
             { key: "assignment", label: "Assignment" },
-            { key: "student", label: "Student" },
-            { key: "submission", label: "Submission", link: true },
-            { key: "grade", label: "Grade", editable: true },
+            { key: "student", label: "Student", width: 140 },
+            { key: "submission", label: "Submission", link: true, width: 90 },
+            { key: "grade", label: "Grade", editable: true, width: 80 },
+            { key: "outOf", label: "Out of", width: 70 },
             { key: "comment", label: "Comment", editable: true, multiline: true },
           ],
           rows: reviewRows,
           rowDetail: async (row) => {
-            const entry = nonOfflineRuns[Number(row.runIndex)];
+            const entry = runs[Number(row.runIndex)];
+            if (!entry || entry.offline) {
+              throw new Error("Submission details are unavailable for this row.");
+            }
             const result = entry?.run.results[Number(row.resultIndex)];
-            if (!entry || !result || typeof result.userId !== "number") {
+            if (!result || typeof result.userId !== "number") {
               throw new Error("Submission details are unavailable for this row.");
             }
             const courseId = parseCanvasCourseId(entry.canvasUrl ?? "");
@@ -4578,10 +4597,10 @@ export const STEP_REGISTRY: StepDefinition[] = [
               `${s.student}${s.submittedAt ? ` - submitted ${new Date(s.submittedAt).toLocaleString()}` : ""}`,
               s.text?.trim() ? s.text.trim() : "(no text submission)",
             ];
-            if (s.files?.length) {
-              parts.push(`Attached files: ${s.files.map((f) => f.name).join(", ")}`);
-            }
-            return parts.join("\n\n");
+            return {
+              text: parts.join("\n\n"),
+              files: s.files ?? [],
+            };
           },
         };
       }
@@ -4649,7 +4668,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
         };
       }
 
-      // Group approved rows by runIndex
+      // Group approved rows by runIndex (indexes the FULL runs array so the posting
+      // step and grade-submissions detail lookups agree when any offline run is present).
       const approvedByRunIndex = new Map<string, Array<Record<string, string>>>();
       for (const row of approved) {
         const runIndex = row.runIndex ?? "";

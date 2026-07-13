@@ -15,7 +15,8 @@ import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFil
 import { uploadCourseZip, removeCourseZip } from "@/lib/course-files";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
-import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction } from "@/app/actions";
+import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction, runSubmissionCodeAction } from "@/app/actions";
+import type { CodeRunResult } from "@/lib/code-runner";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import {
   loadCustomWorkflows,
@@ -36,6 +37,7 @@ import {
   getStepDefinition,
   type StepRunSummary,
   type StepRunHelpers,
+  type TableRowDetail,
 } from "@/lib/workflows/registry";
 import type { WorkflowDef, RuntimeField, WorkflowStepConfig } from "@/lib/workflows/types";
 import styles from "../page.module.css";
@@ -283,9 +285,9 @@ export default function WorkflowsTab() {
     initialValue?: string;
     submitLabel?: string;
     regenerate?: () => Promise<string>;
-    columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean; link?: boolean }>;
+    columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean; link?: boolean; width?: number }>;
     selectable?: boolean;
-    rowDetail?: (row: Record<string, string>) => Promise<string>;
+    rowDetail?: (row: Record<string, string>) => Promise<TableRowDetail>;
     transform?: (value: string | File[] | Array<Record<string, string>>) => unknown;
   } | null>(null);
   const inputResolverRef = useRef<{ resolve: (value: string | File[] | Array<Record<string, string>> | null) => void } | null>(null);
@@ -296,7 +298,7 @@ export default function WorkflowsTab() {
   const [runInputChecked, setRunInputChecked] = useState<boolean[]>([]);
   const [runInputBusy, setRunInputBusy] = useState(false);
   const [runInputError, setRunInputError] = useState<string | null>(null);
-  const [runInputDetails, setRunInputDetails] = useState<Record<number, { open: boolean; status: "loading" | "done" | "error"; text: string }>>({});
+  const [runInputDetails, setRunInputDetails] = useState<Record<number, { open: boolean; status: "loading" | "done" | "error"; detail: TableRowDetail | null; error: string; run?: { status: "running" | "done"; result: CodeRunResult | null } }>>({});
   const [pendingHandoff, setPendingHandoff] = useState<{ workflowId: string; prefill: Record<string, string> } | null>(null);
 
   const [uploadFiles, setUploadFiles] = useState<Record<string, File[]>>({});
@@ -1965,8 +1967,21 @@ export default function WorkflowsTab() {
                                     padding: "6px 8px",
                                     fontWeight: "bold",
                                     width: 32,
+                                    position: "sticky",
+                                    top: 0,
+                                    background: "var(--card-background)",
+                                    zIndex: 1,
                                   }}
                                 >
+                                  <Checkbox
+                                    size="small"
+                                    checked={runInputChecked.every((c) => c)}
+                                    indeterminate={runInputChecked.some((c) => c) && !runInputChecked.every((c) => c)}
+                                    onChange={() => {
+                                      const allChecked = runInputChecked.every((c) => c);
+                                      setRunInputChecked(runInputChecked.map(() => !allChecked));
+                                    }}
+                                  />
                                 </th>
                               )}
                               {runInput.columns.map((col) => (
@@ -1977,6 +1992,11 @@ export default function WorkflowsTab() {
                                     borderBottom: "1px solid var(--field-border)",
                                     padding: "6px 8px",
                                     fontWeight: "bold",
+                                    width: col.width,
+                                    position: "sticky",
+                                    top: 0,
+                                    background: "var(--card-background)",
+                                    zIndex: 1,
                                   }}
                                 >
                                   {col.label}
@@ -1990,6 +2010,10 @@ export default function WorkflowsTab() {
                                     padding: "6px 8px",
                                     fontWeight: "bold",
                                     width: 80,
+                                    position: "sticky",
+                                    top: 0,
+                                    background: "var(--card-background)",
+                                    zIndex: 1,
                                   }}
                                 >
                                 </th>
@@ -2003,7 +2027,7 @@ export default function WorkflowsTab() {
                               const colSpan = (runInput.selectable ? 1 : 0) + (runInput.columns?.length ?? 0) + (hasDetail ? 1 : 0);
                               return (
                                 <Fragment key={rowIndex}>
-                                  <tr>
+                                  <tr style={{ background: rowIndex % 2 === 1 ? "var(--surface-subtle)" : undefined }}>
                                     {runInput.selectable && (
                                       <td
                                         style={{
@@ -2031,6 +2055,7 @@ export default function WorkflowsTab() {
                                         style={{
                                           borderBottom: "1px solid var(--field-border)",
                                           padding: "6px 8px",
+                                          width: col.width,
                                         }}
                                       >
                                         {col.link ? (
@@ -2077,16 +2102,21 @@ export default function WorkflowsTab() {
                                                 ...prev,
                                                 [rowIndex]: { ...prev[rowIndex]!, open: false },
                                               }));
+                                            } else if (detail?.status === "done") {
+                                              setRunInputDetails((prev) => ({
+                                                ...prev,
+                                                [rowIndex]: { ...prev[rowIndex]!, open: true },
+                                              }));
                                             } else {
                                               setRunInputDetails((prev) => ({
                                                 ...prev,
-                                                [rowIndex]: { open: true, status: "loading", text: "" },
+                                                [rowIndex]: { open: true, status: "loading", detail: null, error: "" },
                                               }));
                                               try {
-                                                const text = await runInput.rowDetail!(row);
+                                                const result = await runInput.rowDetail!(row);
                                                 setRunInputDetails((prev) => ({
                                                   ...prev,
-                                                  [rowIndex]: { open: true, status: "done", text },
+                                                  [rowIndex]: { open: true, status: "done", detail: result, error: "" },
                                                 }));
                                               } catch (err) {
                                                 setRunInputDetails((prev) => ({
@@ -2094,7 +2124,8 @@ export default function WorkflowsTab() {
                                                   [rowIndex]: {
                                                     open: true,
                                                     status: "error",
-                                                    text: err instanceof Error ? err.message : "Error loading submission",
+                                                    detail: null,
+                                                    error: err instanceof Error ? err.message : "Error loading submission",
                                                   },
                                                 }));
                                               }
@@ -2115,23 +2146,207 @@ export default function WorkflowsTab() {
                                           padding: "8px",
                                         }}
                                       >
-                                        <div
-                                          style={{
-                                            maxHeight: 300,
-                                            overflow: "auto",
-                                            whiteSpace: "pre-wrap",
-                                            fontSize: "0.85rem",
-                                            padding: "8px",
-                                            background: "var(--surface-subtle)",
-                                            borderRadius: "4px",
-                                          }}
-                                        >
-                                          {detail.status === "loading" && "Loading submission..."}
-                                          {detail.status === "done" && detail.text}
-                                          {detail.status === "error" && (
-                                            <span style={{ color: "var(--danger)" }}>{detail.text}</span>
-                                          )}
-                                        </div>
+                                        {detail.status === "loading" && <div>Loading submission...</div>}
+                                        {detail.status === "error" && (
+                                          <div style={{ color: "var(--danger)" }}>{detail.error}</div>
+                                        )}
+                                        {detail.status === "done" && detail.detail && (
+                                          <div>
+                                            <div
+                                              style={{
+                                                maxHeight: 300,
+                                                overflow: "auto",
+                                                whiteSpace: "pre-wrap",
+                                                fontSize: "0.85rem",
+                                                padding: "8px",
+                                                background: "var(--surface-subtle)",
+                                                borderRadius: "4px",
+                                                marginBottom: "12px",
+                                              }}
+                                            >
+                                              {detail.detail.text}
+                                            </div>
+                                            {detail.detail.files && detail.detail.files.length > 0 && (
+                                              <div>
+                                                {detail.detail.files.map((file) => {
+                                                  const isTextLike = file.mimeType.startsWith("text/") ||
+                                                    ["py", "js", "ts", "jsx", "tsx", "java", "c", "cpp", "h", "cs", "rb", "go", "rs", "php", "html", "css", "json", "md", "txt", "sql", "sh", "yml", "yaml"].includes(
+                                                      file.name.includes(".") ? file.name.split(".").pop()?.toLowerCase() || "" : ""
+                                                    );
+                                                  const content = isTextLike
+                                                    ? (() => {
+                                                        try {
+                                                          const bytes = Uint8Array.from(atob(file.base64), c => c.charCodeAt(0));
+                                                          const text = new TextDecoder().decode(bytes);
+                                                          return text.length > 20000 ? text.substring(0, 20000) + "\n... (truncated)" : text;
+                                                        } catch {
+                                                          return "(Error decoding file)";
+                                                        }
+                                                      })()
+                                                    : "(binary file - download via SpeedGrader)";
+                                                  return (
+                                                    <div key={file.name}>
+                                                      <div style={{ fontWeight: "bold", marginTop: "8px", marginBottom: "4px" }}>{file.name}</div>
+                                                      <pre
+                                                        style={{
+                                                          fontFamily: "monospace",
+                                                          fontSize: "0.8rem",
+                                                          whiteSpace: "pre-wrap",
+                                                          margin: "4px 0 12px",
+                                                          maxHeight: 240,
+                                                          overflow: "auto",
+                                                          padding: 8,
+                                                          background: "var(--card-background)",
+                                                          border: "1px solid var(--field-border)",
+                                                          borderRadius: 4,
+                                                        }}
+                                                      >
+                                                        {content}
+                                                      </pre>
+                                                    </div>
+                                                  );
+                                                })}
+                                                <Button
+                                                  size="small"
+                                                  variant="outlined"
+                                                  disabled={detail.run?.status === "running"}
+                                                  onClick={async () => {
+                                                    setRunInputDetails((prev) => ({
+                                                      ...prev,
+                                                      [rowIndex]: {
+                                                        ...prev[rowIndex]!,
+                                                        run: { status: "running", result: null },
+                                                      },
+                                                    }));
+                                                    try {
+                                                      const result = await runSubmissionCodeAction(
+                                                        (detail.detail?.files ?? []).map((f) => ({
+                                                          name: f.name,
+                                                          extension: f.name.includes(".") ? f.name.split(".").pop()!.toLowerCase() : "",
+                                                          rawBase64: f.base64,
+                                                        }))
+                                                      );
+                                                      setRunInputDetails((prev) => ({
+                                                        ...prev,
+                                                        [rowIndex]: {
+                                                          ...prev[rowIndex]!,
+                                                          run: { status: "done", result },
+                                                        },
+                                                      }));
+                                                    } catch {
+                                                      setRunInputDetails((prev) => ({
+                                                        ...prev,
+                                                        [rowIndex]: {
+                                                          ...prev[rowIndex]!,
+                                                          run: { status: "done", result: null },
+                                                        },
+                                                      }));
+                                                    }
+                                                  }}
+                                                  style={{ marginTop: "8px" }}
+                                                >
+                                                  {detail.run?.status === "running" ? "Running..." : detail.run?.result ? "Run again" : "Run code"}
+                                                </Button>
+                                                {detail.run?.result && (
+                                                  <div style={{ marginTop: "12px" }}>
+                                                    <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
+                                                      {detail.run.result.language} - {detail.run.result.ran ? `ran (exit ${detail.run.result.exitCode})` : `failed${detail.run.result.exitCode !== null ? ` (exit ${detail.run.result.exitCode})` : ""}`}
+                                                    </div>
+                                                    {detail.run.result.error && (
+                                                      <div style={{ marginBottom: "8px" }}>
+                                                        <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginBottom: "4px" }}>Error</div>
+                                                        <pre
+                                                          style={{
+                                                            fontFamily: "monospace",
+                                                            fontSize: "0.8rem",
+                                                            whiteSpace: "pre-wrap",
+                                                            margin: "0",
+                                                            maxHeight: 240,
+                                                            overflow: "auto",
+                                                            padding: 8,
+                                                            background: "var(--card-background)",
+                                                            border: "1px solid var(--field-border)",
+                                                            borderRadius: 4,
+                                                          }}
+                                                        >
+                                                          {detail.run.result.error}
+                                                        </pre>
+                                                      </div>
+                                                    )}
+                                                    {detail.run.result.compileOutput && (
+                                                      <div style={{ marginBottom: "8px" }}>
+                                                        <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginBottom: "4px" }}>Compile output</div>
+                                                        <pre
+                                                          style={{
+                                                            fontFamily: "monospace",
+                                                            fontSize: "0.8rem",
+                                                            whiteSpace: "pre-wrap",
+                                                            margin: "0",
+                                                            maxHeight: 240,
+                                                            overflow: "auto",
+                                                            padding: 8,
+                                                            background: "var(--card-background)",
+                                                            border: "1px solid var(--field-border)",
+                                                            borderRadius: 4,
+                                                          }}
+                                                        >
+                                                          {detail.run.result.compileOutput}
+                                                        </pre>
+                                                      </div>
+                                                    )}
+                                                    {detail.run.result.stdout && (
+                                                      <div style={{ marginBottom: "8px" }}>
+                                                        <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginBottom: "4px" }}>Output</div>
+                                                        <pre
+                                                          style={{
+                                                            fontFamily: "monospace",
+                                                            fontSize: "0.8rem",
+                                                            whiteSpace: "pre-wrap",
+                                                            margin: "0",
+                                                            maxHeight: 240,
+                                                            overflow: "auto",
+                                                            padding: 8,
+                                                            background: "var(--card-background)",
+                                                            border: "1px solid var(--field-border)",
+                                                            borderRadius: 4,
+                                                          }}
+                                                        >
+                                                          {detail.run.result.stdout}
+                                                        </pre>
+                                                      </div>
+                                                    )}
+                                                    {detail.run.result.stderr && (
+                                                      <div style={{ marginBottom: "8px" }}>
+                                                        <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginBottom: "4px" }}>Stderr</div>
+                                                        <pre
+                                                          style={{
+                                                            fontFamily: "monospace",
+                                                            fontSize: "0.8rem",
+                                                            whiteSpace: "pre-wrap",
+                                                            margin: "0",
+                                                            maxHeight: 240,
+                                                            overflow: "auto",
+                                                            padding: 8,
+                                                            background: "var(--card-background)",
+                                                            border: "1px solid var(--field-border)",
+                                                            borderRadius: 4,
+                                                          }}
+                                                        >
+                                                          {detail.run.result.stderr}
+                                                        </pre>
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                )}
+                                                {detail.run?.result === null && detail.run?.status === "done" && (
+                                                  <div style={{ marginTop: "12px", color: "var(--hint-text)", fontSize: "0.85rem" }}>
+                                                    No runnable code detected.
+                                                  </div>
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
                                       </td>
                                     </tr>
                                   )}
@@ -2218,6 +2433,11 @@ export default function WorkflowsTab() {
                         </Button>
                       )}
                     </div>
+                    {runInput.kind === "table" && runInput.selectable && (
+                      <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginTop: "8px" }}>
+                        {runInputChecked.filter(Boolean).length} of {runInputRows.length} row(s) selected
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

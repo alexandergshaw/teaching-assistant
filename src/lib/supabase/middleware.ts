@@ -39,8 +39,16 @@ export async function updateSession(request: NextRequest) {
 
   // Gate everything except the login page and Supabase auth callbacks to the
   // owner allowlist. Static assets are already excluded by the matcher.
+  // The /api/cron namespace is also exempt: it is called machine-to-machine
+  // (Vercel Cron / a GitHub Action) with no session cookie, and each cron
+  // route enforces its OWN Bearer CRON_SECRET check - a stronger auth for an
+  // unattended caller than the human session gate. Without this exemption the
+  // cron request is redirected to /login (a 307) before it reaches the route.
   const { pathname } = request.nextUrl;
-  const isPublic = pathname.startsWith("/login") || pathname.startsWith("/auth");
+  const isPublic =
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/auth") ||
+    pathname.startsWith("/api/cron");
 
   if (!isPublic) {
     if (!isOwnerEmail(user?.email)) {

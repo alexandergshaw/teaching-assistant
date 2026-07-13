@@ -280,11 +280,16 @@ function mergeCardLayout(saved: CardLayoutGroup[]): CardLayoutGroup[] {
   return groups;
 }
 
-// Merge saved institution fields with the defaults by id: defaults first (saved
-// values win), extra saved fields after - so new defaults appear for existing users.
+// Merge saved institution fields with the defaults by id: defaults first (the
+// default's label/type win so built-in chips can be relabeled centrally; only the
+// saved value and lms carry over), extra saved fields after - so new defaults
+// appear for existing users.
 function mergeInstitutionFields(saved: InstitutionField[]): InstitutionField[] {
   const byId = new Map(saved.map((f) => [f.id, f]));
-  const merged = DEFAULT_INSTITUTION_FIELDS.map((d) => byId.get(d.id) ?? { ...d });
+  const merged = DEFAULT_INSTITUTION_FIELDS.map((d) => {
+    const saved_ = byId.get(d.id);
+    return saved_ ? { ...d, value: saved_.value, lms: saved_.lms ?? d.lms } : { ...d };
+  });
   const extras = saved.filter((f) => !DEFAULT_INSTITUTION_FIELDS.some((d) => d.id === f.id));
   return [...merged, ...extras];
 }
@@ -344,7 +349,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [customTileEdit, setCustomTileEdit] = useState<{ courseId: string; tileId: string; value: string } | null>(null);
   // Per-institution common fields (undefined = not loaded yet) + edit/add forms.
   const [instFields, setInstFields] = useState<Record<string, InstitutionField[] | undefined>>({});
-  const [instFieldEdit, setInstFieldEdit] = useState<{ acronym: string; id: string; value: string } | null>(null);
+  const [instFieldEdit, setInstFieldEdit] = useState<{ acronym: string; id: string; value: string; lms?: string } | null>(null);
   const [instFieldAdd, setInstFieldAdd] = useState<{ acronym: string; label: string; type: "text" | "date" | "url" } | null>(null);
   // Syllabus templates for the syllabusTemplate field typeahead (null = not loaded yet).
   const [syllabusTemplates, setSyllabusTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
@@ -892,7 +897,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       : field === "description" ? (c.description ?? "")
       : field === "weeks" ? (c.weeks !== null ? String(c.weeks) : "")
       : field === "tests" ? (c.tests !== null ? String(c.tests) : "")
-      : field === "lms" ? (c.lms ?? "")
+      : field === "lms" ? (c.lms || institutionLms(c))
       : field === "dayTime" ? (c.dayTime ?? "")
       : ((c[field as Exclude<InlineField, "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime">] ?? "") as string);
     setTileEdit({ id: c.id, field, value });
@@ -904,6 +909,13 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       setRepoAddSel("");
       setRepoAddBranch("");
     }
+  };
+
+  const institutionLms = (c: Course): string => {
+    const acr = (c.institution ?? "").trim();
+    if (!acr) return "";
+    const f = instFields[acr]?.find((x) => x.id === "lmsUrl");
+    return f?.lms ?? "";
   };
 
   const tileClick = (handler: () => void) => (e: React.MouseEvent) => {
@@ -1174,6 +1186,9 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
           <MenuItem value="canvas">Canvas</MenuItem>
           <MenuItem value="blackboard">Blackboard</MenuItem>
         </TextField>
+        {!editingCourse.lms && institutionLms(editingCourse) && (
+          <p className={styles.fieldHint} style={{ margin: "6px 0 0 0" }}>Defaults to the institution&apos;s LMS.</p>
+        )}
         <p className={styles.fieldHint} style={{ margin: "6px 0 0 0" }}>LMS course (optional)</p>
         {institution ? (
           <>
@@ -1900,9 +1915,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                     )}
                   </>
                 )
-                : (
-                  <span className={styles.courseResourceEmpty}>Not set</span>
-                )}
+                : institutionLms(c)
+                  ? (
+                    <>
+                      <span className={styles.courseResourceValue}>{institutionLms(c) === "canvas" ? "Canvas" : institutionLms(c) === "blackboard" ? "Blackboard" : institutionLms(c)}</span>
+                      <span className={styles.fieldHint} style={{ margin: 0 }}>From the institution</span>
+                    </>
+                  )
+                  : (
+                    <span className={styles.courseResourceEmpty}>Not set</span>
+                  )}
           </div>
         );
       case "integrations":
@@ -2432,8 +2454,8 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     const list = instFields[edit.acronym];
     if (!list) return;
     const current = list.find((f) => f.id === edit.id);
-    if (!current || current.value === edit.value.trim()) return;
-    applyInstFields(edit.acronym, list.map((f) => (f.id === edit.id ? { ...f, value: edit.value.trim() } : f)));
+    if (!current || (current.value === edit.value.trim() && (current.lms ?? "") === (edit.lms ?? ""))) return;
+    applyInstFields(edit.acronym, list.map((f) => (f.id === edit.id ? { ...f, value: edit.value.trim(), lms: edit.lms ?? current.lms } : f)));
   };
 
   // Keep the click-outside listener's ref pointing at the latest closure.
@@ -2468,7 +2490,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   data-inst-field-editing={editing ? "true" : "false"}
                   onClick={(e) => {
                     if ((e.target as HTMLElement).closest("a, button, input, textarea, select, label")) return;
-                    if (!editing) setInstFieldEdit({ acronym, id: f.id, value: f.value });
+                    if (!editing) setInstFieldEdit({ acronym, id: f.id, value: f.value, lms: f.lms ?? "" });
                   }}
                 >
                   <span className={styles.instFieldLabel}>{f.label}</span>
@@ -2482,6 +2504,32 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         loading={syllabusTemplates === null}
                         noOptionsText="No templates available"
                       />
+                    ) : f.type === "lms" ? (
+                      <div>
+                        <Typeahead
+                          options={[
+                            { value: "canvas", label: "Canvas" },
+                            { value: "blackboard", label: "Blackboard" },
+                          ]}
+                          value={instFieldEdit.lms ?? ""}
+                          onChange={(v) => setInstFieldEdit((p) => (p ? { ...p, lms: v } : p))}
+                          placeholder="Choose an LMS..."
+                        />
+                        <TextField
+                          size="small"
+                          fullWidth
+                          type="text"
+                          value={instFieldEdit.value}
+                          onChange={(e) => setInstFieldEdit((p) => (p ? { ...p, value: e.target.value } : p))}
+                          onBlur={saveInstFieldEdit}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") saveInstFieldEdit();
+                            if (e.key === "Escape") setInstFieldEdit(null);
+                          }}
+                          placeholder="LMS URL"
+                          style={{ marginTop: "6px" }}
+                        />
+                      </div>
                     ) : (
                       <TextField
                         size="small"
@@ -2496,13 +2544,22 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                         }}
                       />
                     )
-                  ) : f.value ? (
+                  ) : f.value || (f.type === "lms" && f.lms) ? (
                     f.type === "date" ? (
                       <span className={styles.instFieldValue}>{new Date(`${f.value}T00:00:00`).toLocaleDateString()}</span>
                     ) : f.type === "url" ? (
                       <a className={styles.instFieldValue} href={f.value} target="_blank" rel="noreferrer">{f.value}</a>
                     ) : f.type === "syllabusTemplate" ? (
                       <span className={styles.instFieldValue}>{(syllabusTemplates ?? []).find((t) => t.id === f.value)?.name ?? f.value}</span>
+                    ) : f.type === "lms" ? (
+                      <>
+                        {f.lms && (
+                          <span className={styles.instFieldValue}>{f.lms === "canvas" ? "Canvas" : f.lms === "blackboard" ? "Blackboard" : f.lms}</span>
+                        )}
+                        {f.value && (
+                          <a className={styles.instFieldValue} href={f.value} target="_blank" rel="noreferrer">{f.value}</a>
+                        )}
+                      </>
                     ) : (
                       <span className={styles.instFieldValue}>{f.value}</span>
                     )
@@ -2991,18 +3048,20 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
             const groupNotif = g.courses.reduce((s, c) => s + courseNotifTotal(c), 0);
             return (
               <div key={g.key} className={styles.courseGroup}>
-                <button
-                  type="button"
-                  className={styles.courseGroupHeader}
-                  aria-expanded={open}
-                  onClick={() => toggleGroup(g.key)}
-                >
-                  <span className={styles.courseGroupName}>{g.label}</span>
-                  {groupNotif > 0 && <span className={styles.navBadge} title="Outstanding LMS notifications">{groupNotif}</span>}
-                  <span className={styles.courseGroupCount}>{g.courses.length}</span>
-                </button>
-                {/* Per-institution common fields (signed-in only; not for the "No institution" section). */}
-                {open && user && g.key !== NO_INSTITUTION && renderInstitutionPanel(g.key)}
+                <div className={styles.courseGroupSticky}>
+                  <button
+                    type="button"
+                    className={styles.courseGroupHeader}
+                    aria-expanded={open}
+                    onClick={() => toggleGroup(g.key)}
+                  >
+                    <span className={styles.courseGroupName}>{g.label}</span>
+                    {groupNotif > 0 && <span className={styles.navBadge} title="Outstanding LMS notifications">{groupNotif}</span>}
+                    <span className={styles.courseGroupCount}>{g.courses.length}</span>
+                  </button>
+                  {/* Per-institution common fields (signed-in only; not for the "No institution" section). */}
+                  {open && user && g.key !== NO_INSTITUTION && renderInstitutionPanel(g.key)}
+                </div>
                 {open && (
                   <div className={styles.courseGrid}>
                     {g.courses.map((c) => {

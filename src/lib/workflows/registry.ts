@@ -600,6 +600,17 @@ export const STEP_REGISTRY: StepDefinition[] = [
               baseName;
           }
           tileLms = (tile?.lms ?? "").trim().toLowerCase();
+
+          // The course tile's LMS inherits from the institution's LMS field
+          // when unset, matching the Courses tab display.
+          if (!tileLms && tile?.institution && helpers.getInstitutionFields) {
+            const fields = await helpers
+              .getInstitutionFields(tile.institution)
+              .catch(() => []);
+            tileLms = (fields.find((f) => f.id === "lmsUrl")?.lms ?? "")
+              .trim()
+              .toLowerCase();
+          }
         }
       }
 
@@ -1806,7 +1817,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         list && !("error" in list)
           ? list.courses.find((c) => c.id === hubCourseId)
           : undefined;
-      const tileLms = (tile?.lms ?? "").trim().toLowerCase();
+      let tileLms = (tile?.lms ?? "").trim().toLowerCase();
+
+      // The course tile's LMS inherits from the institution's LMS field when unset, matching the Courses tab display.
+      if (!tileLms && tile?.institution && helpers.getInstitutionFields) {
+        const fields = await helpers.getInstitutionFields(tile.institution).catch(() => []);
+        tileLms = (fields.find((f) => f.id === "lmsUrl")?.lms ?? "").trim().toLowerCase();
+      }
 
       // Skip if the tile was provided but not found, or it has no LMS set;
       // both Canvas and Blackboard import Common Cartridge natively, so

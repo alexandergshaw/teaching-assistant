@@ -7,8 +7,11 @@ import type { Database, Json } from "./supabase/types";
 export interface InstitutionField {
   id: string;
   label: string;
-  type: "text" | "date" | "url" | "syllabusTemplate";
+  type: "text" | "date" | "url" | "syllabusTemplate" | "lms";
   value: string;
+  /** Only used by type "lms" field; the LMS platform ("canvas" | "blackboard" | "").
+   * Harmless for other types. */
+  lms?: string;
 }
 
 /** InstitutionField.type = "syllabusTemplate": value is a syllabus template id;
@@ -19,7 +22,7 @@ export interface InstitutionField {
 export const DEFAULT_INSTITUTION_FIELDS: InstitutionField[] = [
   { id: "startDate", label: "Course start date", type: "date", value: "" },
   { id: "outlookUrl", label: "Outlook URL", type: "url", value: "" },
-  { id: "lmsUrl", label: "LMS URL", type: "url", value: "" },
+  { id: "lmsUrl", label: "LMS", type: "lms", value: "", lms: "" },
   { id: "syllabusTemplate", label: "Syllabus template", type: "syllabusTemplate", value: "" },
   { id: "email", label: "Email", type: "text", value: "" },
 ];
@@ -57,8 +60,9 @@ export async function loadInstitutionFields(
     fields.push({
       id: raw.id as string,
       label: raw.label as string,
-      type: raw.type === "date" || raw.type === "url" || raw.type === "syllabusTemplate" ? raw.type : "text",
+      type: raw.type === "date" || raw.type === "url" || raw.type === "syllabusTemplate" || raw.type === "lms" ? raw.type : "text",
       value: typeof raw.value === "string" ? (raw.value as string) : "",
+      lms: typeof raw.lms === "string" ? raw.lms : "",
     });
   }
   return fields;

@@ -64,6 +64,13 @@ import {
   courseZipObjectPaths,
 } from "@/lib/course-files";
 import { parseCartridgeBlob, type CartridgeCourseData } from "@/lib/cartridge-import";
+import {
+  listWorkflowSchedules,
+  updateWorkflowSchedule,
+  deleteWorkflowSchedule,
+  reenableSchedule,
+  type WorkflowSchedule,
+} from "@/lib/workflow-schedules";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import Typeahead from "./ui/Typeahead";
 import styles from "../page.module.css";
@@ -287,6 +294,7 @@ const TILE_LABELS: Record<string, string> = {
   rubric: "Rubric",
   lmsExports: "LMS Exports",
   materials: "Materials",
+  scheduledWorkflows: "Scheduled workflows",
 };
 
 function PencilIcon() {
@@ -357,7 +365,7 @@ function mergeInstitutionFields(saved: InstitutionField[]): InstitutionField[] {
   return [...merged, ...extras];
 }
 
-export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-planning" | "version-control") => void }) {
+export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-planning" | "version-control" | "workflows") => void }) {
   const { institutions, active: activeInstitution } = useInstitutionSelection();
   const { supabase, user } = useSupabase();
   const [courses, setCourses] = useState<Course[]>(() => hubCache?.courses ?? []);
@@ -424,6 +432,10 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [syllabusTemplates, setSyllabusTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
   // Acronym whose institution template chip is uploading a new .docx.
   const [instTemplateUploading, setInstTemplateUploading] = useState<string | null>(null);
+  // Scheduled workflow runs (null = not loaded); shown on course tiles and
+  // institution panels for the schedules attached to each.
+  const [workflowSchedules, setWorkflowSchedules] = useState<WorkflowSchedule[] | null>(null);
+  const [workflowScheduleRemoveConfirm, setWorkflowScheduleRemoveConfirm] = useState<string | null>(null);
   // Ref mirror of saveInstFieldEdit so the mount-once click-outside listener
   // always calls the latest closure (avoids TDZ/stale-closure issues).
   const saveInstFieldEditRef = useRef<() => void>(() => {});
@@ -632,6 +644,91 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       cancelled = true;
     };
   }, [user, syllabusTemplates, instFields]);
+
+  // Load the user's scheduled workflow runs once for the tiles/panels.
+  // (Signed out, course cards never render, so leaving this null is fine.)
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await listWorkflowSchedules(supabase, user.id);
+        if (!cancelled) setWorkflowSchedules(rows);
+      } catch (err) {
+        console.error("Failed to load workflow schedules:", err);
+        if (!cancelled) setWorkflowSchedules([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, supabase]);
+
+  const toggleWorkflowSchedule = async (s: WorkflowSchedule) => {
+    if (!user) return;
+    let nextRunAt: string | undefined;
+    if (!s.enabled) {
+      const re = reenableSchedule(s);
+      if (!re.ok) {
+        setError("That one-time schedule is in the past - recreate it from the Workflows tab.");
+        return;
+      }
+      nextRunAt = re.nextRunAt;
+    }
+    try {
+      await updateWorkflowSchedule(supabase, user.id, s.id, {
+        enabled: !s.enabled,
+        ...(nextRunAt ? { nextRunAt } : {}),
+      });
+      setWorkflowSchedules((prev) =>
+        (prev ?? []).map((x) =>
+          x.id === s.id ? { ...x, enabled: !s.enabled, nextRunAt: nextRunAt ?? x.nextRunAt } : x
+        )
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update the schedule.");
+    }
+  };
+
+  const removeWorkflowSchedule = async (id: string) => {
+    if (!user) return;
+    try {
+      await deleteWorkflowSchedule(supabase, user.id, id);
+      setWorkflowSchedules((prev) => (prev ?? []).filter((x) => x.id !== id));
+      setWorkflowScheduleRemoveConfirm(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete the schedule.");
+    }
+  };
+
+  // One schedule row (used by the course tile and the institution panel).
+  const workflowScheduleRow = (s: WorkflowSchedule) => (
+    <div key={s.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "4px 0", fontSize: "0.85em" }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ fontWeight: 600 }}>{s.workflowName}</span>
+        <div style={{ color: "var(--text-secondary)", fontSize: "0.9em" }}>
+          {s.enabled
+            ? `next run ${new Date(s.nextRunAt).toLocaleString()}${s.repeat !== "none" ? ` (${s.repeat})` : ""}`
+            : "disabled"}
+        </div>
+      </div>
+      <button type="button" className={styles.linkButton} onClick={() => void toggleWorkflowSchedule(s)}>
+        {s.enabled ? "Disable" : "Enable"}
+      </button>
+      <button
+        type="button"
+        className={styles.linkButton}
+        style={{ color: "var(--danger)" }}
+        onClick={() =>
+          workflowScheduleRemoveConfirm === s.id
+            ? void removeWorkflowSchedule(s.id)
+            : setWorkflowScheduleRemoveConfirm(s.id)
+        }
+      >
+        {workflowScheduleRemoveConfirm === s.id ? "Confirm" : "Remove"}
+      </button>
+    </div>
+  );
 
   const toggleGroup = (key: string) =>
     setCollapsed((prev) => {
@@ -3461,6 +3558,33 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
             )}
           </div>
         );
+      case "scheduledWorkflows": {
+        const courseSchedules = (workflowSchedules ?? []).filter((s) => s.courseId === c.id);
+        return (
+          <div className={styles.courseResource}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("scheduledWorkflows")}{tileHideButton("scheduledWorkflows", c)}Scheduled workflows</span>
+              {courseSchedules.length > 0 && (
+                <span className={styles.navBadge} style={{ marginLeft: 8 }}>{courseSchedules.length}</span>
+              )}
+            </div>
+            {workflowSchedules === null ? (
+              <span className={styles.courseResourceEmpty}>Loading...</span>
+            ) : courseSchedules.length === 0 ? (
+              <span className={styles.courseResourceEmpty}>
+                No workflows scheduled for this course - attach one when scheduling a workflow.
+              </span>
+            ) : (
+              <div style={{ marginTop: 4 }}>{courseSchedules.map(workflowScheduleRow)}</div>
+            )}
+            <div className={styles.courseResourceActions}>
+              <button type="button" className={styles.linkButton} onClick={() => onNavigate("workflows")}>
+                Open Workflows
+              </button>
+            </div>
+          </div>
+        );
+      }
       case "materials":
         return (
           <div className={`${styles.courseResource}${!c.materialsZipPath ? " " + styles.courseResourceClickable : ""}`}>
@@ -3973,6 +4097,14 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                 </div>
               );
             })}
+            {(workflowSchedules ?? []).some((s) => s.institution === acronym) && (
+              <div className={styles.instFieldChip} style={{ cursor: "default" }}>
+                <span className={styles.instFieldLabel}>Scheduled workflows</span>
+                {(workflowSchedules ?? [])
+                  .filter((s) => s.institution === acronym)
+                  .map(workflowScheduleRow)}
+              </div>
+            )}
             {addingField ? (
               <div className={styles.instFieldChip} style={{ cursor: "default" }}>
                 <TextField

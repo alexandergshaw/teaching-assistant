@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef, Fragment } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef, Fragment } from "react";
 import { Button, TextField, MenuItem, Autocomplete, FormControlLabel, Checkbox } from "@mui/material";
 import TabHeader from "./TabHeader";
 import WorkflowBuilder from "./WorkflowBuilder";
@@ -12,7 +12,19 @@ import { useInstitutionSelection } from "@/lib/institutions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFile } from "@/lib/recording-files";
-import { uploadCourseZip, uploadCourseZipChunked, removeCourseZip, removeCourseZipObjects } from "@/lib/course-files";
+import { uploadCourseZip, uploadCourseZipChunked, removeCourseZip, removeCourseZipObjects, downloadCourseZipBlob } from "@/lib/course-files";
+import { parseCartridgeBlob, type CartridgeCourseData } from "@/lib/cartridge-import";
+import { liveModuleValue, exportModuleValue } from "@/lib/workflows/module-value";
+import {
+  listWorkflowSchedules,
+  createWorkflowSchedule,
+  updateWorkflowSchedule,
+  deleteWorkflowSchedule,
+  computeNextRunAt,
+  type WorkflowSchedule,
+  type ScheduleRepeat,
+} from "@/lib/workflow-schedules";
+import { peekScheduledRun, takeScheduledRun, SCHEDULED_RUN_EVENT } from "@/lib/workflow-schedule-handoff";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
 import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction, runSubmissionCodeAction } from "@/app/actions";
@@ -238,6 +250,12 @@ export default function WorkflowsTab() {
   const [custom, setCustom] = useState<WorkflowDef[]>(() =>
     typeof window === "undefined" ? [] : loadCustomWorkflows()
   );
+  // Signed in, custom defs live in Supabase and arrive async; scheduled runs
+  // of custom workflows must not be judged "missing" before they land. A
+  // failed load is tracked separately so those runs are skipped with an error
+  // instead of stalling the queue or wrongly disabling their schedules.
+  const [customLoaded, setCustomLoaded] = useState(false);
+  const [customLoadFailed, setCustomLoadFailed] = useState(false);
   const workflows = allWorkflows(custom);
 
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(() => {
@@ -321,6 +339,19 @@ export default function WorkflowsTab() {
 
   const [lmsModuleOptions, setLmsModuleOptions] = useState<Array<{ value: string; label: string }>>([]);
   const [lmsModuleError, setLmsModuleError] = useState<string | null>(null);
+  // True while the module options are export-sourced (no live LMS connection).
+  const [lmsModuleFromExport, setLmsModuleFromExport] = useState(false);
+
+  // Scheduled runs for the signed-in user (null = not loaded yet).
+  const [schedules, setSchedules] = useState<WorkflowSchedule[] | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [scheduleForm, setScheduleForm] = useState<{ runAt: string; repeat: ScheduleRepeat; courseId: string; institution: string } | null>(null);
+  const [scheduleBusy, setScheduleBusy] = useState(false);
+  const [scheduleRemoveConfirm, setScheduleRemoveConfirm] = useState<string | null>(null);
+
+  // Parsed course exports keyed by course id; promises so concurrent readers
+  // (module picker + running steps) share one download.
+  const courseExportCacheRef = useRef<Map<string, Promise<CartridgeCourseData | null>>>(new Map());
 
   const [orgs, setOrgs] = useState<string[] | null>(null);
   const [orgsError, setOrgsError] = useState<string | null>(null);
@@ -408,15 +439,79 @@ export default function WorkflowsTab() {
     setPrevModuleSource(moduleSource);
     setLmsModuleOptions([]);
     setLmsModuleError(null);
+    setLmsModuleFromExport(false);
   }
+
+  // Download and parse the newest LMS export saved on a course tile; shared by
+  // the module picker fallback and running steps (helpers.loadCourseExport).
+  // The course row is re-read every call so a freshly saved export is picked
+  // up; only the expensive download+parse is cached, keyed by storage path.
+  const loadCourseExportData = useCallback(
+    async (courseId: string): Promise<CartridgeCourseData | null> => {
+      if (!user) return null;
+      const list = await listCourseHubAction();
+      if ("error" in list) throw new Error(list.error);
+      const course = list.courses.find((c) => c.id === courseId);
+      if (!course || course.exportFiles.length === 0) return null;
+      const latest = course.exportFiles.reduce((a, b) => (b.addedAt > a.addedAt ? b : a));
+      const cached = courseExportCacheRef.current.get(latest.path);
+      if (cached) return cached;
+      const promise = (async () => {
+        const blob = await downloadCourseZipBlob(supabase, latest);
+        return await parseCartridgeBlob(blob);
+      })();
+      courseExportCacheRef.current.set(latest.path, promise);
+      // Evict failures so a retry can succeed.
+      promise.catch(() => courseExportCacheRef.current.delete(latest.path));
+      return promise;
+    },
+    [user, supabase]
+  );
 
   useEffect(() => {
     if (!lmsModuleNeeded) return;
-    // No live LMS connection: the render-phase reset above already cleared
-    // the options, so there is nothing to fetch.
-    if (!lmsModuleCanvasUrl) return;
+    const courseId = firstHubCourseValue.trim();
 
     let cancelled = false;
+
+    // Offer the modules from the course's LMS export when the live LMS is
+    // unavailable (no connection, or the live call failed).
+    const loadExportOptions = async (liveError: string | null) => {
+      if (!courseId) return;
+      try {
+        const data = await loadCourseExportData(courseId);
+        if (cancelled) return;
+        if (data && data.modules.length > 0) {
+          setLmsModuleOptions(
+            data.modules.map((m) => ({
+              value: exportModuleValue(m.name),
+              label: m.name,
+            }))
+          );
+          setLmsModuleFromExport(true);
+        }
+        setLmsModuleError(liveError);
+      } catch (err) {
+        if (!cancelled) {
+          setLmsModuleError(
+            liveError ?? (err instanceof Error ? err.message : "Could not load modules.")
+          );
+        }
+      }
+    };
+
+    if (!lmsModuleCanvasUrl) {
+      // Wait for the course list before deciding the course has no live LMS:
+      // during the initial hubCourses load the canvasUrl is simply unknown,
+      // and prematurely downloading the export here would waste a large fetch
+      // for live-connected courses.
+      if (hubCourses !== null) {
+        void loadExportOptions(null);
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
 
     (async () => {
       try {
@@ -426,23 +521,22 @@ export default function WorkflowsTab() {
         );
         if (cancelled) return;
         if ("error" in content) {
-          setLmsModuleError(content.error);
-          setLmsModuleOptions([]);
+          await loadExportOptions(content.error);
         } else {
           setLmsModuleOptions(
             content.modules.map((m: CanvasModule) => ({
-              value: String(m.id),
+              value: liveModuleValue(m.id, m.name),
               label: m.name,
             }))
           );
           setLmsModuleError(null);
+          setLmsModuleFromExport(false);
         }
       } catch (err) {
         if (!cancelled) {
-          setLmsModuleError(
+          await loadExportOptions(
             err instanceof Error ? err.message : "Could not load modules."
           );
-          setLmsModuleOptions([]);
         }
       }
     })();
@@ -450,7 +544,7 @@ export default function WorkflowsTab() {
     return () => {
       cancelled = true;
     };
-  }, [lmsModuleNeeded, lmsModuleCanvasUrl, activeInstitution]);
+  }, [lmsModuleNeeded, lmsModuleCanvasUrl, firstHubCourseValue, activeInstitution, loadCourseExportData, hubCourses]);
 
   const updateCustom = (next: WorkflowDef[]) => {
     setCustom(next);
@@ -495,9 +589,13 @@ export default function WorkflowsTab() {
           } else {
             setCustom(dbRows);
           }
+          // Custom defs are now authoritative; scheduled runs of custom
+          // workflows may consume (they wait for this flag).
+          setCustomLoaded(true);
         }
       } catch (err) {
         console.error("Failed to load workflows from database:", err);
+        if (!cancelled) setCustomLoadFailed(true);
       }
     })();
 
@@ -568,8 +666,80 @@ export default function WorkflowsTab() {
     };
   }, [user, supabase]);
 
+  // Load the user's scheduled runs once per mount.
   useEffect(() => {
-    const needsHubCourse = runtimeFields.some((f) => f.type === "hubCourse" || f.type === "hubCourseList");
+    if (!user) {
+      setSchedules([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await listWorkflowSchedules(supabase, user.id);
+        if (!cancelled) {
+          setSchedules(rows);
+          setScheduleError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setScheduleError(err instanceof Error ? err.message : "Could not load schedules.");
+          setSchedules([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, supabase]);
+
+  // Consume queued scheduled runs (claimed by the page-level watcher) once the
+  // tab is idle: each becomes a normal auto-run handoff. Runs whose workflow
+  // id is not found stay queued until the async custom-def load settles
+  // (customLoaded); only then are they treated as deleted, and their schedule
+  // is disabled so a repeating schedule cannot grab the tab forever.
+  useEffect(() => {
+    const consume = () => {
+      if (running || pendingHandoff) return;
+      const next = peekScheduledRun();
+      if (!next) return;
+      if (!workflows.some((w) => w.id === next.workflowId)) {
+        if (user && !customLoaded && !customLoadFailed) return;
+        takeScheduledRun();
+        if (customLoadFailed) {
+          // The defs may exist but could not be loaded: skip without
+          // disabling the schedule.
+          setValidationError(
+            `Could not load your custom workflows, so the scheduled run of "${next.workflowName}" was skipped.`
+          );
+          return;
+        }
+        setValidationError(
+          `Scheduled workflow "${next.workflowName}" no longer exists; its schedule has been disabled.`
+        );
+        if (user) {
+          void updateWorkflowSchedule(supabase, user.id, next.scheduleId, { enabled: false })
+            .then(() => {
+              setSchedules((prev) =>
+                (prev ?? []).map((x) => (x.id === next.scheduleId ? { ...x, enabled: false } : x))
+              );
+            })
+            .catch((err) => console.error("Failed to disable orphaned schedule:", err));
+        }
+        return;
+      }
+      takeScheduledRun();
+      setPendingHandoff({ workflowId: next.workflowId, prefill: next.fieldValues });
+    };
+    consume();
+    window.addEventListener(SCHEDULED_RUN_EVENT, consume);
+    return () => window.removeEventListener(SCHEDULED_RUN_EVENT, consume);
+  });
+
+  useEffect(() => {
+    const needsHubCourse =
+      runtimeFields.some((f) => f.type === "hubCourse" || f.type === "hubCourseList") ||
+      scheduleForm !== null ||
+      (schedules ?? []).some((s) => s.courseId);
     if (!needsHubCourse || hubCourses !== null) return;
 
     let cancelled = false;
@@ -595,7 +765,7 @@ export default function WorkflowsTab() {
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, hubCourses]);
+  }, [runtimeFields, hubCourses, scheduleForm, schedules]);
 
   useEffect(() => {
     const needsLmsCourseList = runtimeFields.some((f) => f.type === "lmsCourseList");
@@ -880,6 +1050,7 @@ export default function WorkflowsTab() {
           ? async (acronym: string) =>
               loadInstitutionFields(supabase, user.id, acronym)
           : null,
+      loadCourseExport: user && supabase ? loadCourseExportData : null,
     };
 
     // Expanded steps carry bindings already translated into expanded
@@ -1090,6 +1261,82 @@ export default function WorkflowsTab() {
     // effect mid-dance, so the deps list is intentionally narrower.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingHandoff, running, selectedWorkflowId, values]);
+
+  // Create a schedule for the selected workflow from the current form values.
+  const handleCreateSchedule = async () => {
+    if (!user || !selectedDef || !scheduleForm) return;
+    const runAt = new Date(scheduleForm.runAt);
+    if (Number.isNaN(runAt.getTime())) {
+      setScheduleError("Pick a valid first run time.");
+      return;
+    }
+    if (runAt.getTime() <= Date.now()) {
+      setScheduleError("Pick a time in the future.");
+      return;
+    }
+    setScheduleBusy(true);
+    setScheduleError(null);
+    try {
+      const created = await createWorkflowSchedule(supabase, user.id, {
+        workflowId: selectedDef.id,
+        workflowName: selectedDef.name,
+        fieldValues: values,
+        nextRunAt: runAt.toISOString(),
+        repeat: scheduleForm.repeat,
+        courseId: scheduleForm.courseId || null,
+        institution: scheduleForm.institution || null,
+      });
+      setSchedules((prev) =>
+        [...(prev ?? []), created].sort((a, b) => a.nextRunAt.localeCompare(b.nextRunAt))
+      );
+      setScheduleForm(null);
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : "Could not save the schedule.");
+    } finally {
+      setScheduleBusy(false);
+    }
+  };
+
+  const handleToggleSchedule = async (s: WorkflowSchedule) => {
+    if (!user) return;
+    // Re-enabling a schedule whose time already passed: repeating ones move to
+    // their next future occurrence instead of firing immediately; a one-time
+    // schedule in the past cannot be re-armed.
+    let nextRunAt: string | undefined;
+    if (!s.enabled && new Date(s.nextRunAt).getTime() <= Date.now()) {
+      if (s.repeat === "none") {
+        setScheduleError("That one-time schedule is in the past - create a new one instead.");
+        return;
+      }
+      nextRunAt = computeNextRunAt(s.nextRunAt, s.repeat, new Date()) ?? undefined;
+    }
+    try {
+      await updateWorkflowSchedule(supabase, user.id, s.id, {
+        enabled: !s.enabled,
+        ...(nextRunAt ? { nextRunAt } : {}),
+      });
+      setSchedules((prev) =>
+        (prev ?? []).map((x) =>
+          x.id === s.id ? { ...x, enabled: !s.enabled, nextRunAt: nextRunAt ?? x.nextRunAt } : x
+        )
+      );
+      setScheduleError(null);
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : "Could not update the schedule.");
+    }
+  };
+
+  const handleDeleteSchedule = async (id: string) => {
+    if (!user) return;
+    try {
+      await deleteWorkflowSchedule(supabase, user.id, id);
+      setSchedules((prev) => (prev ?? []).filter((x) => x.id !== id));
+      setScheduleRemoveConfirm(null);
+      setScheduleError(null);
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : "Could not delete the schedule.");
+    }
+  };
 
   return (
     <div className={styles.card}>
@@ -1637,7 +1884,7 @@ export default function WorkflowsTab() {
                         const input = document.createElement("input");
                         input.type = "file";
                         input.multiple = true;
-                        input.accept = ".imscc,.zip";
+                        input.accept = field.accept ?? ".imscc,.zip";
                         input.onchange = (e) => {
                           const newFiles = Array.from((e.target as HTMLInputElement).files ?? []);
                           setUploadFiles((prev) => ({
@@ -1691,26 +1938,36 @@ export default function WorkflowsTab() {
               } else if (field.type === "lmsModule") {
                 // Options load in a top-level effect keyed to the form's
                 // first hubCourse field; the renderer reads hoisted state.
+                // Without a live LMS connection the options come from the
+                // course's LMS export tile.
+                // Legacy persisted values are bare live ids; map them onto the
+                // matching "id|name" option so the picker still displays them.
+                const moduleValue =
+                  value && !value.includes("|")
+                    ? lmsModuleOptions.find((o) => o.value.startsWith(`${value}|`))?.value ?? value
+                    : value;
                 return (
                   <div key={field.fieldKey} className={styles.field}>
                     <label>{field.label}</label>
-                    {!lmsModuleCanvasUrl ? (
-                      <p className={styles.fieldHint}>
-                        No live LMS connection - the step will fall back to the
-                        tile&apos;s export.
+                    <Typeahead
+                      options={lmsModuleOptions}
+                      value={moduleValue}
+                      onChange={(v) => handleValueChange(field.fieldKey, v)}
+                      placeholder="Choose a module..."
+                      noOptionsText={
+                        lmsModuleError
+                          ? `Error: ${lmsModuleError}`
+                          : lmsModuleCanvasUrl
+                            ? "No modules available"
+                            : "No modules available - add a Canvas URL or upload an LMS export to the course tile"
+                      }
+                    />
+                    {lmsModuleFromExport && (
+                      <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
+                        {lmsModuleCanvasUrl
+                          ? "The live LMS is unavailable - these modules come from the course's LMS export."
+                          : "No live LMS connection - these modules come from the course's LMS export."}
                       </p>
-                    ) : (
-                      <Typeahead
-                        options={lmsModuleOptions}
-                        value={value}
-                        onChange={(v) => handleValueChange(field.fieldKey, v)}
-                        placeholder="Choose a module..."
-                        noOptionsText={
-                          lmsModuleError
-                            ? `Error: ${lmsModuleError}`
-                            : "No modules available"
-                        }
-                      />
                     )}
                     {field.help && (
                       <p className={styles.fieldHint} style={{ margin: 0 }}>
@@ -1742,14 +1999,143 @@ export default function WorkflowsTab() {
               <p className={styles.error}>{validationError}</p>
             )}
 
-            <Button
-              variant="contained"
-              onClick={handleRun}
-              disabled={running || !!runPause || !!runInput || !!expanded.error}
-              size="small"
-            >
-              {running ? "Running..." : "Run"}
-            </Button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <Button
+                variant="contained"
+                onClick={handleRun}
+                disabled={running || !!runPause || !!runInput || !!expanded.error}
+                size="small"
+              >
+                {running ? "Running..." : "Run"}
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                disabled={!user || !!expanded.error}
+                onClick={() =>
+                  setScheduleForm((prev) =>
+                    prev
+                      ? null
+                      : { runAt: "", repeat: "none", courseId: "", institution: activeInstitution || "" }
+                  )
+                }
+              >
+                {scheduleForm ? "Cancel schedule" : "Schedule..."}
+              </Button>
+            </div>
+
+            {scheduleForm && (
+              <div style={{ marginTop: 16, border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                <span style={{ fontWeight: 600, fontSize: "0.9em" }}>Schedule {selectedDef?.name}</span>
+                <p className={styles.fieldHint} style={{ margin: 0 }}>
+                  Uses the run form values as they are right now. Runs start while the app is open; an overdue schedule runs on your next visit.
+                </p>
+                {runtimeFields.some((f) => f.type === "uploads" && f.required) && (
+                  <p className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)" }}>
+                    This workflow requires a file upload at run time, which cannot be saved with a schedule - the scheduled run will stop at the form.
+                  </p>
+                )}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <TextField
+                    size="small"
+                    label="First run"
+                    type="datetime-local"
+                    value={scheduleForm.runAt}
+                    onChange={(e) => setScheduleForm((p) => (p ? { ...p, runAt: e.target.value } : p))}
+                    slotProps={{ inputLabel: { shrink: true } }}
+                  />
+                  <TextField
+                    select
+                    size="small"
+                    label="Repeat"
+                    value={scheduleForm.repeat}
+                    onChange={(e) => setScheduleForm((p) => (p ? { ...p, repeat: e.target.value as ScheduleRepeat } : p))}
+                    sx={{ minWidth: 150 }}
+                  >
+                    <MenuItem value="none">Does not repeat</MenuItem>
+                    <MenuItem value="daily">Daily</MenuItem>
+                    <MenuItem value="weekly">Weekly</MenuItem>
+                  </TextField>
+                  <TextField
+                    select
+                    size="small"
+                    label="Course (optional)"
+                    value={scheduleForm.courseId}
+                    onChange={(e) => setScheduleForm((p) => (p ? { ...p, courseId: e.target.value } : p))}
+                    sx={{ minWidth: 180 }}
+                  >
+                    <MenuItem value="">None</MenuItem>
+                    {(hubCourses ?? []).map((c) => (
+                      <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+                    ))}
+                  </TextField>
+                  <TextField
+                    select
+                    size="small"
+                    label="Institution (optional)"
+                    value={scheduleForm.institution}
+                    onChange={(e) => setScheduleForm((p) => (p ? { ...p, institution: e.target.value } : p))}
+                    sx={{ minWidth: 160 }}
+                  >
+                    <MenuItem value="">None</MenuItem>
+                    {institutions.map((i) => (
+                      <MenuItem key={i} value={i}>{i}</MenuItem>
+                    ))}
+                  </TextField>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    disabled={scheduleBusy || !scheduleForm.runAt}
+                    onClick={() => void handleCreateSchedule()}
+                  >
+                    {scheduleBusy ? "Saving..." : "Save schedule"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {scheduleError && <p className={styles.error}>{scheduleError}</p>}
+
+            {schedules && schedules.length > 0 && (
+              <div style={{ marginTop: 20 }}>
+                <h3 style={{ fontSize: "0.9rem", margin: "0 0 8px 0" }}>Scheduled runs</h3>
+                {schedules.map((s) => {
+                  const courseName = s.courseId
+                    ? hubCourses?.find((c) => c.id === s.courseId)?.name ?? "course"
+                    : null;
+                  const attachment = [courseName, s.institution].filter(Boolean).join(", ");
+                  const repeatLabel = s.repeat === "daily" ? "daily" : s.repeat === "weekly" ? "weekly" : "once";
+                  return (
+                    <div key={s.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--field-border)", fontSize: "0.85em" }}>
+                      <span style={{ fontWeight: 600 }}>{s.workflowName}</span>
+                      <span style={{ color: "var(--text-secondary)" }}>
+                        {s.enabled
+                          ? `next run ${new Date(s.nextRunAt).toLocaleString()} (${repeatLabel})`
+                          : "disabled"}
+                        {attachment ? ` - ${attachment}` : ""}
+                      </span>
+                      <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                        <button type="button" className={styles.linkButton} onClick={() => void handleToggleSchedule(s)}>
+                          {s.enabled ? "Disable" : "Enable"}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          style={{ color: "var(--danger)" }}
+                          onClick={() =>
+                            scheduleRemoveConfirm === s.id
+                              ? void handleDeleteSchedule(s.id)
+                              : setScheduleRemoveConfirm(s.id)
+                          }
+                        >
+                          {scheduleRemoveConfirm === s.id ? "Confirm" : "Remove"}
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </>
         )}
       </div>

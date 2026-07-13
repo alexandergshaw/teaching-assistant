@@ -575,6 +575,53 @@ export interface Database {
           updated_at?: string;
         };
       };
+      workflow_schedules: {
+        Row: {
+          id: string;
+          user_id: string;
+          workflow_id: string;
+          workflow_name: string;
+          field_values: Json;
+          next_run_at: string;
+          repeat: string;
+          enabled: boolean;
+          course_id: string | null;
+          institution: string | null;
+          last_run_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          workflow_id: string;
+          workflow_name: string;
+          field_values?: Json;
+          next_run_at: string;
+          repeat?: string;
+          enabled?: boolean;
+          course_id?: string | null;
+          institution?: string | null;
+          last_run_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          workflow_id?: string;
+          workflow_name?: string;
+          field_values?: Json;
+          next_run_at?: string;
+          repeat?: string;
+          enabled?: boolean;
+          course_id?: string | null;
+          institution?: string | null;
+          last_run_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
     };
     Views: Record<string, { Row: Record<string, unknown> }>;
     Functions: Record<string, { Args: Record<string, unknown>; Returns: unknown }>;

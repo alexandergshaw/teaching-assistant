@@ -39,6 +39,7 @@ import {
   previewFileAction,
   createScheduledAnnouncementAction,
   generateLectureFromMaterialsAction,
+  generateLectureQaAction,
   regenerateAnnouncementAction,
   analyzeCourseTechAction,
   previewFinalizedSyllabusAction,
@@ -70,6 +71,8 @@ import { parseGeneratedRubric } from "@/app/utils/rubric";
 import type { RubricCriterionInput, DueDateUpdate } from "@/lib/canvas-modules";
 import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
 import { planCartridgeModules } from "@/lib/week-numbering";
+import { parseLmsModuleValue } from "@/lib/workflows/module-value";
+import type { CartridgeCourseData } from "@/lib/cartridge-import";
 
 // "Student" or "Student | github-username" (pipe-separated so commas in
 // names like "Last, First" never masquerade as usernames).
@@ -228,6 +231,9 @@ export interface StepRunHelpers {
   loadCommonResources: (() => Promise<CommonResourceItem[]>) | null;
   getLibraryFile: ((fileId: string) => Promise<{ blob: Blob; name: string; mimeType: string } | null>) | null;
   getInstitutionFields: ((acronym: string) => Promise<InstitutionField[]>) | null;
+  /** Parsed newest LMS export package from the course's export tile, or null
+   * when the course has none. */
+  loadCourseExport: ((courseId: string) => Promise<CartridgeCourseData | null>) | null;
 }
 
 export type StepRunSummary =
@@ -320,6 +326,165 @@ export interface StepDefinition {
     helpers: StepRunHelpers,
     onProgress: (text: string) => void
   ) => Promise<StepRunResult>;
+}
+
+/**
+ * Gather the text a lecture-shaped step feeds the model, trying sources in
+ * order: the live LMS module (page bodies + file previews + item titles),
+ * then on live failure or an export-sourced module pick the course's LMS
+ * export tile (item titles + syllabus text), then the tile's own
+ * topics/description. Content gathering never hard-fails the step.
+ */
+async function gatherModuleMaterials(
+  tile: Course,
+  moduleIdRaw: string,
+  helpers: StepRunHelpers,
+  onProgress: (text: string) => void
+): Promise<{ moduleName: string; materialsText: string; notes: string[]; materialsSource: string }> {
+  // Materials cap at ~20000 chars so the deck prompt stays inside the
+  // action's own truncation budget; going over surfaces as a note.
+  const MATERIALS_CAP = 20000;
+  const chunks: string[] = [];
+  const notes: string[] = [];
+  let total = 0;
+  let truncated = false;
+  const push = (text: string) => {
+    if (!text) return;
+    if (total >= MATERIALS_CAP) {
+      truncated = true;
+      return;
+    }
+    const slice = text.slice(0, MATERIALS_CAP - total);
+    if (slice.length < text.length) truncated = true;
+    chunks.push(slice);
+    total += slice.length;
+  };
+
+  const canvasUrl = (tile.canvasUrl ?? "").trim();
+  const inst = helpers.activeInstitution || undefined;
+  const picked = parseLmsModuleValue(moduleIdRaw);
+
+  let moduleName = "Upcoming module";
+  let materialsSource = "";
+  let gathered = false;
+
+  // Pull item titles + syllabus text from the course's newest LMS export.
+  const gatherFromExport = async (matchName: string | null): Promise<boolean> => {
+    if (!helpers.loadCourseExport || !matchName) return false;
+    onProgress("Reading the course export...");
+    let data: CartridgeCourseData | null = null;
+    try {
+      data = await helpers.loadCourseExport(tile.id);
+    } catch (err) {
+      notes.push(`course export: ${err instanceof Error ? err.message : "could not read"}`);
+      return false;
+    }
+    if (!data || data.modules.length === 0) return false;
+    const target =
+      data.modules.find((m) => m.name === matchName) ??
+      data.modules.find((m) => m.name.toLowerCase() === matchName.toLowerCase());
+    if (!target) return false;
+    moduleName = target.name;
+    for (const item of target.items) {
+      push(`${item.type}: ${item.title}\n`);
+    }
+    if (data.syllabusHtml) {
+      const syllabusText = data.syllabusHtml
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (syllabusText) push(`\n# Course syllabus (context)\n${syllabusText}\n`);
+    }
+    materialsSource = `Materials from the course export module "${target.name}" (item titles + syllabus)`;
+    return true;
+  };
+
+  if (picked.fromExport) {
+    gathered = await gatherFromExport(picked.name);
+    if (!gathered) {
+      notes.push(`module "${picked.name ?? ""}" not found in the course export`);
+    }
+  } else if (canvasUrl && picked.liveId) {
+    onProgress("Loading module materials...");
+    try {
+      const content = await listCourseContentAction(canvasUrl, inst);
+      if ("error" in content) {
+        throw new Error(content.error);
+      }
+      const courseModule = content.modules.find((m) => String(m.id) === picked.liveId);
+      if (!courseModule) {
+        throw new Error("the chosen module was not found in the LMS course");
+      }
+      moduleName = courseModule.name;
+      materialsSource = `Materials read from LMS module "${courseModule.name}"`;
+
+      for (const item of courseModule.items) {
+        // Fail-forward per item: unreadable materials become notes.
+        try {
+          if (item.type === "Page" && item.pageUrl) {
+            const p = await getPageAction(canvasUrl, item.pageUrl, inst);
+            if ("error" in p) {
+              throw new Error(p.error);
+            }
+            const bodyText = p.page.body
+              .replace(/<[^>]+>/g, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+            push(`# ${p.page.title}\n${bodyText}\n\n`);
+          } else if (item.type === "File" && item.contentId !== null) {
+            const f = await previewFileAction(canvasUrl, item.contentId, inst);
+            if ("error" in f) {
+              throw new Error(f.error);
+            }
+            if (f.preview.text.trim()) {
+              push(`# ${item.title}\n${f.preview.text}\n\n`);
+            }
+          } else if (
+            item.type === "Assignment" ||
+            item.type === "Quiz" ||
+            item.type === "Discussion"
+          ) {
+            push(`${item.type}: ${item.title}\n`);
+          }
+        } catch (err) {
+          notes.push(
+            `${item.title}: ${
+              err instanceof Error ? err.message : "could not read"
+            }`
+          );
+        }
+      }
+      gathered = true;
+    } catch (err) {
+      // Live LMS failed: fall back to the course export tile by module name.
+      const message = err instanceof Error ? err.message : "could not read the LMS course";
+      gathered = await gatherFromExport(picked.name);
+      if (gathered) {
+        notes.push(`live LMS failed (${message}) - used the course export instead`);
+      } else {
+        notes.push(`live LMS failed (${message}) and the course export had no matching module`);
+      }
+    }
+  }
+
+  if (!gathered) {
+    // Reset any partial content so the terminal fallback stands alone.
+    chunks.length = 0;
+    total = 0;
+    push(
+      [tile.topics ?? "", tile.description ?? ""]
+        .filter(Boolean)
+        .join("\n\n")
+    );
+    notes.push("no live LMS module or export module - using tile topics/description");
+    materialsSource = "Materials from the tile's topics/description";
+  }
+
+  if (truncated) {
+    notes.push("materials truncated to ~20000 characters");
+  }
+
+  return { moduleName, materialsText: chunks.join(""), notes, materialsSource };
 }
 
 export const STEP_REGISTRY: StepDefinition[] = [
@@ -3351,7 +3516,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         label: "Module",
         type: "lmsModule",
         required: false,
-        help: "Pick from the live LMS connection; without one the step falls back to the tile's topics.",
+        help: "Pick from the live LMS connection or the course's LMS export; without either the step falls back to the tile's topics.",
       },
     ],
     outputs: [
@@ -3369,102 +3534,15 @@ export const STEP_REGISTRY: StepDefinition[] = [
         throw new Error("Choose a course tile.");
       }
 
-      const canvasUrl = (tile.canvasUrl ?? "").trim();
-      const inst = helpers.activeInstitution || undefined;
       const moduleIdRaw = String(values.moduleId ?? "").trim();
-
-      // Materials cap at ~20000 chars so the deck prompt stays inside the
-      // action's own truncation budget; going over surfaces as a note.
-      const MATERIALS_CAP = 20000;
-      const chunks: string[] = [];
-      const notes: string[] = [];
-      let total = 0;
-      let truncated = false;
-      const push = (text: string) => {
-        if (!text) return;
-        if (total >= MATERIALS_CAP) {
-          truncated = true;
-          return;
-        }
-        const slice = text.slice(0, MATERIALS_CAP - total);
-        if (slice.length < text.length) truncated = true;
-        chunks.push(slice);
-        total += slice.length;
-      };
-
-      let moduleName = "Upcoming module";
-      let materialsSource = "";
-
-      if (canvasUrl && moduleIdRaw) {
-        onProgress("Loading module materials...");
-        const content = await listCourseContentAction(canvasUrl, inst);
-        if ("error" in content) {
-          throw new Error(content.error);
-        }
-        const courseModule = content.modules.find(
-          (m) => String(m.id) === moduleIdRaw
-        );
-        if (!courseModule) {
-          throw new Error("Pick a module.");
-        }
-        moduleName = courseModule.name;
-        materialsSource = `Materials read from LMS module "${courseModule.name}"`;
-
-        for (const item of courseModule.items) {
-          // Fail-forward per item: unreadable materials become notes.
-          try {
-            if (item.type === "Page" && item.pageUrl) {
-              const p = await getPageAction(canvasUrl, item.pageUrl, inst);
-              if ("error" in p) {
-                throw new Error(p.error);
-              }
-              const bodyText = p.page.body
-                .replace(/<[^>]+>/g, " ")
-                .replace(/\s+/g, " ")
-                .trim();
-              push(`# ${p.page.title}\n${bodyText}\n\n`);
-            } else if (item.type === "File" && item.contentId !== null) {
-              const f = await previewFileAction(canvasUrl, item.contentId, inst);
-              if ("error" in f) {
-                throw new Error(f.error);
-              }
-              if (f.preview.text.trim()) {
-                push(`# ${item.title}\n${f.preview.text}\n\n`);
-              }
-            } else if (
-              item.type === "Assignment" ||
-              item.type === "Quiz" ||
-              item.type === "Discussion"
-            ) {
-              push(`${item.type}: ${item.title}\n`);
-            }
-          } catch (err) {
-            notes.push(
-              `${item.title}: ${
-                err instanceof Error ? err.message : "could not read"
-              }`
-            );
-          }
-        }
-      } else {
-        push(
-          [tile.topics ?? "", tile.description ?? ""]
-            .filter(Boolean)
-            .join("\n\n")
-        );
-        notes.push("no live LMS module - using tile topics/description");
-        materialsSource = "Materials from the tile's topics/description";
-      }
-
-      if (truncated) {
-        notes.push("materials truncated to ~20000 characters");
-      }
+      const { moduleName, materialsText, notes, materialsSource } =
+        await gatherModuleMaterials(tile, moduleIdRaw, helpers, onProgress);
 
       onProgress("Generating lecture...");
       const r = await generateLectureFromMaterialsAction(
         tile.name,
         moduleName,
-        chunks.join(""),
+        materialsText,
         helpers.provider
       );
       if ("error" in r) {
@@ -3523,7 +3601,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         },
       };
 
-      const materialsForPrompt = chunks.join("");
+      const materialsForPrompt = materialsText;
       let latestDraft = r.announcement;
 
       result.requireInput = {
@@ -3660,6 +3738,161 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summary: {
           kind: "text",
           text: summaryLine,
+        },
+      };
+    },
+  },
+
+  {
+    type: "lecture-qa",
+    name: "Anticipate lecture Q&A",
+    description:
+      "Predict the questions students are likely to ask during a lecture and draft instructor-ready answers from the module's materials and optional slide deck.",
+    inputs: [
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: true,
+      },
+      {
+        key: "moduleId",
+        label: "Module",
+        type: "lmsModule",
+        required: false,
+        help: "Pick from the live LMS connection or the course's LMS export; without either the step falls back to the tile's topics.",
+      },
+      {
+        key: "slides",
+        label: "Lecture slides (optional)",
+        type: "uploads",
+        required: false,
+        help: "Attach the lecture deck (.pptx, .pdf, or .docx, up to 3 files of ~6 MB each) to ground the questions in what will actually be presented.",
+        accept: ".pptx,.pdf,.docx,.ppt,.doc",
+      },
+    ],
+    outputs: [
+      { key: "qaText", label: "Q&A", type: "longtext" },
+      { key: "moduleName", label: "Module", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      const list = await listCourseHubAction();
+      if ("error" in list) {
+        throw new Error(list.error);
+      }
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (!tile) {
+        throw new Error("Choose a course tile.");
+      }
+
+      const moduleIdRaw = String(values.moduleId ?? "").trim();
+      const { moduleName, materialsText, notes, materialsSource } =
+        await gatherModuleMaterials(tile, moduleIdRaw, helpers, onProgress);
+
+      // Optional slide uploads ride to the server as base64 for text
+      // extraction. Server actions cap request bodies at 10 MB, so oversized
+      // or extra files are skipped with a note instead of failing the run.
+      const uploads = Array.isArray(values.slides) ? (values.slides as File[]) : [];
+      const MAX_SLIDE_FILES = 3;
+      const MAX_SLIDE_BYTES = 6 * 1024 * 1024;
+      if (uploads.length > MAX_SLIDE_FILES) {
+        notes.push(
+          `only the first ${MAX_SLIDE_FILES} slide files are used (${uploads.length} attached)`
+        );
+      }
+      const slideFiles: Array<{ name: string; base64: string }> = [];
+      for (const file of uploads.slice(0, MAX_SLIDE_FILES)) {
+        if (file.size > MAX_SLIDE_BYTES) {
+          notes.push(`${file.name}: too large (max ~6 MB) - skipped`);
+          continue;
+        }
+        try {
+          const buffer = await file.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          let binary = "";
+          const CHUNK = 0x8000;
+          for (let i = 0; i < bytes.length; i += CHUNK) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+          }
+          slideFiles.push({ name: file.name, base64: btoa(binary) });
+        } catch (err) {
+          notes.push(
+            `${file.name}: ${err instanceof Error ? err.message : "could not read"}`
+          );
+        }
+      }
+
+      onProgress("Anticipating student questions...");
+      const r = await generateLectureQaAction(
+        tile.name,
+        moduleName,
+        materialsText,
+        slideFiles,
+        helpers.provider
+      );
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+      if (r.questions.length === 0) {
+        throw new Error("The model returned no questions. Try again.");
+      }
+
+      const qaText = r.questions
+        .map((q, i) => `Q${i + 1}: ${q.question}\n\nA: ${q.answer}`)
+        .join("\n\n\n");
+
+      // Markdown headings make the docx structure deterministic (the plain-text
+      // builder's heading heuristics depend on line length otherwise).
+      const docText = [
+        `# ${tile.name} - ${moduleName}: Anticipated student questions`,
+        "",
+        ...r.questions.flatMap((q, i) => [`## Q${i + 1}: ${q.question}`, "", q.answer, ""]),
+      ].join("\n");
+      const docxBuffer = await buildDocxFromPlainText(docText, [], helpers.author);
+      const blob = new Blob([new Uint8Array(docxBuffer)], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      });
+
+      const sanitize = (s: string) =>
+        s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+      const fileName = `${sanitize(tile.name)}_${sanitize(moduleName)}_QA.docx`;
+
+      onProgress(`Downloading ${fileName}...`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      if (helpers.saveCourseMaterialFile) {
+        try {
+          await helpers.saveCourseMaterialFile(tile.id, blob, fileName);
+        } catch (err) {
+          notes.push(
+            `saving to the course tile failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          );
+        }
+      }
+
+      return {
+        outputs: { qaText, moduleName },
+        summary: {
+          kind: "list",
+          label: `${r.questions.length} anticipated question(s) for ${moduleName} -> ${fileName}`,
+          items: [
+            ...r.questions.map((q) => q.question),
+            materialsSource,
+            ...(slideFiles.length > 0
+              ? [`slides included: ${slideFiles.map((f) => f.name).join(", ")}`]
+              : []),
+            ...notes,
+          ],
         },
       };
     },

@@ -62,6 +62,9 @@ export interface StepInputSpec {
   type: WorkflowValueType;
   required: boolean;
   help?: string;
+  /** type "uploads" only: the file picker's accept filter (defaults to LMS
+   * export archives when absent). */
+  accept?: string;
 }
 
 export interface StepOutputSpec {
@@ -113,6 +116,8 @@ export interface RuntimeField {
   type: WorkflowValueType;
   required: boolean;
   help?: string;
+  /** type "uploads" only: the file picker's accept filter. */
+  accept?: string;
 }
 
 /**
@@ -142,6 +147,7 @@ export function collectRuntimeFields(
             type: spec.type,
             required: spec.required,
             help: spec.help,
+            accept: spec.accept,
           });
         }
       }

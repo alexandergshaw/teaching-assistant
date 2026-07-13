@@ -291,6 +291,24 @@ export const PREPARE_LECTURE: WorkflowDef = {
   ],
 };
 
+export const LECTURE_QA: WorkflowDef = {
+  id: "lecture-qa",
+  preset: true,
+  name: "Lecture Q&A",
+  description:
+    "Pick a course and module, optionally attach the lecture slides: anticipates the questions students are likely to ask during that lecture and drafts instructor-ready answers, saved to the course tile as a Word document.",
+  steps: [
+    {
+      type: "lecture-qa",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        moduleId: { source: "runtime", fieldKey: "lmsModule" },
+        slides: { source: "runtime", fieldKey: "slides" },
+      },
+    },
+  ],
+};
+
 export const UPDATE_COURSE_TECH: WorkflowDef = {
   id: "update-course-tech",
   preset: true,
@@ -389,6 +407,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     ASSIGN_DUE_DATES,
     GRADE_SUBMISSIONS,
     PREPARE_LECTURE,
+    LECTURE_QA,
     UPDATE_COURSE_TECH,
     REPO_AGENT_UPDATE,
     STUDENT_REPOS,

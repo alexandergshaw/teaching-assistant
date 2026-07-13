@@ -166,6 +166,7 @@ import {
 import type { OfficeImage } from "@/lib/office-edit";
 import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
 import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
+import { extractTextFromBuffer } from "@/lib/office-extract";
 import { suggestHeadingLevels, titleFromFileName } from "@/lib/doc-headings";
 import { buildOfficeIssues } from "@/lib/accessibility/office-issues";
 import { buildDocxFromPlainText } from "@/lib/docx";
@@ -1418,6 +1419,149 @@ Return ONLY valid JSON: { "announcement": "..." }`;
     return { announcement: parsed.announcement };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not regenerate the announcement." };
+  }
+}
+
+/**
+ * Anticipate the questions students are likely to ask during a lecture and
+ * draft instructor-ready answers. Module materials arrive as gathered text;
+ * optional slide uploads arrive base64 and are text-extracted server-side.
+ */
+export async function generateLectureQaAction(
+  courseName: string,
+  moduleName: string,
+  materialsText: string,
+  slideFiles: Array<{ name: string; base64: string }>,
+  provider: LlmProvider = "gemini"
+): Promise<{ questions: Array<{ question: string; answer: string }> } | { error: string }> {
+  try {
+    await requireOwner();
+
+    let slidesText = "";
+    for (const file of slideFiles.slice(0, 3)) {
+      try {
+        const text = await extractTextFromBuffer(file.name, Buffer.from(file.base64, "base64"));
+        if (text && text.trim()) {
+          slidesText += `\n# Slides: ${file.name}\n${text.trim()}\n`;
+        }
+      } catch (err) {
+        console.error(
+          `Slide text extraction failed for "${file.name}": ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+
+    const materials = materialsText.slice(0, 20000);
+    const slides = slidesText.slice(0, 16000);
+
+    // Embedded Deterministic Engine: template questions from the material
+    // headings so the step never errors without an LLM provider. Falls back
+    // to sentence/phrase fragments when the text has no heading-sized lines
+    // (e.g. a tile's topics field pasted as one long paragraph).
+    if (provider === "embedded") {
+      const combined = materials + "\n" + slides;
+      let topics = [
+        ...new Set(
+          combined
+            .split("\n")
+            .map((l) => l.replace(/^#+\s*/, "").trim())
+            .filter((l) => l.length > 3 && l.length < 80)
+        ),
+      ];
+      if (topics.length === 0) {
+        topics = [
+          ...new Set(
+            combined
+              .split(/[.;,\n]+/)
+              .map((l) => l.trim())
+              .filter((l) => l.length > 3 && l.length < 80)
+          ),
+        ];
+      }
+      const questions = topics.slice(0, 10).map((topic) => ({
+        question: `Can you walk through "${topic}" one more time with an example?`,
+        answer: `Revisit the ${topic} material step by step, work one concrete example on the board, and point students to the matching module resource for practice.`,
+      }));
+      if (questions.length === 0) {
+        return { error: "Not enough material to anticipate questions. Add module materials or slides." };
+      }
+      return { questions };
+    }
+
+    const prompt = `You are an experienced instructor preparing for a lecture. Based on the module materials${slides ? " and the actual lecture slides" : ""} below, anticipate the questions students are most likely to ask DURING this lecture, and write a clear, instructor-ready answer for each.
+
+COURSE: ${courseName}
+MODULE: ${moduleName}
+
+MATERIALS:
+${materials}
+${slides ? `\nLECTURE SLIDES:\n${slides}\n` : ""}
+Requirements:
+- 10 to 16 questions, phrased the way a student would actually ask them (confusions, edge cases, "why does...", "what happens if...", practical concerns like grading or tooling).
+- Order them roughly in the order the topics come up in the lecture.
+- Each answer is 2-5 sentences, concrete and self-contained, written so the instructor can deliver it verbatim.
+- Include at least one question about how the topic connects to the assignment or assessment when the materials mention one.
+
+Return ONLY valid JSON matching this structure:
+{ "questions": [ { "question": "string", "answer": "string" } ] }`;
+
+    let parsed: { questions?: Array<{ question?: string; answer?: string }> } | null = null;
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const result = await callLlm(
+        {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.6, maxOutputTokens: 8192 },
+        },
+        provider
+      );
+
+      if (!result.ok) {
+        return {
+          error: `LLM API error for "${moduleName}": HTTP ${result.status} — ${result.body.slice(0, 200)}`,
+        };
+      }
+
+      const jsonText = jsonObjectSlice(result.text);
+      if (!jsonText) {
+        if (attempt === 1) {
+          console.error(`Lecture Q&A JSON parse failed for "${moduleName}" (attempt 1): no JSON object in the response`);
+          continue;
+        }
+        return { error: "Could not parse the Q&A from the model output. Try again." };
+      }
+
+      try {
+        parsed = JSON.parse(jsonText) as { questions?: Array<{ question?: string; answer?: string }> };
+        break;
+      } catch (err) {
+        if (attempt === 1) {
+          console.error(
+            `Lecture Q&A JSON parse failed for "${moduleName}" (attempt 1): ${err instanceof Error ? err.message : String(err)}`
+          );
+          continue;
+        }
+        return { error: "Could not parse the Q&A from the model output. Try again." };
+      }
+    }
+
+    if (!parsed || !Array.isArray(parsed.questions)) {
+      return { error: `Model did not return a valid questions array for "${moduleName}".` };
+    }
+
+    const questions = parsed.questions
+      .filter(
+        (q): q is { question: string; answer: string } =>
+          typeof q.question === "string" &&
+          q.question.trim() !== "" &&
+          typeof q.answer === "string" &&
+          q.answer.trim() !== ""
+      )
+      .map((q) => ({ question: q.question.trim(), answer: q.answer.trim() }));
+
+    return { questions };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate the lecture Q&A." };
   }
 }
 

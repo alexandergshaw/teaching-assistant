@@ -1322,6 +1322,103 @@ export async function getCourseName(courseUrl: string, code?: string): Promise<s
   return course.name?.trim() || course.course_code?.trim() || `Course ${courseId}`;
 }
 
+/** Fetch course metadata: name, start date (ISO), and syllabus body (HTML). */
+export async function getCourseInfo(
+  courseUrl: string,
+  code?: string
+): Promise<{ name: string; startAt: string | null; syllabusBody: string }> {
+  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
+  const response = await fetch(`${baseUrl}/api/v1/courses/${courseId}?include[]=syllabus_body`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+  const data = (await response.json()) as { name?: string; start_at?: string | null; syllabus_body?: string | null };
+  return {
+    name: data.name ?? "",
+    startAt: data.start_at ?? null,
+    syllabusBody: data.syllabus_body ?? "",
+  };
+}
+
+/**
+ * Export a course as an IMS Common Cartridge (.imscc).
+ * Returns the cartridge filename and base64-encoded content.
+ * Polls the export status up to 3 minutes before timing out.
+ */
+export async function exportCourseCartridge(
+  courseUrl: string,
+  code?: string
+): Promise<{ fileName: string; base64: string }> {
+  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
+
+  const exportResponse = await fetch(
+    `${baseUrl}/api/v1/courses/${courseId}/content_exports?export_type=common_cartridge&skip_notifications=true`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  if (!exportResponse.ok) {
+    throw canvasError(exportResponse.status, institution);
+  }
+
+  const exportData = (await exportResponse.json()) as { id?: string };
+  if (!exportData.id) {
+    throw new Error("The LMS did not return an export ID.");
+  }
+
+  let attachment: { url?: string; filename?: string } | null = null;
+  const maxAttempts = 36;
+  const pollIntervalMs = 5000;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const statusResponse = await fetch(
+      `${baseUrl}/api/v1/courses/${courseId}/content_exports/${exportData.id}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!statusResponse.ok) {
+      throw canvasError(statusResponse.status, institution);
+    }
+
+    const status = (await statusResponse.json()) as {
+      workflow_state?: string;
+      attachment?: { url?: string; filename?: string } | null;
+    };
+    if (status.workflow_state === "exported") {
+      attachment = status.attachment ?? null;
+      break;
+    }
+    if (status.workflow_state === "failed") {
+      throw new Error("The LMS reported the export failed.");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  if (!attachment?.url) {
+    throw new Error("Timed out waiting for the LMS export (try again in a minute).");
+  }
+
+  let attachmentResponse = await fetch(attachment.url);
+  if (!attachmentResponse.ok) {
+    attachmentResponse = await fetch(attachment.url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!attachmentResponse.ok) {
+      throw new Error("Could not download the export from the LMS.");
+    }
+  }
+
+  const arrayBuffer = await attachmentResponse.arrayBuffer();
+  const base64 = Buffer.from(arrayBuffer).toString("base64");
+  return {
+    fileName: attachment.filename ?? "export.imscc",
+    base64,
+  };
+}
+
 /** List a course's recent announcements (newest first), one page of 50. */
 export async function listAnnouncements(
   courseUrl: string,

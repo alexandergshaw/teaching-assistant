@@ -27,6 +27,13 @@ import {
   removeCourseExportFileAction,
   listCoursesAction,
   listSyllabusTemplatesAction,
+  getCourseInfoAction,
+  exportCourseCartridgeAction,
+  importLmsSyllabusAction,
+  listCourseContentAction,
+  listRubricsAction,
+  getRubricAction,
+  type ScheduleWeekPlan,
 } from "../actions";
 import type { Course, CourseCustomTile } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
@@ -34,6 +41,7 @@ import { loadCommonResources, saveCommonResources, type CommonResourceItem } fro
 import { DEFAULT_CARD_LAYOUT, loadCardLayout, saveCardLayout, type CardLayoutGroup } from "@/lib/card-layout";
 import { DEFAULT_INSTITUTION_FIELDS, loadInstitutionFields, saveInstitutionFields, type InstitutionField } from "@/lib/institution-fields";
 import { listRecordingFiles, type RecordingFile } from "@/lib/recording-files";
+import { scheduleToCsv } from "@/lib/workflows/types";
 import GithubRepoPicker from "./GithubRepoPicker";
 import TabHeader from "./TabHeader";
 import SyllabusPreviewModal, { type SyllabusPreviewPara } from "./SyllabusPreviewModal";
@@ -324,6 +332,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [tileEdit, setTileEdit] = useState<{ id: string; field: InlineField; value: string } | null>(null);
   const [tileSaving, setTileSaving] = useState(false);
+  const [lmsBusyTile, setLmsBusyTile] = useState<string | null>(null);
   const [expandedRosterId, setExpandedRosterId] = useState<string | null>(null);
   const [csvPreview, setCsvPreview] = useState<{ name: string; csv: string } | null>(null);
   const [csvRemoveConfirm, setCsvRemoveConfirm] = useState<string | null>(null);
@@ -593,6 +602,334 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
 
   const syllabusName = (id: string | null): string | null =>
     id ? syllabi.find((s) => s.id === id)?.name ?? "Linked syllabus" : null;
+
+  const canLms = (c: Course) => Boolean((c.canvasUrl ?? "").trim() && (c.institution ?? "").trim());
+
+  const handleLmsRosterFromTile = async (c: Course) => {
+    if (!canLms(c)) {
+      setError("Course must have both a Canvas URL and institution to pull from LMS.");
+      return;
+    }
+    const tileKey = `${c.id}:roster`;
+    setLmsBusyTile(tileKey);
+    setError(null);
+    try {
+      const courseId = parseCanvasCourseId(c.canvasUrl ?? "")?.toString();
+      if (!courseId) {
+        setError("Could not extract course ID from Canvas URL.");
+        return;
+      }
+      const r = await listCourseRosterAction(c.institution!.trim().toUpperCase(), courseId);
+      if ("error" in r) {
+        setError(r.error);
+        return;
+      }
+      const currentRosterLines = rosterToRows(c.roster ?? "");
+      const currentNames = new Map(currentRosterLines.map((row) => [row.student.trim(), row.username]));
+      const lines = r.students
+        .sort((a, b) => {
+          const aName = (a.sortableName || a.name).trim();
+          const bName = (b.sortableName || b.name).trim();
+          return aName.localeCompare(bName);
+        })
+        .map((s) => {
+          const name = (s.sortableName || s.name).trim();
+          const username = currentNames.get(name) ?? "";
+          return { student: name, username };
+        });
+      const rosterText = rowsToRoster(lines);
+      setTileEdit({ id: c.id, field: "roster", value: rosterText });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not fetch roster from LMS.");
+    } finally {
+      setLmsBusyTile(null);
+    }
+  };
+
+  const handleLmsStartDateFromTile = async (c: Course) => {
+    if (!canLms(c)) {
+      setError("Course must have both a Canvas URL and institution to pull from LMS.");
+      return;
+    }
+    const tileKey = `${c.id}:startDate`;
+    setLmsBusyTile(tileKey);
+    setError(null);
+    try {
+      const r = await getCourseInfoAction(c.canvasUrl ?? "", c.institution?.trim());
+      if ("error" in r) {
+        setError(r.error);
+        return;
+      }
+      if (!r.startAt) {
+        setError("The LMS course has no start date.");
+        return;
+      }
+      const startDate = r.startAt.slice(0, 10);
+      const result = await updateCourseHubAction(c.id, { ...courseToInput(c), startDate });
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+      setCourses((prev) => {
+        const next = prev.map((course) => (course.id === result.course.id ? result.course : course));
+        if (hubCache) hubCache = { ...hubCache, courses: next };
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not fetch start date from LMS.");
+    } finally {
+      setLmsBusyTile(null);
+    }
+  };
+
+  const handleLmsSyllabusFromTile = async (c: Course) => {
+    if (!canLms(c)) {
+      setError("Course must have both a Canvas URL and institution to pull from LMS.");
+      return;
+    }
+    const tileKey = `${c.id}:syllabus`;
+    setLmsBusyTile(tileKey);
+    setError(null);
+    try {
+      const r = await importLmsSyllabusAction(c.canvasUrl ?? "", c.institution?.trim(), c.name);
+      if ("error" in r) {
+        setError(r.error);
+        return;
+      }
+      const result = await updateCourseHubAction(c.id, { ...courseToInput(c), syllabusId: r.syllabusId });
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+      setCourses((prev) => {
+        const next = prev.map((course) => (course.id === result.course.id ? result.course : course));
+        if (hubCache) hubCache = { ...hubCache, courses: next };
+        return next;
+      });
+      await reloadSyllabi();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not import syllabus from LMS.");
+    } finally {
+      setLmsBusyTile(null);
+    }
+  };
+
+  const handleLmsCsvFromTile = async (c: Course) => {
+    if (!canLms(c)) {
+      setError("Course must have both a Canvas URL and institution to pull from LMS.");
+      return;
+    }
+    const tileKey = `${c.id}:csv`;
+    setLmsBusyTile(tileKey);
+    setError(null);
+    try {
+      const r = await listCourseContentAction(c.canvasUrl ?? "", c.institution?.trim());
+      if ("error" in r) {
+        setError(r.error);
+        return;
+      }
+      const rows: ScheduleWeekPlan[] = [];
+      for (const courseModule of r.modules) {
+        const match = courseModule.name.match(/module\s*0*(\d+)/i);
+        if (!match) continue;
+        const week = parseInt(match[1], 10);
+        const topicText = courseModule.name.split(":").slice(1).join(":").trim();
+        const assignmentItem = courseModule.items.find((item) => item.type.toLowerCase() === "assignment");
+        rows.push({
+          week,
+          topic: topicText || "",
+          summary: "",
+          assignmentTitle: assignmentItem?.title ?? null,
+          assignmentSlug: null,
+          testName: null,
+        });
+      }
+      if (rows.length === 0) {
+        setError("No Module NN modules found in the LMS course.");
+        return;
+      }
+      rows.sort((a, b) => a.week - b.week);
+      const csv = scheduleToCsv(rows);
+      const result = await updateCourseHubAction(c.id, { ...courseToInput(c), csvName: "lms-schedule.csv", csvData: csv });
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+      setCourses((prev) => {
+        const next = prev.map((course) => (course.id === result.course.id ? result.course : course));
+        if (hubCache) hubCache = { ...hubCache, courses: next };
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not fetch course content from LMS.");
+    } finally {
+      setLmsBusyTile(null);
+    }
+  };
+
+  const handleLmsWeeksFromTile = async (c: Course) => {
+    if (!canLms(c)) {
+      setError("Course must have both a Canvas URL and institution to pull from LMS.");
+      return;
+    }
+    const tileKey = `${c.id}:weeks`;
+    setLmsBusyTile(tileKey);
+    setError(null);
+    try {
+      const r = await listCourseContentAction(c.canvasUrl ?? "", c.institution?.trim());
+      if ("error" in r) {
+        setError(r.error);
+        return;
+      }
+      const weekNumbers = new Set<number>();
+      for (const courseModule of r.modules) {
+        const match = courseModule.name.match(/module\s*0*(\d+)/i);
+        if (match) {
+          weekNumbers.add(parseInt(match[1], 10));
+        }
+      }
+      if (weekNumbers.size === 0) {
+        setError("No Module NN modules found in the LMS course.");
+        return;
+      }
+      const result = await updateCourseHubAction(c.id, { ...courseToInput(c), weeks: weekNumbers.size });
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+      setCourses((prev) => {
+        const next = prev.map((course) => (course.id === result.course.id ? result.course : course));
+        if (hubCache) hubCache = { ...hubCache, courses: next };
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not fetch course content from LMS.");
+    } finally {
+      setLmsBusyTile(null);
+    }
+  };
+
+  const handleLmsRubricFromTile = async (c: Course) => {
+    if (!canLms(c)) {
+      setError("Course must have both a Canvas URL and institution to pull from LMS.");
+      return;
+    }
+    const tileKey = `${c.id}:rubric`;
+    setLmsBusyTile(tileKey);
+    setError(null);
+    try {
+      const lr = await listRubricsAction(c.canvasUrl ?? "", c.institution?.trim());
+      if ("error" in lr) {
+        setError(lr.error);
+        return;
+      }
+      if (lr.rubrics.length === 0) {
+        setError("The LMS course has no rubrics.");
+        return;
+      }
+      const firstRubric = lr.rubrics[0];
+      const rr = await getRubricAction(c.canvasUrl ?? "", firstRubric.id, c.institution?.trim());
+      if ("error" in rr) {
+        setError(rr.error);
+        return;
+      }
+      const rubric = rr.rubric;
+      const lines: string[] = [];
+      for (const criterion of rubric.criteria) {
+        const firstRating = rubric.criteria.length > 0 ? criterion.ratings[0] : null;
+        const summary = firstRating
+          ? `${criterion.description} (${criterion.points}): ${criterion.longDescription?.split("\n")[0] ?? ""}`
+          : `${criterion.description} (${criterion.points}): `;
+        lines.push(summary);
+        for (const rating of criterion.ratings) {
+          lines.push(`  - ${rating.description}: ${rating.points} pts`);
+        }
+      }
+      const rubricText = lines.join("\n");
+      const result = await updateCourseHubAction(c.id, {
+        ...courseToInput(c),
+        rubricName: `${rubric.title}.md`,
+        rubricData: rubricText,
+      });
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+      setCourses((prev) => {
+        const next = prev.map((course) => (course.id === result.course.id ? result.course : course));
+        if (hubCache) hubCache = { ...hubCache, courses: next };
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not fetch rubric from LMS.");
+    } finally {
+      setLmsBusyTile(null);
+    }
+  };
+
+  const handleLmsExportFromTile = async (c: Course) => {
+    if (!canLms(c)) {
+      setError("Course must have both a Canvas URL and institution to pull from LMS.");
+      return;
+    }
+    const tileKey = `${c.id}:lmsExports`;
+    setLmsBusyTile(tileKey);
+    setError(null);
+    if (!user) {
+      setError("You must be logged in.");
+      setLmsBusyTile(null);
+      return;
+    }
+    try {
+      const r = await exportCourseCartridgeAction(c.canvasUrl ?? "", c.institution?.trim());
+      if ("error" in r) {
+        setError(r.error);
+        return;
+      }
+      const bytes = Uint8Array.from(atob(r.base64), (ch) => ch.charCodeAt(0));
+      const blob = new Blob([bytes], { type: "application/octet-stream" });
+      const { path } = await uploadCourseZip(supabase, user.id, c.id, blob, null);
+      const appendResult = await appendCourseExportFileAction(c.id, {
+        name: r.fileName,
+        path,
+        size: blob.size,
+      });
+      if ("error" in appendResult) {
+        setError(appendResult.error);
+        await removeCourseZip(supabase, path);
+        return;
+      }
+      setCourses((prev) => {
+        const updated = prev.map((course) => {
+          if (course.id === c.id) {
+            const filtered = course.exportFiles.filter((f) => f.name !== r.fileName);
+            return {
+              ...course,
+              exportFiles: [
+                ...filtered,
+                {
+                  name: r.fileName,
+                  path,
+                  size: blob.size,
+                  addedAt: new Date().toISOString(),
+                },
+              ],
+            };
+          }
+          return course;
+        });
+        if (hubCache) hubCache = { ...hubCache, courses: updated };
+        return updated;
+      });
+      if (appendResult.replacedPath) {
+        await removeCourseZip(supabase, appendResult.replacedPath);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not export from LMS.");
+    } finally {
+      setLmsBusyTile(null);
+    }
+  };
 
   const update = (patch: Partial<CourseForm>) => setForm((f) => (f ? { ...f, ...patch } : f));
   const updateRepo = (i: number, patch: Partial<{ repo: string; branch: string }>) =>
@@ -1860,10 +2197,34 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   <button type="button" className={styles.linkButton} onClick={() => handleDownloadSyllabus(c)} disabled={busyId === c.id}>
                     {busyId === c.id ? "Downloading…" : "Download"}
                   </button>
+                  {canLms(c) && (
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      disabled={lmsBusyTile === `${c.id}:syllabus`}
+                      onClick={() => void handleLmsSyllabusFromTile(c)}
+                    >
+                      {lmsBusyTile === `${c.id}:syllabus` ? "Loading..." : "From LMS"}
+                    </button>
+                  )}
                 </div>
               </>
             ) : (
-              <span className={styles.courseResourceEmpty}>Not linked</span>
+              <>
+                <span className={styles.courseResourceEmpty}>Not linked</span>
+                {canLms(c) && (
+                  <div className={styles.courseResourceActions}>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      disabled={lmsBusyTile === `${c.id}:syllabus`}
+                      onClick={() => void handleLmsSyllabusFromTile(c)}
+                    >
+                      {lmsBusyTile === `${c.id}:syllabus` ? "Loading..." : "From LMS"}
+                    </button>
+                  </div>
+                )}
+              </>
             ))}
           </div>
         );
@@ -1938,10 +2299,38 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
               ? tileDateEditor()
               : c.startDate
                 ? (
-                  <span className={styles.courseResourceValue}>{new Date(`${c.startDate}T00:00:00`).toLocaleDateString()}</span>
+                  <>
+                    <span className={styles.courseResourceValue}>{new Date(`${c.startDate}T00:00:00`).toLocaleDateString()}</span>
+                    {canLms(c) && (
+                      <div className={styles.courseResourceActions}>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          disabled={lmsBusyTile === `${c.id}:startDate`}
+                          onClick={() => void handleLmsStartDateFromTile(c)}
+                        >
+                          {lmsBusyTile === `${c.id}:startDate` ? "Loading..." : "From LMS"}
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )
                 : (
-                  <span className={styles.courseResourceEmpty}>Not set</span>
+                  <>
+                    <span className={styles.courseResourceEmpty}>Not set</span>
+                    {canLms(c) && (
+                      <div className={styles.courseResourceActions}>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          disabled={lmsBusyTile === `${c.id}:startDate`}
+                          onClick={() => void handleLmsStartDateFromTile(c)}
+                        >
+                          {lmsBusyTile === `${c.id}:startDate` ? "Loading..." : "From LMS"}
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
           </div>
         );
@@ -1963,10 +2352,38 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
               ? tileNumberEditor()
               : c.weeks !== null
                 ? (
-                  <span className={styles.courseResourceValue}>{c.weeks}</span>
+                  <>
+                    <span className={styles.courseResourceValue}>{c.weeks}</span>
+                    {canLms(c) && (
+                      <div className={styles.courseResourceActions}>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          disabled={lmsBusyTile === `${c.id}:weeks`}
+                          onClick={() => void handleLmsWeeksFromTile(c)}
+                        >
+                          {lmsBusyTile === `${c.id}:weeks` ? "Loading..." : "From LMS"}
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )
                 : (
-                  <span className={styles.courseResourceEmpty}>Not set</span>
+                  <>
+                    <span className={styles.courseResourceEmpty}>Not set</span>
+                    {canLms(c) && (
+                      <div className={styles.courseResourceActions}>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          disabled={lmsBusyTile === `${c.id}:weeks`}
+                          onClick={() => void handleLmsWeeksFromTile(c)}
+                        >
+                          {lmsBusyTile === `${c.id}:weeks` ? "Loading..." : "From LMS"}
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
           </div>
         );
@@ -2127,6 +2544,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       >
                         Copy
                       </button>
+                      {canLms(c) && (
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          disabled={lmsBusyTile === `${c.id}:roster`}
+                          onClick={() => void handleLmsRosterFromTile(c)}
+                        >
+                          {lmsBusyTile === `${c.id}:roster` ? "Loading..." : "From LMS"}
+                        </button>
+                      )}
                     </div>
                     {expandedRosterId === c.id && (
                       <div className={styles.rosterPreview}>
@@ -2138,7 +2565,21 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   </>
                 )
                 : (
-                  <span className={styles.courseResourceEmpty}>Not set</span>
+                  <>
+                    <span className={styles.courseResourceEmpty}>Not set</span>
+                    {canLms(c) && (
+                      <div className={styles.courseResourceActions}>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          disabled={lmsBusyTile === `${c.id}:roster`}
+                          onClick={() => void handleLmsRosterFromTile(c)}
+                        >
+                          {lmsBusyTile === `${c.id}:roster` ? "Loading..." : "From LMS"}
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
           </div>
         );
@@ -2161,14 +2602,26 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
               ? (
                 <>
                   <span className={styles.courseResourceEmpty}>No schedule saved yet - Course Refresh saves one here, or upload a CSV.</span>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    disabled={uploadingCsv}
-                    onClick={() => csvUploadRef.current?.click()}
-                  >
-                    {uploadingCsv ? "Uploading…" : "Upload CSV"}
-                  </Button>
+                  <div className={styles.courseResourceActions}>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled={uploadingCsv}
+                      onClick={() => csvUploadRef.current?.click()}
+                    >
+                      {uploadingCsv ? "Uploading…" : "Upload CSV"}
+                    </Button>
+                    {canLms(c) && (
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        disabled={lmsBusyTile === `${c.id}:csv`}
+                        onClick={() => void handleLmsCsvFromTile(c)}
+                      >
+                        {lmsBusyTile === `${c.id}:csv` ? "Loading..." : "From LMS"}
+                      </button>
+                    )}
+                  </div>
                   <input
                     ref={csvUploadRef}
                     type="file"
@@ -2226,6 +2679,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                     >
                       {csvRemoveConfirm === c.id ? "Confirm" : "Remove"}
                     </button>
+                    {canLms(c) && (
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        disabled={lmsBusyTile === `${c.id}:csv`}
+                        onClick={() => void handleLmsCsvFromTile(c)}
+                      >
+                        {lmsBusyTile === `${c.id}:csv` ? "Loading..." : "From LMS"}
+                      </button>
+                    )}
                     {csvRemoveConfirm === c.id && (
                       <input
                         type="hidden"
@@ -2300,14 +2763,26 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
               ? (
                 <>
                   <span className={styles.courseResourceEmpty}>No rubric yet - Course Refresh generates one here, or upload a rubric.</span>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    disabled={uploadingRubric}
-                    onClick={() => openRubricPicker(c)}
-                  >
-                    {uploadingRubric ? "Uploading…" : "Upload rubric"}
-                  </Button>
+                  <div className={styles.courseResourceActions}>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled={uploadingRubric}
+                      onClick={() => openRubricPicker(c)}
+                    >
+                      {uploadingRubric ? "Uploading…" : "Upload rubric"}
+                    </Button>
+                    {canLms(c) && (
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        disabled={lmsBusyTile === `${c.id}:rubric`}
+                        onClick={() => void handleLmsRubricFromTile(c)}
+                      >
+                        {lmsBusyTile === `${c.id}:rubric` ? "Loading..." : "From LMS"}
+                      </button>
+                    )}
+                  </div>
                 </>
               )
               : (
@@ -2354,6 +2829,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                     >
                       {rubricRemoveConfirm === c.id ? "Confirm" : "Remove"}
                     </button>
+                    {canLms(c) && (
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        disabled={lmsBusyTile === `${c.id}:rubric`}
+                        onClick={() => void handleLmsRubricFromTile(c)}
+                      >
+                        {lmsBusyTile === `${c.id}:rubric` ? "Loading..." : "From LMS"}
+                      </button>
+                    )}
                   </div>
                   {rubricRemoveConfirm === c.id && (
                     <div style={{ marginTop: 8 }}>
@@ -2423,6 +2908,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                   >
                     {uploadingExport ? "Uploading..." : "Upload export"}
                   </Button>
+                  {canLms(c) && (
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      disabled={lmsBusyTile === `${c.id}:lmsExports`}
+                      onClick={() => void handleLmsExportFromTile(c)}
+                    >
+                      {lmsBusyTile === `${c.id}:lmsExports` ? "Exporting... (takes a minute)" : "Pull export from LMS"}
+                    </button>
+                  )}
                 </div>
               </>
             ) : (

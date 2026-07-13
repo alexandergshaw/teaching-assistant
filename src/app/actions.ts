@@ -55,6 +55,8 @@ import {
   getSpeedGraderUrl,
   postCanvasGrades,
   getCourseName,
+  getCourseInfo,
+  exportCourseCartridge,
   listAnnouncements,
   createAnnouncement,
   listConversations,
@@ -166,6 +168,7 @@ import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
 import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
 import { suggestHeadingLevels, titleFromFileName } from "@/lib/doc-headings";
 import { buildOfficeIssues } from "@/lib/accessibility/office-issues";
+import { buildDocxFromPlainText } from "@/lib/docx";
 import { type AccessibleItemType, type Issue } from "@/lib/accessibility/types";
 import { callLlm, normalizeProvider, type LlmProvider, type LlmPart } from "@/lib/llm";
 import {
@@ -4435,6 +4438,73 @@ export async function getCourseNotificationsAction(
     return await getCourseNotifications(code, match[1]);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load notifications." };
+  }
+}
+
+/** Fetch course metadata from the LMS: name, start date, and syllabus HTML. */
+export async function getCourseInfoAction(
+  courseUrl: string,
+  acronym?: string
+): Promise<{ name: string; startAt: string | null; syllabusBody: string } | { error: string }> {
+  try {
+    await requireOwner();
+    return await getCourseInfo(courseUrl, acronym?.trim());
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load course information." };
+  }
+}
+
+/** Export a course as an IMS Common Cartridge from the LMS. */
+export async function exportCourseCartridgeAction(
+  courseUrl: string,
+  acronym?: string
+): Promise<{ fileName: string; base64: string } | { error: string }> {
+  try {
+    await requireOwner();
+    return await exportCourseCartridge(courseUrl, acronym?.trim());
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not export the course from the LMS." };
+  }
+}
+
+/**
+ * Fetch the LMS course's syllabus, convert it to a Word document,
+ * save it to the finalized library, and return the saved syllabus metadata.
+ */
+export async function importLmsSyllabusAction(
+  courseUrl: string,
+  acronym: string | undefined,
+  courseName: string
+): Promise<{ syllabusId: string; name: string } | { error: string }> {
+  try {
+    await requireOwner();
+    const info = await getCourseInfo(courseUrl, acronym?.trim());
+    if (!info.syllabusBody.trim()) {
+      return { error: "The LMS course has no syllabus content." };
+    }
+
+    const text = info.syllabusBody
+      .replace(/<\/p>/gi, "\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/li>/gi, "\n")
+      .replace(/<\/h[1-6]>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join("\n");
+
+    const docxBuffer = await buildDocxFromPlainText(text, [], undefined);
+    const base64 = Buffer.from(docxBuffer).toString("base64");
+    const syllabusName = `${courseName} syllabus (LMS import)`;
+    const result = await createFinalizedSyllabusAction(syllabusName, "lms-syllabus.docx", base64);
+    if ("error" in result) {
+      return result;
+    }
+    return { syllabusId: result.syllabus.id, name: result.syllabus.name };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not import the syllabus from the LMS." };
   }
 }
 

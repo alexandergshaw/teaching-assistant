@@ -264,7 +264,7 @@ export interface StepRunResult {
   requireInput?: {
     message: string;
     key: string;
-    kind: "text" | "choice" | "upload" | "workflow";
+    kind: "text" | "choice" | "upload" | "workflow" | "table";
     options?: Array<{ value: string; label: string }>;
     optional?: boolean;
     handoffPrefill?: Record<string, string>;
@@ -276,6 +276,13 @@ export interface StepRunResult {
      * content with the resolved string. Steps run in-browser, so a closure is
      * valid here. */
     regenerate?: () => Promise<string>;
+    /** kind "table" only: column definitions; rows render read-only unless a
+     * column is editable. Row keys not listed in columns pass through the edit
+     * untouched (useful for hidden join keys). */
+    columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean }>;
+    /** kind "table" only: the rows to review; the resolved value is the edited
+     * array in the same shape. */
+    rows?: Array<Record<string, string>>;
   };
 }
 
@@ -3928,7 +3935,15 @@ export const STEP_REGISTRY: StepDefinition[] = [
         key: "courses",
         label: "Courses",
         type: "hubCourseList",
-        required: true,
+        required: false,
+        help: "Leave empty and pick an institution instead to grade every course with pending submissions.",
+      },
+      {
+        key: "institution",
+        label: "Institution",
+        type: "institution",
+        required: false,
+        help: "Used when no course tiles are selected: every course at this institution with assignments awaiting grading is included.",
       },
     ],
     outputs: [{ key: "plan", label: "Grading plan", type: "courseList" }],
@@ -3944,26 +3959,6 @@ export const STEP_REGISTRY: StepDefinition[] = [
       }
 
       const lines: string[] = [];
-
-      // Fail-forward: a deleted tile records a line and drops out of the plan.
-      const tiles: Course[] = [];
-      for (const id of ids) {
-        const tile = hub.courses.find((c) => c.id === id);
-        if (!tile) {
-          lines.push(`${id}: not found`);
-          continue;
-        }
-        tiles.push(tile);
-      }
-
-      const withLms = tiles.filter((t) => (t.canvasUrl ?? "").trim());
-      const offline = tiles.filter((t) => !(t.canvasUrl ?? "").trim());
-
-      // Uppercase before dedup: listGradingQueueAction uppercases acronyms, so
-      // "ut" and "UT" are the same institution and must scan once, not twice.
-      const resolveAcronym = (t: Course): string =>
-        (t.institution || helpers.activeInstitution || "").trim().toUpperCase();
-      const acronyms = [...new Set(withLms.map(resolveAcronym).filter(Boolean))];
 
       interface PlanRow {
         courseId: string;
@@ -3981,78 +3976,157 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       const plan: PlanRow[] = [];
       const queueErrors: Array<{ acronym: string; error: string }> = [];
+      let offline: Course[] = [];
 
-      if (withLms.length > 0) {
+      // Institution-wide mode: no tiles selected
+      if (ids.length === 0) {
+        const acronym = String(values.institution ?? "").trim().toUpperCase();
+        if (!acronym) {
+          throw new Error("Select one or more course tiles, or pick an institution.");
+        }
+
         onProgress("Loading grading queue...");
-        const queueResult = await listGradingQueueAction(acronyms);
+        const queueResult = await listGradingQueueAction([acronym]);
         if ("error" in queueResult) {
           throw new Error(queueResult.error);
         }
 
         const { rows: queueRows, errors } = queueResult;
-        // An expired token must surface, never read as "nothing needs grading".
         queueErrors.push(...errors);
         for (const e of errors) {
           lines.push(`Institution ${e.acronym}: ${e.error}`);
         }
 
-        for (const tile of withLms) {
-          const tileCanvasId = parseCanvasCourseId(tile.canvasUrl ?? "");
-          if (!tileCanvasId) {
-            lines.push(`${tile.name}: the LMS URL has no /courses/<id> - skipped`);
-            continue;
-          }
-
-          // Match on institution + numeric course id: ids alone collide
-          // across institutions and would duplicate rows.
-          const tileAcronym = resolveAcronym(tile);
-          const tileRows = queueRows.filter((row) => {
-            const rowCanvasId = parseCanvasCourseId(row.canvasUrl);
-            return (
-              rowCanvasId === tileCanvasId &&
-              row.institution.trim().toUpperCase() === tileAcronym
-            );
+        // Build plan from ALL returned rows (no tile matching)
+        for (const row of queueRows) {
+          const hasRubric = !!(row.rubricText && row.rubricText.trim());
+          plan.push({
+            courseId: "", // no local tile
+            courseName: row.courseName || row.canvasUrl,
+            institution: row.institution,
+            canvasUrl: row.canvasUrl,
+            assignmentName: row.title,
+            needsGrading: row.needsGradingCount,
+            hasRubric,
+            rubricText: row.rubricText ?? "",
+            description: row.description ?? "",
+            pointsPossible: row.pointsPossible,
           });
 
-          for (const row of tileRows) {
-            const hasRubric = !!(row.rubricText && row.rubricText.trim());
-            plan.push({
-              courseId: tile.id,
-              courseName: tile.name,
-              institution: row.institution,
-              canvasUrl: row.canvasUrl,
-              assignmentName: row.title,
-              needsGrading: row.needsGradingCount,
-              hasRubric,
-              rubricText: row.rubricText ?? "",
-              description: row.description ?? "",
-              pointsPossible: row.pointsPossible,
+          lines.push(
+            `${row.courseName || row.canvasUrl} - ${row.title}: ${row.needsGradingCount} to grade${
+              hasRubric ? "" : " (no rubric)"
+            }`
+          );
+        }
+
+        if (plan.length === 0 && queueErrors.length > 0) {
+          throw new Error(
+            `The grading queue could not be loaded for ${acronym}: ${queueErrors
+              .map((e) => e.error)
+              .join("; ")}`
+          );
+        }
+
+        if (lines.length === 0) {
+          lines.push(`Nothing needs grading at ${acronym}.`);
+        }
+      } else {
+        // Tile-based mode: existing logic
+        // Fail-forward: a deleted tile records a line and drops out of the plan.
+        const tiles: Course[] = [];
+        for (const id of ids) {
+          const tile = hub.courses.find((c) => c.id === id);
+          if (!tile) {
+            lines.push(`${id}: not found`);
+            continue;
+          }
+          tiles.push(tile);
+        }
+
+        const withLms = tiles.filter((t) => (t.canvasUrl ?? "").trim());
+        // Assign the OUTER offline list (declared above both modes): the
+        // no-rubric confirmation below counts offline tiles from it.
+        offline = tiles.filter((t) => !(t.canvasUrl ?? "").trim());
+
+        // Uppercase before dedup: listGradingQueueAction uppercases acronyms, so
+        // "ut" and "UT" are the same institution and must scan once, not twice.
+        const resolveAcronym = (t: Course): string =>
+          (t.institution || helpers.activeInstitution || "").trim().toUpperCase();
+        const acronyms = [...new Set(withLms.map(resolveAcronym).filter(Boolean))];
+
+        if (withLms.length > 0) {
+          onProgress("Loading grading queue...");
+          const queueResult = await listGradingQueueAction(acronyms);
+          if ("error" in queueResult) {
+            throw new Error(queueResult.error);
+          }
+
+          const { rows: queueRows, errors } = queueResult;
+          // An expired token must surface, never read as "nothing needs grading".
+          queueErrors.push(...errors);
+          for (const e of errors) {
+            lines.push(`Institution ${e.acronym}: ${e.error}`);
+          }
+
+          for (const tile of withLms) {
+            const tileCanvasId = parseCanvasCourseId(tile.canvasUrl ?? "");
+            if (!tileCanvasId) {
+              lines.push(`${tile.name}: the LMS URL has no /courses/<id> - skipped`);
+              continue;
+            }
+
+            // Match on institution + numeric course id: ids alone collide
+            // across institutions and would duplicate rows.
+            const tileAcronym = resolveAcronym(tile);
+            const tileRows = queueRows.filter((row) => {
+              const rowCanvasId = parseCanvasCourseId(row.canvasUrl);
+              return (
+                rowCanvasId === tileCanvasId &&
+                row.institution.trim().toUpperCase() === tileAcronym
+              );
             });
 
-            lines.push(
-              `${tile.name} - ${row.title}: ${row.needsGradingCount} to grade${
-                hasRubric ? "" : " (no rubric)"
-              }`
-            );
+            for (const row of tileRows) {
+              const hasRubric = !!(row.rubricText && row.rubricText.trim());
+              plan.push({
+                courseId: tile.id,
+                courseName: tile.name,
+                institution: row.institution,
+                canvasUrl: row.canvasUrl,
+                assignmentName: row.title,
+                needsGrading: row.needsGradingCount,
+                hasRubric,
+                rubricText: row.rubricText ?? "",
+                description: row.description ?? "",
+                pointsPossible: row.pointsPossible,
+              });
+
+              lines.push(
+                `${tile.name} - ${row.title}: ${row.needsGradingCount} to grade${
+                  hasRubric ? "" : " (no rubric)"
+                }`
+              );
+            }
           }
         }
-      }
 
-      for (const tile of offline) {
-        plan.push({ courseId: tile.id, courseName: tile.name, offline: true });
-        lines.push(`${tile.name}: no LMS - submissions can be uploaded as a zip in the next step`);
-      }
+        for (const tile of offline) {
+          plan.push({ courseId: tile.id, courseName: tile.name, offline: true });
+          lines.push(`${tile.name}: no LMS - submissions can be uploaded as a zip in the next step`);
+        }
 
-      if (plan.length === 0 && queueErrors.length > 0) {
-        throw new Error(
-          `The grading queue could not be loaded for ${queueErrors
-            .map((e) => e.acronym)
-            .join(", ")}: ${queueErrors.map((e) => e.error).join("; ")}`
-        );
-      }
+        if (plan.length === 0 && queueErrors.length > 0) {
+          throw new Error(
+            `The grading queue could not be loaded for ${queueErrors
+              .map((e) => e.acronym)
+              .join(", ")}: ${queueErrors.map((e) => e.error).join("; ")}`
+          );
+        }
 
-      if (lines.length === 0) {
-        lines.push("Nothing needs grading in the selected courses.");
+        if (lines.length === 0) {
+          lines.push("Nothing needs grading in the selected courses.");
+        }
       }
 
       const result: StepRunResult = {
@@ -4156,7 +4230,10 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: true,
       },
     ],
-    outputs: [{ key: "runs", label: "Grading runs", type: "courseList" }],
+    outputs: [
+      { key: "runs", label: "Grading runs", type: "courseList" },
+      { key: "approvedGrades", label: "Approved grades", type: "courseList" },
+    ],
     run: async (values, helpers, onProgress) => {
       interface PlanRow {
         courseId: string;
@@ -4344,12 +4421,53 @@ export const STEP_REGISTRY: StepDefinition[] = [
       }
 
       const result: StepRunResult = {
-        outputs: { runs },
+        outputs: { runs, approvedGrades: [] },
         summary: { kind: "list", label: "Grading complete", items: lines },
       };
 
       if (postable > 0) {
-        result.requireConfirmation = `Ready to post grades for ${postable} submission(s) across ${nonOfflineRuns.length} assignment(s). Continue to post to the LMS, or cancel to stop without posting.`;
+        // Build review rows from postable entries
+        const reviewRows: Array<Record<string, string>> = [];
+        const fractionRegex = /(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/;
+
+        for (let i = 0; i < nonOfflineRuns.length; i++) {
+          const entry = nonOfflineRuns[i];
+          for (let j = 0; j < entry.run.results.length; j++) {
+            const row = entry.run.results[j];
+            if (typeof row.userId !== "number") continue;
+
+            const fractionMatch = row.totalScore.match(fractionRegex);
+            const earned = fractionMatch
+              ? fractionMatch[1]
+              : (row.totalScore.match(/-?\d+(?:\.\d+)?/) ?? [])[0] ?? "";
+
+            reviewRows.push({
+              runIndex: String(i),
+              resultIndex: String(j),
+              course: entry.courseName,
+              assignment: entry.assignmentName,
+              student: row.student,
+              grade: earned,
+              comment: row.overallComment,
+            });
+          }
+        }
+
+        result.requireInput = {
+          message: `Review the grades below - edit scores or comments, then approve to post ${postable} grade(s) to the LMS. Skip to finish without posting.`,
+          key: "approvedGrades",
+          kind: "table",
+          optional: true,
+          submitLabel: "Approve grades",
+          columns: [
+            { key: "course", label: "Course" },
+            { key: "assignment", label: "Assignment" },
+            { key: "student", label: "Student" },
+            { key: "grade", label: "Grade", editable: true },
+            { key: "comment", label: "Comment", editable: true, multiline: true },
+          ],
+          rows: reviewRows,
+        };
       }
 
       return result;
@@ -4367,6 +4485,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         type: "courseList",
         required: true,
       },
+      {
+        key: "approvedGrades",
+        label: "Approved grades",
+        type: "courseList",
+        required: false,
+        help: "The reviewed rows from the grading step; only these are posted.",
+      },
     ],
     outputs: [],
     run: async (values, helpers, onProgress) => {
@@ -4382,9 +4507,45 @@ export const STEP_REGISTRY: StepDefinition[] = [
         ? (values.runs as RunEntry[])
         : [];
 
+      const approved = Array.isArray(values.approvedGrades)
+        ? (values.approvedGrades as Array<Record<string, string>>)
+        : [];
+
       const lines: string[] = [];
 
-      for (const entry of runs) {
+      // Check if there are any non-offline runs with numeric userId entries
+      const nonOfflineRuns = runs.filter((r) => !r.offline);
+      const hasPostableRows = nonOfflineRuns.some((r) =>
+        r.run.results.some((row) => typeof row.userId === "number")
+      );
+
+      // If there are postable rows but none were approved, skip posting
+      if (hasPostableRows && approved.length === 0) {
+        for (const entry of runs) {
+          if (entry.offline) {
+            lines.push(`${entry.courseName}: offline grades not posted (no LMS)`);
+          }
+        }
+        lines.push("Grades were not approved - nothing posted.");
+        return {
+          outputs: {},
+          summary: { kind: "list" as const, label: "Grades posted", items: lines },
+        };
+      }
+
+      // Group approved rows by runIndex
+      const approvedByRunIndex = new Map<string, Array<Record<string, string>>>();
+      for (const row of approved) {
+        const runIndex = row.runIndex ?? "";
+        if (!approvedByRunIndex.has(runIndex)) {
+          approvedByRunIndex.set(runIndex, []);
+        }
+        approvedByRunIndex.get(runIndex)!.push(row);
+      }
+
+      for (let i = 0; i < runs.length; i++) {
+        const entry = runs[i];
+
         try {
           if (entry.offline) {
             lines.push(`${entry.courseName}: offline grades not posted (no LMS)`);
@@ -4393,6 +4554,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
           onProgress(`Posting grades for ${entry.courseName} - ${entry.assignmentName}...`);
 
+          // Collect approved rows for this run
+          const runApprovedRows = approvedByRunIndex.get(String(i)) ?? [];
+          if (runApprovedRows.length === 0) {
+            lines.push(`${entry.courseName} - ${entry.assignmentName}: no approved grades`);
+            continue;
+          }
+
           const payload: Array<{
             userId: number;
             grade?: string;
@@ -4400,19 +4568,33 @@ export const STEP_REGISTRY: StepDefinition[] = [
             rubricAreas?: Array<{ area: string; score: string; comment: string }>;
           }> = [];
 
-          for (const row of entry.run.results) {
-            if (typeof row.userId !== "number") continue;
+          for (const approvedRow of runApprovedRows) {
+            const resultIndex = approvedRow.resultIndex ? parseInt(approvedRow.resultIndex, 10) : null;
+            if (resultIndex === null || resultIndex < 0 || resultIndex >= entry.run.results.length) {
+              lines.push(`${approvedRow.student}: result index out of range - skipped`);
+              continue;
+            }
 
-            const fraction = row.totalScore.match(/(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/);
-            const earned = fraction
-              ? fraction[1]
-              : (row.totalScore.match(/-?\d+(?:\.\d+)?/) ?? [])[0] ?? "";
+            const result = entry.run.results[resultIndex];
+            const userId = result.userId;
+            if (typeof userId !== "number") {
+              lines.push(`${approvedRow.student}: no Canvas user id - skipped`);
+              continue;
+            }
+
+            const grade = (approvedRow.grade ?? "").trim();
+            if (grade && !grade.match(/^-?\d+(\.\d+)?$/)) {
+              lines.push(`${approvedRow.student}: invalid grade "${grade}" - skipped`);
+              continue;
+            }
+
+            const comment = approvedRow.comment ?? result.overallComment;
 
             payload.push({
-              userId: row.userId,
-              grade: earned,
-              comment: row.overallComment,
-              rubricAreas: row.rubricAreas.map((a) => ({
+              userId,
+              grade: grade || undefined,
+              comment,
+              rubricAreas: result.rubricAreas.map((a) => ({
                 area: a.area,
                 score: a.score,
                 comment: "",

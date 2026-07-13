@@ -321,12 +321,13 @@ export const GRADE_SUBMISSIONS: WorkflowDef = {
   preset: true,
   name: "Grade Submissions",
   description:
-    "Pick one or more courses; assignments with ungraded submissions are pulled from the LMS and graded against their associated rubrics. Assignments without a rubric pause for approval and get an LLM-generated rubric. Courses without an LMS pause for a zip upload of submissions and are graded offline. Grades post to the LMS only after a final confirmation.",
+    "Pick one or more courses, or just an institution, to grade every course with pending submissions there. Assignments with ungraded submissions are pulled from the LMS and graded against their associated rubrics. Assignments without a rubric pause for approval and get an LLM-generated rubric. Courses without an LMS pause for a zip upload of submissions and are graded offline. Graded results pause in an editable review table and post to the LMS only after approval.",
   steps: [
     {
       type: "grading-preflight",
       bindings: {
         courses: { source: "runtime", fieldKey: "courses" },
+        institution: { source: "runtime", fieldKey: "institution" },
       },
     },
     {
@@ -347,6 +348,7 @@ export const GRADE_SUBMISSIONS: WorkflowDef = {
       type: "post-grades",
       bindings: {
         runs: { source: "step", stepIndex: 2, outputKey: "runs" },
+        approvedGrades: { source: "step", stepIndex: 2, outputKey: "approvedGrades" },
       },
     },
   ],

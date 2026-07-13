@@ -277,17 +277,19 @@ export default function WorkflowsTab() {
   const [runInput, setRunInput] = useState<{
     stepIndex: number;
     message: string;
-    kind: "text" | "choice" | "upload" | "workflow";
+    kind: "text" | "choice" | "upload" | "workflow" | "table";
     options: Array<{ value: string; label: string }>;
     optional: boolean;
     initialValue?: string;
     submitLabel?: string;
     regenerate?: () => Promise<string>;
+    columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean }>;
   } | null>(null);
-  const inputResolverRef = useRef<{ resolve: (value: string | File[] | null) => void } | null>(null);
+  const inputResolverRef = useRef<{ resolve: (value: string | File[] | Array<Record<string, string>> | null) => void } | null>(null);
   const [runInputText, setRunInputText] = useState("");
   const [runInputChoice, setRunInputChoice] = useState("");
   const [runInputFiles, setRunInputFiles] = useState<File[]>([]);
+  const [runInputRows, setRunInputRows] = useState<Array<Record<string, string>>>([]);
   const [runInputBusy, setRunInputBusy] = useState(false);
   const [runInputError, setRunInputError] = useState<string | null>(null);
   const [pendingHandoff, setPendingHandoff] = useState<{ workflowId: string; prefill: Record<string, string> } | null>(null);
@@ -948,6 +950,7 @@ export default function WorkflowsTab() {
           setRunInputText(result.requireInput!.initialValue ?? "");
           setRunInputChoice("");
           setRunInputFiles([]);
+          setRunInputRows(result.requireInput!.rows ?? []);
           setRunInputError(null);
 
           await new Promise<void>((resolve) => {
@@ -960,6 +963,7 @@ export default function WorkflowsTab() {
               initialValue: result.requireInput!.initialValue,
               submitLabel: result.requireInput!.submitLabel,
               regenerate: result.requireInput!.regenerate,
+              columns: result.requireInput!.columns,
             });
             inputResolverRef.current = {
               resolve: (value) => {
@@ -1903,6 +1907,72 @@ export default function WorkflowsTab() {
                       </>
                     )}
 
+                    {runInput.kind === "table" && runInput.columns && (
+                      <div style={{ maxHeight: 400, overflow: "auto", marginTop: 8 }}>
+                        <table
+                          style={{
+                            width: "100%",
+                            borderCollapse: "collapse",
+                            fontSize: "0.85rem",
+                          }}
+                        >
+                          <thead>
+                            <tr>
+                              {runInput.columns.map((col) => (
+                                <th
+                                  key={col.key}
+                                  style={{
+                                    textAlign: "left",
+                                    borderBottom: "1px solid var(--field-border)",
+                                    padding: "6px 8px",
+                                    fontWeight: "bold",
+                                  }}
+                                >
+                                  {col.label}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {runInputRows.map((row, rowIndex) => (
+                              <tr key={rowIndex}>
+                                {runInput.columns!.map((col) => (
+                                  <td
+                                    key={col.key}
+                                    style={{
+                                      borderBottom: "1px solid var(--field-border)",
+                                      padding: "6px 8px",
+                                    }}
+                                  >
+                                    {col.editable ? (
+                                      <TextField
+                                        size="small"
+                                        fullWidth
+                                        multiline={col.multiline}
+                                        minRows={col.multiline ? 2 : 1}
+                                        value={row[col.key] ?? ""}
+                                        onChange={(e) => {
+                                          setRunInputRows((prev) =>
+                                            prev.map((r, idx) =>
+                                              idx === rowIndex
+                                                ? { ...r, [col.key]: e.target.value }
+                                                : r
+                                            )
+                                          );
+                                        }}
+                                      />
+                                    ) : (
+                                      row[col.key] ?? ""
+                                    )}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
                     <div
                       style={{
                         display: "flex",
@@ -1920,7 +1990,9 @@ export default function WorkflowsTab() {
                             ? !runInputText.trim()
                             : runInput.kind === "choice" || runInput.kind === "workflow"
                               ? !runInputChoice
-                              : runInputFiles.length === 0)
+                              : runInput.kind === "upload"
+                                ? runInputFiles.length === 0
+                                : runInputRows.length === 0)
                         }
                         onClick={() => {
                           const value =
@@ -1928,8 +2000,10 @@ export default function WorkflowsTab() {
                               ? runInputText
                               : runInput.kind === "choice" || runInput.kind === "workflow"
                                 ? runInputChoice
-                                : runInputFiles;
-                          inputResolverRef.current?.resolve(value as string | File[]);
+                                : runInput.kind === "upload"
+                                  ? runInputFiles
+                                  : runInputRows;
+                          inputResolverRef.current?.resolve(value as string | File[] | Array<Record<string, string>>);
                         }}
                       >
                         {runInput.kind === "workflow"

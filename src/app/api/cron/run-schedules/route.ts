@@ -33,7 +33,10 @@ import type { LlmProvider } from "@/lib/llm";
 //      needs a Vercel Pro plan for sub-daily crons; on the Hobby plan Vercel
 //      silently runs crons at most once a day.
 export const runtime = "nodejs";
-export const maxDuration = 300;
+// 60s is the ceiling that builds on ALL plans (the Hobby cap). A higher value
+// (up to 300 on Pro, 900 on Enterprise) makes the deployment FAIL to build on
+// Hobby, which silently unregisters the cron. On Pro you can raise this to 300.
+export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 // Bounds one cron tick's work regardless of how large the due backlog is;

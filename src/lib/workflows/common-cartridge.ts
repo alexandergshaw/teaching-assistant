@@ -37,6 +37,62 @@ function sanitizePath(s: string): string {
   return s.replace(/[^a-zA-Z0-9._ -]/g, "_");
 }
 
+// QTI 1.2 essay assessment (IMS CC profile): one manually graded essay item
+// carrying the deliverable instructions. Blackboard Ultra imports these as
+// gradable Tests inside the module; it silently drops the CC assignment
+// extension, which is why cc-flavor deliverables ride QTI instead.
+export function buildQtiAssessmentXml(a: {
+  identifier: string;
+  title: string;
+  html: string;
+}): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<questestinterop xmlns="http://www.imsglobal.org/xsd/ims_qtiasiv1p2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.imsglobal.org/xsd/ims_qtiasiv1p2 http://www.imsglobal.org/profile/cc/ccv1p3/ccv1p3_qtiasiv1p2p1_v1p0.xsd">
+  <assessment ident="${a.identifier}" title="${esc(a.title)}">
+    <qtimetadata>
+      <qtimetadatafield>
+        <fieldlabel>cc_profile</fieldlabel>
+        <fieldentry>cc.exam.v0p1</fieldentry>
+      </qtimetadatafield>
+      <qtimetadatafield>
+        <fieldlabel>qmd_scoretype</fieldlabel>
+        <fieldentry>Percentage</fieldentry>
+      </qtimetadatafield>
+    </qtimetadata>
+    <section ident="root_section">
+      <item ident="${a.identifier}_i1" title="${esc(a.title)}">
+        <itemmetadata>
+          <qtimetadata>
+            <qtimetadatafield>
+              <fieldlabel>cc_profile</fieldlabel>
+              <fieldentry>cc.essay.v0p1</fieldentry>
+            </qtimetadatafield>
+            <qtimetadatafield>
+              <fieldlabel>qmd_scoringpermitted</fieldlabel>
+              <fieldentry>Yes</fieldentry>
+            </qtimetadatafield>
+            <qtimetadatafield>
+              <fieldlabel>qmd_computerscored</fieldlabel>
+              <fieldentry>No</fieldentry>
+            </qtimetadatafield>
+          </qtimetadata>
+        </itemmetadata>
+        <presentation>
+          <material>
+            <mattext texttype="text/html">${esc(a.html)}</mattext>
+          </material>
+          <response_str ident="response1" rcardinality="Single">
+            <render_fib>
+              <response_label ident="answer1" rshuffle="No"/>
+            </render_fib>
+          </response_str>
+        </presentation>
+      </item>
+    </section>
+  </assessment>
+</questestinterop>`;
+}
+
 // Canvas course-export assignment settings; due_at omitted when absent.
 export function buildAssignmentSettingsXml(a: {
   identifier: string;
@@ -202,11 +258,11 @@ function emitContentItems(
   }
 
   // Add assignment resources: Canvas uses learning-application-resource with
-  // assignment_settings.xml; CC uses the CC assignment extension.
+  // assignment_settings.xml; cc flavor uses QTI essay assessments because Blackboard
+  // Ultra drops the CC assignment extension.
   for (const assignment of assignments) {
     const num = String(state.resourceId++).padStart(4, "0");
     const resId = `r${num}`;
-    const assignmentId = `a${num}`;
 
     if (flavor === "canvas") {
       // Canvas flavor: assignment.html + assignment_settings.xml
@@ -245,24 +301,20 @@ function emitContentItems(
         contentType: "Assignment",
       });
     } else {
-      // CC flavor: standard CC assignment extension
-      const assignmentXml = `<?xml version="1.0" encoding="UTF-8"?>
-<assignment xmlns="http://www.imsglobal.org/xsd/imscc_extensions/assignment" identifier="${assignmentId}">
-  <title>${esc(assignment.title)}</title>
-  <text texttype="text/html">${esc(assignment.html)}</text>
-  <gradable points_possible="${assignment.points}">true</gradable>
-  <submission_formats>
-    <format type="text"/>
-  </submission_formats>
-</assignment>`;
+      // CC flavor: QTI essay assessment
+      const assessmentXml = buildQtiAssessmentXml({
+        identifier: resId,
+        title: assignment.title,
+        html: assignment.html,
+      });
 
-      const resPath = `res${resId}/assignment.xml`;
-      state.zip.file(resPath, assignmentXml);
+      const resPath = `res${resId}/assessment.xml`;
+      state.zip.file(resPath, assessmentXml);
 
       const assignmentItemId = `i${String(state.itemId++).padStart(4, "0")}`;
       state.resourceDefs.push({
         id: resId,
-        type: "assignment_xmlv1p0",
+        type: "imsqti_xmlv1p2/imscc_xmlv1p3/assessment",
         href: resPath,
       });
 

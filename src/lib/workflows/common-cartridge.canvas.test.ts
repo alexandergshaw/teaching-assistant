@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildAssignmentSettingsXml, buildModuleMetaXml } from "./common-cartridge";
+import { buildAssignmentSettingsXml, buildModuleMetaXml, buildQtiAssessmentXml } from "./common-cartridge";
 
 describe("buildAssignmentSettingsXml", () => {
   it("includes due_at when provided", () => {
@@ -169,5 +169,85 @@ describe("buildModuleMetaXml", () => {
 
     expect(xml).toMatch(/^<\?xml version="1.0" encoding="UTF-8"\?>/);
     expect(xml).toContain('xmlns="http://canvas.instructure.com/xsd/cccv1p0"');
+  });
+});
+
+describe("buildQtiAssessmentXml", () => {
+  it("includes cc_profile fields for exam and essay", () => {
+    const xml = buildQtiAssessmentXml({
+      identifier: "qti001",
+      title: "Week 1 Assessment",
+      html: "<p>Instructions</p>",
+    });
+
+    expect(xml).toContain("<fieldentry>cc.exam.v0p1</fieldentry>");
+    expect(xml).toContain("<fieldentry>cc.essay.v0p1</fieldentry>");
+  });
+
+  it("includes response_str for essay response", () => {
+    const xml = buildQtiAssessmentXml({
+      identifier: "qti001",
+      title: "Assessment",
+      html: "<p>Write an essay</p>",
+    });
+
+    expect(xml).toContain("<response_str ident=\"response1\" rcardinality=\"Single\">");
+    expect(xml).toContain("<render_fib>");
+    expect(xml).toContain("<response_label ident=\"answer1\" rshuffle=\"No\"/>");
+  });
+
+  it("escapes title containing & and <", () => {
+    const xml = buildQtiAssessmentXml({
+      identifier: "qti002",
+      title: "Final & Midterm <Exam>",
+      html: "<p>Test</p>",
+    });
+
+    expect(xml).toContain("Final &amp; Midterm &lt;Exam&gt;");
+  });
+
+  it("escapes html in mattext", () => {
+    const xml = buildQtiAssessmentXml({
+      identifier: "qti003",
+      title: "Task",
+      html: "<p>Read the docs & submit</p>",
+    });
+
+    expect(xml).toContain("&lt;p&gt;Read the docs &amp; submit&lt;/p&gt;");
+  });
+
+  it("includes identifier in assessment and item ident attributes", () => {
+    const xml = buildQtiAssessmentXml({
+      identifier: "qti_special",
+      title: "Test Assessment",
+      html: "<p>Instructions</p>",
+    });
+
+    expect(xml).toContain('ident="qti_special"');
+    expect(xml).toContain('ident="qti_special_i1"');
+  });
+
+  it("includes XML declaration and QTI namespace", () => {
+    const xml = buildQtiAssessmentXml({
+      identifier: "qti001",
+      title: "Test",
+      html: "<p>Test</p>",
+    });
+
+    expect(xml).toMatch(/^<\?xml version="1.0" encoding="UTF-8"\?>/);
+    expect(xml).toContain('xmlns="http://www.imsglobal.org/xsd/ims_qtiasiv1p2"');
+    expect(xml).toContain("xsi:schemaLocation");
+  });
+
+  it("includes scoring metadata fields", () => {
+    const xml = buildQtiAssessmentXml({
+      identifier: "qti001",
+      title: "Graded Task",
+      html: "<p>Submit your work</p>",
+    });
+
+    expect(xml).toContain("<fieldentry>Percentage</fieldentry>");
+    expect(xml).toContain("<fieldentry>Yes</fieldentry>");
+    expect(xml).toContain("<fieldentry>No</fieldentry>");
   });
 });

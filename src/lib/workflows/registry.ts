@@ -1917,7 +1917,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     // reference it; the step now serves any Common Cartridge LMS.
     type: "blackboard-export",
     name: "LMS export (.imscc)",
-    description: "Package the generated materials as a Common Cartridge for the course tile's LMS. Canvas imports it via Settings > Import Course Content > Common Cartridge; Blackboard via Import Package. Modules are numbered 01 through the number of scheduled weeks; every module includes its deliverable assignment with the end-of-week deadline. Canvas exports carry real assignment due dates; Blackboard imports show the deadline in each assignment's instructions.",
+    description: "Package the generated materials as a Common Cartridge for the course tile's LMS. Canvas imports deliverables as assignments with real due dates; Blackboard imports each deliverable as a gradable test (one essay submission) with the deadline in its instructions. Canvas imports via Settings > Import Course Content > Common Cartridge; Blackboard via Import Package. Modules are numbered 01 through the number of scheduled weeks.",
     inputs: [
       {
         key: "files",
@@ -2234,13 +2234,29 @@ export const STEP_REGISTRY: StepDefinition[] = [
         }
       }
 
+      let lmsSource: "tile" | "institution" | "none" = "none";
+      if (tileLms === "canvas" || tileLms === "blackboard") {
+        lmsSource = "tile";
+      } else if (tile?.institution && helpers.getInstitutionFields) {
+        lmsSource = "institution";
+      }
+
+      let lmsSourceSuffix = "";
+      if (hubCourseId) {
+        if (lmsSource === "institution") {
+          lmsSourceSuffix = ` (LMS read from the institution's LMS field)`;
+        } else if (lmsSource === "tile") {
+          lmsSourceSuffix = ` (LMS read from the course tile)`;
+        }
+      }
+
       let summaryText: string;
       if (tileLms === "canvas") {
-        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package. Deliverables import as assignments; introductions import as module documents (Word files); files import into modules.`;
+        summaryText = `Built for Canvas - deliverables import as assignments with due dates; introductions import as module documents (Word files); files import into modules. Downloaded ${baseName}.imscc${lmsSourceSuffix} - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package.`;
       } else if (tileLms === "blackboard") {
-        summaryText = `Downloaded ${baseName}.imscc - import it in Blackboard via Import Course Content; modules arrive inside a course folder. Deliverables import as assignments; introductions import as module documents (Word files).`;
+        summaryText = `Built for Blackboard - each deliverable imports as a gradable test (one essay submission) with the deadline in its instructions; introductions import as module documents (Word files); files import into modules. Downloaded ${baseName}.imscc${lmsSourceSuffix} - import it in Blackboard via Import Course Content.`;
       } else {
-        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package, or in Blackboard via Course Content > Import Package. Deliverables import as assignments; introductions import as module documents (Word files).`;
+        summaryText = `Downloaded ${baseName}.imscc - import it in Canvas via Settings > Import Course Content > Common Cartridge 1.x Package (Canvas imports deliverables as assignments with due dates), or in Blackboard via Course Content > Import Package (Blackboard imports deliverables as gradable tests with deadlines in instructions).`;
       }
 
       return {

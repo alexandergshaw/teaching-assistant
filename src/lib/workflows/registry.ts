@@ -62,6 +62,7 @@ import {
   draftMessageReplyAction,
   replyToConversationAction,
   setConversationStateAction,
+  detectMeetingRequestAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -5844,6 +5845,38 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: {},
         summary: { kind: "text", text: `Conversation ${convId} marked ${state}.` },
+      };
+    },
+  },
+
+  {
+    type: "detect-meeting-request",
+    name: "Detect a meeting request",
+    description: "Classify whether a message thread is asking to meet live, with a confidence score, so a workflow can branch toward scheduling.",
+    inputs: [
+      { key: "thread", label: "Conversation thread", type: "longtext", required: true, help: "The thread text, e.g. wired from Read the message inbox." },
+    ],
+    outputs: [
+      { key: "isMeetingRequest", label: "Is a meeting request", type: "boolean" },
+      { key: "confidence", label: "Confidence", type: "number" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const thread = String(values.thread ?? "").trim();
+      if (!thread) {
+        throw new Error("Provide the conversation thread to classify.");
+      }
+      onProgress("Classifying...");
+      const r = await detectMeetingRequestAction(thread, helpers.provider);
+      const pct = Math.round(r.confidence * 100);
+      return {
+        outputs: {
+          isMeetingRequest: r.isMeetingRequest ? "1" : "",
+          confidence: r.confidence,
+        },
+        summary: {
+          kind: "text",
+          text: `Meeting request: ${r.isMeetingRequest ? "yes" : "no"} (confidence ${pct}%)`,
+        },
       };
     },
   },

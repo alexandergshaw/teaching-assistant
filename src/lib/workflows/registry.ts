@@ -36,6 +36,7 @@ import {
   createGradableAction,
   createQuizQuestionAction,
   bulkUpdateAction,
+  bulkDeleteAction,
   createPageAction,
   listCoursesByTermAction,
   createCourseHubAction,
@@ -8889,6 +8890,47 @@ export const STEP_REGISTRY: StepDefinition[] = [
       }
       const items = failures.length ? failures : [`${published ? "Published" : "Unpublished"} ${updated} module(s).`];
       return { outputs: { updated }, summary: { kind: "list", label: `${updated} of ${ids.length} module(s) updated`, items } };
+    },
+  },
+
+  {
+    type: "bulk-delete-lms-items",
+    name: "Delete LMS items",
+    description: "Bulk-delete selected assignments, quizzes, discussions, or pages from a course. Attended-only (destructive).",
+    inputs: [
+      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
+      { key: "kind", label: "Item kind", type: "text", required: true, help: "assignments, quizzes, discussions, or pages (use the exact BulkKind values)." },
+      { key: "ids", label: "Item ids", type: "longtext", required: true, help: "One id per line." },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+    ],
+    outputs: [
+      { key: "deleted", label: "Items deleted", type: "number" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const course = String(values.course ?? "").trim();
+      if (!course) throw new Error("Select an LMS course.");
+      const kindRaw = String(values.kind ?? "").trim().toLowerCase();
+      const kindMap: Record<string, "Assignment" | "Quiz" | "Discussion" | "Page"> = {
+        "assignment": "Assignment",
+        "assignments": "Assignment",
+        "quiz": "Quiz",
+        "quizzes": "Quiz",
+        "discussion": "Discussion",
+        "discussions": "Discussion",
+        "page": "Page",
+        "pages": "Page",
+      };
+      const kind = kindMap[kindRaw];
+      if (!kind) {
+        throw new Error("Item kind must be one of: Assignment, Quiz, Discussion, Page");
+      }
+      const ids = String(values.ids ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+      if (ids.length === 0) throw new Error("Provide at least one id.");
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+      onProgress("Deleting items...");
+      const r = await bulkDeleteAction(course, kind, ids, inst);
+      if ("error" in r) throw new Error(r.error);
+      return { outputs: { deleted: r.updated }, summary: { kind: "text", text: `Deleted ${r.updated} ${kindRaw}.` } };
     },
   },
 ];

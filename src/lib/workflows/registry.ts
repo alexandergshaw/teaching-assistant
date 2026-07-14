@@ -137,6 +137,7 @@ import {
   listCourseRosterAction,
   inviteOrgMemberAction,
   setRepoCollaboratorAction,
+  exportCourseCartridgeAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -9180,6 +9181,41 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: {},
         summary: { kind: "text", text: `Granted ${username} ${permission} on ${repo}.` },
+      };
+    },
+  },
+
+  {
+    type: "export-course-cartridge",
+    name: "Export a course as a cartridge",
+    description: "Export a live LMS course as an IMS Common Cartridge (.imscc) for backup or migration, and save it to a course tile.",
+    inputs: [
+      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
+      { key: "hubCourse", label: "Course tile", type: "hubCourse", required: false, help: "Save the export to this course's materials." },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+    ],
+    outputs: [
+      { key: "fileName", label: "Export file name", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const course = String(values.course ?? "").trim();
+      if (!course) throw new Error("Select an LMS course to export.");
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+      onProgress("Exporting course...");
+      const r = await exportCourseCartridgeAction(course, inst);
+      if ("error" in r) throw new Error(r.error);
+      const blob = base64ToBlob(r.base64, "application/octet-stream");
+      const hubCourse = String(values.hubCourse ?? "").trim();
+      if (hubCourse && helpers.saveCourseMaterialFile) {
+        await helpers.saveCourseMaterialFile(hubCourse, blob, r.fileName);
+        return {
+          outputs: { fileName: r.fileName },
+          summary: { kind: "text", text: `Exported ${r.fileName} and saved it to the course materials.` },
+        };
+      }
+      return {
+        outputs: { fileName: r.fileName },
+        summary: { kind: "text", text: `Exported ${r.fileName} (${Math.round(blob.size / 1024)} KB). Select a course tile to save it.` },
       };
     },
   },

@@ -22,6 +22,7 @@ import {
   generateSchedulePlanFromRepoAction,
   setCourseCsvAction,
   setCourseRubricAction,
+  deleteGradingDraftAction,
   deleteModuleAction,
   setupStudentRepoAction,
   listCourseHubAction,
@@ -7723,6 +7724,33 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { succeeded },
         summary: { kind: "text", text: `Associated the rubric with ${succeeded} assignment(s).` },
+      };
+    },
+  },
+
+  {
+    type: "discard-grading-draft",
+    name: "Discard a grading draft",
+    description: "Delete a pending grading draft during review triage. Attended-only.",
+    inputs: [
+      { key: "draftId", label: "Draft id", type: "text", required: true },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const draftId = String(values.draftId ?? "").trim();
+      if (!draftId) {
+        throw new Error("Provide the grading draft id.");
+      }
+
+      onProgress("Discarding draft...");
+      const r = await deleteGradingDraftAction(draftId);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      return {
+        outputs: {},
+        summary: { kind: "text", text: `Discarded grading draft ${draftId}.` },
       };
     },
   },

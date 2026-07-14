@@ -95,6 +95,7 @@ import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { applyTextRevision } from "@/lib/embedded/revise";
 import { scaffoldCourseOutline } from "@/lib/embedded/course";
+import { extractDefinitions } from "@/lib/embedded/scaffold";
 import type {
   StepInputSpec,
   StepOutputSpec,
@@ -6758,6 +6759,44 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { outline },
         summary: { kind: "text", text: outline },
+      };
+    },
+  },
+
+  {
+    type: "extract-glossary-terms",
+    name: "Extract glossary terms",
+    description: "Pull term and definition pairs out of course material into a glossary.",
+    inputs: [
+      { key: "text", label: "Source material", type: "longtext", required: true }
+    ],
+    outputs: [
+      { key: "glossary", label: "Glossary", type: "longtext" }
+    ],
+    run: async (values, helpers, onProgress) => {
+      const text = String(values.text ?? "").trim();
+      if (!text) {
+        throw new Error("Provide the source material to scan.");
+      }
+
+      onProgress("Extracting glossary terms...");
+      const defs = extractDefinitions(text);
+
+      const items: string[] = [];
+      const glossaryLines: string[] = [];
+      for (const def of defs) {
+        glossaryLines.push(`${def.term}: ${def.definition}`);
+        items.push(def.term);
+      }
+      const glossary = glossaryLines.join("\n");
+
+      return {
+        outputs: { glossary },
+        summary: {
+          kind: "list",
+          label: `${defs.length} term(s)`,
+          items: items.length ? items : ["(none found)"],
+        },
       };
     },
   },

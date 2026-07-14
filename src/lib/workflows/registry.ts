@@ -96,6 +96,7 @@ import {
   syncAssignmentFromRepoAction,
   syncAssignmentToRepoAction,
   rememberRubricAction,
+  findBankedRubricAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7652,6 +7653,30 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const r = await rememberRubricAction(rubric, topic);
       if ("error" in r) throw new Error(r.error);
       return { outputs: {}, summary: { kind: "text", text: `Banked a rubric for "${topic}".` } };
+    },
+  },
+
+  {
+    type: "find-banked-rubric",
+    name: "Find a banked rubric",
+    description: "Retrieve a previously banked rubric for a matching topic, to reuse before generating a new one.",
+    inputs: [
+      { key: "topic", label: "Topic", type: "text", required: true },
+    ],
+    outputs: [
+      { key: "rubric", label: "Rubric", type: "longtext" },
+      { key: "matched", label: "Matched", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const topic = String(values.topic ?? "").trim();
+      if (!topic) throw new Error("Provide a topic.");
+      onProgress("Looking up a banked rubric...");
+      const r = await findBankedRubricAction(topic);
+      if ("error" in r) throw new Error(r.error);
+      return {
+        outputs: { rubric: r.rubric, matched: r.matched ? "1" : "" },
+        summary: { kind: "text", text: r.matched ? r.rubric : `No banked rubric found for "${topic}".` },
+      };
     },
   },
 ];

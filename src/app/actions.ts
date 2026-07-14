@@ -38,7 +38,7 @@ import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { copyedit, stripLongDashes } from "@/lib/embedded/scaffold";
 import { routeRequest } from "@/lib/embedded/router";
-import { rememberRubric } from "@/lib/research/rubric-bank";
+import { rememberRubric, findRubricForTopic } from "@/lib/research/rubric-bank";
 import { findCaseStudyMaterial, type CaseStudyMaterial, findPracticeProblems, type PracticeProblemEntry } from "@/lib/research/index";
 import {
   listUnverifiedKnowledge,
@@ -9326,5 +9326,18 @@ export async function rememberRubricAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not bank the rubric." };
+  }
+}
+
+export async function findBankedRubricAction(
+  topic: string
+): Promise<{ rubric: string; matched: boolean } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!topic.trim()) return { error: "Provide a topic." };
+    const found = await findRubricForTopic(topic);
+    return { rubric: found ?? "", matched: found != null };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not look up a banked rubric." };
   }
 }

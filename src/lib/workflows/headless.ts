@@ -92,6 +92,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "poll-avatar-video",
   "get-assignment-sync-state",
   "remember-rubric",
+  "find-banked-rubric",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

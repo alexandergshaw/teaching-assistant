@@ -113,6 +113,7 @@ import {
   generateCopilotProjectPromptAction,
   listCopilotTasksAction,
   listPullRequestFilesAction,
+  reviewPullRequestAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8389,6 +8390,47 @@ export const STEP_REGISTRY: StepDefinition[] = [
           label: `${r.files.length} file(s) changed`,
           items: r.files.length ? filenames : ["(none)"],
         },
+      };
+    },
+  },
+
+  {
+    type: "review-pull-request",
+    name: "Review a pull request",
+    description: "Submit an approve, request-changes, or comment review on a pull request. Attended-only.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "prNumber", label: "PR number", type: "text", required: true },
+      { key: "verdict", label: "Verdict", type: "text", required: true, help: "approve, request-changes, or comment." },
+      { key: "body", label: "Comment", type: "longtext", required: false },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+
+      const prRaw = String(values.prNumber ?? "").trim();
+      if (!/^\d+$/.test(prRaw)) throw new Error("Provide the numeric PR number.");
+
+      const verdict = String(values.verdict ?? "").trim().toLowerCase();
+      const eventMap: Record<string, "APPROVE" | "REQUEST_CHANGES" | "COMMENT"> = {
+        "approve": "APPROVE",
+        "request-changes": "REQUEST_CHANGES",
+        "request_changes": "REQUEST_CHANGES",
+        "comment": "COMMENT",
+      };
+      const event = eventMap[verdict];
+      if (!event) throw new Error("Verdict must be approve, request-changes, or comment.");
+
+      const body = String(values.body ?? "");
+
+      onProgress("Submitting review...");
+      const r = await reviewPullRequestAction(repo, Number(prRaw), event, body);
+      if ("error" in r) throw new Error(r.error);
+
+      return {
+        outputs: {},
+        summary: { kind: "text", text: `Submitted a ${verdict} review on PR #${prRaw}.` },
       };
     },
   },

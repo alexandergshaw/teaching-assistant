@@ -108,6 +108,7 @@ import {
   autoFixOfficeFileAction,
   checkBrokenLinksAction,
   measureKnowledgeGapAction,
+  runResearchLoopAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8209,6 +8210,37 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summary: {
           kind: "text",
           text: `Coverage ${(rep.coverage * 100).toFixed(0)}% (gap ${(rep.gap * 100).toFixed(0)}%). Uncovered: ${rep.uncoveredTerms.length ? rep.uncoveredTerms.join(", ") : "none"}.`
+        }
+      };
+    },
+  },
+
+  {
+    type: "run-research-loop",
+    name: "Grow the knowledge base for a topic",
+    description: "Retrieve external knowledge for a topic's uncovered terms and store it (unverified) for later review. Ideal as an unattended background-research step.",
+    inputs: [
+      { key: "topic", label: "Topic", type: "text", required: true }
+    ],
+    outputs: [
+      { key: "learned", label: "Entries learned", type: "number" }
+    ],
+    run: async (values, helpers, onProgress) => {
+      const topic = String(values.topic ?? "").trim();
+      if (!topic) throw new Error("Provide a topic.");
+
+      onProgress("Researching and learning...");
+      const r = await runResearchLoopAction(topic);
+      if ("error" in r) throw new Error(r.error);
+
+      const learnedCount = r.report.stored;
+      const rounds = r.report.rounds;
+
+      return {
+        outputs: { learned: learnedCount },
+        summary: {
+          kind: "text",
+          text: `Learned ${learnedCount} new entr${learnedCount === 1 ? "y" : "ies"} over ${rounds} round(s) for "${topic}".`
         }
       };
     },

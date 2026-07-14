@@ -46,7 +46,7 @@ import {
   deleteKnowledgeEntry,
   type KnowledgeRow,
 } from "@/lib/research/db";
-import { measureCoverage, type CoverageReport } from "@/lib/research/gap";
+import { measureCoverage, runResearchLoop, type CoverageReport, type ResearchLoopReport } from "@/lib/research/gap";
 import { applyTextRevision, applySlidesRevision, applyHtmlRevision } from "@/lib/embedded/revise";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
@@ -9385,6 +9385,20 @@ export async function measureKnowledgeGapAction(
     return { report };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not measure coverage." };
+  }
+}
+
+export async function runResearchLoopAction(
+  topic: string
+): Promise<{ report: ResearchLoopReport } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!topic.trim()) return { error: "Provide a topic." };
+    const before = await measureCoverage(topic.trim());
+    const report = await runResearchLoop(topic.trim(), before);
+    return { report };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not run the research loop." };
   }
 }
 

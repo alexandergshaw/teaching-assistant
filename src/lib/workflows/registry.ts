@@ -123,6 +123,7 @@ import {
   listGithubReposAction,
   ingestRepoAction,
   commitFileAction,
+  copyFileToCanvasPageAction,
   detectRepoFrontendAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
@@ -8795,6 +8796,38 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       const summaryText = summaryParts.join("\n");
       return { outputs: { framework, devCommand }, summary: { kind: "text", text: summaryText } };
+    },
+  },
+
+  {
+    type: "publish-file-as-page",
+    name: "Publish a file as a Canvas page",
+    description: "Publish file content (e.g. starter code) into Canvas as a code-block wiki page. Attended-only.",
+    inputs: [
+      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
+      { key: "title", label: "Page title", type: "text", required: true },
+      { key: "content", label: "File content", type: "longtext", required: true },
+      { key: "filePath", label: "File path/name", type: "text", required: false, help: "Used to label the code block." },
+      { key: "published", label: "Publish immediately", type: "boolean", required: false },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+    ],
+    outputs: [
+      { key: "pageUrl", label: "Page URL", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const course = String(values.course ?? "").trim();
+      if (!course) throw new Error("Select an LMS course.");
+      const title = String(values.title ?? "").trim();
+      if (!title) throw new Error("Provide a page title.");
+      const content = String(values.content ?? "");
+      if (!content) throw new Error("Provide the file content.");
+      const filePath = String(values.filePath ?? "").trim() || title;
+      const published = String(values.published ?? "") === "1";
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+      onProgress("Publishing page...");
+      const r = await copyFileToCanvasPageAction(course, { filePath, content, title, published }, inst);
+      if ("error" in r) throw new Error(r.error);
+      return { outputs: { pageUrl: r.htmlUrl }, summary: { kind: "link", label: `Published "${title}"`, url: r.htmlUrl } };
     },
   },
 ];

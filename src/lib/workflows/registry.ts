@@ -87,6 +87,7 @@ import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { parseCalendarEmbedded } from "@/lib/embedded/calendar";
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
+import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import type {
   StepInputSpec,
   StepOutputSpec,
@@ -6399,6 +6400,62 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       return {
         outputs: { courseTitle, scheduleText },
+        summary: { kind: "list", label: `${rows.length}-week schedule`, items },
+      };
+    },
+  },
+
+  {
+    type: "generate-schedule-offline",
+    name: "Generate a schedule (offline, no AI)",
+    description: "Deterministically build a week-by-week schedule (dates, topics, spaced tests) with no model call -- an offline fallback that always runs unattended.",
+    inputs: [
+      { key: "description", label: "Course description", type: "longtext", required: true },
+      { key: "startDate", label: "Start date", type: "date", required: true },
+      { key: "weeks", label: "Number of weeks", type: "number", required: true },
+      { key: "tests", label: "Number of tests", type: "number", required: false },
+    ],
+    outputs: [
+      { key: "scheduleText", label: "Schedule", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const description = String(values.description ?? "").trim();
+      if (!description) {
+        throw new Error("Provide a course description.");
+      }
+
+      const startDate = String(values.startDate ?? "").trim();
+      if (!startDate) {
+        throw new Error("Provide a start date.");
+      }
+
+      const weeks = Number(values.weeks);
+      if (!Number.isInteger(weeks) || weeks < 1) {
+        throw new Error("Provide a valid number of weeks (1 or more).");
+      }
+
+      const testsRaw = String(values.tests ?? "").trim();
+      const tests = testsRaw && Number.isInteger(Number(testsRaw)) ? Number(testsRaw) : 0;
+
+      onProgress("Building schedule...");
+      const rows = scaffoldCourseSchedule(description, startDate, weeks, tests);
+
+      const items: string[] = [];
+      const lines: string[] = [];
+
+      for (const row of rows) {
+        const weekLabel = row.dates ? `Week ${row.week} (${row.dates})` : `Week ${row.week}`;
+        const topicStr = row.topics || "(no topic)";
+        const assignStr = row.assignment || "(no assignment)";
+        const line = `${weekLabel} - ${topicStr} [${assignStr}]`;
+        lines.push(line);
+        items.push(topicStr);
+      }
+
+      const scheduleText = lines.join("\n");
+
+      return {
+        outputs: { scheduleText },
         summary: { kind: "list", label: `${rows.length}-week schedule`, items },
       };
     },

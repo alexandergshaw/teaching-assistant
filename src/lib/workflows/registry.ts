@@ -72,6 +72,8 @@ import {
   importLmsSyllabusAction,
   regenerateSyllabusFieldAction,
   listSyllabusTemplatesAction,
+  updateSyllabusTemplateAction,
+  deleteSyllabusTemplateAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6308,6 +6310,38 @@ export const STEP_REGISTRY: StepDefinition[] = [
           items: r.templates.length ? r.templates.map((t) => t.name) : ["(none)"],
         },
       };
+    },
+  },
+
+  {
+    type: "manage-syllabus-template",
+    name: "Rename or delete a syllabus template",
+    description: "Rename or delete a saved syllabus template. Attended-only.",
+    inputs: [
+      { key: "templateId", label: "Template id", type: "text", required: true },
+      { key: "action", label: "Action", type: "text", required: true, help: "rename or delete." },
+      { key: "newName", label: "New name", type: "text", required: false, help: "Required when action is rename." },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const id = String(values.templateId ?? "").trim();
+      if (!id) throw new Error("Provide the template id.");
+      const action = String(values.action ?? "").trim().toLowerCase();
+      if (action === "delete") {
+        onProgress("Deleting template...");
+        const r = await deleteSyllabusTemplateAction(id);
+        if ("error" in r) throw new Error(r.error);
+        return { outputs: {}, summary: { kind: "text", text: `Deleted template ${id}.` } };
+      }
+      if (action === "rename") {
+        const newName = String(values.newName ?? "").trim();
+        if (!newName) throw new Error("Provide the new name for the rename.");
+        onProgress("Renaming template...");
+        const r = await updateSyllabusTemplateAction(id, { name: newName });
+        if ("error" in r) throw new Error(r.error);
+        return { outputs: {}, summary: { kind: "text", text: `Renamed template to "${newName}".` } };
+      }
+      throw new Error("Action must be rename or delete.");
     },
   },
 ];

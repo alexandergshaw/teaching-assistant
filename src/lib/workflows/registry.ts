@@ -24,6 +24,7 @@ import {
   setCourseRubricAction,
   deleteGradingDraftAction,
   deleteModuleAction,
+  updateModuleAction,
   setupStudentRepoAction,
   listCourseHubAction,
   createCourseAssignmentAction,
@@ -8852,6 +8853,42 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const r = await copyFileToCanvasPageAction(course, { filePath, content, title, published }, inst);
       if ("error" in r) throw new Error(r.error);
       return { outputs: { pageUrl: r.htmlUrl }, summary: { kind: "link", label: `Published "${title}"`, url: r.htmlUrl } };
+    },
+  },
+
+  {
+    type: "bulk-publish-modules",
+    name: "Publish modules",
+    description: "Publish (or unpublish) many modules at once. Attended-only.",
+    inputs: [
+      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
+      { key: "moduleIds", label: "Module ids", type: "longtext", required: true, help: "One numeric module id per line." },
+      { key: "unpublish", label: "Unpublish instead", type: "boolean", required: false },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+    ],
+    outputs: [
+      { key: "updated", label: "Modules updated", type: "number" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const course = String(values.course ?? "").trim();
+      if (!course) throw new Error("Select an LMS course.");
+      const ids = String(values.moduleIds ?? "").split("\n").map((s) => s.trim()).filter((s) => /^\d+$/.test(s));
+      if (ids.length === 0) throw new Error("Provide at least one numeric module id.");
+      const published = String(values.unpublish ?? "") !== "1";
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+      onProgress("Publishing modules...");
+      let updated = 0;
+      const failures: string[] = [];
+      for (const id of ids) {
+        const r = await updateModuleAction(course, Number(id), { published }, inst);
+        if ("error" in r) {
+          failures.push(`${id}: ${r.error}`);
+        } else {
+          updated++;
+        }
+      }
+      const items = failures.length ? failures : [`${published ? "Published" : "Unpublished"} ${updated} module(s).`];
+      return { outputs: { updated }, summary: { kind: "list", label: `${updated} of ${ids.length} module(s) updated`, items } };
     },
   },
 ];

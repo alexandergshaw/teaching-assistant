@@ -6,9 +6,15 @@
 // occurrence (repeating schedules fire again at their next time).
 
 export interface ScheduledRun {
-  scheduleId: string;
+  /** Present for a time-schedule handoff; null for an event-trigger handoff. */
+  scheduleId: string | null;
+  /** Present for an event-trigger handoff; null for a time-schedule handoff.
+   * Both sources funnel through this one queue and auto-run identically - the
+   * id just tells the tab which record to disable if the workflow is missing. */
+  triggerId?: string | null;
   workflowId: string;
   workflowName: string;
+  /** For a trigger handoff, this already has the event's fireValues merged in. */
   fieldValues: Record<string, string>;
 }
 

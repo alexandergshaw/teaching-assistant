@@ -26,6 +26,19 @@ import {
   type ScheduleRepeat,
 } from "@/lib/workflow-schedules";
 import { peekScheduledRun, takeScheduledRun, SCHEDULED_RUN_EVENT } from "@/lib/workflow-schedule-handoff";
+import {
+  listWorkflowTriggers,
+  createWorkflowTrigger,
+  updateWorkflowTrigger,
+  deleteWorkflowTrigger,
+  generateWebhookToken,
+  getEventSource,
+  describeTrigger,
+  EVENT_SOURCES,
+  type WorkflowTrigger,
+  type TriggerEventType,
+} from "@/lib/workflow-triggers";
+import { recordWorkflowRun } from "@/lib/workflow-runs";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
 import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction, runSubmissionCodeAction } from "@/app/actions";
@@ -553,6 +566,19 @@ export default function WorkflowsTab() {
   const [scheduleBusy, setScheduleBusy] = useState(false);
   const [scheduleRemoveConfirm, setScheduleRemoveConfirm] = useState<string | null>(null);
 
+  // Event triggers for the signed-in user (null = not loaded yet).
+  const [triggers, setTriggers] = useState<WorkflowTrigger[] | null>(null);
+  const [triggerError, setTriggerError] = useState<string | null>(null);
+  const [triggerForm, setTriggerForm] = useState<{
+    eventType: TriggerEventType;
+    config: Record<string, string>;
+    courseId: string;
+    institution: string;
+    unattended: boolean;
+  } | null>(null);
+  const [triggerBusy, setTriggerBusy] = useState(false);
+  const [triggerRemoveConfirm, setTriggerRemoveConfirm] = useState<string | null>(null);
+
   // Parsed course exports keyed by course id; promises so concurrent readers
   // (module picker + running steps) share one download.
   const courseExportCacheRef = useRef<Map<string, Promise<CartridgeCourseData | null>>>(new Map());
@@ -949,6 +975,32 @@ export default function WorkflowsTab() {
     };
   }, [user, supabase]);
 
+  // Load the user's event triggers once per mount (mirrors the schedule load).
+  useEffect(() => {
+    if (!user) {
+      setTriggers([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await listWorkflowTriggers(supabase, user.id);
+        if (!cancelled) {
+          setTriggers(rows);
+          setTriggerError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setTriggerError(err instanceof Error ? err.message : "Could not load triggers.");
+          setTriggers([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, supabase]);
+
   // Consume queued scheduled runs (claimed by the page-level watcher) once the
   // tab is idle: each becomes a normal auto-run handoff. Runs whose workflow
   // id is not found stay queued until the async custom-def load settles
@@ -971,16 +1023,30 @@ export default function WorkflowsTab() {
           return;
         }
         setValidationError(
-          `Scheduled workflow "${next.workflowName}" no longer exists; its schedule has been disabled.`
+          `Workflow "${next.workflowName}" no longer exists; its schedule or trigger has been disabled.`
         );
-        if (user) {
-          void updateWorkflowSchedule(supabase, user.id, next.scheduleId, { enabled: false })
+        // A queued run carries EITHER a scheduleId (time schedule) or a
+        // triggerId (event trigger); disable whichever produced this orphan so
+        // a repeating source cannot grab the tab forever.
+        if (user && next.scheduleId) {
+          const scheduleId = next.scheduleId;
+          void updateWorkflowSchedule(supabase, user.id, scheduleId, { enabled: false })
             .then(() => {
               setSchedules((prev) =>
-                (prev ?? []).map((x) => (x.id === next.scheduleId ? { ...x, enabled: false } : x))
+                (prev ?? []).map((x) => (x.id === scheduleId ? { ...x, enabled: false } : x))
               );
             })
             .catch((err) => console.error("Failed to disable orphaned schedule:", err));
+        }
+        if (user && next.triggerId) {
+          const triggerId = next.triggerId;
+          void updateWorkflowTrigger(supabase, user.id, triggerId, { enabled: false })
+            .then(() => {
+              setTriggers((prev) =>
+                (prev ?? []).map((x) => (x.id === triggerId ? { ...x, enabled: false } : x))
+              );
+            })
+            .catch((err) => console.error("Failed to disable orphaned trigger:", err));
         }
         return;
       }
@@ -996,6 +1062,7 @@ export default function WorkflowsTab() {
     const needsHubCourse =
       runtimeFields.some((f) => f.type === "hubCourse" || f.type === "hubCourseList") ||
       scheduleForm !== null ||
+      triggerForm !== null ||
       (schedules ?? []).some((s) => s.courseId);
     if (!needsHubCourse || hubCourses !== null) return;
 
@@ -1022,7 +1089,7 @@ export default function WorkflowsTab() {
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, hubCourses, scheduleForm, schedules]);
+  }, [runtimeFields, hubCourses, scheduleForm, schedules, triggerForm]);
 
   useEffect(() => {
     const needsLmsCourseList = runtimeFields.some((f) => f.type === "lmsCourseList");
@@ -1534,6 +1601,20 @@ export default function WorkflowsTab() {
       setPendingHandoff(null);
     }
 
+    // Log the completion so a 'workflow-completed' (chaining) trigger can fire
+    // off this run. Best-effort; never blocks or breaks the run. A run whose
+    // only "failures" are user-disabled steps is not a genuine failure (mirrors
+    // the handoff guard above).
+    if (user && supabase && selectedDef) {
+      const genuineFailure = failedSteps.size > disabledRunIndices.size;
+      void recordWorkflowRun(supabase, user.id, {
+        workflowId: selectedDef.id,
+        workflowName: selectedDef.name,
+        status: genuineFailure ? "error" : "ok",
+        triggerSource: "manual",
+      }).catch((err) => console.error("Failed to record workflow run:", err));
+    }
+
     // Re-arm the lazy fetch so runs that created/updated tiles refresh the pickers
     setHubCourses(null);
     setRunning(false);
@@ -1660,6 +1741,92 @@ export default function WorkflowsTab() {
       setScheduleError(err instanceof Error ? err.message : "Could not delete the schedule.");
     }
   };
+
+  // Create an event trigger for the selected workflow from the current form
+  // values. Mirrors handleCreateSchedule's snapshot of values/provider/
+  // disabledSteps; the event source and its config decide when it fires.
+  const handleCreateTrigger = async () => {
+    if (!user || !selectedDef || !triggerForm) return;
+    const source = getEventSource(triggerForm.eventType);
+    if (!source) {
+      setTriggerError("Pick an event.");
+      return;
+    }
+    // Every required config field for this event source must be filled.
+    for (const field of source.configFields) {
+      if (field.required && !(triggerForm.config[field.key] ?? "").trim()) {
+        setTriggerError(`${field.label} is required for this event.`);
+        return;
+      }
+    }
+    // An lmsCourse value must contain a Canvas course id, or the server-side
+    // evaluator's /courses/(\d+)/ parse will silently never match and the
+    // trigger will save but never fire.
+    for (const field of source.configFields) {
+      if (field.type !== "lmsCourse") continue;
+      const fieldValue = (triggerForm.config[field.key] ?? "").trim();
+      if (fieldValue && !/courses\/\d+/.test(fieldValue)) {
+        setTriggerError("Enter the Canvas course URL (it must contain /courses/<id>).");
+        return;
+      }
+    }
+    setTriggerBusy(true);
+    setTriggerError(null);
+    try {
+      const created = await createWorkflowTrigger(supabase, user.id, {
+        workflowId: selectedDef.id,
+        workflowName: selectedDef.name,
+        fieldValues: values,
+        eventType: triggerForm.eventType,
+        eventConfig: triggerForm.config,
+        // Only meaningful when selectedHeadlessSafe gated the checkbox visible
+        // AND the event source can be evaluated server-side; app-open triggers
+        // ignore it. provider/disabledSteps are snapshotted regardless.
+        unattended: selectedHeadlessSafe && source.serverEvaluable && triggerForm.unattended,
+        provider: getStoredProvider(),
+        disabledSteps: Array.from(disabledSteps),
+        courseId: triggerForm.courseId || null,
+        institution: triggerForm.institution || null,
+        webhookToken: triggerForm.eventType === "webhook" ? generateWebhookToken() : null,
+      });
+      setTriggers((prev) => [created, ...(prev ?? [])]);
+      setTriggerForm(null);
+    } catch (err) {
+      setTriggerError(err instanceof Error ? err.message : "Could not save the trigger.");
+    } finally {
+      setTriggerBusy(false);
+    }
+  };
+
+  const handleToggleTrigger = async (t: WorkflowTrigger) => {
+    if (!user) return;
+    try {
+      await updateWorkflowTrigger(supabase, user.id, t.id, { enabled: !t.enabled });
+      setTriggers((prev) =>
+        (prev ?? []).map((x) => (x.id === t.id ? { ...x, enabled: !t.enabled } : x))
+      );
+      setTriggerError(null);
+    } catch (err) {
+      setTriggerError(err instanceof Error ? err.message : "Could not update the trigger.");
+    }
+  };
+
+  const handleDeleteTrigger = async (id: string) => {
+    if (!user) return;
+    try {
+      await deleteWorkflowTrigger(supabase, user.id, id);
+      setTriggers((prev) => (prev ?? []).filter((x) => x.id !== id));
+      setTriggerRemoveConfirm(null);
+      setTriggerError(null);
+    } catch (err) {
+      setTriggerError(err instanceof Error ? err.message : "Could not delete the trigger.");
+    }
+  };
+
+  // The webhook base URL shown next to a webhook trigger. Read at render on the
+  // client so it reflects wherever the app is actually served from.
+  const webhookBaseUrl =
+    typeof window !== "undefined" ? window.location.origin : "";
 
   return (
     <div className={styles.card}>
@@ -2581,6 +2748,278 @@ export default function WorkflowsTab() {
               </div>
             )}
           </>
+        )}
+
+        {selectedDef && (
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--field-border)" }}>
+            <h3 style={{ fontSize: "0.95rem", margin: "0 0 4px 0" }}>Triggers</h3>
+            <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>
+              Run this workflow automatically when an event happens - a submission, a message, a repo push, another workflow finishing, or an inbound webhook. Available while you build the workflow and when you run it.
+            </p>
+            <Button
+              variant="outlined"
+              size="small"
+              disabled={!user || !!expanded.error}
+              onClick={() =>
+                setTriggerForm((prev) =>
+                  prev
+                    ? null
+                    : {
+                        eventType: "submission-received",
+                        config: {},
+                        courseId: "",
+                        institution: activeInstitution || "",
+                        unattended: false,
+                      }
+                )
+              }
+            >
+              {triggerForm ? "Cancel trigger" : "Trigger on event..."}
+            </Button>
+
+            {triggerForm && (() => {
+              const source = getEventSource(triggerForm.eventType);
+              const canUnattended = selectedHeadlessSafe && !!source?.serverEvaluable;
+              return (
+                <div style={{ marginTop: 16, border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <span style={{ fontWeight: 600, fontSize: "0.9em" }}>Trigger {selectedDef?.name} on an event</span>
+                  <p className={styles.fieldHint} style={{ margin: 0 }}>
+                    Uses the run form values as they are right now. Events are checked about every {MIN_INTERVAL_MINUTES} minutes while the app is open; unattended triggers are also checked in the cloud.
+                  </p>
+                  <TextField
+                    select
+                    size="small"
+                    label="Event"
+                    value={triggerForm.eventType}
+                    onChange={(e) =>
+                      setTriggerForm((p) =>
+                        p ? { ...p, eventType: e.target.value as TriggerEventType, config: {} } : p
+                      )
+                    }
+                    sx={{ maxWidth: 380 }}
+                  >
+                    {EVENT_SOURCES.map((s) => (
+                      <MenuItem key={s.type} value={s.type}>{s.label}</MenuItem>
+                    ))}
+                  </TextField>
+                  {source && (
+                    <p className={styles.fieldHint} style={{ margin: 0 }}>{source.description}</p>
+                  )}
+
+                  {(source?.configFields ?? []).map((field) => {
+                    const val = triggerForm.config[field.key] ?? "";
+                    const setVal = (v: string) =>
+                      setTriggerForm((p) => (p ? { ...p, config: { ...p.config, [field.key]: v } } : p));
+                    if (field.type === "boolean") {
+                      return (
+                        <FormControlLabel
+                          key={field.key}
+                          control={
+                            <Checkbox size="small" checked={val === "1"} onChange={(e) => setVal(e.target.checked ? "1" : "")} />
+                          }
+                          label={field.label}
+                        />
+                      );
+                    }
+                    if (field.type === "institution") {
+                      return (
+                        <TextField key={field.key} select size="small" label={field.label} value={val} onChange={(e) => setVal(e.target.value)} helperText={field.help} sx={{ minWidth: 200 }}>
+                          <MenuItem value="">{`(active: ${activeInstitution || "none"})`}</MenuItem>
+                          {institutions.map((i) => (
+                            <MenuItem key={i} value={i}>{i}</MenuItem>
+                          ))}
+                        </TextField>
+                      );
+                    }
+                    if (field.type === "course") {
+                      return (
+                        <TextField key={field.key} select size="small" label={field.label} value={val} onChange={(e) => setVal(e.target.value)} helperText={field.help} sx={{ minWidth: 220 }}>
+                          <MenuItem value="">Select a course</MenuItem>
+                          {(hubCourses ?? []).map((c) => (
+                            <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+                          ))}
+                        </TextField>
+                      );
+                    }
+                    if (field.type === "workflow") {
+                      return (
+                        <TextField key={field.key} select size="small" label={field.label} value={val} onChange={(e) => setVal(e.target.value)} helperText={field.help} sx={{ minWidth: 240 }}>
+                          <MenuItem value="">Select a workflow</MenuItem>
+                          {workflows.filter((w) => w.id !== selectedWorkflowId).map((w) => (
+                            <MenuItem key={w.id} value={w.id}>{w.name}</MenuItem>
+                          ))}
+                        </TextField>
+                      );
+                    }
+                    if (field.type === "lmsCourse") {
+                      if (!activeInstitution) {
+                        return (
+                          <TextField
+                            key={field.key}
+                            size="small"
+                            label={field.label}
+                            value={val}
+                            onChange={(e) => setVal(e.target.value)}
+                            helperText={field.help || "Paste the Canvas course URL, e.g. https://<canvas>/courses/12345"}
+                            sx={{ minWidth: 260 }}
+                          />
+                        );
+                      }
+                      return (
+                        <div key={field.key} style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 260 }}>
+                          <span className={styles.fieldHint}>{field.label}</span>
+                          <CoursePicker
+                            activeInstitution={activeInstitution}
+                            courseUrl={val}
+                            onSelect={(url) => setVal(url)}
+                          />
+                          <p className={styles.fieldHint} style={{ margin: 0 }}>
+                            {field.help || "Paste the Canvas course URL, e.g. https://<canvas>/courses/12345"}
+                          </p>
+                        </div>
+                      );
+                    }
+                    if (field.type === "org") {
+                      return (
+                        <div key={field.key} style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220 }}>
+                          <span className={styles.fieldHint}>{field.label}</span>
+                          <Typeahead
+                            options={(orgs ?? []).map((o) => ({ value: o, label: o }))}
+                            value={val}
+                            onChange={(v) => setVal(v)}
+                            placeholder={orgs === null ? "Loading organizations..." : "Choose an organization..."}
+                            loading={orgs === null}
+                            noOptionsText="No organizations"
+                          />
+                          {field.help && (
+                            <p className={styles.fieldHint} style={{ margin: 0 }}>
+                              {field.help}
+                            </p>
+                          )}
+                          {orgsError && <p className={styles.error}>{orgsError}</p>}
+                        </div>
+                      );
+                    }
+                    return (
+                      <TextField
+                        key={field.key}
+                        size="small"
+                        type={field.type === "number" ? "number" : "text"}
+                        label={field.label}
+                        value={val}
+                        onChange={(e) => setVal(e.target.value)}
+                        helperText={field.help}
+                        sx={{ minWidth: field.type === "number" ? 140 : 260 }}
+                        {...(field.type === "number" ? { slotProps: { htmlInput: { min: 1, step: 1 } } } : {})}
+                      />
+                    );
+                  })}
+
+                  {triggerForm.eventType === "webhook" && (
+                    <p className={styles.fieldHint} style={{ margin: 0 }}>
+                      A secret URL is generated on save. POST to it from any external system to run this workflow.
+                    </p>
+                  )}
+
+                  {canUnattended ? (
+                    <div>
+                      <FormControlLabel
+                        control={
+                          <Checkbox size="small" checked={triggerForm.unattended} onChange={(e) => setTriggerForm((p) => (p ? { ...p, unattended: e.target.checked } : p))} />
+                        }
+                        label="Watch in the cloud (even when the app is closed)"
+                      />
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        Unattended triggers use the current run-form values and provider snapshot; interactive workflows are not eligible.
+                      </p>
+                    </div>
+                  ) : source && !source.serverEvaluable && triggerForm.eventType !== "webhook" ? (
+                    <p className={styles.fieldHint} style={{ margin: 0 }}>
+                      This event only happens in your browser, so its trigger runs while the app is open.
+                    </p>
+                  ) : triggerForm.eventType !== "webhook" ? (
+                    <p className={styles.fieldHint} style={{ margin: 0 }}>
+                      This workflow pauses for input, so its trigger only runs while the app is open.
+                    </p>
+                  ) : null}
+
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <TextField select size="small" label="Course (optional)" value={triggerForm.courseId} onChange={(e) => setTriggerForm((p) => (p ? { ...p, courseId: e.target.value } : p))} sx={{ minWidth: 180 }}>
+                      <MenuItem value="">None</MenuItem>
+                      {(hubCourses ?? []).map((c) => (
+                        <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+                      ))}
+                    </TextField>
+                    <TextField select size="small" label="Institution (optional)" value={triggerForm.institution} onChange={(e) => setTriggerForm((p) => (p ? { ...p, institution: e.target.value } : p))} sx={{ minWidth: 160 }}>
+                      <MenuItem value="">None</MenuItem>
+                      {institutions.map((i) => (
+                        <MenuItem key={i} value={i}>{i}</MenuItem>
+                      ))}
+                    </TextField>
+                    <Button variant="contained" size="small" disabled={triggerBusy} onClick={() => void handleCreateTrigger()}>
+                      {triggerBusy ? "Saving..." : "Save trigger"}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {triggerError && <p className={styles.error}>{triggerError}</p>}
+
+            {(triggers ?? []).some((t) => t.workflowId === selectedDef.id) && (
+              <div style={{ marginTop: 16 }}>
+                {(triggers ?? []).filter((t) => t.workflowId === selectedDef.id).map((t) => {
+                  const courseName = t.courseId
+                    ? hubCourses?.find((c) => c.id === t.courseId)?.name ?? "course"
+                    : null;
+                  const attachment = [courseName, t.institution].filter(Boolean).join(", ");
+                  const webhookUrl =
+                    t.eventType === "webhook" && t.webhookToken
+                      ? `${webhookBaseUrl}/api/triggers/${t.webhookToken}`
+                      : null;
+                  return (
+                    <div key={t.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--field-border)", fontSize: "0.85em" }}>
+                      <span style={{ fontWeight: 600 }}>{t.workflowName}</span>
+                      {t.unattended && (
+                        <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>Unattended</span>
+                      )}
+                      <span style={{ color: "var(--text-secondary)" }}>
+                        {describeTrigger(t)}
+                        {t.enabled ? "" : " - disabled"}
+                        {attachment ? ` - ${attachment}` : ""}
+                        {t.lastFiredAt ? ` - last fired ${new Date(t.lastFiredAt).toLocaleString()}` : ""}
+                      </span>
+                      {webhookUrl && (
+                        <code style={{ flexBasis: "100%", fontSize: "0.8em", color: "var(--text-secondary)", wordBreak: "break-all" }}>{webhookUrl}</code>
+                      )}
+                      <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                        {webhookUrl && (
+                          <button type="button" className={styles.linkButton} onClick={() => void navigator.clipboard?.writeText(webhookUrl)}>
+                            Copy URL
+                          </button>
+                        )}
+                        <button type="button" className={styles.linkButton} onClick={() => void handleToggleTrigger(t)}>
+                          {t.enabled ? "Disable" : "Enable"}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          style={{ color: "var(--danger)" }}
+                          onClick={() =>
+                            triggerRemoveConfirm === t.id
+                              ? void handleDeleteTrigger(t.id)
+                              : setTriggerRemoveConfirm(t.id)
+                          }
+                        >
+                          {triggerRemoveConfirm === t.id ? "Confirm" : "Remove"}
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
       </div>
 

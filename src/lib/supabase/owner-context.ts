@@ -12,28 +12,37 @@ import { AsyncLocalStorage } from "node:async_hooks";
  *
  * The bypass is safe ONLY because of who is allowed to call runAsOwner and
  * under what conditions:
- *   - The ONLY caller is src/app/api/cron/run-schedules/route.ts.
- *   - That route calls runAsOwner ONLY after (a) verifying the request's
- *     `Authorization: Bearer <token>` header against the server-only
- *     CRON_SECRET env var, and (b) resolving the schedule's target user via
- *     the Supabase service-role admin API and confirming isOwnerEmail on the
- *     result - i.e. re-checking the exact allowlist requireOwner() itself
- *     enforces on the normal path.
+ *   - The callers are src/app/api/cron/run-schedules/route.ts (which also runs
+ *     the unattended event-trigger loop via src/lib/workflow-trigger-runner.ts)
+ *     and src/app/api/triggers/[token]/route.ts (the inbound webhook endpoint).
+ *   - Each caller calls runAsOwner ONLY after (a) authenticating the request
+ *     against a server-only secret - the cron route verifies an
+ *     `Authorization: Bearer <token>` header against the CRON_SECRET env var;
+ *     the webhook route matches the unguessable per-trigger `webhook_token`
+ *     from the URL against an enabled trigger row - and (b) resolving the
+ *     target user via the Supabase service-role admin API and confirming
+ *     isOwnerEmail on the result, i.e. re-checking the exact allowlist
+ *     requireOwner() itself enforces on the normal path. Both also gate the
+ *     workflow through isHeadlessSafeWorkflow before running it.
  *   - This module exports nothing that a client component could import: it
  *     has no "use client" directive and is never imported by one. Grep
  *     `runAsOwner` before changing that invariant - it must stay imported
- *     only by the cron route and by src/lib/workflows/server-runner.ts
- *     (which receives the owner as a plain argument; it never reads
- *     request/cookie state itself).
+ *     only by the two trusted route handlers above (and their
+ *     src/lib/workflow-trigger-runner.ts helper) and by
+ *     src/lib/workflows/server-runner.ts (which receives the owner as a plain
+ *     argument; it never reads request/cookie state itself).
  *   - AsyncLocalStorage scopes the impersonation to the exact async call
  *     tree started inside runAsOwner's callback. It is not global, not
  *     request-wide via middleware, and cannot leak into a concurrent request
  *     that did not call runAsOwner itself.
  *
  * Do NOT add a way to set this context from anything reachable by a browser
- * request (a Server Action invoked by a client, a public Route Handler
- * without its own CRON_SECRET-equivalent check, middleware, etc.). Doing so
- * would let any request impersonate the app owner.
+ * request UNLESS it carries its own CRON_SECRET-equivalent gate. A Server
+ * Action invoked by a client, a public Route Handler with no server-only
+ * secret check, middleware, etc. must never reach runAsOwner - doing so would
+ * let any request impersonate the app owner. The webhook route qualifies only
+ * because the per-trigger token is exactly such a secret and it re-checks the
+ * owner allowlist before impersonating.
  */
 
 export interface OwnerIdentity {

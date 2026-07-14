@@ -7,6 +7,8 @@ import { listWorkflowDefs } from "@/lib/workflow-defs";
 import { allWorkflows } from "@/lib/workflows/presets";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
 import { runWorkflowUnattended, buildServerStepRunHelpers } from "@/lib/workflows/server-runner";
+import { runDueUnattendedTriggers } from "@/lib/workflow-trigger-runner";
+import { recordWorkflowRun } from "@/lib/workflow-runs";
 import { resolveDocumentAuthor } from "@/lib/author";
 import type { LlmProvider } from "@/lib/llm";
 
@@ -141,6 +143,20 @@ export async function GET(req: NextRequest) {
           ? undefined
           : JSON.stringify(outcome.steps.filter((s) => s.status === "error" || s.status === "needs-interaction")),
       });
+
+      // Log the completion so a 'workflow-completed' (chaining) trigger can
+      // fire off this scheduled run. Best-effort: chaining is a convenience and
+      // must never fail the run that produced it.
+      try {
+        await recordWorkflowRun(supabase, schedule.userId, {
+          workflowId: schedule.workflowId,
+          workflowName: def.name,
+          status: outcome.ok ? "ok" : "error",
+          triggerSource: "schedule",
+        });
+      } catch {
+        // ignore
+      }
     } catch (err) {
       results.push({
         scheduleId: schedule.id,
@@ -151,5 +167,27 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ processed: results.length, results });
+  // After time-schedules, evaluate due UNATTENDED event triggers across all
+  // users (a new submission, a repo push, a chained workflow, ...). Isolated in
+  // its own try so a trigger-side failure never masks the schedule results.
+  let triggerResults: Awaited<ReturnType<typeof runDueUnattendedTriggers>> = [];
+  try {
+    triggerResults = await runDueUnattendedTriggers(supabase, now, MAX_SCHEDULES_PER_RUN);
+  } catch (err) {
+    triggerResults = [
+      {
+        triggerId: "",
+        workflowId: "",
+        status: "error",
+        detail: err instanceof Error ? err.message : String(err),
+      },
+    ];
+  }
+
+  return NextResponse.json({
+    processed: results.length,
+    results,
+    triggersProcessed: triggerResults.length,
+    triggers: triggerResults,
+  });
 }

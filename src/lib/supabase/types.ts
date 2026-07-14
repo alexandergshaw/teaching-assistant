@@ -634,6 +634,103 @@ export interface Database {
           interval_minutes?: number | null;
         };
       };
+      workflow_triggers: {
+        Row: {
+          id: string;
+          user_id: string;
+          workflow_id: string;
+          workflow_name: string;
+          field_values: Json;
+          event_type: string;
+          event_config: Json;
+          cursor: Json | null;
+          check_version: number;
+          enabled: boolean;
+          unattended: boolean;
+          provider: string | null;
+          disabled_steps: Json;
+          course_id: string | null;
+          institution: string | null;
+          webhook_token: string | null;
+          last_checked_at: string | null;
+          last_fired_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          workflow_id: string;
+          workflow_name: string;
+          field_values?: Json;
+          event_type: string;
+          event_config?: Json;
+          cursor?: Json | null;
+          check_version?: number;
+          enabled?: boolean;
+          unattended?: boolean;
+          provider?: string | null;
+          disabled_steps?: Json;
+          course_id?: string | null;
+          institution?: string | null;
+          webhook_token?: string | null;
+          last_checked_at?: string | null;
+          last_fired_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          workflow_id?: string;
+          workflow_name?: string;
+          field_values?: Json;
+          event_type?: string;
+          event_config?: Json;
+          cursor?: Json | null;
+          check_version?: number;
+          enabled?: boolean;
+          unattended?: boolean;
+          provider?: string | null;
+          disabled_steps?: Json;
+          course_id?: string | null;
+          institution?: string | null;
+          webhook_token?: string | null;
+          last_checked_at?: string | null;
+          last_fired_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      workflow_runs: {
+        Row: {
+          id: string;
+          user_id: string;
+          workflow_id: string;
+          workflow_name: string;
+          status: string;
+          trigger_source: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          workflow_id: string;
+          workflow_name: string;
+          status: string;
+          trigger_source?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          workflow_id?: string;
+          workflow_name?: string;
+          status?: string;
+          trigger_source?: string | null;
+          created_at?: string;
+        };
+      };
       grading_drafts: {
         Row: {
           id: string;

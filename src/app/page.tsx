@@ -13,6 +13,7 @@ import RecordingTab from "./components/RecordingTab";
 import FilesTab from "./components/FilesTab";
 import WorkflowsTab from "./components/WorkflowsTab";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
+import WorkflowTriggerWatcher from "./components/WorkflowTriggerWatcher";
 import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
 import LessonPlanningForm from "./components/LessonPlanningForm";
@@ -676,6 +677,7 @@ export default function Home() {
     <>
       <TopBar />
       <WorkflowScheduleWatcher onRunScheduled={() => setActiveTab("workflows")} />
+      <WorkflowTriggerWatcher onRunScheduled={() => setActiveTab("workflows")} />
       <main className={styles.page}>
       <div className={styles.tabContainer}>
         <Tabs

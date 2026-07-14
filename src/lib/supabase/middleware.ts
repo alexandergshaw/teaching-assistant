@@ -44,11 +44,15 @@ export async function updateSession(request: NextRequest) {
   // route enforces its OWN Bearer CRON_SECRET check - a stronger auth for an
   // unattended caller than the human session gate. Without this exemption the
   // cron request is redirected to /login (a 307) before it reaches the route.
+  // /api/triggers is the inbound webhook-trigger namespace, exempt for the same
+  // reason: an external caller has no session, and the route authenticates with
+  // the unguessable per-trigger token in its path.
   const { pathname } = request.nextUrl;
   const isPublic =
     pathname.startsWith("/login") ||
     pathname.startsWith("/auth") ||
-    pathname.startsWith("/api/cron");
+    pathname.startsWith("/api/cron") ||
+    pathname.startsWith("/api/triggers");
 
   if (!isPublic) {
     if (!isOwnerEmail(user?.email)) {

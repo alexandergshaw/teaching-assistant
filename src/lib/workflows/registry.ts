@@ -102,6 +102,7 @@ import {
   bulkAssociateRubricAction,
   generateModelAnswerAction,
   gradeOneSubmissionAction,
+  runSubmissionCodeAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7912,6 +7913,73 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { gradeSummary, canvasUrl: r.canvasUrl },
         summary: { kind: "text", text: gradeSummary },
+      };
+    },
+  },
+  {
+    type: "run-submission-code",
+    name: "Run submission code",
+    description:
+      "Execute a student's submitted code in the sandbox and capture its output as grading evidence.",
+    inputs: [
+      { key: "code", label: "Code", type: "longtext", required: true },
+      {
+        key: "fileName",
+        label: "File name",
+        type: "text",
+        required: false,
+        help: "Defaults to solution.py; the extension picks the language.",
+      },
+    ],
+    outputs: [{ key: "output", label: "Run output", type: "longtext" }],
+    run: async (values, helpers, onProgress) => {
+      const code = String(values.code ?? "").trim();
+      if (!code) {
+        throw new Error("Provide the code to run.");
+      }
+
+      const fileName = String(values.fileName ?? "").trim() || "solution.py";
+      const dot = fileName.lastIndexOf(".");
+      const extension = dot >= 0 ? fileName.slice(dot) : ".py";
+
+      onProgress("Running code...");
+      const result = await runSubmissionCodeAction([
+        { name: fileName, extension, previewContent: code },
+      ]);
+
+      if (!result) {
+        throw new Error("The code could not be run.");
+      }
+
+      let outputText = "";
+
+      if (result.stdout) {
+        outputText += result.stdout;
+      }
+
+      if (result.stderr) {
+        if (outputText) outputText += "\n";
+        outputText += result.stderr;
+      }
+
+      if (result.exitCode !== null && result.exitCode !== 0) {
+        if (outputText) outputText += "\n";
+        outputText += `Exit code: ${result.exitCode}`;
+      }
+
+      if (result.compileOutput) {
+        if (outputText) outputText += "\n";
+        outputText += `Compiler output:\n${result.compileOutput}`;
+      }
+
+      if (result.error) {
+        if (outputText) outputText += "\n";
+        outputText += `Error: ${result.error}`;
+      }
+
+      return {
+        outputs: { output: outputText },
+        summary: { kind: "text", text: outputText || "(No output)" },
       };
     },
   },

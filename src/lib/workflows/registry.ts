@@ -69,6 +69,7 @@ import {
   getInstitutionCountsAction,
   getUnreadCountsAction,
   checkStudentActivityAction,
+  importLmsSyllabusAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6168,6 +6169,41 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { activity: lines.join("\n"), staleCount },
         summary: { kind: "list", label: `${r.rows.length} repo(s), ${staleCount} stale`, items: lines.length ? lines : ["(no repos found)"] },
+      };
+    },
+  },
+
+  {
+    type: "import-lms-syllabus",
+    name: "Import syllabus from the LMS",
+    description: "Pull an existing syllabus from the live LMS course and save it as a finalized syllabus for reuse.",
+    inputs: [
+      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
+      { key: "courseName", label: "Course name", type: "text", required: false, help: "Names the imported syllabus; defaults to 'Course syllabus'." },
+      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
+    ],
+    outputs: [
+      { key: "syllabusId", label: "Syllabus id", type: "text" },
+      { key: "syllabusName", label: "Syllabus name", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const course = String(values.course ?? "").trim();
+      if (!course) {
+        throw new Error("Select an LMS course to import from.");
+      }
+
+      const courseName = String(values.courseName ?? "").trim() || "Course syllabus";
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+
+      onProgress("Importing syllabus from the LMS...");
+      const r = await importLmsSyllabusAction(course, inst, courseName);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      return {
+        outputs: { syllabusId: r.syllabusId, syllabusName: r.name },
+        summary: { kind: "text", text: `Imported syllabus "${r.name}".` },
       };
     },
   },

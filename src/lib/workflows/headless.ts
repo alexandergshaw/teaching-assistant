@@ -62,6 +62,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "check-needs-grading",
   "get-unread-and-notifications",
   "check-student-activity",
+  "import-lms-syllabus",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

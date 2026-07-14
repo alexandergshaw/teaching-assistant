@@ -1263,6 +1263,21 @@ export async function gradeOneSubmissionAction(
   }
 }
 
+export async function generateModelAnswerAction(
+  instructions: string,
+  rubric: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ modelAnswer: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!instructions.trim()) return { error: "Provide the assignment instructions." };
+    const answer = await generateSampleAnswer(instructions, rubric, provider);
+    return { modelAnswer: typeof answer === "string" ? answer : String(answer) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate a model answer." };
+  }
+}
+
 export async function listAnnouncementsAction(
   courseUrl: string,
   acronym?: string

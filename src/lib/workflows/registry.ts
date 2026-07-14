@@ -99,6 +99,7 @@ import {
   rememberRubricAction,
   findBankedRubricAction,
   bulkAssociateRubricAction,
+  generateModelAnswerAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7751,6 +7752,37 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: {},
         summary: { kind: "text", text: `Discarded grading draft ${draftId}.` },
+      };
+    },
+  },
+
+  {
+    type: "generate-model-answer",
+    name: "Generate a model answer",
+    description: "Write a full-credit model answer for an assignment against its rubric, as an instructor reference.",
+    inputs: [
+      { key: "instructions", label: "Assignment instructions", type: "longtext", required: true },
+      { key: "rubric", label: "Rubric", type: "longtext", required: false },
+    ],
+    outputs: [
+      { key: "modelAnswer", label: "Model answer", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const instructions = String(values.instructions ?? "").trim();
+      if (!instructions) {
+        throw new Error("Provide the assignment instructions.");
+      }
+
+      const rubric = String(values.rubric ?? "");
+      onProgress("Writing model answer...");
+      const r = await generateModelAnswerAction(instructions, rubric, helpers.provider);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      return {
+        outputs: { modelAnswer: r.modelAnswer },
+        summary: { kind: "text", text: r.modelAnswer },
       };
     },
   },

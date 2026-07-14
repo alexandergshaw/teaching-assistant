@@ -12,6 +12,7 @@ import {
   getRepoZipAction,
   generateLecturePlansAction,
   listCourseContentAction,
+  listAnnouncementsAction,
   createModuleAction,
   requestFileUploadAction,
   createModuleItemAction,
@@ -5494,6 +5495,76 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: {},
         summary: { kind: "list" as const, label: "Grades posted", items: lines },
+      };
+    },
+  },
+
+  {
+    type: "list-announcements",
+    name: "List course announcements",
+    description: "Read a course's existing LMS announcements (scheduled ones surfaced first) so a later step can avoid duplicating them.",
+    inputs: [
+      {
+        key: "course",
+        label: "LMS course",
+        type: "lmsCourse",
+        required: true,
+      },
+      {
+        key: "institution",
+        label: "Institution",
+        type: "institution",
+        required: false,
+        help: "Defaults to the active institution.",
+      },
+    ],
+    outputs: [
+      { key: "announcements", label: "Announcements", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const course = String(values.course ?? "").trim();
+      if (!course) {
+        return {
+          outputs: { announcements: "" },
+          summary: {
+            kind: "text",
+            text: "Skipped - no LMS course selected.",
+          },
+        };
+      }
+
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+
+      onProgress("Loading announcements...");
+      const r = await listAnnouncementsAction(course, inst);
+
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      const titles: string[] = [];
+      const lines: string[] = [];
+
+      for (const announcement of r.announcements) {
+        const title = announcement.title.trim();
+        titles.push(title || "(untitled)");
+
+        let line = title || "(untitled)";
+        if (announcement.delayedPostAt && !announcement.postedAt) {
+          line += ` (scheduled for ${announcement.delayedPostAt})`;
+        }
+        lines.push(line);
+      }
+
+      const announcements = lines.join("\n");
+
+      return {
+        outputs: { announcements },
+        summary: {
+          kind: "list",
+          label: `${r.announcements.length} announcement(s) in ${r.courseName}`,
+          items: titles.length > 0 ? titles : ["(none)"],
+        },
       };
     },
   },

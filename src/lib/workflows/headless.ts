@@ -33,6 +33,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "save-csv-to-course",
   "save-zip-to-course",
   "lms-wipe",
+  "list-announcements",
   "assign-student-repos",
   "lms-rubric",
   "lms-assignments",

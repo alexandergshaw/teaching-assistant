@@ -120,6 +120,7 @@ import {
   dispatchTestsAction,
   getTestRunStatusAction,
   setBranchProtectionAction,
+  listGithubReposAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8665,6 +8666,30 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: {},
         summary: { kind: "text", text: `Set ${topics.length} topic(s) on ${repo}.` },
+      };
+    },
+  },
+
+  {
+    type: "list-github-repos",
+    name: "List GitHub repositories",
+    description: "Enumerate the repositories the token can see, to seed a repo selection or fan-out.",
+    inputs: [],
+    outputs: [
+      { key: "repos", label: "Repositories", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      onProgress("Listing repositories...");
+      const r = await listGithubReposAction();
+      if ("error" in r) throw new Error(r.error);
+      const names = r.repos.map((repo) => repo.fullName);
+      return {
+        outputs: { repos: names.join("\n") },
+        summary: {
+          kind: "list",
+          label: `${r.repos.length} repo(s)`,
+          items: names.length ? names : ["(none)"],
+        },
       };
     },
   },

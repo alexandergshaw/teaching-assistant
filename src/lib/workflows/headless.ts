@@ -108,6 +108,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "read-pr-diff",
   "dispatch-tests",
   "poll-test-run",
+  "list-github-repos",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

@@ -39,7 +39,7 @@ import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { copyedit, stripLongDashes } from "@/lib/embedded/scaffold";
 import { routeRequest } from "@/lib/embedded/router";
 import { rememberRubric } from "@/lib/research/rubric-bank";
-import { findCaseStudyMaterial, type CaseStudyMaterial } from "@/lib/research/index";
+import { findCaseStudyMaterial, type CaseStudyMaterial, findPracticeProblems, type PracticeProblemEntry } from "@/lib/research/index";
 import {
   listUnverifiedKnowledge,
   verifyKnowledgeEntry,
@@ -9095,6 +9095,20 @@ export async function rerunWorkflowRunAction(repoRef: string, runId: number): Pr
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not rerun the workflow." };
+  }
+}
+
+export async function findPracticeProblemsAction(
+  topic: string,
+  limit = 3
+): Promise<{ problems: PracticeProblemEntry[] } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!topic.trim()) return { error: "Provide a topic." };
+    const problems = await findPracticeProblems(topic.trim(), limit);
+    return { problems };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not find practice problems." };
   }
 }
 

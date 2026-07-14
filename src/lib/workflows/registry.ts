@@ -81,6 +81,7 @@ import {
   generateExamplesAction,
   generateDocumentTextAction,
   findCaseStudyMaterialAction,
+  findPracticeProblemsAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6837,6 +6838,57 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { caseStudy, found: "1" },
         summary: { kind: "text", text: `Found case study: ${r.material.title}` }
+      };
+    },
+  },
+
+  {
+    type: "find-practice-problems",
+    name: "Find practice problems",
+    description: "Retrieve hand-verified practice problems (example, prompt, solution) for a topic from the curated knowledge base.",
+    inputs: [
+      { key: "topic", label: "Topic", type: "text", required: true },
+      { key: "count", label: "How many", type: "number", required: false, help: "Default 3." }
+    ],
+    outputs: [
+      { key: "problems", label: "Practice problems", type: "longtext" },
+      { key: "count", label: "Count", type: "number" }
+    ],
+    run: async (values, helpers, onProgress) => {
+      const topic = String(values.topic ?? "").trim();
+      if (!topic) throw new Error("Provide a topic.");
+
+      const countRaw = String(values.count ?? "").trim();
+      const limit = countRaw && Number.isInteger(Number(countRaw)) && Number(countRaw) > 0 ? Number(countRaw) : 3;
+
+      onProgress("Finding practice problems...");
+      const r = await findPracticeProblemsAction(topic, limit);
+      if ("error" in r) throw new Error(r.error);
+
+      const items: string[] = [];
+      const lines: string[] = [];
+
+      for (const problem of r.problems) {
+        items.push(problem.title);
+        lines.push(`[${problem.language}] ${problem.title}`);
+        lines.push("");
+        lines.push("Prompt:");
+        lines.push(problem.prompt);
+        lines.push("");
+        lines.push("Example:");
+        lines.push(problem.exampleCode);
+        lines.push("");
+        lines.push("Solution:");
+        lines.push(problem.solutionCode);
+        lines.push("");
+        lines.push("---");
+        lines.push("");
+      }
+
+      const problems = lines.join("\n").trim();
+      return {
+        outputs: { problems, count: r.problems.length },
+        summary: { kind: "list", label: `${r.problems.length} problem(s)`, items: items.length ? items : ["(none found)"] }
       };
     },
   },

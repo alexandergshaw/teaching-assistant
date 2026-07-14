@@ -13,6 +13,7 @@ import {
   generateLecturePlansAction,
   listCourseContentAction,
   listAnnouncementsAction,
+  draftAnnouncementAction,
   createModuleAction,
   requestFileUploadAction,
   createModuleItemAction,
@@ -5564,6 +5565,45 @@ export const STEP_REGISTRY: StepDefinition[] = [
           kind: "list",
           label: `${r.announcements.length} announcement(s) in ${r.courseName}`,
           items: titles.length > 0 ? titles : ["(none)"],
+        },
+      };
+    },
+  },
+
+  {
+    type: "draft-announcement",
+    name: "Draft an announcement",
+    description: "Draft a warm, professional course announcement (subject and body) from a short instruction, ready to review or post in a later step.",
+    inputs: [
+      {
+        key: "instruction",
+        label: "What should it say?",
+        type: "longtext",
+        required: true,
+      },
+    ],
+    outputs: [
+      { key: "announcementTitle", label: "Announcement title", type: "text" },
+      { key: "announcement", label: "Announcement body", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const instruction = String(values.instruction ?? "").trim();
+      if (!instruction) {
+        throw new Error("Describe what the announcement should say first.");
+      }
+
+      onProgress("Drafting announcement...");
+      const r = await draftAnnouncementAction(instruction, helpers.provider);
+
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      return {
+        outputs: { announcementTitle: r.title, announcement: r.message },
+        summary: {
+          kind: "text",
+          text: `${r.title}\n\n${r.message}`,
         },
       };
     },

@@ -77,6 +77,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "generate-worked-examples",
   "generate-full-credit-checklist",
   "generate-document",
+  "generate-rubric-from-repo",
   "revise-generated-document",
   "outline-course-from-repo",
   "extract-glossary-terms",

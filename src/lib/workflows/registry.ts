@@ -7597,6 +7597,41 @@ export const STEP_REGISTRY: StepDefinition[] = [
       };
     },
   },
+
+  {
+    type: "generate-rubric-from-repo",
+    name: "Generate a rubric from a repo",
+    description: "Generate a grading rubric from a repository's contents.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+    ],
+    outputs: [
+      { key: "rubric", label: "Rubric", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) {
+        throw new Error("Provide a repository.");
+      }
+
+      onProgress("Downloading repository...");
+      const z = await getRepoZipAction(repo);
+      if ("error" in z) {
+        throw new Error(z.error);
+      }
+
+      onProgress("Generating rubric...");
+      const r = await generateCourseRubricFromZipAction(z.base64, helpers.provider);
+      if (typeof r !== "string") {
+        throw new Error(r.error);
+      }
+
+      return {
+        outputs: { rubric: r },
+        summary: { kind: "text", text: r },
+      };
+    },
+  },
 ];
 
 export function getStepDefinition(type: string): StepDefinition | undefined {

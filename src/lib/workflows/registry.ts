@@ -28,6 +28,7 @@ import {
   createCourseAssignmentAction,
   createRubricAction,
   generateCourseRubricFromZipAction,
+  generateCourseScheduleAction,
   getFinalizedSyllabusAction,
   placeSyllabusInModuleAction,
   createGradableAction,
@@ -6342,6 +6343,64 @@ export const STEP_REGISTRY: StepDefinition[] = [
         return { outputs: {}, summary: { kind: "text", text: `Renamed template to "${newName}".` } };
       }
       throw new Error("Action must be rename or delete.");
+    },
+  },
+
+  {
+    type: "generate-dated-schedule",
+    name: "Generate a dated course schedule",
+    description: "Generate a week-by-week course schedule anchored to real calendar dates from a term and start date.",
+    inputs: [
+      { key: "description", label: "Course description", type: "longtext", required: true },
+      { key: "startDate", label: "Start date", type: "date", required: true },
+      { key: "term", label: "Term", type: "text", required: false, help: "e.g. Fall 2026." },
+      { key: "weeks", label: "Number of weeks", type: "number", required: false },
+      { key: "tests", label: "Number of tests", type: "number", required: false },
+    ],
+    outputs: [
+      { key: "courseTitle", label: "Course title", type: "text" },
+      { key: "scheduleText", label: "Schedule", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const description = String(values.description ?? "").trim();
+      if (!description) {
+        throw new Error("Provide a course description.");
+      }
+
+      const startDate = String(values.startDate ?? "").trim();
+      if (!startDate) {
+        throw new Error("Provide a start date.");
+      }
+
+      const term = String(values.term ?? "").trim();
+      const weeksRaw = String(values.weeks ?? "").trim();
+      const weeks = weeksRaw ? Number(weeksRaw) : null;
+      const testsRaw = String(values.tests ?? "").trim();
+      const tests = testsRaw ? Number(testsRaw) : null;
+
+      onProgress("Generating dated schedule...");
+      const r = await generateCourseScheduleAction(description, term, startDate, weeks, tests, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+
+      const courseTitle = "";
+      const rows = r.rows ?? [];
+      const items: string[] = [];
+      const lines: string[] = [];
+
+      for (const row of rows) {
+        const weekLabel = row.dates ? `Week ${row.week} (${row.dates})` : `Week ${row.week}`;
+        const topicStr = row.topics || "(no topics)";
+        const line = `${weekLabel} - ${topicStr}`;
+        lines.push(line);
+        items.push(topicStr || `Week ${row.week}`);
+      }
+
+      const scheduleText = lines.join("\n");
+
+      return {
+        outputs: { courseTitle, scheduleText },
+        summary: { kind: "list", label: `${rows.length}-week schedule`, items },
+      };
     },
   },
 ];

@@ -23,6 +23,7 @@ import { expandWorkflowDef, type WorkflowDef } from "./types";
  */
 export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "generate-schedule",
+  "generate-dated-schedule",
   "repo-from-template",
   "fill-readmes",
   "lecture-zip",

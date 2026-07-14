@@ -125,6 +125,7 @@ import {
   commitFileAction,
   copyFileToCanvasPageAction,
   detectRepoFrontendAction,
+  revisePageWithAiAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8796,6 +8797,29 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       const summaryText = summaryParts.join("\n");
       return { outputs: { framework, devCommand }, summary: { kind: "text", text: summaryText } };
+    },
+  },
+
+  {
+    type: "revise-page-with-ai",
+    name: "Revise page HTML with AI",
+    description: "Apply an edit instruction to a page's HTML (returns the revised HTML to review or save in a later step).",
+    inputs: [
+      { key: "html", label: "Page HTML", type: "longtext", required: true },
+      { key: "instruction", label: "Edit instruction", type: "text", required: true },
+    ],
+    outputs: [
+      { key: "html", label: "Revised HTML", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const html = String(values.html ?? "").trim();
+      if (!html) throw new Error("Provide the page HTML.");
+      const instruction = String(values.instruction ?? "").trim();
+      if (!instruction) throw new Error("Provide the edit instruction.");
+      onProgress("Revising page...");
+      const r = await revisePageWithAiAction(html, instruction, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+      return { outputs: { html: r.html }, summary: { kind: "text", text: r.html } };
     },
   },
 

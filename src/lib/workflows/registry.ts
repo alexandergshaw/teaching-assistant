@@ -83,6 +83,7 @@ import {
   findCaseStudyMaterialAction,
   findPracticeProblemsAction,
   generateSlidesAction,
+  generateLectureScriptAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6930,6 +6931,32 @@ export const STEP_REGISTRY: StepDefinition[] = [
         outputs: { presentationTitle: r.presentationTitle, deck, slidesJson },
         summary: { kind: "list", label: r.presentationTitle, items: titles.length ? titles : ["(no slides)"] }
       };
+    },
+  },
+
+  {
+    type: "generate-lecture-script",
+    name: "Generate a lecture script",
+    description: "Write a spoken lecture script for a topic and objectives, to feed narration or an avatar video.",
+    inputs: [
+      { key: "topic", label: "Topic", type: "text", required: true },
+      { key: "objectives", label: "Objectives", type: "longtext", required: true },
+      { key: "minutes", label: "Target minutes", type: "number", required: false, help: "Default 50." }
+    ],
+    outputs: [
+      { key: "script", label: "Lecture script", type: "longtext" }
+    ],
+    run: async (values, helpers, onProgress) => {
+      const topic = String(values.topic ?? "").trim();
+      if (!topic) throw new Error("Provide a topic.");
+      const objectives = String(values.objectives ?? "").trim();
+      if (!objectives) throw new Error("Provide the objectives.");
+      const minutesRaw = String(values.minutes ?? "").trim();
+      const minutes = minutesRaw && Number.isFinite(Number(minutesRaw)) && Number(minutesRaw) > 0 ? Number(minutesRaw) : 50;
+      onProgress("Writing lecture script...");
+      const r = await generateLectureScriptAction(topic, objectives, minutes, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+      return { outputs: { script: r.script }, summary: { kind: "text", text: r.script } };
     },
   },
 ];

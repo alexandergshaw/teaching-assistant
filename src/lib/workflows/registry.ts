@@ -97,6 +97,7 @@ import {
   syncAssignmentToRepoAction,
   rememberRubricAction,
   findBankedRubricAction,
+  bulkAssociateRubricAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7676,6 +7677,52 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { rubric: r.rubric, matched: r.matched ? "1" : "" },
         summary: { kind: "text", text: r.matched ? r.rubric : `No banked rubric found for "${topic}".` },
+      };
+    },
+  },
+
+  {
+    type: "bulk-associate-rubric",
+    name: "Attach a rubric to assignments",
+    description: "Associate one rubric with many assignments across a course at once. Attended-only.",
+    inputs: [
+      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
+      { key: "rubricId", label: "Rubric id", type: "text", required: true, help: "The numeric Canvas rubric id." },
+      { key: "assignmentIds", label: "Assignment ids", type: "longtext", required: true, help: "One assignment id per line." },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+    ],
+    outputs: [
+      { key: "succeeded", label: "Succeeded", type: "number" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const course = String(values.course ?? "").trim();
+      if (!course) {
+        throw new Error("Select an LMS course.");
+      }
+
+      const rubricIdRaw = String(values.rubricId ?? "").trim();
+      if (!/^\d+$/.test(rubricIdRaw)) {
+        throw new Error("Provide the numeric rubric id.");
+      }
+      const rubricId = Number(rubricIdRaw);
+
+      const ids = String(values.assignmentIds ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+      if (ids.length === 0) {
+        throw new Error("Provide at least one assignment id.");
+      }
+
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+
+      onProgress("Associating rubric...");
+      const r = await bulkAssociateRubricAction(course, rubricId, ids, inst);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      const succeeded = r.updated;
+      return {
+        outputs: { succeeded },
+        summary: { kind: "text", text: `Associated the rubric with ${succeeded} assignment(s).` },
       };
     },
   },

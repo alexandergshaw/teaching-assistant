@@ -136,6 +136,7 @@ import {
   submitSelectiveImportAction,
   listCourseRosterAction,
   inviteOrgMemberAction,
+  setRepoCollaboratorAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -9151,6 +9152,34 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { invited },
         summary: { kind: "list", label: `Invited ${invited} of ${members.length}`, items },
+      };
+    },
+  },
+
+  {
+    type: "set-repo-collaborator-access",
+    name: "Grant repo access",
+    description: "Grant or adjust a collaborator's permission on a repository. Attended-only.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "username", label: "GitHub username", type: "text", required: true },
+      { key: "permission", label: "Permission", type: "text", required: false, help: "pull, push (default), or maintain." },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+      const username = String(values.username ?? "").trim();
+      if (!username) throw new Error("Provide the GitHub username.");
+      const permRaw = String(values.permission ?? "").trim().toLowerCase();
+      const permission: RepoPermission =
+        permRaw === "pull" ? "pull" : permRaw === "maintain" ? "maintain" : "push";
+      onProgress("Setting collaborator access...");
+      const r = await setRepoCollaboratorAction(repo, username, permission);
+      if ("error" in r) throw new Error(r.error);
+      return {
+        outputs: {},
+        summary: { kind: "text", text: `Granted ${username} ${permission} on ${repo}.` },
       };
     },
   },

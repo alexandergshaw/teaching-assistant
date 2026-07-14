@@ -48,6 +48,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "schedule-lecture-announcement",
   "lecture-qa",
   "post-grades",
+  "generate-assignment-brief",
   // The unattended AI-scoring half of grading: it grades and saves a durable
   // draft (saveGradingDraftAction) but never sets requireInput/
   // requireConfirmation and never calls postCanvasGradesAction. Posting only

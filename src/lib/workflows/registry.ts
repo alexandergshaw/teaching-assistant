@@ -50,6 +50,7 @@ import {
   generateCourseSyllabusAction,
   createFinalizedSyllabusAction,
   gradeAction,
+  generateAssignmentAction,
   generateAssignmentRubricAction,
   listGradingQueueAction,
   postCanvasGradesAction,
@@ -7237,6 +7238,67 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { status: r.status, videoUrl: url },
         summary: { kind: "text", text: `Render status: ${r.status}` },
+      };
+    },
+  },
+
+  {
+    type: "generate-assignment-brief",
+    name: "Generate an assignment",
+    description: "Draft a structured assignment (overview, steps, deliverables) from a module's objectives.",
+    inputs: [
+      { key: "objectives", label: "Module objectives", type: "longtext", required: true },
+      { key: "context", label: "Context", type: "longtext", required: false, help: "Optional source material." },
+    ],
+    outputs: [
+      { key: "assignment", label: "Assignment", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const objectives = String(values.objectives ?? "").trim();
+      if (!objectives) throw new Error("Provide the module objectives.");
+      const context = String(values.context ?? "");
+      onProgress("Generating assignment...");
+      const r = await generateAssignmentAction(objectives, context, [], helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+
+      const lines: string[] = [];
+      lines.push(`# ${r.title}\n`);
+      lines.push("## Overview");
+      lines.push(r.overview);
+      lines.push("");
+
+      if (r.steps && r.steps.length > 0) {
+        lines.push("## Steps");
+        for (let i = 0; i < r.steps.length; i++) {
+          const step = r.steps[i];
+          lines.push(`${i + 1}. ${step.stepTitle}`);
+          lines.push(`   ${step.description}`);
+        }
+        lines.push("");
+      }
+
+      if (r.tools && r.tools.length > 0) {
+        lines.push("## Tools");
+        for (const tool of r.tools) {
+          lines.push(`- ${tool}`);
+        }
+        lines.push("");
+      }
+
+      if (r.deliverables && r.deliverables.length > 0) {
+        lines.push("## Deliverables");
+        for (const deliverable of r.deliverables) {
+          lines.push(`- ${deliverable}`);
+        }
+        lines.push("");
+      }
+
+      const assignment = lines.join("\n").trim();
+      const items = [r.title];
+
+      return {
+        outputs: { assignment },
+        summary: { kind: "list", label: "Assignment", items },
       };
     },
   },

@@ -81,6 +81,7 @@ import { buildDocxFromPlainText } from "@/lib/docx";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { parseCalendarEmbedded } from "@/lib/embedded/calendar";
+import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import type {
   StepInputSpec,
   StepOutputSpec,
@@ -6204,6 +6205,56 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { syllabusId: r.syllabusId, syllabusName: r.name },
         summary: { kind: "text", text: `Imported syllabus "${r.name}".` },
+      };
+    },
+  },
+
+  {
+    type: "detect-syllabus-fields",
+    name: "Detect syllabus fields to fill",
+    description: "Scan syllabus text and list the class-specific fields (instructor, term, office hours, grading, etc.) that need filling, with suggested values.",
+    inputs: [
+      {
+        key: "syllabusText",
+        label: "Syllabus text",
+        type: "longtext",
+        required: true,
+      },
+    ],
+    outputs: [
+      {
+        key: "fields",
+        label: "Detected fields",
+        type: "longtext",
+      },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const text = String(values.syllabusText ?? "").trim();
+      if (!text) {
+        throw new Error("Paste the syllabus text to scan.");
+      }
+
+      onProgress("Scanning syllabus...");
+
+      const paragraphs = text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line, i) => ({ id: String(i), text: line }));
+
+      const detected = scaffoldSyllabusFields(paragraphs);
+
+      const fieldsText = detected.map((f) => `${f.label}: ${f.suggestedText}`).join("\n");
+
+      const items = detected.map((f) => f.label);
+
+      return {
+        outputs: { fields: fieldsText },
+        summary: {
+          kind: "list",
+          label: `${detected.length} field(s) to fill`,
+          items: items.length ? items : ["(none detected)"],
+        },
       };
     },
   },

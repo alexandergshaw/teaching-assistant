@@ -74,6 +74,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "generate-worked-examples",
   "generate-document",
   "revise-generated-document",
+  "outline-course-from-repo",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

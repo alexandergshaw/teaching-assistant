@@ -94,6 +94,7 @@ import { parseCalendarEmbedded } from "@/lib/embedded/calendar";
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { applyTextRevision } from "@/lib/embedded/revise";
+import { scaffoldCourseOutline } from "@/lib/embedded/course";
 import type {
   StepInputSpec,
   StepOutputSpec,
@@ -6720,6 +6721,43 @@ export const STEP_REGISTRY: StepDefinition[] = [
           kind: "text",
           text: result.applied ? result.text : "Could not parse that edit instruction; document unchanged.",
         },
+      };
+    },
+  },
+
+  {
+    type: "outline-course-from-repo",
+    name: "Outline a course from a repo digest",
+    description: "Build a week-by-week markdown course outline from a repository digest or file listing (detects technologies, adds a capstone).",
+    inputs: [
+      {
+        key: "digest",
+        label: "Repo digest or file listing",
+        type: "longtext",
+        required: true,
+        help: "A repo digest or newline-separated file paths, e.g. from Build a repo digest.",
+      },
+    ],
+    outputs: [
+      { key: "outline", label: "Course outline", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const digest = String(values.digest ?? "").trim();
+      if (!digest) {
+        throw new Error("Provide a repo digest or file listing.");
+      }
+
+      onProgress("Building course outline...");
+
+      const lines = digest.split("\n").map((s) => s.trim()).filter(Boolean);
+      const fullName = lines[0] || "Repository";
+      const paths = lines.slice(1);
+
+      const outline = scaffoldCourseOutline(fullName, paths);
+
+      return {
+        outputs: { outline },
+        summary: { kind: "text", text: outline },
       };
     },
   },

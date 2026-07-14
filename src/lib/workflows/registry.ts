@@ -139,6 +139,7 @@ import {
   setRepoCollaboratorAction,
   exportCourseCartridgeAction,
   updateRepoAction,
+  deleteOrgReposAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -9238,6 +9239,41 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const r = await updateRepoAction(repo, { archived });
       if ("error" in r) throw new Error(r.error);
       return { outputs: {}, summary: { kind: "text", text: `${archived ? "Archived" : "Unarchived"} ${repo}.` } };
+    },
+  },
+
+  {
+    type: "delete-org-repos",
+    name: "Delete org repositories",
+    description: "Permanently delete repositories in a GitHub organization (end-of-term teardown). Attended-only and irreversible: type DELETE to confirm.",
+    inputs: [
+      { key: "org", label: "Organization", type: "org", required: true },
+      { key: "repoNames", label: "Repository names", type: "longtext", required: true, help: "One repo name (without owner) per line." },
+      { key: "confirm", label: "Confirmation", type: "text", required: true, help: "Type DELETE to confirm permanent deletion." },
+    ],
+    outputs: [
+      { key: "deleted", label: "Deleted", type: "number" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const org = String(values.org ?? "").trim();
+      if (!org) throw new Error("Provide a GitHub organization.");
+      if (String(values.confirm ?? "").trim() !== "DELETE") throw new Error("Type DELETE in the confirmation field to permanently delete these repositories.");
+      const names = String(values.repoNames ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+      if (names.length === 0) throw new Error("Provide at least one repository name.");
+      onProgress("Deleting repositories...");
+      const r = await deleteOrgReposAction(org, names);
+      if ("error" in r) throw new Error(r.error);
+      let deleted = 0;
+      const lines: string[] = [];
+      for (const res of r.results) {
+        if (res.error) {
+          lines.push(`${res.name}: ${res.error}`);
+        } else {
+          deleted++;
+          lines.push(`${res.name}: deleted`);
+        }
+      }
+      return { outputs: { deleted }, summary: { kind: "list", label: `Deleted ${deleted} of ${r.results.length} repo(s)`, items: lines.length ? lines : ["(none)"] } };
     },
   },
 ];

@@ -138,6 +138,7 @@ import {
   inviteOrgMemberAction,
   setRepoCollaboratorAction,
   exportCourseCartridgeAction,
+  updateRepoAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -9217,6 +9218,26 @@ export const STEP_REGISTRY: StepDefinition[] = [
         outputs: { fileName: r.fileName },
         summary: { kind: "text", text: `Exported ${r.fileName} (${Math.round(blob.size / 1024)} KB). Select a course tile to save it.` },
       };
+    },
+  },
+
+  {
+    type: "archive-repo",
+    name: "Archive a repository",
+    description: "Archive a repository (make it read-only) at end of term, or unarchive it. Attended-only (non-destructive).",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "unarchive", label: "Unarchive instead", type: "boolean", required: false },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+      const archived = String(values.unarchive ?? "") !== "1";
+      onProgress(archived ? "Archiving repository..." : "Unarchiving repository...");
+      const r = await updateRepoAction(repo, { archived });
+      if ("error" in r) throw new Error(r.error);
+      return { outputs: {}, summary: { kind: "text", text: `${archived ? "Archived" : "Unarchived"} ${repo}.` } };
     },
   },
 ];

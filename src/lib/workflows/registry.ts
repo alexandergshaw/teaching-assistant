@@ -86,6 +86,7 @@ import {
   generateLectureScriptAction,
   reviseLectureSlidesAction,
   extractPptxSlidesAction,
+  synthesizeNarrationAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7099,6 +7100,72 @@ export const STEP_REGISTRY: StepDefinition[] = [
           kind: "list",
           label: `${r.slides.length} slide(s)`,
           items,
+        },
+      };
+    },
+  },
+
+  {
+    type: "synthesize-narration",
+    name: "Synthesize narration audio",
+    description: "Turn a script into narration audio with the in-house voice, and save it to a course's materials.",
+    inputs: [
+      {
+        key: "text",
+        label: "Script",
+        type: "longtext",
+        required: true,
+      },
+      {
+        key: "voiceId",
+        label: "Voice id",
+        type: "text",
+        required: false,
+        help: "Optional - overrides the default voice.",
+      },
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: false,
+        help: "Save the audio to this course's materials.",
+      },
+      {
+        key: "fileName",
+        label: "File name",
+        type: "text",
+        required: false,
+        help: "Defaults to narration.mp3.",
+      },
+    ],
+    outputs: [
+      { key: "saved", label: "Saved", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const text = String(values.text ?? "").trim();
+      if (!text) throw new Error("Provide the script to synthesize.");
+      const voiceId = String(values.voiceId ?? "").trim() || undefined;
+      onProgress("Synthesizing narration...");
+      const r = await synthesizeNarrationAction(text, voiceId);
+      if ("error" in r) throw new Error(r.error);
+      const blob = base64ToBlob(r.base64, r.mimeType);
+      const hubCourse = String(values.hubCourse ?? "").trim();
+      const fileName = String(values.fileName ?? "").trim() || "narration.mp3";
+      if (hubCourse && helpers.saveCourseMaterialFile) {
+        await helpers.saveCourseMaterialFile(hubCourse, blob, fileName);
+        return {
+          outputs: { saved: "1" },
+          summary: {
+            kind: "text",
+            text: `Saved ${fileName} to the course materials.`,
+          },
+        };
+      }
+      return {
+        outputs: { saved: "" },
+        summary: {
+          kind: "text",
+          text: `Generated narration audio (${Math.round(blob.size / 1024)} KB). Select a course tile to save it.`,
         },
       };
     },

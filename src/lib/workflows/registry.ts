@@ -92,6 +92,7 @@ import {
   getAvatarVideoStatusAction,
   draftAssignmentDescriptionAction,
   getAssignmentSyncStateAction,
+  syncAssignmentFromRepoAction,
   syncAssignmentToRepoAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
@@ -7416,6 +7417,39 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { path: r.path },
         summary: { kind: "text", text: `Wrote the assignment to ${r.path}.` },
+      };
+    },
+  },
+
+  {
+    type: "sync-assignment-from-repo",
+    name: "Update assignment from the repo",
+    description: "Update an LMS assignment's description from the repo file (README). Attended-only.",
+    inputs: [
+      { key: "assignmentUrl", label: "Assignment URL", type: "text", required: true },
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "path", label: "File path in repo", type: "text", required: true, help: "e.g. week01/README.md" },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+      { key: "branch", label: "Branch", type: "text", required: false },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const assignmentUrl = String(values.assignmentUrl ?? "").trim();
+      if (!assignmentUrl) throw new Error("Provide the assignment URL.");
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide the repository.");
+      const path = String(values.path ?? "").trim();
+      if (!path) throw new Error("Provide the file path in the repo.");
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+      const branch = String(values.branch ?? "").trim() || undefined;
+
+      onProgress("Updating the assignment from the repo...");
+      const r = await syncAssignmentFromRepoAction(assignmentUrl, repo, path, inst, branch);
+      if ("error" in r) throw new Error(r.error);
+
+      return {
+        outputs: {},
+        summary: { kind: "text", text: "Updated the assignment from the repo file." },
       };
     },
   },

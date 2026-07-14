@@ -92,6 +92,7 @@ import {
   getAvatarVideoStatusAction,
   draftAssignmentDescriptionAction,
   getAssignmentSyncStateAction,
+  syncAssignmentToRepoAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7380,6 +7381,41 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { inSync: inSyncOutput, diff: diffText },
         summary: { kind: "text", text: summaryText },
+      };
+    },
+  },
+
+  {
+    type: "sync-assignment-to-repo",
+    name: "Push assignment into the repo",
+    description: "Write an LMS assignment's content into the repo file (README). Attended-only.",
+    inputs: [
+      { key: "assignmentUrl", label: "Assignment URL", type: "text", required: true },
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "path", label: "File path in repo", type: "text", required: true, help: "e.g. week01/README.md" },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+      { key: "branch", label: "Branch", type: "text", required: false },
+    ],
+    outputs: [
+      { key: "path", label: "Committed path", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const assignmentUrl = String(values.assignmentUrl ?? "").trim();
+      if (!assignmentUrl) throw new Error("Provide the assignment URL.");
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide the repository.");
+      const path = String(values.path ?? "").trim();
+      if (!path) throw new Error("Provide the file path in the repo.");
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+      const branch = String(values.branch ?? "").trim() || undefined;
+
+      onProgress("Syncing assignment to the repo...");
+      const r = await syncAssignmentToRepoAction(assignmentUrl, repo, path, inst, branch);
+      if ("error" in r) throw new Error(r.error);
+
+      return {
+        outputs: { path: r.path },
+        summary: { kind: "text", text: `Wrote the assignment to ${r.path}.` },
       };
     },
   },

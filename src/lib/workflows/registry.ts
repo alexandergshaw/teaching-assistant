@@ -109,6 +109,7 @@ import {
   checkBrokenLinksAction,
   measureKnowledgeGapAction,
   runResearchLoopAction,
+  listUnverifiedKnowledgeAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8242,6 +8243,40 @@ export const STEP_REGISTRY: StepDefinition[] = [
           kind: "text",
           text: `Learned ${learnedCount} new entr${learnedCount === 1 ? "y" : "ies"} over ${rounds} round(s) for "${topic}".`
         }
+      };
+    },
+  },
+
+  {
+    type: "list-unverified-knowledge",
+    name: "List unverified knowledge",
+    description: "List knowledge entries the research loop learned but that are awaiting review, so they can be checked before use.",
+    inputs: [],
+    outputs: [
+      { key: "entries", label: "Unverified entries", type: "longtext" },
+      { key: "count", label: "Count", type: "number" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      onProgress("Loading unverified knowledge...");
+      const r = await listUnverifiedKnowledgeAction();
+      if ("error" in r) throw new Error(r.error);
+
+      const titles = r.entries.map((entry) => entry.title);
+      const entriesText = r.entries
+        .map((entry) => {
+          const topic = Array.isArray(entry.topics) ? entry.topics.join(", ") : entry.topics || "";
+          const snippet = entry.summary ? entry.summary.split("\n")[0].slice(0, 60) : "";
+          return `${entry.title}\n  Topic: ${topic}\n  Kind: ${entry.kind}\n  Summary: ${snippet}${snippet.length >= 60 ? "..." : ""}`;
+        })
+        .join("\n\n");
+
+      return {
+        outputs: { entries: entriesText, count: r.entries.length },
+        summary: {
+          kind: "list",
+          label: `${r.entries.length} unverified entr${r.entries.length === 1 ? "y" : "ies"}`,
+          items: r.entries.length ? titles : ["(none)"],
+        },
       };
     },
   },

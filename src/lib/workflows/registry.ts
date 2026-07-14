@@ -77,6 +77,7 @@ import {
   deleteSyllabusTemplateAction,
   extractTopicsFromRepoAction,
   generateModuleIntroAction,
+  generateLessonPlanAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6528,6 +6529,48 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { intro },
         summary: { kind: "text", text: intro },
+      };
+    },
+  },
+
+  {
+    type: "generate-lesson-plan",
+    name: "Generate a lesson plan",
+    description: "Generate a lesson plan (slides and talking points) from a module's objectives.",
+    inputs: [
+      { key: "objectives", label: "Module objectives", type: "longtext", required: true },
+      { key: "context", label: "Context", type: "longtext", required: false, help: "Optional source material." },
+    ],
+    outputs: [
+      { key: "lessonPlan", label: "Lesson plan", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const objectives = String(values.objectives ?? "").trim();
+      if (!objectives) throw new Error("Provide the module objectives.");
+      const context = String(values.context ?? "");
+
+      onProgress("Generating lesson plan...");
+      const r = await generateLessonPlanAction(objectives, context, [], undefined, undefined, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+
+      const lines: string[] = [];
+      for (const slide of r.slides) {
+        lines.push(`${slide.title}\n`);
+        for (const bullet of slide.bullets) {
+          lines.push(`- ${bullet}`);
+        }
+        if (slide.code) {
+          lines.push(`\n(Code: ${slide.codeLanguage || "code"})\n${slide.code}\n`);
+        }
+        lines.push("");
+      }
+      const lessonPlan = lines.join("\n").trim();
+
+      const items = r.slides.map((s) => s.title).length > 0 ? r.slides.map((s) => s.title) : ["(generated)"];
+
+      return {
+        outputs: { lessonPlan },
+        summary: { kind: "list", label: `Lesson plan (${r.slides.length} slides)`, items },
       };
     },
   },

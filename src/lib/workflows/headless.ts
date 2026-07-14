@@ -70,6 +70,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "list-syllabus-templates",
   "extract-topics-from-repo",
   "generate-module-intro",
+  "generate-lesson-plan",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

@@ -118,6 +118,7 @@ import {
   setupTestsWorkflowAction,
   dispatchTestsAction,
   getTestRunStatusAction,
+  setBranchProtectionAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8593,6 +8594,47 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { status, results: resultsText },
         summary: { kind: "text", text: `Run ${status}${r.summary ? ` - ${r.summary.passed}/${r.summary.tests} tests passed` : ""}` },
+      };
+    },
+  },
+
+  {
+    type: "set-branch-protection",
+    name: "Protect a branch",
+    description: "Lock a repository branch (require reviews, checks, or linear history). Attended-only.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "branch", label: "Branch", type: "text", required: false, help: "Defaults to main." },
+      { key: "requirePullRequestReviews", label: "Require pull request reviews", type: "boolean", required: false },
+      { key: "requireStatusChecks", label: "Require status checks", type: "boolean", required: false },
+      { key: "strictStatusChecks", label: "Require strict status checks", type: "boolean", required: false },
+      { key: "enforceAdmins", label: "Enforce for administrators", type: "boolean", required: false },
+      { key: "requireLinearHistory", label: "Require linear history", type: "boolean", required: false },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+
+      const branch = String(values.branch ?? "").trim() || "main";
+
+      const opts = {
+        requirePullRequestReviews: String(values.requirePullRequestReviews ?? "") === "1",
+        requiredApprovingReviewCount: 1,
+        requireStatusChecks: String(values.requireStatusChecks ?? "") === "1",
+        statusCheckContexts: [],
+        strictStatusChecks: String(values.strictStatusChecks ?? "") === "1",
+        enforceAdmins: String(values.enforceAdmins ?? "") === "1",
+        requireLinearHistory: String(values.requireLinearHistory ?? "") === "1",
+      };
+
+      onProgress("Applying branch protection...");
+      const r = await setBranchProtectionAction(repo, branch, opts);
+      if ("error" in r) throw new Error(r.error);
+
+      return {
+        outputs: {},
+        summary: { kind: "text", text: `Protected ${branch} on ${repo}.` },
       };
     },
   },

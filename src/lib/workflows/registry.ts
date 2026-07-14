@@ -80,6 +80,7 @@ import {
   updateSyllabusTemplateAction,
   deleteSyllabusTemplateAction,
   extractTopicsFromRepoAction,
+  setRepoTopicsAction,
   generateModuleIntroAction,
   generateLessonPlanAction,
   generateExamplesAction,
@@ -8635,6 +8636,35 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: {},
         summary: { kind: "text", text: `Protected ${branch} on ${repo}.` },
+      };
+    },
+  },
+
+  {
+    type: "tag-repos",
+    name: "Tag a repository",
+    description: "Set the topics (labels) on a repository to organize it by section or cohort. Attended-only.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "topics", label: "Topics", type: "longtext", required: true, help: "One topic per line (lowercase, hyphenated)." },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+      const topics = String(values.topics ?? "")
+        .split("\n")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+      if (topics.length === 0) throw new Error("Provide at least one topic.");
+
+      onProgress("Tagging repository...");
+      const r = await setRepoTopicsAction(repo, topics);
+      if ("error" in r) throw new Error(r.error);
+
+      return {
+        outputs: {},
+        summary: { kind: "text", text: `Set ${topics.length} topic(s) on ${repo}.` },
       };
     },
   },

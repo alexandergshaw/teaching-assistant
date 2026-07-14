@@ -258,6 +258,7 @@ import {
   copyPathsToRepo,
   type CopyPathsOptions,
   type CopyPathsResult,
+  setRepoTopics,
 } from "@/lib/github";
 import {
   listGithubModels,
@@ -3804,6 +3805,21 @@ export async function extractTopicsFromRepoAction(
     return { topics };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not extract topics from the repository." };
+  }
+}
+
+/**
+ * Set the topics (labels) on a repository to organize it by section or cohort.
+ */
+export async function setRepoTopicsAction(repoRef: string, topics: string[]): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    const parsed = parseRepoRef(repoRef);
+    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
+    await setRepoTopics(parsed.owner, parsed.repo, topics);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not set repo topics." };
   }
 }
 

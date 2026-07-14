@@ -88,6 +88,7 @@ import {
   extractPptxSlidesAction,
   synthesizeNarrationAction,
   generateAvatarVideoAction,
+  getAvatarVideoStatusAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7199,6 +7200,43 @@ export const STEP_REGISTRY: StepDefinition[] = [
           kind: "text",
           text: `Avatar render started (id ${r.videoId}). Use Poll avatar video to fetch it when ready.`,
         },
+      };
+    },
+  },
+
+  {
+    type: "poll-avatar-video",
+    name: "Poll an avatar video",
+    description: "Check an avatar video render's status and return its download URL when ready.",
+    inputs: [
+      {
+        key: "videoId",
+        label: "Video id",
+        type: "text",
+        required: true,
+        help: "The id from Generate an avatar video.",
+      },
+    ],
+    outputs: [
+      { key: "status", label: "Status", type: "text" },
+      { key: "videoUrl", label: "Video URL", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const videoId = String(values.videoId ?? "").trim();
+      if (!videoId) throw new Error("Provide the video id.");
+      onProgress("Checking render status...");
+      const r = await getAvatarVideoStatusAction(videoId);
+      if ("error" in r) throw new Error(r.error);
+      const url = r.videoUrl ?? "";
+      if (url) {
+        return {
+          outputs: { status: r.status, videoUrl: url },
+          summary: { kind: "link", label: `Render ${r.status}`, url },
+        };
+      }
+      return {
+        outputs: { status: r.status, videoUrl: url },
+        summary: { kind: "text", text: `Render status: ${r.status}` },
       };
     },
   },

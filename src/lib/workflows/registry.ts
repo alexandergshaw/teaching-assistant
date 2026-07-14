@@ -57,6 +57,8 @@ import {
   listPendingGradingDraftsAction,
   getGradingDraftAction,
   markGradingDraftReviewedAction,
+  listConversationsAction,
+  getConversationAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -5668,6 +5670,84 @@ export const STEP_REGISTRY: StepDefinition[] = [
           kind: "link",
           label: postAt ? `Scheduled "${title}"` : `Posted "${title}"`,
           url: r.announcement.htmlUrl,
+        },
+      };
+    },
+  },
+
+  {
+    type: "read-inbox",
+    name: "Read the message inbox",
+    description: "List the LMS inbox conversations, and optionally load one full thread by id, so a later step can triage or draft a reply.",
+    inputs: [
+      {
+        key: "institution",
+        label: "Institution",
+        type: "institution",
+        required: false,
+        help: "Defaults to the active institution.",
+      },
+      {
+        key: "conversationId",
+        label: "Conversation id",
+        type: "text",
+        required: false,
+        help: "Optional - load this thread's full text; leave blank to just list the inbox.",
+      },
+    ],
+    outputs: [
+      { key: "conversations", label: "Inbox list", type: "longtext" },
+      { key: "thread", label: "Selected thread", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+
+      onProgress("Loading inbox...");
+      const r = await listConversationsAction(inst);
+      if ("error" in r) throw new Error(r.error);
+
+      const subjects: string[] = [];
+      const convLines: string[] = [];
+
+      for (const conv of r.conversations) {
+        subjects.push(conv.subject);
+        const snippet = conv.lastMessage ? conv.lastMessage.substring(0, 60).replace(/\n/g, " ") : "(no message)";
+        const participantsStr = conv.participants.join(", ") || "(no participants)";
+        convLines.push(
+          `${conv.subject} | ${participantsStr} | ${snippet}${conv.lastMessage && conv.lastMessage.length > 60 ? "..." : ""}`
+        );
+      }
+
+      const conversations = convLines.join("\n");
+
+      let thread = "";
+      const convId = String(values.conversationId ?? "").trim();
+      if (convId && /^\d+$/.test(convId)) {
+        onProgress("Loading thread...");
+        const d = await getConversationAction(Number(convId), inst);
+        if ("error" in d) throw new Error(d.error);
+
+        const threadLines = [`Subject: ${d.conversation.subject}`, ""];
+        threadLines.push("Participants: " + d.conversation.participants.join(", "));
+        threadLines.push("");
+
+        for (const msg of d.conversation.messages) {
+          threadLines.push(`${msg.author}: ${msg.body}`);
+          if (msg.createdAt) {
+            threadLines.push(`(${msg.createdAt})`);
+          }
+          threadLines.push("");
+        }
+
+        thread = threadLines.join("\n");
+      }
+
+      return {
+        outputs: { conversations, thread },
+        summary: {
+          kind: "list",
+          label: `${r.conversations.length} conversation(s)`,
+          items: subjects.length ? subjects : ["(inbox empty)"],
         },
       };
     },

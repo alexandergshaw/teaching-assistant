@@ -64,6 +64,7 @@ import {
   setConversationStateAction,
   detectMeetingRequestAction,
   getAvailableSlotsAction,
+  draftMeetingReplyAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -5915,6 +5916,31 @@ export const STEP_REGISTRY: StepDefinition[] = [
           items: r.slotLabels.length ? r.slotLabels : ["(no open slots)"],
         },
       };
+    },
+  },
+
+  {
+    type: "draft-meeting-reply",
+    name: "Draft a scheduling reply",
+    description: "Draft a reply proposing meeting times from the open slots, ready to review and send.",
+    inputs: [
+      { key: "thread", label: "Conversation thread", type: "longtext", required: true, help: "The student's message thread." },
+      { key: "slotsIso", label: "Open slots (ISO)", type: "longtext", required: true, help: "ISO slots, one per line, e.g. wired from Find open meeting slots." },
+      { key: "timeZone", label: "Time zone", type: "text", required: false, help: "Optional IANA zone to label the offered times." },
+    ],
+    outputs: [
+      { key: "reply", label: "Draft reply", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const thread = String(values.thread ?? "").trim();
+      if (!thread) throw new Error("Provide the conversation thread.");
+      const slots = String(values.slotsIso ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+      if (slots.length === 0) throw new Error("Provide open time slots (wire them from Find open meeting slots).");
+      const tz = String(values.timeZone ?? "").trim() || undefined;
+      onProgress("Drafting reply...");
+      const r = await draftMeetingReplyAction(thread, slots, helpers.provider, tz);
+      if ("error" in r) throw new Error(r.error);
+      return { outputs: { reply: r.body }, summary: { kind: "text", text: r.body } };
     },
   },
 ];

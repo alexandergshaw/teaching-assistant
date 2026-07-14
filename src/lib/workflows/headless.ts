@@ -112,6 +112,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "list-github-repos",
   "ingest-repo-digest",
   "detect-repo-frontend",
+  "fetch-assignment-brief",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

@@ -130,6 +130,7 @@ import {
   revisePageWithAiAction,
   renameCourseFileAction,
   deleteCourseFileAction,
+  fetchCanvasMetaAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8971,6 +8972,27 @@ export const STEP_REGISTRY: StepDefinition[] = [
         return { outputs: {}, summary: { kind: "text", text: `Renamed file ${fileId} to "${newName}".` } };
       }
       throw new Error("Action must be rename or delete.");
+    },
+  },
+
+  {
+    type: "fetch-assignment-brief",
+    name: "Fetch an assignment brief",
+    description: "Read an LMS assignment's description and attached rubric, to prefill instructions and rubric for grading or rubric generation.",
+    inputs: [
+      { key: "assignmentUrl", label: "Assignment URL", type: "text", required: true },
+    ],
+    outputs: [
+      { key: "description", label: "Description", type: "longtext" },
+      { key: "rubric", label: "Rubric", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const url = String(values.assignmentUrl ?? "").trim();
+      if (!url) throw new Error("Provide the assignment URL.");
+      onProgress("Fetching assignment brief...");
+      const r = await fetchCanvasMetaAction(url);
+      if ("error" in r) throw new Error(r.error);
+      return { outputs: { description: r.description, rubric: r.rubricText }, summary: { kind: "text", text: r.description || "(no description)" } };
     },
   },
 ];

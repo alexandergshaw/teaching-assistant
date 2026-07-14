@@ -9314,3 +9314,17 @@ export async function generateFullCreditChecklistAction(
     return { error: err instanceof Error ? err.message : "Could not generate the checklist." };
   }
 }
+
+export async function rememberRubricAction(
+  rubric: string,
+  topic: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!rubric.trim() || !topic.trim()) return { error: "Provide a rubric and a topic." };
+    void rememberRubric(topic, rubric);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not bank the rubric." };
+  }
+}

@@ -95,6 +95,7 @@ import {
   getAssignmentSyncStateAction,
   syncAssignmentFromRepoAction,
   syncAssignmentToRepoAction,
+  rememberRubricAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7630,6 +7631,27 @@ export const STEP_REGISTRY: StepDefinition[] = [
         outputs: { rubric: r },
         summary: { kind: "text", text: r },
       };
+    },
+  },
+
+  {
+    type: "remember-rubric",
+    name: "Bank a rubric for reuse",
+    description: "Save a rubric with its assignment topic so it can be reused for similar assignments later.",
+    inputs: [
+      { key: "rubric", label: "Rubric", type: "longtext", required: true },
+      { key: "topic", label: "Topic", type: "text", required: true },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const rubric = String(values.rubric ?? "").trim();
+      if (!rubric) throw new Error("Provide the rubric to bank.");
+      const topic = String(values.topic ?? "").trim();
+      if (!topic) throw new Error("Provide the assignment topic.");
+      onProgress("Banking rubric...");
+      const r = await rememberRubricAction(rubric, topic);
+      if ("error" in r) throw new Error(r.error);
+      return { outputs: {}, summary: { kind: "text", text: `Banked a rubric for "${topic}".` } };
     },
   },
 ];

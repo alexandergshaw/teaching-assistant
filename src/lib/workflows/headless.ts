@@ -54,6 +54,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "grade-to-draft",
   "read-inbox",
   "draft-message-reply",
+  "triage-inbox",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

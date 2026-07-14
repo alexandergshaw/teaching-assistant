@@ -61,6 +61,7 @@ import {
   getConversationAction,
   draftMessageReplyAction,
   replyToConversationAction,
+  setConversationStateAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -5809,6 +5810,40 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: {},
         summary: { kind: "text", text: `Reply sent on conversation ${convId}.` },
+      };
+    },
+  },
+
+  {
+    type: "triage-inbox",
+    name: "Triage an inbox conversation",
+    description: "Mark an LMS inbox conversation read, unread, or archived after it has been handled.",
+    inputs: [
+      { key: "conversationId", label: "Conversation id", type: "text", required: true },
+      { key: "state", label: "New state", type: "text", required: true, help: "read, unread, or archived." },
+      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const convId = String(values.conversationId ?? "").trim();
+      if (!convId || !/^\d+$/.test(convId)) {
+        throw new Error("Provide the numeric conversation id.");
+      }
+
+      const state = String(values.state ?? "").trim().toLowerCase();
+      if (state !== "read" && state !== "unread" && state !== "archived") {
+        throw new Error("State must be read, unread, or archived.");
+      }
+
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+
+      onProgress("Updating conversation...");
+      const r = await setConversationStateAction(Number(convId), state as "read" | "unread" | "archived", inst);
+      if ("error" in r) throw new Error(r.error);
+
+      return {
+        outputs: {},
+        summary: { kind: "text", text: `Conversation ${convId} marked ${state}.` },
       };
     },
   },

@@ -114,6 +114,7 @@ import {
   listCopilotTasksAction,
   listPullRequestFilesAction,
   reviewPullRequestAction,
+  mergePullRequestAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8431,6 +8432,37 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: {},
         summary: { kind: "text", text: `Submitted a ${verdict} review on PR #${prRaw}.` },
+      };
+    },
+  },
+
+  {
+    type: "merge-pull-request",
+    name: "Merge a pull request",
+    description: "Merge a pull request (merge, squash, or rebase). Attended-only.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "prNumber", label: "PR number", type: "text", required: true },
+      { key: "method", label: "Merge method", type: "text", required: false, help: "merge (default), squash, or rebase." },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+
+      const prRaw = String(values.prNumber ?? "").trim();
+      if (!/^\d+$/.test(prRaw)) throw new Error("Provide the numeric PR number.");
+
+      const methodRaw = String(values.method ?? "").trim().toLowerCase();
+      const method: "merge" | "squash" | "rebase" = methodRaw === "squash" ? "squash" : methodRaw === "rebase" ? "rebase" : "merge";
+
+      onProgress("Merging pull request...");
+      const r = await mergePullRequestAction(repo, Number(prRaw), method);
+      if ("error" in r) throw new Error(r.error);
+
+      return {
+        outputs: {},
+        summary: { kind: "text", text: `Merged PR #${prRaw} (${method}).` },
       };
     },
   },

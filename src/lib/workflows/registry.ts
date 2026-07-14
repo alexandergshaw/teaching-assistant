@@ -122,6 +122,7 @@ import {
   setBranchProtectionAction,
   listGithubReposAction,
   ingestRepoAction,
+  commitFileAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8727,6 +8728,34 @@ export const STEP_REGISTRY: StepDefinition[] = [
           text: `Digest of ${digest.fullName}: ${digest.fileCount} file(s), ${digest.text.length} char(s)`,
         },
       };
+    },
+  },
+
+  {
+    type: "commit-file-to-repo",
+    name: "Commit a file to a repo",
+    description: "Commit a single file's content to a branch (e.g. push feedback or a solution file). Attended-only.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "path", label: "File path", type: "text", required: true, help: "e.g. feedback/week01.md" },
+      { key: "content", label: "File content", type: "longtext", required: true },
+      { key: "message", label: "Commit message", type: "text", required: false },
+      { key: "branch", label: "Branch", type: "text", required: false, help: "Defaults to main." },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+      const path = String(values.path ?? "").trim();
+      if (!path) throw new Error("Provide the file path.");
+      const content = String(values.content ?? "");
+      if (!content) throw new Error("Provide the file content.");
+      const message = String(values.message ?? "").trim() || `Update ${path}`;
+      const branch = String(values.branch ?? "").trim() || "main";
+      onProgress("Committing file...");
+      const r = await commitFileAction(repo, path, content, message, branch);
+      if ("error" in r) throw new Error(r.error);
+      return { outputs: {}, summary: { kind: "text", text: `Committed ${path} to ${repo} (${branch}).` } };
     },
   },
 ];

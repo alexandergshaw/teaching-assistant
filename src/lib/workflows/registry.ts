@@ -65,6 +65,7 @@ import {
   detectMeetingRequestAction,
   getAvailableSlotsAction,
   draftMeetingReplyAction,
+  createMeetingAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -5941,6 +5942,40 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const r = await draftMeetingReplyAction(thread, slots, helpers.provider, tz);
       if ("error" in r) throw new Error(r.error);
       return { outputs: { reply: r.body }, summary: { kind: "text", text: r.body } };
+    },
+  },
+
+  {
+    type: "book-meeting",
+    name: "Book a meeting",
+    description: "Create a calendar event with a Google Meet link and invite the student. Attended-only: wire the start time from an approved open slot.",
+    inputs: [
+      { key: "startISO", label: "Start time (ISO)", type: "text", required: true, help: "ISO datetime, e.g. one of the open slots." },
+      { key: "studentName", label: "Student name", type: "text", required: false },
+      { key: "studentEmail", label: "Student email", type: "text", required: false },
+      { key: "timeZone", label: "Time zone", type: "text", required: false, help: "Optional IANA zone for the event." },
+    ],
+    outputs: [
+      { key: "meetUrl", label: "Meet link", type: "text" },
+      { key: "eventUrl", label: "Calendar event", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const startISO = String(values.startISO ?? "").trim();
+      if (!startISO) throw new Error("Provide the meeting start time (ISO).");
+      const studentName = String(values.studentName ?? "").trim() || undefined;
+      const studentEmail = String(values.studentEmail ?? "").trim() || undefined;
+      const tz = String(values.timeZone ?? "").trim() || undefined;
+      onProgress("Booking meeting...");
+      const r = await createMeetingAction(startISO, studentName, studentEmail, tz);
+      if ("error" in r) throw new Error(r.error);
+      const link = r.htmlLink ?? r.meetLink ?? "";
+      const result = {
+        outputs: { meetUrl: r.meetLink ?? "", eventUrl: r.htmlLink ?? "" },
+        summary: link
+          ? { kind: "link" as const, label: "Meeting booked", url: link }
+          : { kind: "text" as const, text: "Meeting booked." },
+      };
+      return result;
     },
   },
 ];

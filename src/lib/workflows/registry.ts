@@ -84,8 +84,10 @@ import {
   findPracticeProblemsAction,
   generateSlidesAction,
   generateLectureScriptAction,
+  reviseLectureSlidesAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
+import type { SlideData } from "@/app/actions";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
 import type { InstitutionField } from "@/lib/institution-fields";
 import type { RepoPermission } from "@/lib/github";
@@ -6957,6 +6959,83 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const r = await generateLectureScriptAction(topic, objectives, minutes, helpers.provider);
       if ("error" in r) throw new Error(r.error);
       return { outputs: { script: r.script }, summary: { kind: "text", text: r.script } };
+    },
+  },
+
+  {
+    type: "revise-generated-slides",
+    name: "Revise slides",
+    description: "Apply an edit instruction (rename, remove, add a slide, trim bullets) to a deck's slides. Takes the slides JSON emitted by Generate slides.",
+    inputs: [
+      {
+        key: "presentationTitle",
+        label: "Presentation title",
+        type: "text",
+        required: true,
+      },
+      {
+        key: "slidesJson",
+        label: "Slides (JSON)",
+        type: "longtext",
+        required: true,
+        help: "Slides JSON, e.g. wired from Generate slides.",
+      },
+      {
+        key: "instruction",
+        label: "Edit instruction",
+        type: "text",
+        required: true,
+      },
+    ],
+    outputs: [
+      {
+        key: "slidesJson",
+        label: "Revised slides (JSON)",
+        type: "longtext",
+      },
+      {
+        key: "deck",
+        label: "Deck (readable)",
+        type: "longtext",
+      },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const title = String(values.presentationTitle ?? "").trim();
+      if (!title) throw new Error("Provide the presentation title.");
+      const instruction = String(values.instruction ?? "").trim();
+      if (!instruction) throw new Error("Provide the edit instruction.");
+      const raw = String(values.slidesJson ?? "").trim();
+      if (!raw) throw new Error("Provide the slides JSON (wire it from Generate slides).");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new Error("The slides JSON is not valid JSON.");
+      }
+      if (!Array.isArray(parsed)) throw new Error("The slides JSON must be an array of slides.");
+      const currentSlides = parsed as SlideData[];
+      onProgress("Revising slides...");
+      const r = await reviseLectureSlidesAction(title, currentSlides, instruction, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+      const deckLines: string[] = [`# ${title}`];
+      for (const slide of r.slides) {
+        deckLines.push(`\n## ${slide.title}`);
+        for (const bullet of slide.bullets) {
+          deckLines.push(`- ${bullet}`);
+        }
+      }
+      const deck = deckLines.join("\n");
+      return {
+        outputs: {
+          slidesJson: JSON.stringify(r.slides),
+          deck,
+        },
+        summary: {
+          kind: "list",
+          label: title,
+          items: r.slides.map((s) => s.title),
+        },
+      };
     },
   },
 ];

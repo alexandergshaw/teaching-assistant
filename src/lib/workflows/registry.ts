@@ -70,6 +70,7 @@ import {
   getUnreadCountsAction,
   checkStudentActivityAction,
   importLmsSyllabusAction,
+  regenerateSyllabusFieldAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6256,6 +6257,30 @@ export const STEP_REGISTRY: StepDefinition[] = [
           items: items.length ? items : ["(none detected)"],
         },
       };
+    },
+  },
+
+  {
+    type: "regenerate-syllabus-field",
+    name: "Regenerate a syllabus field",
+    description: "AI-rewrite a single syllabus field (e.g. course description, policies) given its current text and optional context.",
+    inputs: [
+      { key: "fieldLabel", label: "Field label", type: "text", required: true, help: "e.g. Course description, Grading policy." },
+      { key: "currentText", label: "Current text", type: "longtext", required: false },
+      { key: "context", label: "Context", type: "longtext", required: false, help: "Optional background (e.g. a codebase or course summary) to steer the rewrite." },
+    ],
+    outputs: [
+      { key: "value", label: "New text", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const label = String(values.fieldLabel ?? "").trim();
+      if (!label) throw new Error("Provide the field label to regenerate.");
+      const currentText = String(values.currentText ?? "");
+      const context = String(values.context ?? "");
+      onProgress("Regenerating field...");
+      const r = await regenerateSyllabusFieldAction({ label, currentText }, context, {}, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+      return { outputs: { value: r.text }, summary: { kind: "text", text: r.text } };
     },
   },
 ];

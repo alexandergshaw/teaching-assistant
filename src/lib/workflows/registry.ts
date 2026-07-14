@@ -60,6 +60,7 @@ import {
   listConversationsAction,
   getConversationAction,
   draftMessageReplyAction,
+  replyToConversationAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -5775,6 +5776,40 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const r = await draftMessageReplyAction(thread, instructions, helpers.provider);
       if ("error" in r) throw new Error(r.error);
       return { outputs: { draftReply: r.body }, summary: { kind: "text", text: r.body } };
+    },
+  },
+
+  {
+    type: "reply-to-conversation",
+    name: "Send a reply to a student message",
+    description: "Send a reply to an LMS inbox conversation. Attended-only: wire the reply text from Draft a reply to a student message.",
+    inputs: [
+      { key: "conversationId", label: "Conversation id", type: "text", required: true },
+      { key: "body", label: "Reply", type: "longtext", required: true, help: "The reply text, e.g. wired from Draft a reply to a student message." },
+      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const convId = String(values.conversationId ?? "").trim();
+      if (!convId || !/^\d+$/.test(convId)) {
+        throw new Error("Provide the numeric conversation id to reply to.");
+      }
+
+      const body = String(values.body ?? "").trim();
+      if (!body) {
+        throw new Error("Provide the reply text (wire it from Draft a reply to a student message).");
+      }
+
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+
+      onProgress("Sending reply...");
+      const r = await replyToConversationAction(Number(convId), body, inst);
+      if ("error" in r) throw new Error(r.error);
+
+      return {
+        outputs: {},
+        summary: { kind: "text", text: `Reply sent on conversation ${convId}.` },
+      };
     },
   },
 ];

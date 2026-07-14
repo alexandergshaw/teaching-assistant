@@ -71,6 +71,7 @@ import {
   checkStudentActivityAction,
   importLmsSyllabusAction,
   regenerateSyllabusFieldAction,
+  listSyllabusTemplatesAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6281,6 +6282,32 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const r = await regenerateSyllabusFieldAction({ label, currentText }, context, {}, helpers.provider);
       if ("error" in r) throw new Error(r.error);
       return { outputs: { value: r.text }, summary: { kind: "text", text: r.text } };
+    },
+  },
+
+  {
+    type: "list-syllabus-templates",
+    name: "List syllabus templates",
+    description: "Enumerate the saved syllabus templates so a later step can pick one to adapt.",
+    inputs: [],
+    outputs: [
+      { key: "templates", label: "Templates", type: "longtext" },
+      { key: "templateIds", label: "Template ids", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      onProgress("Loading templates...");
+      const r = await listSyllabusTemplatesAction();
+      if ("error" in r) throw new Error(r.error);
+      const lines = r.templates.map((t) => `${t.name} (${t.id})`);
+      const ids = r.templates.map((t) => t.id).join("\n");
+      return {
+        outputs: { templates: lines.join("\n"), templateIds: ids },
+        summary: {
+          kind: "list",
+          label: `${r.templates.length} template(s)`,
+          items: r.templates.length ? r.templates.map((t) => t.name) : ["(none)"],
+        },
+      };
     },
   },
 ];

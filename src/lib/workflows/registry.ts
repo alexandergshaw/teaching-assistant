@@ -91,6 +91,7 @@ import {
   generateAvatarVideoAction,
   getAvatarVideoStatusAction,
   draftAssignmentDescriptionAction,
+  getAssignmentSyncStateAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7325,6 +7326,60 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { description: r.text },
         summary: { kind: "text", text: r.text },
+      };
+    },
+  },
+
+  {
+    type: "get-assignment-sync-state",
+    name: "Check assignment/repo sync",
+    description: "Compare an LMS assignment against its repo file and report whether they are in sync.",
+    inputs: [
+      { key: "assignmentUrl", label: "Assignment URL", type: "text", required: true },
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "path", label: "File path in repo", type: "text", required: true, help: "e.g. week01/README.md" },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+      { key: "branch", label: "Branch", type: "text", required: false },
+    ],
+    outputs: [
+      { key: "inSync", label: "In sync", type: "boolean" },
+      { key: "diff", label: "Difference", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const assignmentUrl = String(values.assignmentUrl ?? "").trim();
+      if (!assignmentUrl) throw new Error("Provide the assignment URL.");
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide the repository.");
+      const path = String(values.path ?? "").trim();
+      if (!path) throw new Error("Provide the file path in the repo.");
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+      const branch = String(values.branch ?? "").trim() || undefined;
+
+      onProgress("Comparing assignment and repo...");
+      const r = await getAssignmentSyncStateAction(assignmentUrl, repo, path, inst, branch);
+      if ("error" in r) throw new Error(r.error);
+
+      const isSync = r.repoMarkdown !== null && r.repoMarkdown === r.canvasMarkdown;
+      const inSyncOutput = isSync ? "1" : "";
+
+      let diffText: string;
+      if (r.repoMarkdown === null) {
+        diffText = "Repo file does not exist.\n\nCanvas assignment markdown:\n" + r.canvasMarkdown;
+      } else if (isSync) {
+        diffText = "No differences.";
+      } else {
+        diffText = "Canvas:\n" + r.canvasMarkdown + "\n\n---\n\nRepo file:\n" + r.repoMarkdown;
+      }
+
+      const summaryText = isSync
+        ? "In sync."
+        : r.repoMarkdown === null
+          ? "Repo file does not exist."
+          : "Content differs between Canvas and repo file.";
+
+      return {
+        outputs: { inSync: inSyncOutput, diff: diffText },
+        summary: { kind: "text", text: summaryText },
       };
     },
   },

@@ -101,6 +101,7 @@ import {
   findBankedRubricAction,
   bulkAssociateRubricAction,
   generateModelAnswerAction,
+  gradeOneSubmissionAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7845,6 +7846,71 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       return {
         outputs: { gradeSummary },
+        summary: { kind: "text", text: gradeSummary },
+      };
+    },
+  },
+
+  {
+    type: "grade-one-submission",
+    name: "Grade one submission",
+    description: "AI-score a single submission's code against a rubric (finer-grained than the batch grader). Good for regrades and appeals. Scoring only; does not post.",
+    inputs: [
+      { key: "code", label: "Submission code/text", type: "longtext", required: true },
+      { key: "courseId", label: "Course id", type: "text", required: true },
+      { key: "assignmentId", label: "Assignment id", type: "text", required: true },
+      { key: "userId", label: "Student user id", type: "text", required: true, help: "The numeric Canvas user id." },
+    ],
+    outputs: [
+      { key: "gradeSummary", label: "Grade and feedback", type: "longtext" },
+      { key: "canvasUrl", label: "Submission URL", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const code = String(values.code ?? "").trim();
+      if (!code) {
+        throw new Error("Provide the submission code or text.");
+      }
+
+      const courseId = String(values.courseId ?? "").trim();
+      if (!courseId) {
+        throw new Error("Provide the course id.");
+      }
+
+      const assignmentId = String(values.assignmentId ?? "").trim();
+      if (!assignmentId) {
+        throw new Error("Provide the assignment id.");
+      }
+
+      const userIdRaw = String(values.userId ?? "").trim();
+      if (!/^\d+$/.test(userIdRaw)) {
+        throw new Error("Provide the numeric student user id.");
+      }
+
+      onProgress("Grading submission...");
+      const r = await gradeOneSubmissionAction(code, courseId, assignmentId, Number(userIdRaw), helpers.provider);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      const gradeSummaryLines: string[] = [];
+      for (const result of r.run.results) {
+        gradeSummaryLines.push(`Student: ${result.student}`);
+        if (result.totalScore) {
+          gradeSummaryLines.push(`Total Score: ${result.totalScore}`);
+        }
+        for (const area of result.rubricAreas) {
+          gradeSummaryLines.push(`${area.area}: ${area.score}`);
+        }
+        if (result.overallComment) {
+          gradeSummaryLines.push(`Feedback: ${result.overallComment}`);
+        }
+        gradeSummaryLines.push("");
+      }
+
+      const gradeSummary = gradeSummaryLines.join("\n").trim();
+
+      return {
+        outputs: { gradeSummary, canvasUrl: r.canvasUrl },
         summary: { kind: "text", text: gradeSummary },
       };
     },

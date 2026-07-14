@@ -103,6 +103,7 @@ import {
   generateModelAnswerAction,
   gradeOneSubmissionAction,
   runSubmissionCodeAction,
+  listRunArtifactsAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7980,6 +7981,60 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { output: outputText },
         summary: { kind: "text", text: outputText || "(No output)" },
+      };
+    },
+  },
+
+  {
+    type: "list-ci-artifacts",
+    name: "List CI run artifacts",
+    description: "List the artifacts (e.g. autograder reports) produced by a repo's CI run, with their download URLs.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "runId", label: "CI run id", type: "text", required: true, help: "The numeric GitHub Actions run id." },
+    ],
+    outputs: [
+      { key: "artifacts", label: "Artifacts", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) {
+        throw new Error("Provide a repository.");
+      }
+
+      const runIdRaw = String(values.runId ?? "").trim();
+      if (!/^\d+$/.test(runIdRaw)) {
+        throw new Error("Provide the numeric CI run id.");
+      }
+
+      onProgress("Listing artifacts...");
+      const r = await listRunArtifactsAction(repo, Number(runIdRaw));
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      const lines: string[] = [];
+      const names: string[] = [];
+
+      for (const artifact of r.artifacts) {
+        lines.push(`Name: ${artifact.name}`);
+        lines.push(`Size: ${(artifact.sizeInBytes / 1024 / 1024).toFixed(2)} MB`);
+        lines.push(`Expired: ${artifact.expired ? "yes" : "no"}`);
+        if (artifact.expiresAt) {
+          lines.push(`Expires: ${artifact.expiresAt}`);
+        }
+        if (artifact.createdAt) {
+          lines.push(`Created: ${artifact.createdAt}`);
+        }
+        lines.push("");
+        names.push(artifact.name);
+      }
+
+      const artifactsText = lines.join("\n").trim();
+
+      return {
+        outputs: { artifacts: artifactsText },
+        summary: { kind: "list", label: `${r.artifacts.length} artifact(s)`, items: r.artifacts.length ? names : ["(none)"] },
       };
     },
   },

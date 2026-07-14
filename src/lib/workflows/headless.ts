@@ -97,6 +97,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "remember-rubric",
   "find-banked-rubric",
   "run-submission-code",
+  "list-ci-artifacts",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

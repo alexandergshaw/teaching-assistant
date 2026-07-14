@@ -67,6 +67,7 @@ import {
   draftMeetingReplyAction,
   createMeetingAction,
   getInstitutionCountsAction,
+  getUnreadCountsAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6078,6 +6079,54 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summary: {
           kind: "text",
           text: `${needsGrading} submission(s) need grading; ${unread} unread message(s).`,
+        },
+      };
+    },
+  },
+
+  {
+    type: "get-unread-and-notifications",
+    name: "Get unread message counts",
+    description: "Read unread inbox counts per institution, for a dashboard or digest step.",
+    inputs: [
+      {
+        key: "institutions",
+        label: "Institutions",
+        type: "longtext",
+        required: false,
+        help: "One institution acronym per line; blank uses the active institution.",
+      },
+    ],
+    outputs: [
+      { key: "unread", label: "Total unread", type: "number" },
+      { key: "breakdown", label: "Per-institution breakdown", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const raw = String(values.institutions ?? "")
+        .split("\n")
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean);
+      const acronyms = raw.length ? raw : (helpers.activeInstitution ? [helpers.activeInstitution] : []);
+
+      if (acronyms.length === 0) {
+        throw new Error("Select at least one institution.");
+      }
+
+      onProgress("Loading unread counts...");
+      const r = await getUnreadCountsAction(acronyms);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      const unread = r.counts.reduce((n, c) => n + c.unread, 0);
+      const breakdown = r.counts.map((c) => `${c.acronym}: ${c.unread} unread`).join("\n");
+
+      return {
+        outputs: { unread, breakdown },
+        summary: {
+          kind: "list",
+          label: `${unread} unread message(s)`,
+          items: r.counts.map((c) => `${c.acronym}: ${c.unread}`),
         },
       };
     },

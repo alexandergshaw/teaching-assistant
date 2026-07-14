@@ -83,6 +83,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "find-practice-problems",
   "generate-slides-standalone",
   "generate-lecture-script",
+  "generate-quiz-from-material",
   "revise-generated-slides",
   "synthesize-narration",
   "generate-avatar-video",

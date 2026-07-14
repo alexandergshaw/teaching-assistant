@@ -112,6 +112,7 @@ import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { applyTextRevision } from "@/lib/embedded/revise";
 import { scaffoldCourseOutline } from "@/lib/embedded/course";
 import { extractDefinitions } from "@/lib/embedded/scaffold";
+import { scaffoldQuizQuestions, renderQuizText } from "@/lib/embedded/quiz";
 import type {
   StepInputSpec,
   StepOutputSpec,
@@ -7478,6 +7479,35 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: {},
         summary: { kind: "text", text: "Updated the assignment from the repo file." },
+      };
+    },
+  },
+
+  {
+    type: "generate-quiz-from-material",
+    name: "Generate a quiz from material",
+    description: "Generate cloze and multiple-choice questions (with a verbatim answer key) from the instructor's own material. Emits the questions as JSON for an LMS import step.",
+    inputs: [
+      { key: "material", label: "Source material", type: "longtext", required: true },
+      { key: "count", label: "How many questions", type: "number", required: false, help: "Default 5." },
+    ],
+    outputs: [
+      { key: "quiz", label: "Quiz (with answer key)", type: "longtext" },
+      { key: "questionsJson", label: "Questions (JSON)", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const material = String(values.material ?? "").trim();
+      if (!material) throw new Error("Provide the source material.");
+      const countRaw = String(values.count ?? "").trim();
+      const count = countRaw && Number.isInteger(Number(countRaw)) && Number(countRaw) > 0 ? Number(countRaw) : 5;
+
+      onProgress("Generating quiz...");
+      const questions = scaffoldQuizQuestions(material, count);
+      const quiz = renderQuizText(questions);
+
+      return {
+        outputs: { quiz, questionsJson: JSON.stringify(questions) },
+        summary: { kind: "text", text: quiz || "(no questions could be generated from this material)" },
       };
     },
   },

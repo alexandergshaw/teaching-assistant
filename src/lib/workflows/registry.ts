@@ -90,6 +90,7 @@ import {
   synthesizeNarrationAction,
   generateAvatarVideoAction,
   getAvatarVideoStatusAction,
+  draftAssignmentDescriptionAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7299,6 +7300,31 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { assignment },
         summary: { kind: "list", label: "Assignment", items },
+      };
+    },
+  },
+
+  {
+    type: "draft-assignment-description",
+    name: "Draft an assignment description",
+    description: "AI-draft an assignment description from its name and some notes, ready to attach when creating the assignment.",
+    inputs: [
+      { key: "name", label: "Assignment name", type: "text", required: true },
+      { key: "notes", label: "Notes", type: "longtext", required: false, help: "Optional - what the assignment should cover." },
+    ],
+    outputs: [
+      { key: "description", label: "Description", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const name = String(values.name ?? "").trim();
+      if (!name) throw new Error("Provide the assignment name.");
+      const notes = String(values.notes ?? "");
+      onProgress("Drafting description...");
+      const r = await draftAssignmentDescriptionAction(name, notes, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+      return {
+        outputs: { description: r.text },
+        summary: { kind: "text", text: r.text },
       };
     },
   },

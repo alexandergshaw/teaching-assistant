@@ -52,6 +52,7 @@ import {
   gradeAction,
   generateAssignmentAction,
   generateAssignmentRubricAction,
+  generateFullCreditChecklistAction,
   listGradingQueueAction,
   postCanvasGradesAction,
   pullSubmissionAction,
@@ -5541,6 +5542,33 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: {},
         summary: { kind: "list" as const, label: "Grades posted", items: lines },
+      };
+    },
+  },
+
+  {
+    type: "generate-full-credit-checklist",
+    name: "Generate a full-credit checklist",
+    description: "Produce a short student-facing 'how to earn full credit' checklist from an assignment's instructions and rubric.",
+    inputs: [
+      { key: "instructions", label: "Assignment instructions", type: "longtext", required: true },
+      { key: "rubric", label: "Rubric", type: "longtext", required: false },
+    ],
+    outputs: [
+      { key: "checklist", label: "Checklist", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const instructions = String(values.instructions ?? "").trim();
+      if (!instructions) throw new Error("Provide the assignment instructions.");
+      const rubric = String(values.rubric ?? "");
+
+      onProgress("Generating checklist...");
+      const r = await generateFullCreditChecklistAction(instructions, rubric, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+
+      return {
+        outputs: { checklist: r.checklist },
+        summary: { kind: "text", text: r.checklist },
       };
     },
   },

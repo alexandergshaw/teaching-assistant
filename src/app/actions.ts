@@ -9298,3 +9298,19 @@ export async function findCaseStudyMaterialAction(
     return { error: err instanceof Error ? err.message : "Could not find a case study." };
   }
 }
+
+export async function generateFullCreditChecklistAction(
+  instructions: string,
+  rubric: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ checklist: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!instructions.trim()) return { error: "Provide the assignment instructions." };
+    const items = await synthesizeFullCreditChecklist(instructions, rubric, provider);
+    const checklist = items.join("\n");
+    return { checklist };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate the checklist." };
+  }
+}

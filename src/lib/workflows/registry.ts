@@ -117,6 +117,7 @@ import {
   mergePullRequestAction,
   setupTestsWorkflowAction,
   dispatchTestsAction,
+  getTestRunStatusAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8545,6 +8546,53 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { runId: String(r.since) },
         summary: { kind: "text", text: `Dispatched tests (run id ${r.since}). Use Poll test run to fetch results.` },
+      };
+    },
+  },
+
+  {
+    type: "poll-test-run",
+    name: "Poll the autograder run",
+    description: "Check the status and pass/fail result of a dispatched autograder run.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "runId", label: "Run id", type: "text", required: true, help: "The run id (timestamp) from Run the autograder tests." },
+      { key: "ref", label: "Branch or ref", type: "text", required: false },
+    ],
+    outputs: [
+      { key: "status", label: "Status", type: "text" },
+      { key: "results", label: "Results", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+
+      const runId = String(values.runId ?? "").trim();
+      if (!runId) throw new Error("Provide the run id.");
+
+      const ref = String(values.ref ?? "").trim() || undefined;
+
+      onProgress("Checking run status...");
+      const r = await getTestRunStatusAction(repo, ref || "main", runId);
+      if ("error" in r) throw new Error(r.error);
+
+      const status = r.run?.status || "unknown";
+      let resultsText = `Status: ${status}`;
+      if (r.run?.conclusion) {
+        resultsText += `\nConclusion: ${r.run.conclusion}`;
+      }
+      if (r.summary) {
+        resultsText += `\n\nTest Results:\n`;
+        resultsText += `Tests run: ${r.summary.tests}\n`;
+        resultsText += `Passed: ${r.summary.passed}\n`;
+        resultsText += `Failed: ${r.summary.failures}\n`;
+        resultsText += `Errors: ${r.summary.errors}\n`;
+        resultsText += `Skipped: ${r.summary.skipped}`;
+      }
+
+      return {
+        outputs: { status, results: resultsText },
+        summary: { kind: "text", text: `Run ${status}${r.summary ? ` - ${r.summary.passed}/${r.summary.tests} tests passed` : ""}` },
       };
     },
   },

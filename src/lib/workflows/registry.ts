@@ -107,6 +107,7 @@ import {
   listRunArtifactsAction,
   autoFixOfficeFileAction,
   checkBrokenLinksAction,
+  measureKnowledgeGapAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8177,6 +8178,38 @@ export const STEP_REGISTRY: StepDefinition[] = [
           label: `${r.links.length} broken link(s) (state: ${r.state})`,
           items: r.links.length ? urls : ["(none)"],
         },
+      };
+    },
+  },
+
+  {
+    type: "measure-knowledge-gap",
+    name: "Measure knowledge coverage",
+    description: "Score how well the stored knowledge base covers a topic and list the uncovered terms, as a diagnostic before generating materials.",
+    inputs: [
+      { key: "topic", label: "Topic", type: "text", required: true }
+    ],
+    outputs: [
+      { key: "coverage", label: "Coverage (0-1)", type: "number" },
+      { key: "uncoveredTerms", label: "Uncovered terms", type: "longtext" }
+    ],
+    run: async (values, helpers, onProgress) => {
+      const topic = String(values.topic ?? "").trim();
+      if (!topic) throw new Error("Provide a topic.");
+
+      onProgress("Measuring coverage...");
+      const r = await measureKnowledgeGapAction(topic);
+      if ("error" in r) throw new Error(r.error);
+
+      const rep = r.report;
+      const uncovered = rep.uncoveredTerms.join("\n");
+
+      return {
+        outputs: { coverage: rep.coverage, uncoveredTerms: uncovered },
+        summary: {
+          kind: "text",
+          text: `Coverage ${(rep.coverage * 100).toFixed(0)}% (gap ${(rep.gap * 100).toFixed(0)}%). Uncovered: ${rep.uncoveredTerms.length ? rep.uncoveredTerms.join(", ") : "none"}.`
+        }
       };
     },
   },

@@ -46,6 +46,7 @@ import {
   deleteKnowledgeEntry,
   type KnowledgeRow,
 } from "@/lib/research/db";
+import { measureCoverage, type CoverageReport } from "@/lib/research/gap";
 import { applyTextRevision, applySlidesRevision, applyHtmlRevision } from "@/lib/embedded/revise";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import {
@@ -9371,6 +9372,19 @@ export async function findBankedRubricAction(
     return { rubric: found ?? "", matched: found != null };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not look up a banked rubric." };
+  }
+}
+
+export async function measureKnowledgeGapAction(
+  topic: string
+): Promise<{ report: CoverageReport } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!topic.trim()) return { error: "Provide a topic." };
+    const report = await measureCoverage(topic.trim());
+    return { report };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not measure coverage." };
   }
 }
 

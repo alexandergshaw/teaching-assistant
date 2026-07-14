@@ -114,6 +114,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "detect-repo-frontend",
   "fetch-assignment-brief",
   "copy-course-content",
+  "poll-migration-state",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

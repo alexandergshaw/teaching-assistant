@@ -132,6 +132,7 @@ import {
   deleteCourseFileAction,
   fetchCanvasMetaAction,
   createCourseCopyAction,
+  getMigrationStateAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -9027,6 +9028,33 @@ export const STEP_REGISTRY: StepDefinition[] = [
         outputs: { migrationId: String(r.migrationId), destCourse: destUrl },
         summary: { kind: "text", text: `Started course copy (migration ${r.migrationId}). Use Poll migration state to track it.` },
       };
+    },
+  },
+
+  {
+    type: "poll-migration-state",
+    name: "Poll a course-copy migration",
+    description: "Check the state of a running course-content migration.",
+    inputs: [
+      { key: "destCourse", label: "Destination LMS course", type: "lmsCourse", required: true },
+      { key: "migrationId", label: "Migration id", type: "text", required: true },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+    ],
+    outputs: [
+      { key: "state", label: "State", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const destUrl = String(values.destCourse ?? "").trim();
+      if (!destUrl) throw new Error("Select the destination LMS course.");
+      const destId = parseCanvasCourseId(destUrl);
+      if (!destId) throw new Error("The destination course URL must contain a course id.");
+      const migRaw = String(values.migrationId ?? "").trim();
+      if (!/^\d+$/.test(migRaw)) throw new Error("Provide the numeric migration id.");
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+      onProgress("Checking migration state...");
+      const r = await getMigrationStateAction(destUrl, destId, Number(migRaw), inst);
+      if ("error" in r) throw new Error(r.error);
+      return { outputs: { state: r.state }, summary: { kind: "text", text: `Migration state: ${r.state}.` } };
     },
   },
 ];

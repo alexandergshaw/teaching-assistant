@@ -76,6 +76,7 @@ import { buildSlidesPptx } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
+import { parseCalendarEmbedded } from "@/lib/embedded/calendar";
 import type {
   StepInputSpec,
   StepOutputSpec,
@@ -5976,6 +5977,61 @@ export const STEP_REGISTRY: StepDefinition[] = [
           : { kind: "text" as const, text: "Meeting booked." },
       };
       return result;
+    },
+  },
+
+  {
+    type: "parse-academic-calendar",
+    name: "Parse an academic calendar",
+    description: "Extract typed, categorized calendar events (lectures, exams, deadlines, holidays) from pasted syllabus or calendar text.",
+    inputs: [
+      {
+        key: "text",
+        label: "Calendar or syllabus text",
+        type: "longtext",
+        required: true,
+      },
+    ],
+    outputs: [
+      { key: "events", label: "Parsed events", type: "longtext" },
+      { key: "school", label: "School", type: "text" },
+      { key: "term", label: "Term", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const text = String(values.text ?? "").trim();
+      if (!text) {
+        throw new Error("Paste the calendar or syllabus text to parse.");
+      }
+
+      onProgress("Parsing calendar...");
+      const result = parseCalendarEmbedded(text);
+
+      const items = result.events.map((evt) => {
+        let line = `${evt.date}`;
+        if (evt.endDate) {
+          line += ` - ${evt.endDate}`;
+        }
+        line += ` - ${evt.type}: ${evt.title}`;
+        return line;
+      });
+
+      const eventCount = result.events.length;
+      const school = result.school ?? "";
+      const term = result.term ?? "";
+      const events = items.join("\n");
+
+      return {
+        outputs: {
+          events,
+          school,
+          term,
+        },
+        summary: {
+          kind: "list",
+          label: `${eventCount} event(s) parsed`,
+          items: items.length ? items : ["(none found)"],
+        },
+      };
     },
   },
 ];

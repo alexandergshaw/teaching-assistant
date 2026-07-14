@@ -58,6 +58,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "detect-meeting-request",
   "find-open-slots",
   "draft-meeting-reply",
+  "parse-academic-calendar",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

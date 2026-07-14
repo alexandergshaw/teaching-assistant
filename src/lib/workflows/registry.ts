@@ -113,6 +113,7 @@ import { applyTextRevision } from "@/lib/embedded/revise";
 import { scaffoldCourseOutline } from "@/lib/embedded/course";
 import { extractDefinitions } from "@/lib/embedded/scaffold";
 import { scaffoldQuizQuestions, renderQuizText } from "@/lib/embedded/quiz";
+import { generateEmbeddedRubricText } from "@/lib/embedded-grader/rubric";
 import type {
   StepInputSpec,
   StepOutputSpec,
@@ -7568,6 +7569,32 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       const items = failures.length ? failures : [`Created ${created} question(s).`];
       return { outputs: { created }, summary: { kind: "list", label: `Created ${created} of ${parsed.length} question(s)`, items } };
+    },
+  },
+
+  {
+    type: "generate-rubric-offline",
+    name: "Generate a rubric (offline, no AI)",
+    description: "Build a tiered weighted grading rubric from an assignment's instructions with no model call -- a fallback rubric source.",
+    inputs: [
+      { key: "instructions", label: "Assignment instructions", type: "longtext", required: true },
+    ],
+    outputs: [
+      { key: "rubric", label: "Rubric", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const instructions = String(values.instructions ?? "").trim();
+      if (!instructions) {
+        throw new Error("Provide the assignment instructions.");
+      }
+
+      onProgress("Building rubric...");
+      const rubric = generateEmbeddedRubricText(instructions);
+
+      return {
+        outputs: { rubric },
+        summary: { kind: "text", text: rubric },
+      };
     },
   },
 ];

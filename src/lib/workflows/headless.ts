@@ -39,6 +39,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "draft-announcement",
   "draft-assignment-description",
   "assign-student-repos",
+  "generate-rubric-offline",
   "lms-rubric",
   "lms-assignments",
   "blackboard-export",

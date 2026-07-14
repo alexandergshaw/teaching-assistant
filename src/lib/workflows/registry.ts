@@ -14,6 +14,7 @@ import {
   listCourseContentAction,
   listAnnouncementsAction,
   draftAnnouncementAction,
+  createAnnouncementAction,
   createModuleAction,
   requestFileUploadAction,
   createModuleItemAction,
@@ -5604,6 +5605,69 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summary: {
           kind: "text",
           text: `${r.title}\n\n${r.message}`,
+        },
+      };
+    },
+  },
+
+  {
+    type: "post-announcement",
+    name: "Post an announcement",
+    description: "Publish an announcement to the LMS course (immediately, or scheduled for a future date). Attended-only: wire the title and body from Draft an announcement, or type them in.",
+    inputs: [
+      {
+        key: "course",
+        label: "LMS course",
+        type: "lmsCourse",
+        required: true,
+      },
+      {
+        key: "announcementTitle",
+        label: "Title",
+        type: "text",
+        required: true,
+      },
+      {
+        key: "announcement",
+        label: "Body",
+        type: "longtext",
+        required: true,
+      },
+      {
+        key: "postAt",
+        label: "Schedule for",
+        type: "date",
+        required: false,
+        help: "Leave blank to post now; set a future date to schedule.",
+      },
+      {
+        key: "institution",
+        label: "Institution",
+        type: "institution",
+        required: false,
+        help: "Defaults to the active institution.",
+      },
+    ],
+    outputs: [
+      { key: "announcementUrl", label: "Announcement URL", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const course = String(values.course ?? "").trim();
+      if (!course) throw new Error("Select an LMS course to post to.");
+      const title = String(values.announcementTitle ?? "").trim();
+      const body = String(values.announcement ?? "").trim();
+      if (!title || !body) throw new Error("Provide a title and body (wire these from Draft an announcement).");
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+      const postAt = String(values.postAt ?? "").trim() || undefined;
+      onProgress(postAt ? "Scheduling announcement..." : "Posting announcement...");
+      const r = await createAnnouncementAction(course, title, body, inst, postAt);
+      if ("error" in r) throw new Error(r.error);
+      return {
+        outputs: { announcementUrl: r.announcement.htmlUrl },
+        summary: {
+          kind: "link",
+          label: postAt ? `Scheduled "${title}"` : `Posted "${title}"`,
+          url: r.announcement.htmlUrl,
         },
       };
     },

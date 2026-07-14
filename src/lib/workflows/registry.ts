@@ -76,6 +76,7 @@ import {
   updateSyllabusTemplateAction,
   deleteSyllabusTemplateAction,
   extractTopicsFromRepoAction,
+  generateModuleIntroAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6487,6 +6488,46 @@ export const STEP_REGISTRY: StepDefinition[] = [
           label: `${r.topics.length} topic(s)`,
           items: r.topics.length ? r.topics : ["(none found)"],
         },
+      };
+    },
+  },
+
+  {
+    type: "generate-module-intro",
+    name: "Generate a module introduction",
+    description: "Produce a module overview plus key-terms text from the week's objectives, ready to save as a module intro.",
+    inputs: [
+      {
+        key: "objectives",
+        label: "Module objectives",
+        type: "longtext",
+        required: true,
+      },
+      {
+        key: "context",
+        label: "Context",
+        type: "longtext",
+        required: false,
+        help: "Optional source material to draw on.",
+      },
+    ],
+    outputs: [
+      { key: "intro", label: "Module intro", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const objectives = String(values.objectives ?? "").trim();
+      if (!objectives) throw new Error("Provide the module objectives.");
+      const context = String(values.context ?? "");
+
+      onProgress("Generating module intro...");
+      const r = await generateModuleIntroAction(objectives, context, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+
+      const intro = [r.overview, r.keyTerms ? "Key terms:\n" + r.keyTerms : ""].filter(Boolean).join("\n\n");
+
+      return {
+        outputs: { intro },
+        summary: { kind: "text", text: intro },
       };
     },
   },

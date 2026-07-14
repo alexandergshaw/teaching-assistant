@@ -82,6 +82,7 @@ import {
   generateDocumentTextAction,
   findCaseStudyMaterialAction,
   findPracticeProblemsAction,
+  generateSlidesAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6889,6 +6890,45 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { problems, count: r.problems.length },
         summary: { kind: "list", label: `${r.problems.length} problem(s)`, items: items.length ? items : ["(none found)"] }
+      };
+    },
+  },
+
+  {
+    type: "generate-slides-standalone",
+    name: "Generate slides",
+    description: "Generate a single lecture deck (title and slides) from a prompt. Emits the slides as JSON so a later step can revise them.",
+    inputs: [
+      { key: "prompt", label: "What should the deck cover?", type: "longtext", required: true }
+    ],
+    outputs: [
+      { key: "presentationTitle", label: "Presentation title", type: "text" },
+      { key: "deck", label: "Deck (readable)", type: "longtext" },
+      { key: "slidesJson", label: "Slides (JSON)", type: "longtext" }
+    ],
+    run: async (values, helpers, onProgress) => {
+      const prompt = String(values.prompt ?? "").trim();
+      if (!prompt) throw new Error("Describe the slides to generate first.");
+
+      onProgress("Generating slides...");
+      const r = await generateSlidesAction(prompt, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+
+      const deckLines: string[] = [r.presentationTitle];
+      for (const slide of r.slides) {
+        deckLines.push(`\n## ${slide.title}`);
+        for (const bullet of slide.bullets) {
+          deckLines.push(`- ${bullet}`);
+        }
+      }
+      const deck = deckLines.join("\n");
+
+      const slidesJson = JSON.stringify(r.slides);
+      const titles = r.slides.map((s) => s.title);
+
+      return {
+        outputs: { presentationTitle: r.presentationTitle, deck, slidesJson },
+        summary: { kind: "list", label: r.presentationTitle, items: titles.length ? titles : ["(no slides)"] }
       };
     },
   },

@@ -112,6 +112,7 @@ import {
   listUnverifiedKnowledgeAction,
   generateCopilotProjectPromptAction,
   listCopilotTasksAction,
+  listPullRequestFilesAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8347,6 +8348,46 @@ export const STEP_REGISTRY: StepDefinition[] = [
           kind: "list",
           label: `${r.tasks.length} task(s)`,
           items: r.tasks.length ? titles : ["(none)"],
+        },
+      };
+    },
+  },
+
+  {
+    type: "read-pr-diff",
+    name: "Read a pull request diff",
+    description: "Read a pull request's changed files and unified diffs, to feed a review or an automated grade.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "prNumber", label: "PR number", type: "text", required: true, help: "The pull request number." },
+    ],
+    outputs: [
+      { key: "diff", label: "Diff", type: "longtext" },
+      { key: "files", label: "Changed files", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+
+      const prRaw = String(values.prNumber ?? "").trim();
+      if (!/^\d+$/.test(prRaw)) throw new Error("Provide the numeric PR number.");
+
+      onProgress("Reading PR diff...");
+      const r = await listPullRequestFilesAction(repo, Number(prRaw));
+      if ("error" in r) throw new Error(r.error);
+
+      const filenames = r.files.map((f) => f.filename);
+      const filesText = filenames.join("\n");
+      const diffText = r.files
+        .map((f) => `${f.filename}\n${f.patch || "(binary or too large)"}`)
+        .join("\n\n");
+
+      return {
+        outputs: { diff: diffText, files: filesText },
+        summary: {
+          kind: "list",
+          label: `${r.files.length} file(s) changed`,
+          items: r.files.length ? filenames : ["(none)"],
         },
       };
     },

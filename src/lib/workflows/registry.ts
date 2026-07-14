@@ -66,6 +66,7 @@ import {
   getAvailableSlotsAction,
   draftMeetingReplyAction,
   createMeetingAction,
+  getInstitutionCountsAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6030,6 +6031,53 @@ export const STEP_REGISTRY: StepDefinition[] = [
           kind: "list",
           label: `${eventCount} event(s) parsed`,
           items: items.length ? items : ["(none found)"],
+        },
+      };
+    },
+  },
+
+  {
+    type: "check-needs-grading",
+    name: "Check for work needing grading",
+    description: "Count submissions waiting to be graded (and unread messages) for an institution, so a scheduled run can fire only when work is waiting.",
+    inputs: [
+      {
+        key: "institution",
+        label: "Institution",
+        type: "institution",
+        required: false,
+        help: "Defaults to the active institution.",
+      },
+    ],
+    outputs: [
+      { key: "needsGrading", label: "Submissions needing grading", type: "number" },
+      { key: "unread", label: "Unread messages", type: "number" },
+      { key: "hasWork", label: "Has work waiting", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || "";
+      if (!inst) {
+        throw new Error("Select an institution to check.");
+      }
+
+      onProgress("Checking for pending work...");
+      const r = await getInstitutionCountsAction([inst]);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      const needsGrading = r.counts.reduce((n, c) => n + c.needsGrading, 0);
+      const unread = r.counts.reduce((n, c) => n + c.unread, 0);
+
+      return {
+        outputs: {
+          needsGrading,
+          unread,
+          hasWork: needsGrading > 0 ? "1" : "",
+        },
+        summary: {
+          kind: "text",
+          text: `${needsGrading} submission(s) need grading; ${unread} unread message(s).`,
         },
       };
     },

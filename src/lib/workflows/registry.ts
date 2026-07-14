@@ -86,6 +86,7 @@ import {
   generateDocumentTextAction,
   findCaseStudyMaterialAction,
   findPracticeProblemsAction,
+  researchTopicAction,
   generateSlidesAction,
   generateLectureScriptAction,
   reviseLectureSlidesAction,
@@ -6943,6 +6944,53 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { problems, count: r.problems.length },
         summary: { kind: "list", label: `${r.problems.length} problem(s)`, items: items.length ? items : ["(none found)"] }
+      };
+    },
+  },
+
+  {
+    type: "research-topic",
+    name: "Research a topic",
+    description: "Fetch external, cited research (case studies and practice material) for a topic, to seed lecture or assignment content.",
+    inputs: [
+      { key: "topic", label: "Topic", type: "text", required: true },
+      { key: "count", label: "How many results", type: "number", required: false, help: "Default 5." }
+    ],
+    outputs: [
+      { key: "results", label: "Research results", type: "longtext" }
+    ],
+    run: async (values, helpers, onProgress) => {
+      const topic = String(values.topic ?? "").trim();
+      if (!topic) throw new Error("Provide a topic.");
+
+      const countRaw = String(values.count ?? "").trim();
+      const limit = countRaw && Number.isInteger(Number(countRaw)) && Number(countRaw) > 0 ? Number(countRaw) : 5;
+
+      onProgress("Researching...");
+      const r = await researchTopicAction(topic, limit);
+      if ("error" in r) throw new Error(r.error);
+
+      const items: string[] = [];
+      const lines: string[] = [];
+
+      for (const result of r.results) {
+        items.push(result.title);
+        lines.push(result.title);
+        lines.push(`Source: ${result.source}`);
+        if (result.url) {
+          lines.push(`URL: ${result.url}`);
+        }
+        lines.push("");
+        lines.push(result.summary);
+        lines.push("");
+        lines.push("---");
+        lines.push("");
+      }
+
+      const results = lines.join("\n").trim();
+      return {
+        outputs: { results },
+        summary: { kind: "list", label: `${r.results.length} result(s)`, items: r.results.length ? items : ["(none found)"] }
       };
     },
   },

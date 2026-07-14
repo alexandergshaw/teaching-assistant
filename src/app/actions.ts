@@ -39,7 +39,7 @@ import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { copyedit, stripLongDashes } from "@/lib/embedded/scaffold";
 import { routeRequest } from "@/lib/embedded/router";
 import { rememberRubric, findRubricForTopic } from "@/lib/research/rubric-bank";
-import { findCaseStudyMaterial, type CaseStudyMaterial, findPracticeProblems, type PracticeProblemEntry } from "@/lib/research/index";
+import { findCaseStudyMaterial, type CaseStudyMaterial, findPracticeProblems, type PracticeProblemEntry, research, type ResearchResult } from "@/lib/research/index";
 import {
   listUnverifiedKnowledge,
   verifyKnowledgeEntry,
@@ -9127,6 +9127,20 @@ export async function findPracticeProblemsAction(
     return { problems };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not find practice problems." };
+  }
+}
+
+export async function researchTopicAction(
+  topic: string,
+  limit = 5
+): Promise<{ results: ResearchResult[] } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!topic.trim()) return { error: "Provide a topic." };
+    const results = await research(topic.trim(), { limit });
+    return { results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not research the topic." };
   }
 }
 

@@ -80,6 +80,7 @@ import {
   generateLessonPlanAction,
   generateExamplesAction,
   generateDocumentTextAction,
+  findCaseStudyMaterialAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6797,6 +6798,45 @@ export const STEP_REGISTRY: StepDefinition[] = [
           label: `${defs.length} term(s)`,
           items: items.length ? items : ["(none found)"],
         },
+      };
+    },
+  },
+
+  {
+    type: "find-case-study-slide",
+    name: "Find a case-study slide",
+    description: "Retrieve ready slide material (title, factual bullets, lesson) for the best real case study on a topic, from the curated knowledge base.",
+    inputs: [
+      { key: "topic", label: "Topic", type: "text", required: true }
+    ],
+    outputs: [
+      { key: "caseStudy", label: "Case study", type: "longtext" },
+      { key: "found", label: "Found", type: "boolean" }
+    ],
+    run: async (values, helpers, onProgress) => {
+      const topic = String(values.topic ?? "").trim();
+      if (!topic) throw new Error("Provide a topic.");
+
+      onProgress("Finding a case study...");
+      const r = await findCaseStudyMaterialAction(topic);
+      if ("error" in r) throw new Error(r.error);
+
+      if (!r.material) {
+        return {
+          outputs: { caseStudy: "", found: "" },
+          summary: { kind: "text", text: `No case study found for "${topic}".` }
+        };
+      }
+
+      const lines: string[] = [r.material.title, ""];
+      for (const bullet of r.material.bullets) {
+        lines.push(`- ${bullet}`);
+      }
+
+      const caseStudy = lines.join("\n").trim();
+      return {
+        outputs: { caseStudy, found: "1" },
+        summary: { kind: "text", text: `Found case study: ${r.material.title}` }
       };
     },
   },

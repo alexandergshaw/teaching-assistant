@@ -39,6 +39,7 @@ import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { copyedit, stripLongDashes } from "@/lib/embedded/scaffold";
 import { routeRequest } from "@/lib/embedded/router";
 import { rememberRubric } from "@/lib/research/rubric-bank";
+import { findCaseStudyMaterial, type CaseStudyMaterial } from "@/lib/research/index";
 import {
   listUnverifiedKnowledge,
   verifyKnowledgeEntry,
@@ -9268,5 +9269,18 @@ export async function reviewKnowledgeEntryAction(
     return ok ? { ok: true } : { error: "The update didn't apply. Check the knowledge database configuration." };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not review the entry." };
+  }
+}
+
+export async function findCaseStudyMaterialAction(
+  topic: string
+): Promise<{ material: CaseStudyMaterial | null } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!topic.trim()) return { error: "Provide a topic." };
+    const material = await findCaseStudyMaterial(topic.trim());
+    return { material };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not find a case study." };
   }
 }

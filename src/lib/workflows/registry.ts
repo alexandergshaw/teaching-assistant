@@ -116,6 +116,7 @@ import {
   reviewPullRequestAction,
   mergePullRequestAction,
   setupTestsWorkflowAction,
+  dispatchTestsAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8516,6 +8517,34 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: {},
         summary: { kind: "text", text: "Autograder CI workflow installed successfully." },
+      };
+    },
+  },
+
+  {
+    type: "dispatch-tests",
+    name: "Run the autograder tests",
+    description: "Trigger the autograder tests workflow for a repository. Emits the run id for a later poll step.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "ref", label: "Branch or ref", type: "text", required: false },
+    ],
+    outputs: [
+      { key: "runId", label: "CI run id", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+
+      const ref = String(values.ref ?? "").trim() || undefined;
+
+      onProgress("Dispatching tests...");
+      const r = await dispatchTestsAction(repo, ref);
+      if ("error" in r) throw new Error(r.error);
+
+      return {
+        outputs: { runId: String(r.since) },
+        summary: { kind: "text", text: `Dispatched tests (run id ${r.since}). Use Poll test run to fetch results.` },
       };
     },
   },

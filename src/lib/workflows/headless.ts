@@ -106,6 +106,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "generate-copilot-prompt",
   "poll-copilot-tasks",
   "read-pr-diff",
+  "dispatch-tests",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

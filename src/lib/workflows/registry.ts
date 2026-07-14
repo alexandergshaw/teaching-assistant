@@ -133,6 +133,7 @@ import {
   fetchCanvasMetaAction,
   createCourseCopyAction,
   getMigrationStateAction,
+  submitSelectiveImportAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -9055,6 +9056,33 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const r = await getMigrationStateAction(destUrl, destId, Number(migRaw), inst);
       if ("error" in r) throw new Error(r.error);
       return { outputs: { state: r.state }, summary: { kind: "text", text: `Migration state: ${r.state}.` } };
+    },
+  },
+  {
+    type: "submit-selective-import",
+    name: "Submit a selective import",
+    description: "Commit a selective course-copy: import only the chosen content properties for a migration. Attended-only.",
+    inputs: [
+      { key: "destCourse", label: "Destination LMS course", type: "lmsCourse", required: true },
+      { key: "migrationId", label: "Migration id", type: "text", required: true },
+      { key: "properties", label: "Content property ids", type: "longtext", required: true, help: "One copy[...] property id per line (from the selective data)." },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const destUrl = String(values.destCourse ?? "").trim();
+      if (!destUrl) throw new Error("Select the destination LMS course.");
+      const destId = parseCanvasCourseId(destUrl);
+      if (!destId) throw new Error("The destination course URL must contain a course id.");
+      const migRaw = String(values.migrationId ?? "").trim();
+      if (!/^\d+$/.test(migRaw)) throw new Error("Provide the numeric migration id.");
+      const properties = String(values.properties ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+      if (properties.length === 0) throw new Error("Provide at least one content property id.");
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+      onProgress("Submitting selective import...");
+      const r = await submitSelectiveImportAction(destUrl, destId, Number(migRaw), properties, inst);
+      if ("error" in r) throw new Error(r.error);
+      return { outputs: {}, summary: { kind: "text", text: `Submitted selective import of ${properties.length} item(s).` } };
     },
   },
 ];

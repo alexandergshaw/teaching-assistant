@@ -85,6 +85,7 @@ import {
   generateSlidesAction,
   generateLectureScriptAction,
   reviseLectureSlidesAction,
+  extractPptxSlidesAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7034,6 +7035,70 @@ export const STEP_REGISTRY: StepDefinition[] = [
           kind: "list",
           label: title,
           items: r.slides.map((s) => s.title),
+        },
+      };
+    },
+  },
+
+  {
+    type: "extract-pptx-slides",
+    name: "Extract slides from a PowerPoint",
+    description: "Read the slide text out of an uploaded .pptx deck, to feed narration or Q&A. Attended-only (needs an uploaded file).",
+    inputs: [
+      {
+        key: "deck",
+        label: "PowerPoint file",
+        type: "uploads",
+        required: true,
+        accept: ".pptx",
+      },
+    ],
+    outputs: [
+      { key: "slides", label: "Slides", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const files = values.deck as File[] | undefined;
+      if (!files || files.length === 0) {
+        throw new Error("Upload a .pptx file.");
+      }
+
+      const file = files[0];
+      onProgress("Reading slides...");
+
+      // Convert the File to base64 (browser-safe, chunked to avoid call-stack limits)
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = "";
+      const CHUNK = 0x8000;
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+      }
+      const base64 = btoa(binary);
+
+      const r = await extractPptxSlidesAction(base64);
+      if ("error" in r) throw new Error(r.error);
+
+      // Build a readable slides text: one block per slide
+      const slidesLines: string[] = [];
+      for (const s of r.slides) {
+        slidesLines.push(`Slide ${s.slide}: ${s.title}`);
+        if (s.text) {
+          slidesLines.push(s.text);
+        }
+        slidesLines.push("");
+      }
+      const slides = slidesLines.join("\n");
+
+      // Build items list for summary
+      const items = r.slides.length > 0
+        ? r.slides.map((s) => `Slide ${s.slide}: ${s.title}`)
+        : ["(empty)"];
+
+      return {
+        outputs: { slides },
+        summary: {
+          kind: "list",
+          label: `${r.slides.length} slide(s)`,
+          items,
         },
       };
     },

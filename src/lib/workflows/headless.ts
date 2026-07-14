@@ -103,6 +103,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "measure-knowledge-gap",
   "run-research-loop",
   "list-unverified-knowledge",
+  "generate-copilot-prompt",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

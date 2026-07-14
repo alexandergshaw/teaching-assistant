@@ -110,6 +110,7 @@ import {
   measureKnowledgeGapAction,
   runResearchLoopAction,
   listUnverifiedKnowledgeAction,
+  generateCopilotProjectPromptAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8277,6 +8278,36 @@ export const STEP_REGISTRY: StepDefinition[] = [
           label: `${r.entries.length} unverified entr${r.entries.length === 1 ? "y" : "ies"}`,
           items: r.entries.length ? titles : ["(none)"],
         },
+      };
+    },
+  },
+
+  {
+    type: "generate-copilot-prompt",
+    name: "Generate a Copilot agent prompt",
+    description: "Draft a GitHub Copilot coding-agent project/scaffolding prompt, ready to feed an agent task.",
+    inputs: [
+      { key: "schedule", label: "Course schedule", type: "longtext", required: true },
+      { key: "fileName", label: "Schedule file name", type: "text", required: false, help: "Defaults to schedule.csv." },
+    ],
+    outputs: [
+      { key: "prompt", label: "Agent prompt", type: "longtext" }
+    ],
+    run: async (values, helpers, onProgress) => {
+      const schedule = String(values.schedule ?? "").trim();
+      if (!schedule) throw new Error("Provide course schedule content.");
+
+      const fileName = String(values.fileName ?? "").trim() || "schedule.csv";
+
+      onProgress("Drafting Copilot prompt...");
+      const r = await generateCopilotProjectPromptAction(schedule, fileName, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+
+      const promptText = r.prompt;
+
+      return {
+        outputs: { prompt: promptText },
+        summary: { kind: "text", text: promptText }
       };
     },
   },

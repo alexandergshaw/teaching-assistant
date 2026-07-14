@@ -7619,6 +7619,35 @@ export async function copilotChatAction(
   }
 }
 
+/** Check student repo activity: list repos in an org with their last-commit date. */
+export async function checkStudentActivityAction(
+  org: string,
+  prefix?: string
+): Promise<{ rows: Array<{ repo: string; lastCommit: string | null; htmlUrl: string }> } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!org.trim()) return { error: "Provide a GitHub organization." };
+    const repos = await listOrgRepos(org.trim(), prefix?.trim() || undefined);
+    const rows = await Promise.all(
+      repos.map(async (r) => {
+        const [owner, name] = r.fullName.split("/");
+        let lastCommit: string | null = null;
+        try {
+          const commits = await listCommits(owner, name, undefined, 1);
+          lastCommit = commits[0]?.date || null;
+        } catch {
+          lastCommit = null;
+        }
+        return { repo: r.fullName, lastCommit, htmlUrl: r.htmlUrl };
+      })
+    );
+    rows.sort((a, b) => (a.lastCommit ?? "").localeCompare(b.lastCommit ?? ""));
+    return { rows };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not read student activity." };
+  }
+}
+
 /** Generate a grading rubric from a repo's code (optionally guided by instructions). */
 export async function generateRubricFromRepoAction(
   repoRef: string,

@@ -68,6 +68,7 @@ import {
   createMeetingAction,
   getInstitutionCountsAction,
   getUnreadCountsAction,
+  checkStudentActivityAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6128,6 +6129,45 @@ export const STEP_REGISTRY: StepDefinition[] = [
           label: `${unread} unread message(s)`,
           items: r.counts.map((c) => `${c.acronym}: ${c.unread}`),
         },
+      };
+    },
+  },
+
+  {
+    type: "check-student-activity",
+    name: "Check student repo activity",
+    description: "List each student repo in the org with its last-commit date, flagging repos with no recent activity as at-risk.",
+    inputs: [
+      { key: "org", label: "Organization", type: "org", required: true },
+      { key: "prefix", label: "Repo name prefix", type: "text", required: false, help: "Only repos whose name starts with this." },
+      { key: "staleDays", label: "Stale after (days)", type: "number", required: false, help: "Flag repos with no commit in this many days (default 7)." },
+    ],
+    outputs: [
+      { key: "activity", label: "Activity report", type: "longtext" },
+      { key: "staleCount", label: "Stale repos", type: "number" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const org = String(values.org ?? "").trim();
+      if (!org) throw new Error("Provide a GitHub organization.");
+      const prefix = String(values.prefix ?? "").trim() || undefined;
+      const staleRaw = String(values.staleDays ?? "").trim();
+      const staleDays = staleRaw && Number.isFinite(Number(staleRaw)) ? Number(staleRaw) : 7;
+
+      onProgress("Reading student repos...");
+      const r = await checkStudentActivityAction(org, prefix);
+      if ("error" in r) throw new Error(r.error);
+
+      const cutoff = Date.now() - staleDays * 86400000;
+      let staleCount = 0;
+      const lines = r.rows.map((row) => {
+        const stale = !row.lastCommit || new Date(row.lastCommit).getTime() < cutoff;
+        if (stale) staleCount++;
+        return `${row.repo}: ${row.lastCommit ? row.lastCommit : "no commits"}${stale ? " (STALE)" : ""}`;
+      });
+
+      return {
+        outputs: { activity: lines.join("\n"), staleCount },
+        summary: { kind: "list", label: `${r.rows.length} repo(s), ${staleCount} stale`, items: lines.length ? lines : ["(no repos found)"] },
       };
     },
   },

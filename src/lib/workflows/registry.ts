@@ -123,6 +123,7 @@ import {
   listGithubReposAction,
   ingestRepoAction,
   commitFileAction,
+  detectRepoFrontendAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8756,6 +8757,44 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const r = await commitFileAction(repo, path, content, message, branch);
       if ("error" in r) throw new Error(r.error);
       return { outputs: {}, summary: { kind: "text", text: `Committed ${path} to ${repo} (${branch}).` } };
+    },
+  },
+
+  {
+    type: "detect-repo-frontend",
+    name: "Detect a repo's stack",
+    description: "Detect a repository's frontend framework and dev command (and backend), to configure a run, preview, or automated build.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true, help: "As owner/name." },
+    ],
+    outputs: [
+      { key: "framework", label: "Framework", type: "text" },
+      { key: "devCommand", label: "Dev command", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository (owner/name).");
+      onProgress("Detecting stack...");
+      const r = await detectRepoFrontendAction(repo);
+      if ("error" in r) throw new Error(r.error);
+      const framework = r.frontend?.framework ?? "";
+      const devCommand = r.frontend?.devCommand ?? "";
+
+      const summaryParts: string[] = [];
+      if (r.frontend) {
+        summaryParts.push(`Frontend: ${r.frontend.framework}`);
+        summaryParts.push(`Dev command: ${r.frontend.devCommand}`);
+      } else {
+        summaryParts.push("No frontend detected.");
+      }
+
+      if (r.backend) {
+        summaryParts.push(`Backend: ${r.backend.framework} (${r.backend.runtime})`);
+        summaryParts.push(`Backend dev: ${r.backend.devCommand}`);
+      }
+
+      const summaryText = summaryParts.join("\n");
+      return { outputs: { framework, devCommand }, summary: { kind: "text", text: summaryText } };
     },
   },
 ];

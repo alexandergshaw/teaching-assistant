@@ -93,6 +93,7 @@ import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { parseCalendarEmbedded } from "@/lib/embedded/calendar";
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
+import { applyTextRevision } from "@/lib/embedded/revise";
 import type {
   StepInputSpec,
   StepOutputSpec,
@@ -6669,6 +6670,56 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { document: r.text },
         summary: { kind: "text", text: r.text },
+      };
+    },
+  },
+
+  {
+    type: "revise-generated-document",
+    name: "Revise a document",
+    description: "Apply a natural-language edit instruction (replace, retitle, remove a section, add a bullet, shorten) to a generated markdown document.",
+    inputs: [
+      {
+        key: "document",
+        label: "Document",
+        type: "longtext",
+        required: true,
+      },
+      {
+        key: "instruction",
+        label: "Edit instruction",
+        type: "text",
+        required: true,
+        help: "e.g. 'remove the Prerequisites section', 'shorten the overview'.",
+      },
+    ],
+    outputs: [
+      { key: "document", label: "Revised document", type: "longtext" },
+      { key: "applied", label: "Edit applied", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const document = String(values.document ?? "").trim();
+      if (!document) {
+        throw new Error("Provide the document to revise.");
+      }
+
+      const instruction = String(values.instruction ?? "").trim();
+      if (!instruction) {
+        throw new Error("Provide the edit instruction.");
+      }
+
+      onProgress("Applying edit...");
+      const result = applyTextRevision(document, instruction);
+
+      return {
+        outputs: {
+          document: result.text,
+          applied: result.applied ? "1" : "",
+        },
+        summary: {
+          kind: "text",
+          text: result.applied ? result.text : "Could not parse that edit instruction; document unchanged.",
+        },
       };
     },
   },

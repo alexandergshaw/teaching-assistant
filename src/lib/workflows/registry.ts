@@ -131,6 +131,7 @@ import {
   renameCourseFileAction,
   deleteCourseFileAction,
   fetchCanvasMetaAction,
+  createCourseCopyAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8993,6 +8994,39 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const r = await fetchCanvasMetaAction(url);
       if ("error" in r) throw new Error(r.error);
       return { outputs: { description: r.description, rubric: r.rubricText }, summary: { kind: "text", text: r.description || "(no description)" } };
+    },
+  },
+
+  {
+    type: "copy-course-content",
+    name: "Copy course content",
+    description: "Start a content migration that copies one course's content into another (destination). Emits the migration id for a poll step.",
+    inputs: [
+      { key: "destCourse", label: "Destination LMS course", type: "lmsCourse", required: true },
+      { key: "sourceCourseId", label: "Source course id", type: "text", required: true, help: "The numeric id of the course to copy FROM." },
+      { key: "selective", label: "Selective (choose content later)", type: "boolean", required: false },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+    ],
+    outputs: [
+      { key: "migrationId", label: "Migration id", type: "text" },
+      { key: "destCourse", label: "Destination course", type: "lmsCourse" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const destUrl = String(values.destCourse ?? "").trim();
+      if (!destUrl) throw new Error("Select the destination LMS course.");
+      const destId = parseCanvasCourseId(destUrl);
+      if (!destId) throw new Error("The destination course URL must contain a course id.");
+      const sourceCourseId = String(values.sourceCourseId ?? "").trim();
+      if (!sourceCourseId) throw new Error("Provide the source course id.");
+      const selective = String(values.selective ?? "") === "1";
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+      onProgress("Starting course copy...");
+      const r = await createCourseCopyAction(destUrl, destId, sourceCourseId, selective, inst);
+      if ("error" in r) throw new Error(r.error);
+      return {
+        outputs: { migrationId: String(r.migrationId), destCourse: destUrl },
+        summary: { kind: "text", text: `Started course copy (migration ${r.migrationId}). Use Poll migration state to track it.` },
+      };
     },
   },
 ];

@@ -78,6 +78,7 @@ import {
   extractTopicsFromRepoAction,
   generateModuleIntroAction,
   generateLessonPlanAction,
+  generateExamplesAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6571,6 +6572,68 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { lessonPlan },
         summary: { kind: "list", label: `Lesson plan (${r.slides.length} slides)`, items },
+      };
+    },
+  },
+
+  {
+    type: "generate-worked-examples",
+    name: "Generate worked examples",
+    description: "Produce worked examples per concept from a module's objectives, for use in a lecture or handout.",
+    inputs: [
+      {
+        key: "objectives",
+        label: "Module objectives",
+        type: "longtext",
+        required: true,
+      },
+      {
+        key: "context",
+        label: "Context",
+        type: "longtext",
+        required: false,
+        help: "Optional source material.",
+      },
+    ],
+    outputs: [
+      {
+        key: "examples",
+        label: "Worked examples",
+        type: "longtext",
+      },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const objectives = String(values.objectives ?? "").trim();
+      if (!objectives) {
+        throw new Error("Provide the module objectives.");
+      }
+
+      const context = String(values.context ?? "");
+
+      onProgress("Generating worked examples...");
+      const r = await generateExamplesAction(objectives, context, [], helpers.provider);
+
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      const lines: string[] = [];
+      lines.push(`Lesson Type: ${r.lessonType}`);
+      lines.push("");
+
+      for (const example of r.examples) {
+        lines.push(`## ${example.concept}`);
+        lines.push(`Title: ${example.title}`);
+        lines.push(`${example.content}`);
+        lines.push("");
+      }
+
+      const examples = lines.join("\n").trim();
+      const items = r.examples.map((e) => e.concept).length > 0 ? r.examples.map((e) => e.concept) : ["(generated)"];
+
+      return {
+        outputs: { examples },
+        summary: { kind: "list", label: "Worked examples", items },
       };
     },
   },

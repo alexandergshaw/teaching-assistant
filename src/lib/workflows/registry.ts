@@ -134,6 +134,7 @@ import {
   createCourseCopyAction,
   getMigrationStateAction,
   submitSelectiveImportAction,
+  listCourseRosterAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -9083,6 +9084,37 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const r = await submitSelectiveImportAction(destUrl, destId, Number(migRaw), properties, inst);
       if ("error" in r) throw new Error(r.error);
       return { outputs: {}, summary: { kind: "text", text: `Submitted selective import of ${properties.length} item(s).` } };
+    },
+  },
+  {
+    type: "fetch-course-roster",
+    name: "Fetch the course roster",
+    description: "Pull an LMS course's enrolled students (names and login ids) into a roster, to feed repo or messaging fan-out.",
+    inputs: [
+      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+    ],
+    outputs: [
+      { key: "roster", label: "Roster", type: "longtext" },
+      { key: "count", label: "Students", type: "number" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const url = String(values.course ?? "").trim();
+      if (!url) throw new Error("Select an LMS course.");
+      const courseId = parseCanvasCourseId(url);
+      if (!courseId) throw new Error("The course URL must contain a course id.");
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || "";
+      if (!inst) throw new Error("Select an institution.");
+      onProgress("Loading roster...");
+      const r = await listCourseRosterAction(inst, courseId);
+      if ("error" in r) throw new Error(r.error);
+      const rosterLines = r.students.map((s) => `${s.name} | ${s.loginId}`);
+      const rosterText = rosterLines.join("\n");
+      const items = r.students.length > 0 ? r.students.map((s) => s.name) : ["(none)"];
+      return {
+        outputs: { roster: rosterText, count: r.students.length },
+        summary: { kind: "list", label: `${r.students.length} student(s)`, items },
+      };
     },
   },
 ];

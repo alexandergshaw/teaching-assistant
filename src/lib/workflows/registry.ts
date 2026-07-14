@@ -111,6 +111,7 @@ import {
   runResearchLoopAction,
   listUnverifiedKnowledgeAction,
   generateCopilotProjectPromptAction,
+  listCopilotTasksAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8308,6 +8309,45 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { prompt: promptText },
         summary: { kind: "text", text: promptText }
+      };
+    },
+  },
+
+  {
+    type: "poll-copilot-tasks",
+    name: "Check Copilot agent tasks",
+    description: "List a repository's Copilot coding-agent tasks with their status and linked pull request, to see whether the agent has finished.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+    ],
+    outputs: [
+      { key: "tasks", label: "Tasks", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+
+      onProgress("Checking Copilot tasks...");
+      const r = await listCopilotTasksAction(repo);
+      if ("error" in r) throw new Error(r.error);
+
+      const titles = r.tasks.map((task) => task.title);
+      const tasksText = r.tasks
+        .map((task) => {
+          const prInfo = task.pr
+            ? `PR #${task.pr.number} (${task.pr.state}${task.pr.isDraft ? ", draft" : ""})`
+            : "(no PR)";
+          return `${task.title}\n  Number: #${task.number}\n  State: ${task.state}\n  PR: ${prInfo}`;
+        })
+        .join("\n\n");
+
+      return {
+        outputs: { tasks: tasksText },
+        summary: {
+          kind: "list",
+          label: `${r.tasks.length} task(s)`,
+          items: r.tasks.length ? titles : ["(none)"],
+        },
       };
     },
   },

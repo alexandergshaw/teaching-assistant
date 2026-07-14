@@ -110,7 +110,15 @@ describe("isHeadlessSafeWorkflow", () => {
     expect(isHeadlessSafeWorkflow(def, () => undefined)).toBe(false);
   });
 
-  it("has exactly 22 headless-safe step types", () => {
-    expect(HEADLESS_SAFE_STEP_TYPES.size).toBe(22);
+  it("has exactly 23 headless-safe step types", () => {
+    expect(HEADLESS_SAFE_STEP_TYPES.size).toBe(23);
+  });
+
+  it("accepts the unattended grade-to-draft preset (scoring only, no posting)", () => {
+    expect(isHeadlessSafeWorkflow(byId("grade-to-draft-scorer"), lookup)).toBe(true);
+  });
+
+  it("rejects the review-grading-draft preset (pauses for human approval before posting)", () => {
+    expect(isHeadlessSafeWorkflow(byId("review-grading-drafts"), lookup)).toBe(false);
   });
 });

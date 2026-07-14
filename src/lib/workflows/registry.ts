@@ -50,9 +50,13 @@ import {
   listGradingQueueAction,
   postCanvasGradesAction,
   pullSubmissionAction,
+  saveGradingDraftAction,
+  listPendingGradingDraftsAction,
+  getGradingDraftAction,
+  markGradingDraftReviewedAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
-import type { GradingRun } from "@/lib/grade";
+import type { GradingRun, GradingRunEntry } from "@/lib/grade";
 import type { InstitutionField } from "@/lib/institution-fields";
 import type { RepoPermission } from "@/lib/github";
 import type { CommonResourceItem } from "@/lib/common-resources";
@@ -73,6 +77,7 @@ import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
 import { planCartridgeModules } from "@/lib/week-numbering";
 import { parseLmsModuleValue } from "@/lib/workflows/module-value";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
+import { buildGradingReviewRows, countPostableResults, stripGradingRunEntriesForDraft } from "@/lib/workflows/grading-review-rows";
 
 // Base64-encode UTF-8 text in the browser (btoa alone rejects non-latin1).
 function encodeTextBase64(text: string): string {
@@ -4609,18 +4614,11 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const tileMap = new Map(hub.courses.map((c) => [c.id, c]));
       const zips = Array.isArray(values.submissionsZip) ? (values.submissionsZip as File[]) : [];
 
-      interface RunEntry {
-        courseName: string;
-        assignmentName: string;
-        canvasUrl: string;
-        run: GradingRun;
-        institution?: string;
-        assignmentId?: string;
-        pointsPossible?: number | null;
-        offline?: boolean;
-      }
-
-      const runs: RunEntry[] = [];
+      // GradingRunEntry (src/lib/grade.ts) is shared with grade-to-draft and
+      // review-grading-draft so every producer of a `runs` array agrees on
+      // its shape and on runIndex/resultIndex numbering (see
+      // buildGradingReviewRows below).
+      const runs: GradingRunEntry[] = [];
       const lines: string[] = [];
 
       for (const row of plan) {
@@ -4766,11 +4764,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       // Only rows with a numeric Canvas user id can be posted; promising
       // run.results.length posts would overcount on providers that return none.
       const nonOfflineRuns = runs.filter((r) => !r.offline);
-      const postable = nonOfflineRuns.reduce(
-        (sum, r) =>
-          sum + r.run.results.filter((row) => typeof row.userId === "number").length,
-        0
-      );
+      const postable = countPostableResults(runs);
       if (nonOfflineRuns.length > 0 && postable === 0) {
         lines.push(
           "No rows carry a Canvas user id - nothing can be posted (provider limitation)"
@@ -4785,36 +4779,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
       if (postable > 0) {
         // Build review rows from postable entries; runIndex indexes the FULL runs array
         // so post-grades and rowDetail lookups agree when any offline run is present.
-        const reviewRows: Array<Record<string, string>> = [];
-        const fractionRegex = /(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/;
-
-        for (let i = 0; i < runs.length; i++) {
-          const entry = runs[i];
-          if (entry.offline) continue;
-          for (let j = 0; j < entry.run.results.length; j++) {
-            const row = entry.run.results[j];
-            if (typeof row.userId !== "number") continue;
-
-            const fractionMatch = row.totalScore.match(fractionRegex);
-            const earned = fractionMatch
-              ? fractionMatch[1]
-              : (row.totalScore.match(/-?\d+(?:\.\d+)?/) ?? [])[0] ?? "";
-
-            reviewRows.push({
-              runIndex: String(i),
-              resultIndex: String(j),
-              course: entry.courseName,
-              assignment: entry.assignmentName,
-              student: row.student,
-              submission: entry.run.speedGraderUrl && typeof row.userId === "number"
-                ? `${entry.run.speedGraderUrl}&student_id=${row.userId}`
-                : "",
-              grade: earned,
-              outOf: entry.pointsPossible != null ? String(entry.pointsPossible) : "",
-              comment: row.overallComment,
-            });
-          }
-        }
+        // Shared with review-grading-draft (see grading-review-rows.ts) so the
+        // two producers of this review table can never number rows differently.
+        const reviewRows = buildGradingReviewRows(runs);
 
         result.requireInput = {
           message: `Review the grades below - open a submission to check the student's work, edit scores or comments, then approve to post ${postable} grade(s) to the LMS. Uncheck a row to leave that student out of the post. Skip to finish without posting.`,
@@ -4901,6 +4868,449 @@ export const STEP_REGISTRY: StepDefinition[] = [
           },
         };
       }
+
+      return result;
+    },
+  },
+
+  {
+    // HEADLESS (unattended-safe): the AI *scoring* half of grading, split out
+    // so it can run on a schedule with nobody watching. It NEVER sets
+    // requireInput/requireConfirmation and NEVER calls postCanvasGradesAction
+    // - it only grades and saves a durable draft (saveGradingDraftAction).
+    // Grades reach Canvas exclusively through the app-open
+    // review-grading-draft -> post-grades pair, after a human approves rows
+    // in the review table. See HEADLESS_SAFE_STEP_TYPES in headless.ts.
+    type: "grade-to-draft",
+    name: "Grade submissions to a draft",
+    description:
+      "Unattended AI scoring only: grade every LMS assignment with pending submissions and save the results as a draft. Nothing is posted to Canvas by this step - review and post the draft separately with Review Graded Drafts.",
+    inputs: [
+      {
+        key: "courses",
+        label: "Courses",
+        type: "hubCourseList",
+        required: false,
+        help: "Leave empty and pick an institution instead to grade every course with pending submissions.",
+      },
+      {
+        key: "institution",
+        label: "Institution",
+        type: "institution",
+        required: false,
+        help: "Used when no course tiles are selected: every course at this institution with assignments awaiting grading is included.",
+      },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const ids = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      // Mirrors grading-preflight's PlanRow (registry.ts, "grading-preflight"
+      // above) minus the fields only that step's review table needs.
+      interface PlanRow {
+        courseName: string;
+        institution?: string;
+        canvasUrl?: string;
+        assignmentName?: string;
+        assignmentId?: string;
+        rubricText?: string;
+        description?: string;
+        pointsPossible?: number | null;
+      }
+
+      const plan: PlanRow[] = [];
+      const lines: string[] = [];
+      const queueErrors: Array<{ acronym: string; error: string }> = [];
+
+      // Institution-wide mode: no tiles selected - mirrors grading-preflight.
+      if (ids.length === 0) {
+        const acronym = String(values.institution ?? "").trim().toUpperCase();
+        if (!acronym) {
+          throw new Error("Select one or more course tiles, or pick an institution.");
+        }
+
+        onProgress("Loading grading queue...");
+        const queueResult = await listGradingQueueAction([acronym]);
+        if ("error" in queueResult) {
+          throw new Error(queueResult.error);
+        }
+
+        const { rows: queueRows, errors } = queueResult;
+        queueErrors.push(...errors);
+        for (const e of errors) {
+          lines.push(`Institution ${e.acronym}: ${e.error}`);
+        }
+
+        for (const row of queueRows) {
+          plan.push({
+            courseName: row.courseName || row.canvasUrl,
+            institution: row.institution,
+            canvasUrl: row.canvasUrl,
+            assignmentName: row.title,
+            assignmentId: row.assignmentId,
+            rubricText: row.rubricText ?? "",
+            description: row.description ?? "",
+            pointsPossible: row.pointsPossible,
+          });
+        }
+
+        if (plan.length === 0 && queueErrors.length > 0) {
+          throw new Error(
+            `The grading queue could not be loaded for ${acronym}: ${queueErrors
+              .map((e) => e.error)
+              .join("; ")}`
+          );
+        }
+      } else {
+        // Tile-based mode: fail-forward per missing tile. Offline tiles (no
+        // canvasUrl) are SKIPPED entirely - there is no unattended path for
+        // them (no browser to upload a zip); each is noted below instead.
+        const tiles: Course[] = [];
+        for (const id of ids) {
+          const tile = hub.courses.find((c) => c.id === id);
+          if (!tile) {
+            lines.push(`${id}: not found - skipped`);
+            continue;
+          }
+          tiles.push(tile);
+        }
+
+        const withLms = tiles.filter((t) => (t.canvasUrl ?? "").trim());
+        const offline = tiles.filter((t) => !(t.canvasUrl ?? "").trim());
+        for (const tile of offline) {
+          lines.push(
+            `${tile.name}: no LMS - unattended grading has no upload step, skipped (run Grade Submissions in the app to grade it offline).`
+          );
+        }
+
+        const resolveAcronym = (t: Course): string =>
+          (t.institution || helpers.activeInstitution || "").trim().toUpperCase();
+        const acronyms = [...new Set(withLms.map(resolveAcronym).filter(Boolean))];
+
+        if (withLms.length > 0) {
+          onProgress("Loading grading queue...");
+          const queueResult = await listGradingQueueAction(acronyms);
+          if ("error" in queueResult) {
+            throw new Error(queueResult.error);
+          }
+
+          const { rows: queueRows, errors } = queueResult;
+          queueErrors.push(...errors);
+          for (const e of errors) {
+            lines.push(`Institution ${e.acronym}: ${e.error}`);
+          }
+
+          for (const tile of withLms) {
+            const tileCanvasId = parseCanvasCourseId(tile.canvasUrl ?? "");
+            if (!tileCanvasId) {
+              lines.push(`${tile.name}: the LMS URL has no /courses/<id> - skipped`);
+              continue;
+            }
+
+            const tileAcronym = resolveAcronym(tile);
+            const tileRows = queueRows.filter((row) => {
+              const rowCanvasId = parseCanvasCourseId(row.canvasUrl);
+              return (
+                rowCanvasId === tileCanvasId &&
+                row.institution.trim().toUpperCase() === tileAcronym
+              );
+            });
+
+            for (const row of tileRows) {
+              plan.push({
+                courseName: tile.name,
+                institution: row.institution,
+                canvasUrl: row.canvasUrl,
+                assignmentName: row.title,
+                assignmentId: row.assignmentId,
+                rubricText: row.rubricText ?? "",
+                description: row.description ?? "",
+                pointsPossible: row.pointsPossible,
+              });
+            }
+          }
+        }
+
+        if (plan.length === 0 && queueErrors.length > 0) {
+          throw new Error(
+            `The grading queue could not be loaded for ${queueErrors
+              .map((e) => e.acronym)
+              .join(", ")}: ${queueErrors.map((e) => e.error).join("; ")}`
+          );
+        }
+      }
+
+      if (plan.length === 0) {
+        lines.push("Nothing needs grading - no draft saved.");
+        return {
+          outputs: {},
+          summary: { kind: "list", label: "Nothing to grade", items: lines },
+        };
+      }
+
+      // Grade every plan row with the EXACT loop grade-submissions uses (same
+      // rubric-generation fallback, same gradeAction FormData) so unattended
+      // scores match the interactive flow.
+      const runs: GradingRunEntry[] = [];
+
+      for (const row of plan) {
+        try {
+          let rubricText = (row.rubricText ?? "").trim();
+
+          if (!rubricText) {
+            onProgress(`Generating rubric for ${row.courseName} - ${row.assignmentName}...`);
+            const rubricResult = await generateAssignmentRubricAction(
+              row.assignmentName ?? "",
+              row.description ?? "",
+              helpers.provider
+            );
+
+            if (typeof rubricResult === "string") {
+              rubricText = rubricResult;
+            } else {
+              lines.push(
+                `${row.courseName} - ${row.assignmentName}: rubric generation failed: ${rubricResult.error}`
+              );
+              continue;
+            }
+          }
+
+          onProgress(`Grading ${row.courseName} - ${row.assignmentName}...`);
+
+          const formData = new FormData();
+          formData.set("canvasUrl", row.canvasUrl ?? "");
+          formData.set("provider", helpers.provider);
+          formData.set("rubric", rubricText);
+          formData.set(
+            "assignmentInstructions",
+            row.description ||
+              row.assignmentName ||
+              "Grade each submission against the rubric."
+          );
+          formData.set("institution", row.institution ?? "");
+
+          // gradeAction only reads from Canvas and scores with the LLM - it
+          // never writes back. Posting only ever happens in the post-grades
+          // step, below, after human review.
+          const gradeResult = await gradeAction({ run: null, error: null }, formData);
+
+          if (gradeResult.error) {
+            lines.push(`${row.courseName} - ${row.assignmentName}: ${gradeResult.error}`);
+            continue;
+          }
+
+          if (!gradeResult.run) {
+            lines.push(`${row.courseName} - ${row.assignmentName}: no submissions to grade`);
+            continue;
+          }
+
+          runs.push({
+            courseName: row.courseName,
+            assignmentName: row.assignmentName ?? "",
+            canvasUrl: row.canvasUrl ?? "",
+            run: gradeResult.run,
+            institution: row.institution,
+            assignmentId: row.assignmentId,
+            pointsPossible: row.pointsPossible,
+          });
+
+          lines.push(
+            `${row.courseName} - ${row.assignmentName}: graded ${gradeResult.run.results.length} submission(s)`
+          );
+        } catch (err) {
+          lines.push(
+            `${row.courseName} - ${row.assignmentName ?? "unknown"}: ${
+              err instanceof Error ? err.message : "failed"
+            }`
+          );
+        }
+      }
+
+      if (runs.length === 0) {
+        lines.push("Nothing was gradable - no draft saved.");
+        return {
+          outputs: {},
+          summary: { kind: "list", label: "Nothing to grade", items: lines },
+        };
+      }
+
+      const submissionCount = runs.reduce((sum, r) => sum + r.run.results.length, 0);
+      const summary = `${runs.length} assignment(s), ${submissionCount} submission(s) graded - review to post`;
+
+      // Strip rawBase64/previewContent/codeExecution before persisting: a
+      // draft never needs submitted-file bytes (post-grades reads only
+      // grade/comment/rubric/totalScore/userId; review-grading-draft
+      // re-fetches files from Canvas on demand). This keeps the jsonb payload
+      // small and is the ONLY thing that leaves this step - nothing here
+      // posts to Canvas.
+      const strippedRuns = stripGradingRunEntriesForDraft(runs);
+
+      const saveResult = await saveGradingDraftAction(summary, { runs: strippedRuns });
+      if ("error" in saveResult) {
+        throw new Error(`Could not save the grading draft: ${saveResult.error}`);
+      }
+
+      lines.push(`Saved draft: ${summary}`);
+
+      return {
+        outputs: {},
+        summary: { kind: "list", label: "Draft saved", items: lines },
+      };
+    },
+  },
+
+  {
+    // APP-OPEN ONLY: sets requireInput below, so it is deliberately absent
+    // from HEADLESS_SAFE_STEP_TYPES in headless.ts and cannot be scheduled
+    // unattended. This is the ONLY step that turns a saved draft into
+    // something post-grades can act on - grades still only reach Canvas
+    // after the user approves rows in the table this step renders.
+    type: "review-grading-draft",
+    name: "Review a grading draft",
+    description:
+      "Load the oldest pending grading draft (saved by Grade Submissions to a Draft) into an editable review table. Approving posts the checked rows to the LMS via the next step; skipping leaves the draft pending for later.",
+    inputs: [],
+    outputs: [
+      { key: "runs", label: "Grading runs", type: "courseList" },
+      { key: "approvedGrades", label: "Approved grades", type: "courseList" },
+    ],
+    run: async () => {
+      const listResult = await listPendingGradingDraftsAction();
+      if ("error" in listResult) {
+        throw new Error(listResult.error);
+      }
+
+      if (listResult.drafts.length === 0) {
+        return {
+          outputs: { runs: [], approvedGrades: [] },
+          summary: { kind: "text", text: "No pending grading drafts to review." },
+        };
+      }
+
+      // Oldest first (listPendingGradingDraftsAction orders by created_at
+      // ascending), so this always takes the longest-waiting draft.
+      const draftId = listResult.drafts[0].id;
+      const draftResult = await getGradingDraftAction(draftId);
+      if ("error" in draftResult) {
+        throw new Error(draftResult.error);
+      }
+
+      const runs = draftResult.draft.payload.runs;
+
+      const result: StepRunResult = {
+        outputs: { runs, approvedGrades: [] },
+        summary: {
+          kind: "text",
+          text: `Loaded the oldest pending draft: ${draftResult.draft.summary}`,
+        },
+      };
+
+      // Built from the SAME shared helper grade-submissions uses (see
+      // grading-review-rows.ts), over the draft's own runs array, so
+      // runIndex/resultIndex agree with what post-grades expects.
+      const postable = countPostableResults(runs);
+
+      if (postable === 0) {
+        // Nothing to show - mark the draft reviewed now so an empty draft
+        // does not sit pending forever (best-effort; markGradingDraftReviewedAction
+        // is idempotent, so a failure here just leaves it re-reviewable later).
+        void markGradingDraftReviewedAction(draftId).catch(() => {});
+        return result;
+      }
+
+      const reviewRows = buildGradingReviewRows(runs);
+
+      result.requireInput = {
+        message: `Review the grades below - open a submission to check the student's work, edit scores or comments, then approve to post ${postable} grade(s) to the LMS. Uncheck a row to leave that student out of the post. Skip to finish without posting (the draft stays pending for later).`,
+        key: "approvedGrades",
+        kind: "table",
+        optional: true,
+        selectable: true,
+        submitLabel: "Approve grades",
+        columns: [
+          { key: "course", label: "Course" },
+          { key: "assignment", label: "Assignment" },
+          { key: "student", label: "Student", width: 140 },
+          { key: "submission", label: "Submission", link: true, width: 90 },
+          { key: "grade", label: "Grade", editable: true, width: 80 },
+          { key: "outOf", label: "Out of", width: 70 },
+          { key: "comment", label: "Comment", editable: true, multiline: true },
+        ],
+        rows: reviewRows,
+        rowDetail: async (row) => {
+          const entry = runs[Number(row.runIndex)];
+          const gradeResult = entry?.run.results[Number(row.resultIndex)];
+          if (!entry || !gradeResult) {
+            throw new Error("Submission details are unavailable for this row.");
+          }
+
+          const sections: string[] = [gradeResult.student];
+          if (gradeResult.rubricAreas.length > 0) {
+            sections.push(
+              [
+                "Rubric breakdown:",
+                ...gradeResult.rubricAreas.map(
+                  (a) => `- ${a.area}: ${a.score}${a.comment ? ` (${a.comment})` : ""}`
+                ),
+              ].join("\n")
+            );
+          }
+          if (gradeResult.feedback.trim()) {
+            sections.push(`AI feedback:\n${gradeResult.feedback.trim()}`);
+          }
+          // A draft never carries submittedFiles bytes (stripped before
+          // persisting - see stripGradingRunEntriesForDraft), so this always
+          // falls through to the Canvas re-fetch branch below.
+          if (gradeResult.submittedFiles.length > 0) {
+            return {
+              text: sections.join("\n\n"),
+              files: gradeResult.submittedFiles.map((f) => ({
+                name: f.name,
+                base64: f.rawBase64 ?? encodeTextBase64(f.previewContent),
+                mimeType: f.mimeType ?? "text/plain",
+              })),
+            };
+          }
+          if (!entry.offline && typeof gradeResult.userId === "number") {
+            const courseId = parseCanvasCourseId(entry.canvasUrl ?? "");
+            if (entry.institution && courseId && entry.assignmentId) {
+              const pulled = await pullSubmissionAction(
+                entry.institution,
+                courseId,
+                entry.assignmentId,
+                gradeResult.userId
+              );
+              if (!("error" in pulled)) {
+                const s = pulled.submission;
+                sections.push(
+                  s.text?.trim() ? `Text submission:\n${s.text.trim()}` : "(no text submission)"
+                );
+                return { text: sections.join("\n\n"), files: s.files ?? [] };
+              }
+            }
+          }
+          return { text: sections.join("\n\n"), files: [] };
+        },
+        transform: (value) => {
+          const rows = Array.isArray(value) ? (value as Array<Record<string, string>>) : [];
+          // Best-effort, fire-and-forget: this closure runs synchronously (the
+          // runner does not await it), and it fires ONLY on submit, never on
+          // skip (see WorkflowsTab's requireInput resolver - a skip resolves
+          // with null and this transform is never called). A failure here is
+          // swallowed because markGradingDraftReviewedAction is idempotent -
+          // reviewing the same draft again later just marks it reviewed again.
+          void markGradingDraftReviewedAction(draftId).catch(() => {});
+          return rows;
+        },
+      };
 
       return result;
     },

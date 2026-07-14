@@ -634,6 +634,35 @@ export interface Database {
           interval_minutes?: number | null;
         };
       };
+      grading_drafts: {
+        Row: {
+          id: string;
+          user_id: string;
+          status: string;
+          summary: string;
+          payload: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          status?: string;
+          summary?: string;
+          payload?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          status?: string;
+          summary?: string;
+          payload?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
     };
     Views: Record<string, { Row: Record<string, unknown> }>;
     Functions: Record<string, { Args: Record<string, unknown>; Returns: unknown }>;

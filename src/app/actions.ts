@@ -279,9 +279,17 @@ import {
   detectRubricSource,
   type GradingApiResponse,
 } from "@/lib/grading-engine";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
 import { requireOwner } from "@/lib/supabase/auth";
+import {
+  listPendingGradingDrafts,
+  getGradingDraft,
+  createGradingDraft,
+  markGradingDraftReviewed,
+  deleteGradingDraft,
+  type GradingDraftPayload,
+} from "@/lib/grading-drafts";
 import {
   getCredentials,
   getValidAccessToken,
@@ -1012,6 +1020,117 @@ export async function postCanvasGradesAction(
     return await postCanvasGrades(url, grades);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post grades to Canvas." };
+  }
+}
+
+// ── Grading drafts ───────────────────────────────────────────────────────
+//
+// Persistence for the unattended grade-to-draft step's output and the
+// app-open review-grading-draft step's read/mark-reviewed calls. Every
+// action below is owner-gated and uses the service-role client + the
+// owner's own id (from requireOwner()) - the same pattern as the rest of
+// this file's Supabase-backed actions - so it works identically whether
+// called from a signed-in browser session or, via requireOwner()'s
+// runAsOwner impersonation, from inside a headless cron run
+// (src/app/api/cron/run-schedules/route.ts). NONE of these actions post
+// anything to Canvas; posting only ever happens through
+// postCanvasGradesAction above, called from the post-grades step after the
+// user approves rows in the review table.
+
+/** Save a new pending grading draft (the grade-to-draft step's output). */
+export async function saveGradingDraftAction(
+  summary: string,
+  payload: GradingDraftPayload
+): Promise<{ id: string } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const draft = await createGradingDraft(supabase, user.id, { summary, payload });
+    return { id: draft.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the grading draft." };
+  }
+}
+
+/** Lightweight listing (id/summary/createdAt only) of the owner's pending
+ * drafts, oldest first. */
+export async function listPendingGradingDraftsAction(): Promise<
+  { drafts: Array<{ id: string; summary: string; createdAt: string }> } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const drafts = await listPendingGradingDrafts(supabase, user.id);
+    return {
+      drafts: drafts.map((d) => ({ id: d.id, summary: d.summary, createdAt: d.createdAt })),
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load grading drafts." };
+  }
+}
+
+/** One draft's full payload (the runs the review-grading-draft step
+ * reconstructs into review rows). */
+export async function getGradingDraftAction(
+  id: string
+): Promise<
+  | {
+      draft: {
+        id: string;
+        status: "pending" | "reviewed";
+        summary: string;
+        payload: GradingDraftPayload;
+      };
+    }
+  | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const draft = await getGradingDraft(supabase, user.id, id);
+    if (!draft) {
+      return { error: "That grading draft was not found." };
+    }
+    return {
+      draft: {
+        id: draft.id,
+        status: draft.status,
+        summary: draft.summary,
+        payload: draft.payload,
+      },
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the grading draft." };
+  }
+}
+
+/** Mark a draft reviewed (called from the review table's transform closure
+ * on submit only - never on skip). Idempotent, so a best-effort caller never
+ * needs to check the draft's current status first. */
+export async function markGradingDraftReviewedAction(
+  id: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    await markGradingDraftReviewed(supabase, user.id, id);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the grading draft." };
+  }
+}
+
+/** Delete a draft outright (e.g. an optional "discard" action). */
+export async function deleteGradingDraftAction(
+  id: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    await deleteGradingDraft(supabase, user.id, id);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not delete the grading draft." };
   }
 }
 

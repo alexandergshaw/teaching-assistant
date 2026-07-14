@@ -44,6 +44,12 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "schedule-lecture-announcement",
   "lecture-qa",
   "post-grades",
+  // The unattended AI-scoring half of grading: it grades and saves a durable
+  // draft (saveGradingDraftAction) but never sets requireInput/
+  // requireConfirmation and never calls postCanvasGradesAction. Posting only
+  // happens through the app-open review-grading-draft -> post-grades pair,
+  // which is why "review-grading-draft" is deliberately NOT in this set.
+  "grade-to-draft",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in
@@ -68,6 +74,9 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
 //     submissions zip upload for courses with no LMS connection.
 //   - grade-submissions: sets requireInput to review and approve grades
 //     before they post to the LMS.
+//   - review-grading-draft: sets requireInput to review and approve a saved
+//     grading draft's grades before they post to the LMS (app-open only -
+//     see grade-to-draft above for the unattended scoring half).
 
 /**
  * True iff every step in `def`'s expansion (include-workflow steps

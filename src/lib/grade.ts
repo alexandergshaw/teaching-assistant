@@ -84,6 +84,31 @@ export interface GradingRun {
   sampleAnswer?: string;
 }
 
+/**
+ * One assignment's grading run in workflow context: the GradingRun plus the
+ * course/assignment/institution/canvasUrl metadata needed to link back to
+ * SpeedGrader and post results to Canvas. Produced by the grade-submissions
+ * and grade-to-draft steps (src/lib/workflows/registry.ts) and consumed by
+ * post-grades - shared here so every producer/consumer agrees on the shape
+ * a `runs` array element carries, and on runIndex/resultIndex numbering
+ * (see buildGradingReviewRows in src/lib/workflows/grading-review-rows.ts).
+ */
+export interface GradingRunEntry {
+  courseName: string;
+  assignmentName: string;
+  canvasUrl: string;
+  run: GradingRun;
+  institution?: string;
+  assignmentId?: string;
+  pointsPossible?: number | null;
+  offline?: boolean;
+}
+
+// The draft strip helpers (stripGradeResultForDraft / stripGradingRunForDraft /
+// stripGradingRunEntriesForDraft) live in src/lib/workflows/grading-review-rows.ts
+// - a client-safe module - because this file (grade.ts) transitively imports
+// server-only code and must never be VALUE-imported by the client step registry.
+
 interface InferredFileNameParts {
   studentDisplay: string;
   citationFileName: string;

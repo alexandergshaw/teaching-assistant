@@ -372,6 +372,44 @@ export const GRADE_SUBMISSIONS: WorkflowDef = {
   ],
 };
 
+export const GRADE_TO_DRAFT: WorkflowDef = {
+  id: "grade-to-draft-scorer",
+  preset: true,
+  name: "Grade Submissions (draft, unattended)",
+  description:
+    "Unattended AI scoring only, safe to run on a schedule with the app closed: grades every LMS assignment with pending submissions in the selected courses (or every course at an institution) and saves the results as a draft. Offline courses (no LMS) are skipped and noted - they need a browser upload. This step never posts to Canvas; use Review Graded Drafts to review and post the saved draft.",
+  steps: [
+    {
+      type: "grade-to-draft",
+      bindings: {
+        courses: { source: "runtime", fieldKey: "courses" },
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+  ],
+};
+
+export const REVIEW_GRADING_DRAFTS: WorkflowDef = {
+  id: "review-grading-drafts",
+  preset: true,
+  name: "Review Graded Drafts",
+  description:
+    "Load the oldest pending grading draft saved by Grade Submissions (draft, unattended) into an editable review table - open a submission to check the student's work, edit scores or comments, then approve to post to the LMS. Skipping leaves the draft pending for later. Runs app-open only; posts only what you approve.",
+  steps: [
+    {
+      type: "review-grading-draft",
+      bindings: {},
+    },
+    {
+      type: "post-grades",
+      bindings: {
+        runs: { source: "step", stepIndex: 0, outputKey: "runs" },
+        approvedGrades: { source: "step", stepIndex: 0, outputKey: "approvedGrades" },
+      },
+    },
+  ],
+};
+
 export const STUDENT_REPOS: WorkflowDef = {
   id: "student-repo-assignment",
   preset: true,
@@ -406,6 +444,8 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     IMPORT_COURSES,
     ASSIGN_DUE_DATES,
     GRADE_SUBMISSIONS,
+    GRADE_TO_DRAFT,
+    REVIEW_GRADING_DRAFTS,
     PREPARE_LECTURE,
     LECTURE_QA,
     UPDATE_COURSE_TECH,

@@ -121,6 +121,7 @@ import {
   getTestRunStatusAction,
   setBranchProtectionAction,
   listGithubReposAction,
+  ingestRepoAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8689,6 +8690,41 @@ export const STEP_REGISTRY: StepDefinition[] = [
           kind: "list",
           label: `${r.repos.length} repo(s)`,
           items: names.length ? names : ["(none)"],
+        },
+      };
+    },
+  },
+
+  {
+    type: "ingest-repo-digest",
+    name: "Build a repo digest",
+    description: "Build a bounded text digest of a repository's README and source, to feed grading, analysis, or an outline step.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "branch", label: "Branch", type: "text", required: false },
+    ],
+    outputs: [
+      { key: "digest", label: "Repo digest", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+      const branch = String(values.branch ?? "").trim() || undefined;
+      onProgress("Building repo digest...");
+      const r = await ingestRepoAction(repo, branch);
+      if ("error" in r) throw new Error(r.error);
+      const digest = r.digest;
+      const digestText = [
+        `File count: ${digest.fileCount}${digest.truncated ? " (truncated)" : ""}`,
+        digest.description,
+        "",
+        digest.text,
+      ].join("\n");
+      return {
+        outputs: { digest: digestText },
+        summary: {
+          kind: "text",
+          text: `Digest of ${digest.fullName}: ${digest.fileCount} file(s), ${digest.text.length} char(s)`,
         },
       };
     },

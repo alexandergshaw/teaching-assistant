@@ -75,6 +75,7 @@ import {
   listSyllabusTemplatesAction,
   updateSyllabusTemplateAction,
   deleteSyllabusTemplateAction,
+  extractTopicsFromRepoAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6457,6 +6458,35 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { scheduleText },
         summary: { kind: "list", label: `${rows.length}-week schedule`, items },
+      };
+    },
+  },
+
+  {
+    type: "extract-topics-from-repo",
+    name: "Extract topics from a repo",
+    description: "Mine a repository's contents for a structured list of course topics, to seed schedule or content generation.",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+    ],
+    outputs: [
+      { key: "topics", label: "Topics", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+
+      onProgress("Reading repository topics...");
+      const r = await extractTopicsFromRepoAction(repo, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+
+      return {
+        outputs: { topics: r.topics.join("\n") },
+        summary: {
+          kind: "list",
+          label: `${r.topics.length} topic(s)`,
+          items: r.topics.length ? r.topics : ["(none found)"],
+        },
       };
     },
   },

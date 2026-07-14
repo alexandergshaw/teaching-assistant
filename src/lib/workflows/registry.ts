@@ -105,6 +105,7 @@ import {
   runSubmissionCodeAction,
   listRunArtifactsAction,
   autoFixOfficeFileAction,
+  checkBrokenLinksAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8074,6 +8075,60 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { issuesAddressed: r.issues.length },
         summary: { kind: "text", text: `Remediated the file (${r.issues.length} accessibility issue(s) addressed).` },
+      };
+    },
+  },
+
+  {
+    type: "check-broken-links",
+    name: "Check for broken links",
+    description: "Run and read Canvas link validation for a course, returning any broken links. Set Kick off to start a fresh scan (results appear on a later run).",
+    inputs: [
+      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
+      { key: "kickoff", label: "Kick off a fresh scan", type: "boolean", required: false },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+    ],
+    outputs: [
+      { key: "brokenLinks", label: "Broken links", type: "longtext" },
+      { key: "state", label: "Scan state", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const course = String(values.course ?? "").trim();
+      if (!course) {
+        throw new Error("Select an LMS course.");
+      }
+
+      const kickoff = String(values.kickoff ?? "") === "1";
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+
+      onProgress(kickoff ? "Starting link validation..." : "Reading link validation...");
+      const r = await checkBrokenLinksAction(course, inst, kickoff);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      const lines: string[] = [];
+      const urls: string[] = [];
+      for (const link of r.links) {
+        lines.push(`${link.itemType}: ${link.itemTitle}`);
+        lines.push(`URL: ${link.url}`);
+        lines.push(`Reason: ${link.reason}`);
+        if (link.linkText) {
+          lines.push(`Link text: ${link.linkText}`);
+        }
+        lines.push("");
+        urls.push(link.url);
+      }
+
+      const brokenLinks = lines.join("\n").trim();
+
+      return {
+        outputs: { brokenLinks, state: r.state },
+        summary: {
+          kind: "list",
+          label: `${r.links.length} broken link(s) (state: ${r.state})`,
+          items: r.links.length ? urls : ["(none)"],
+        },
       };
     },
   },

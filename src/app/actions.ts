@@ -163,6 +163,9 @@ import {
   createAssignment,
   listAssignmentGroups,
   type NewAssignment,
+  startLinkValidation,
+  getLinkValidation,
+  type BrokenLink,
 } from "@/lib/canvas-modules";
 import type { OfficeImage } from "@/lib/office-edit";
 import type { OfficeKind, OfficeParagraph, RunSpan } from "@/lib/office-edit";
@@ -9354,5 +9357,20 @@ export async function findBankedRubricAction(
     return { rubric: found ?? "", matched: found != null };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not look up a banked rubric." };
+  }
+}
+
+export async function checkBrokenLinksAction(
+  courseUrl: string,
+  acronym?: string,
+  kickoff = false
+): Promise<{ state: string; links: BrokenLink[] } | { error: string }> {
+  try {
+    await requireOwner();
+    if (kickoff) { await startLinkValidation(courseUrl, acronym); }
+    const result = await getLinkValidation(courseUrl, acronym);
+    return result;
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not check links." };
   }
 }

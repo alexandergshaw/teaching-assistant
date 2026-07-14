@@ -59,6 +59,7 @@ import {
   markGradingDraftReviewedAction,
   listConversationsAction,
   getConversationAction,
+  draftMessageReplyAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -5750,6 +5751,30 @@ export const STEP_REGISTRY: StepDefinition[] = [
           items: subjects.length ? subjects : ["(inbox empty)"],
         },
       };
+    },
+  },
+
+  {
+    type: "draft-message-reply",
+    name: "Draft a reply to a student message",
+    description: "Draft a courteous reply to a student's message thread, ready to review and send in a later step.",
+    inputs: [
+      { key: "thread", label: "Conversation thread", type: "longtext", required: true, help: "The thread text, e.g. wired from Read the message inbox." },
+      { key: "instructions", label: "Reply guidance", type: "longtext", required: false, help: "Optional - what the reply should say or emphasize." },
+    ],
+    outputs: [
+      { key: "draftReply", label: "Draft reply", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const thread = String(values.thread ?? "").trim();
+      if (!thread) {
+        throw new Error("Provide the conversation thread to reply to (wire it from Read the message inbox).");
+      }
+      const instructions = String(values.instructions ?? "");
+      onProgress("Drafting reply...");
+      const r = await draftMessageReplyAction(thread, instructions, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+      return { outputs: { draftReply: r.body }, summary: { kind: "text", text: r.body } };
     },
   },
 ];

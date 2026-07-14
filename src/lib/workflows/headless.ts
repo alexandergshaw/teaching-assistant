@@ -53,6 +53,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // which is why "review-grading-draft" is deliberately NOT in this set.
   "grade-to-draft",
   "read-inbox",
+  "draft-message-reply",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

@@ -51,6 +51,7 @@ import {
   generateCourseSyllabusAction,
   createFinalizedSyllabusAction,
   gradeAction,
+  gradeRepoAction,
   generateAssignmentAction,
   generateAssignmentRubricAction,
   generateFullCreditChecklistAction,
@@ -7783,6 +7784,68 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { modelAnswer: r.modelAnswer },
         summary: { kind: "text", text: r.modelAnswer },
+      };
+    },
+  },
+
+  {
+    type: "grade-repo",
+    name: "Grade a repository",
+    description: "AI-grade a single student repository against a rubric. Produces a score and feedback (does not post to the LMS).",
+    inputs: [
+      { key: "repo", label: "Repository", type: "repo", required: true },
+      { key: "instructions", label: "Assignment instructions", type: "longtext", required: true },
+      { key: "rubric", label: "Rubric", type: "longtext", required: false },
+      { key: "branch", label: "Branch", type: "text", required: false },
+    ],
+    outputs: [
+      { key: "gradeSummary", label: "Grade and feedback", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) {
+        throw new Error("Provide a repository.");
+      }
+
+      const instructions = String(values.instructions ?? "").trim();
+      if (!instructions) {
+        throw new Error("Provide the assignment instructions.");
+      }
+
+      const rubric = String(values.rubric ?? "");
+      const branch = String(values.branch ?? "").trim() || undefined;
+
+      onProgress("Grading repository...");
+      const r = await gradeRepoAction(repo, instructions, rubric, helpers.provider, branch);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      const summaryLines: string[] = [];
+      summaryLines.push(r.fullName);
+      summaryLines.push("");
+
+      for (const result of r.run.results) {
+        summaryLines.push(`Student: ${result.student}`);
+        if (result.totalScore) {
+          summaryLines.push(`Total Score: ${result.totalScore}`);
+        }
+        for (const area of result.rubricAreas) {
+          if (area.score) {
+            summaryLines.push(`${area.area}: ${area.score}`);
+          }
+        }
+        if (result.overallComment) {
+          summaryLines.push(`Feedback: ${result.overallComment}`);
+        }
+        summaryLines.push("");
+      }
+
+      const gradeSummary = summaryLines.join("\n").trim();
+
+      return {
+        outputs: { gradeSummary },
+        summary: { kind: "text", text: gradeSummary },
       };
     },
   },

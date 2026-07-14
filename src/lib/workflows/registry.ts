@@ -135,6 +135,7 @@ import {
   getMigrationStateAction,
   submitSelectiveImportAction,
   listCourseRosterAction,
+  inviteOrgMemberAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -9114,6 +9115,42 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { roster: rosterText, count: r.students.length },
         summary: { kind: "list", label: `${r.students.length} student(s)`, items },
+      };
+    },
+  },
+  {
+    type: "invite-org-members",
+    name: "Invite students to the GitHub org",
+    description: "Invite each listed student to a GitHub organization by username or email. Attended-only.",
+    inputs: [
+      { key: "org", label: "Organization", type: "org", required: true },
+      { key: "members", label: "Usernames or emails", type: "longtext", required: true, help: "One GitHub username or email per line." },
+      { key: "role", label: "Role", type: "text", required: false, help: "member (default) or admin." },
+    ],
+    outputs: [
+      { key: "invited", label: "Invited", type: "number" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const org = String(values.org ?? "").trim();
+      if (!org) throw new Error("Provide a GitHub organization.");
+      const members = String(values.members ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+      if (members.length === 0) throw new Error("Provide at least one username or email.");
+      const role: "admin" | "member" = String(values.role ?? "").trim().toLowerCase() === "admin" ? "admin" : "member";
+      onProgress("Inviting members...");
+      let invited = 0;
+      const failures: string[] = [];
+      for (const m of members) {
+        const r = await inviteOrgMemberAction(org, m, role);
+        if ("error" in r) {
+          failures.push(`${m}: ${r.error}`);
+        } else {
+          invited++;
+        }
+      }
+      const items = failures.length ? failures : [`Invited ${invited} member(s) to ${org}.`];
+      return {
+        outputs: { invited },
+        summary: { kind: "list", label: `Invited ${invited} of ${members.length}`, items },
       };
     },
   },

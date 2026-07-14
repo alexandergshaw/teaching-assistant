@@ -63,6 +63,7 @@ import {
   replyToConversationAction,
   setConversationStateAction,
   detectMeetingRequestAction,
+  getAvailableSlotsAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -5876,6 +5877,42 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summary: {
           kind: "text",
           text: `Meeting request: ${r.isMeetingRequest ? "yes" : "no"} (confidence ${pct}%)`,
+        },
+      };
+    },
+  },
+
+  {
+    type: "find-open-slots",
+    name: "Find open meeting slots",
+    description: "Compute the instructor's open meeting slots within working hours (time-zone aware). Emits ISO slots to feed a scheduling reply and human-readable labels.",
+    inputs: [
+      { key: "timeZone", label: "Time zone", type: "text", required: false, help: "Optional IANA zone (e.g. America/Chicago); blank uses your configured zone." },
+    ],
+    outputs: [
+      { key: "slotsIso", label: "Open slots (ISO)", type: "longtext" },
+      { key: "slots", label: "Open slots", type: "longtext" },
+      { key: "timeZone", label: "Time zone", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const tz = String(values.timeZone ?? "").trim() || undefined;
+      onProgress("Finding open times...");
+      const r = await getAvailableSlotsAction(tz);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+      const slotsIso = r.slots.join("\n");
+      const slotsText = r.slotLabels.join("\n");
+      return {
+        outputs: {
+          slotsIso,
+          slots: slotsText,
+          timeZone: r.timeZone,
+        },
+        summary: {
+          kind: "list",
+          label: `${r.slots.length} open slot(s)`,
+          items: r.slotLabels.length ? r.slotLabels : ["(no open slots)"],
         },
       };
     },

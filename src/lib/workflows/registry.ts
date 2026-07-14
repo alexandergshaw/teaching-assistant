@@ -115,6 +115,7 @@ import {
   listPullRequestFilesAction,
   reviewPullRequestAction,
   mergePullRequestAction,
+  setupTestsWorkflowAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8463,6 +8464,58 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: {},
         summary: { kind: "text", text: `Merged PR #${prRaw} (${method}).` },
+      };
+    },
+  },
+
+  {
+    type: "setup-tests-workflow",
+    name: "Install an autograder CI workflow",
+    description: "Commit a GitHub Actions autograder tests workflow into a repository. Attended-only.",
+    inputs: [
+      {
+        key: "repo",
+        label: "Repository",
+        type: "repo",
+        required: true,
+      },
+      {
+        key: "branch",
+        label: "Branch (optional)",
+        type: "text",
+        required: false,
+      },
+      {
+        key: "template",
+        label: "Test template",
+        type: "text",
+        required: true,
+      },
+      {
+        key: "customCommand",
+        label: "Custom test command (optional)",
+        type: "text",
+        required: false,
+      },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const repo = String(values.repo ?? "").trim();
+      if (!repo) throw new Error("Provide a repository.");
+
+      const branch = String(values.branch ?? "").trim() || undefined;
+      const template = String(values.template ?? "").trim();
+      if (!template) throw new Error("Provide a test template.");
+
+      const customCommand = String(values.customCommand ?? "").trim();
+
+      onProgress("Installing tests workflow...");
+      const r = await setupTestsWorkflowAction(repo, branch, template, customCommand);
+      if ("error" in r) throw new Error(r.error);
+
+      return {
+        outputs: {},
+        summary: { kind: "text", text: "Autograder CI workflow installed successfully." },
       };
     },
   },

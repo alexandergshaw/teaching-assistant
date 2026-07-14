@@ -87,6 +87,7 @@ import {
   reviseLectureSlidesAction,
   extractPptxSlidesAction,
   synthesizeNarrationAction,
+  generateAvatarVideoAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -7166,6 +7167,37 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summary: {
           kind: "text",
           text: `Generated narration audio (${Math.round(blob.size / 1024)} KB). Select a course tile to save it.`,
+        },
+      };
+    },
+  },
+
+  {
+    type: "generate-avatar-video",
+    name: "Generate an avatar video",
+    description: "Start an in-house avatar (talking-head) lecture-video render from a script. Emits a video id for a later poll step.",
+    inputs: [
+      {
+        key: "script",
+        label: "Script",
+        type: "longtext",
+        required: true,
+      },
+    ],
+    outputs: [
+      { key: "videoId", label: "Video id", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const script = String(values.script ?? "").trim();
+      if (!script) throw new Error("Provide the script to render.");
+      onProgress("Starting avatar render...");
+      const r = await generateAvatarVideoAction(script);
+      if ("error" in r) throw new Error(r.error);
+      return {
+        outputs: { videoId: r.videoId },
+        summary: {
+          kind: "text",
+          text: `Avatar render started (id ${r.videoId}). Use Poll avatar video to fetch it when ready.`,
         },
       };
     },

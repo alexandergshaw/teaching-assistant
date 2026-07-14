@@ -79,6 +79,7 @@ import {
   generateModuleIntroAction,
   generateLessonPlanAction,
   generateExamplesAction,
+  generateDocumentTextAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
@@ -6634,6 +6635,40 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { examples },
         summary: { kind: "list", label: "Worked examples", items },
+      };
+    },
+  },
+
+  {
+    type: "generate-document",
+    name: "Generate a document",
+    description: "Generate a handout or document (overview, details, key terms, summary) from a freeform prompt.",
+    inputs: [
+      {
+        key: "prompt",
+        label: "What should the document cover?",
+        type: "longtext",
+        required: true,
+      },
+    ],
+    outputs: [
+      { key: "document", label: "Document", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const prompt = String(values.prompt ?? "").trim();
+      if (!prompt) {
+        throw new Error("Describe the document to generate first.");
+      }
+
+      onProgress("Generating document...");
+      const r = await generateDocumentTextAction(prompt, helpers.provider);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      return {
+        outputs: { document: r.text },
+        summary: { kind: "text", text: r.text },
       };
     },
   },

@@ -104,6 +104,7 @@ import {
   gradeOneSubmissionAction,
   runSubmissionCodeAction,
   listRunArtifactsAction,
+  autoFixOfficeFileAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8035,6 +8036,44 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { artifacts: artifactsText },
         summary: { kind: "list", label: `${r.artifacts.length} artifact(s)`, items: r.artifacts.length ? names : ["(none)"] },
+      };
+    },
+  },
+
+  {
+    type: "remediate-office-file",
+    name: "Remediate a course Office file",
+    description: "Auto-fix accessibility issues (alt text, headings, title) in a course docx or pptx file and save it back. Attended-only.",
+    inputs: [
+      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
+      { key: "fileId", label: "File id", type: "text", required: true, help: "The numeric Canvas file id." },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+    ],
+    outputs: [
+      { key: "issuesAddressed", label: "Issues addressed", type: "number" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const course = String(values.course ?? "").trim();
+      if (!course) {
+        throw new Error("Select an LMS course.");
+      }
+
+      const fileIdRaw = String(values.fileId ?? "").trim();
+      if (!/^\d+$/.test(fileIdRaw)) {
+        throw new Error("Provide the numeric file id.");
+      }
+
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+
+      onProgress("Remediating file...");
+      const r = await autoFixOfficeFileAction(course, Number(fileIdRaw), inst, helpers.provider);
+      if ("error" in r) {
+        throw new Error(r.error);
+      }
+
+      return {
+        outputs: { issuesAddressed: r.issues.length },
+        summary: { kind: "text", text: `Remediated the file (${r.issues.length} accessibility issue(s) addressed).` },
       };
     },
   },

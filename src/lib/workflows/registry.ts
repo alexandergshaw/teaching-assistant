@@ -128,6 +128,8 @@ import {
   copyFileToCanvasPageAction,
   detectRepoFrontendAction,
   revisePageWithAiAction,
+  renameCourseFileAction,
+  deleteCourseFileAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -8931,6 +8933,44 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const r = await bulkDeleteAction(course, kind, ids, inst);
       if ("error" in r) throw new Error(r.error);
       return { outputs: { deleted: r.updated }, summary: { kind: "text", text: `Deleted ${r.updated} ${kindRaw}.` } };
+    },
+  },
+
+  {
+    type: "manage-course-files",
+    name: "Rename or delete a course file",
+    description: "Rename or delete a file in a course's Files area. Attended-only.",
+    inputs: [
+      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
+      { key: "fileId", label: "File id", type: "text", required: true, help: "The numeric Canvas file id." },
+      { key: "action", label: "Action", type: "text", required: true, help: "rename or delete." },
+      { key: "newName", label: "New name", type: "text", required: false, help: "Required when action is rename." },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+    ],
+    outputs: [],
+    run: async (values, helpers, onProgress) => {
+      const course = String(values.course ?? "").trim();
+      if (!course) throw new Error("Select an LMS course.");
+      const fileIdRaw = String(values.fileId ?? "").trim();
+      if (!/^\d+$/.test(fileIdRaw)) throw new Error("Provide the numeric file id.");
+      const fileId = Number(fileIdRaw);
+      const action = String(values.action ?? "").trim().toLowerCase();
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+      if (action === "delete") {
+        onProgress("Deleting file...");
+        const r = await deleteCourseFileAction(course, fileId, inst);
+        if ("error" in r) throw new Error(r.error);
+        return { outputs: {}, summary: { kind: "text", text: `Deleted file ${fileId}.` } };
+      }
+      if (action === "rename") {
+        const newName = String(values.newName ?? "").trim();
+        if (!newName) throw new Error("Provide the new name for the rename.");
+        onProgress("Renaming file...");
+        const r = await renameCourseFileAction(course, fileId, newName, inst);
+        if ("error" in r) throw new Error(r.error);
+        return { outputs: {}, summary: { kind: "text", text: `Renamed file ${fileId} to "${newName}".` } };
+      }
+      throw new Error("Action must be rename or delete.");
     },
   },
 ];

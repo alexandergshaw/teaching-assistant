@@ -9484,3 +9484,23 @@ export async function countWorkflowDeliverablesSince(sinceIso: string): Promise<
     return { count: 0 };
   }
 }
+
+/** Count of the owner's PENDING grading drafts created since the given ISO
+ * timestamp - powers the Grade Drafts nav-tab badge. Defensive: any failure
+ * returns 0 so the badge never breaks the nav. */
+export async function countGradingDraftsSince(sinceIso: string): Promise<{ count: number }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const { count } = await supabase
+      .from("grading_drafts")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("status", "pending")
+      .gt("created_at", sinceIso);
+
+    return { count: count ?? 0 };
+  } catch {
+    return { count: 0 };
+  }
+}

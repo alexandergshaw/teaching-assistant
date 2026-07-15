@@ -5635,3 +5635,129 @@ a.instFieldValue:hover {
   padding: 10px;
   background: var(--card-background);
 }
+
+/* Grade Drafts tab */
+.draftList {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.draftSection {
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.draftSectionHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--field-border) 14%, transparent);
+  border-bottom: 1px solid var(--card-border);
+  flex-wrap: wrap;
+}
+
+.draftSectionTitle {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.draftSectionMeta {
+  margin-top: 2px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.draftSectionActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.draftAssignmentHead {
+  padding: 10px 16px 4px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.draftGradeRow {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 90px minmax(160px, 2fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 16px;
+  border-top: 1px solid color-mix(in srgb, var(--card-border) 55%, transparent);
+  font-size: 0.86rem;
+}
+
+.draftGradeStudent {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.draftGradeScore {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.draftGradeComment {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draftExpand {
+  padding: 10px 16px 14px;
+  background: color-mix(in srgb, var(--field-background) 60%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--card-border) 55%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.draftRubricArea {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.84rem;
+  flex-wrap: wrap;
+}
+
+.draftRubricAreaName {
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 120px;
+}
+
+.draftRubricAreaScore {
+  color: var(--accent-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.draftFeedback {
+  white-space: pre-wrap;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+@media (max-width: 700px) {
+  .draftGradeRow {
+    grid-template-columns: 1fr auto;
+    row-gap: 4px;
+  }
+
+  .draftGradeComment {
+    grid-column: 1 / -1;
+    white-space: normal;
+  }
+}

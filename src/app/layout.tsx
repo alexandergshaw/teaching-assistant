@@ -6,6 +6,7 @@ import ContextMenu from "./components/ContextMenu";
 import { InstitutionCountsProvider } from "./components/InstitutionCounts";
 import { VcCountsProvider } from "./components/VcCounts";
 import { FilesInboxProvider } from "./components/FilesInbox";
+import { DraftedGradesInboxProvider } from "./components/DraftedGradesInbox";
 import { AccessibilityProvider } from "./components/AccessibilityProvider";
 import { SupabaseProvider } from "@/context/SupabaseProvider";
 import AppThemeProvider from "./components/AppThemeProvider";
@@ -31,7 +32,9 @@ export default function RootLayout({
             <InstitutionCountsProvider>
               <VcCountsProvider>
                 <FilesInboxProvider>
-                  <AccessibilityProvider>{children}</AccessibilityProvider>
+                  <DraftedGradesInboxProvider>
+                    <AccessibilityProvider>{children}</AccessibilityProvider>
+                  </DraftedGradesInboxProvider>
                 </FilesInboxProvider>
               </VcCountsProvider>
             </InstitutionCountsProvider>

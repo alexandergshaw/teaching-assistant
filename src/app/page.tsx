@@ -11,6 +11,7 @@ import ContentTab from "./components/ContentTab";
 import GradingTab from "./components/GradingTab";
 import RecordingTab from "./components/RecordingTab";
 import FilesTab from "./components/FilesTab";
+import DraftedGradesTab from "./components/DraftedGradesTab";
 import WorkflowsTab from "./components/WorkflowsTab";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
 import WorkflowTriggerWatcher from "./components/WorkflowTriggerWatcher";
@@ -21,6 +22,7 @@ import TopBar from "./components/TopBar";
 import { useInstitutionCounts } from "./components/InstitutionCounts";
 import { useVcCounts } from "./components/VcCounts";
 import { useFilesInbox } from "./components/FilesInbox";
+import { useDraftedGradesInbox } from "./components/DraftedGradesInbox";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { stampDocxAppProperties } from "@/lib/docx";
@@ -37,7 +39,7 @@ import { VIEW_KEY } from "./components/content-tab/constants";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "courses" | "course-planning" | "content" | "recording" | "files" | "workflows";
+type ActiveTab = "courses" | "course-planning" | "content" | "recording" | "files" | "workflows" | "grade-drafts";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 type BuildView = "new" | "prebuilt";
 const BUILD_VIEW_KEY = "ta-build-view";
@@ -142,6 +144,7 @@ export default function Home() {
   const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
   const { total: vcAttention } = useVcCounts();
   const { count: filesInbox, markSeen: markFilesSeen } = useFilesInbox();
+  const { count: draftsInbox, markSeen: markDraftsSeen } = useDraftedGradesInbox();
   const [testState] = useActionState(testGeminiAction, initialTestState);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "course-planning";
@@ -155,7 +158,7 @@ export default function Home() {
       localStorage.setItem(VIEW_KEY, "version-control");
       return "content";
     }
-    return saved === "courses" || saved === "course-planning" || saved === "content" || saved === "recording" || saved === "files" || saved === "workflows" ? saved : "course-planning";
+    return saved === "courses" || saved === "course-planning" || saved === "content" || saved === "recording" || saved === "files" || saved === "workflows" || saved === "grade-drafts" ? saved : "course-planning";
   });
   const [buildView, setBuildViewState] = useState<BuildView>(() => {
     if (typeof window === "undefined") return "prebuilt";
@@ -200,6 +203,12 @@ export default function Home() {
       markFilesSeen();
     }
   }, [activeTab, markFilesSeen]);
+
+  useEffect(() => {
+    if (activeTab === "grade-drafts") {
+      markDraftsSeen();
+    }
+  }, [activeTab, markDraftsSeen]);
 
   useEffect(() => {
     return () => {
@@ -729,6 +738,7 @@ export default function Home() {
           />
           <Tab label="Recording" value="recording" disableRipple />
           <Tab label={<NavTabLabel text="Files" count={filesInbox} />} value="files" disableRipple />
+          <Tab label={<NavTabLabel text="Grade Drafts" count={draftsInbox} />} value="grade-drafts" disableRipple />
         </Tabs>
 
         {activeTab === "courses" && (
@@ -798,6 +808,8 @@ export default function Home() {
         </div>
 
         {activeTab === "files" && <FilesTab />}
+
+        {activeTab === "grade-drafts" && <DraftedGradesTab onReviewDrafts={() => setActiveTab("workflows")} />}
 
         {activeTab === "workflows" && <WorkflowsTab />}
 

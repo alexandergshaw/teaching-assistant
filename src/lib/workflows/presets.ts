@@ -377,7 +377,7 @@ export const GRADE_TO_DRAFT: WorkflowDef = {
   preset: true,
   name: "Grade Submissions (draft, unattended)",
   description:
-    "Unattended AI scoring only, safe to run on a schedule with the app closed: grades every LMS assignment with pending submissions in the selected courses (or every course at an institution) and saves the results as a draft. Offline courses (no LMS) are skipped and noted - they need a browser upload. This step never posts to Canvas; use Review Graded Drafts to review and post the saved draft.",
+    "Unattended AI scoring only, safe to run on a schedule with the app closed: grades every LMS assignment with pending submissions for whatever the workflow is scoped to - the selected course tiles, or every course at the scoped institution (scope All institutions to cover every configured school). Offline courses (no LMS) are skipped and noted. This step never posts to Canvas; use Review Graded Drafts to review and post the saved draft.",
   steps: [
     {
       type: "grade-to-draft",

@@ -58,7 +58,6 @@ import {
   generateAssignmentRubricAction,
   generateFullCreditChecklistAction,
   listGradingQueueAction,
-  listConfiguredInstitutionsAction,
   postCanvasGradesAction,
   pullSubmissionAction,
   saveGradingDraftAction,
@@ -5222,33 +5221,25 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "grade-to-draft",
     name: "Grade submissions to a draft",
     description:
-      "Unattended AI scoring only: grade every LMS assignment with pending submissions and save the results as a draft. Nothing is posted to Canvas by this step - review and post the draft separately with Review Graded Drafts.",
+      "Unattended AI scoring only: grades every LMS assignment with pending submissions for whatever the workflow is scoped to - the selected course tiles, or every course at the scoped institution (scope the workflow to All institutions to cover every configured school, one run each) - and saves the results as a draft. Nothing is posted to Canvas by this step - review and post the draft separately with Review Graded Drafts.",
     inputs: [
       {
         key: "courses",
-        label: "Courses",
+        label: "Course tiles",
         type: "hubCourseList",
         required: false,
-        help: "Leave empty and pick an institution instead to grade every course with pending submissions.",
+        help: "Grade only these course tiles (usually inherited From workflow scope). Leave empty to grade a whole institution instead.",
       },
       {
         key: "institution",
         label: "Institution",
         type: "institution",
         required: false,
-        help: "Used when no course tiles are selected: every course at this institution with assignments awaiting grading is included.",
-      },
-      {
-        key: "autonomous",
-        label: "Autonomous (all institutions)",
-        type: "boolean",
-        required: false,
-        help: "Run hands-off: with no course tiles AND no institution selected, grade every course at every institution the server is configured for.",
+        help: "Used when no course tiles are selected: grades every course at this institution with pending submissions. Scope the workflow to All institutions to grade every configured school (one run each).",
       },
     ],
     outputs: [],
     run: async (values, helpers, onProgress) => {
-      const autonomous = String(values.autonomous ?? "") === "1";
       const ids = String(values.courses ?? "")
         .split("\n")
         .map((s) => s.trim())
@@ -5279,26 +5270,16 @@ export const STEP_REGISTRY: StepDefinition[] = [
       // Institution-wide mode: no tiles selected - mirrors grading-preflight.
       if (ids.length === 0) {
         const acronym = String(values.institution ?? "").trim().toUpperCase();
-        // Autonomous + nothing picked: grade every institution the server is
-        // configured for (the only institution list available unattended).
-        let acronyms: string[];
-        if (acronym) {
-          acronyms = [acronym];
-        } else if (autonomous) {
-          onProgress("Resolving all institutions...");
-          const all = await listConfiguredInstitutionsAction();
-          if ("error" in all) {
-            throw new Error(all.error);
-          }
-          if (all.acronyms.length === 0) {
-            throw new Error("No institutions are configured on the server.");
-          }
-          acronyms = all.acronyms;
-        } else {
+        // Institution-wide mode. "All institutions" is handled by scoping the
+        // workflow to institution "*" (fan-out runs this step once per school
+        // with a concrete institution pinned), so a single run always targets
+        // exactly one institution here.
+        if (!acronym) {
           throw new Error(
-            "Select one or more course tiles, pick an institution, or enable Autonomous to grade every institution."
+            "Nothing to grade: scope the workflow to course tiles or an institution (or All institutions), or select course tiles / an institution on this step."
           );
         }
+        const acronyms = [acronym];
 
         onProgress("Loading grading queue...");
         const queueResult = await listGradingQueueAction(acronyms);

@@ -2,6 +2,14 @@ import { describe, it, expect, vi } from "vitest";
 import { runWorkflowUnattended, buildRunReportMarkdown, type StepRunOutcome } from "./server-runner";
 import type { StepDefinition, StepRunHelpers } from "./registry";
 import type { WorkflowDef } from "./types";
+import { resolveFanoutInstitutions } from "./fanout";
+
+// Keep isInstitutionFanout / scopeForInstitution real; only stub the network
+// enumerator so fan-out can be exercised without env-configured institutions.
+vi.mock("./fanout", async (importOriginal) => {
+  const actual = (await importOriginal()) as typeof import("./fanout");
+  return { ...actual, resolveFanoutInstitutions: vi.fn() };
+});
 
 // A tiny fake step catalog + fake helpers, injected via runWorkflowUnattended's
 // stepLookup override, so the run loop (binding resolution, disabled-step
@@ -463,5 +471,115 @@ describe("runWorkflowUnattended report capture", () => {
       stepLookup: lookupOf(defs),
     });
     expect(saveRunReport).not.toHaveBeenCalled();
+  });
+});
+
+describe("runWorkflowUnattended institution fan-out", () => {
+  const probeDefs: Record<string, StepDefinition> = {
+    probe: {
+      type: "probe",
+      name: "Probe",
+      description: "",
+      inputs: [{ key: "inst", label: "Institution", type: "institution", required: false }],
+      outputs: [],
+      run: async () => ({ outputs: {}, summary: { kind: "text", text: "ran" } }),
+    },
+  };
+  const fanoutDef: WorkflowDef = {
+    id: "fo",
+    name: "Fanout WF",
+    description: "",
+    scope: { institution: "*" },
+    steps: [{ type: "probe", bindings: { inst: { source: "runtime", fieldKey: "inst" } } }],
+  };
+
+  it("runs the body once per configured institution, pinning the active institution and scope", async () => {
+    vi.mocked(resolveFanoutInstitutions).mockResolvedValue({ list: ["AAA", "BBB"] });
+    const seen: Array<{ active: string | null; inst: unknown }> = [];
+    const defs: Record<string, StepDefinition> = {
+      probe: {
+        ...probeDefs.probe,
+        run: async (values, helpers) => {
+          seen.push({ active: helpers.activeInstitution, inst: values.inst });
+          return { outputs: {}, summary: { kind: "text", text: "ran" } };
+        },
+      },
+    };
+    const result = await runWorkflowUnattended({
+      def: fanoutDef,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+    });
+    expect(result.ok).toBe(true);
+    // The institution is pinned per iteration - active context AND the scoped
+    // institution input both resolve to the concrete acronym.
+    expect(seen).toEqual([
+      { active: "AAA", inst: "AAA" },
+      { active: "BBB", inst: "BBB" },
+    ]);
+    expect(result.groups?.map((g) => g.institution)).toEqual(["AAA", "BBB"]);
+    expect(result.steps.map((s) => s.institution)).toEqual(["AAA", "BBB"]);
+  });
+
+  it("errors (never silently succeeds) when no institutions are configured", async () => {
+    vi.mocked(resolveFanoutInstitutions).mockResolvedValue({ list: [] });
+    const result = await runWorkflowUnattended({
+      def: fanoutDef,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(probeDefs),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.steps[0].error).toContain("No institutions");
+  });
+
+  it("surfaces an enumeration error", async () => {
+    vi.mocked(resolveFanoutInstitutions).mockResolvedValue({ error: "boom" });
+    const result = await runWorkflowUnattended({
+      def: fanoutDef,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(probeDefs),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.steps[0].error).toContain("Could not list institutions: boom");
+  });
+
+  it("skips institutions past the time-budget deadline", async () => {
+    vi.mocked(resolveFanoutInstitutions).mockResolvedValue({ list: ["AAA", "BBB"] });
+    const result = await runWorkflowUnattended({
+      def: fanoutDef,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(probeDefs),
+      deadlineMs: 0,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.groups?.every((g) => !g.ok)).toBe(true);
+    expect(result.steps.every((s) => (s.error ?? "").includes("time budget"))).toBe(true);
+  });
+
+  it("does not fan out (nor enumerate) when the institution scope is concrete", async () => {
+    vi.mocked(resolveFanoutInstitutions).mockClear();
+    const result = await runWorkflowUnattended({
+      def: { ...fanoutDef, scope: { institution: "MCC" } },
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(probeDefs),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.groups).toBeUndefined();
+    expect(resolveFanoutInstitutions).not.toHaveBeenCalled();
   });
 });

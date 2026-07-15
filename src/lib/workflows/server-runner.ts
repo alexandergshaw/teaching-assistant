@@ -34,6 +34,7 @@ import { parseCartridgeBlob } from "@/lib/cartridge-import";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
 import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction } from "@/app/actions";
+import { isInstitutionFanout, scopeForInstitution, resolveFanoutInstitutions } from "@/lib/workflows/fanout";
 
 export interface StepRunOutcome {
   index: number;
@@ -41,37 +42,36 @@ export interface StepRunOutcome {
   status: "done" | "error" | "disabled" | "needs-interaction";
   error: string | null;
   summary: StepRunSummary | null;
+  institution?: string;
+}
+
+export interface InstitutionGroupOutcome {
+  institution: string;
+  steps: StepRunOutcome[];
+  ok: boolean;
 }
 
 export interface WorkflowRunSummary {
-  steps: StepRunOutcome[];
+  ok: boolean;
   /** False when any step genuinely errored, unexpectedly needed interaction,
    * or could not run because a step it depends on was disabled. Only a
    * step's OWN disabled status is exempted from counting against this - a
    * disabled step with no enabled dependents leaves `ok: true` (mirrors
    * handleRun's disabledRunIndices distinction). */
-  ok: boolean;
+  steps: StepRunOutcome[];
+  groups?: InstitutionGroupOutcome[];
 }
 
-/**
- * Run `def` end-to-end with no pauses. `disabledTopIndices` mirrors the
- * client's per-workflow disabled-step overlay (see workflows/types.ts
- * saveDisabledSteps) at the TOP-LEVEL step index space (expandWorkflowDef's
- * topIndices) - the same space handleRun reads it in.
- */
-export async function runWorkflowUnattended(opts: {
+async function runExpandedBodyOnce(opts: {
   def: WorkflowDef;
   resolveWorkflow: (id: string) => WorkflowDef | undefined;
   fieldValues: Record<string, string>;
   disabledTopIndices: Set<number>;
   helpers: StepRunHelpers;
-  /** Step catalog lookup; defaults to the real registry. Overridable in
-   * tests so binding-resolution/cascade/abort logic can be exercised without
-   * pulling in the full (network-touching) step catalog. */
-  stepLookup?: (type: string) => StepDefinition | undefined;
-}): Promise<WorkflowRunSummary> {
-  const { def, resolveWorkflow, fieldValues, disabledTopIndices, helpers } = opts;
-  const stepLookup = opts.stepLookup ?? getStepDefinition;
+  stepLookup: (type: string) => StepDefinition | undefined;
+  filterHubByInstitution: boolean;
+}): Promise<{ steps: StepRunOutcome[]; ok: boolean }> {
+  const { def, resolveWorkflow, fieldValues, disabledTopIndices, helpers, stepLookup, filterHubByInstitution } = opts;
 
   let expanded: ReturnType<typeof expandWorkflowDef>;
   try {
@@ -166,7 +166,7 @@ export async function runWorkflowUnattended(opts: {
           resolvedInputs[spec.key] = await expandScopedValue(
             spec.type,
             resolvedInputs[spec.key] as string,
-            { activeInstitution: scopeInst || helpers.activeInstitution }
+            { activeInstitution: scopeInst || helpers.activeInstitution, filterHubByInstitution }
           );
         }
       }
@@ -205,15 +205,85 @@ export async function runWorkflowUnattended(opts: {
   }
 
   const genuineFailures = [...failedSteps].filter((i) => !disabledRunIndices.has(i));
-  // Persist the run's text deliverables to the Files tab so an unattended run's
-  // output is not lost. Best-effort: a failed report must never fail the run.
+  return { ok: genuineFailures.length === 0, steps: outcomes };
+}
+
+/**
+ * Run `def` end-to-end with no pauses. `disabledTopIndices` mirrors the
+ * client's per-workflow disabled-step overlay (see workflows/types.ts
+ * saveDisabledSteps) at the TOP-LEVEL step index space (expandWorkflowDef's
+ * topIndices) - the same space handleRun reads it in.
+ *
+ * When a workflow's scope is `institution: "*"`, runs the workflow body once
+ * per configured institution, pinning the scope + active institution each
+ * iteration, and aggregates results into labeled groups. Non-fan-out runs
+ * execute once as before.
+ */
+export async function runWorkflowUnattended(opts: {
+  def: WorkflowDef;
+  resolveWorkflow: (id: string) => WorkflowDef | undefined;
+  fieldValues: Record<string, string>;
+  disabledTopIndices: Set<number>;
+  helpers: StepRunHelpers;
+  /** Step catalog lookup; defaults to the real registry. Overridable in
+   * tests so binding-resolution/cascade/abort logic can be exercised without
+   * pulling in the full (network-touching) step catalog. */
+  stepLookup?: (type: string) => StepDefinition | undefined;
+  /** Optional soft deadline (Date.now() ms). When a fan-out passes it, the
+   * remaining institutions are recorded as skipped instead of started, so the
+   * unattended run stays inside its time budget and resumes next tick. */
+  deadlineMs?: number;
+}): Promise<WorkflowRunSummary> {
+  const { def, helpers } = opts;
+  const stepLookup = opts.stepLookup ?? getStepDefinition;
+
+  let ok: boolean;
+  let steps: StepRunOutcome[];
+  let groups: InstitutionGroupOutcome[] | undefined;
+
+  if (!isInstitutionFanout(def.scope)) {
+    const out = await runExpandedBodyOnce({ ...opts, stepLookup, filterHubByInstitution: false });
+    ok = out.ok;
+    steps = out.steps;
+  } else {
+    const resolved = await resolveFanoutInstitutions();
+    if ("error" in resolved) {
+      ok = false;
+      steps = [{ index: -1, type: def.id, status: "error", error: `Could not list institutions: ${resolved.error}`, summary: null }];
+    } else if (resolved.list.length === 0) {
+      ok = false;
+      steps = [{ index: -1, type: def.id, status: "error", error: "No institutions are configured on the server.", summary: null }];
+    } else {
+      groups = [];
+      for (const acronym of resolved.list) {
+        if (opts.deadlineMs !== undefined && Date.now() > opts.deadlineMs) {
+          groups.push({
+            institution: acronym,
+            ok: false,
+            steps: [{ index: -1, type: def.id, status: "error", error: "Skipped - run time budget reached; resumes next scheduled run.", summary: null, institution: acronym }],
+          });
+          continue;
+        }
+        const scopedDef: WorkflowDef = { ...def, scope: scopeForInstitution(def.scope!, acronym) };
+        const scopedHelpers: StepRunHelpers = { ...helpers, activeInstitution: acronym };
+        const out = await runExpandedBodyOnce({
+          ...opts,
+          def: scopedDef,
+          helpers: scopedHelpers,
+          stepLookup,
+          filterHubByInstitution: true,
+        });
+        groups.push({ institution: acronym, steps: out.steps, ok: out.ok });
+      }
+      ok = groups.every((g) => g.ok);
+      steps = groups.flatMap((g) => g.steps.map((s) => ({ ...s, institution: s.institution ?? g.institution })));
+    }
+  }
+
+  // Persist the run's text deliverables to the Files tab (best-effort). For a
+  // fan-out this is one combined report across every institution.
   if (helpers.saveRunReport) {
-    const markdown = buildRunReportMarkdown(
-      def.name,
-      new Date().toISOString(),
-      outcomes,
-      (t) => stepLookup(t)?.name ?? t
-    );
+    const markdown = buildRunReportMarkdown(def.name, new Date().toISOString(), steps, (t) => stepLookup(t)?.name ?? t);
     if (markdown) {
       try {
         await helpers.saveRunReport(`${def.name} report`, markdown);
@@ -222,7 +292,8 @@ export async function runWorkflowUnattended(opts: {
       }
     }
   }
-  return { ok: genuineFailures.length === 0, steps: outcomes };
+
+  return groups ? { ok, steps, groups } : { ok, steps };
 }
 
 /**

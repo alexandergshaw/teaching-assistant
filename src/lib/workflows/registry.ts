@@ -603,31 +603,61 @@ async function gatherModuleMaterials(
   return { moduleName, materialsText: chunks.join(""), notes, materialsSource };
 }
 
+// Loads the workflow-scoped course tile and returns its CURRENT module/week
+// topic + learning-outcomes summary, or null when there is nothing to derive
+// from (no hubCourse, missing tile, no/invalid start date, not-started/complete,
+// or no schedule row for the current week).
+async function deriveCurrentModule(
+  values: Record<string, unknown>
+): Promise<{ topic: string; summary: string } | null> {
+  const hubCourseId = String(values.hubCourse ?? "").trim();
+  if (!hubCourseId) return null;
+  const list = await listCourseHubAction();
+  if ("error" in list) return null;
+  const tile = list.courses.find((c) => c.id === hubCourseId);
+  if (!tile) return null;
+  const rawWeek = currentCourseWeek(tile.startDate, Date.now());
+  if (rawWeek === null) return null;
+  const status = courseProgressStatus(rawWeek, tile.weeks);
+  if (status === "not-started" || status === "complete") return null;
+  const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
+  const entry = csvToSchedule(tile.csvData ?? "").find((e) => e.week === displayWeek);
+  if (!entry) return null;
+  return { topic: entry.topic?.trim() ?? "", summary: entry.summary?.trim() ?? "" };
+}
+
 // The Module objectives for a content step: the explicitly provided text, or -
 // when empty and a course tile is given (typically from workflow scope) -
-// derived from that tile's CURRENT module/week schedule row (topic + the week's
-// learning-outcomes summary). Lets a scoped workflow produce content for "this
-// week" with no prompt. Returns "" when nothing can be derived.
+// derived from that tile's CURRENT module (topic + the week's learning-outcomes
+// summary). Returns "" when nothing can be derived.
 export async function resolveModuleObjectives(values: Record<string, unknown>): Promise<string> {
   const explicit = String(values.objectives ?? "").trim();
   if (explicit) return explicit;
-  const hubCourseId = String(values.hubCourse ?? "").trim();
-  if (!hubCourseId) return "";
-  const list = await listCourseHubAction();
-  if ("error" in list) return "";
-  const tile = list.courses.find((c) => c.id === hubCourseId);
-  if (!tile) return "";
-  const rawWeek = currentCourseWeek(tile.startDate, Date.now());
-  if (rawWeek === null) return "";
-  const status = courseProgressStatus(rawWeek, tile.weeks);
-  if (status === "not-started" || status === "complete") return "";
-  const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
-  const entry = csvToSchedule(tile.csvData ?? "").find((e) => e.week === displayWeek);
-  if (!entry) return "";
+  const mod = await deriveCurrentModule(values);
+  if (!mod) return "";
   const parts: string[] = [];
-  if (entry.topic?.trim()) parts.push(`Topic: ${entry.topic.trim()}`);
-  if (entry.summary?.trim()) parts.push(entry.summary.trim());
+  if (mod.topic) parts.push(`Topic: ${mod.topic}`);
+  if (mod.summary) parts.push(mod.summary);
   return parts.join("\n");
+}
+
+// Both the topic and objectives for a content step that needs each separately
+// (e.g. Generate a lecture script): explicit values win per field; whatever is
+// empty is derived from the scoped course's current module.
+export async function resolveModuleContext(
+  values: Record<string, unknown>
+): Promise<{ topic: string; objectives: string }> {
+  const explicitTopic = String(values.topic ?? "").trim();
+  const explicitObjectives = String(values.objectives ?? "").trim();
+  if (explicitTopic && explicitObjectives) return { topic: explicitTopic, objectives: explicitObjectives };
+  const mod = await deriveCurrentModule(values);
+  const parts: string[] = [];
+  if (mod?.topic) parts.push(`Topic: ${mod.topic}`);
+  if (mod?.summary) parts.push(mod.summary);
+  return {
+    topic: explicitTopic || (mod?.topic ?? ""),
+    objectives: explicitObjectives || parts.join("\n"),
+  };
 }
 
 // Classify a resolve-rubric source line: a Canvas assignment/discussion URL is
@@ -7398,18 +7428,24 @@ export const STEP_REGISTRY: StepDefinition[] = [
     name: "Generate a lecture script",
     description: "Write a spoken lecture script for a topic and objectives, to feed narration or an avatar video.",
     inputs: [
-      { key: "topic", label: "Topic", type: "text", required: true },
-      { key: "objectives", label: "Objectives", type: "longtext", required: true },
+      {
+        key: "hubCourse",
+        label: "Course tile (optional)",
+        type: "hubCourse",
+        required: false,
+        help: "Scope the workflow to a course tile (or bind one) to auto-fill the topic and objectives from its current module - no need to type them.",
+      },
+      { key: "topic", label: "Topic", type: "text", required: false, courseDerived: true },
+      { key: "objectives", label: "Objectives", type: "longtext", required: false, courseDerived: true },
       { key: "minutes", label: "Target minutes", type: "number", required: false, help: "Default 50." }
     ],
     outputs: [
       { key: "script", label: "Lecture script", type: "longtext" }
     ],
     run: async (values, helpers, onProgress) => {
-      const topic = String(values.topic ?? "").trim();
-      if (!topic) throw new Error("Provide a topic.");
-      const objectives = String(values.objectives ?? "").trim();
-      if (!objectives) throw new Error("Provide the objectives.");
+      const { topic, objectives } = await resolveModuleContext(values);
+      if (!topic) throw new Error("Provide a topic, or scope/bind a course tile to derive it from the current module.");
+      if (!objectives) throw new Error("Provide the objectives, or scope/bind a course tile to derive them from the current module.");
       const minutesRaw = String(values.minutes ?? "").trim();
       const minutes = minutesRaw && Number.isFinite(Number(minutesRaw)) && Number(minutesRaw) > 0 ? Number(minutesRaw) : 50;
       onProgress("Writing lecture script...");

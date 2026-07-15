@@ -593,3 +593,89 @@ describe("runWorkflowUnattended institution fan-out", () => {
     expect(resolveFanoutInstitutions).not.toHaveBeenCalled();
   });
 });
+
+describe("runWorkflowUnattended fan-out checkpointing", () => {
+  const makeRecordingDefs = (ran: string[]): Record<string, StepDefinition> => ({
+    probe: {
+      type: "probe",
+      name: "Probe",
+      description: "",
+      inputs: [],
+      outputs: [],
+      run: async (_values, helpers) => {
+        ran.push(helpers.activeInstitution ?? "");
+        return { outputs: {}, summary: { kind: "text", text: "ran" } };
+      },
+    },
+  });
+  const def: WorkflowDef = {
+    id: "fo",
+    name: "F",
+    description: "",
+    scope: { institution: "*" },
+    steps: [{ type: "probe", bindings: {} }],
+  };
+
+  it("skips already-done institutions and checkpoints each new one (resume)", async () => {
+    vi.mocked(resolveFanoutInstitutions).mockResolvedValue({ list: ["AAA", "BBB", "CCC"] });
+    const ran: string[] = [];
+    const done: string[] = [];
+    const onInstitutionDone = vi.fn(async (acronym: string) => {
+      done.push(acronym);
+      return true;
+    });
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(makeRecordingDefs(ran)),
+      skipInstitutions: new Set(["AAA"]),
+      onInstitutionDone,
+    });
+    expect(ran).toEqual(["BBB", "CCC"]);
+    expect(done).toEqual(["BBB", "CCC"]);
+    expect(result.fanout).toEqual({ total: 3, ranThisTick: ["BBB", "CCC"], remaining: [], truncated: false });
+  });
+
+  it("truncates cleanly past the deadline (no error rows) and reports the remainder", async () => {
+    vi.mocked(resolveFanoutInstitutions).mockResolvedValue({ list: ["AAA", "BBB"] });
+    const ran: string[] = [];
+    const onInstitutionDone = vi.fn(async () => true);
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(makeRecordingDefs(ran)),
+      deadlineMs: 0,
+      onInstitutionDone,
+    });
+    expect(ran).toEqual([]);
+    expect(onInstitutionDone).not.toHaveBeenCalled();
+    expect(result.fanout?.truncated).toBe(true);
+    expect(result.fanout?.remaining).toEqual(["AAA", "BBB"]);
+    expect(result.steps).toEqual([]);
+  });
+
+  it("stops the fan-out when a checkpoint is lost (onInstitutionDone false)", async () => {
+    vi.mocked(resolveFanoutInstitutions).mockResolvedValue({ list: ["AAA", "BBB", "CCC"] });
+    const ran: string[] = [];
+    const onInstitutionDone = vi.fn(async () => false);
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(makeRecordingDefs(ran)),
+      onInstitutionDone,
+    });
+    expect(ran).toEqual(["AAA"]);
+    expect(onInstitutionDone).toHaveBeenCalledTimes(1);
+    expect(result.fanout?.remaining).toEqual(["BBB", "CCC"]);
+    expect(result.fanout?.truncated).toBe(true);
+  });
+});

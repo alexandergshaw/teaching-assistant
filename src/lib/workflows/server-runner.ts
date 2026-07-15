@@ -60,6 +60,9 @@ export interface WorkflowRunSummary {
    * handleRun's disabledRunIndices distinction). */
   steps: StepRunOutcome[];
   groups?: InstitutionGroupOutcome[];
+  /** Fan-out progress for the caller (cron route) to decide resume vs finish.
+   * Present only for a checkpointed institution fan-out run. */
+  fanout?: { total: number; ranThisTick: string[]; remaining: string[]; truncated: boolean };
 }
 
 async function runExpandedBodyOnce(opts: {
@@ -240,6 +243,13 @@ export async function runWorkflowUnattended(opts: {
    * remaining institutions are recorded as skipped instead of started, so the
    * unattended run stays inside its time budget and resumes next tick. */
   deadlineMs?: number;
+  /** Institution fan-out checkpointing (unattended schedule runs only). When
+   * provided, the fan-out skips `skipInstitutions` and, after EACH institution's
+   * body finishes, calls `onInstitutionDone` so progress survives a later kill.
+   * If `onInstitutionDone` resolves false (checkpoint lost) the fan-out stops.
+   * Absent -> current behavior (no checkpoint; the deadline marks the rest errored). */
+  skipInstitutions?: Set<string>;
+  onInstitutionDone?: (acronym: string, ok: boolean) => Promise<boolean>;
 }): Promise<WorkflowRunSummary> {
   const { def, helpers } = opts;
   const stepLookup = opts.stepLookup ?? getStepDefinition;
@@ -247,6 +257,7 @@ export async function runWorkflowUnattended(opts: {
   let ok: boolean;
   let steps: StepRunOutcome[];
   let groups: InstitutionGroupOutcome[] | undefined;
+  let fanoutInfo: WorkflowRunSummary["fanout"];
 
   if (!isInstitutionFanout(def.scope)) {
     const out = await runExpandedBodyOnce({ ...opts, stepLookup, filterHubByInstitution: false });
@@ -261,9 +272,15 @@ export async function runWorkflowUnattended(opts: {
       ok = false;
       steps = [{ index: -1, type: def.id, status: "error", error: "No institutions are configured on the server.", summary: null }];
     } else {
+      const checkpointing = opts.onInstitutionDone !== undefined;
+      const skip = opts.skipInstitutions ?? new Set<string>();
       groups = [];
+      const ranThisTick: string[] = [];
       for (const acronym of resolved.list) {
+        if (skip.has(acronym)) continue; // already done in an earlier tick of this occurrence
+
         if (opts.deadlineMs !== undefined && Date.now() > opts.deadlineMs) {
+          if (checkpointing) continue; // resume path: leave the remainder for the next tick, no error row
           groups.push({
             institution: acronym,
             ok: false,
@@ -271,6 +288,7 @@ export async function runWorkflowUnattended(opts: {
           });
           continue;
         }
+
         const scopedDef: WorkflowDef = { ...def, scope: scopeForInstitution(def.scope!, acronym) };
         const scopedHelpers: StepRunHelpers = { ...helpers, activeInstitution: acronym };
         const out = await runExpandedBodyOnce({
@@ -281,15 +299,29 @@ export async function runWorkflowUnattended(opts: {
           filterHubByInstitution: true,
         });
         groups.push({ institution: acronym, steps: out.steps, ok: out.ok });
+        ranThisTick.push(acronym);
+
+        if (checkpointing) {
+          // Persist BEFORE the next institution starts, so a hard-kill during it
+          // still records this one as done. A lost CAS means we no longer own the
+          // occurrence - stop.
+          const kept = await opts.onInstitutionDone!(acronym, out.ok);
+          if (!kept) break;
+        }
       }
       ok = groups.every((g) => g.ok);
       steps = groups.flatMap((g) => g.steps.map((s) => ({ ...s, institution: s.institution ?? g.institution })));
+      if (checkpointing) {
+        const done = new Set([...skip, ...ranThisTick]);
+        const remaining = resolved.list.filter((a) => !done.has(a));
+        fanoutInfo = { total: resolved.list.length, ranThisTick, remaining, truncated: remaining.length > 0 };
+      }
     }
   }
 
   // Persist the run's text deliverables to the Files tab (best-effort). For a
   // fan-out this is one combined report across every institution.
-  if (helpers.saveRunReport) {
+  if (helpers.saveRunReport && !(fanoutInfo && fanoutInfo.truncated)) {
     const markdown = buildRunReportMarkdown(def.name, new Date().toISOString(), steps, (t) => stepLookup(t)?.name ?? t);
     if (markdown) {
       try {
@@ -300,7 +332,7 @@ export async function runWorkflowUnattended(opts: {
     }
   }
 
-  return groups ? { ok, steps, groups } : { ok, steps };
+  return groups ? { ok, steps, groups, ...(fanoutInfo ? { fanout: fanoutInfo } : {}) } : { ok, steps };
 }
 
 /**

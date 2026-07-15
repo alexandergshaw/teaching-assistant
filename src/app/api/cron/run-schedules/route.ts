@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { runAsOwner } from "@/lib/supabase/owner-context";
 import { isOwnerEmail } from "@/lib/owner";
-import { listDueUnattendedWorkflowSchedules, claimWorkflowSchedule } from "@/lib/workflow-schedules";
+import {
+  listDueUnattendedWorkflowSchedules, claimWorkflowSchedule,
+  claimFanoutSchedule, checkpointFanoutInstitution, deferFanoutResume, finishFanoutSchedule,
+} from "@/lib/workflow-schedules";
 import { listWorkflowDefs } from "@/lib/workflow-defs";
 import { allWorkflows } from "@/lib/workflows/presets";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
 import { runWorkflowUnattended, buildServerStepRunHelpers } from "@/lib/workflows/server-runner";
+import { isInstitutionFanout } from "@/lib/workflows/fanout";
 import { runDueUnattendedTriggers } from "@/lib/workflow-trigger-runner";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
 import { resolveDocumentAuthor } from "@/lib/author";
@@ -93,22 +97,80 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
-      // Atomic claim BEFORE running: conditioned on next_run_at/enabled still
-      // holding their read values, so the client watcher (if the app happens
-      // to be open too) and a second cron tick can never both run the same
-      // occurrence. Also advances next_run_at (or disables a one-shot) and
-      // stamps last_run_at, regardless of what happens next.
+      // Load the def BEFORE claiming so a fan-out can take the checkpoint-aware
+      // claim path. Invalid/non-headless defs still fall through to the ordinary
+      // claim below (which advances next_run_at) so they don't re-select forever.
+      const customDefs = await listWorkflowDefs(supabase, schedule.userId);
+      const defs = allWorkflows(customDefs);
+      const lookup = (id: string) => defs.find((d) => d.id === id);
+      const def = lookup(schedule.workflowId);
+      const runnable = !!def && isHeadlessSafeWorkflow(def, lookup);
+
+      const provider: LlmProvider =
+        schedule.provider === "gemini" || schedule.provider === "other" || schedule.provider === "embedded"
+          ? schedule.provider
+          : "gemini";
+
+      if (runnable && isInstitutionFanout(def!.scope)) {
+        const claim = await claimFanoutSchedule(supabase, schedule.userId, schedule, now);
+        if (!claim) {
+          results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "already claimed" });
+          continue;
+        }
+        if (claim.kind === "abandon") {
+          results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "fan-out abandoned (no forward progress)" });
+          continue;
+        }
+        const progress = claim.progress;
+
+        const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
+          runWorkflowUnattended({
+            def: def!,
+            resolveWorkflow: lookup,
+            fieldValues: schedule.fieldValues,
+            disabledTopIndices: new Set(schedule.disabledSteps),
+            helpers: buildServerStepRunHelpers({
+              supabase, userId: schedule.userId, institution: schedule.institution,
+              provider, author: resolveDocumentAuthor(userRes.user), workflowName: def!.name,
+            }),
+            deadlineMs: runDeadlineMs,
+            skipInstitutions: new Set(progress.doneInstitutions),
+            onInstitutionDone: async (acronym, ok) => {
+              if (!progress.doneInstitutions.includes(acronym)) progress.doneInstitutions.push(acronym);
+              if (!ok) progress.anyError = true;
+              return await checkpointFanoutInstitution(supabase, schedule.userId, schedule.id, progress, new Date());
+            },
+          })
+        );
+
+        if (outcome.fanout?.truncated) {
+          await deferFanoutResume(supabase, schedule.userId, schedule.id, progress.runToken, new Date());
+          results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "ok", detail: `fan-out partial: ${progress.doneInstitutions.length}/${outcome.fanout.total} done` });
+        } else {
+          await finishFanoutSchedule(supabase, schedule.userId, schedule.id, progress, new Date());
+          const runOk = outcome.ok && !progress.anyError;
+          results.push({
+            scheduleId: schedule.id, workflowId: schedule.workflowId,
+            status: runOk ? "ok" : "error",
+            detail: runOk ? undefined : JSON.stringify(outcome.steps.filter((s) => s.status === "error" || s.status === "needs-interaction")),
+          });
+          try {
+            await recordWorkflowRun(supabase, schedule.userId, {
+              workflowId: schedule.workflowId, workflowName: def!.name,
+              status: runOk ? "ok" : "error", triggerSource: "schedule",
+            });
+          } catch { /* ignore */ }
+        }
+        continue;
+      }
+
+      // Non-fan-out (and invalid/non-headless) schedules: ordinary claim path
+      // (advances next_run_at). Unchanged behavior.
       const claimed = await claimWorkflowSchedule(supabase, schedule.userId, schedule, now);
       if (!claimed) {
         results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "already claimed" });
         continue;
       }
-
-      const customDefs = await listWorkflowDefs(supabase, schedule.userId);
-      const defs = allWorkflows(customDefs);
-      const lookup = (id: string) => defs.find((d) => d.id === id);
-      const def = lookup(schedule.workflowId);
-
       if (!def) {
         results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "workflow not found" });
         continue;
@@ -118,11 +180,6 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
-      const provider: LlmProvider =
-        schedule.provider === "gemini" || schedule.provider === "other" || schedule.provider === "embedded"
-          ? schedule.provider
-          : "gemini";
-
       const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
         runWorkflowUnattended({
           def,
@@ -130,39 +187,25 @@ export async function GET(req: NextRequest) {
           fieldValues: schedule.fieldValues,
           disabledTopIndices: new Set(schedule.disabledSteps),
           helpers: buildServerStepRunHelpers({
-            supabase,
-            userId: schedule.userId,
-            institution: schedule.institution,
-            provider,
-            author: resolveDocumentAuthor(userRes.user),
-            workflowName: def.name,
+            supabase, userId: schedule.userId, institution: schedule.institution,
+            provider, author: resolveDocumentAuthor(userRes.user), workflowName: def.name,
           }),
           deadlineMs: runDeadlineMs,
         })
       );
 
       results.push({
-        scheduleId: schedule.id,
-        workflowId: schedule.workflowId,
+        scheduleId: schedule.id, workflowId: schedule.workflowId,
         status: outcome.ok ? "ok" : "error",
-        detail: outcome.ok
-          ? undefined
-          : JSON.stringify(outcome.steps.filter((s) => s.status === "error" || s.status === "needs-interaction")),
+        detail: outcome.ok ? undefined : JSON.stringify(outcome.steps.filter((s) => s.status === "error" || s.status === "needs-interaction")),
       });
 
-      // Log the completion so a 'workflow-completed' (chaining) trigger can
-      // fire off this scheduled run. Best-effort: chaining is a convenience and
-      // must never fail the run that produced it.
       try {
         await recordWorkflowRun(supabase, schedule.userId, {
-          workflowId: schedule.workflowId,
-          workflowName: def.name,
-          status: outcome.ok ? "ok" : "error",
-          triggerSource: "schedule",
+          workflowId: schedule.workflowId, workflowName: def.name,
+          status: outcome.ok ? "ok" : "error", triggerSource: "schedule",
         });
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
     } catch (err) {
       results.push({
         scheduleId: schedule.id,

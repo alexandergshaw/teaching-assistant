@@ -377,6 +377,24 @@ export default function WorkflowsTab() {
   const [customLoaded, setCustomLoaded] = useState(false);
   const [customLoadFailed, setCustomLoadFailed] = useState(false);
   const workflows = allWorkflows(custom);
+  const [workflowSearch, setWorkflowSearch] = useState<string>(() =>
+    typeof window === "undefined" ? "" : localStorage.getItem("ta-workflows-search") ?? ""
+  );
+  useEffect(() => {
+    try {
+      localStorage.setItem("ta-workflows-search", workflowSearch);
+    } catch {
+      // ignore storage write failures
+    }
+  }, [workflowSearch]);
+  const workflowQuery = workflowSearch.trim().toLowerCase();
+  const filteredWorkflows = workflowQuery
+    ? workflows.filter(
+        (w) =>
+          w.name.toLowerCase().includes(workflowQuery) ||
+          (w.description ?? "").toLowerCase().includes(workflowQuery)
+      )
+    : workflows;
 
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(() => {
     if (typeof window === "undefined") return COURSE_KICKOFF.id;
@@ -1894,7 +1912,15 @@ export default function WorkflowsTab() {
       <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 4 }}>
           <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: 4 }}>Workflows</div>
-          {workflows.map((w) => (
+          <TextField
+            size="small"
+            value={workflowSearch}
+            onChange={(e) => setWorkflowSearch(e.target.value)}
+            placeholder="Search workflows..."
+            aria-label="Search workflows"
+            sx={{ marginBottom: 1 }}
+          />
+          {filteredWorkflows.map((w) => (
             <button
               key={w.id}
               type="button"
@@ -1915,6 +1941,11 @@ export default function WorkflowsTab() {
               {w.name}{w.preset ? " (preset)" : ""}
             </button>
           ))}
+          {filteredWorkflows.length === 0 && (
+            <div style={{ fontSize: "0.85em", color: "var(--text-secondary)", padding: "4px 8px" }}>
+              No workflows match your search.
+            </div>
+          )}
           <Button
             size="small"
             variant="outlined"

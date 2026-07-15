@@ -131,6 +131,7 @@ export async function GET(req: NextRequest) {
             institution: schedule.institution,
             provider,
             author: resolveDocumentAuthor(userRes.user),
+            workflowName: def.name,
           }),
         })
       );

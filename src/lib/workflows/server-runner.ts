@@ -285,8 +285,9 @@ export function buildServerStepRunHelpers(opts: {
   institution: string | null;
   provider: LlmProvider;
   author: string;
+  workflowName?: string;
 }): StepRunHelpers {
-  const { supabase, userId, institution, provider, author } = opts;
+  const { supabase, userId, institution, provider, author, workflowName } = opts;
 
   return {
     activeInstitution: institution,
@@ -298,6 +299,9 @@ export function buildServerStepRunHelpers(opts: {
         kind: "bundle",
         mimeType: "application/zip",
         durationSec: null,
+        source: "workflow",
+        origin: "unattended",
+        workflowName: workflowName ?? null,
       });
     },
     saveRunReport: async (name, markdown) => {
@@ -308,6 +312,9 @@ export function buildServerStepRunHelpers(opts: {
         mimeType: "text/markdown",
         durationSec: null,
         fileExt: "md",
+        source: "workflow",
+        origin: "unattended",
+        workflowName: workflowName ?? null,
       });
     },
     saveCourseMaterialFile: async (courseId, blob, fileName) => {

@@ -13,6 +13,9 @@ export interface RecordingFile {
   sizeBytes: number;
   durationSec: number | null;
   storagePath: string;
+  source: string | null;
+  origin: string | null;
+  workflowName: string | null;
   createdAt: string;
 }
 
@@ -53,7 +56,7 @@ export async function saveRecordingFile(
   supabase: SupabaseClient<Database>,
   userId: string,
   blob: Blob,
-  meta: { name: string; kind: "recording" | "captioned" | "narrated" | "bundle" | "file"; mimeType: string; durationSec: number | null; fileExt?: string }
+  meta: { name: string; kind: "recording" | "captioned" | "narrated" | "bundle" | "file"; mimeType: string; durationSec: number | null; fileExt?: string; source?: string | null; origin?: string | null; workflowName?: string | null }
 ): Promise<RecordingFile> {
   const id = crypto.randomUUID();
   let ext = meta.fileExt;
@@ -84,6 +87,9 @@ export async function saveRecordingFile(
       size_bytes: blob.size,
       duration_sec: meta.durationSec,
       storage_path: path,
+      source: meta.source ?? null,
+      origin: meta.origin ?? null,
+      workflow_name: meta.workflowName ?? null,
     })
     .select()
     .single();
@@ -191,6 +197,9 @@ function mapRecordingFile(row: Database["public"]["Tables"]["recording_files"]["
     sizeBytes: row.size_bytes,
     durationSec: row.duration_sec,
     storagePath: row.storage_path,
+    source: row.source,
+    origin: row.origin,
+    workflowName: row.workflow_name,
     createdAt: row.created_at,
   };
 }

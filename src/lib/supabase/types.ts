@@ -464,6 +464,9 @@ export interface Database {
           size_bytes: number;
           duration_sec: number | null;
           storage_path: string;
+          source: string | null;
+          origin: string | null;
+          workflow_name: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -476,6 +479,9 @@ export interface Database {
           size_bytes?: number;
           duration_sec?: number | null;
           storage_path: string;
+          source?: string | null;
+          origin?: string | null;
+          workflow_name?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -488,6 +494,9 @@ export interface Database {
           size_bytes?: number;
           duration_sec?: number | null;
           storage_path?: string;
+          source?: string | null;
+          origin?: string | null;
+          workflow_name?: string | null;
           created_at?: string;
           updated_at?: string;
         };

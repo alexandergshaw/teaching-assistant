@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useRef, Fragment } from "react";
-import { Button, TextField, MenuItem, Autocomplete, FormControlLabel, Checkbox } from "@mui/material";
+import { Button, TextField, MenuItem, Autocomplete, FormControlLabel, Checkbox, Tabs, Tab } from "@mui/material";
 import TabHeader from "./TabHeader";
 import WorkflowBuilder from "./WorkflowBuilder";
 import GithubRepoPicker from "./GithubRepoPicker";
@@ -541,6 +541,8 @@ export default function WorkflowsTab() {
 
   const [editing, setEditing] = useState(false);
   const [deleteArmed, setDeleteArmed] = useState(false);
+  // Master-detail layout: which sub-tab of the right panel is showing.
+  const [panel, setPanel] = useState<"build" | "run" | "automate">("run");
 
   // Mirror `editing` into a ref so the focus refetch handler can skip
   // reloading while the builder is open without re-registering listeners.
@@ -1275,6 +1277,10 @@ export default function WorkflowsTab() {
   const handleRun = async () => {
     if (!selectedDef) return;
     if (expanded.error) return;
+    // Surface the run in the Run panel BEFORE validating, so an auto-fired
+    // scheduled/triggered run whose prefilled form fails validation shows its
+    // error (which now lives in the Run panel) rather than failing invisibly.
+    setPanel("run");
     // Scheduled runs and workflow handoffs land here too (both call
     // handleRun directly); reading disabledSteps at call time - rather than
     // snapshotting it into the schedule - means a scheduled run always
@@ -1847,117 +1853,30 @@ export default function WorkflowsTab() {
         subtitle="Kick off multi-step jobs that chain the app's tools together: schedules, repos, lecture materials, and LMS population in one run."
       />
 
-      <div className={styles.form}>
-        <div className={styles.field}>
-          <label>Workflow</label>
-          <Typeahead
-            disabled={running}
-            options={workflows.map((w) => ({
-              value: w.id,
-              label: w.name,
-              hint: w.preset ? "Preset" : "Custom",
-            }))}
-            value={selectedWorkflowId}
-            onChange={(v) => {
-              if (v) handleWorkflowChange(v);
-            }}
-            placeholder="Choose a workflow..."
-          />
-          {selectedDef && (
-            <>
-              <p className={styles.fieldHint}>{selectedDef.description}</p>
-              {expanded.error && (
-                <p className={styles.error}>{expanded.error}</p>
-              )}
-              {!editing && (
-                <div className={styles.fieldHint}>
-                  <div style={{ marginBottom: 6 }}>
-                    Turn a step off to skip it in your own runs - this only
-                    affects you; the workflow itself (and other users) is
-                    unchanged.
-                  </div>
-                  {expanded.steps.map((step, i) => {
-                    const stepDef = getStepDefinition(step.type);
-                    const topIndex = expanded.topIndices[i];
-                    const isDisabled = disabledSteps.has(topIndex);
-                    const bindings = Object.entries(step.bindings)
-                      .map(([key, binding]) => {
-                        if (binding.source === "runtime") {
-                          return `${key}: from run form`;
-                        } else if (binding.source === "step") {
-                          return `${key}: from step ${binding.stepIndex + 1} output`;
-                        } else if (binding.source === "literal") {
-                          return `${key}: = ${binding.value}`;
-                        }
-                        return "";
-                      })
-                      .filter(Boolean)
-                      .join(" | ");
-                    return (
-                      <div
-                        key={i}
-                        style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          gap: 2,
-                          opacity: isDisabled ? 0.6 : 1,
-                        }}
-                      >
-                        <Checkbox
-                          size="small"
-                          checked={!isDisabled}
-                          onChange={() => {
-                            setDisabledSteps((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(topIndex)) next.delete(topIndex);
-                              else next.add(topIndex);
-                              return next;
-                            });
-                          }}
-                          title={
-                            isDisabled
-                              ? "Enable this step for your runs"
-                              : "Disable this step for your runs"
-                          }
-                          style={{ padding: 2, marginTop: -3 }}
-                        />
-                        <div>
-                          <span style={{ textDecoration: isDisabled ? "line-through" : undefined }}>
-                            {i + 1}. {stepDef?.name ?? step.type}
-                          </span>
-                          {expanded.origins[i] && (
-                            <span style={{ marginLeft: 6, opacity: 0.75 }}>
-                              (from {expanded.origins[i]})
-                            </span>
-                          )}
-                          {bindings && (
-                            <span style={{ marginLeft: 8 }}>({bindings})</span>
-                          )}
-                          {isDisabled && (
-                            <span
-                              className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}
-                              style={{ marginLeft: 8 }}
-                            >
-                              Disabled
-                            </span>
-                          )}
-                          {isDisabled && disabledStepsWithEnabledDependents.has(topIndex) && (
-                            <div style={{ fontSize: "0.9em", opacity: 0.85 }}>
-                              A later enabled step depends on this step&apos;s output and will
-                              be skipped when you run.
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: 4 }}>Workflows</div>
+          {workflows.map((w) => (
+            <button
+              key={w.id}
+              type="button"
+              disabled={running}
+              onClick={() => handleWorkflowChange(w.id)}
+              style={{
+                textAlign: "left",
+                padding: "6px 8px",
+                borderRadius: 8,
+                border: "none",
+                cursor: running ? "default" : "pointer",
+                background: w.id === selectedWorkflowId ? "var(--field-background)" : "transparent",
+                color: "var(--text-primary)",
+                fontWeight: w.id === selectedWorkflowId ? 600 : 400,
+                fontSize: "0.9em",
+              }}
+            >
+              {w.name}{w.preset ? " (preset)" : ""}
+            </button>
+          ))}
           <Button
             size="small"
             variant="outlined"
@@ -1975,17 +1894,133 @@ export default function WorkflowsTab() {
               }
               handleWorkflowChange(newDef.id);
               setEditing(true);
+              setPanel("build");
             }}
           >
             New workflow
           </Button>
+        </div>
 
-          <Button
-            size="small"
-            variant="outlined"
-            disabled={running}
-            onClick={() => {
-              if (!selectedDef) return;
+        <div className={styles.form} style={{ flex: 1, minWidth: 320 }}>
+          {!selectedDef ? (
+            <p className={styles.fieldHint}>Select a workflow from the list, or create a new one.</p>
+          ) : (
+            <>
+              <Tabs
+                value={panel}
+                onChange={(_, v) => setPanel(v as "build" | "run" | "automate")}
+                sx={{ minHeight: 36, mb: 1 }}
+              >
+                {/* Lock navigation away from an active run so its progress and
+                    any mid-run pause / input prompt (which live in the Run
+                    panel) can never be hidden behind another tab. */}
+                <Tab value="build" label="Build" sx={{ minHeight: 36 }} disabled={running || !!runPause || !!runInput} />
+                <Tab value="run" label="Run" sx={{ minHeight: 36 }} />
+                <Tab value="automate" label="Automate" sx={{ minHeight: 36 }} disabled={running || !!runPause || !!runInput} />
+              </Tabs>
+
+              {panel === "build" && (
+                <>
+                  {selectedDef && (
+                    <>
+                      <p className={styles.fieldHint}>{selectedDef.description}</p>
+                      {expanded.error && (
+                        <p className={styles.error}>{expanded.error}</p>
+                      )}
+                      {!editing && (
+                        <div className={styles.fieldHint}>
+                          <div style={{ marginBottom: 6 }}>
+                            Turn a step off to skip it in your own runs - this only
+                            affects you; the workflow itself (and other users) is
+                            unchanged.
+                          </div>
+                          {expanded.steps.map((step, i) => {
+                            const stepDef = getStepDefinition(step.type);
+                            const topIndex = expanded.topIndices[i];
+                            const isDisabled = disabledSteps.has(topIndex);
+                            const bindings = Object.entries(step.bindings)
+                              .map(([key, binding]) => {
+                                if (binding.source === "runtime") {
+                                  return `${key}: from run form`;
+                                } else if (binding.source === "step") {
+                                  return `${key}: from step ${binding.stepIndex + 1} output`;
+                                } else if (binding.source === "literal") {
+                                  return `${key}: = ${binding.value}`;
+                                }
+                                return "";
+                              })
+                              .filter(Boolean)
+                              .join(" | ");
+                            return (
+                              <div
+                                key={i}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "flex-start",
+                                  gap: 2,
+                                  opacity: isDisabled ? 0.6 : 1,
+                                }}
+                              >
+                                <Checkbox
+                                  size="small"
+                                  checked={!isDisabled}
+                                  onChange={() => {
+                                    setDisabledSteps((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(topIndex)) next.delete(topIndex);
+                                      else next.add(topIndex);
+                                      return next;
+                                    });
+                                  }}
+                                  title={
+                                    isDisabled
+                                      ? "Enable this step for your runs"
+                                      : "Disable this step for your runs"
+                                  }
+                                  style={{ padding: 2, marginTop: -3 }}
+                                />
+                                <div>
+                                  <span style={{ textDecoration: isDisabled ? "line-through" : undefined }}>
+                                    {i + 1}. {stepDef?.name ?? step.type}
+                                  </span>
+                                  {expanded.origins[i] && (
+                                    <span style={{ marginLeft: 6, opacity: 0.75 }}>
+                                      (from {expanded.origins[i]})
+                                    </span>
+                                  )}
+                                  {bindings && (
+                                    <span style={{ marginLeft: 8 }}>({bindings})</span>
+                                  )}
+                                  {isDisabled && (
+                                    <span
+                                      className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}
+                                      style={{ marginLeft: 8 }}
+                                    >
+                                      Disabled
+                                    </span>
+                                  )}
+                                  {isDisabled && disabledStepsWithEnabledDependents.has(topIndex) && (
+                                    <div style={{ fontSize: "0.9em", opacity: 0.85 }}>
+                                      A later enabled step depends on this step&apos;s output and will
+                                      be skipped when you run.
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={running}
+                      onClick={() => {
+                        if (!selectedDef) return;
               const copied: WorkflowDef = {
                 id: crypto.randomUUID(),
                 name: `${selectedDef.name} (copy)`,
@@ -2086,10 +2121,12 @@ export default function WorkflowsTab() {
             }}
           />
         )}
+                </>
+              )}
 
-        {!editing && (
-          <>
-            {runtimeFields.map((field) => {
+              {panel === "run" && (
+                <>
+                  {runtimeFields.map((field) => {
               const value = values[field.fieldKey] ?? "";
 
               if (field.type === "org") {
@@ -2656,14 +2693,898 @@ export default function WorkflowsTab() {
                 </span>
               )}
             </div>
-          </>
-        )}
 
-        {selectedDef && (
+                  {runState.length > 0 && (
+                    <div style={{ marginTop: 28 }}>
+                      <h2 style={{ fontSize: "1rem", marginBottom: 16 }}>Run Progress</h2>
+                      {runState.map((state, i) => {
+                        const stepDef = getStepDefinition(expanded.steps[i]?.type ?? "");
+
+                        const badgeClass =
+                          state.status === "pending"
+                            ? styles.ghBadgeNeutral
+                            : state.status === "running"
+                              ? styles.ghBadgeAccent
+                              : state.status === "done"
+                                ? styles.ghBadgeSuccess
+                                : state.status === "disabled"
+                                  ? styles.ghBadgeNeutral
+                                  : "";
+
+                        return (
+                          <div
+                            key={i}
+                            style={{
+                              border: "1px solid var(--field-border)",
+                              borderRadius: 12,
+                              padding: 12,
+                              marginTop: 8,
+                              background: "var(--field-background)",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                marginBottom: 8,
+                              }}
+                            >
+                              <span>
+                                {i + 1}. {stepDef?.name ?? expanded.steps[i]?.type}
+                                {expanded.origins[i] && (
+                                  <span style={{ marginLeft: 6, opacity: 0.75 }}>
+                                    (from {expanded.origins[i]})
+                                  </span>
+                                )}
+                              </span>
+                              <span
+                                className={`${styles.ghBadge} ${badgeClass}`}
+                                style={
+                                  state.status === "error"
+                                    ? {
+                                        color: "var(--danger)",
+                                        background: "color-mix(in srgb, var(--danger) 15%, transparent)",
+                                      }
+                                    : {}
+                                }
+                              >
+                                {state.status === "error"
+                                  ? "Failed"
+                                  : state.status === "disabled"
+                                    ? "Disabled"
+                                    : state.status}
+                              </span>
+                            </div>
+
+                            {state.progress && (
+                              <p className={styles.fieldHint}>{state.progress}</p>
+                            )}
+
+                            {state.error && (
+                              <p className={styles.error}>{state.error}</p>
+                            )}
+
+                            {state.summary && (
+                              <div style={{ marginTop: 12 }}>
+                                <SummaryView summary={state.summary} />
+                              </div>
+                            )}
+
+                            {runPause && runPause.stepIndex === i && (
+                              <div style={{ marginTop: 12 }}>
+                                <p className={styles.fieldHint}>{runPause.message}</p>
+                                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                                  <Button
+                                    size="small"
+                                    variant="contained"
+                                    onClick={() => {
+                                      pauseResolverRef.current?.resolve(true);
+                                    }}
+                                  >
+                                    Continue
+                                  </Button>
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => {
+                                      pauseResolverRef.current?.resolve(false);
+                                    }}
+                                  >
+                                    Cancel run
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+
+                            {runInput && runInput.stepIndex === i && (
+                              <div style={{ marginTop: 12 }}>
+                                <p className={styles.fieldHint}>{runInput.message}</p>
+
+                                {runInput.kind === "text" && (
+                                  <>
+                                    <TextField
+                                      size="small"
+                                      fullWidth
+                                      multiline
+                                      minRows={3}
+                                      value={runInputText}
+                                      onChange={(e) => setRunInputText(e.target.value)}
+                                      disabled={runInputBusy}
+                                      style={{ marginTop: 8 }}
+                                    />
+                                    {runInput.regenerate && (
+                                      <Button
+                                        size="small"
+                                        variant="outlined"
+                                        disabled={runInputBusy}
+                                        onClick={async () => {
+                                          setRunInputBusy(true);
+                                          setRunInputError(null);
+                                          try {
+                                            const result = await runInput.regenerate!();
+                                            setRunInputText(result);
+                                          } catch (err) {
+                                            setRunInputError(
+                                              err instanceof Error ? err.message : "Regeneration failed"
+                                            );
+                                          } finally {
+                                            setRunInputBusy(false);
+                                          }
+                                        }}
+                                        style={{ marginTop: 8 }}
+                                      >
+                                        Regenerate with AI
+                                      </Button>
+                                    )}
+                                    {runInputError && (
+                                      <p className={styles.error} style={{ marginTop: 8 }}>
+                                        {runInputError}
+                                      </p>
+                                    )}
+                                  </>
+                                )}
+
+                                {(runInput.kind === "choice" || runInput.kind === "workflow") && (
+                                  <TextField
+                                    size="small"
+                                    fullWidth
+                                    select
+                                    value={runInputChoice}
+                                    onChange={(e) => setRunInputChoice(e.target.value)}
+                                    style={{ marginTop: 8 }}
+                                  >
+                                    <MenuItem value="" disabled>
+                                      Choose...
+                                    </MenuItem>
+                                    {runInput.options.map((opt) => (
+                                      <MenuItem key={opt.value} value={opt.value}>
+                                        {opt.label}
+                                      </MenuItem>
+                                    ))}
+                                  </TextField>
+                                )}
+
+                                {runInput.kind === "upload" && (
+                                  <>
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      onClick={() => {
+                                        const input = document.createElement("input");
+                                        input.type = "file";
+                                        input.multiple = true;
+                                        input.accept = ".zip";
+                                        input.onchange = (e) => {
+                                          const newFiles = Array.from(
+                                            (e.target as HTMLInputElement).files ?? []
+                                          );
+                                          setRunInputFiles(newFiles);
+                                        };
+                                        input.click();
+                                      }}
+                                      style={{ marginTop: 8 }}
+                                    >
+                                      Choose zip...
+                                    </Button>
+                                    {runInputFiles.length > 0 && (
+                                      <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
+                                        {runInputFiles.map((f) => f.name).join(", ")}
+                                      </p>
+                                    )}
+                                  </>
+                                )}
+
+                                {runInput.kind === "table" && runInput.columns && (
+                                  <>
+                                    <h3 className={styles.workflowReviewHeading}>
+                                      {tableHasGrade ? "Grade review" : "Review table"}
+                                    </h3>
+                                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                                      <TextField
+                                        size="small"
+                                        placeholder="Search rows..."
+                                        value={runInputSearch}
+                                        onChange={(e) => setRunInputSearch(e.target.value)}
+                                        sx={{ width: 220 }}
+                                      />
+                                      {tableGradeStats && (
+                                        <span style={{ fontSize: "0.8rem", color: "var(--hint-text)" }}>
+                                          {tableGradeStats.avg !== null
+                                            ? `avg ${tableGradeStats.avg.toFixed(1)} - median ${tableGradeStats.median!.toFixed(1)} - min ${tableGradeStats.min} - max ${tableGradeStats.max}`
+                                            : "no valid grades yet"}
+                                          {tableGradeStats.missing > 0 && ` - ${tableGradeStats.missing} without a grade (comment-only)`}
+                                          {tableGradeStats.invalid > 0 && (
+                                            <span style={{ color: "var(--danger)" }}>
+                                              {` - ${tableGradeStats.invalid} invalid grade(s)`}
+                                            </span>
+                                          )}
+                                        </span>
+                                      )}
+                                      {tableGradeDist && (
+                                        <div
+                                          role="img"
+                                          aria-label={`Grade distribution - ${tableGradeDist.ariaLabel}`}
+                                          title={tableGradeDist.ariaLabel}
+                                          style={{
+                                            display: "flex",
+                                            height: 8,
+                                            width: 140,
+                                            borderRadius: 999,
+                                            overflow: "hidden",
+                                            background: "var(--surface-subtle)",
+                                            flex: "none",
+                                          }}
+                                        >
+                                          {tableGradeDist.segments
+                                            .filter((s) => s.count > 0)
+                                            .map((s) => (
+                                              <div
+                                                key={s.band}
+                                                style={{
+                                                  width: `${(s.count / tableGradeDist.total) * 100}%`,
+                                                  background: `var(--${s.band})`,
+                                                }}
+                                              />
+                                            ))}
+                                        </div>
+                                      )}
+                                      <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
+                                        {tableHasGrade && tableGradeStats && tableGradeStats.invalid > 0 && runInput.selectable && (
+                                          <button
+                                            type="button"
+                                            className={styles.linkButton}
+                                            onClick={() =>
+                                              setRunInputChecked((prev) =>
+                                                prev.map((c, i) => (tableGradeIssue(runInputRows[i] ?? {}) ? false : c))
+                                              )
+                                            }
+                                          >
+                                            Uncheck invalid
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          className={styles.linkButton}
+                                          onClick={() => {
+                                            const cols = (runInput.columns ?? []).filter((c) => !c.link);
+                                            const header = [...cols.map((c) => c.label), ...(runInput.selectable ? ["Selected"] : [])];
+                                            const lines = [header.map(csvCell).join(",")];
+                                            for (const { row, index } of tableDisplay) {
+                                              lines.push(
+                                                [
+                                                  ...cols.map((c) => csvCell(row[c.key] ?? "")),
+                                                  ...(runInput.selectable ? [(runInputChecked[index] ?? true) ? "yes" : "no"] : []),
+                                                ].join(",")
+                                              );
+                                            }
+                                            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+                                            const url = URL.createObjectURL(blob);
+                                            const a = document.createElement("a");
+                                            a.href = url;
+                                            a.download = "review-table.csv";
+                                            document.body.appendChild(a);
+                                            a.click();
+                                            document.body.removeChild(a);
+                                            URL.revokeObjectURL(url);
+                                          }}
+                                        >
+                                          Download CSV
+                                        </button>
+                                      </span>
+                                    </div>
+                                    {runInputSearch.trim() && (
+                                      <p className={styles.fieldHint} style={{ margin: "6px 0 0 0" }}>
+                                        Showing {tableDisplay.length} of {runInputRows.length} row(s); selection actions and the CSV export cover only the visible rows.
+                                      </p>
+                                    )}
+                                  <div style={{ maxHeight: "min(65vh, 720px)", overflow: "auto", marginTop: 8 }}>
+                                    <table
+                                      style={{
+                                        width: "100%",
+                                        borderCollapse: "collapse",
+                                        fontSize: "0.85rem",
+                                      }}
+                                    >
+                                      <thead>
+                                        <tr>
+                                          {runInput.selectable && (
+                                            <th
+                                              style={{
+                                                textAlign: "center",
+                                                borderBottom: "1px solid var(--field-border)",
+                                                padding: "8px 10px",
+                                                fontWeight: "bold",
+                                                width: 32,
+                                                position: "sticky",
+                                                top: 0,
+                                                background: "var(--card-background)",
+                                                zIndex: 1,
+                                              }}
+                                            >
+                                              <Checkbox
+                                                size="small"
+                                                checked={tableDisplay.length > 0 && tableDisplay.every(({ index }) => runInputChecked[index] ?? true)}
+                                                indeterminate={
+                                                  tableDisplay.some(({ index }) => runInputChecked[index] ?? true) &&
+                                                  !tableDisplay.every(({ index }) => runInputChecked[index] ?? true)
+                                                }
+                                                onChange={() => {
+                                                  const allChecked = tableDisplay.every(({ index }) => runInputChecked[index] ?? true);
+                                                  const visible = new Set(tableDisplay.map(({ index }) => index));
+                                                  setRunInputChecked((prev) => prev.map((c, i) => (visible.has(i) ? !allChecked : c)));
+                                                }}
+                                              />
+                                            </th>
+                                          )}
+                                          {runInput.columns.map((col) => (
+                                            <th
+                                              key={col.key}
+                                              style={{
+                                                textAlign: "left",
+                                                borderBottom: "1px solid var(--field-border)",
+                                                padding: "8px 10px",
+                                                fontWeight: "bold",
+                                                width: col.width,
+                                                position: "sticky",
+                                                top: 0,
+                                                background: "var(--card-background)",
+                                                zIndex: 1,
+                                                cursor: col.link ? undefined : "pointer",
+                                                userSelect: "none",
+                                              }}
+                                              title={col.link ? undefined : "Sort by this column"}
+                                              onClick={() => {
+                                                if (col.link) return;
+                                                setRunInputSort((prev) =>
+                                                  prev?.key !== col.key
+                                                    ? { key: col.key, dir: "asc" }
+                                                    : prev.dir === "asc"
+                                                      ? { key: col.key, dir: "desc" }
+                                                      : null
+                                                );
+                                              }}
+                                            >
+                                              {col.label}
+                                              {runInputSort?.key === col.key && (
+                                                <span style={{ marginLeft: 4, fontSize: "0.7em", color: "var(--hint-text)" }}>
+                                                  {runInputSort.dir === "asc" ? "(asc)" : "(desc)"}
+                                                </span>
+                                              )}
+                                            </th>
+                                          ))}
+                                          {runInput.rowDetail && (
+                                            <th
+                                              style={{
+                                                textAlign: "center",
+                                                borderBottom: "1px solid var(--field-border)",
+                                                padding: "8px 10px",
+                                                fontWeight: "bold",
+                                                width: 80,
+                                                position: "sticky",
+                                                top: 0,
+                                                background: "var(--card-background)",
+                                                zIndex: 1,
+                                              }}
+                                            >
+                                            </th>
+                                          )}
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {tableDisplay.map(({ row, index: rowIndex }) => {
+                                          const detail = runInputDetails[rowIndex];
+                                          const hasDetail = runInput.rowDetail !== undefined;
+                                          const colSpan = (runInput.selectable ? 1 : 0) + (runInput.columns?.length ?? 0) + (hasDetail ? 1 : 0);
+                                          const initialRow = runInputInitialRows[rowIndex];
+                                          const rowDirty =
+                                            initialRow !== undefined &&
+                                            (runInput.columns ?? []).some(
+                                              (c) => c.editable && (row[c.key] ?? "") !== (initialRow[c.key] ?? "")
+                                            );
+                                          const rowSelected = runInputChecked[rowIndex] ?? true;
+                                          return (
+                                            <Fragment key={rowIndex}>
+                                              <tr
+                                                className={`${styles.workflowTableRow} ${
+                                                  runInput.selectable
+                                                    ? rowSelected
+                                                      ? styles.workflowTableRowSelected
+                                                      : styles.workflowTableRowUnselected
+                                                    : ""
+                                                }`}
+                                              >
+                                                {runInput.selectable && (
+                                                  <td
+                                                    style={{
+                                                      borderBottom: "1px solid var(--field-border)",
+                                                      padding: "8px 10px",
+                                                      textAlign: "center",
+                                                    }}
+                                                  >
+                                                    <Checkbox
+                                                      size="small"
+                                                      checked={runInputChecked[rowIndex] ?? true}
+                                                      onChange={() => {
+                                                        setRunInputChecked((prev) =>
+                                                          prev.map((c, idx) =>
+                                                            idx === rowIndex ? !c : c
+                                                          )
+                                                        );
+                                                      }}
+                                                    />
+                                                  </td>
+                                                )}
+                                                {runInput.columns!.map((col) => (
+                                                  <td
+                                                    key={col.key}
+                                                    style={{
+                                                      borderBottom: "1px solid var(--field-border)",
+                                                      padding: "8px 10px",
+                                                      width: col.width,
+                                                    }}
+                                                  >
+                                                    {col.link ? (
+                                                      row[col.key] ? (
+                                                        <a href={row[col.key]} target="_blank" rel="noreferrer" className={styles.linkButton}>
+                                                          View
+                                                        </a>
+                                                      ) : null
+                                                    ) : col.editable ? (
+                                                      <TextField
+                                                        size="small"
+                                                        fullWidth
+                                                        multiline={col.multiline}
+                                                        minRows={col.multiline ? 2 : 1}
+                                                        value={row[col.key] ?? ""}
+                                                        error={tableHasGrade && col.key === "grade" && tableGradeIssue(row) !== null}
+                                                        sx={
+                                                          initialRow !== undefined && (row[col.key] ?? "") !== (initialRow[col.key] ?? "")
+                                                            ? { "& .MuiInputBase-root": { background: "color-mix(in srgb, var(--accent) 8%, transparent)" } }
+                                                            : undefined
+                                                        }
+                                                        onFocus={() =>
+                                                          setTableFrozenOrder((prev) => prev ?? tableDisplay.map(({ index }) => index))
+                                                        }
+                                                        onBlur={() => setTableFrozenOrder(null)}
+                                                        onChange={(e) => {
+                                                          setRunInputRows((prev) =>
+                                                            prev.map((r, idx) =>
+                                                              idx === rowIndex
+                                                                ? { ...r, [col.key]: e.target.value }
+                                                                : r
+                                                            )
+                                                          );
+                                                        }}
+                                                      />
+                                                    ) : (
+                                                      row[col.key] ?? ""
+                                                    )}
+                                                    {tableHasGrade && col.key === "grade" && (
+                                                      <div style={{ marginTop: 4 }}>
+                                                        <GradeBadge row={row} />
+                                                      </div>
+                                                    )}
+                                                  </td>
+                                                ))}
+                                                {hasDetail && (
+                                                  <td
+                                                    style={{
+                                                      borderBottom: "1px solid var(--field-border)",
+                                                      padding: "8px 10px",
+                                                      textAlign: "center",
+                                                      whiteSpace: "nowrap",
+                                                    }}
+                                                  >
+                                                    {rowDirty && (
+                                                      <button
+                                                        className={styles.linkButton}
+                                                        style={{ marginRight: 8 }}
+                                                        title="Restore this row's original values"
+                                                        onClick={() => {
+                                                          setRunInputRows((prev) =>
+                                                            prev.map((r, idx) => (idx === rowIndex ? { ...runInputInitialRows[rowIndex] } : r))
+                                                          );
+                                                        }}
+                                                      >
+                                                        Reset
+                                                      </button>
+                                                    )}
+                                                    <button
+                                                      className={styles.linkButton}
+                                                      onClick={async () => {
+                                                        if (detail?.open) {
+                                                          setRunInputDetails((prev) => ({
+                                                            ...prev,
+                                                            [rowIndex]: { ...prev[rowIndex]!, open: false },
+                                                          }));
+                                                        } else if (detail?.status === "done") {
+                                                          setRunInputDetails((prev) => ({
+                                                            ...prev,
+                                                            [rowIndex]: { ...prev[rowIndex]!, open: true },
+                                                          }));
+                                                        } else {
+                                                          setRunInputDetails((prev) => ({
+                                                            ...prev,
+                                                            [rowIndex]: { open: true, status: "loading", detail: null, error: "" },
+                                                          }));
+                                                          try {
+                                                            const result = await runInput.rowDetail!(row);
+                                                            setRunInputDetails((prev) => ({
+                                                              ...prev,
+                                                              [rowIndex]: { open: true, status: "done", detail: result, error: "" },
+                                                            }));
+                                                          } catch (err) {
+                                                            setRunInputDetails((prev) => ({
+                                                              ...prev,
+                                                              [rowIndex]: {
+                                                                open: true,
+                                                                status: "error",
+                                                                detail: null,
+                                                                error: err instanceof Error ? err.message : "Error loading submission",
+                                                              },
+                                                            }));
+                                                          }
+                                                        }
+                                                      }}
+                                                    >
+                                                      {detail?.open ? "Hide" : "Preview"}
+                                                    </button>
+                                                  </td>
+                                                )}
+                                              </tr>
+                                              {hasDetail && detail?.open && (
+                                                <tr>
+                                                  <td
+                                                    colSpan={colSpan}
+                                                    className={styles.workflowDetailCell}
+                                                    style={{
+                                                      borderBottom: "1px solid var(--field-border)",
+                                                      padding: "10px 12px 10px 20px",
+                                                    }}
+                                                  >
+                                                    {detail.status === "loading" && <div>Loading submission...</div>}
+                                                    {detail.status === "error" && (
+                                                      <div style={{ color: "var(--danger)" }}>{detail.error}</div>
+                                                    )}
+                                                    {detail.status === "done" && detail.detail && (
+                                                      <div>
+                                                        <div
+                                                          style={{
+                                                            maxHeight: 300,
+                                                            overflow: "auto",
+                                                            fontSize: "0.85rem",
+                                                            padding: "10px 12px",
+                                                            background: "var(--card-background)",
+                                                            border: "1px solid var(--field-border)",
+                                                            borderRadius: "6px",
+                                                            marginBottom: "12px",
+                                                          }}
+                                                        >
+                                                          <DetailSectionsView text={detail.detail.text} />
+                                                        </div>
+                                                        {detail.detail.files && detail.detail.files.length > 0 && (
+                                                          <div>
+                                                            {detail.detail.files.map((file) => {
+                                                              const isTextLike = file.mimeType.startsWith("text/") ||
+                                                                ["py", "js", "ts", "jsx", "tsx", "java", "c", "cpp", "h", "cs", "rb", "go", "rs", "php", "html", "css", "json", "md", "txt", "sql", "sh", "yml", "yaml"].includes(
+                                                                  file.name.includes(".") ? file.name.split(".").pop()?.toLowerCase() || "" : ""
+                                                                );
+                                                              const content = isTextLike
+                                                                ? (() => {
+                                                                    try {
+                                                                      const bytes = Uint8Array.from(atob(file.base64), c => c.charCodeAt(0));
+                                                                      const text = new TextDecoder().decode(bytes);
+                                                                      return text.length > 20000 ? text.substring(0, 20000) + "\n... (truncated)" : text;
+                                                                    } catch {
+                                                                      return "(Error decoding file)";
+                                                                    }
+                                                                  })()
+                                                                : "(binary file - download via SpeedGrader)";
+                                                              return (
+                                                                <div key={file.name} className={styles.workflowCard} style={{ marginTop: "8px" }}>
+                                                                  <div style={{ fontWeight: "bold", marginBottom: "4px" }}>{file.name}</div>
+                                                                  <pre
+                                                                    style={{
+                                                                      fontFamily: "monospace",
+                                                                      fontSize: "0.8rem",
+                                                                      whiteSpace: "pre-wrap",
+                                                                      margin: 0,
+                                                                      maxHeight: 240,
+                                                                      overflow: "auto",
+                                                                    }}
+                                                                  >
+                                                                    {content}
+                                                                  </pre>
+                                                                </div>
+                                                              );
+                                                            })}
+                                                            <Button
+                                                              size="small"
+                                                              variant="outlined"
+                                                              disabled={detail.run?.status === "running"}
+                                                              onClick={async () => {
+                                                                setRunInputDetails((prev) => ({
+                                                                  ...prev,
+                                                                  [rowIndex]: {
+                                                                    ...prev[rowIndex]!,
+                                                                    run: { status: "running", result: null },
+                                                                  },
+                                                                }));
+                                                                try {
+                                                                  const result = await runSubmissionCodeAction(
+                                                                    (detail.detail?.files ?? []).map((f) => ({
+                                                                      name: f.name,
+                                                                      extension: f.name.includes(".") ? f.name.split(".").pop()!.toLowerCase() : "",
+                                                                      rawBase64: f.base64,
+                                                                    }))
+                                                                  );
+                                                                  setRunInputDetails((prev) => ({
+                                                                    ...prev,
+                                                                    [rowIndex]: {
+                                                                      ...prev[rowIndex]!,
+                                                                      run: { status: "done", result },
+                                                                    },
+                                                                  }));
+                                                                } catch (err) {
+                                                                  setRunInputDetails((prev) => ({
+                                                                    ...prev,
+                                                                    [rowIndex]: {
+                                                                      ...prev[rowIndex]!,
+                                                                      run: {
+                                                                        status: "done",
+                                                                        result: null,
+                                                                        error: err instanceof Error ? err.message : "Run failed.",
+                                                                      },
+                                                                    },
+                                                                  }));
+                                                                }
+                                                              }}
+                                                              style={{ marginTop: "8px" }}
+                                                            >
+                                                              {detail.run?.status === "running" ? "Running..." : detail.run?.result ? "Run again" : "Run code"}
+                                                            </Button>
+                                                            {detail.run?.result && (
+                                                              <div className={styles.workflowCard} style={{ marginTop: "12px" }}>
+                                                                <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
+                                                                  {detail.run.result.language} - {detail.run.result.ran ? `ran (exit ${detail.run.result.exitCode})` : `failed${detail.run.result.exitCode !== null ? ` (exit ${detail.run.result.exitCode})` : ""}`}
+                                                                </div>
+                                                                {detail.run.result.error && (
+                                                                  <div style={{ marginBottom: "8px" }}>
+                                                                    <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginBottom: "4px" }}>Error</div>
+                                                                    <pre
+                                                                      style={{
+                                                                        fontFamily: "monospace",
+                                                                        fontSize: "0.8rem",
+                                                                        whiteSpace: "pre-wrap",
+                                                                        margin: "0",
+                                                                        maxHeight: 240,
+                                                                        overflow: "auto",
+                                                                        padding: 8,
+                                                                        background: "var(--card-background)",
+                                                                        border: "1px solid var(--field-border)",
+                                                                        borderRadius: 4,
+                                                                      }}
+                                                                    >
+                                                                      {detail.run.result.error}
+                                                                    </pre>
+                                                                  </div>
+                                                                )}
+                                                                {detail.run.result.compileOutput && (
+                                                                  <div style={{ marginBottom: "8px" }}>
+                                                                    <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginBottom: "4px" }}>Compile output</div>
+                                                                    <pre
+                                                                      style={{
+                                                                        fontFamily: "monospace",
+                                                                        fontSize: "0.8rem",
+                                                                        whiteSpace: "pre-wrap",
+                                                                        margin: "0",
+                                                                        maxHeight: 240,
+                                                                        overflow: "auto",
+                                                                        padding: 8,
+                                                                        background: "var(--card-background)",
+                                                                        border: "1px solid var(--field-border)",
+                                                                        borderRadius: 4,
+                                                                      }}
+                                                                    >
+                                                                      {detail.run.result.compileOutput}
+                                                                    </pre>
+                                                                  </div>
+                                                                )}
+                                                                {detail.run.result.stdout && (
+                                                                  <div style={{ marginBottom: "8px" }}>
+                                                                    <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginBottom: "4px" }}>Output</div>
+                                                                    <pre
+                                                                      style={{
+                                                                        fontFamily: "monospace",
+                                                                        fontSize: "0.8rem",
+                                                                        whiteSpace: "pre-wrap",
+                                                                        margin: "0",
+                                                                        maxHeight: 240,
+                                                                        overflow: "auto",
+                                                                        padding: 8,
+                                                                        background: "var(--card-background)",
+                                                                        border: "1px solid var(--field-border)",
+                                                                        borderRadius: 4,
+                                                                      }}
+                                                                    >
+                                                                      {detail.run.result.stdout}
+                                                                    </pre>
+                                                                  </div>
+                                                                )}
+                                                                {detail.run.result.stderr && (
+                                                                  <div style={{ marginBottom: "8px" }}>
+                                                                    <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginBottom: "4px" }}>Stderr</div>
+                                                                    <pre
+                                                                      style={{
+                                                                        fontFamily: "monospace",
+                                                                        fontSize: "0.8rem",
+                                                                        whiteSpace: "pre-wrap",
+                                                                        margin: "0",
+                                                                        maxHeight: 240,
+                                                                        overflow: "auto",
+                                                                        padding: 8,
+                                                                        background: "var(--card-background)",
+                                                                        border: "1px solid var(--field-border)",
+                                                                        borderRadius: 4,
+                                                                      }}
+                                                                    >
+                                                                      {detail.run.result.stderr}
+                                                                    </pre>
+                                                                  </div>
+                                                                )}
+                                                              </div>
+                                                            )}
+                                                            {detail.run?.result === null && detail.run?.status === "done" && (
+                                                              detail.run.error ? (
+                                                                <div style={{ marginTop: "12px", color: "var(--danger)", fontSize: "0.85rem" }}>
+                                                                  Run failed: {detail.run.error}
+                                                                </div>
+                                                              ) : (
+                                                                <div style={{ marginTop: "12px", color: "var(--hint-text)", fontSize: "0.85rem" }}>
+                                                                  No runnable code detected.
+                                                                </div>
+                                                              )
+                                                            )}
+                                                          </div>
+                                                        )}
+                                                      </div>
+                                                    )}
+                                                  </td>
+                                                </tr>
+                                              )}
+                                            </Fragment>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                  </>
+                                )}
+
+                                <div
+                                  className={runInput.kind === "table" ? styles.workflowActionBar : undefined}
+                                  style={{
+                                    display: "flex",
+                                    gap: 8,
+                                    marginTop: 8,
+                                    alignItems: "center",
+                                    flexWrap: "wrap",
+                                  }}
+                                >
+                                  <Button
+                                    size="small"
+                                    variant="contained"
+                                    disabled={
+                                      runInputBusy ||
+                                      (runInput.kind === "text"
+                                        ? !runInputText.trim()
+                                        : runInput.kind === "choice" || runInput.kind === "workflow"
+                                          ? !runInputChoice
+                                          : runInput.kind === "upload"
+                                            ? runInputFiles.length === 0
+                                            : runInput.kind === "table" && runInput.selectable
+                                              ? runInputRows.filter((_, idx) => runInputChecked[idx]).length === 0 ||
+                                                tableCheckedInvalid > 0
+                                              : runInputRows.length === 0)
+                                    }
+                                    onClick={() => {
+                                      let value: string | File[] | Array<Record<string, string>>;
+                                      if (runInput.kind === "text") {
+                                        value = runInputText;
+                                      } else if (
+                                        runInput.kind === "choice" ||
+                                        runInput.kind === "workflow"
+                                      ) {
+                                        value = runInputChoice;
+                                      } else if (runInput.kind === "upload") {
+                                        value = runInputFiles;
+                                      } else if (runInput.kind === "table") {
+                                        value = runInput.selectable
+                                          ? runInputRows.filter((_, idx) => runInputChecked[idx])
+                                          : runInputRows;
+                                      } else {
+                                        value = runInputRows;
+                                      }
+                                      inputResolverRef.current?.resolve(
+                                        value as string | File[] | Array<Record<string, string>>
+                                      );
+                                    }}
+                                  >
+                                    {runInput.kind === "workflow"
+                                      ? "Run selected workflow after this run"
+                                      : runInput.submitLabel ?? "Submit"}
+                                  </Button>
+                                  {runInput.optional && (
+                                    <Button
+                                      size="small"
+                                      variant="text"
+                                      disabled={runInputBusy}
+                                      onClick={() => {
+                                        inputResolverRef.current?.resolve(null);
+                                      }}
+                                    >
+                                      Skip
+                                    </Button>
+                                  )}
+                                  {!runInput.optional && (
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      disabled={runInputBusy}
+                                      onClick={() => {
+                                        inputResolverRef.current?.resolve(null);
+                                      }}
+                                    >
+                                      Cancel run
+                                    </Button>
+                                  )}
+                                  {runInput.kind === "table" && runInput.selectable && (
+                                    <span style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginLeft: "auto" }}>
+                                      {runInputChecked.filter(Boolean).length} of {runInputRows.length} row(s) selected
+                                      {tableCheckedInvalid > 0 && (
+                                        <span style={{ color: "var(--danger)" }}>
+                                          {` - ${tableCheckedInvalid} selected row(s) have an invalid grade; fix them or uncheck them to enable ${runInput.submitLabel ?? "Submit"}`}
+                                        </span>
+                                      )}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {panel === "automate" && (
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--field-border)" }}>
             <h3 style={{ fontSize: "0.95rem", margin: "0 0 4px 0" }}>Schedule</h3>
             <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>
-              Run this workflow at a set time, optionally repeating. Available while you build the workflow and when you run it.
+              Run this workflow at a set time, optionally repeating.
             </p>
             <Button
               variant="outlined"
@@ -2860,7 +3781,7 @@ export default function WorkflowsTab() {
 
             <h3 style={{ fontSize: "0.95rem", margin: "24px 0 4px 0", paddingTop: 16, borderTop: "1px solid var(--field-border)" }}>Triggers</h3>
             <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>
-              Run this workflow automatically when an event happens - a submission, a message, a repo push, another workflow finishing, or an inbound webhook. Available while you build the workflow and when you run it.
+              Run this workflow automatically when an event happens - a submission, a message, a repo push, another workflow finishing, or an inbound webhook.
             </p>
             <Button
               variant="outlined"
@@ -3172,891 +4093,10 @@ export default function WorkflowsTab() {
             )}
           </div>
         )}
-      </div>
-
-      {runState.length > 0 && (
-        <div style={{ marginTop: 28 }}>
-          <h2 style={{ fontSize: "1rem", marginBottom: 16 }}>Run Progress</h2>
-          {runState.map((state, i) => {
-            const stepDef = getStepDefinition(expanded.steps[i]?.type ?? "");
-
-            const badgeClass =
-              state.status === "pending"
-                ? styles.ghBadgeNeutral
-                : state.status === "running"
-                  ? styles.ghBadgeAccent
-                  : state.status === "done"
-                    ? styles.ghBadgeSuccess
-                    : state.status === "disabled"
-                      ? styles.ghBadgeNeutral
-                      : "";
-
-            return (
-              <div
-                key={i}
-                style={{
-                  border: "1px solid var(--field-border)",
-                  borderRadius: 12,
-                  padding: 12,
-                  marginTop: 8,
-                  background: "var(--field-background)",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    marginBottom: 8,
-                  }}
-                >
-                  <span>
-                    {i + 1}. {stepDef?.name ?? expanded.steps[i]?.type}
-                    {expanded.origins[i] && (
-                      <span style={{ marginLeft: 6, opacity: 0.75 }}>
-                        (from {expanded.origins[i]})
-                      </span>
-                    )}
-                  </span>
-                  <span
-                    className={`${styles.ghBadge} ${badgeClass}`}
-                    style={
-                      state.status === "error"
-                        ? {
-                            color: "var(--danger)",
-                            background: "color-mix(in srgb, var(--danger) 15%, transparent)",
-                          }
-                        : {}
-                    }
-                  >
-                    {state.status === "error"
-                      ? "Failed"
-                      : state.status === "disabled"
-                        ? "Disabled"
-                        : state.status}
-                  </span>
-                </div>
-
-                {state.progress && (
-                  <p className={styles.fieldHint}>{state.progress}</p>
-                )}
-
-                {state.error && (
-                  <p className={styles.error}>{state.error}</p>
-                )}
-
-                {state.summary && (
-                  <div style={{ marginTop: 12 }}>
-                    <SummaryView summary={state.summary} />
-                  </div>
-                )}
-
-                {runPause && runPause.stepIndex === i && (
-                  <div style={{ marginTop: 12 }}>
-                    <p className={styles.fieldHint}>{runPause.message}</p>
-                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                      <Button
-                        size="small"
-                        variant="contained"
-                        onClick={() => {
-                          pauseResolverRef.current?.resolve(true);
-                        }}
-                      >
-                        Continue
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => {
-                          pauseResolverRef.current?.resolve(false);
-                        }}
-                      >
-                        Cancel run
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {runInput && runInput.stepIndex === i && (
-                  <div style={{ marginTop: 12 }}>
-                    <p className={styles.fieldHint}>{runInput.message}</p>
-
-                    {runInput.kind === "text" && (
-                      <>
-                        <TextField
-                          size="small"
-                          fullWidth
-                          multiline
-                          minRows={3}
-                          value={runInputText}
-                          onChange={(e) => setRunInputText(e.target.value)}
-                          disabled={runInputBusy}
-                          style={{ marginTop: 8 }}
-                        />
-                        {runInput.regenerate && (
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            disabled={runInputBusy}
-                            onClick={async () => {
-                              setRunInputBusy(true);
-                              setRunInputError(null);
-                              try {
-                                const result = await runInput.regenerate!();
-                                setRunInputText(result);
-                              } catch (err) {
-                                setRunInputError(
-                                  err instanceof Error ? err.message : "Regeneration failed"
-                                );
-                              } finally {
-                                setRunInputBusy(false);
-                              }
-                            }}
-                            style={{ marginTop: 8 }}
-                          >
-                            Regenerate with AI
-                          </Button>
-                        )}
-                        {runInputError && (
-                          <p className={styles.error} style={{ marginTop: 8 }}>
-                            {runInputError}
-                          </p>
-                        )}
-                      </>
-                    )}
-
-                    {(runInput.kind === "choice" || runInput.kind === "workflow") && (
-                      <TextField
-                        size="small"
-                        fullWidth
-                        select
-                        value={runInputChoice}
-                        onChange={(e) => setRunInputChoice(e.target.value)}
-                        style={{ marginTop: 8 }}
-                      >
-                        <MenuItem value="" disabled>
-                          Choose...
-                        </MenuItem>
-                        {runInput.options.map((opt) => (
-                          <MenuItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </MenuItem>
-                        ))}
-                      </TextField>
-                    )}
-
-                    {runInput.kind === "upload" && (
-                      <>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          onClick={() => {
-                            const input = document.createElement("input");
-                            input.type = "file";
-                            input.multiple = true;
-                            input.accept = ".zip";
-                            input.onchange = (e) => {
-                              const newFiles = Array.from(
-                                (e.target as HTMLInputElement).files ?? []
-                              );
-                              setRunInputFiles(newFiles);
-                            };
-                            input.click();
-                          }}
-                          style={{ marginTop: 8 }}
-                        >
-                          Choose zip...
-                        </Button>
-                        {runInputFiles.length > 0 && (
-                          <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
-                            {runInputFiles.map((f) => f.name).join(", ")}
-                          </p>
-                        )}
-                      </>
-                    )}
-
-                    {runInput.kind === "table" && runInput.columns && (
-                      <>
-                        <h3 className={styles.workflowReviewHeading}>
-                          {tableHasGrade ? "Grade review" : "Review table"}
-                        </h3>
-                        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-                          <TextField
-                            size="small"
-                            placeholder="Search rows..."
-                            value={runInputSearch}
-                            onChange={(e) => setRunInputSearch(e.target.value)}
-                            sx={{ width: 220 }}
-                          />
-                          {tableGradeStats && (
-                            <span style={{ fontSize: "0.8rem", color: "var(--hint-text)" }}>
-                              {tableGradeStats.avg !== null
-                                ? `avg ${tableGradeStats.avg.toFixed(1)} - median ${tableGradeStats.median!.toFixed(1)} - min ${tableGradeStats.min} - max ${tableGradeStats.max}`
-                                : "no valid grades yet"}
-                              {tableGradeStats.missing > 0 && ` - ${tableGradeStats.missing} without a grade (comment-only)`}
-                              {tableGradeStats.invalid > 0 && (
-                                <span style={{ color: "var(--danger)" }}>
-                                  {` - ${tableGradeStats.invalid} invalid grade(s)`}
-                                </span>
-                              )}
-                            </span>
-                          )}
-                          {tableGradeDist && (
-                            <div
-                              role="img"
-                              aria-label={`Grade distribution - ${tableGradeDist.ariaLabel}`}
-                              title={tableGradeDist.ariaLabel}
-                              style={{
-                                display: "flex",
-                                height: 8,
-                                width: 140,
-                                borderRadius: 999,
-                                overflow: "hidden",
-                                background: "var(--surface-subtle)",
-                                flex: "none",
-                              }}
-                            >
-                              {tableGradeDist.segments
-                                .filter((s) => s.count > 0)
-                                .map((s) => (
-                                  <div
-                                    key={s.band}
-                                    style={{
-                                      width: `${(s.count / tableGradeDist.total) * 100}%`,
-                                      background: `var(--${s.band})`,
-                                    }}
-                                  />
-                                ))}
-                            </div>
-                          )}
-                          <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
-                            {tableHasGrade && tableGradeStats && tableGradeStats.invalid > 0 && runInput.selectable && (
-                              <button
-                                type="button"
-                                className={styles.linkButton}
-                                onClick={() =>
-                                  setRunInputChecked((prev) =>
-                                    prev.map((c, i) => (tableGradeIssue(runInputRows[i] ?? {}) ? false : c))
-                                  )
-                                }
-                              >
-                                Uncheck invalid
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              className={styles.linkButton}
-                              onClick={() => {
-                                const cols = (runInput.columns ?? []).filter((c) => !c.link);
-                                const header = [...cols.map((c) => c.label), ...(runInput.selectable ? ["Selected"] : [])];
-                                const lines = [header.map(csvCell).join(",")];
-                                for (const { row, index } of tableDisplay) {
-                                  lines.push(
-                                    [
-                                      ...cols.map((c) => csvCell(row[c.key] ?? "")),
-                                      ...(runInput.selectable ? [(runInputChecked[index] ?? true) ? "yes" : "no"] : []),
-                                    ].join(",")
-                                  );
-                                }
-                                const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-                                const url = URL.createObjectURL(blob);
-                                const a = document.createElement("a");
-                                a.href = url;
-                                a.download = "review-table.csv";
-                                document.body.appendChild(a);
-                                a.click();
-                                document.body.removeChild(a);
-                                URL.revokeObjectURL(url);
-                              }}
-                            >
-                              Download CSV
-                            </button>
-                          </span>
-                        </div>
-                        {runInputSearch.trim() && (
-                          <p className={styles.fieldHint} style={{ margin: "6px 0 0 0" }}>
-                            Showing {tableDisplay.length} of {runInputRows.length} row(s); selection actions and the CSV export cover only the visible rows.
-                          </p>
-                        )}
-                      <div style={{ maxHeight: "min(65vh, 720px)", overflow: "auto", marginTop: 8 }}>
-                        <table
-                          style={{
-                            width: "100%",
-                            borderCollapse: "collapse",
-                            fontSize: "0.85rem",
-                          }}
-                        >
-                          <thead>
-                            <tr>
-                              {runInput.selectable && (
-                                <th
-                                  style={{
-                                    textAlign: "center",
-                                    borderBottom: "1px solid var(--field-border)",
-                                    padding: "8px 10px",
-                                    fontWeight: "bold",
-                                    width: 32,
-                                    position: "sticky",
-                                    top: 0,
-                                    background: "var(--card-background)",
-                                    zIndex: 1,
-                                  }}
-                                >
-                                  <Checkbox
-                                    size="small"
-                                    checked={tableDisplay.length > 0 && tableDisplay.every(({ index }) => runInputChecked[index] ?? true)}
-                                    indeterminate={
-                                      tableDisplay.some(({ index }) => runInputChecked[index] ?? true) &&
-                                      !tableDisplay.every(({ index }) => runInputChecked[index] ?? true)
-                                    }
-                                    onChange={() => {
-                                      const allChecked = tableDisplay.every(({ index }) => runInputChecked[index] ?? true);
-                                      const visible = new Set(tableDisplay.map(({ index }) => index));
-                                      setRunInputChecked((prev) => prev.map((c, i) => (visible.has(i) ? !allChecked : c)));
-                                    }}
-                                  />
-                                </th>
-                              )}
-                              {runInput.columns.map((col) => (
-                                <th
-                                  key={col.key}
-                                  style={{
-                                    textAlign: "left",
-                                    borderBottom: "1px solid var(--field-border)",
-                                    padding: "8px 10px",
-                                    fontWeight: "bold",
-                                    width: col.width,
-                                    position: "sticky",
-                                    top: 0,
-                                    background: "var(--card-background)",
-                                    zIndex: 1,
-                                    cursor: col.link ? undefined : "pointer",
-                                    userSelect: "none",
-                                  }}
-                                  title={col.link ? undefined : "Sort by this column"}
-                                  onClick={() => {
-                                    if (col.link) return;
-                                    setRunInputSort((prev) =>
-                                      prev?.key !== col.key
-                                        ? { key: col.key, dir: "asc" }
-                                        : prev.dir === "asc"
-                                          ? { key: col.key, dir: "desc" }
-                                          : null
-                                    );
-                                  }}
-                                >
-                                  {col.label}
-                                  {runInputSort?.key === col.key && (
-                                    <span style={{ marginLeft: 4, fontSize: "0.7em", color: "var(--hint-text)" }}>
-                                      {runInputSort.dir === "asc" ? "(asc)" : "(desc)"}
-                                    </span>
-                                  )}
-                                </th>
-                              ))}
-                              {runInput.rowDetail && (
-                                <th
-                                  style={{
-                                    textAlign: "center",
-                                    borderBottom: "1px solid var(--field-border)",
-                                    padding: "8px 10px",
-                                    fontWeight: "bold",
-                                    width: 80,
-                                    position: "sticky",
-                                    top: 0,
-                                    background: "var(--card-background)",
-                                    zIndex: 1,
-                                  }}
-                                >
-                                </th>
-                              )}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {tableDisplay.map(({ row, index: rowIndex }) => {
-                              const detail = runInputDetails[rowIndex];
-                              const hasDetail = runInput.rowDetail !== undefined;
-                              const colSpan = (runInput.selectable ? 1 : 0) + (runInput.columns?.length ?? 0) + (hasDetail ? 1 : 0);
-                              const initialRow = runInputInitialRows[rowIndex];
-                              const rowDirty =
-                                initialRow !== undefined &&
-                                (runInput.columns ?? []).some(
-                                  (c) => c.editable && (row[c.key] ?? "") !== (initialRow[c.key] ?? "")
-                                );
-                              const rowSelected = runInputChecked[rowIndex] ?? true;
-                              return (
-                                <Fragment key={rowIndex}>
-                                  <tr
-                                    className={`${styles.workflowTableRow} ${
-                                      runInput.selectable
-                                        ? rowSelected
-                                          ? styles.workflowTableRowSelected
-                                          : styles.workflowTableRowUnselected
-                                        : ""
-                                    }`}
-                                  >
-                                    {runInput.selectable && (
-                                      <td
-                                        style={{
-                                          borderBottom: "1px solid var(--field-border)",
-                                          padding: "8px 10px",
-                                          textAlign: "center",
-                                        }}
-                                      >
-                                        <Checkbox
-                                          size="small"
-                                          checked={runInputChecked[rowIndex] ?? true}
-                                          onChange={() => {
-                                            setRunInputChecked((prev) =>
-                                              prev.map((c, idx) =>
-                                                idx === rowIndex ? !c : c
-                                              )
-                                            );
-                                          }}
-                                        />
-                                      </td>
-                                    )}
-                                    {runInput.columns!.map((col) => (
-                                      <td
-                                        key={col.key}
-                                        style={{
-                                          borderBottom: "1px solid var(--field-border)",
-                                          padding: "8px 10px",
-                                          width: col.width,
-                                        }}
-                                      >
-                                        {col.link ? (
-                                          row[col.key] ? (
-                                            <a href={row[col.key]} target="_blank" rel="noreferrer" className={styles.linkButton}>
-                                              View
-                                            </a>
-                                          ) : null
-                                        ) : col.editable ? (
-                                          <TextField
-                                            size="small"
-                                            fullWidth
-                                            multiline={col.multiline}
-                                            minRows={col.multiline ? 2 : 1}
-                                            value={row[col.key] ?? ""}
-                                            error={tableHasGrade && col.key === "grade" && tableGradeIssue(row) !== null}
-                                            sx={
-                                              initialRow !== undefined && (row[col.key] ?? "") !== (initialRow[col.key] ?? "")
-                                                ? { "& .MuiInputBase-root": { background: "color-mix(in srgb, var(--accent) 8%, transparent)" } }
-                                                : undefined
-                                            }
-                                            onFocus={() =>
-                                              setTableFrozenOrder((prev) => prev ?? tableDisplay.map(({ index }) => index))
-                                            }
-                                            onBlur={() => setTableFrozenOrder(null)}
-                                            onChange={(e) => {
-                                              setRunInputRows((prev) =>
-                                                prev.map((r, idx) =>
-                                                  idx === rowIndex
-                                                    ? { ...r, [col.key]: e.target.value }
-                                                    : r
-                                                )
-                                              );
-                                            }}
-                                          />
-                                        ) : (
-                                          row[col.key] ?? ""
-                                        )}
-                                        {tableHasGrade && col.key === "grade" && (
-                                          <div style={{ marginTop: 4 }}>
-                                            <GradeBadge row={row} />
-                                          </div>
-                                        )}
-                                      </td>
-                                    ))}
-                                    {hasDetail && (
-                                      <td
-                                        style={{
-                                          borderBottom: "1px solid var(--field-border)",
-                                          padding: "8px 10px",
-                                          textAlign: "center",
-                                          whiteSpace: "nowrap",
-                                        }}
-                                      >
-                                        {rowDirty && (
-                                          <button
-                                            className={styles.linkButton}
-                                            style={{ marginRight: 8 }}
-                                            title="Restore this row's original values"
-                                            onClick={() => {
-                                              setRunInputRows((prev) =>
-                                                prev.map((r, idx) => (idx === rowIndex ? { ...runInputInitialRows[rowIndex] } : r))
-                                              );
-                                            }}
-                                          >
-                                            Reset
-                                          </button>
-                                        )}
-                                        <button
-                                          className={styles.linkButton}
-                                          onClick={async () => {
-                                            if (detail?.open) {
-                                              setRunInputDetails((prev) => ({
-                                                ...prev,
-                                                [rowIndex]: { ...prev[rowIndex]!, open: false },
-                                              }));
-                                            } else if (detail?.status === "done") {
-                                              setRunInputDetails((prev) => ({
-                                                ...prev,
-                                                [rowIndex]: { ...prev[rowIndex]!, open: true },
-                                              }));
-                                            } else {
-                                              setRunInputDetails((prev) => ({
-                                                ...prev,
-                                                [rowIndex]: { open: true, status: "loading", detail: null, error: "" },
-                                              }));
-                                              try {
-                                                const result = await runInput.rowDetail!(row);
-                                                setRunInputDetails((prev) => ({
-                                                  ...prev,
-                                                  [rowIndex]: { open: true, status: "done", detail: result, error: "" },
-                                                }));
-                                              } catch (err) {
-                                                setRunInputDetails((prev) => ({
-                                                  ...prev,
-                                                  [rowIndex]: {
-                                                    open: true,
-                                                    status: "error",
-                                                    detail: null,
-                                                    error: err instanceof Error ? err.message : "Error loading submission",
-                                                  },
-                                                }));
-                                              }
-                                            }
-                                          }}
-                                        >
-                                          {detail?.open ? "Hide" : "Preview"}
-                                        </button>
-                                      </td>
-                                    )}
-                                  </tr>
-                                  {hasDetail && detail?.open && (
-                                    <tr>
-                                      <td
-                                        colSpan={colSpan}
-                                        className={styles.workflowDetailCell}
-                                        style={{
-                                          borderBottom: "1px solid var(--field-border)",
-                                          padding: "10px 12px 10px 20px",
-                                        }}
-                                      >
-                                        {detail.status === "loading" && <div>Loading submission...</div>}
-                                        {detail.status === "error" && (
-                                          <div style={{ color: "var(--danger)" }}>{detail.error}</div>
-                                        )}
-                                        {detail.status === "done" && detail.detail && (
-                                          <div>
-                                            <div
-                                              style={{
-                                                maxHeight: 300,
-                                                overflow: "auto",
-                                                fontSize: "0.85rem",
-                                                padding: "10px 12px",
-                                                background: "var(--card-background)",
-                                                border: "1px solid var(--field-border)",
-                                                borderRadius: "6px",
-                                                marginBottom: "12px",
-                                              }}
-                                            >
-                                              <DetailSectionsView text={detail.detail.text} />
-                                            </div>
-                                            {detail.detail.files && detail.detail.files.length > 0 && (
-                                              <div>
-                                                {detail.detail.files.map((file) => {
-                                                  const isTextLike = file.mimeType.startsWith("text/") ||
-                                                    ["py", "js", "ts", "jsx", "tsx", "java", "c", "cpp", "h", "cs", "rb", "go", "rs", "php", "html", "css", "json", "md", "txt", "sql", "sh", "yml", "yaml"].includes(
-                                                      file.name.includes(".") ? file.name.split(".").pop()?.toLowerCase() || "" : ""
-                                                    );
-                                                  const content = isTextLike
-                                                    ? (() => {
-                                                        try {
-                                                          const bytes = Uint8Array.from(atob(file.base64), c => c.charCodeAt(0));
-                                                          const text = new TextDecoder().decode(bytes);
-                                                          return text.length > 20000 ? text.substring(0, 20000) + "\n... (truncated)" : text;
-                                                        } catch {
-                                                          return "(Error decoding file)";
-                                                        }
-                                                      })()
-                                                    : "(binary file - download via SpeedGrader)";
-                                                  return (
-                                                    <div key={file.name} className={styles.workflowCard} style={{ marginTop: "8px" }}>
-                                                      <div style={{ fontWeight: "bold", marginBottom: "4px" }}>{file.name}</div>
-                                                      <pre
-                                                        style={{
-                                                          fontFamily: "monospace",
-                                                          fontSize: "0.8rem",
-                                                          whiteSpace: "pre-wrap",
-                                                          margin: 0,
-                                                          maxHeight: 240,
-                                                          overflow: "auto",
-                                                        }}
-                                                      >
-                                                        {content}
-                                                      </pre>
-                                                    </div>
-                                                  );
-                                                })}
-                                                <Button
-                                                  size="small"
-                                                  variant="outlined"
-                                                  disabled={detail.run?.status === "running"}
-                                                  onClick={async () => {
-                                                    setRunInputDetails((prev) => ({
-                                                      ...prev,
-                                                      [rowIndex]: {
-                                                        ...prev[rowIndex]!,
-                                                        run: { status: "running", result: null },
-                                                      },
-                                                    }));
-                                                    try {
-                                                      const result = await runSubmissionCodeAction(
-                                                        (detail.detail?.files ?? []).map((f) => ({
-                                                          name: f.name,
-                                                          extension: f.name.includes(".") ? f.name.split(".").pop()!.toLowerCase() : "",
-                                                          rawBase64: f.base64,
-                                                        }))
-                                                      );
-                                                      setRunInputDetails((prev) => ({
-                                                        ...prev,
-                                                        [rowIndex]: {
-                                                          ...prev[rowIndex]!,
-                                                          run: { status: "done", result },
-                                                        },
-                                                      }));
-                                                    } catch (err) {
-                                                      setRunInputDetails((prev) => ({
-                                                        ...prev,
-                                                        [rowIndex]: {
-                                                          ...prev[rowIndex]!,
-                                                          run: {
-                                                            status: "done",
-                                                            result: null,
-                                                            error: err instanceof Error ? err.message : "Run failed.",
-                                                          },
-                                                        },
-                                                      }));
-                                                    }
-                                                  }}
-                                                  style={{ marginTop: "8px" }}
-                                                >
-                                                  {detail.run?.status === "running" ? "Running..." : detail.run?.result ? "Run again" : "Run code"}
-                                                </Button>
-                                                {detail.run?.result && (
-                                                  <div className={styles.workflowCard} style={{ marginTop: "12px" }}>
-                                                    <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
-                                                      {detail.run.result.language} - {detail.run.result.ran ? `ran (exit ${detail.run.result.exitCode})` : `failed${detail.run.result.exitCode !== null ? ` (exit ${detail.run.result.exitCode})` : ""}`}
-                                                    </div>
-                                                    {detail.run.result.error && (
-                                                      <div style={{ marginBottom: "8px" }}>
-                                                        <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginBottom: "4px" }}>Error</div>
-                                                        <pre
-                                                          style={{
-                                                            fontFamily: "monospace",
-                                                            fontSize: "0.8rem",
-                                                            whiteSpace: "pre-wrap",
-                                                            margin: "0",
-                                                            maxHeight: 240,
-                                                            overflow: "auto",
-                                                            padding: 8,
-                                                            background: "var(--card-background)",
-                                                            border: "1px solid var(--field-border)",
-                                                            borderRadius: 4,
-                                                          }}
-                                                        >
-                                                          {detail.run.result.error}
-                                                        </pre>
-                                                      </div>
-                                                    )}
-                                                    {detail.run.result.compileOutput && (
-                                                      <div style={{ marginBottom: "8px" }}>
-                                                        <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginBottom: "4px" }}>Compile output</div>
-                                                        <pre
-                                                          style={{
-                                                            fontFamily: "monospace",
-                                                            fontSize: "0.8rem",
-                                                            whiteSpace: "pre-wrap",
-                                                            margin: "0",
-                                                            maxHeight: 240,
-                                                            overflow: "auto",
-                                                            padding: 8,
-                                                            background: "var(--card-background)",
-                                                            border: "1px solid var(--field-border)",
-                                                            borderRadius: 4,
-                                                          }}
-                                                        >
-                                                          {detail.run.result.compileOutput}
-                                                        </pre>
-                                                      </div>
-                                                    )}
-                                                    {detail.run.result.stdout && (
-                                                      <div style={{ marginBottom: "8px" }}>
-                                                        <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginBottom: "4px" }}>Output</div>
-                                                        <pre
-                                                          style={{
-                                                            fontFamily: "monospace",
-                                                            fontSize: "0.8rem",
-                                                            whiteSpace: "pre-wrap",
-                                                            margin: "0",
-                                                            maxHeight: 240,
-                                                            overflow: "auto",
-                                                            padding: 8,
-                                                            background: "var(--card-background)",
-                                                            border: "1px solid var(--field-border)",
-                                                            borderRadius: 4,
-                                                          }}
-                                                        >
-                                                          {detail.run.result.stdout}
-                                                        </pre>
-                                                      </div>
-                                                    )}
-                                                    {detail.run.result.stderr && (
-                                                      <div style={{ marginBottom: "8px" }}>
-                                                        <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginBottom: "4px" }}>Stderr</div>
-                                                        <pre
-                                                          style={{
-                                                            fontFamily: "monospace",
-                                                            fontSize: "0.8rem",
-                                                            whiteSpace: "pre-wrap",
-                                                            margin: "0",
-                                                            maxHeight: 240,
-                                                            overflow: "auto",
-                                                            padding: 8,
-                                                            background: "var(--card-background)",
-                                                            border: "1px solid var(--field-border)",
-                                                            borderRadius: 4,
-                                                          }}
-                                                        >
-                                                          {detail.run.result.stderr}
-                                                        </pre>
-                                                      </div>
-                                                    )}
-                                                  </div>
-                                                )}
-                                                {detail.run?.result === null && detail.run?.status === "done" && (
-                                                  detail.run.error ? (
-                                                    <div style={{ marginTop: "12px", color: "var(--danger)", fontSize: "0.85rem" }}>
-                                                      Run failed: {detail.run.error}
-                                                    </div>
-                                                  ) : (
-                                                    <div style={{ marginTop: "12px", color: "var(--hint-text)", fontSize: "0.85rem" }}>
-                                                      No runnable code detected.
-                                                    </div>
-                                                  )
-                                                )}
-                                              </div>
-                                            )}
-                                          </div>
-                                        )}
-                                      </td>
-                                    </tr>
-                                  )}
-                                </Fragment>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                      </>
-                    )}
-
-                    <div
-                      className={runInput.kind === "table" ? styles.workflowActionBar : undefined}
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                        marginTop: 8,
-                        alignItems: "center",
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <Button
-                        size="small"
-                        variant="contained"
-                        disabled={
-                          runInputBusy ||
-                          (runInput.kind === "text"
-                            ? !runInputText.trim()
-                            : runInput.kind === "choice" || runInput.kind === "workflow"
-                              ? !runInputChoice
-                              : runInput.kind === "upload"
-                                ? runInputFiles.length === 0
-                                : runInput.kind === "table" && runInput.selectable
-                                  ? runInputRows.filter((_, idx) => runInputChecked[idx]).length === 0 ||
-                                    tableCheckedInvalid > 0
-                                  : runInputRows.length === 0)
-                        }
-                        onClick={() => {
-                          let value: string | File[] | Array<Record<string, string>>;
-                          if (runInput.kind === "text") {
-                            value = runInputText;
-                          } else if (
-                            runInput.kind === "choice" ||
-                            runInput.kind === "workflow"
-                          ) {
-                            value = runInputChoice;
-                          } else if (runInput.kind === "upload") {
-                            value = runInputFiles;
-                          } else if (runInput.kind === "table") {
-                            value = runInput.selectable
-                              ? runInputRows.filter((_, idx) => runInputChecked[idx])
-                              : runInputRows;
-                          } else {
-                            value = runInputRows;
-                          }
-                          inputResolverRef.current?.resolve(
-                            value as string | File[] | Array<Record<string, string>>
-                          );
-                        }}
-                      >
-                        {runInput.kind === "workflow"
-                          ? "Run selected workflow after this run"
-                          : runInput.submitLabel ?? "Submit"}
-                      </Button>
-                      {runInput.optional && (
-                        <Button
-                          size="small"
-                          variant="text"
-                          disabled={runInputBusy}
-                          onClick={() => {
-                            inputResolverRef.current?.resolve(null);
-                          }}
-                        >
-                          Skip
-                        </Button>
-                      )}
-                      {!runInput.optional && (
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          disabled={runInputBusy}
-                          onClick={() => {
-                            inputResolverRef.current?.resolve(null);
-                          }}
-                        >
-                          Cancel run
-                        </Button>
-                      )}
-                      {runInput.kind === "table" && runInput.selectable && (
-                        <span style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginLeft: "auto" }}>
-                          {runInputChecked.filter(Boolean).length} of {runInputRows.length} row(s) selected
-                          {tableCheckedInvalid > 0 && (
-                            <span style={{ color: "var(--danger)" }}>
-                              {` - ${tableCheckedInvalid} selected row(s) have an invalid grade; fix them or uncheck them to enable ${runInput.submitLabel ?? "Submit"}`}
-                            </span>
-                          )}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+            </>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

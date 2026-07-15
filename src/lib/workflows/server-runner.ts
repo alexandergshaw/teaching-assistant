@@ -15,6 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 import type { LlmProvider } from "@/lib/llm";
 import { expandWorkflowDef, type WorkflowDef } from "@/lib/workflows/types";
+import { isScopeableListType, expandScopedValue } from "@/lib/workflows/scope";
 import {
   getStepDefinition,
   type StepDefinition,
@@ -144,6 +145,16 @@ export async function runWorkflowUnattended(opts: {
           resolvedInputs[spec.key] = output;
         } else if (binding.source === "literal") {
           resolvedInputs[spec.key] = binding.value;
+        }
+
+        // Expand a scopeable input's "*" (all) sentinel into a concrete
+        // newline-joined list so the action always receives a real list.
+        if (isScopeableListType(spec.type) && typeof resolvedInputs[spec.key] === "string") {
+          resolvedInputs[spec.key] = await expandScopedValue(
+            spec.type,
+            resolvedInputs[spec.key] as string,
+            { activeInstitution: helpers.activeInstitution }
+          );
         }
       }
 

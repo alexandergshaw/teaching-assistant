@@ -39,6 +39,7 @@ import {
   type TriggerEventType,
 } from "@/lib/workflow-triggers";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
+import { isScopeableListType, expandScopedValue, ALL_SCOPE } from "@/lib/workflows/scope";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
 import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction, runSubmissionCodeAction } from "@/app/actions";
@@ -1457,6 +1458,16 @@ export default function WorkflowsTab() {
           } else if (binding.source === "literal") {
             resolvedInputs[spec.key] = binding.value;
           }
+
+          // Expand a scopeable input's "*" (all) sentinel into a concrete
+          // newline-joined list so the action always receives a real list.
+          if (isScopeableListType(spec.type) && typeof resolvedInputs[spec.key] === "string") {
+            resolvedInputs[spec.key] = await expandScopedValue(
+              spec.type,
+              resolvedInputs[spec.key] as string,
+              { activeInstitution: activeInstitution || null }
+            );
+          }
         }
 
         const onProgress = (text: string) => {
@@ -2276,7 +2287,10 @@ export default function WorkflowsTab() {
                     </div>
                   );
                 }
-                const urlArray = value.split("\n").map((s) => s.trim()).filter(Boolean);
+                const isAll = value.trim() === ALL_SCOPE;
+                const urlArray = isAll
+                  ? []
+                  : value.split("\n").map((s) => s.trim()).filter(Boolean);
                 const selectedOptions = urlArray.map((url) => {
                   const found = lmsCourseOptions?.find((o) => o.url === url);
                   return found || { url, name: url };
@@ -2284,32 +2298,46 @@ export default function WorkflowsTab() {
                 return (
                   <div key={field.fieldKey} className={styles.field}>
                     <label>{field.label}</label>
-                    <Autocomplete
-                      multiple
-                      options={lmsCourseOptions ?? []}
-                      getOptionLabel={(option) => option.name}
-                      isOptionEqualToValue={(option, val) => option.url === val.url}
-                      value={selectedOptions}
-                      onChange={(_, newValue) => {
-                        const urls = newValue.map((o) => o.url).join("\n");
-                        handleValueChange(field.fieldKey, urls);
-                      }}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
+                    <FormControlLabel
+                      control={
+                        <Checkbox
                           size="small"
-                          label={field.label}
-                          placeholder={
-                            lmsCourseOptions === null
-                              ? "Loading courses..."
-                              : "Select courses..."
+                          checked={isAll}
+                          onChange={(e) =>
+                            handleValueChange(field.fieldKey, e.target.checked ? ALL_SCOPE : "")
                           }
                         />
-                      )}
-                      loading={lmsCourseOptions === null}
-                      noOptionsText="No courses found"
-                      disabled={lmsCourseOptions === null}
+                      }
+                      label="All courses at this institution"
                     />
+                    {!isAll && (
+                      <Autocomplete
+                        multiple
+                        options={lmsCourseOptions ?? []}
+                        getOptionLabel={(option) => option.name}
+                        isOptionEqualToValue={(option, val) => option.url === val.url}
+                        value={selectedOptions}
+                        onChange={(_, newValue) => {
+                          const urls = newValue.map((o) => o.url).join("\n");
+                          handleValueChange(field.fieldKey, urls);
+                        }}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            size="small"
+                            label={field.label}
+                            placeholder={
+                              lmsCourseOptions === null
+                                ? "Loading courses..."
+                                : "Select courses..."
+                            }
+                          />
+                        )}
+                        loading={lmsCourseOptions === null}
+                        noOptionsText="No courses found"
+                        disabled={lmsCourseOptions === null}
+                      />
+                    )}
                     {field.help && (
                       <p className={styles.fieldHint} style={{ margin: 0 }}>
                         {field.help}
@@ -2365,7 +2393,12 @@ export default function WorkflowsTab() {
                   </div>
                 );
               } else if (field.type === "hubCourseList") {
-                const idArray = value.split("\n").map((s) => s.trim()).filter(Boolean);
+                // "*" = all tiles (expanded at run time); otherwise a
+                // newline-joined subset.
+                const isAll = value.trim() === ALL_SCOPE;
+                const idArray = isAll
+                  ? []
+                  : value.split("\n").map((s) => s.trim()).filter(Boolean);
                 // Unknown saved ids surface as placeholder options shaped
                 // like the hubCourses elements so no cast is needed.
                 const selectedOptions = idArray.map((id) => {
@@ -2377,32 +2410,46 @@ export default function WorkflowsTab() {
                 return (
                   <div key={field.fieldKey} className={styles.field}>
                     <label>{field.label}</label>
-                    <Autocomplete
-                      multiple
-                      options={hubCourses ?? []}
-                      getOptionLabel={(option) => option.name}
-                      isOptionEqualToValue={(option, val) => option.id === val.id}
-                      value={selectedOptions}
-                      onChange={(_, newValue) => {
-                        const ids = newValue.map((o) => o.id).join("\n");
-                        handleValueChange(field.fieldKey, ids);
-                      }}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
+                    <FormControlLabel
+                      control={
+                        <Checkbox
                           size="small"
-                          label={field.label}
-                          placeholder={
-                            hubCourses === null
-                              ? "Loading courses..."
-                              : "Select courses..."
+                          checked={isAll}
+                          onChange={(e) =>
+                            handleValueChange(field.fieldKey, e.target.checked ? ALL_SCOPE : "")
                           }
                         />
-                      )}
-                      loading={hubCourses === null}
-                      noOptionsText="No courses available"
-                      disabled={hubCourses === null}
+                      }
+                      label="All course tiles"
                     />
+                    {!isAll && (
+                      <Autocomplete
+                        multiple
+                        options={hubCourses ?? []}
+                        getOptionLabel={(option) => option.name}
+                        isOptionEqualToValue={(option, val) => option.id === val.id}
+                        value={selectedOptions}
+                        onChange={(_, newValue) => {
+                          const ids = newValue.map((o) => o.id).join("\n");
+                          handleValueChange(field.fieldKey, ids);
+                        }}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            size="small"
+                            label={field.label}
+                            placeholder={
+                              hubCourses === null
+                                ? "Loading courses..."
+                                : "Select courses..."
+                            }
+                          />
+                        )}
+                        loading={hubCourses === null}
+                        noOptionsText="No courses available"
+                        disabled={hubCourses === null}
+                      />
+                    )}
                     {field.help && (
                       <p className={styles.fieldHint} style={{ margin: 0 }}>
                         {field.help}

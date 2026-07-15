@@ -33,7 +33,29 @@ export type WorkflowValueType =
   | "hubCourseList"
   | "uploads"
   | "lmsModule"
-  | "courseList";
+  | "courseList"
+  | "orgList";
+
+// A single-item value type -> its scopeable list type. Lets a single-item
+// output from an earlier step bind a scopeable ("one / several / all") list
+// input: the single id/url is simply a one-element list to the consuming step.
+export const SINGLE_TO_LIST_TYPE: Record<string, string> = {
+  hubCourse: "hubCourseList",
+  lmsCourse: "lmsCourseList",
+  org: "orgList",
+};
+
+/**
+ * Whether an output of `outputType` may bind an input of `inputType`: an exact
+ * type match, or a single-item output feeding its scopeable list input (e.g. a
+ * `hubCourse` output into a `hubCourseList` "all/several" input). The reverse
+ * (a list output into a single input) is NOT allowed - a single input cannot
+ * hold many values.
+ */
+export function outputFeedsInput(outputType: string, inputType: string): boolean {
+  if (outputType === inputType) return true;
+  return SINGLE_TO_LIST_TYPE[outputType] === inputType;
+}
 
 export interface GeneratedCourseFile {
   name: string;

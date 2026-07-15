@@ -9,6 +9,7 @@ import {
   type InputBinding,
   type StepInputSpec,
   expandWorkflowDef,
+  outputFeedsInput,
 } from "@/lib/workflows/types";
 import {
   STEP_REGISTRY,
@@ -75,7 +76,7 @@ function normalizeBindings(def: WorkflowDef): WorkflowDef {
           refStep &&
           refDef &&
           refOutput &&
-          refOutput.type === input.type
+          outputFeedsInput(refOutput.type, input.type)
         ) {
           normalizedBindings[input.key] = binding;
         } else {
@@ -778,7 +779,7 @@ function InputBindingRow({
     const def = allStepDefs[j];
     if (!def) continue;
     for (const output of def.outputs) {
-      if (output.type === input.type) {
+      if (outputFeedsInput(output.type, input.type)) {
         compatibleStepOutputs.push({
           stepIndex: j,
           outputKey: output.key,

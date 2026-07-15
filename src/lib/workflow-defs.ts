@@ -2,7 +2,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "./supabase/types";
-import type { WorkflowDef, WorkflowStepConfig } from "@/lib/workflows/types";
+import type { WorkflowDef, WorkflowStepConfig, WorkflowScope } from "@/lib/workflows/types";
 
 export async function listWorkflowDefs(
   supabase: SupabaseClient<Database>,
@@ -35,6 +35,7 @@ export async function upsertWorkflowDef(
       name: def.name,
       description: def.description,
       steps: def.steps as unknown as Json,
+      scope: (def.scope ?? {}) as unknown as Json,
       updated_at: new Date().toISOString(),
     }, { onConflict: "id" });
 
@@ -57,7 +58,13 @@ export async function deleteWorkflowDef(
   }
 }
 
-function mapWorkflowDef(row: Database["public"]["Tables"]["workflow_defs"]["Row"]): WorkflowDef {
+// Exported so the row -> def mapping (including the scope round-trip) is
+// unit-testable without a live Supabase client.
+export function mapWorkflowDef(row: Database["public"]["Tables"]["workflow_defs"]["Row"]): WorkflowDef {
+  const scope =
+    row.scope && typeof row.scope === "object" && !Array.isArray(row.scope)
+      ? (row.scope as unknown as WorkflowScope)
+      : undefined;
   return {
     id: row.id,
     name: row.name,
@@ -65,5 +72,7 @@ function mapWorkflowDef(row: Database["public"]["Tables"]["workflow_defs"]["Row"
     steps: Array.isArray(row.steps)
       ? (row.steps as unknown as WorkflowStepConfig[])
       : [],
+    // Drop an empty scope object so def.scope stays undefined when nothing is set.
+    ...(scope && Object.keys(scope).length > 0 ? { scope } : {}),
   };
 }

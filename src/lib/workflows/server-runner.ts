@@ -14,7 +14,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 import type { LlmProvider } from "@/lib/llm";
-import { expandWorkflowDef, type WorkflowDef } from "@/lib/workflows/types";
+import { expandWorkflowDef, applyWorkflowScope, scopeCoversType, type WorkflowDef } from "@/lib/workflows/types";
 import { isScopeableListType, expandScopedValue } from "@/lib/workflows/scope";
 import {
   getStepDefinition,
@@ -127,7 +127,17 @@ export async function runWorkflowUnattended(opts: {
           // workflow-schedules.ts) - an unattended run always resolves an
           // uploads-type runtime field to an empty list, exactly like a
           // client run whose uploadFiles state was never populated.
-          resolvedInputs[spec.key] = spec.type === "uploads" ? [] : fieldValues[binding.fieldKey] ?? "";
+          // For entity inputs, an empty value falls back to the workflow's
+          // scope target, so an unattended run needs no prompt. A scope-COVERED
+          // input is filled from the scope directly (ignoring any snapshot value
+          // from a sibling field sharing the key) so an "all" scope is not
+          // narrowed.
+          if (spec.type === "uploads") {
+            resolvedInputs[spec.key] = [];
+          } else {
+            const runVal = scopeCoversType(def.scope, spec.type) ? "" : fieldValues[binding.fieldKey] ?? "";
+            resolvedInputs[spec.key] = applyWorkflowScope(spec.type, runVal, def.scope);
+          }
         } else if (binding.source === "step") {
           if (failedSteps.has(binding.stepIndex)) {
             const failedDef = stepLookup(expanded.steps[binding.stepIndex]?.type ?? "");
@@ -149,11 +159,14 @@ export async function runWorkflowUnattended(opts: {
 
         // Expand a scopeable input's "*" (all) sentinel into a concrete
         // newline-joined list so the action always receives a real list.
+        // Canvas-course "*" enumerates the workflow's scoped institution when
+        // set (falling back to the run's institution).
         if (isScopeableListType(spec.type) && typeof resolvedInputs[spec.key] === "string") {
+          const scopeInst = applyWorkflowScope("institution", "", def.scope).trim();
           resolvedInputs[spec.key] = await expandScopedValue(
             spec.type,
             resolvedInputs[spec.key] as string,
-            { activeInstitution: helpers.activeInstitution }
+            { activeInstitution: scopeInst || helpers.activeInstitution }
           );
         }
       }

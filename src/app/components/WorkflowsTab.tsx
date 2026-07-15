@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useRef, Fragment } from "rea
 import { Button, TextField, MenuItem, Autocomplete, FormControlLabel, Checkbox, Tabs, Tab } from "@mui/material";
 import TabHeader from "./TabHeader";
 import WorkflowBuilder from "./WorkflowBuilder";
+import WorkflowScopeControl from "./WorkflowScopeControl";
 import GithubRepoPicker from "./GithubRepoPicker";
 import CoursePicker from "./CoursePicker";
 import Typeahead from "./ui/Typeahead";
@@ -52,6 +53,10 @@ import {
   expandWorkflowDef,
   loadDisabledSteps,
   saveDisabledSteps,
+  applyWorkflowScope,
+  scopeCoversType,
+  describeWorkflowScope,
+  type WorkflowScope,
 } from "@/lib/workflows/types";
 import { splitDetailSections } from "@/lib/workflows/detail-sections";
 import {
@@ -1064,7 +1069,7 @@ export default function WorkflowsTab() {
   useEffect(() => {
     const needsHubCourse =
       runtimeFields.some((f) => f.type === "hubCourse" || f.type === "hubCourseList") ||
-      editing ||
+      panel === "build" ||
       scheduleForm !== null ||
       triggerForm !== null ||
       (schedules ?? []).some((s) => s.courseId);
@@ -1093,10 +1098,11 @@ export default function WorkflowsTab() {
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, hubCourses, scheduleForm, schedules, triggerForm, editing]);
+  }, [runtimeFields, hubCourses, scheduleForm, schedules, triggerForm, panel]);
 
   useEffect(() => {
-    const needsLmsCourseList = runtimeFields.some((f) => f.type === "lmsCourseList");
+    const needsLmsCourseList =
+      panel === "build" || runtimeFields.some((f) => f.type === "lmsCourseList");
     if (!needsLmsCourseList || lmsCourseOptions !== null || !activeInstitution) return;
 
     let cancelled = false;
@@ -1127,11 +1133,11 @@ export default function WorkflowsTab() {
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, lmsCourseOptions, activeInstitution]);
+  }, [runtimeFields, lmsCourseOptions, activeInstitution, panel]);
 
   useEffect(() => {
     const needsOrg =
-      editing || runtimeFields.some((f) => f.type === "org" || f.type === "orgList");
+      panel === "build" || runtimeFields.some((f) => f.type === "org" || f.type === "orgList");
     if (!needsOrg || orgs !== null) return;
 
     let cancelled = false;
@@ -1157,7 +1163,7 @@ export default function WorkflowsTab() {
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, orgs, editing]);
+  }, [runtimeFields, orgs, panel]);
 
   const handleWorkflowChange = (newId: string) => {
     setSelectedWorkflowId(newId);
@@ -1179,6 +1185,24 @@ export default function WorkflowsTab() {
     // Same lifecycle as values: the disabled-step overlay is per workflow id,
     // so it is rehydrated (not carried over) whenever the selection changes.
     setDisabledSteps(new Set(loadDisabledSteps(newId)));
+  };
+
+  // Set the selected (custom) workflow's workflow-level targets and persist.
+  const handleScopeChange = (scope: WorkflowScope) => {
+    if (!selectedDef || selectedDef.preset) return;
+    // selectedDef already reflects any in-flight builder step edit, so `next`
+    // carries both. Cancel the builder's pending debounced save (whose queued
+    // def has no scope) so it cannot clobber this write.
+    const next: WorkflowDef = { ...selectedDef, scope };
+    updateCustom(custom.map((w) => (w.id === next.id ? next : w)));
+    if (user && supabase) {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      pendingDefRef.current = null;
+      void upsertWorkflowDef(supabase, user.id, next).catch(console.error);
+    }
   };
 
   const handleValueChange = (fieldKey: string, value: string) => {
@@ -1239,7 +1263,7 @@ export default function WorkflowsTab() {
       // lmsModule stays out of the list: without a live LMS connection the
       // field renders only a fallback hint, so a required flag on it must
       // not block the run.
-      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "lmsCourseList", "hubCourse", "org", "institution", "hubCourseList", "uploads"];
+      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "lmsCourseList", "hubCourse", "org", "orgList", "institution", "hubCourseList", "uploads"];
       if (!fieldTypes.includes(field.type)) continue;
 
       if (field.type === "uploads") {
@@ -1446,7 +1470,15 @@ export default function WorkflowsTab() {
               // File objects cannot persist; resolve from non-persisted uploadFiles state.
               resolvedInputs[spec.key] = uploadFiles[binding.fieldKey] ?? [];
             } else {
-              resolvedInputs[spec.key] = values[binding.fieldKey] ?? "";
+              // An empty entity input falls back to the workflow's scope target.
+              // A scope-COVERED input is filled from the scope directly (ignoring
+              // any run-form value, which for a covered input can only come from
+              // a sibling field sharing the key), so an "all" scope is not
+              // narrowed by a single-input sibling.
+              const runVal = scopeCoversType(selectedDef.scope, spec.type)
+                ? ""
+                : values[binding.fieldKey] ?? "";
+              resolvedInputs[spec.key] = applyWorkflowScope(spec.type, runVal, selectedDef.scope);
             }
           } else if (binding.source === "step") {
             if (failedSteps.has(binding.stepIndex)) {
@@ -1469,11 +1501,14 @@ export default function WorkflowsTab() {
 
           // Expand a scopeable input's "*" (all) sentinel into a concrete
           // newline-joined list so the action always receives a real list.
+          // Canvas-course "*" enumerates the WORKFLOW'S scoped institution when
+          // set (not the ambient top-bar one), so it targets the right school.
           if (isScopeableListType(spec.type) && typeof resolvedInputs[spec.key] === "string") {
+            const scopeInst = applyWorkflowScope("institution", "", selectedDef.scope).trim();
             resolvedInputs[spec.key] = await expandScopedValue(
               spec.type,
               resolvedInputs[spec.key] as string,
-              { activeInstitution: activeInstitution || null }
+              { activeInstitution: (scopeInst || activeInstitution) || null }
             );
           }
         }
@@ -1923,6 +1958,17 @@ export default function WorkflowsTab() {
 
               {panel === "build" && (
                 <>
+                  {selectedDef && !selectedDef.preset && (
+                    <WorkflowScopeControl
+                      scope={selectedDef.scope ?? {}}
+                      onChange={handleScopeChange}
+                      hubCourses={hubCourses}
+                      institutions={institutions}
+                      orgs={orgs}
+                      lmsCourseOptions={lmsCourseOptions}
+                      activeInstitution={activeInstitution || null}
+                    />
+                  )}
                   {selectedDef && (
                     <>
                       <p className={styles.fieldHint}>{selectedDef.description}</p>
@@ -2028,6 +2074,9 @@ export default function WorkflowsTab() {
                 name: `${selectedDef.name} (copy)`,
                 description: selectedDef.description,
                 steps: JSON.parse(JSON.stringify(selectedDef.steps)),
+                // Carry the workflow-level targets to the copy (a duplicate of a
+                // preset is how you customize its scope, so it must inherit it).
+                ...(selectedDef.scope ? { scope: { ...selectedDef.scope } } : {}),
               };
               updateCustom([...custom, copied]);
               if (user && supabase) {
@@ -2129,6 +2178,11 @@ export default function WorkflowsTab() {
 
               {panel === "run" && (
                 <>
+                  {describeWorkflowScope(selectedDef.scope) && (
+                    <p className={styles.fieldHint} style={{ margin: "0 0 10px 0" }}>
+                      This workflow targets {describeWorkflowScope(selectedDef.scope)} (set under Build).
+                    </p>
+                  )}
                   {runtimeFields.map((field) => {
               const value = values[field.fieldKey] ?? "";
 

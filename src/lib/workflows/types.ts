@@ -143,12 +143,106 @@ export interface WorkflowStepConfig {
   };
 }
 
+/**
+ * Workflow-level targets: what institution / course tiles / Canvas courses /
+ * GitHub orgs the WHOLE workflow is for. Set once (before the steps), it fills
+ * every matching entity input the workflow's steps ask for - so the run form
+ * stops asking for them and a scheduled/triggered/webhook run has its targets
+ * without any prompt. Each value is in the standard entity format: a single
+ * id/url/acronym, a newline-joined list, or "*" for all (list-capable families
+ * only). An unset family (empty/absent) leaves those inputs asking as before.
+ */
+export interface WorkflowScope {
+  institution?: string;
+  hubCourse?: string;
+  lmsCourse?: string;
+  org?: string;
+}
+
 export interface WorkflowDef {
   id: string;
   name: string;
   description: string;
   preset?: boolean;
   steps: WorkflowStepConfig[];
+  /** Workflow-level entity targets applied to matching step inputs. */
+  scope?: WorkflowScope;
+}
+
+/** The workflow-scope family a value type belongs to, or null when the type is
+ * not a scopeable entity. The single and list variants share a family. */
+export function scopeFamilyForType(type: string): keyof WorkflowScope | null {
+  switch (type) {
+    case "institution":
+      return "institution";
+    case "hubCourse":
+    case "hubCourseList":
+      return "hubCourse";
+    case "lmsCourse":
+    case "lmsCourseList":
+      return "lmsCourse";
+    case "org":
+    case "orgList":
+      return "org";
+    default:
+      return null;
+  }
+}
+
+/** The single-item (non-list) entity value types. */
+function isSingleEntityType(type: string): boolean {
+  return type === "institution" || type === "hubCourse" || type === "lmsCourse" || type === "org";
+}
+
+/** Whether the workflow scope can actually fill this input - i.e. the input no
+ * longer needs to be asked at run time. Defined via applyWorkflowScope so a
+ * family set to "*" (all) covers a LIST input but NOT a single input (which
+ * cannot express "all"), keeping that single input in the run form. */
+export function scopeCoversType(scope: WorkflowScope | undefined, type: string): boolean {
+  return applyWorkflowScope(type, "", scope).trim().length > 0;
+}
+
+/**
+ * The effective value for an entity input given the run-form value and the
+ * workflow scope. A non-empty run-form value always wins (a per-run override);
+ * otherwise the scope value is coerced to the input's arity: a list input takes
+ * the scope value as-is (the engine later expands "*"); a single input takes
+ * the first concrete item, and never "*" (which a single input cannot express).
+ */
+export function applyWorkflowScope(
+  type: string,
+  runtimeValue: string,
+  scope: WorkflowScope | undefined
+): string {
+  if (runtimeValue.trim()) return runtimeValue;
+  const family = scopeFamilyForType(type);
+  if (!family || !scope) return runtimeValue;
+  const scopeVal = (scope[family] ?? "").trim();
+  if (!scopeVal) return runtimeValue;
+  if (isSingleEntityType(type)) {
+    if (scopeVal === "*") return runtimeValue;
+    return scopeVal.split("\n").map((s) => s.trim()).filter(Boolean)[0] ?? "";
+  }
+  return scopeVal;
+}
+
+/** A short human summary of a workflow's scope for the run view, or "" when no
+ * family is set. */
+export function describeWorkflowScope(scope: WorkflowScope | undefined): string {
+  if (!scope) return "";
+  const count = (v?: string) => (v ?? "").split("\n").map((s) => s.trim()).filter(Boolean).length;
+  const parts: string[] = [];
+  if (scope.institution?.trim()) parts.push(`institution ${scope.institution.trim()}`);
+  if (scope.hubCourse?.trim()) {
+    parts.push(scope.hubCourse.trim() === "*" ? "all course tiles" : `${count(scope.hubCourse)} course tile(s)`);
+  }
+  if (scope.lmsCourse?.trim()) {
+    parts.push(scope.lmsCourse.trim() === "*" ? "all Canvas courses" : `${count(scope.lmsCourse)} Canvas course(s)`);
+  }
+  if (scope.org?.trim()) {
+    parts.push(scope.org.trim() === "*" ? "all organizations" : `${count(scope.org)} organization(s)`);
+  }
+  return parts.join(", ");
 }
 
 export interface RuntimeField {
@@ -179,6 +273,9 @@ export function collectRuntimeFields(
     for (const spec of specs) {
       const binding = step.bindings[spec.key];
       if (binding && binding.source === "runtime") {
+        // A field the workflow scope already targets is not asked at run time -
+        // the scope fills it (see applyWorkflowScope in the runners).
+        if (scopeCoversType(def.scope, spec.type)) continue;
         const fieldKey = binding.fieldKey;
         if (!seen.has(fieldKey)) {
           seen.add(fieldKey);

@@ -5801,13 +5801,14 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "list-announcements",
     name: "List course announcements",
-    description: "Read a course's existing LMS announcements (scheduled ones surfaced first) so a later step can avoid duplicating them.",
+    description: "Read existing LMS announcements (scheduled ones surfaced first) for one, several, or all courses, so a later step can avoid duplicating them.",
     inputs: [
       {
         key: "course",
-        label: "LMS course",
-        type: "lmsCourse",
+        label: "LMS courses",
+        type: "lmsCourseList",
         required: true,
+        help: "One, several, or all courses at the institution.",
       },
       {
         key: "institution",
@@ -5821,48 +5822,52 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "announcements", label: "Announcements", type: "longtext" },
     ],
     run: async (values, helpers, onProgress) => {
-      const course = String(values.course ?? "").trim();
-      if (!course) {
+      // Scopeable list input: newline-joined course URLs (a single URL is a
+      // one-element list, so pre-scope workflows keep working).
+      const courses = String(values.course ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (courses.length === 0) {
         return {
           outputs: { announcements: "" },
-          summary: {
-            kind: "text",
-            text: "Skipped - no LMS course selected.",
-          },
+          summary: { kind: "text", text: "Skipped - no LMS course selected." },
         };
       }
 
       const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
+      const multi = courses.length > 1;
+      const outLines: string[] = [];
+      const items: string[] = [];
+      let total = 0;
 
-      onProgress("Loading announcements...");
-      const r = await listAnnouncementsAction(course, inst);
-
-      if ("error" in r) {
-        throw new Error(r.error);
-      }
-
-      const titles: string[] = [];
-      const lines: string[] = [];
-
-      for (const announcement of r.announcements) {
-        const title = announcement.title.trim();
-        titles.push(title || "(untitled)");
-
-        let line = title || "(untitled)";
-        if (announcement.delayedPostAt && !announcement.postedAt) {
-          line += ` (scheduled for ${announcement.delayedPostAt})`;
+      for (const course of courses) {
+        onProgress(`Loading announcements${multi ? ` (${course})` : ""}...`);
+        const r = await listAnnouncementsAction(course, inst);
+        if ("error" in r) {
+          items.push(`${course}: ${r.error}`);
+          if (multi) outLines.push(`# ${course} - error: ${r.error}`);
+          continue;
         }
-        lines.push(line);
+        total += r.announcements.length;
+        if (multi) outLines.push(`# ${r.courseName}`);
+        for (const announcement of r.announcements) {
+          const title = announcement.title.trim() || "(untitled)";
+          let line = title;
+          if (announcement.delayedPostAt && !announcement.postedAt) {
+            line += ` (scheduled for ${announcement.delayedPostAt})`;
+          }
+          outLines.push(line);
+          items.push(multi ? `${r.courseName}: ${title}` : title);
+        }
       }
-
-      const announcements = lines.join("\n");
 
       return {
-        outputs: { announcements },
+        outputs: { announcements: outLines.join("\n") },
         summary: {
           kind: "list",
-          label: `${r.announcements.length} announcement(s) in ${r.courseName}`,
-          items: titles.length > 0 ? titles : ["(none)"],
+          label: `${total} announcement(s) across ${courses.length} course(s)`,
+          items: items.length > 0 ? items : ["(none)"],
         },
       };
     },
@@ -6420,9 +6425,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "check-student-activity",
     name: "Check student repo activity",
-    description: "List each student repo in the org with its last-commit date, flagging repos with no recent activity as at-risk.",
+    description: "List each student repo (across one, several, or all orgs) with its last-commit date, flagging repos with no recent activity as at-risk.",
     inputs: [
-      { key: "org", label: "Organization", type: "org", required: true },
+      { key: "org", label: "Organizations", type: "orgList", required: true, help: "One, several, or all of your GitHub orgs." },
       { key: "prefix", label: "Repo name prefix", type: "text", required: false, help: "Only repos whose name starts with this." },
       { key: "staleDays", label: "Stale after (days)", type: "number", required: false, help: "Flag repos with no commit in this many days (default 7)." },
     ],
@@ -6431,27 +6436,46 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "staleCount", label: "Stale repos", type: "number" },
     ],
     run: async (values, helpers, onProgress) => {
-      const org = String(values.org ?? "").trim();
-      if (!org) throw new Error("Provide a GitHub organization.");
+      // Scopeable list input: newline-joined org logins (a single login is a
+      // one-element list, so pre-scope workflows keep working).
+      const orgs = String(values.org ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (orgs.length === 0) throw new Error("Provide a GitHub organization.");
       const prefix = String(values.prefix ?? "").trim() || undefined;
       const staleRaw = String(values.staleDays ?? "").trim();
       const staleDays = staleRaw && Number.isFinite(Number(staleRaw)) ? Number(staleRaw) : 7;
 
-      onProgress("Reading student repos...");
-      const r = await checkStudentActivityAction(org, prefix);
-      if ("error" in r) throw new Error(r.error);
-
       const cutoff = Date.now() - staleDays * 86400000;
+      const multi = orgs.length > 1;
+      const lines: string[] = [];
       let staleCount = 0;
-      const lines = r.rows.map((row) => {
-        const stale = !row.lastCommit || new Date(row.lastCommit).getTime() < cutoff;
-        if (stale) staleCount++;
-        return `${row.repo}: ${row.lastCommit ? row.lastCommit : "no commits"}${stale ? " (STALE)" : ""}`;
-      });
+      let repoCount = 0;
+
+      for (const org of orgs) {
+        onProgress(`Reading student repos${multi ? ` (${org})` : ""}...`);
+        const r = await checkStudentActivityAction(org, prefix);
+        if ("error" in r) {
+          lines.push(`${org}: ${r.error}`);
+          continue;
+        }
+        if (multi) lines.push(`# ${org}`);
+        for (const row of r.rows) {
+          repoCount++;
+          const stale = !row.lastCommit || new Date(row.lastCommit).getTime() < cutoff;
+          if (stale) staleCount++;
+          lines.push(`${row.repo}: ${row.lastCommit ? row.lastCommit : "no commits"}${stale ? " (STALE)" : ""}`);
+        }
+      }
 
       return {
         outputs: { activity: lines.join("\n"), staleCount },
-        summary: { kind: "list", label: `${r.rows.length} repo(s), ${staleCount} stale`, items: lines.length ? lines : ["(no repos found)"] },
+        summary: {
+          kind: "list",
+          label: `${repoCount} repo(s), ${staleCount} stale`,
+          items: lines.length ? lines : ["(no repos found)"],
+        },
       };
     },
   },
@@ -8341,9 +8365,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "check-broken-links",
     name: "Check for broken links",
-    description: "Run and read Canvas link validation for a course, returning any broken links. Set Kick off to start a fresh scan (results appear on a later run).",
+    description: "Run and read Canvas link validation for one, several, or all courses, returning any broken links. Set Kick off to start a fresh scan (results appear on a later run).",
     inputs: [
-      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
+      { key: "course", label: "LMS courses", type: "lmsCourseList", required: true, help: "One, several, or all courses at the institution." },
       { key: "kickoff", label: "Kick off a fresh scan", type: "boolean", required: false },
       { key: "institution", label: "Institution", type: "institution", required: false },
     ],
@@ -8352,41 +8376,55 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "state", label: "Scan state", type: "text" },
     ],
     run: async (values, helpers, onProgress) => {
-      const course = String(values.course ?? "").trim();
-      if (!course) {
+      // Scopeable list input: newline-joined course URLs (a single URL is a
+      // one-element list, so pre-scope workflows keep working).
+      const courses = String(values.course ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (courses.length === 0) {
         throw new Error("Select an LMS course.");
       }
 
       const kickoff = String(values.kickoff ?? "") === "1";
       const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
-
-      onProgress(kickoff ? "Starting link validation..." : "Reading link validation...");
-      const r = await checkBrokenLinksAction(course, inst, kickoff);
-      if ("error" in r) {
-        throw new Error(r.error);
-      }
-
-      const lines: string[] = [];
+      const multi = courses.length > 1;
+      const outLines: string[] = [];
       const urls: string[] = [];
-      for (const link of r.links) {
-        lines.push(`${link.itemType}: ${link.itemTitle}`);
-        lines.push(`URL: ${link.url}`);
-        lines.push(`Reason: ${link.reason}`);
-        if (link.linkText) {
-          lines.push(`Link text: ${link.linkText}`);
+      const states: string[] = [];
+      let totalBroken = 0;
+
+      for (const course of courses) {
+        onProgress(`${kickoff ? "Starting" : "Reading"} link validation${multi ? ` (${course})` : ""}...`);
+        const r = await checkBrokenLinksAction(course, inst, kickoff);
+        if ("error" in r) {
+          outLines.push(`# ${course} - error: ${r.error}`);
+          states.push("error");
+          continue;
         }
-        lines.push("");
-        urls.push(link.url);
+        states.push(r.state);
+        totalBroken += r.links.length;
+        if (multi) outLines.push(`# ${course} (state: ${r.state})`);
+        for (const link of r.links) {
+          outLines.push(`${link.itemType}: ${link.itemTitle}`);
+          outLines.push(`URL: ${link.url}`);
+          outLines.push(`Reason: ${link.reason}`);
+          if (link.linkText) {
+            outLines.push(`Link text: ${link.linkText}`);
+          }
+          outLines.push("");
+          urls.push(link.url);
+        }
       }
 
-      const brokenLinks = lines.join("\n").trim();
+      const state = multi ? [...new Set(states)].join(",") : states[0] ?? "none";
 
       return {
-        outputs: { brokenLinks, state: r.state },
+        outputs: { brokenLinks: outLines.join("\n").trim(), state },
         summary: {
           kind: "list",
-          label: `${r.links.length} broken link(s) (state: ${r.state})`,
-          items: r.links.length ? urls : ["(none)"],
+          label: `${totalBroken} broken link(s) across ${courses.length} course(s)`,
+          items: urls.length ? urls : ["(none)"],
         },
       };
     },

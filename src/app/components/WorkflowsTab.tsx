@@ -1127,7 +1127,7 @@ export default function WorkflowsTab() {
   }, [runtimeFields, lmsCourseOptions, activeInstitution]);
 
   useEffect(() => {
-    const needsOrg = runtimeFields.some((f) => f.type === "org");
+    const needsOrg = runtimeFields.some((f) => f.type === "org" || f.type === "orgList");
     if (!needsOrg || orgs !== null) return;
 
     let cancelled = false;
@@ -2108,6 +2108,60 @@ export default function WorkflowsTab() {
                       loading={orgs === null}
                       noOptionsText="No organizations"
                     />
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {field.help}
+                      </p>
+                    )}
+                    {orgsError && <p className={styles.error}>{orgsError}</p>}
+                  </div>
+                );
+              } else if (field.type === "orgList") {
+                // "*" = all orgs (expanded at run time); otherwise a
+                // newline-joined subset.
+                const isAll = value.trim() === ALL_SCOPE;
+                const orgArray = isAll
+                  ? []
+                  : value.split("\n").map((s) => s.trim()).filter(Boolean);
+                return (
+                  <div key={field.fieldKey} className={styles.field}>
+                    <label>{field.label}</label>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={isAll}
+                          onChange={(e) =>
+                            handleValueChange(field.fieldKey, e.target.checked ? ALL_SCOPE : "")
+                          }
+                        />
+                      }
+                      label="All organizations"
+                    />
+                    {!isAll && (
+                      <Autocomplete
+                        multiple
+                        options={orgs ?? []}
+                        getOptionLabel={(o) => o}
+                        value={orgArray}
+                        onChange={(_, newValue) =>
+                          handleValueChange(field.fieldKey, newValue.join("\n"))
+                        }
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            size="small"
+                            label={field.label}
+                            placeholder={
+                              orgs === null ? "Loading organizations..." : "Select organizations..."
+                            }
+                          />
+                        )}
+                        loading={orgs === null}
+                        noOptionsText="No organizations"
+                        disabled={orgs === null}
+                      />
+                    )}
                     {field.help && (
                       <p className={styles.fieldHint} style={{ margin: 0 }}>
                         {field.help}

@@ -1,5 +1,54 @@
 import { describe, it, expect } from "vitest";
-import { assignWeekNumbers, renumberWeekLabel, planCartridgeModules } from "./week-numbering";
+import {
+  assignWeekNumbers,
+  renumberWeekLabel,
+  planCartridgeModules,
+  currentCourseWeek,
+  courseProgressStatus,
+} from "./week-numbering";
+
+describe("currentCourseWeek", () => {
+  const start = "2026-08-24"; // a Monday, UTC midnight
+  const day = (n: number) => Date.parse(start) + n * 86_400_000;
+
+  it("returns null for a missing or invalid start date", () => {
+    expect(currentCourseWeek(null, Date.parse(start))).toBeNull();
+    expect(currentCourseWeek(undefined, Date.parse(start))).toBeNull();
+    expect(currentCourseWeek("not-a-date", Date.parse(start))).toBeNull();
+  });
+
+  it("returns 0 before the start date", () => {
+    expect(currentCourseWeek(start, day(-1))).toBe(0);
+  });
+
+  it("counts 7-day spans as weeks 1..N", () => {
+    expect(currentCourseWeek(start, day(0))).toBe(1); // first day
+    expect(currentCourseWeek(start, day(6))).toBe(1); // last day of week 1
+    expect(currentCourseWeek(start, day(7))).toBe(2); // first day of week 2
+    expect(currentCourseWeek(start, day(20))).toBe(3);
+  });
+
+  it("returns the RAW elapsed week even past the course length (caller clamps)", () => {
+    expect(currentCourseWeek(start, day(7 * 20))).toBe(21);
+  });
+});
+
+describe("courseProgressStatus", () => {
+  it("is not-started at or below week 0", () => {
+    expect(courseProgressStatus(0, 16)).toBe("not-started");
+  });
+  it("is in-progress within the course, including the final week", () => {
+    expect(courseProgressStatus(1, 16)).toBe("in-progress");
+    expect(courseProgressStatus(16, 16)).toBe("in-progress");
+  });
+  it("is complete only past the last week", () => {
+    expect(courseProgressStatus(17, 16)).toBe("complete");
+  });
+  it("stays in-progress when the total is unknown", () => {
+    expect(courseProgressStatus(99, null)).toBe("in-progress");
+    expect(courseProgressStatus(99, 0)).toBe("in-progress");
+  });
+});
 
 describe("assignWeekNumbers", () => {
   it("shifts zero-based repos to 1-based", () => {

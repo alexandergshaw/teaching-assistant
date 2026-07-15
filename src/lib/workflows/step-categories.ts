@@ -44,6 +44,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "schedule-from-repo",
     "outline-course-from-repo",
     "parse-academic-calendar",
+    "course-progress",
   ],
   "course-setup": [
     "load-course-tile",

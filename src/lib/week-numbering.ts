@@ -65,6 +65,41 @@ export function renumberWeekLabel(label: string, week: number): string {
   return label.slice(0, start) + padded + label.slice(start + token.length);
 }
 
+/**
+ * The 1-based elapsed course week that `now` falls in, given the course start
+ * date. Weeks are 7-day spans from the start: week 1 is days 0-6, week 2 is
+ * days 7-13, and so on. Returns the RAW elapsed week (it can exceed the course
+ * length - the caller decides whether that means "complete"), or 0 before the
+ * start date, or null when the start date is missing/invalid. `now` is passed
+ * in (epoch ms) so the function stays pure and testable.
+ */
+export function currentCourseWeek(
+  startDateIso: string | null | undefined,
+  now: number
+): number | null {
+  if (!startDateIso) return null;
+  const start = Date.parse(startDateIso);
+  if (Number.isNaN(start)) return null;
+  const diffDays = Math.floor((now - start) / 86_400_000);
+  if (diffDays < 0) return 0;
+  return Math.floor(diffDays / 7) + 1;
+}
+
+export type CourseProgressStatus = "not-started" | "in-progress" | "complete";
+
+/** Classify where a course is from its RAW elapsed week (0 = not started) and
+ * total week count: past the last week -> "complete", within it -> "in-progress". */
+export function courseProgressStatus(
+  rawWeek: number,
+  totalWeeks: number | null | undefined
+): CourseProgressStatus {
+  if (rawWeek <= 0) return "not-started";
+  if (typeof totalWeeks === "number" && totalWeeks > 0 && rawWeek > totalWeeks) {
+    return "complete";
+  }
+  return "in-progress";
+}
+
 export interface CartridgeModulePlan {
   week: number;
   title: string;

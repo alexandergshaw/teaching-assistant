@@ -170,7 +170,7 @@ import { scheduleToCsv, csvToSchedule } from "@/lib/workflows/types";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
 import type { RubricCriterionInput, DueDateUpdate } from "@/lib/canvas-modules";
 import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
-import { planCartridgeModules } from "@/lib/week-numbering";
+import { planCartridgeModules, currentCourseWeek, courseProgressStatus } from "@/lib/week-numbering";
 import { parseLmsModuleValue } from "@/lib/workflows/module-value";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
 import { buildGradingReviewRows, countPostableResults, stripGradingRunEntriesForDraft } from "@/lib/workflows/grading-review-rows";
@@ -3619,6 +3619,69 @@ export const STEP_REGISTRY: StepDefinition[] = [
     },
   },
 
+  {
+    type: "course-progress",
+    name: "Find the current week and module",
+    description:
+      "Work out which week a course is currently in from its start date, and the matching module/topic from the course schedule. Outputs feed later steps (e.g. draft an announcement for the current module).",
+    inputs: [
+      { key: "hubCourse", label: "Course tile", type: "hubCourse", required: true },
+    ],
+    outputs: [
+      { key: "week", label: "Current week", type: "number" },
+      { key: "moduleName", label: "Current module", type: "text" },
+      { key: "topic", label: "Current topic", type: "text" },
+      { key: "status", label: "Status", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      if (!hubCourseId) throw new Error("Choose a course tile.");
+
+      onProgress("Reading the course...");
+      const list = await listCourseHubAction();
+      if ("error" in list) throw new Error(list.error);
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (!tile) throw new Error("Course tile not found.");
+
+      const rawWeek = currentCourseWeek(tile.startDate, Date.now());
+      if (rawWeek === null) {
+        throw new Error(`"${tile.name}" has no start date set - add one on the course tile first.`);
+      }
+      const status = courseProgressStatus(rawWeek, tile.weeks);
+      // Clamp for display so a finished course never reports past its last week.
+      const displayWeek =
+        tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
+
+      // Topic for the current week from the course schedule CSV, when present.
+      const schedule = csvToSchedule(tile.csvData ?? "");
+      const entry = schedule.find((e) => e.week === displayWeek);
+      const topic = entry?.topic?.trim() ?? "";
+      const totalLabel = tile.weeks && tile.weeks > 0 ? ` of ${tile.weeks}` : "";
+
+      let moduleName: string;
+      let summaryText: string;
+      if (status === "not-started") {
+        moduleName = "Not started";
+        summaryText = `${tile.name} has not started yet${tile.startDate ? ` (starts ${tile.startDate})` : ""}.`;
+      } else if (status === "complete") {
+        moduleName = "Complete";
+        summaryText = `${tile.name} has finished${tile.weeks ? ` (${tile.weeks} week(s))` : ""}.`;
+      } else {
+        moduleName = `Module ${String(displayWeek).padStart(2, "0")}${topic ? `: ${topic}` : ""}`;
+        summaryText = `${tile.name} is in week ${displayWeek}${totalLabel}${topic ? ` - ${topic}` : ""}.`;
+      }
+
+      return {
+        outputs: {
+          week: status === "not-started" ? 0 : displayWeek,
+          moduleName,
+          topic,
+          status,
+        },
+        summary: { kind: "text", text: summaryText },
+      };
+    },
+  },
   {
     type: "prepare-lecture",
     name: "Prepare lecture",

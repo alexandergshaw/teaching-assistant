@@ -75,6 +75,7 @@ describe("describeWorkflowScope", () => {
     expect(describeWorkflowScope({ hubCourse: "*" })).toBe("all course tiles");
     expect(describeWorkflowScope({ hubCourse: "a\nb\nc" })).toBe("3 course tile(s)");
     expect(describeWorkflowScope({ org: "*" })).toBe("all organizations");
+    expect(describeWorkflowScope({ institution: "*" })).toBe("all institutions");
   });
   it("returns empty for no scope / empty scope", () => {
     expect(describeWorkflowScope(undefined)).toBe("");

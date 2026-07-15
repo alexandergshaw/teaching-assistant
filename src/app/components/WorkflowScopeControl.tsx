@@ -27,6 +27,7 @@ export default function WorkflowScopeControl({
   activeInstitution: string | null;
 }) {
   const set = (patch: Partial<WorkflowScope>) => onChange({ ...scope, ...patch });
+  const institutionAll = (scope.institution ?? "").trim() === ALL_SCOPE;
 
   const listPicker = (
     value: string,
@@ -85,13 +86,27 @@ export default function WorkflowScopeControl({
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
         <div style={cell}>
           <span style={labelStyle}>Institution</span>
-          <Typeahead
-            options={institutions.map((i) => ({ value: i, label: i }))}
-            value={scope.institution ?? ""}
-            onChange={(v) => set({ institution: v })}
-            placeholder="Any (ask when running)"
-            noOptionsText="No institutions"
-          />
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={institutionAll}
+                  onChange={(e) => set({ institution: e.target.checked ? ALL_SCOPE : "" })}
+                />
+              }
+              label="All institutions"
+            />
+            {!institutionAll && (
+              <Typeahead
+                options={institutions.map((i) => ({ value: i, label: i }))}
+                value={scope.institution ?? ""}
+                onChange={(v) => set({ institution: v })}
+                placeholder="Any (ask when running)"
+                noOptionsText="No institutions"
+              />
+            )}
+          </div>
         </div>
         <div style={cell}>
           <span style={labelStyle}>Course tiles</span>

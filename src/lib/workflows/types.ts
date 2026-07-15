@@ -232,7 +232,9 @@ export function describeWorkflowScope(scope: WorkflowScope | undefined): string 
   if (!scope) return "";
   const count = (v?: string) => (v ?? "").split("\n").map((s) => s.trim()).filter(Boolean).length;
   const parts: string[] = [];
-  if (scope.institution?.trim()) parts.push(`institution ${scope.institution.trim()}`);
+  if (scope.institution?.trim()) {
+    parts.push(scope.institution.trim() === "*" ? "all institutions" : `institution ${scope.institution.trim()}`);
+  }
   if (scope.hubCourse?.trim()) {
     parts.push(scope.hubCourse.trim() === "*" ? "all course tiles" : `${count(scope.hubCourse)} course tile(s)`);
   }

@@ -58,6 +58,7 @@ import {
   generateAssignmentRubricAction,
   generateFullCreditChecklistAction,
   listGradingQueueAction,
+  listConfiguredInstitutionsAction,
   postCanvasGradesAction,
   pullSubmissionAction,
   saveGradingDraftAction,
@@ -3622,13 +3623,14 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "prepare-lecture",
     name: "Prepare lecture",
     description:
-      "Build a lecture deck from a module's materials, save it to the course tile, and pause for announcement review - edit, regenerate with AI, or approve before it is scheduled.",
+      "Build a lecture deck from a module's materials and save it to the course tile. Pauses for announcement review unless Autonomous is on; in Autonomous mode with no course tile it prepares a lecture for every tile.",
     inputs: [
       {
         key: "hubCourse",
         label: "Course tile",
         type: "hubCourse",
-        required: true,
+        required: false,
+        help: "Leave empty in Autonomous mode to prepare a lecture for every course tile.",
       },
       {
         key: "moduleId",
@@ -3637,104 +3639,192 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Pick from the live LMS connection or the course's LMS export; without either the step falls back to the tile's topics.",
       },
+      {
+        key: "autonomous",
+        label: "Autonomous (no review, all tiles)",
+        type: "boolean",
+        required: false,
+        help: "Run hands-off: build and save the deck(s) without pausing to review the announcement. With no course tile selected, prepares a lecture for every tile.",
+      },
     ],
     outputs: [
       { key: "announcement", label: "Announcement", type: "longtext" },
       { key: "moduleName", label: "Module", type: "text" },
     ],
     run: async (values, helpers, onProgress) => {
+      const autonomous = String(values.autonomous ?? "") === "1";
       const hubCourseId = String(values.hubCourse ?? "").trim();
+      const moduleIdRaw = String(values.moduleId ?? "").trim();
+
       const list = await listCourseHubAction();
       if ("error" in list) {
         throw new Error(list.error);
       }
+
+      // Build the deck + recap for one tile: gather materials, generate the
+      // lecture, save the pptx to the tile. Downloads only in the interactive
+      // single-tile path (guarded for headless); never pauses.
+      const buildForTile = async (
+        tile: Course,
+        download: boolean
+      ): Promise<{
+        announcement: string;
+        moduleName: string;
+        slideCount: number;
+        fileName: string;
+        materialsText: string;
+        materialsSource: string;
+        notes: string[];
+      }> => {
+        const { moduleName, materialsText, notes, materialsSource } =
+          await gatherModuleMaterials(tile, moduleIdRaw, helpers, onProgress);
+
+        onProgress(`Generating lecture for ${tile.name}...`);
+        const r = await generateLectureFromMaterialsAction(
+          tile.name,
+          moduleName,
+          materialsText,
+          helpers.provider
+        );
+        if ("error" in r) {
+          throw new Error(r.error);
+        }
+
+        const pptxData = await buildSlidesPptx({
+          presentationTitle: r.presentationTitle,
+          slides: r.slides,
+          subtitle: moduleName,
+          author: helpers.author,
+        });
+        const blob = new Blob([pptxData], {
+          type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        });
+
+        const sanitize = (s: string) =>
+          s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+        const fileName = `${sanitize(tile.name)}_${sanitize(moduleName)}_Lecture.pptx`;
+
+        // Browser-only convenience download; skipped server-side (no document)
+        // and in the autonomous multi-tile path. The tile save below is the
+        // durable artifact either way.
+        if (download && typeof document !== "undefined") {
+          onProgress(`Downloading ${fileName}...`);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = fileName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+
+        if (helpers.saveCourseMaterialFile) {
+          try {
+            await helpers.saveCourseMaterialFile(tile.id, blob, fileName);
+          } catch (err) {
+            notes.push(
+              `saving to the course tile failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          }
+        }
+
+        return {
+          announcement: r.announcement,
+          moduleName,
+          slideCount: r.slides.length,
+          fileName,
+          materialsText,
+          materialsSource,
+          notes,
+        };
+      };
+
+      // Autonomous: build for the chosen tile, or every tile when none is
+      // picked, with no review pause.
+      if (autonomous) {
+        const tiles = hubCourseId
+          ? list.courses.filter((c) => c.id === hubCourseId)
+          : list.courses;
+        if (hubCourseId && tiles.length === 0) {
+          throw new Error("Choose a course tile.");
+        }
+        if (tiles.length === 0) {
+          return {
+            outputs: { announcement: "", moduleName: "" },
+            summary: { kind: "text", text: "No course tiles to prepare lectures for." },
+          };
+        }
+
+        const items: string[] = [];
+        const announcements: string[] = [];
+        let built = 0;
+        for (const tile of tiles) {
+          try {
+            const b = await buildForTile(tile, false);
+            built++;
+            announcements.push(`# ${tile.name} - ${b.moduleName}\n${b.announcement}`);
+            items.push(`${tile.name}: ${b.slideCount} slide(s) -> ${b.fileName}`);
+            for (const n of b.notes) items.push(`  ${tile.name}: ${n}`);
+          } catch (err) {
+            items.push(
+              `${tile.name}: failed - ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
+        }
+
+        return {
+          outputs: {
+            announcement: announcements.join("\n\n"),
+            moduleName: `${built} lecture(s)`,
+          },
+          summary: {
+            kind: "list",
+            label: `Prepared ${built} lecture(s)`,
+            items: items.length ? items : ["(nothing prepared)"],
+          },
+        };
+      }
+
+      // Interactive: one tile, then pause to review the recap announcement.
       const tile = list.courses.find((c) => c.id === hubCourseId);
       if (!tile) {
         throw new Error("Choose a course tile.");
       }
 
-      const moduleIdRaw = String(values.moduleId ?? "").trim();
-      const { moduleName, materialsText, notes, materialsSource } =
-        await gatherModuleMaterials(tile, moduleIdRaw, helpers, onProgress);
-
-      onProgress("Generating lecture...");
-      const r = await generateLectureFromMaterialsAction(
-        tile.name,
-        moduleName,
-        materialsText,
-        helpers.provider
-      );
-      if ("error" in r) {
-        throw new Error(r.error);
-      }
-
-      const pptxData = await buildSlidesPptx({
-        presentationTitle: r.presentationTitle,
-        slides: r.slides,
-        subtitle: moduleName,
-        author: helpers.author,
-      });
-      const blob = new Blob([pptxData], {
-        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      });
-
-      const sanitize = (s: string) =>
-        s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
-      const fileName = `${sanitize(tile.name)}_${sanitize(moduleName)}_Lecture.pptx`;
-
-      onProgress(`Downloading ${fileName}...`);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      if (helpers.saveCourseMaterialFile) {
-        try {
-          await helpers.saveCourseMaterialFile(tile.id, blob, fileName);
-        } catch (err) {
-          notes.push(
-            `saving to the course tile failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`
-          );
-        }
-      }
+      const b = await buildForTile(tile, true);
 
       const result: StepRunResult = {
         outputs: {
-          announcement: r.announcement,
-          moduleName,
+          announcement: b.announcement,
+          moduleName: b.moduleName,
         },
         summary: {
           kind: "list",
-          label: `Lecture ready for ${moduleName}`,
+          label: `Lecture ready for ${b.moduleName}`,
           items: [
-            `${r.slides.length} slide(s) -> ${fileName}`,
-            materialsSource,
-            ...notes,
+            `${b.slideCount} slide(s) -> ${b.fileName}`,
+            b.materialsSource,
+            ...b.notes,
           ],
         },
       };
 
-      const materialsForPrompt = materialsText;
-      let latestDraft = r.announcement;
-
+      let latestDraft = b.announcement;
       result.requireInput = {
         message: "Review the recap announcement below. Edit it directly, regenerate it with AI, or approve it to schedule; skip to finish without scheduling.",
         key: "announcement",
         kind: "text",
         optional: true,
-        initialValue: r.announcement,
+        initialValue: b.announcement,
         submitLabel: "Approve announcement",
         regenerate: async () => {
           const regen = await regenerateAnnouncementAction(
             tile.name,
-            moduleName,
-            materialsForPrompt,
+            b.moduleName,
+            b.materialsText,
             latestDraft,
             helpers.provider
           );
@@ -4995,9 +5085,17 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Used when no course tiles are selected: every course at this institution with assignments awaiting grading is included.",
       },
+      {
+        key: "autonomous",
+        label: "Autonomous (all institutions)",
+        type: "boolean",
+        required: false,
+        help: "Run hands-off: with no course tiles AND no institution selected, grade every course at every institution the server is configured for.",
+      },
     ],
     outputs: [],
     run: async (values, helpers, onProgress) => {
+      const autonomous = String(values.autonomous ?? "") === "1";
       const ids = String(values.courses ?? "")
         .split("\n")
         .map((s) => s.trim())
@@ -5028,12 +5126,29 @@ export const STEP_REGISTRY: StepDefinition[] = [
       // Institution-wide mode: no tiles selected - mirrors grading-preflight.
       if (ids.length === 0) {
         const acronym = String(values.institution ?? "").trim().toUpperCase();
-        if (!acronym) {
-          throw new Error("Select one or more course tiles, or pick an institution.");
+        // Autonomous + nothing picked: grade every institution the server is
+        // configured for (the only institution list available unattended).
+        let acronyms: string[];
+        if (acronym) {
+          acronyms = [acronym];
+        } else if (autonomous) {
+          onProgress("Resolving all institutions...");
+          const all = await listConfiguredInstitutionsAction();
+          if ("error" in all) {
+            throw new Error(all.error);
+          }
+          if (all.acronyms.length === 0) {
+            throw new Error("No institutions are configured on the server.");
+          }
+          acronyms = all.acronyms;
+        } else {
+          throw new Error(
+            "Select one or more course tiles, pick an institution, or enable Autonomous to grade every institution."
+          );
         }
 
         onProgress("Loading grading queue...");
-        const queueResult = await listGradingQueueAction([acronym]);
+        const queueResult = await listGradingQueueAction(acronyms);
         if ("error" in queueResult) {
           throw new Error(queueResult.error);
         }
@@ -5059,9 +5174,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
         if (plan.length === 0 && queueErrors.length > 0) {
           throw new Error(
-            `The grading queue could not be loaded for ${acronym}: ${queueErrors
-              .map((e) => e.error)
-              .join("; ")}`
+            `The grading queue could not be loaded for ${queueErrors
+              .map((e) => e.acronym)
+              .join(", ")}: ${queueErrors.map((e) => e.error).join("; ")}`
           );
         }
       } else {

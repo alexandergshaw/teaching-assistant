@@ -50,6 +50,19 @@ function institutionToken(inst: CanvasInstitution): string | undefined {
   return process.env[`${inst.code}_CANVAS_API_TOKEN`]?.trim() || undefined;
 }
 
+/**
+ * Codes of the hardcoded CANVAS_INSTITUTIONS (which derive their base URL from a
+ * built-in host, so they work with only a token set) that currently have an API
+ * token configured. Unioned into "all institutions" discovery so a token-only
+ * preconfigured school is not silently missed by env-var scanning that expects a
+ * `<CODE>_CANVAS_URL`.
+ */
+export function listPreconfiguredInstitutionCodes(): string[] {
+  return CANVAS_INSTITUTIONS.filter((inst) => institutionToken(inst)).map((inst) =>
+    inst.code.toUpperCase()
+  );
+}
+
 // Minimal HTML-to-text for Canvas message/body bodies (stored as HTML).
 export function htmlToText(html: string): string {
   return html

@@ -2549,26 +2549,35 @@ export default function WorkflowsTab() {
               >
                 {running ? "Running..." : "Run"}
               </Button>
-              <Button
-                variant="outlined"
-                size="small"
-                disabled={!user || !!expanded.error}
-                onClick={() =>
-                  setScheduleForm((prev) =>
-                    prev
-                      ? null
-                      : { runAt: "", repeat: "none", intervalValue: "30", intervalUnit: "minutes", courseId: "", institution: activeInstitution || "", unattended: false }
-                  )
-                }
-              >
-                {scheduleForm ? "Cancel schedule" : "Schedule..."}
-              </Button>
               {allStepsDisabled && (
                 <span className={styles.fieldHint} style={{ color: "var(--danger)" }}>
                   Enable at least one step.
                 </span>
               )}
             </div>
+          </>
+        )}
+
+        {selectedDef && (
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--field-border)" }}>
+            <h3 style={{ fontSize: "0.95rem", margin: "0 0 4px 0" }}>Schedule</h3>
+            <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>
+              Run this workflow at a set time, optionally repeating. Available while you build the workflow and when you run it.
+            </p>
+            <Button
+              variant="outlined"
+              size="small"
+              disabled={!user || !!expanded.error}
+              onClick={() =>
+                setScheduleForm((prev) =>
+                  prev
+                    ? null
+                    : { runAt: "", repeat: "none", intervalValue: "30", intervalUnit: "minutes", courseId: "", institution: activeInstitution || "", unattended: false }
+                )
+              }
+            >
+              {scheduleForm ? "Cancel schedule" : "Schedule..."}
+            </Button>
 
             {scheduleForm && (
               <div style={{ marginTop: 16, border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2747,12 +2756,8 @@ export default function WorkflowsTab() {
                 })}
               </div>
             )}
-          </>
-        )}
 
-        {selectedDef && (
-          <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--field-border)" }}>
-            <h3 style={{ fontSize: "0.95rem", margin: "0 0 4px 0" }}>Triggers</h3>
+            <h3 style={{ fontSize: "0.95rem", margin: "24px 0 4px 0", paddingTop: 16, borderTop: "1px solid var(--field-border)" }}>Triggers</h3>
             <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>
               Run this workflow automatically when an event happens - a submission, a message, a repo push, another workflow finishing, or an inbound webhook. Available while you build the workflow and when you run it.
             </p>
@@ -2829,6 +2834,51 @@ export default function WorkflowsTab() {
                             <MenuItem key={i} value={i}>{i}</MenuItem>
                           ))}
                         </TextField>
+                      );
+                    }
+                    if (field.type === "institutions") {
+                      // "*" means every configured institution (resolved on the
+                      // server at evaluation time); otherwise a comma-separated
+                      // explicit list; empty falls back to the active one.
+                      const all = val.trim() === "*";
+                      const selected = all
+                        ? []
+                        : val.split(",").map((s) => s.trim()).filter(Boolean);
+                      return (
+                        <div key={field.key} style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 300 }}>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                size="small"
+                                checked={all}
+                                onChange={(e) => setVal(e.target.checked ? "*" : "")}
+                              />
+                            }
+                            label="All institutions"
+                          />
+                          {!all && (
+                            <Autocomplete
+                              multiple
+                              size="small"
+                              options={institutions}
+                              getOptionLabel={(o) => o}
+                              value={selected}
+                              onChange={(_, v) => setVal(v.join(","))}
+                              renderInput={(params) => (
+                                <TextField
+                                  {...params}
+                                  label={field.label}
+                                  placeholder={
+                                    selected.length ? "" : `active: ${activeInstitution || "none"}`
+                                  }
+                                />
+                              )}
+                            />
+                          )}
+                          {field.help && (
+                            <p className={styles.fieldHint} style={{ margin: 0 }}>{field.help}</p>
+                          )}
+                        </div>
                       );
                     }
                     if (field.type === "course") {

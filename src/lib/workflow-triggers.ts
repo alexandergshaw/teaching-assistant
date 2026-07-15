@@ -26,6 +26,7 @@ import {
   checkBrokenLinksAction,
   listCourseRosterAction,
   listCourseHubAction,
+  listConfiguredInstitutionsAction,
 } from "@/app/actions";
 
 // ---------------------------------------------------------------------------
@@ -58,7 +59,16 @@ export type TriggerEventCategory =
 export interface TriggerConfigField {
   key: string;
   label: string;
-  type: "text" | "number" | "institution" | "org" | "lmsCourse" | "course" | "workflow" | "boolean";
+  type:
+    | "text"
+    | "number"
+    | "institution"
+    | "institutions"
+    | "org"
+    | "lmsCourse"
+    | "course"
+    | "workflow"
+    | "boolean";
   required: boolean;
   help?: string;
 }
@@ -378,6 +388,50 @@ function resolveInstitution(config: Record<string, string>, ctx: TriggerEvalCont
   return (config.institution || ctx.activeInstitution || "").trim();
 }
 
+/** The special config value meaning "every institution the server is
+ * configured for" - expanded server-side at evaluation time so it stays
+ * current as institutions are added, without snapshotting a list. */
+export const ALL_INSTITUTIONS = "*";
+
+/** Parse an institutions config value (from the multi-select) into either the
+ * "all" sentinel or an explicit, de-duplicated, uppercased acronym list. Pure
+ * and testable; the acronyms are comma- or newline-separated. Reads the plural
+ * `institutions` key, falling back to the legacy singular `institution`. */
+export function parseInstitutionsConfig(config: Record<string, string>): { all: boolean; list: string[] } {
+  const raw = (config.institutions ?? config.institution ?? "").trim();
+  if (raw === ALL_INSTITUTIONS) return { all: true, list: [] };
+  const list = [
+    ...new Set(
+      raw
+        .split(/[,\n]/)
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean)
+        .filter((s) => s !== ALL_INSTITUTIONS)
+    ),
+  ];
+  return { all: false, list };
+}
+
+/** Resolve an institutions config to the concrete acronym list to poll: the
+ * full configured set for "all" (via the server), the explicit list otherwise,
+ * or the active institution as a last resort. Returns a discriminated result so
+ * a genuine "all" lookup failure is surfaced by the caller rather than masked as
+ * an empty (looks-unconfigured) list. */
+async function resolveInstitutionList(
+  config: Record<string, string>,
+  ctx: TriggerEvalContext
+): Promise<{ list: string[] } | { error: string }> {
+  const parsed = parseInstitutionsConfig(config);
+  if (parsed.all) {
+    const r = await listConfiguredInstitutionsAction();
+    if ("error" in r) return { error: r.error };
+    return { list: r.acronyms };
+  }
+  if (parsed.list.length > 0) return { list: parsed.list };
+  const active = (ctx.activeInstitution || "").trim().toUpperCase();
+  return { list: active ? [active] : [] };
+}
+
 function parseThreshold(raw: string | undefined, fallback: number): number {
   const n = Number((raw ?? "").trim());
   return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -400,18 +454,20 @@ export const EVENT_SOURCES: EventSourceDef[] = [
     description: "Fires when the number of submissions waiting to be graded rises - i.e. a student turned something in.",
     category: "lms",
     configFields: [
-      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
+      { key: "institutions", label: "Institutions", type: "institutions", required: false, help: "Defaults to the active institution; pick several or choose all." },
     ],
     minPollMinutes: 15,
     serverEvaluable: true,
     evaluate: async (config, cursor, ctx) => {
-      const inst = resolveInstitution(config, ctx);
-      if (!inst) return { fired: false, cursor: cursor ?? {}, detail: "No institution configured." };
-      const r = await getInstitutionCountsAction([inst]);
+      const resolved = await resolveInstitutionList(config, ctx);
+      if ("error" in resolved) return { fired: false, cursor: cursor ?? {}, detail: resolved.error };
+      const insts = resolved.list;
+      if (insts.length === 0) return { fired: false, cursor: cursor ?? {}, detail: "No institution configured." };
+      const r = await getInstitutionCountsAction(insts);
       if ("error" in r) return { fired: false, cursor: cursor ?? {}, detail: r.error };
       const needsGrading = r.counts.reduce((n, c) => n + c.needsGrading, 0);
       const d = decideCountRise(cursor, needsGrading);
-      return { ...d, fireValues: { needsGrading: String(needsGrading), institution: inst } };
+      return { ...d, fireValues: { needsGrading: String(needsGrading), institutions: insts.join(", ") } };
     },
   },
   {
@@ -420,20 +476,22 @@ export const EVENT_SOURCES: EventSourceDef[] = [
     description: "Fires when the count of submissions needing grading reaches at least N (on the rising edge).",
     category: "lms",
     configFields: [
-      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
-      { key: "threshold", label: "Threshold", type: "number", required: true, help: "Fire when this many or more are waiting." },
+      { key: "institutions", label: "Institutions", type: "institutions", required: false, help: "Defaults to the active institution; pick several or choose all." },
+      { key: "threshold", label: "Threshold", type: "number", required: true, help: "Fire when this many or more are waiting (summed across the institutions)." },
     ],
     minPollMinutes: 15,
     serverEvaluable: true,
     evaluate: async (config, cursor, ctx) => {
-      const inst = resolveInstitution(config, ctx);
-      if (!inst) return { fired: false, cursor: cursor ?? {}, detail: "No institution configured." };
+      const resolved = await resolveInstitutionList(config, ctx);
+      if ("error" in resolved) return { fired: false, cursor: cursor ?? {}, detail: resolved.error };
+      const insts = resolved.list;
+      if (insts.length === 0) return { fired: false, cursor: cursor ?? {}, detail: "No institution configured." };
       const threshold = parseThreshold(config.threshold, 1);
-      const r = await getInstitutionCountsAction([inst]);
+      const r = await getInstitutionCountsAction(insts);
       if ("error" in r) return { fired: false, cursor: cursor ?? {}, detail: r.error };
       const needsGrading = r.counts.reduce((n, c) => n + c.needsGrading, 0);
       const d = decideThresholdEdge(cursor, needsGrading, threshold);
-      return { ...d, fireValues: { needsGrading: String(needsGrading), institution: inst } };
+      return { ...d, fireValues: { needsGrading: String(needsGrading), institutions: insts.join(", ") } };
     },
   },
   {
@@ -442,18 +500,20 @@ export const EVENT_SOURCES: EventSourceDef[] = [
     description: "Fires when the unread inbox count rises - i.e. a new message arrived.",
     category: "lms",
     configFields: [
-      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
+      { key: "institutions", label: "Institutions", type: "institutions", required: false, help: "Defaults to the active institution; pick several or choose all." },
     ],
     minPollMinutes: 15,
     serverEvaluable: true,
     evaluate: async (config, cursor, ctx) => {
-      const inst = resolveInstitution(config, ctx);
-      if (!inst) return { fired: false, cursor: cursor ?? {}, detail: "No institution configured." };
-      const r = await getUnreadCountsAction([inst]);
+      const resolved = await resolveInstitutionList(config, ctx);
+      if ("error" in resolved) return { fired: false, cursor: cursor ?? {}, detail: resolved.error };
+      const insts = resolved.list;
+      if (insts.length === 0) return { fired: false, cursor: cursor ?? {}, detail: "No institution configured." };
+      const r = await getUnreadCountsAction(insts);
       if ("error" in r) return { fired: false, cursor: cursor ?? {}, detail: r.error };
       const unread = r.counts.reduce((n, c) => n + c.unread, 0);
       const d = decideCountRise(cursor, unread);
-      return { ...d, fireValues: { unread: String(unread), institution: inst } };
+      return { ...d, fireValues: { unread: String(unread), institutions: insts.join(", ") } };
     },
   },
   {
@@ -462,20 +522,22 @@ export const EVENT_SOURCES: EventSourceDef[] = [
     description: "Fires when unread inbox messages reach at least N (on the rising edge).",
     category: "lms",
     configFields: [
-      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
-      { key: "threshold", label: "Threshold", type: "number", required: true, help: "Fire when this many or more are unread." },
+      { key: "institutions", label: "Institutions", type: "institutions", required: false, help: "Defaults to the active institution; pick several or choose all." },
+      { key: "threshold", label: "Threshold", type: "number", required: true, help: "Fire when this many or more are unread (summed across the institutions)." },
     ],
     minPollMinutes: 15,
     serverEvaluable: true,
     evaluate: async (config, cursor, ctx) => {
-      const inst = resolveInstitution(config, ctx);
-      if (!inst) return { fired: false, cursor: cursor ?? {}, detail: "No institution configured." };
+      const resolved = await resolveInstitutionList(config, ctx);
+      if ("error" in resolved) return { fired: false, cursor: cursor ?? {}, detail: resolved.error };
+      const insts = resolved.list;
+      if (insts.length === 0) return { fired: false, cursor: cursor ?? {}, detail: "No institution configured." };
       const threshold = parseThreshold(config.threshold, 1);
-      const r = await getUnreadCountsAction([inst]);
+      const r = await getUnreadCountsAction(insts);
       if ("error" in r) return { fired: false, cursor: cursor ?? {}, detail: r.error };
       const unread = r.counts.reduce((n, c) => n + c.unread, 0);
       const d = decideThresholdEdge(cursor, unread, threshold);
-      return { ...d, fireValues: { unread: String(unread), institution: inst } };
+      return { ...d, fireValues: { unread: String(unread), institutions: insts.join(", ") } };
     },
   },
   {
@@ -749,7 +811,9 @@ export function describeTrigger(trigger: WorkflowTrigger): string {
   const base = source?.label ?? trigger.eventType;
   const cfg = trigger.eventConfig;
   const bits: string[] = [];
-  if (cfg.institution) bits.push(cfg.institution);
+  const insts = parseInstitutionsConfig(cfg);
+  if (insts.all) bits.push("all institutions");
+  else if (insts.list.length) bits.push(insts.list.join("/"));
   if (cfg.org) bits.push(cfg.org);
   if (cfg.threshold) bits.push(`>= ${cfg.threshold}`);
   return bits.length ? `${base} (${bits.join(", ")})` : base;

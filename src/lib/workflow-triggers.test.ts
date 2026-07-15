@@ -17,6 +17,8 @@ import {
   lifecycleCooldownElapsed,
   isLifecycleEventType,
   LIFECYCLE_EVENT_TYPES,
+  parseInstitutionsConfig,
+  ALL_INSTITUTIONS,
   type WorkflowTrigger,
 } from "@/lib/workflow-triggers";
 import type { Database, Json } from "./supabase/types";
@@ -485,11 +487,20 @@ describe("describeTrigger", () => {
   it("appends institution, org, and threshold config bits when present", () => {
     const t = makeTrigger({
       eventType: "needs-grading-threshold",
-      eventConfig: { institution: "example.edu", threshold: "5" },
+      eventConfig: { institutions: "MCC", threshold: "5" },
     });
     const desc = describeTrigger(t);
-    expect(desc).toContain("example.edu");
+    // Institution acronyms are normalized to uppercase for the summary.
+    expect(desc).toContain("MCC");
     expect(desc).toContain(">= 5");
+  });
+
+  it("shows 'all institutions' for the wildcard config", () => {
+    const t = makeTrigger({
+      eventType: "message-received",
+      eventConfig: { institutions: "*" },
+    });
+    expect(describeTrigger(t)).toContain("all institutions");
   });
 
   it("falls back to the raw event type when the source is unknown", () => {
@@ -587,6 +598,35 @@ describe("lifecycle triggers", () => {
       expect(lifecycleCooldownElapsed(t, Date.parse("2026-07-14T00:04:00Z"))).toBe(false);
       expect(lifecycleCooldownElapsed(t, Date.parse("2026-07-14T00:05:00Z"))).toBe(true);
     }
+  });
+});
+
+describe("parseInstitutionsConfig", () => {
+  it("treats the '*' sentinel as all institutions", () => {
+    expect(parseInstitutionsConfig({ institutions: ALL_INSTITUTIONS })).toEqual({ all: true, list: [] });
+    expect(parseInstitutionsConfig({ institutions: "*" })).toEqual({ all: true, list: [] });
+  });
+
+  it("parses a comma- or newline-separated list, uppercased and de-duplicated", () => {
+    expect(parseInstitutionsConfig({ institutions: "mcc, mpcc" })).toEqual({ all: false, list: ["MCC", "MPCC"] });
+    expect(parseInstitutionsConfig({ institutions: "MCC\nUT\nMCC" })).toEqual({ all: false, list: ["MCC", "UT"] });
+  });
+
+  it("returns an empty list when blank (caller falls back to the active institution)", () => {
+    expect(parseInstitutionsConfig({})).toEqual({ all: false, list: [] });
+    expect(parseInstitutionsConfig({ institutions: "   " })).toEqual({ all: false, list: [] });
+  });
+
+  it("falls back to the legacy singular 'institution' key", () => {
+    expect(parseInstitutionsConfig({ institution: "ut" })).toEqual({ all: false, list: ["UT"] });
+  });
+
+  it("prefers the plural 'institutions' key over the singular one", () => {
+    expect(parseInstitutionsConfig({ institutions: "MCC", institution: "UT" })).toEqual({ all: false, list: ["MCC"] });
+  });
+
+  it("drops a stray '*' mixed into an explicit list", () => {
+    expect(parseInstitutionsConfig({ institutions: "MCC,*,UT" })).toEqual({ all: false, list: ["MCC", "UT"] });
   });
 });
 

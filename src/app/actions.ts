@@ -86,6 +86,7 @@ import {
   type CanvasSubmissionDetail,
   type CanvasStudentWork,
 } from "@/lib/canvas";
+import { listPreconfiguredInstitutionCodes } from "@/lib/canvas-core";
 import {
   listModules,
   createModule,
@@ -5196,6 +5197,39 @@ export async function checkInstitutionsAction(
     return { statuses };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not check institutions." };
+  }
+}
+
+/**
+ * Every institution the server actually has Canvas credentials for, derived
+ * from the `<ACRONYM>_CANVAS_URL` / `<ACRONYM>_CANVAS_API_TOKEN` env vars. This
+ * is the ONLY institution list available server-side (the acronym registry
+ * otherwise lives in client localStorage), so it is what "all institutions"
+ * options resolve to for unattended runs and event triggers.
+ */
+export async function listConfiguredInstitutionsAction(): Promise<
+  { acronyms: string[] } | { error: string }
+> {
+  try {
+    await requireOwner();
+    const acronyms = new Set<string>();
+    for (const key of Object.keys(process.env)) {
+      const m = /^([A-Z][A-Z0-9]*)_CANVAS_URL$/.exec(key);
+      if (!m) continue;
+      const code = m[1];
+      if (process.env[key] && process.env[`${code}_CANVAS_API_TOKEN`]) {
+        acronyms.add(code);
+      }
+    }
+    // Also include hardcoded institutions that derive their host and so work
+    // with only a token set (no `<CODE>_CANVAS_URL`); env scanning alone would
+    // miss them, making "all institutions" narrower than what actually works.
+    for (const code of listPreconfiguredInstitutionCodes()) {
+      acronyms.add(code);
+    }
+    return { acronyms: [...acronyms].sort() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list institutions." };
   }
 }
 

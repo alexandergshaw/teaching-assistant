@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { isHeadlessSafeWorkflow, HEADLESS_SAFE_STEP_TYPES } from "./headless";
 import { allWorkflows } from "./presets";
-import type { WorkflowDef } from "./types";
+import type { WorkflowDef, InputBinding } from "./types";
 
 const workflows = allWorkflows([]);
 const lookup = (id: string) => workflows.find((w) => w.id === id);
@@ -25,6 +25,29 @@ describe("isHeadlessSafeWorkflow", () => {
     expect(isHeadlessSafeWorkflow(byId("prepare-lecture"), lookup)).toBe(false);
     expect(isHeadlessSafeWorkflow(byId("import-courses"), lookup)).toBe(false);
     expect(isHeadlessSafeWorkflow(byId("update-course-tech"), lookup)).toBe(false);
+  });
+
+  it("treats prepare-lecture as headless-safe only when autonomous is pinned to literal '1'", () => {
+    const make = (autonomous?: InputBinding): WorkflowDef => ({
+      id: "pl-only",
+      name: "Prepare lecture only",
+      description: "",
+      steps: [
+        {
+          type: "prepare-lecture",
+          bindings: {
+            hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+            ...(autonomous ? { autonomous } : {}),
+          },
+        },
+      ],
+    });
+    // Pinned on -> no review pause -> headless-safe.
+    expect(isHeadlessSafeWorkflow(make({ source: "literal", value: "1" }), lookup)).toBe(true);
+    // Pinned off, a runtime field the predicate cannot see, or absent -> not safe.
+    expect(isHeadlessSafeWorkflow(make({ source: "literal", value: "" }), lookup)).toBe(false);
+    expect(isHeadlessSafeWorkflow(make({ source: "runtime", fieldKey: "autonomous" }), lookup)).toBe(false);
+    expect(isHeadlessSafeWorkflow(make(undefined), lookup)).toBe(false);
   });
 
   it("rejects Course Refresh and Course Kickoff (load-course-tile conditionally pauses)", () => {

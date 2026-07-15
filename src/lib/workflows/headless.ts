@@ -9,7 +9,7 @@
 // and on the server (the cron route, re-validating before every unattended
 // run) from the same source of truth.
 
-import { expandWorkflowDef, type WorkflowDef } from "./types";
+import { expandWorkflowDef, type WorkflowDef, type WorkflowStepConfig } from "./types";
 
 /**
  * Step types whose run() closure (see registry.ts STEP_REGISTRY) never sets
@@ -146,6 +146,35 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
 //     see grade-to-draft above for the unattended scoring half).
 
 /**
+ * Step types that are headless-safe ONLY for certain configurations, keyed by a
+ * predicate over the step's bindings. Kept separate from the flat
+ * HEADLESS_SAFE_STEP_TYPES set (and out of the headless-count canary) because
+ * their safety depends on how the step is wired, not just its type.
+ */
+export const CONDITIONALLY_HEADLESS_SAFE: Record<
+  string,
+  (step: WorkflowStepConfig) => boolean
+> = {
+  // prepare-lecture pauses to review the recap announcement UNLESS its
+  // `autonomous` input is fixed on. It is headless-safe only when the workflow
+  // PINS autonomous to a literal "1", so a schedule/trigger cannot smuggle in an
+  // interactive run that would then abort unattended. A runtime-bound autonomous
+  // field is not enough - the predicate cannot see a value that only exists at
+  // run time.
+  "prepare-lecture": (step) => {
+    const b = step.bindings.autonomous;
+    return b?.source === "literal" && b.value === "1";
+  },
+};
+
+/** Whether a single expanded step is headless-safe, by type or by a
+ * configuration-dependent predicate. */
+export function isHeadlessSafeStep(step: WorkflowStepConfig): boolean {
+  if (HEADLESS_SAFE_STEP_TYPES.has(step.type)) return true;
+  return CONDITIONALLY_HEADLESS_SAFE[step.type]?.(step) ?? false;
+}
+
+/**
  * True iff every step in `def`'s expansion (include-workflow steps
  * flattened) is headless-safe. A workflow with zero steps, an include cycle,
  * or a reference to an unresolvable included workflow (expandWorkflowDef
@@ -160,7 +189,7 @@ export function isHeadlessSafeWorkflow(
   try {
     const { steps } = expandWorkflowDef(def, lookup);
     if (steps.length === 0) return false;
-    return steps.every((step) => HEADLESS_SAFE_STEP_TYPES.has(step.type));
+    return steps.every(isHeadlessSafeStep);
   } catch {
     return false;
   }

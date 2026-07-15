@@ -189,6 +189,14 @@ export function scopeFamilyForType(type: string): keyof WorkflowScope | null {
   }
 }
 
+/** The course-derived module PICKER type. A `lmsModule` input is filled
+ * indirectly by scope: when its step's course is workflow-scoped, the step
+ * derives the module from that course. (The opaque `modules` payload type is
+ * NOT included - it is produced by a prior step, not derived from the course.) */
+export function isModuleType(type: string): boolean {
+  return type === "lmsModule";
+}
+
 /** The single-item (non-list) entity value types. */
 function isSingleEntityType(type: string): boolean {
   return type === "institution" || type === "hubCourse" || type === "lmsCourse" || type === "org";
@@ -294,12 +302,25 @@ export function collectRuntimeFields(
     const specs = stepInputs(step.type);
     if (!specs) continue;
 
+    // Does this step have a course input the workflow scope targets (one /
+    // several / all)? If so, a module input in the same step is the "current
+    // module" of that scoped course - the step derives it, so it is not asked.
+    const stepCourseScoped = specs.some((s) => {
+      const fam = scopeFamilyForType(s.type);
+      if (fam !== "hubCourse" && fam !== "lmsCourse") return false;
+      const listType = fam === "hubCourse" ? "hubCourseList" : "lmsCourseList";
+      return scopeCoversType(def.scope, listType);
+    });
+
     for (const spec of specs) {
       const binding = step.bindings[spec.key];
       if (binding && binding.source === "runtime") {
         // A field the workflow scope already targets is not asked at run time -
         // the scope fills it (see applyWorkflowScope in the runners).
         if (scopeCoversType(def.scope, spec.type)) continue;
+        // A module input whose step's course is scoped is derived from that
+        // course, so it is not asked either.
+        if (isModuleType(spec.type) && stepCourseScoped) continue;
         const fieldKey = binding.fieldKey;
         if (!seen.has(fieldKey)) {
           seen.add(fieldKey);

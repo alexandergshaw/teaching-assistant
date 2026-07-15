@@ -16,6 +16,7 @@ import {
   scopeFamilyForType,
   applyWorkflowScope,
   describeScopeForType,
+  isModuleType,
 } from "@/lib/workflows/types";
 import { ALL_SCOPE } from "@/lib/workflows/scope";
 
@@ -694,6 +695,13 @@ function StepCard({
     );
   }
 
+  const courseScoped = stepDef.inputs.some((s) => {
+    const fam = scopeFamilyForType(s.type);
+    if (fam !== "hubCourse" && fam !== "lmsCourse") return false;
+    const listType = fam === "hubCourse" ? "hubCourseList" : "lmsCourseList";
+    return scopeCoversType(scope, listType);
+  });
+
   return (
     <div
       style={{
@@ -715,6 +723,11 @@ function StepCard({
           <strong>
             {stepIndex + 1}. {stepDef.name}
           </strong>
+          {stepDef.description && (
+            <div style={{ fontSize: "0.8rem", opacity: 0.7, marginTop: 2, maxWidth: 640 }}>
+              {stepDef.description}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           <Button
@@ -753,6 +766,7 @@ function StepCard({
           onBindingChange={onBindingChange}
           picker={picker}
           scope={scope}
+          courseScoped={courseScoped}
         />
       ))}
     </div>
@@ -796,6 +810,7 @@ function InputBindingRow({
   onBindingChange,
   picker,
   scope,
+  courseScoped,
 }: {
   stepIndex: number;
   input: StepInputSpec;
@@ -811,6 +826,7 @@ function InputBindingRow({
   ) => void;
   picker: BuilderPickerData;
   scope?: WorkflowScope;
+  courseScoped?: boolean;
 }) {
   let currentSource: "runtime" | "step" | "literal" = "runtime";
   let currentStepIndex: number | undefined;
@@ -830,6 +846,8 @@ function InputBindingRow({
   const scopeFamily = scopeFamilyForType(input.type);
   const isScopeable = scopeFamily !== null;
   const scopeFamilyValue = scopeFamily && scope ? (scope[scopeFamily] ?? "").trim() : "";
+  const moduleFromScope = isModuleType(input.type) && !!courseScoped;
+  const showScopeOption = isScopeable || moduleFromScope;
 
   const compatibleStepOutputs: Array<{
     stepIndex: number;
@@ -852,7 +870,7 @@ function InputBindingRow({
   }
 
   const options: Array<{ value: string; label: string }> = [
-    { value: "runtime", label: isScopeable ? "From workflow scope" : "Ask when running" },
+    { value: "runtime", label: showScopeOption ? "From workflow scope" : "Ask when running" },
     ...compatibleStepOutputs.map((o) => ({
       value: `step:${o.stepIndex}:${o.outputKey}`,
       label: o.label,
@@ -934,9 +952,17 @@ function InputBindingRow({
           />
         )}
       </div>
-      {isScopeable && currentSource === "runtime" && (
-        <div style={{ fontSize: "0.8rem", opacity: 0.7, marginTop: 4, marginLeft: 128 }}>
+      {input.help && (
+        <div style={{ fontSize: "0.78rem", opacity: 0.6, marginTop: 2, marginLeft: 128, maxWidth: 560 }}>
+          {input.help}
+        </div>
+      )}
+      {showScopeOption && currentSource === "runtime" && (
+        <div style={{ fontSize: "0.8rem", opacity: 0.7, marginTop: 2, marginLeft: 128 }}>
           {(() => {
+            if (moduleFromScope && !isScopeable) {
+              return "Taken from the workflow's scoped course.";
+            }
             if (!scopeCovered) {
               if (scopeFamilyValue === "*") {
                 return "The workflow scope targets all - this single field is asked at run time.";

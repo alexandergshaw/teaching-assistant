@@ -153,3 +153,74 @@ describe("collectRuntimeFields with a workflow scope", () => {
     expect(fields.map((f) => f.fieldKey).sort()).toEqual(["hubCourse", "topic"]);
   });
 });
+
+describe("collectRuntimeFields - module input under a scoped course", () => {
+  const inputs: Record<string, StepInputSpec[]> = {
+    prep: [
+      { key: "hubCourse", label: "Course tile", type: "hubCourse", required: false },
+      { key: "moduleId", label: "Module", type: "lmsModule", required: false },
+      { key: "topic", label: "Topic", type: "text", required: true },
+    ],
+  };
+  const lookup = (type: string) => inputs[type];
+  const def: WorkflowDef = {
+    id: "w",
+    name: "W",
+    description: "",
+    steps: [
+      {
+        type: "prep",
+        bindings: {
+          hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+          moduleId: { source: "runtime", fieldKey: "moduleId" },
+          topic: { source: "runtime", fieldKey: "topic" },
+        },
+      },
+    ],
+  };
+
+  it("asks for the module when no course is scoped", () => {
+    const fields = collectRuntimeFields(def, lookup);
+    expect(fields.map((f) => f.fieldKey).sort()).toEqual(["hubCourse", "moduleId", "topic"]);
+  });
+
+  it("drops the module when a concrete course is scoped (course + module both filled)", () => {
+    const scoped: WorkflowDef = { ...def, scope: { hubCourse: "tile1" } };
+    const fields = collectRuntimeFields(scoped, lookup);
+    expect(fields.map((f) => f.fieldKey)).toEqual(["topic"]);
+  });
+
+  it("drops the module when the course scope is '*' (all), but still asks the single course input", () => {
+    const scoped: WorkflowDef = { ...def, scope: { hubCourse: "*" } };
+    const fields = collectRuntimeFields(scoped, lookup);
+    expect(fields.map((f) => f.fieldKey).sort()).toEqual(["hubCourse", "topic"]);
+  });
+
+  it("does NOT skip an opaque 'modules' payload input (only lmsModule is course-derived)", () => {
+    const modInputs: Record<string, StepInputSpec[]> = {
+      pop: [
+        { key: "hubCourse", label: "Course tile", type: "hubCourse", required: false },
+        { key: "modules", label: "LMS modules", type: "modules", required: false },
+      ],
+    };
+    const modDef: WorkflowDef = {
+      id: "w2",
+      name: "W2",
+      description: "",
+      scope: { hubCourse: "tile1" },
+      steps: [
+        {
+          type: "pop",
+          bindings: {
+            hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+            modules: { source: "runtime", fieldKey: "modules" },
+          },
+        },
+      ],
+    };
+    const fields = collectRuntimeFields(modDef, (t) => modInputs[t]);
+    // hubCourse concrete -> covered (dropped); modules is NOT a course-derived
+    // picker -> still asked.
+    expect(fields.map((f) => f.fieldKey)).toEqual(["modules"]);
+  });
+});

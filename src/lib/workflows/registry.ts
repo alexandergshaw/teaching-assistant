@@ -6894,6 +6894,14 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Optional source material.",
       },
+      {
+        key: "slides",
+        label: "Slides (optional)",
+        type: "uploads",
+        required: false,
+        help: "Attach a .pptx deck to ground the examples in your slides.",
+        accept: ".pptx",
+      },
     ],
     outputs: [
       {
@@ -6910,8 +6918,37 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       const context = String(values.context ?? "");
 
+      // Optional .pptx uploads: extract the deck's slide text and fold it into
+      // the context so examples are grounded in the actual slides. Uploads never
+      // persist to an unattended run (they resolve to []), so this is a no-op there.
+      const slideUploads = Array.isArray(values.slides) ? (values.slides as File[]) : [];
+      const MAX_SLIDE_FILES = 3;
+      const MAX_SLIDE_BYTES = 6 * 1024 * 1024;
+      const slideBlocks: string[] = [];
+      for (const file of slideUploads.slice(0, MAX_SLIDE_FILES)) {
+        if (file.size > MAX_SLIDE_BYTES) continue;
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          let binary = "";
+          const CHUNK = 0x8000;
+          for (let i = 0; i < bytes.length; i += CHUNK) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+          }
+          const extracted = await extractPptxSlidesAction(btoa(binary));
+          if ("error" in extracted) continue;
+          for (const s of extracted.slides) {
+            slideBlocks.push(`Slide ${s.slide}: ${s.title}${s.text ? `\n${s.text}` : ""}`);
+          }
+        } catch {
+          // skip a file we cannot read; the run continues with whatever we have
+        }
+      }
+      const contextWithSlides = [context, slideBlocks.join("\n\n")]
+        .filter((t) => t.trim())
+        .join("\n\n");
+
       onProgress("Generating worked examples...");
-      const r = await generateExamplesAction(objectives, context, [], helpers.provider);
+      const r = await generateExamplesAction(objectives, contextWithSlides, [], helpers.provider);
 
       if ("error" in r) {
         throw new Error(r.error);

@@ -15,7 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 import type { LlmProvider } from "@/lib/llm";
 import { expandWorkflowDef, applyWorkflowScope, scopeCoversType, type WorkflowDef } from "@/lib/workflows/types";
-import { isScopeableListType, expandScopedValue, resolveClassRepoRef } from "@/lib/workflows/scope";
+import { isScopeableListType, expandScopedValue, resolveClassRepoRef, resolveClassTileRef } from "@/lib/workflows/scope";
 import {
   getStepDefinition,
   type StepDefinition,
@@ -178,6 +178,15 @@ async function runExpandedBodyOnce(opts: {
         // specific picked tile). Non-references pass through unchanged.
         if (spec.type === "repo" && typeof resolvedInputs[spec.key] === "string") {
           resolvedInputs[spec.key] = await resolveClassRepoRef(resolvedInputs[spec.key] as string, def.scope);
+        }
+
+        // A "@class-tile" reference fills an input from the scoped/picked course
+        // tile's matching field (lmsCourse/date/institution). Non-references pass through.
+        if (
+          (spec.type === "lmsCourse" || spec.type === "date" || spec.type === "institution") &&
+          typeof resolvedInputs[spec.key] === "string"
+        ) {
+          resolvedInputs[spec.key] = await resolveClassTileRef(resolvedInputs[spec.key] as string, def.scope, spec.type);
         }
       }
 

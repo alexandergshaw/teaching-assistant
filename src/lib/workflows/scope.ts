@@ -71,16 +71,26 @@ export async function expandScopedValue(
 /** The sentinel a repo input stores to reference a course tile's class repo. */
 export const CLASS_REPO_REF = "@class-repo";
 
-/** Parse a class-repo reference. Returns null when `value` is not one; otherwise
- * `{ tileId }` where tileId is a specific course-tile id, or null to mean "the
- * workflow-scoped course tile". */
-export function parseClassRepoRef(value: string): { tileId: string | null } | null {
+/** The sentinel a lmsCourse/date/institution input stores to reference a course
+ * tile's matching field (the Canvas course, start date, or institution). */
+export const CLASS_TILE_REF = "@class-tile";
+
+function parsePrefixedTileRef(value: string, prefix: string): { tileId: string | null } | null {
   const v = value.trim();
-  if (v === CLASS_REPO_REF) return { tileId: null };
-  if (v.startsWith(CLASS_REPO_REF + ":")) {
-    return { tileId: v.slice((CLASS_REPO_REF + ":").length).trim() || null };
-  }
+  if (v === prefix) return { tileId: null };
+  if (v.startsWith(prefix + ":")) return { tileId: v.slice((prefix + ":").length).trim() || null };
   return null;
+}
+
+/** Parse a class-repo reference. null when not one; else { tileId } (null tileId
+ * = the workflow-scoped course tile). */
+export function parseClassRepoRef(value: string): { tileId: string | null } | null {
+  return parsePrefixedTileRef(value, CLASS_REPO_REF);
+}
+
+/** Parse a class-tile reference. Same shape as parseClassRepoRef. */
+export function parseClassTileRef(value: string): { tileId: string | null } | null {
+  return parsePrefixedTileRef(value, CLASS_TILE_REF);
 }
 
 /** Resolve a class-repo reference to a course tile's linked class repository
@@ -101,4 +111,29 @@ export async function resolveClassRepoRef(
   const tile = r.courses.find((c) => c.id === tileId);
   if (!tile) return "";
   return tile.repos[0]?.repo?.trim() ?? "";
+}
+
+/** Resolve a class-tile reference to a field of a course tile, chosen by the
+ * consuming input's type: lmsCourse -> the tile's Canvas course URL, date -> its
+ * start date, institution -> its institution. A bare "@class-tile" uses the
+ * workflow-scoped hub-course tile; "@class-tile:<id>" a specific tile. A value
+ * that is not a reference passes through unchanged; an unsupported type or an
+ * unresolvable tile yields "". */
+export async function resolveClassTileRef(
+  value: string,
+  scope: WorkflowScope | undefined,
+  type: string
+): Promise<string> {
+  const ref = parseClassTileRef(value);
+  if (!ref) return value;
+  const tileId = ref.tileId ?? applyWorkflowScope("hubCourse", "", scope).trim();
+  if (!tileId) return "";
+  const r = await listCourseHubAction();
+  if ("error" in r) return "";
+  const tile = r.courses.find((c) => c.id === tileId);
+  if (!tile) return "";
+  if (type === "lmsCourse") return (tile.canvasUrl ?? "").trim();
+  if (type === "date") return (tile.startDate ?? "").trim();
+  if (type === "institution") return (tile.institution ?? "").trim();
+  return "";
 }

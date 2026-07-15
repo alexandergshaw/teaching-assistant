@@ -889,12 +889,21 @@ function InputBindingRow({
     });
   }
 
+  if (input.type === "repo") {
+    options.push({ value: "classrepo", label: "Reference Class Repository Tile" });
+  }
+
+  const isClassRepoRef =
+    currentSource === "literal" && currentLiteralValue.trim().startsWith("@class-repo");
+
   const selectValue =
     currentSource === "step" && currentStepIndex !== undefined
       ? `step:${currentStepIndex}:${currentOutputKey}`
-      : currentSource === "literal"
-        ? "literal"
-        : "runtime";
+      : isClassRepoRef
+        ? "classrepo"
+        : currentSource === "literal"
+          ? "literal"
+          : "runtime";
 
   return (
     <div style={{ marginBottom: 12 }}>
@@ -910,15 +919,11 @@ function InputBindingRow({
             const val = e.target.value;
             if (val === "runtime") {
               onBindingChange(stepIndex, input.key, "runtime");
+            } else if (val === "classrepo") {
+              onBindingChange(stepIndex, input.key, "literal", undefined, undefined, "@class-repo");
             } else if (val === "literal") {
-              onBindingChange(
-                stepIndex,
-                input.key,
-                "literal",
-                undefined,
-                undefined,
-                currentLiteralValue
-              );
+              const seed = currentLiteralValue.trim().startsWith("@class-repo") ? "" : currentLiteralValue;
+              onBindingChange(stepIndex, input.key, "literal", undefined, undefined, seed);
             } else if (val.startsWith("step:")) {
               const parts = val.split(":");
               const j = Number(parts[1]);
@@ -942,16 +947,25 @@ function InputBindingRow({
           ))}
         </TextField>
 
-        {currentSource === "literal" && (
-          <LiteralEditor
-            type={input.type}
-            value={currentLiteralValue}
-            picker={picker}
-            onChange={(v) =>
-              onBindingChange(stepIndex, input.key, "literal", undefined, undefined, v)
-            }
-          />
-        )}
+        {currentSource === "literal" &&
+          (isClassRepoRef ? (
+            <ClassRepoTilePicker
+              value={currentLiteralValue}
+              picker={picker}
+              onChange={(v) =>
+                onBindingChange(stepIndex, input.key, "literal", undefined, undefined, v)
+              }
+            />
+          ) : (
+            <LiteralEditor
+              type={input.type}
+              value={currentLiteralValue}
+              picker={picker}
+              onChange={(v) =>
+                onBindingChange(stepIndex, input.key, "literal", undefined, undefined, v)
+              }
+            />
+          ))}
       </div>
       {input.help && (
         <div style={{ fontSize: "0.78rem", opacity: 0.6, marginTop: 2, marginLeft: 128, maxWidth: 560 }}>
@@ -976,6 +990,41 @@ function InputBindingRow({
         </div>
       )}
     </div>
+  );
+}
+
+// Picks which course tile's linked class repository a repo input references: the
+// workflow-scoped tile by default ("@class-repo"), or a specific tile
+// ("@class-repo:<id>"). Resolved to the tile's first repo at run time.
+function ClassRepoTilePicker({
+  value,
+  onChange,
+  picker,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  picker: BuilderPickerData;
+}) {
+  const tileId = value.trim().startsWith("@class-repo:")
+    ? value.trim().slice("@class-repo:".length)
+    : "";
+  const opts = picker.hubCourses ?? [];
+  return (
+    <TextField
+      select
+      size="small"
+      value={tileId}
+      onChange={(e) => onChange(e.target.value ? `@class-repo:${e.target.value}` : "@class-repo")}
+      sx={{ flex: 1, minWidth: 200 }}
+      helperText="Uses the tile's first linked repository at run time."
+    >
+      <MenuItem value="">Workflow-scoped course tile</MenuItem>
+      {opts.map((c) => (
+        <MenuItem key={c.id} value={c.id}>
+          {c.name}
+        </MenuItem>
+      ))}
+    </TextField>
   );
 }
 

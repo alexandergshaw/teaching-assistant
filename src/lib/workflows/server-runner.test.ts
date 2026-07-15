@@ -408,6 +408,16 @@ describe("buildRunReportMarkdown", () => {
     ];
     expect(buildRunReportMarkdown("W", "t", onlySchedule, (t) => t)).toBeNull();
   });
+
+  it("labels the institution in section headers for a fan-out report", () => {
+    const outcomes: StepRunOutcome[] = [
+      { index: 0, type: "greet", status: "done", error: null, institution: "AAA", summary: { kind: "text", text: "hi A" } },
+      { index: 0, type: "greet", status: "done", error: null, institution: "BBB", summary: { kind: "text", text: "hi B" } },
+    ];
+    const md = buildRunReportMarkdown("W", "t", outcomes, () => "Greet");
+    expect(md).toContain("## 1. Greet (AAA)\n\nhi A");
+    expect(md).toContain("## 1. Greet (BBB)\n\nhi B");
+  });
 });
 
 describe("runWorkflowUnattended report capture", () => {

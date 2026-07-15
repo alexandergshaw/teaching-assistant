@@ -3172,7 +3172,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     ],
     outputs: [{ key: "courses", label: "Course list", type: "courseList" }],
     run: async (values, helpers, onProgress) => {
-      const institution = String(values.institution ?? "").trim();
+      const institution = String(values.institution ?? "").trim() || (helpers.activeInstitution ?? "").trim();
       const term = String(values.term ?? "").trim();
 
       onProgress("Fetching the term's courses...");
@@ -3316,7 +3316,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     outputs: [],
     run: async (values, helpers, onProgress) => {
       const rows = values.courses as TermCoursePreviewRow[];
-      const institution = String(values.institution ?? "").trim();
+      const institution = String(values.institution ?? "").trim() || (helpers.activeInstitution ?? "").trim();
 
       onProgress("Loading existing course cards...");
       const hub = await listCourseHubAction();

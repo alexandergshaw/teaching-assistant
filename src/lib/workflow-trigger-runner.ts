@@ -116,6 +116,7 @@ export async function runDueUnattendedTriggers(
           ? trigger.provider
           : "gemini";
 
+      const runDeadlineMs = now.getTime() + 50_000;
       const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
         runWorkflowUnattended({
           def,
@@ -129,6 +130,7 @@ export async function runDueUnattendedTriggers(
             provider,
             author: resolveDocumentAuthor(userRes.user),
           }),
+          deadlineMs: runDeadlineMs,
         })
       );
 

@@ -50,7 +50,7 @@ export async function expandScopedValue(
     let courses = r.courses;
     if (ctx.filterHubByInstitution) {
       const inst = (ctx.activeInstitution || "").trim();
-      courses = courses.filter((c) => (c.institution ?? "").trim() === inst);
+      courses = courses.filter((c) => (c.institution ?? "").trim().toUpperCase() === inst);
     }
     return courses.map((c) => c.id).join("\n");
   }

@@ -260,7 +260,7 @@ export async function runWorkflowUnattended(opts: {
           groups.push({
             institution: acronym,
             ok: false,
-            steps: [{ index: -1, type: def.id, status: "error", error: "Skipped - run time budget reached; resumes next scheduled run.", summary: null, institution: acronym }],
+            steps: [{ index: -1, type: def.id, status: "error", error: "Skipped - run time budget reached this tick.", summary: null, institution: acronym }],
           });
           continue;
         }
@@ -325,7 +325,8 @@ export function buildRunReportMarkdown(
       continue; // schedule summaries are structured data, not a text deliverable
     }
     if (!body.trim()) continue;
-    sections.push(`## ${o.index + 1}. ${stepName(o.type)}\n\n${body}`);
+    const heading = o.institution ? `${o.index + 1}. ${stepName(o.type)} (${o.institution})` : `${o.index + 1}. ${stepName(o.type)}`;
+    sections.push(`## ${heading}\n\n${body}`);
   }
   if (sections.length === 0) return null;
   return `# ${workflowName}\n\n_Generated ${generatedAt}_\n\n${sections.join("\n\n")}\n`;

@@ -4046,6 +4046,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         help: "Attach the lecture deck (.pptx, .pdf, or .docx, up to 3 files of ~6 MB each) to ground the questions in what will actually be presented.",
         accept: ".pptx,.pdf,.docx,.ppt,.doc",
       },
+      {
+        key: "slidesText",
+        label: "Slides from a previous step (optional)",
+        type: "longtext",
+        required: false,
+        help: "Bind a deck generated earlier in this workflow (Generate slides -> Deck or Slides JSON, or Extract slides -> Slides). Its text grounds the questions the same way an uploaded deck does.",
+      },
     ],
     outputs: [
       { key: "qaText", label: "Q&A", type: "longtext" },
@@ -4099,11 +4106,22 @@ export const STEP_REGISTRY: StepDefinition[] = [
         }
       }
 
+      // A deck produced by an earlier step (Generate slides -> Deck / Slides
+      // JSON, or Extract slides -> Slides) arrives as longtext, already
+      // extracted - fold it into the materials so it grounds the questions the
+      // same way an uploaded deck does. Uploaded slideFiles still ride
+      // separately, so both paths compose; in an unattended run the uploads
+      // resolve to [] and this prior-step text is the only slide grounding.
+      const priorSlidesText = String(values.slidesText ?? "").trim();
+      const materialsForPrompt = priorSlidesText
+        ? `# Slides from a previous step\n${priorSlidesText}\n\n${materialsText}`
+        : materialsText;
+
       onProgress("Anticipating student questions...");
       const r = await generateLectureQaAction(
         tile.name,
         moduleName,
-        materialsText,
+        materialsForPrompt,
         slideFiles,
         helpers.provider
       );

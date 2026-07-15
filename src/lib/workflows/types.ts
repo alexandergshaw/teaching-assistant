@@ -45,6 +45,8 @@ export const LITERAL_CAPABLE_TYPES: ReadonlySet<string> = new Set([
   "text",
   "longtext",
   "number",
+  "date",
+  "repo",
   "boolean",
   "hubCourse",
   "hubCourseList",

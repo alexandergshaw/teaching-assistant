@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Autocomplete, Button, TextField, MenuItem, Checkbox, FormControlLabel, createFilterOptions } from "@mui/material";
 import Typeahead from "./ui/Typeahead";
+import GithubRepoPicker from "./GithubRepoPicker";
 import {
   type WorkflowDef,
   type WorkflowStepConfig,
@@ -881,7 +882,7 @@ function InputBindingRow({
   // institution / org entity types, so a workflow can hard-set the target and
   // run unmonitored. Entity presets get a real picker below (one / several /
   // all for the list types).
-  if (LITERAL_CAPABLE_TYPES.has(input.type) && input.type !== "boolean") {
+  if (LITERAL_CAPABLE_TYPES.has(input.type)) {
     options.push({
       value: "literal",
       label: ["text", "longtext", "number"].includes(input.type) ? "Fixed value" : "Preset value",
@@ -1058,6 +1059,33 @@ function LiteralEditor({
       />
     );
   }
+  if (type === "boolean") {
+    return (
+      <TextField select size="small" value={value === "1" ? "1" : ""} onChange={(e) => onChange(e.target.value)} sx={sx}>
+        <MenuItem value="1">True</MenuItem>
+        <MenuItem value="">False</MenuItem>
+      </TextField>
+    );
+  }
+  if (type === "date") {
+    return (
+      <TextField
+        type="date"
+        size="small"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        sx={sx}
+        slotProps={{ inputLabel: { shrink: true } }}
+      />
+    );
+  }
+  if (type === "repo") {
+    return (
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <GithubRepoPicker value={value} onChange={onChange} />
+      </div>
+    );
+  }
   // lmsCourse / lmsCourseList / text / longtext / number: the builder has no
   // live-course list (that needs an institution + fetch), so a field is used.
   // Only the SCOPEABLE list type accepts "*" (all); a singular lmsCourse does
@@ -1076,6 +1104,8 @@ function LiteralEditor({
       onChange={(e) => onChange(e.target.value)}
       placeholder={type === "lmsCourseList" ? "Canvas course URL(s); * = all" : type === "lmsCourse" ? "Canvas course URL" : undefined}
       helperText={lmsHint}
+      multiline={type === "longtext"}
+      minRows={type === "longtext" ? 3 : undefined}
       sx={sx}
     />
   );

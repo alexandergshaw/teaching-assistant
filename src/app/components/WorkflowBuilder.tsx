@@ -13,6 +13,7 @@ import {
   outputFeedsInput,
   LITERAL_CAPABLE_TYPES,
   scopeCoversType,
+  scopeFamilyForType,
   applyWorkflowScope,
   describeScopeForType,
 } from "@/lib/workflows/types";
@@ -826,6 +827,9 @@ function InputBindingRow({
   }
 
   const scopeCovered = scopeCoversType(scope, input.type);
+  const scopeFamily = scopeFamilyForType(input.type);
+  const isScopeable = scopeFamily !== null;
+  const scopeFamilyValue = scopeFamily && scope ? (scope[scopeFamily] ?? "").trim() : "";
 
   const compatibleStepOutputs: Array<{
     stepIndex: number;
@@ -848,7 +852,7 @@ function InputBindingRow({
   }
 
   const options: Array<{ value: string; label: string }> = [
-    { value: "runtime", label: scopeCovered ? "From workflow scope" : "Ask when running" },
+    { value: "runtime", label: isScopeable ? "From workflow scope" : "Ask when running" },
     ...compatibleStepOutputs.map((o) => ({
       value: `step:${o.stepIndex}:${o.outputKey}`,
       label: o.label,
@@ -930,9 +934,15 @@ function InputBindingRow({
           />
         )}
       </div>
-      {scopeCovered && currentSource === "runtime" && (
+      {isScopeable && currentSource === "runtime" && (
         <div style={{ fontSize: "0.8rem", opacity: 0.7, marginTop: 4, marginLeft: 128 }}>
           {(() => {
+            if (!scopeCovered) {
+              if (scopeFamilyValue === "*") {
+                return "The workflow scope targets all - this single field is asked at run time.";
+              }
+              return "From the workflow scope (set under Build) - asks at run time if unset.";
+            }
             const summary = inheritedScopeSummary(input.type, scope, picker);
             return summary ? `Set by workflow scope: ${summary}` : "Set by workflow scope";
           })()}

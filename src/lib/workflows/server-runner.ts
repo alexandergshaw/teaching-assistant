@@ -205,7 +205,59 @@ export async function runWorkflowUnattended(opts: {
   }
 
   const genuineFailures = [...failedSteps].filter((i) => !disabledRunIndices.has(i));
+  // Persist the run's text deliverables to the Files tab so an unattended run's
+  // output is not lost. Best-effort: a failed report must never fail the run.
+  if (helpers.saveRunReport) {
+    const markdown = buildRunReportMarkdown(
+      def.name,
+      new Date().toISOString(),
+      outcomes,
+      (t) => stepLookup(t)?.name ?? t
+    );
+    if (markdown) {
+      try {
+        await helpers.saveRunReport(`${def.name} report`, markdown);
+      } catch {
+        // ignore - the deliverable report is a convenience, not part of the run
+      }
+    }
+  }
   return { ok: genuineFailures.length === 0, steps: outcomes };
+}
+
+/**
+ * Build a Markdown report of an unattended run's text deliverables, or null when
+ * there is nothing substantive to save. Pure (no I/O, no Date) so it is unit
+ * testable; the caller supplies `generatedAt` and a step-name lookup. Only
+ * `done` steps with a text/list/link summary contribute; schedule summaries and
+ * errored/empty steps are skipped.
+ */
+export function buildRunReportMarkdown(
+  workflowName: string,
+  generatedAt: string,
+  outcomes: StepRunOutcome[],
+  stepName: (type: string) => string
+): string | null {
+  const sections: string[] = [];
+  for (const o of outcomes) {
+    if (o.status !== "done" || !o.summary) continue;
+    const s = o.summary;
+    let body = "";
+    if (s.kind === "text") {
+      body = s.text.trim();
+    } else if (s.kind === "list") {
+      const items = s.items.map((it) => `- ${it}`).join("\n");
+      body = `**${s.label}**\n\n${items}`;
+    } else if (s.kind === "link") {
+      body = `[${s.label}](${s.url})`;
+    } else {
+      continue; // schedule summaries are structured data, not a text deliverable
+    }
+    if (!body.trim()) continue;
+    sections.push(`## ${o.index + 1}. ${stepName(o.type)}\n\n${body}`);
+  }
+  if (sections.length === 0) return null;
+  return `# ${workflowName}\n\n_Generated ${generatedAt}_\n\n${sections.join("\n\n")}\n`;
 }
 
 /**
@@ -246,6 +298,16 @@ export function buildServerStepRunHelpers(opts: {
         kind: "bundle",
         mimeType: "application/zip",
         durationSec: null,
+      });
+    },
+    saveRunReport: async (name, markdown) => {
+      const blob = new Blob([markdown], { type: "text/markdown" });
+      await saveRecordingFile(supabase, userId, blob, {
+        name,
+        kind: "file",
+        mimeType: "text/markdown",
+        durationSec: null,
+        fileExt: "md",
       });
     },
     saveCourseMaterialFile: async (courseId, blob, fileName) => {

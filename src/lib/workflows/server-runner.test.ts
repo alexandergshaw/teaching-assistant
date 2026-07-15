@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { runWorkflowUnattended } from "./server-runner";
+import { runWorkflowUnattended, buildRunReportMarkdown, type StepRunOutcome } from "./server-runner";
 import type { StepDefinition, StepRunHelpers } from "./registry";
 import type { WorkflowDef } from "./types";
 
@@ -360,5 +360,108 @@ describe("runWorkflowUnattended", () => {
 
     expect(result.ok).toBe(false);
     expect(result.steps[0].status).toBe("error");
+  });
+});
+
+describe("buildRunReportMarkdown", () => {
+  const names: Record<string, string> = {
+    greet: "Greet",
+    list: "List step",
+    link: "Link step",
+    sched: "Schedule step",
+  };
+  const name = (t: string) => names[t] ?? t;
+
+  it("renders text, list, and link summaries and skips schedules, errors, and empties", () => {
+    const outcomes: StepRunOutcome[] = [
+      { index: 0, type: "greet", status: "done", error: null, summary: { kind: "text", text: "Hello world" } },
+      { index: 1, type: "list", status: "done", error: null, summary: { kind: "list", label: "Items", items: ["a", "b"] } },
+      { index: 2, type: "link", status: "done", error: null, summary: { kind: "link", label: "Open", url: "https://x.test" } },
+      { index: 3, type: "sched", status: "done", error: null, summary: { kind: "schedule", courseTitle: "C", schedule: [], csv: "" } },
+      { index: 4, type: "greet", status: "error", error: "boom", summary: null },
+      { index: 5, type: "greet", status: "done", error: null, summary: { kind: "text", text: "   " } },
+    ];
+    const md = buildRunReportMarkdown("My Workflow", "2026-07-15T00:00:00.000Z", outcomes, name);
+    expect(md).toBeTruthy();
+    expect(md).toContain("# My Workflow");
+    expect(md).toContain("_Generated 2026-07-15T00:00:00.000Z_");
+    expect(md).toContain("## 1. Greet\n\nHello world");
+    expect(md).toContain("## 2. List step\n\n**Items**\n\n- a\n- b");
+    expect(md).toContain("## 3. Link step\n\n[Open](https://x.test)");
+    expect(md).not.toContain("Schedule step");
+    expect(md).not.toContain("## 5");
+    expect(md).not.toContain("## 6");
+  });
+
+  it("returns null when there is no substantive text deliverable", () => {
+    expect(buildRunReportMarkdown("W", "t", [], (t) => t)).toBeNull();
+    const onlySchedule: StepRunOutcome[] = [
+      { index: 0, type: "sched", status: "done", error: null, summary: { kind: "schedule", courseTitle: "C", schedule: [], csv: "" } },
+    ];
+    expect(buildRunReportMarkdown("W", "t", onlySchedule, (t) => t)).toBeNull();
+  });
+});
+
+describe("runWorkflowUnattended report capture", () => {
+  it("saves a run report when a step produces a text deliverable", async () => {
+    const defs: Record<string, StepDefinition> = {
+      writeup: {
+        type: "writeup",
+        name: "Writeup",
+        description: "",
+        inputs: [],
+        outputs: [],
+        run: async () => ({ outputs: {}, summary: { kind: "text", text: "The deliverable body" } }),
+      },
+    };
+    const def: WorkflowDef = {
+      id: "rep",
+      name: "Report WF",
+      description: "",
+      steps: [{ type: "writeup", bindings: {} }],
+    };
+    const saveRunReport = vi.fn(async (_name: string, _markdown: string) => {});
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: { ...fakeHelpers(), saveRunReport },
+      stepLookup: lookupOf(defs),
+    });
+    expect(result.ok).toBe(true);
+    expect(saveRunReport).toHaveBeenCalledTimes(1);
+    const [reportName, md] = saveRunReport.mock.calls[0];
+    expect(reportName).toBe("Report WF report");
+    expect(md).toContain("The deliverable body");
+  });
+
+  it("does not save a report when no step produces a text deliverable", async () => {
+    const defs: Record<string, StepDefinition> = {
+      silent: {
+        type: "silent",
+        name: "Silent",
+        description: "",
+        inputs: [],
+        outputs: [],
+        run: async () => ({ outputs: {}, summary: { kind: "text", text: "" } }),
+      },
+    };
+    const def: WorkflowDef = {
+      id: "s",
+      name: "Silent WF",
+      description: "",
+      steps: [{ type: "silent", bindings: {} }],
+    };
+    const saveRunReport = vi.fn(async () => {});
+    await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: { ...fakeHelpers(), saveRunReport },
+      stepLookup: lookupOf(defs),
+    });
+    expect(saveRunReport).not.toHaveBeenCalled();
   });
 });

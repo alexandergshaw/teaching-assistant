@@ -338,6 +338,10 @@ export interface StepRunHelpers {
   provider: LlmProvider;
   author: string;
   saveBundle: ((blob: Blob, name: string) => Promise<void>) | null;
+  /** Persist a text run report (Markdown) to the Files tab. Present only for
+   * unattended runs (the server builds one so deliverables are not lost); null
+   * / absent for attended runs, which already show step summaries in the UI. */
+  saveRunReport?: ((name: string, markdown: string) => Promise<void>) | null;
   saveCourseMaterialFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
   saveCourseExportFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
   loadCommonResources: (() => Promise<CommonResourceItem[]>) | null;

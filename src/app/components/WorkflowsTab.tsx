@@ -40,7 +40,7 @@ import {
   type TriggerEventType,
 } from "@/lib/workflow-triggers";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
-import { isScopeableListType, expandScopedValue, ALL_SCOPE } from "@/lib/workflows/scope";
+import { isScopeableListType, expandScopedValue, ALL_SCOPE, resolveClassRepoRef } from "@/lib/workflows/scope";
 import { isInstitutionFanout } from "@/lib/workflows/fanout";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
@@ -1529,6 +1529,10 @@ export default function WorkflowsTab() {
               resolvedInputs[spec.key] as string,
               { activeInstitution: (scopeInst || activeInstitution) || null }
             );
+          }
+
+          if (spec.type === "repo" && typeof resolvedInputs[spec.key] === "string") {
+            resolvedInputs[spec.key] = await resolveClassRepoRef(resolvedInputs[spec.key] as string, selectedDef.scope);
           }
         }
 

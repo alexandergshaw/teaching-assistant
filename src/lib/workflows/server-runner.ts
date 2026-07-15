@@ -15,7 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 import type { LlmProvider } from "@/lib/llm";
 import { expandWorkflowDef, applyWorkflowScope, scopeCoversType, type WorkflowDef } from "@/lib/workflows/types";
-import { isScopeableListType, expandScopedValue } from "@/lib/workflows/scope";
+import { isScopeableListType, expandScopedValue, resolveClassRepoRef } from "@/lib/workflows/scope";
 import {
   getStepDefinition,
   type StepDefinition,
@@ -168,6 +168,13 @@ async function runExpandedBodyOnce(opts: {
             resolvedInputs[spec.key] as string,
             { activeInstitution: scopeInst || helpers.activeInstitution, filterHubByInstitution }
           );
+        }
+
+        // A "@class-repo" reference resolves a repo input to a course tile's
+        // linked class repository (the workflow-scoped tile by default, or a
+        // specific picked tile). Non-references pass through unchanged.
+        if (spec.type === "repo" && typeof resolvedInputs[spec.key] === "string") {
+          resolvedInputs[spec.key] = await resolveClassRepoRef(resolvedInputs[spec.key] as string, def.scope);
         }
       }
 

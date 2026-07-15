@@ -14,6 +14,7 @@
 // step's run().
 
 import { listCourseHubAction, listCoursesAction, listMyOrgsAction } from "@/app/actions";
+import { applyWorkflowScope, type WorkflowScope } from "@/lib/workflows/types";
 
 /** The value types that carry a scopeable collection (one / several / all). */
 export const SCOPEABLE_LIST_TYPES: ReadonlySet<string> = new Set([
@@ -65,4 +66,39 @@ export async function expandScopedValue(
     return "error" in r ? "" : r.orgs.join("\n");
   }
   return value;
+}
+
+/** The sentinel a repo input stores to reference a course tile's class repo. */
+export const CLASS_REPO_REF = "@class-repo";
+
+/** Parse a class-repo reference. Returns null when `value` is not one; otherwise
+ * `{ tileId }` where tileId is a specific course-tile id, or null to mean "the
+ * workflow-scoped course tile". */
+export function parseClassRepoRef(value: string): { tileId: string | null } | null {
+  const v = value.trim();
+  if (v === CLASS_REPO_REF) return { tileId: null };
+  if (v.startsWith(CLASS_REPO_REF + ":")) {
+    return { tileId: v.slice((CLASS_REPO_REF + ":").length).trim() || null };
+  }
+  return null;
+}
+
+/** Resolve a class-repo reference to a course tile's linked class repository
+ * (its first repo). A bare "@class-repo" uses the workflow-scoped hub-course
+ * tile; "@class-repo:<id>" uses that specific tile. A value that is not a
+ * reference passes through unchanged. Returns "" when the tile has no repo or
+ * cannot be resolved. */
+export async function resolveClassRepoRef(
+  value: string,
+  scope: WorkflowScope | undefined
+): Promise<string> {
+  const ref = parseClassRepoRef(value);
+  if (!ref) return value;
+  const tileId = ref.tileId ?? applyWorkflowScope("hubCourse", "", scope).trim();
+  if (!tileId) return "";
+  const r = await listCourseHubAction();
+  if ("error" in r) return "";
+  const tile = r.courses.find((c) => c.id === tileId);
+  if (!tile) return "";
+  return tile.repos[0]?.repo?.trim() ?? "";
 }

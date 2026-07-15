@@ -606,6 +606,7 @@ export interface Database {
           provider: string | null;
           disabled_steps: Json;
           interval_minutes: number | null;
+          fanout_progress: Json | null;
         };
         Insert: {
           id?: string;
@@ -625,6 +626,7 @@ export interface Database {
           provider?: string | null;
           disabled_steps?: Json;
           interval_minutes?: number | null;
+          fanout_progress?: Json | null;
         };
         Update: {
           id?: string;
@@ -644,6 +646,7 @@ export interface Database {
           provider?: string | null;
           disabled_steps?: Json;
           interval_minutes?: number | null;
+          fanout_progress?: Json | null;
         };
       };
       workflow_triggers: {

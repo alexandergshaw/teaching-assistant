@@ -13,6 +13,43 @@ export type ScheduleRepeat = "none" | "interval" | "daily" | "weekly";
 // actually fire more often. Enforced in the UI and treated as the floor here.
 export const MIN_INTERVAL_MINUTES = 15;
 
+/** Checkpoint for an in-flight institution fan-out (unattended runs only). Lets a
+ * truncated fan-out resume on the next cron tick without re-running (and re-posting
+ * for) institutions already completed this occurrence. */
+export interface FanoutProgress {
+  runToken: string;
+  occurrenceRunAt: string;
+  resumeNextRunAt: string | null;
+  doneInstitutions: string[];
+  attempts: number;
+  /** True once any institution errored this occurrence (across ticks), so a
+   * completed fan-out is not reported ok just because the final batch succeeded. */
+  anyError: boolean;
+}
+
+export function parseFanoutProgress(raw: unknown): FanoutProgress | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.runToken !== "string" || !o.runToken) return null;
+  return {
+    runToken: o.runToken,
+    occurrenceRunAt: typeof o.occurrenceRunAt === "string" ? o.occurrenceRunAt : "",
+    resumeNextRunAt: typeof o.resumeNextRunAt === "string" ? o.resumeNextRunAt : null,
+    doneInstitutions: Array.isArray(o.doneInstitutions)
+      ? o.doneInstitutions.filter((x): x is string => typeof x === "string")
+      : [],
+    attempts: typeof o.attempts === "number" ? o.attempts : 0,
+    anyError: typeof o.anyError === "boolean" ? o.anyError : false,
+  };
+}
+
+/** Lease window a fan-out claim holds the schedule out of the due-queue. Must
+ * exceed maxDuration (60s) so an in-flight run is never double-claimed. */
+export const FANOUT_LEASE_MS = 120_000;
+/** Cap on resume ticks per occurrence so a fan-out that can never make forward
+ * progress cannot pin a schedule forever. */
+export const FANOUT_MAX_ATTEMPTS = 50;
+
 export interface WorkflowSchedule {
   id: string;
   /** Owning user; only populated by row-mapping (mapSchedule) - needed by the
@@ -44,6 +81,9 @@ export interface WorkflowSchedule {
    * scheduling time; only meaningful for unattended runs, which have no live
    * localStorage to re-read the user's current toggles from. */
   disabledSteps: number[];
+  /** In-flight institution fan-out checkpoint; null unless a prior unattended
+   * tick truncated a fan-out and left institutions to resume. */
+  fanoutProgress: FanoutProgress | null;
 }
 
 /**
@@ -131,6 +171,7 @@ export function mapSchedule(row: ScheduleRow): WorkflowSchedule {
     unattended: row.unattended,
     provider: row.provider,
     disabledSteps,
+    fanoutProgress: parseFanoutProgress(row.fanout_progress),
   };
 }
 
@@ -300,4 +341,126 @@ export async function claimWorkflowSchedule(
     throw new Error(error.message);
   }
   return Array.isArray(data) && data.length > 0;
+}
+
+type FanoutClaim =
+  | { kind: "run"; progress: FanoutProgress }
+  | { kind: "abandon"; progress: FanoutProgress };
+
+/** Claim a due fan-out schedule for an unattended run, LEASING it out of the
+ * due-queue (next_run_at = now + FANOUT_LEASE_MS) instead of advancing to the
+ * next occurrence. Resumes a prior checkpoint (skipping done institutions), runs
+ * fresh for a new occurrence, or abandons a wedged one. Returns null if the CAS
+ * claim was lost to a concurrent tick. */
+export async function claimFanoutSchedule(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  schedule: WorkflowSchedule,
+  now: Date
+): Promise<FanoutClaim | null> {
+  const prior = schedule.fanoutProgress;
+  const rolledOver =
+    !!prior && prior.resumeNextRunAt !== null &&
+    new Date(prior.resumeNextRunAt).getTime() <= now.getTime();
+  const exhausted = !!prior && prior.attempts >= FANOUT_MAX_ATTEMPTS;
+
+  if (prior && exhausted && !rolledOver) {
+    const patch: Record<string, unknown> = { fanout_progress: null, updated_at: now.toISOString() };
+    if (prior.resumeNextRunAt) patch.next_run_at = prior.resumeNextRunAt;
+    else patch.enabled = false;
+    const { data, error } = await table(supabase)
+      .update(patch)
+      .eq("user_id", userId).eq("id", schedule.id)
+      .eq("next_run_at", schedule.nextRunAt).eq("enabled", true)
+      .select("id");
+    if (error) throw new Error(error.message);
+    if (!Array.isArray(data) || data.length === 0) return null;
+    return { kind: "abandon", progress: prior };
+  }
+
+  const resume = prior && !rolledOver ? prior : null;
+  const progress: FanoutProgress = resume
+    ? { ...resume, attempts: resume.attempts + 1 }
+    : {
+        runToken:
+          typeof globalThis.crypto?.randomUUID === "function"
+            ? globalThis.crypto.randomUUID()
+            : `${now.getTime()}-${now.getMilliseconds()}`,
+        occurrenceRunAt: schedule.nextRunAt,
+        resumeNextRunAt: computeNextRunAt(schedule.nextRunAt, schedule.repeat, now, schedule.intervalMinutes),
+        doneInstitutions: [],
+        attempts: 1,
+        anyError: false,
+      };
+
+  const leaseIso = new Date(now.getTime() + FANOUT_LEASE_MS).toISOString();
+  const { data, error } = await table(supabase)
+    .update({
+      next_run_at: leaseIso,
+      last_run_at: now.toISOString(),
+      updated_at: now.toISOString(),
+      fanout_progress: progress as unknown as Json,
+      enabled: true,
+    })
+    .eq("user_id", userId).eq("id", schedule.id)
+    .eq("next_run_at", schedule.nextRunAt).eq("enabled", true)
+    .select("id");
+  if (error) throw new Error(error.message);
+  if (!Array.isArray(data) || data.length === 0) return null;
+  return { kind: "run", progress };
+}
+
+/** Persist progress (done institutions + anyError) mid-fan-out. CAS on runToken
+ * so a stale tick cannot corrupt a newer occurrence. Returns false when the CAS
+ * lost (caller no longer owns the occurrence and must stop). */
+export async function checkpointFanoutInstitution(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  scheduleId: string,
+  progress: FanoutProgress,
+  now: Date
+): Promise<boolean> {
+  const { data, error } = await table(supabase)
+    .update({ fanout_progress: progress as unknown as Json, updated_at: now.toISOString() })
+    .eq("user_id", userId).eq("id", scheduleId)
+    .eq("fanout_progress->>runToken", progress.runToken)
+    .select("id");
+  if (error) throw new Error(error.message);
+  return Array.isArray(data) && data.length > 0;
+}
+
+/** Truncated fan-out: make the schedule immediately due again so the next tick
+ * resumes the remainder, keeping the checkpoint. */
+export async function deferFanoutResume(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  scheduleId: string,
+  runToken: string,
+  now: Date
+): Promise<void> {
+  const { error } = await table(supabase)
+    .update({ next_run_at: now.toISOString(), updated_at: now.toISOString() })
+    .eq("user_id", userId).eq("id", scheduleId)
+    .eq("fanout_progress->>runToken", runToken);
+  if (error) throw new Error(error.message);
+}
+
+/** Completed fan-out: clear the checkpoint and restore the real schedule -
+ * advance a repeating schedule to its frozen next occurrence, or disable a
+ * one-shot. CAS on runToken so a concurrent tick cannot double-finish. */
+export async function finishFanoutSchedule(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  scheduleId: string,
+  progress: FanoutProgress,
+  now: Date
+): Promise<void> {
+  const patch: Record<string, unknown> = { fanout_progress: null, updated_at: now.toISOString() };
+  if (progress.resumeNextRunAt) patch.next_run_at = progress.resumeNextRunAt;
+  else patch.enabled = false;
+  const { error } = await table(supabase)
+    .update(patch)
+    .eq("user_id", userId).eq("id", scheduleId)
+    .eq("fanout_progress->>runToken", progress.runToken);
+  if (error) throw new Error(error.message);
 }

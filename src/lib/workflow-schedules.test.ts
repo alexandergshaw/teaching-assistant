@@ -23,6 +23,7 @@ function makeRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
     provider: null,
     disabled_steps: [],
     interval_minutes: null,
+    fanout_progress: null,
     ...overrides,
   };
 }

@@ -432,12 +432,264 @@ export const STUDENT_REPOS: WorkflowDef = {
   ],
 };
 
+export const DRAFT_AND_POST_ANNOUNCEMENT: WorkflowDef = {
+  id: "draft-and-post-announcement",
+  preset: true,
+  name: "Draft and Post Announcement",
+  description:
+    "Draft a warm announcement from a one-line instruction, then post or schedule it to a Canvas course.",
+  steps: [
+    {
+      type: "draft-announcement",
+      bindings: {
+        instruction: { source: "runtime", fieldKey: "instruction" },
+      },
+    },
+    {
+      type: "post-announcement",
+      bindings: {
+        course: { source: "runtime", fieldKey: "course" },
+        announcementTitle: { source: "step", stepIndex: 0, outputKey: "announcementTitle" },
+        announcement: { source: "step", stepIndex: 0, outputKey: "announcement" },
+        postAt: { source: "runtime", fieldKey: "postAt" },
+      },
+    },
+  ],
+};
+
+export const WEEKLY_STUDY_GUIDE_PAGE: WorkflowDef = {
+  id: "weekly-study-guide-page",
+  preset: true,
+  name: "Weekly Study Guide Page",
+  description:
+    "Pick a course tile: finds its current week's topic, pulls cited research, and publishes it as a Canvas page for that course.",
+  steps: [
+    {
+      type: "load-course-tile",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        allowMissingRepo: { source: "literal", value: "1" },
+      },
+    },
+    {
+      type: "course-progress",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+      },
+    },
+    {
+      type: "research-topic",
+      bindings: {
+        topic: { source: "step", stepIndex: 1, outputKey: "topic" },
+        count: { source: "literal", value: "5" },
+      },
+    },
+    {
+      type: "publish-file-as-page",
+      bindings: {
+        course: { source: "step", stepIndex: 0, outputKey: "course" },
+        title: { source: "step", stepIndex: 1, outputKey: "moduleName" },
+        content: { source: "step", stepIndex: 2, outputKey: "results" },
+        published: { source: "literal", value: "1" },
+      },
+    },
+  ],
+};
+
+export const WEEKLY_LECTURE_NARRATION: WorkflowDef = {
+  id: "weekly-lecture-narration",
+  preset: true,
+  name: "Weekly Lecture Narration",
+  description:
+    "For this week's topic, generates a lecture script from the course repo and saves narrated audio to the course tile - fully unattended.",
+  steps: [
+    {
+      type: "course-progress",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+      },
+    },
+    {
+      type: "extract-topics-from-repo",
+      bindings: {
+        repo: { source: "runtime", fieldKey: "repo" },
+      },
+    },
+    {
+      type: "generate-lecture-script",
+      bindings: {
+        topic: { source: "step", stepIndex: 0, outputKey: "topic" },
+        objectives: { source: "step", stepIndex: 1, outputKey: "topics" },
+        minutes: { source: "literal", value: "10" },
+      },
+    },
+    {
+      type: "synthesize-narration",
+      bindings: {
+        text: { source: "step", stepIndex: 2, outputKey: "script" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        fileName: { source: "literal", value: "weekly-lecture.mp3" },
+      },
+    },
+  ],
+};
+
+export const WEEKLY_LECTURE_VIDEO: WorkflowDef = {
+  id: "weekly-lecture-video",
+  preset: true,
+  name: "Weekly Lecture Video",
+  description:
+    "Turns this week's lecture script into an in-house avatar talking-head video. Run again or schedule a follow-up poll if the render is still processing.",
+  steps: [
+    {
+      type: "course-progress",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+      },
+    },
+    {
+      type: "extract-topics-from-repo",
+      bindings: {
+        repo: { source: "runtime", fieldKey: "repo" },
+      },
+    },
+    {
+      type: "generate-lecture-script",
+      bindings: {
+        topic: { source: "step", stepIndex: 0, outputKey: "topic" },
+        objectives: { source: "step", stepIndex: 1, outputKey: "topics" },
+        minutes: { source: "literal", value: "10" },
+      },
+    },
+    {
+      type: "generate-avatar-video",
+      bindings: {
+        script: { source: "step", stepIndex: 2, outputKey: "script" },
+      },
+    },
+    {
+      type: "poll-avatar-video",
+      bindings: {
+        videoId: { source: "step", stepIndex: 3, outputKey: "videoId" },
+      },
+    },
+  ],
+};
+
+export const QUIZ_FROM_REPO: WorkflowDef = {
+  id: "quiz-from-repo",
+  preset: true,
+  name: "Quiz from Repo",
+  description:
+    "Mines a repo's topics, generates a quiz with answer key, and imports the questions into an existing Canvas quiz.",
+  steps: [
+    {
+      type: "extract-topics-from-repo",
+      bindings: {
+        repo: { source: "runtime", fieldKey: "repo" },
+      },
+    },
+    {
+      type: "generate-quiz-from-material",
+      bindings: {
+        material: { source: "step", stepIndex: 0, outputKey: "topics" },
+        count: { source: "literal", value: "10" },
+      },
+    },
+    {
+      type: "import-quiz-questions",
+      bindings: {
+        course: { source: "runtime", fieldKey: "course" },
+        quizId: { source: "runtime", fieldKey: "quizId" },
+        questionsJson: { source: "step", stepIndex: 1, outputKey: "questionsJson" },
+      },
+    },
+  ],
+};
+
+export const ASSIGNMENT_KIT: WorkflowDef = {
+  id: "assignment-kit",
+  preset: true,
+  name: "Assignment Kit",
+  description:
+    "From a repo, generates a full assignment brief, rubric, model answer, and full-credit checklist in one unattended pass.",
+  steps: [
+    {
+      type: "extract-topics-from-repo",
+      bindings: {
+        repo: { source: "runtime", fieldKey: "repo" },
+      },
+    },
+    {
+      type: "generate-assignment-brief",
+      bindings: {
+        objectives: { source: "step", stepIndex: 0, outputKey: "topics" },
+      },
+    },
+    {
+      type: "generate-rubric-offline",
+      bindings: {
+        instructions: { source: "step", stepIndex: 1, outputKey: "assignment" },
+      },
+    },
+    {
+      type: "generate-model-answer",
+      bindings: {
+        instructions: { source: "step", stepIndex: 1, outputKey: "assignment" },
+        rubric: { source: "step", stepIndex: 2, outputKey: "rubric" },
+      },
+    },
+    {
+      type: "generate-full-credit-checklist",
+      bindings: {
+        instructions: { source: "step", stepIndex: 1, outputKey: "assignment" },
+        rubric: { source: "step", stepIndex: 2, outputKey: "rubric" },
+      },
+    },
+  ],
+};
+
+export const GROW_KNOWLEDGE_BASE: WorkflowDef = {
+  id: "grow-knowledge-base",
+  preset: true,
+  name: "Grow Knowledge Base",
+  description:
+    "Measures how well a topic is covered, runs the research loop to fill gaps, then re-measures to show the improvement.",
+  steps: [
+    {
+      type: "measure-knowledge-gap",
+      bindings: {
+        topic: { source: "runtime", fieldKey: "topic" },
+      },
+    },
+    {
+      type: "run-research-loop",
+      bindings: {
+        topic: { source: "runtime", fieldKey: "topic" },
+      },
+    },
+    {
+      type: "measure-knowledge-gap",
+      bindings: {
+        topic: { source: "runtime", fieldKey: "topic" },
+      },
+    },
+  ],
+};
+
 /**
  * Merge built-in presets with custom workflows.
  * Returns presets first, then custom workflows.
  */
 export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
   return [
+    DRAFT_AND_POST_ANNOUNCEMENT,
+    WEEKLY_STUDY_GUIDE_PAGE,
+    WEEKLY_LECTURE_NARRATION,
+    WEEKLY_LECTURE_VIDEO,
+    QUIZ_FROM_REPO,
+    ASSIGNMENT_KIT,
+    GROW_KNOWLEDGE_BASE,
     COURSE_KICKOFF,
     COURSE_REFRESH,
     STARTER_MATERIALS,

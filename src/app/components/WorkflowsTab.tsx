@@ -41,7 +41,7 @@ import {
 } from "@/lib/workflow-triggers";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
 import { isScopeableListType, expandScopedValue, ALL_SCOPE, resolveClassRepoRef } from "@/lib/workflows/scope";
-import { isInstitutionFanout } from "@/lib/workflows/fanout";
+import { isInstitutionFanout, resolveFanoutInstitutions, scopeForInstitution } from "@/lib/workflows/fanout";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
 import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction, runSubmissionCodeAction } from "@/app/actions";
@@ -426,21 +426,23 @@ export default function WorkflowsTab() {
     selectedDef ? new Set(loadDisabledSteps(selectedDef.id)) : new Set()
   );
 
+  type StepState = {
+    status: "pending" | "running" | "done" | "error" | "disabled";
+    progress: string | null;
+    summary: StepRunSummary | null;
+    error: string | null;
+  };
   const [runState, setRunState] = useState<
-    Array<{
-      status: "pending" | "running" | "done" | "error" | "disabled";
-      progress: string | null;
-      summary: StepRunSummary | null;
-      error: string | null;
-    }>
+    Array<{ institution: string | null; steps: StepState[] }>
   >([]);
 
   const [running, setRunning] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [runPause, setRunPause] = useState<{ stepIndex: number; message: string } | null>(null);
+  const [runPause, setRunPause] = useState<{ groupIndex: number; stepIndex: number; message: string } | null>(null);
   const pauseResolverRef = useRef<{ resolve: (go: boolean) => void } | null>(null);
 
   const [runInput, setRunInput] = useState<{
+    groupIndex: number;
     stepIndex: number;
     message: string;
     kind: "text" | "choice" | "upload" | "workflow" | "table";
@@ -1339,21 +1341,35 @@ export default function WorkflowsTab() {
     setRunInputBusy(false);
     setRunInputError(null);
     inputResolverRef.current = null;
-    setRunState(
+
+    // Fan out across every configured institution when the scope is institution
+    // "*"; otherwise a single sub-run pinned to the active school. Mirrors
+    // runWorkflowUnattended so attended and unattended cover the same schools.
+    let fanoutInstitutions: Array<string | null>;
+    if (isInstitutionFanout(selectedDef.scope)) {
+      const resolved = await resolveFanoutInstitutions();
+      if ("error" in resolved) {
+        setValidationError(`Could not list institutions: ${resolved.error}`);
+        setRunning(false);
+        return;
+      }
+      if (resolved.list.length === 0) {
+        setValidationError("No institutions are configured on the server.");
+        setRunning(false);
+        return;
+      }
+      fanoutInstitutions = resolved.list;
+    } else {
+      fanoutInstitutions = [null];
+    }
+    const makePendingSteps = (): StepState[] =>
       expanded.steps.map(() => ({
-        status: "pending",
+        status: "pending" as const,
         progress: null,
         summary: null,
         error: null,
-      }))
-    );
-
-    const stepOutputs: Array<Record<string, unknown>> = [];
-    const failedSteps = new Set<number>();
-    // Steps the user disabled are added to failedSteps too (so dependents
-    // cascade-skip), but a disable is not a genuine failure. Tracked
-    // separately so the post-run handoff guard can tell the two apart.
-    const disabledRunIndices = new Set<number>();
+      }));
+    setRunState(fanoutInstitutions.map((institution) => ({ institution, steps: makePendingSteps() })));
 
     const helpers: StepRunHelpers = {
       activeInstitution: activeInstitution || null,
@@ -1443,7 +1459,23 @@ export default function WorkflowsTab() {
 
     // Expanded steps carry bindings already translated into expanded
     // coordinates, so the runner indexes stepOutputs directly.
-    for (let i = 0; i < expanded.steps.length; i++) {
+    let anyGenuineFailure = false;
+    let aborted = false;
+
+    for (let g = 0; g < fanoutInstitutions.length && !aborted; g++) {
+      const institution = fanoutInstitutions[g];
+      const groupScope = institution
+        ? scopeForInstitution(selectedDef.scope!, institution)
+        : selectedDef.scope;
+      const groupHelpers: StepRunHelpers = institution
+        ? { ...helpers, activeInstitution: institution }
+        : helpers;
+
+      const stepOutputs: Array<Record<string, unknown>> = [];
+      const failedSteps = new Set<number>();
+      const disabledRunIndices = new Set<number>();
+
+      for (let i = 0; i < expanded.steps.length; i++) {
       const step = expanded.steps[i];
       const def = getStepDefinition(step.type);
 
@@ -1454,12 +1486,14 @@ export default function WorkflowsTab() {
       if (disabledSteps.has(expanded.topIndices[i])) {
         setRunState((prev) => {
           const next = [...prev];
-          next[i] = {
+          const steps = [...next[g].steps];
+          steps[i] = {
             status: "disabled",
             progress: null,
             summary: null,
             error: null,
           };
+          next[g] = { ...next[g], steps };
           return next;
         });
         failedSteps.add(i);
@@ -1469,7 +1503,9 @@ export default function WorkflowsTab() {
 
       setRunState((prev) => {
         const next = [...prev];
-        next[i] = { ...next[i], status: "running" };
+        const steps = [...next[g].steps];
+        steps[i] = { ...steps[i], status: "running" };
+        next[g] = { ...next[g], steps };
         return next;
       });
 
@@ -1494,10 +1530,10 @@ export default function WorkflowsTab() {
               // any run-form value, which for a covered input can only come from
               // a sibling field sharing the key), so an "all" scope is not
               // narrowed by a single-input sibling.
-              const runVal = scopeCoversType(selectedDef.scope, spec.type)
+              const runVal = scopeCoversType(groupScope, spec.type)
                 ? ""
                 : values[binding.fieldKey] ?? "";
-              resolvedInputs[spec.key] = applyWorkflowScope(spec.type, runVal, selectedDef.scope);
+              resolvedInputs[spec.key] = applyWorkflowScope(spec.type, runVal, groupScope);
             }
           } else if (binding.source === "step") {
             if (failedSteps.has(binding.stepIndex)) {
@@ -1523,50 +1559,55 @@ export default function WorkflowsTab() {
           // Canvas-course "*" enumerates the WORKFLOW'S scoped institution when
           // set (not the ambient top-bar one), so it targets the right school.
           if (isScopeableListType(spec.type) && typeof resolvedInputs[spec.key] === "string") {
-            const scopeInst = applyWorkflowScope("institution", "", selectedDef.scope).trim();
+            const scopeInst = applyWorkflowScope("institution", "", groupScope).trim();
             resolvedInputs[spec.key] = await expandScopedValue(
               spec.type,
               resolvedInputs[spec.key] as string,
-              { activeInstitution: (scopeInst || activeInstitution) || null }
+              { activeInstitution: (scopeInst || groupHelpers.activeInstitution) || null }
             );
           }
 
           if (spec.type === "repo" && typeof resolvedInputs[spec.key] === "string") {
-            resolvedInputs[spec.key] = await resolveClassRepoRef(resolvedInputs[spec.key] as string, selectedDef.scope);
+            resolvedInputs[spec.key] = await resolveClassRepoRef(resolvedInputs[spec.key] as string, groupScope);
           }
         }
 
         const onProgress = (text: string) => {
           setRunState((prev) => {
             const next = [...prev];
-            next[i] = { ...next[i], progress: text };
+            const steps = [...next[g].steps];
+            steps[i] = { ...steps[i], progress: text };
+            next[g] = { ...next[g], steps };
             return next;
           });
         };
 
-        const result = await def.run(resolvedInputs, helpers, onProgress);
+        const result = await def.run(resolvedInputs, groupHelpers, onProgress);
         stepOutputs[i] = result.outputs;
 
         setRunState((prev) => {
           const next = [...prev];
-          next[i] = {
+          const steps = [...next[g].steps];
+          steps[i] = {
             status: "done",
             progress: null,
             summary: result.summary,
             error: null,
           };
+          next[g] = { ...next[g], steps };
           return next;
         });
 
         if (result.requireConfirmation) {
           await new Promise<void>((resolve) => {
-            setRunPause({ stepIndex: i, message: result.requireConfirmation! });
+            setRunPause({ groupIndex: g, stepIndex: i, message: result.requireConfirmation! });
             pauseResolverRef.current = {
               resolve: (go: boolean) => {
                 setRunPause(null);
                 pauseResolverRef.current = null;
                 if (!go) {
                   failedSteps.add(i);
+                  aborted = true;
                 }
                 resolve();
               },
@@ -1600,6 +1641,7 @@ export default function WorkflowsTab() {
 
           await new Promise<void>((resolve) => {
             setRunInput({
+              groupIndex: g,
               stepIndex: i,
               message: result.requireInput!.message,
               kind: result.requireInput!.kind,
@@ -1620,6 +1662,7 @@ export default function WorkflowsTab() {
                 if (value === null) {
                   if (!result.requireInput!.optional) {
                     failedSteps.add(i);
+                    aborted = true;
                   }
                 } else {
                   const merged =
@@ -1657,16 +1700,20 @@ export default function WorkflowsTab() {
           err instanceof Error ? err.message : String(err);
         setRunState((prev) => {
           const next = [...prev];
-          next[i] = {
+          const steps = [...next[g].steps];
+          steps[i] = {
             status: "error",
             progress: null,
             summary: null,
             error: errorMsg,
           };
+          next[g] = { ...next[g], steps };
           return next;
         });
         failedSteps.add(i);
       }
+    }
+      anyGenuineFailure = anyGenuineFailure || failedSteps.size > disabledRunIndices.size;
     }
 
     // A genuine failure or cancel must not fire the mid-run handoff - but
@@ -1674,7 +1721,7 @@ export default function WorkflowsTab() {
     // cascade, so they do not count as failures here. If the only entries
     // are the disabled steps, the run had no real failure and a handoff
     // emitted by a step that actually ran should still fire.
-    if (failedSteps.size > disabledRunIndices.size) {
+    if (anyGenuineFailure) {
       setPendingHandoff(null);
     }
 
@@ -1683,7 +1730,7 @@ export default function WorkflowsTab() {
     // only "failures" are user-disabled steps is not a genuine failure (mirrors
     // the handoff guard above).
     if (user && supabase && selectedDef) {
-      const genuineFailure = failedSteps.size > disabledRunIndices.size;
+      const genuineFailure = anyGenuineFailure;
       void recordWorkflowRun(supabase, user.id, {
         workflowId: selectedDef.id,
         workflowName: selectedDef.name,
@@ -2795,7 +2842,20 @@ export default function WorkflowsTab() {
                   {runState.length > 0 && (
                     <div style={{ marginTop: 28 }}>
                       <h2 style={{ fontSize: "1rem", marginBottom: 16 }}>Run Progress</h2>
-                      {runState.map((state, i) => {
+                      {runState.some((grp) => grp.institution !== null) && (
+                        <p className={styles.fieldHint} style={{ margin: "0 0 12px 0" }}>
+                          {runState.filter((grp) => grp.steps.every((s) => s.status !== "error")).length}
+                          /{runState.length} institutions ok
+                        </p>
+                      )}
+                      {runState.map((group, g) => (
+                        <Fragment key={group.institution ?? g}>
+                          {group.institution && (
+                            <h3 style={{ fontSize: "0.85rem", fontWeight: 600, margin: g === 0 ? "0 0 4px 0" : "20px 0 4px 0", color: "var(--hint-text)" }}>
+                              {group.institution}
+                            </h3>
+                          )}
+                          {group.steps.map((state, i) => {
                         const stepDef = getStepDefinition(expanded.steps[i]?.type ?? "");
 
                         const badgeClass =
@@ -2869,7 +2929,7 @@ export default function WorkflowsTab() {
                               </div>
                             )}
 
-                            {runPause && runPause.stepIndex === i && (
+                            {runPause && runPause.groupIndex === g && runPause.stepIndex === i && (
                               <div style={{ marginTop: 12 }}>
                                 <p className={styles.fieldHint}>{runPause.message}</p>
                                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -2895,7 +2955,7 @@ export default function WorkflowsTab() {
                               </div>
                             )}
 
-                            {runInput && runInput.stepIndex === i && (
+                            {runInput && runInput.groupIndex === g && runInput.stepIndex === i && (
                               <div style={{ marginTop: 12 }}>
                                 <p className={styles.fieldHint}>{runInput.message}</p>
 
@@ -3673,6 +3733,8 @@ export default function WorkflowsTab() {
                           </div>
                         );
                       })}
+                        </Fragment>
+                      ))}
                     </div>
                   )}
                 </>

@@ -268,3 +268,42 @@ describe("collectRuntimeFields - module input under a scoped course", () => {
     expect(fields.map((f) => f.fieldKey)).toEqual(["modules"]);
   });
 });
+
+describe("collectRuntimeFields - courseDerived input under a scoped course", () => {
+  const inputs: Record<string, StepInputSpec[]> = {
+    content: [
+      { key: "hubCourse", label: "Course tile", type: "hubCourse", required: false },
+      { key: "objectives", label: "Module objectives", type: "longtext", required: false, courseDerived: true },
+      { key: "context", label: "Context", type: "longtext", required: false },
+    ],
+  };
+  const lookup = (type: string) => inputs[type];
+  const def: WorkflowDef = {
+    id: "w",
+    name: "W",
+    description: "",
+    steps: [
+      {
+        type: "content",
+        bindings: {
+          hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+          objectives: { source: "runtime", fieldKey: "objectives" },
+          context: { source: "runtime", fieldKey: "context" },
+        },
+      },
+    ],
+  };
+
+  it("drops the courseDerived objectives when a course is scoped, keeps a plain longtext", () => {
+    const scoped: WorkflowDef = { ...def, scope: { hubCourse: "tile1" } };
+    const fields = collectRuntimeFields(scoped, lookup);
+    // hubCourse concrete -> covered (dropped); objectives is courseDerived and a
+    // course is scoped -> derived, not asked; context is a plain longtext -> kept.
+    expect(fields.map((f) => f.fieldKey)).toEqual(["context"]);
+  });
+
+  it("still asks for the objectives when no course is scoped", () => {
+    const fields = collectRuntimeFields(def, lookup);
+    expect(fields.map((f) => f.fieldKey).sort()).toEqual(["context", "hubCourse", "objectives"]);
+  });
+});

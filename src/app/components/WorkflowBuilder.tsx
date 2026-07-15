@@ -847,7 +847,7 @@ function InputBindingRow({
   const scopeFamily = scopeFamilyForType(input.type);
   const isScopeable = scopeFamily !== null;
   const scopeFamilyValue = scopeFamily && scope ? (scope[scopeFamily] ?? "").trim() : "";
-  const moduleFromScope = isModuleType(input.type) && !!courseScoped;
+  const moduleFromScope = (isModuleType(input.type) || !!input.courseDerived) && !!courseScoped;
   const showScopeOption = isScopeable || moduleFromScope;
 
   const compatibleStepOutputs: Array<{

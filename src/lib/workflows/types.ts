@@ -108,6 +108,10 @@ export interface StepInputSpec {
   /** type "uploads" only: the file picker's accept filter (defaults to LMS
    * export archives when absent). */
   accept?: string;
+  /** When true, this input is derived from the step's workflow-scoped course's
+   * current module - shown as "From workflow scope" and not asked at run time,
+   * the same as a course-derived module input. */
+  courseDerived?: boolean;
 }
 
 export interface StepOutputSpec {
@@ -325,7 +329,7 @@ export function collectRuntimeFields(
         if (scopeCoversType(def.scope, spec.type)) continue;
         // A module input whose step's course is scoped is derived from that
         // course, so it is not asked either.
-        if (isModuleType(spec.type) && stepCourseScoped) continue;
+        if ((isModuleType(spec.type) || spec.courseDerived) && stepCourseScoped) continue;
         const fieldKey = binding.fieldKey;
         if (!seen.has(fieldKey)) {
           seen.add(fieldKey);

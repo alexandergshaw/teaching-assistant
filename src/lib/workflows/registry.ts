@@ -603,6 +603,33 @@ async function gatherModuleMaterials(
   return { moduleName, materialsText: chunks.join(""), notes, materialsSource };
 }
 
+// The Module objectives for a content step: the explicitly provided text, or -
+// when empty and a course tile is given (typically from workflow scope) -
+// derived from that tile's CURRENT module/week schedule row (topic + the week's
+// learning-outcomes summary). Lets a scoped workflow produce content for "this
+// week" with no prompt. Returns "" when nothing can be derived.
+export async function resolveModuleObjectives(values: Record<string, unknown>): Promise<string> {
+  const explicit = String(values.objectives ?? "").trim();
+  if (explicit) return explicit;
+  const hubCourseId = String(values.hubCourse ?? "").trim();
+  if (!hubCourseId) return "";
+  const list = await listCourseHubAction();
+  if ("error" in list) return "";
+  const tile = list.courses.find((c) => c.id === hubCourseId);
+  if (!tile) return "";
+  const rawWeek = currentCourseWeek(tile.startDate, Date.now());
+  if (rawWeek === null) return "";
+  const status = courseProgressStatus(rawWeek, tile.weeks);
+  if (status === "not-started" || status === "complete") return "";
+  const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
+  const entry = csvToSchedule(tile.csvData ?? "").find((e) => e.week === displayWeek);
+  if (!entry) return "";
+  const parts: string[] = [];
+  if (entry.topic?.trim()) parts.push(`Topic: ${entry.topic.trim()}`);
+  if (entry.summary?.trim()) parts.push(entry.summary.trim());
+  return parts.join("\n");
+}
+
 // Classify a resolve-rubric source line: a Canvas assignment/discussion URL is
 // an LMS rubric probe; an owner/name or github.com URL is a repo probe; a bare
 // topic goes to the rubric bank; a URL matching neither handler (e.g. a bare
@@ -6829,10 +6856,18 @@ export const STEP_REGISTRY: StepDefinition[] = [
     description: "Produce a module overview plus key-terms text from the week's objectives, ready to save as a module intro.",
     inputs: [
       {
+        key: "hubCourse",
+        label: "Course tile (optional)",
+        type: "hubCourse",
+        required: false,
+        help: "Scope the workflow to a course tile (or bind one) to auto-fill the objectives from its current module - no need to paste them.",
+      },
+      {
         key: "objectives",
         label: "Module objectives",
         type: "longtext",
-        required: true,
+        required: false,
+        courseDerived: true,
       },
       {
         key: "context",
@@ -6846,8 +6881,10 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "intro", label: "Module intro", type: "longtext" },
     ],
     run: async (values, helpers, onProgress) => {
-      const objectives = String(values.objectives ?? "").trim();
-      if (!objectives) throw new Error("Provide the module objectives.");
+      const objectives = await resolveModuleObjectives(values);
+      if (!objectives) {
+        throw new Error("Provide the module objectives, or scope/bind a course tile to derive them from its current module.");
+      }
       const context = String(values.context ?? "");
 
       onProgress("Generating module intro...");
@@ -6868,15 +6905,24 @@ export const STEP_REGISTRY: StepDefinition[] = [
     name: "Generate a lesson plan",
     description: "Generate a lesson plan (slides and talking points) from a module's objectives.",
     inputs: [
-      { key: "objectives", label: "Module objectives", type: "longtext", required: true },
+      {
+        key: "hubCourse",
+        label: "Course tile (optional)",
+        type: "hubCourse",
+        required: false,
+        help: "Scope the workflow to a course tile (or bind one) to auto-fill the objectives from its current module - no need to paste them.",
+      },
+      { key: "objectives", label: "Module objectives", type: "longtext", required: false, courseDerived: true },
       { key: "context", label: "Context", type: "longtext", required: false, help: "Optional source material." },
     ],
     outputs: [
       { key: "lessonPlan", label: "Lesson plan", type: "longtext" },
     ],
     run: async (values, helpers, onProgress) => {
-      const objectives = String(values.objectives ?? "").trim();
-      if (!objectives) throw new Error("Provide the module objectives.");
+      const objectives = await resolveModuleObjectives(values);
+      if (!objectives) {
+        throw new Error("Provide the module objectives, or scope/bind a course tile to derive them from its current module.");
+      }
       const context = String(values.context ?? "");
 
       onProgress("Generating lesson plan...");
@@ -6911,10 +6957,18 @@ export const STEP_REGISTRY: StepDefinition[] = [
     description: "Produce worked examples per concept from a module's objectives, for use in a lecture or handout.",
     inputs: [
       {
+        key: "hubCourse",
+        label: "Course tile (optional)",
+        type: "hubCourse",
+        required: false,
+        help: "Scope the workflow to a course tile (or bind one) to auto-fill the objectives from its current module - no need to paste them.",
+      },
+      {
         key: "objectives",
         label: "Module objectives",
         type: "longtext",
-        required: true,
+        required: false,
+        courseDerived: true,
       },
       {
         key: "context",
@@ -6940,9 +6994,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
       },
     ],
     run: async (values, helpers, onProgress) => {
-      const objectives = String(values.objectives ?? "").trim();
+      const objectives = await resolveModuleObjectives(values);
       if (!objectives) {
-        throw new Error("Provide the module objectives.");
+        throw new Error("Provide the module objectives, or scope/bind a course tile to derive them from its current module.");
       }
 
       const context = String(values.context ?? "");
@@ -7645,15 +7699,24 @@ export const STEP_REGISTRY: StepDefinition[] = [
     name: "Generate an assignment",
     description: "Draft a structured assignment (overview, steps, deliverables) from a module's objectives.",
     inputs: [
-      { key: "objectives", label: "Module objectives", type: "longtext", required: true },
+      {
+        key: "hubCourse",
+        label: "Course tile (optional)",
+        type: "hubCourse",
+        required: false,
+        help: "Scope the workflow to a course tile (or bind one) to auto-fill the objectives from its current module - no need to paste them.",
+      },
+      { key: "objectives", label: "Module objectives", type: "longtext", required: false, courseDerived: true },
       { key: "context", label: "Context", type: "longtext", required: false, help: "Optional source material." },
     ],
     outputs: [
       { key: "assignment", label: "Assignment", type: "longtext" },
     ],
     run: async (values, helpers, onProgress) => {
-      const objectives = String(values.objectives ?? "").trim();
-      if (!objectives) throw new Error("Provide the module objectives.");
+      const objectives = await resolveModuleObjectives(values);
+      if (!objectives) {
+        throw new Error("Provide the module objectives, or scope/bind a course tile to derive them from its current module.");
+      }
       const context = String(values.context ?? "");
       onProgress("Generating assignment...");
       const r = await generateAssignmentAction(objectives, context, [], helpers.provider);

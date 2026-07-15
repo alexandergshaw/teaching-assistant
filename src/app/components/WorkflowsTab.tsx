@@ -1064,6 +1064,7 @@ export default function WorkflowsTab() {
   useEffect(() => {
     const needsHubCourse =
       runtimeFields.some((f) => f.type === "hubCourse" || f.type === "hubCourseList") ||
+      editing ||
       scheduleForm !== null ||
       triggerForm !== null ||
       (schedules ?? []).some((s) => s.courseId);
@@ -1092,7 +1093,7 @@ export default function WorkflowsTab() {
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, hubCourses, scheduleForm, schedules, triggerForm]);
+  }, [runtimeFields, hubCourses, scheduleForm, schedules, triggerForm, editing]);
 
   useEffect(() => {
     const needsLmsCourseList = runtimeFields.some((f) => f.type === "lmsCourseList");
@@ -1129,7 +1130,8 @@ export default function WorkflowsTab() {
   }, [runtimeFields, lmsCourseOptions, activeInstitution]);
 
   useEffect(() => {
-    const needsOrg = runtimeFields.some((f) => f.type === "org" || f.type === "orgList");
+    const needsOrg =
+      editing || runtimeFields.some((f) => f.type === "org" || f.type === "orgList");
     if (!needsOrg || orgs !== null) return;
 
     let cancelled = false;
@@ -1155,7 +1157,7 @@ export default function WorkflowsTab() {
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, orgs]);
+  }, [runtimeFields, orgs, editing]);
 
   const handleWorkflowChange = (newId: string) => {
     setSelectedWorkflowId(newId);
@@ -2090,6 +2092,7 @@ export default function WorkflowsTab() {
           <WorkflowBuilder
             def={selectedDef}
             others={workflows.filter((w) => w.id !== selectedDef.id)}
+            picker={{ hubCourses, institutions, orgs }}
             onChange={(next) => {
               updateCustom(custom.map((w) => (w.id === next.id ? next : w)));
               if (user && supabase) {

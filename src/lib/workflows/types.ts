@@ -36,6 +36,25 @@ export type WorkflowValueType =
   | "courseList"
   | "orgList";
 
+// Value types that can carry a fixed ("preset") value in the builder, so a
+// workflow can hard-set the input and run unmonitored without prompting. Beyond
+// the plain scalar types, this includes the course-tile / Canvas-course / org /
+// institution entity types, which the builder renders with a proper picker
+// (one / several / all for the scopeable list types).
+export const LITERAL_CAPABLE_TYPES: ReadonlySet<string> = new Set([
+  "text",
+  "longtext",
+  "number",
+  "boolean",
+  "hubCourse",
+  "hubCourseList",
+  "lmsCourse",
+  "lmsCourseList",
+  "org",
+  "orgList",
+  "institution",
+]);
+
 // A single-item value type -> its scopeable list type. Lets a single-item
 // output from an earlier step bind a scopeable ("one / several / all") list
 // input: the single id/url is simply a one-element list to the consuming step.

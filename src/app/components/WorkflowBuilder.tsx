@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Autocomplete, Button, TextField, MenuItem, createFilterOptions } from "@mui/material";
+import { Autocomplete, Button, TextField, MenuItem, Checkbox, FormControlLabel, createFilterOptions } from "@mui/material";
 import Typeahead from "./ui/Typeahead";
 import {
   type WorkflowDef,
@@ -10,7 +10,17 @@ import {
   type StepInputSpec,
   expandWorkflowDef,
   outputFeedsInput,
+  LITERAL_CAPABLE_TYPES,
 } from "@/lib/workflows/types";
+import { ALL_SCOPE } from "@/lib/workflows/scope";
+
+// Picker data the builder threads down so a "Preset value" (literal) binding can
+// be filled with a real course tile / institution / org instead of raw text.
+export interface BuilderPickerData {
+  hubCourses: Array<{ id: string; name: string }> | null;
+  institutions: string[];
+  orgs: string[] | null;
+}
 import {
   STEP_REGISTRY,
   getStepDefinition,
@@ -86,12 +96,11 @@ function normalizeBindings(def: WorkflowDef): WorkflowDef {
           };
         }
       } else if (binding.source === "literal") {
-        // Boolean literals ("1"/"" toggles like confirmMissingRepo and
-        // includeInstructions) are literal-capable too; their value is always
-        // a string, so preserve them rather than demote to a runtime field.
-        if (
-          ["text", "longtext", "number", "boolean"].includes(input.type)
-        ) {
+        // Scalar literals (text/number/boolean toggles) AND the course /
+        // institution / org entity types can carry a fixed value; preserve
+        // those so a preset survives normalization. Everything else demotes to
+        // an ask-when-running field.
+        if (LITERAL_CAPABLE_TYPES.has(input.type)) {
           normalizedBindings[input.key] = binding;
         } else {
           normalizedBindings[input.key] = {
@@ -166,11 +175,13 @@ function remapStepReferences(
 export default function WorkflowBuilder({
   def,
   others,
+  picker,
   onChange,
   onDone,
 }: {
   def: WorkflowDef;
   others: WorkflowDef[];
+  picker: BuilderPickerData;
   onChange: (def: WorkflowDef) => void;
   onDone: () => void;
 }) {
@@ -427,6 +438,7 @@ export default function WorkflowBuilder({
             onMove={handleMoveStep}
             onRemove={handleRemoveStep}
             onBindingChange={handleBindingChange}
+            picker={picker}
           />
         ))}
 
@@ -583,6 +595,7 @@ function StepCard({
   onMove,
   onRemove,
   onBindingChange,
+  picker,
 }: {
   stepIndex: number;
   step: WorkflowStepConfig;
@@ -599,6 +612,7 @@ function StepCard({
     outputKey?: string,
     literalValue?: string
   ) => void;
+  picker: BuilderPickerData;
 }) {
   // Include steps have no binding rows to edit - they run the referenced
   // workflow's CURRENT steps at run time.
@@ -729,6 +743,7 @@ function StepCard({
           binding={step.bindings[input.key]}
           allStepDefs={allSteps.map((s) => getStepDefinition(s.type))}
           onBindingChange={onBindingChange}
+          picker={picker}
         />
       ))}
     </div>
@@ -741,6 +756,7 @@ function InputBindingRow({
   binding,
   allStepDefs,
   onBindingChange,
+  picker,
 }: {
   stepIndex: number;
   input: StepInputSpec;
@@ -754,6 +770,7 @@ function InputBindingRow({
     outputKey?: string,
     literalValue?: string
   ) => void;
+  picker: BuilderPickerData;
 }) {
   let currentSource: "runtime" | "step" | "literal" = "runtime";
   let currentStepIndex: number | undefined;
@@ -797,8 +814,15 @@ function InputBindingRow({
     })),
   ];
 
-  if (["text", "longtext", "number"].includes(input.type)) {
-    options.push({ value: "literal", label: "Fixed value" });
+  // A preset ("fixed value") is offered for scalars AND the course /
+  // institution / org entity types, so a workflow can hard-set the target and
+  // run unmonitored. Entity presets get a real picker below (one / several /
+  // all for the list types).
+  if (LITERAL_CAPABLE_TYPES.has(input.type) && input.type !== "boolean") {
+    options.push({
+      value: "literal",
+      label: ["text", "longtext", "number"].includes(input.type) ? "Fixed value" : "Preset value",
+    });
   }
 
   const selectValue =
@@ -854,21 +878,159 @@ function InputBindingRow({
       </TextField>
 
       {currentSource === "literal" && (
-        <TextField
-          size="small"
-          type={input.type === "number" ? "number" : "text"}
+        <LiteralEditor
+          type={input.type}
           value={currentLiteralValue}
-          onChange={(e) => {
-            onBindingChange(
-              stepIndex,
-              input.key,
-              "literal",
-              undefined,
-              undefined,
-              e.target.value
-            );
-          }}
-          style={{ flex: 0, minWidth: "120px" }}
+          picker={picker}
+          onChange={(v) =>
+            onBindingChange(stepIndex, input.key, "literal", undefined, undefined, v)
+          }
+        />
+      )}
+    </div>
+  );
+}
+
+// The editor for a "Preset value" (literal) binding, rendered by input type: a
+// real picker for the course / institution / org entity types (with a one /
+// several / all scope for the list types), and a plain field for scalars and
+// Canvas-course URLs (which the builder cannot enumerate without a live
+// institution context).
+function LiteralEditor({
+  type,
+  value,
+  picker,
+  onChange,
+}: {
+  type: string;
+  value: string;
+  picker: BuilderPickerData;
+  onChange: (value: string) => void;
+}) {
+  const sx = { flex: 1, minWidth: 200 };
+
+  if (type === "hubCourse") {
+    const opts = picker.hubCourses ?? [];
+    const missing = !!value && !opts.some((c) => c.id === value);
+    return (
+      <TextField select size="small" value={value} onChange={(e) => onChange(e.target.value)} sx={sx}
+        helperText={picker.hubCourses === null ? "Loading courses..." : opts.length === 0 ? "No course tiles yet." : undefined}>
+        <MenuItem value="">Choose a course tile</MenuItem>
+        {missing && <MenuItem value={value}>{value} (unavailable)</MenuItem>}
+        {opts.map((c) => (
+          <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+        ))}
+      </TextField>
+    );
+  }
+  if (type === "institution") {
+    const missing = !!value && !picker.institutions.includes(value);
+    return (
+      <TextField select size="small" value={value} onChange={(e) => onChange(e.target.value)} sx={sx}>
+        <MenuItem value="">Choose an institution</MenuItem>
+        {missing && <MenuItem value={value}>{value} (unavailable)</MenuItem>}
+        {picker.institutions.map((i) => (
+          <MenuItem key={i} value={i}>{i}</MenuItem>
+        ))}
+      </TextField>
+    );
+  }
+  if (type === "org") {
+    const opts = picker.orgs ?? [];
+    const missing = !!value && !opts.includes(value);
+    return (
+      <TextField select size="small" value={value} onChange={(e) => onChange(e.target.value)} sx={sx}
+        helperText={picker.orgs === null ? "Loading organizations..." : opts.length === 0 ? "No organizations." : undefined}>
+        <MenuItem value="">Choose an organization</MenuItem>
+        {missing && <MenuItem value={value}>{value} (unavailable)</MenuItem>}
+        {opts.map((o) => (
+          <MenuItem key={o} value={o}>{o}</MenuItem>
+        ))}
+      </TextField>
+    );
+  }
+  if (type === "hubCourseList") {
+    return (
+      <ScopePicker
+        value={value}
+        onChange={onChange}
+        options={(picker.hubCourses ?? []).map((c) => ({ value: c.id, label: c.name }))}
+        allLabel="All course tiles"
+        loading={picker.hubCourses === null}
+      />
+    );
+  }
+  if (type === "orgList") {
+    return (
+      <ScopePicker
+        value={value}
+        onChange={onChange}
+        options={(picker.orgs ?? []).map((o) => ({ value: o, label: o }))}
+        allLabel="All organizations"
+        loading={picker.orgs === null}
+      />
+    );
+  }
+  // lmsCourse / lmsCourseList / text / longtext / number: the builder has no
+  // live-course list (that needs an institution + fetch), so a field is used.
+  // Only the SCOPEABLE list type accepts "*" (all); a singular lmsCourse does
+  // NOT expand "*" at run time, so its hint must not offer it.
+  const lmsHint =
+    type === "lmsCourseList"
+      ? "Paste one Canvas course URL per line, or * for all courses at the institution."
+      : type === "lmsCourse"
+        ? "Paste the Canvas course URL."
+        : undefined;
+  return (
+    <TextField
+      size="small"
+      type={type === "number" ? "number" : "text"}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={type === "lmsCourseList" ? "Canvas course URL(s); * = all" : type === "lmsCourse" ? "Canvas course URL" : undefined}
+      helperText={lmsHint}
+      sx={sx}
+    />
+  );
+}
+
+// One / several / all picker for a scopeable list literal: "All" stores the "*"
+// sentinel (expanded at run time); otherwise a newline-joined subset.
+function ScopePicker({
+  value,
+  onChange,
+  options,
+  allLabel,
+  loading,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+  allLabel: string;
+  loading: boolean;
+}) {
+  const isAll = value.trim() === ALL_SCOPE;
+  const selected = isAll ? [] : value.split("\n").map((s) => s.trim()).filter(Boolean);
+  return (
+    <div style={{ flex: 1, minWidth: 200, display: "flex", flexDirection: "column", gap: 4 }}>
+      <FormControlLabel
+        control={
+          <Checkbox size="small" checked={isAll} onChange={(e) => onChange(e.target.checked ? ALL_SCOPE : "")} />
+        }
+        label={allLabel}
+      />
+      {!isAll && (
+        <Autocomplete
+          multiple
+          size="small"
+          options={options.map((o) => o.value)}
+          getOptionLabel={(v) => options.find((o) => o.value === v)?.label ?? v}
+          value={selected}
+          onChange={(_, v) => onChange(v.join("\n"))}
+          loading={loading}
+          renderInput={(params) => (
+            <TextField {...params} size="small" placeholder={loading ? "Loading..." : "Select..."} />
+          )}
         />
       )}
     </div>

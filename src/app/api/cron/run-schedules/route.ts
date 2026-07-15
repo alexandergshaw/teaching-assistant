@@ -69,6 +69,10 @@ export async function GET(req: NextRequest) {
 
   const supabase = createServiceClient();
   const now = new Date();
+  // Soft deadline inside the maxDuration cap: an institution fan-out stops
+  // starting new institutions past this so the tick stays in budget and the
+  // rest resume next tick (see runWorkflowUnattended deadlineMs).
+  const runDeadlineMs = now.getTime() + 50_000;
   const results: ScheduleResult[] = [];
 
   const due = await listDueUnattendedWorkflowSchedules(supabase, now, MAX_SCHEDULES_PER_RUN);
@@ -133,6 +137,7 @@ export async function GET(req: NextRequest) {
             author: resolveDocumentAuthor(userRes.user),
             workflowName: def.name,
           }),
+          deadlineMs: runDeadlineMs,
         })
       );
 

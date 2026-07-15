@@ -92,7 +92,13 @@ export default function WorkflowScopeControl({
                 <Checkbox
                   size="small"
                   checked={institutionAll}
-                  onChange={(e) => set({ institution: e.target.checked ? ALL_SCOPE : "" })}
+                  onChange={(e) =>
+                    set(
+                      e.target.checked
+                        ? { institution: ALL_SCOPE, lmsCourse: "" }
+                        : { institution: "" }
+                    )
+                  }
                 />
               }
               label="All institutions"
@@ -120,7 +126,11 @@ export default function WorkflowScopeControl({
         </div>
         <div style={cell}>
           <span style={labelStyle}>Canvas courses</span>
-          {activeInstitution ? (
+          {institutionAll ? (
+            <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+              Taken from each institution automatically when running for all institutions.
+            </p>
+          ) : activeInstitution ? (
             listPicker(
               scope.lmsCourse ?? "",
               (v) => set({ lmsCourse: v }),

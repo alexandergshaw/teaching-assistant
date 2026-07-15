@@ -41,6 +41,7 @@ import {
 } from "@/lib/workflow-triggers";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
 import { isScopeableListType, expandScopedValue, ALL_SCOPE } from "@/lib/workflows/scope";
+import { isInstitutionFanout } from "@/lib/workflows/fanout";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
 import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction, runSubmissionCodeAction } from "@/app/actions";
@@ -2181,6 +2182,11 @@ export default function WorkflowsTab() {
                   {describeWorkflowScope(selectedDef.scope) && (
                     <p className={styles.fieldHint} style={{ margin: "0 0 10px 0" }}>
                       This workflow targets {describeWorkflowScope(selectedDef.scope)} (set under Build).
+                    </p>
+                  )}
+                  {isInstitutionFanout(selectedDef.scope) && (
+                    <p className={styles.fieldHint} style={{ margin: "0 0 10px 0" }}>
+                      Scheduled and unattended runs cover every configured institution; a manual run here uses your active institution.
                     </p>
                   )}
                   {runtimeFields.map((field) => {

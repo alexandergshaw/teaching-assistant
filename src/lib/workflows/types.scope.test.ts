@@ -4,6 +4,7 @@ import {
   scopeCoversType,
   applyWorkflowScope,
   describeWorkflowScope,
+  describeScopeForType,
   collectRuntimeFields,
   type WorkflowDef,
   type StepInputSpec,
@@ -79,6 +80,35 @@ describe("describeWorkflowScope", () => {
     expect(describeWorkflowScope(undefined)).toBe("");
     expect(describeWorkflowScope({})).toBe("");
     expect(describeWorkflowScope({ hubCourse: "  " })).toBe("");
+  });
+});
+
+describe("describeScopeForType", () => {
+  it("returns empty when scope does not cover the type", () => {
+    expect(describeScopeForType(undefined, "hubCourseList")).toBe("");
+    expect(describeScopeForType({}, "hubCourseList")).toBe("");
+  });
+
+  it("returns empty for non-entity types", () => {
+    expect(describeScopeForType({ hubCourse: "x" }, "text")).toBe("");
+  });
+
+  it("shows 'all' for a list with wildcard scope", () => {
+    expect(describeScopeForType({ hubCourse: "*" }, "hubCourseList")).toBe("all course tiles");
+    expect(describeScopeForType({ org: "*" }, "orgList")).toBe("all organizations");
+  });
+
+  it("shows a count for a list with concrete values", () => {
+    expect(describeScopeForType({ hubCourse: "a\nb\nc" }, "hubCourseList")).toBe("3 course tile(s)");
+  });
+
+  it("passes through a single entity value", () => {
+    expect(describeScopeForType({ institution: "MCC" }, "institution")).toBe("MCC");
+    expect(describeScopeForType({ hubCourse: "tile1" }, "hubCourse")).toBe("tile1");
+  });
+
+  it("returns empty for a single entity with wildcard scope", () => {
+    expect(describeScopeForType({ hubCourse: "*" }, "hubCourse")).toBe("");
   });
 });
 

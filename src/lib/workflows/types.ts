@@ -245,6 +245,28 @@ export function describeWorkflowScope(scope: WorkflowScope | undefined): string 
   return parts.join(", ");
 }
 
+/** A short human summary of what the workflow scope fills a given input TYPE
+ * with, or "" when the scope does not cover this input. Mirrors the arity rules
+ * of applyWorkflowScope: a single input covered by a concrete value shows that
+ * value; a list input shows "all ..." for "*" or a count otherwise. */
+export function describeScopeForType(scope: WorkflowScope | undefined, type: string): string {
+  const effective = applyWorkflowScope(type, "", scope).trim();
+  if (!effective) return "";
+  const family = scopeFamilyForType(type);
+  if (!family) return "";
+  if (isSingleEntityType(type)) return effective;
+  const labels: Record<Exclude<keyof WorkflowScope, "institution">, [string, string]> = {
+    hubCourse: ["all course tiles", "course tile(s)"],
+    lmsCourse: ["all Canvas courses", "Canvas course(s)"],
+    org: ["all organizations", "organization(s)"],
+  };
+  const pair = labels[family as Exclude<keyof WorkflowScope, "institution">];
+  if (!pair) return effective;
+  if (effective === "*") return pair[0];
+  const count = effective.split("\n").map((s) => s.trim()).filter(Boolean).length;
+  return `${count} ${pair[1]}`;
+}
+
 export interface RuntimeField {
   fieldKey: string;
   label: string;

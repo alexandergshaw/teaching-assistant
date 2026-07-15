@@ -8,9 +8,13 @@ import {
   type WorkflowStepConfig,
   type InputBinding,
   type StepInputSpec,
+  type WorkflowScope,
   expandWorkflowDef,
   outputFeedsInput,
   LITERAL_CAPABLE_TYPES,
+  scopeCoversType,
+  applyWorkflowScope,
+  describeScopeForType,
 } from "@/lib/workflows/types";
 import { ALL_SCOPE } from "@/lib/workflows/scope";
 
@@ -439,6 +443,7 @@ export default function WorkflowBuilder({
             onRemove={handleRemoveStep}
             onBindingChange={handleBindingChange}
             picker={picker}
+            scope={def.scope}
           />
         ))}
 
@@ -596,6 +601,7 @@ function StepCard({
   onRemove,
   onBindingChange,
   picker,
+  scope,
 }: {
   stepIndex: number;
   step: WorkflowStepConfig;
@@ -613,6 +619,7 @@ function StepCard({
     literalValue?: string
   ) => void;
   picker: BuilderPickerData;
+  scope?: WorkflowScope;
 }) {
   // Include steps have no binding rows to edit - they run the referenced
   // workflow's CURRENT steps at run time.
@@ -744,10 +751,40 @@ function StepCard({
           allStepDefs={allSteps.map((s) => getStepDefinition(s.type))}
           onBindingChange={onBindingChange}
           picker={picker}
+          scope={scope}
         />
       ))}
     </div>
   );
+}
+
+// A friendly summary of the value the workflow scope inherits into an input,
+// resolving course-tile ids to names via the picker where possible.
+function inheritedScopeSummary(
+  type: string,
+  scope: WorkflowScope | undefined,
+  picker: BuilderPickerData
+): string {
+  const eff = applyWorkflowScope(type, "", scope).trim();
+  if (!eff) return "";
+  const hubName = (id: string) => picker.hubCourses?.find((c) => c.id === id)?.name ?? id;
+  const items = eff.split("\n").map((s) => s.trim()).filter(Boolean);
+  switch (type) {
+    case "hubCourse":
+      return hubName(eff);
+    case "hubCourseList":
+      return eff === ALL_SCOPE ? "All course tiles" : items.map(hubName).join(", ");
+    case "orgList":
+      return eff === ALL_SCOPE ? "All organizations" : items.join(", ");
+    case "lmsCourseList":
+      return eff === ALL_SCOPE ? "All Canvas courses" : items.join(", ");
+    case "institution":
+    case "org":
+    case "lmsCourse":
+      return eff;
+    default:
+      return describeScopeForType(scope, type);
+  }
 }
 
 function InputBindingRow({
@@ -757,6 +794,7 @@ function InputBindingRow({
   allStepDefs,
   onBindingChange,
   picker,
+  scope,
 }: {
   stepIndex: number;
   input: StepInputSpec;
@@ -771,6 +809,7 @@ function InputBindingRow({
     literalValue?: string
   ) => void;
   picker: BuilderPickerData;
+  scope?: WorkflowScope;
 }) {
   let currentSource: "runtime" | "step" | "literal" = "runtime";
   let currentStepIndex: number | undefined;
@@ -785,6 +824,8 @@ function InputBindingRow({
     currentSource = "literal";
     currentLiteralValue = binding.value;
   }
+
+  const scopeCovered = scopeCoversType(scope, input.type);
 
   const compatibleStepOutputs: Array<{
     stepIndex: number;
@@ -807,7 +848,7 @@ function InputBindingRow({
   }
 
   const options: Array<{ value: string; label: string }> = [
-    { value: "runtime", label: "Ask when running" },
+    { value: "runtime", label: scopeCovered ? "From workflow scope" : "Ask when running" },
     ...compatibleStepOutputs.map((o) => ({
       value: `step:${o.stepIndex}:${o.outputKey}`,
       label: o.label,
@@ -833,59 +874,69 @@ function InputBindingRow({
         : "runtime";
 
   return (
-    <div style={{ marginBottom: 12, display: "flex", gap: 8, alignItems: "center" }}>
-      <label style={{ flex: 0, minWidth: "120px", fontSize: "0.85rem" }}>
-        {input.label}
-      </label>
-      <TextField
-        select
-        size="small"
-        value={selectValue}
-        onChange={(e) => {
-          const val = e.target.value;
-          if (val === "runtime") {
-            onBindingChange(stepIndex, input.key, "runtime");
-          } else if (val === "literal") {
-            onBindingChange(
-              stepIndex,
-              input.key,
-              "literal",
-              undefined,
-              undefined,
-              currentLiteralValue
-            );
-          } else if (val.startsWith("step:")) {
-            const parts = val.split(":");
-            const j = Number(parts[1]);
-            const k = parts.slice(2).join(":");
-            onBindingChange(
-              stepIndex,
-              input.key,
-              "step",
-              j,
-              k,
-              undefined
-            );
-          }
-        }}
-        style={{ flex: 1, minWidth: "200px" }}
-      >
-        {options.map((opt) => (
-          <MenuItem key={opt.value} value={opt.value}>
-            {opt.label}
-          </MenuItem>
-        ))}
-      </TextField>
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ marginBottom: 0, display: "flex", gap: 8, alignItems: "center" }}>
+        <label style={{ flex: 0, minWidth: "120px", fontSize: "0.85rem" }}>
+          {input.label}
+        </label>
+        <TextField
+          select
+          size="small"
+          value={selectValue}
+          onChange={(e) => {
+            const val = e.target.value;
+            if (val === "runtime") {
+              onBindingChange(stepIndex, input.key, "runtime");
+            } else if (val === "literal") {
+              onBindingChange(
+                stepIndex,
+                input.key,
+                "literal",
+                undefined,
+                undefined,
+                currentLiteralValue
+              );
+            } else if (val.startsWith("step:")) {
+              const parts = val.split(":");
+              const j = Number(parts[1]);
+              const k = parts.slice(2).join(":");
+              onBindingChange(
+                stepIndex,
+                input.key,
+                "step",
+                j,
+                k,
+                undefined
+              );
+            }
+          }}
+          style={{ flex: 1, minWidth: "200px" }}
+        >
+          {options.map((opt) => (
+            <MenuItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </MenuItem>
+          ))}
+        </TextField>
 
-      {currentSource === "literal" && (
-        <LiteralEditor
-          type={input.type}
-          value={currentLiteralValue}
-          picker={picker}
-          onChange={(v) =>
-            onBindingChange(stepIndex, input.key, "literal", undefined, undefined, v)
-          }
-        />
+        {currentSource === "literal" && (
+          <LiteralEditor
+            type={input.type}
+            value={currentLiteralValue}
+            picker={picker}
+            onChange={(v) =>
+              onBindingChange(stepIndex, input.key, "literal", undefined, undefined, v)
+            }
+          />
+        )}
+      </div>
+      {scopeCovered && currentSource === "runtime" && (
+        <div style={{ fontSize: "0.8rem", opacity: 0.7, marginTop: 4, marginLeft: 128 }}>
+          {(() => {
+            const summary = inheritedScopeSummary(input.type, scope, picker);
+            return summary ? `Set by workflow scope: ${summary}` : "Set by workflow scope";
+          })()}
+        </div>
       )}
     </div>
   );

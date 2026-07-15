@@ -20,6 +20,7 @@ import LessonPlanningForm from "./components/LessonPlanningForm";
 import TopBar from "./components/TopBar";
 import { useInstitutionCounts } from "./components/InstitutionCounts";
 import { useVcCounts } from "./components/VcCounts";
+import { useFilesInbox } from "./components/FilesInbox";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { stampDocxAppProperties } from "@/lib/docx";
@@ -140,6 +141,7 @@ export default function Home() {
   const { user } = useSupabase();
   const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
   const { total: vcAttention } = useVcCounts();
+  const { count: filesInbox, markSeen: markFilesSeen } = useFilesInbox();
   const [testState] = useActionState(testGeminiAction, initialTestState);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "course-planning";
@@ -192,6 +194,12 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem("ta-active-tab", activeTab);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "files") {
+      markFilesSeen();
+    }
+  }, [activeTab, markFilesSeen]);
 
   useEffect(() => {
     return () => {
@@ -720,7 +728,7 @@ export default function Home() {
             disableRipple
           />
           <Tab label="Recording" value="recording" disableRipple />
-          <Tab label="Files" value="files" disableRipple />
+          <Tab label={<NavTabLabel text="Files" count={filesInbox} />} value="files" disableRipple />
         </Tabs>
 
         {activeTab === "courses" && (

@@ -9466,3 +9466,21 @@ export async function checkBrokenLinksAction(
     return { error: err instanceof Error ? err.message : "Could not check links." };
   }
 }
+
+/** Count workflow deliverable files saved since a given ISO timestamp. */
+export async function countWorkflowDeliverablesSince(sinceIso: string): Promise<{ count: number }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const { count } = await supabase
+      .from("recording_files")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("origin", "unattended")
+      .gt("created_at", sinceIso);
+
+    return { count: count ?? 0 };
+  } catch {
+    return { count: 0 };
+  }
+}

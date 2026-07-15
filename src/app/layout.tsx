@@ -5,6 +5,7 @@ import AiChatFab from "./components/AiChatFab";
 import ContextMenu from "./components/ContextMenu";
 import { InstitutionCountsProvider } from "./components/InstitutionCounts";
 import { VcCountsProvider } from "./components/VcCounts";
+import { FilesInboxProvider } from "./components/FilesInbox";
 import { AccessibilityProvider } from "./components/AccessibilityProvider";
 import { SupabaseProvider } from "@/context/SupabaseProvider";
 import AppThemeProvider from "./components/AppThemeProvider";
@@ -29,7 +30,9 @@ export default function RootLayout({
           <SupabaseProvider>
             <InstitutionCountsProvider>
               <VcCountsProvider>
-                <AccessibilityProvider>{children}</AccessibilityProvider>
+                <FilesInboxProvider>
+                  <AccessibilityProvider>{children}</AccessibilityProvider>
+                </FilesInboxProvider>
               </VcCountsProvider>
             </InstitutionCountsProvider>
             <SelectionChatWidget />

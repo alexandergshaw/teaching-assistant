@@ -893,17 +893,26 @@ function InputBindingRow({
     options.push({ value: "classrepo", label: "Reference Class Repository Tile" });
   }
 
+  if (input.type === "lmsCourse" || input.type === "date" || input.type === "institution") {
+    options.push({ value: "classtile", label: "Reference Class Tile" });
+  }
+
   const isClassRepoRef =
     currentSource === "literal" && currentLiteralValue.trim().startsWith("@class-repo");
+
+  const isClassTileRef =
+    currentSource === "literal" && currentLiteralValue.trim().startsWith("@class-tile");
 
   const selectValue =
     currentSource === "step" && currentStepIndex !== undefined
       ? `step:${currentStepIndex}:${currentOutputKey}`
       : isClassRepoRef
         ? "classrepo"
-        : currentSource === "literal"
-          ? "literal"
-          : "runtime";
+        : isClassTileRef
+          ? "classtile"
+          : currentSource === "literal"
+            ? "literal"
+            : "runtime";
 
   return (
     <div style={{ marginBottom: 12 }}>
@@ -921,8 +930,10 @@ function InputBindingRow({
               onBindingChange(stepIndex, input.key, "runtime");
             } else if (val === "classrepo") {
               onBindingChange(stepIndex, input.key, "literal", undefined, undefined, "@class-repo");
+            } else if (val === "classtile") {
+              onBindingChange(stepIndex, input.key, "literal", undefined, undefined, "@class-tile");
             } else if (val === "literal") {
-              const seed = currentLiteralValue.trim().startsWith("@class-repo") ? "" : currentLiteralValue;
+              const seed = currentLiteralValue.trim().startsWith("@class-") ? "" : currentLiteralValue;
               onBindingChange(stepIndex, input.key, "literal", undefined, undefined, seed);
             } else if (val.startsWith("step:")) {
               const parts = val.split(":");
@@ -949,9 +960,21 @@ function InputBindingRow({
 
         {currentSource === "literal" &&
           (isClassRepoRef ? (
-            <ClassRepoTilePicker
+            <TileRefPicker
               value={currentLiteralValue}
               picker={picker}
+              sentinel="@class-repo"
+              helperText="Uses the tile's first linked repository at run time."
+              onChange={(v) =>
+                onBindingChange(stepIndex, input.key, "literal", undefined, undefined, v)
+              }
+            />
+          ) : isClassTileRef ? (
+            <TileRefPicker
+              value={currentLiteralValue}
+              picker={picker}
+              sentinel="@class-tile"
+              helperText="Uses this course tile's matching field at run time."
               onChange={(v) =>
                 onBindingChange(stepIndex, input.key, "literal", undefined, undefined, v)
               }
@@ -993,30 +1016,34 @@ function InputBindingRow({
   );
 }
 
-// Picks which course tile's linked class repository a repo input references: the
-// workflow-scoped tile by default ("@class-repo"), or a specific tile
-// ("@class-repo:<id>"). Resolved to the tile's first repo at run time.
-function ClassRepoTilePicker({
+// Picks which course tile a sentinel references: the workflow-scoped tile by
+// default (e.g. "@class-repo"), or a specific tile (e.g. "@class-repo:<id>").
+// Generalized for both "@class-repo" (repo input) and "@class-tile" (lmsCourse /
+// date / institution inputs). Resolved to the tile's matching field at run time.
+function TileRefPicker({
   value,
   onChange,
   picker,
+  sentinel,
+  helperText,
 }: {
   value: string;
   onChange: (value: string) => void;
   picker: BuilderPickerData;
+  sentinel: string;
+  helperText: string;
 }) {
-  const tileId = value.trim().startsWith("@class-repo:")
-    ? value.trim().slice("@class-repo:".length)
-    : "";
+  const prefix = `${sentinel}:`;
+  const tileId = value.trim().startsWith(prefix) ? value.trim().slice(prefix.length) : "";
   const opts = picker.hubCourses ?? [];
   return (
     <TextField
       select
       size="small"
       value={tileId}
-      onChange={(e) => onChange(e.target.value ? `@class-repo:${e.target.value}` : "@class-repo")}
+      onChange={(e) => onChange(e.target.value ? `${sentinel}:${e.target.value}` : sentinel)}
       sx={{ flex: 1, minWidth: 200 }}
-      helperText="Uses the tile's first linked repository at run time."
+      helperText={helperText}
     >
       <MenuItem value="">Workflow-scoped course tile</MenuItem>
       {opts.map((c) => (

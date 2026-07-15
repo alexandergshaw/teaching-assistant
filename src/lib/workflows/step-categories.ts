@@ -96,6 +96,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "generate-rubric-from-repo",
     "remember-rubric",
     "find-banked-rubric",
+    "resolve-rubric",
     "bulk-associate-rubric",
     "lms-rubric",
   ],

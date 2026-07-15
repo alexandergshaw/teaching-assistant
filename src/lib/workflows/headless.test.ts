@@ -134,7 +134,7 @@ describe("isHeadlessSafeWorkflow", () => {
   });
 
   it("has exactly 90 headless-safe step types", () => {
-    expect(HEADLESS_SAFE_STEP_TYPES.size).toBe(91);
+    expect(HEADLESS_SAFE_STEP_TYPES.size).toBe(92);
   });
 
   it("accepts the unattended grade-to-draft preset (scoring only, no posting)", () => {

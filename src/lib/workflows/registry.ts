@@ -151,7 +151,7 @@ import type { CommonResourceItem } from "@/lib/common-resources";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
-import { parseCanvasCourseId } from "@/lib/canvas-url";
+import { parseCanvasCourseId, detectCanvasUrlKind } from "@/lib/canvas-url";
 import { parseCalendarEmbedded } from "@/lib/embedded/calendar";
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
@@ -601,6 +601,17 @@ async function gatherModuleMaterials(
   }
 
   return { moduleName, materialsText: chunks.join(""), notes, materialsSource };
+}
+
+// Classify a resolve-rubric source line: a Canvas assignment/discussion URL is
+// an LMS rubric probe; an owner/name or github.com URL is a repo probe; a bare
+// topic goes to the rubric bank; a URL matching neither handler (e.g. a bare
+// Canvas course URL) is skipped rather than mis-probed against the bank.
+export function classifyRubricSource(line: string): "lms" | "repo" | "topic" | "skip" {
+  if (detectCanvasUrlKind(line)) return "lms";
+  if (/github\.com/i.test(line) || /^[^/\s]+\/[^/\s]+$/.test(line)) return "repo";
+  if (/^https?:\/\//i.test(line)) return "skip";
+  return "topic";
 }
 
 export const STEP_REGISTRY: StepDefinition[] = [
@@ -8027,6 +8038,152 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { rubric: r.rubric, matched: r.matched ? "1" : "" },
         summary: { kind: "text", text: r.matched ? r.rubric : `No banked rubric found for "${topic}".` },
+      };
+    },
+  },
+
+  {
+    type: "resolve-rubric",
+    name: "Resolve a rubric",
+    description:
+      "Find a grading rubric for a course's current module. Reads the current week/module from the course tile, then tries each listed source in priority order (a live LMS assignment link, then a GitHub repo) and returns the first actual rubric it finds, or source material a later step can generate one from.",
+    inputs: [
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: true,
+        help: "The rubric is resolved for this tile's CURRENT module/week (same derivation as Find the current week and module).",
+      },
+      {
+        key: "sources",
+        label: "Rubric sources (one per line, in priority order)",
+        type: "longtext",
+        required: true,
+        help: "One source per line, highest priority first: a live LMS assignment/discussion URL (.../courses/123/assignments/456), or a GitHub repo (owner/name or a github.com URL).",
+      },
+    ],
+    outputs: [
+      { key: "rubric", label: "Rubric", type: "longtext" },
+      { key: "material", label: "Source material", type: "longtext" },
+      { key: "hasRubric", label: "Found a rubric", type: "boolean" },
+      { key: "source", label: "Source used", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      if (!hubCourseId) throw new Error("Choose a course tile.");
+      const lines = String(values.sources ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (lines.length === 0) throw new Error("Add at least one rubric source.");
+
+      const list = await listCourseHubAction();
+      if ("error" in list) throw new Error(list.error);
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (!tile) throw new Error("Course tile not found.");
+
+      // Current module/week from the tile (mirrors course-progress). Guard for a
+      // tile with no/invalid start date (rawWeek null) so we never feed null into
+      // Math.min / padStart.
+      const rawWeek = currentCourseWeek(tile.startDate, Date.now());
+      let moduleLabel = "the current module";
+      let topic = "";
+      if (rawWeek !== null) {
+        const status = courseProgressStatus(rawWeek, tile.weeks);
+        const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
+        if (status === "not-started") {
+          moduleLabel = "Not started";
+        } else if (status === "complete") {
+          moduleLabel = "Complete";
+        } else {
+          const entry = csvToSchedule(tile.csvData ?? "").find((e) => e.week === displayWeek);
+          topic = entry?.topic?.trim() ?? "";
+          moduleLabel = `Module ${String(displayWeek).padStart(2, "0")}${topic ? `: ${topic}` : ""}`;
+        }
+      }
+
+      const notes: string[] = [];
+      let fallbackMaterial: { text: string; source: string } | null = null;
+      const done = (rubric: string, material: string, hasRubric: boolean, source: string) => ({
+        outputs: { rubric, material, hasRubric: hasRubric ? "1" : "", source },
+        summary: {
+          kind: "text" as const,
+          text: `${tile.name} - ${moduleLabel}: ${hasRubric ? "rubric" : "material"} from ${source}.${notes.length ? ` Skipped: ${notes.join("; ")}.` : ""}`,
+        },
+      });
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const kind = classifyRubricSource(line);
+
+        if (kind === "lms") {
+          onProgress(`Checking LMS source ${i + 1}/${lines.length}...`);
+          const r = await fetchCanvasMetaAction(line);
+          if ("error" in r) {
+            notes.push(`${line}: ${r.error}`);
+            continue;
+          }
+          if (r.rubricText.trim()) return done(r.rubricText, "", true, line);
+          if (r.description.trim() && !fallbackMaterial) {
+            fallbackMaterial = { text: r.description, source: line };
+          }
+          notes.push(`${line}: resolved but no rubric attached`);
+          continue;
+        }
+
+        if (kind === "repo") {
+          onProgress(`Checking repo source ${i + 1}/${lines.length}...`);
+          const r = await ingestRepoAction(line);
+          if ("error" in r) {
+            notes.push(`${line}: ${r.error}`);
+            continue;
+          }
+          // digest.files carries only TEXT files (readme/code); a rubric.pdf or
+          // rubric.docx will not appear and falls through to README material.
+          const rubricFile = r.digest.files.find((f) => /(^|\/)rubric[^/]*$/i.test(f.path));
+          if (rubricFile && rubricFile.content.trim()) {
+            return done(rubricFile.content, "", true, line);
+          }
+          if (r.digest.text.trim()) {
+            const material = [r.digest.description, r.digest.text].filter(Boolean).join("\n\n");
+            return done("", material, false, line);
+          }
+          notes.push(`${line}: repo has no readable material`);
+          continue;
+        }
+
+        if (kind === "topic") {
+          onProgress(`Checking the rubric bank for "${line}"...`);
+          const r = await findBankedRubricAction(line);
+          if (!("error" in r) && r.matched) {
+            return done(r.rubric, "", true, `banked:${line}`);
+          }
+          notes.push(`${line}: no banked rubric`);
+          continue;
+        }
+
+        notes.push(`${line}: not a recognized source`);
+      }
+
+      // Last resort: the derived module topic against the rubric bank.
+      if (topic) {
+        const r = await findBankedRubricAction(topic);
+        if (!("error" in r) && r.matched) {
+          return done(r.rubric, "", true, `banked:${topic}`);
+        }
+      }
+
+      if (fallbackMaterial) {
+        return done("", fallbackMaterial.text, false, fallbackMaterial.source);
+      }
+
+      return {
+        outputs: { rubric: "", material: "", hasRubric: "", source: "" },
+        summary: {
+          kind: "text" as const,
+          text: `No rubric or material found for ${tile.name} - ${moduleLabel}. Tried ${lines.length} source(s).${notes.length ? ` (${notes.join("; ")})` : ""}`,
+        },
       };
     },
   },

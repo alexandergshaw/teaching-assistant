@@ -98,6 +98,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "get-assignment-sync-state",
   "remember-rubric",
   "find-banked-rubric",
+  "resolve-rubric",
   "run-submission-code",
   "list-ci-artifacts",
   "check-broken-links",

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Button, TextField, MenuItem } from "@mui/material";
+import { useMemo, useState } from "react";
+import { Autocomplete, Button, TextField, MenuItem, createFilterOptions } from "@mui/material";
 import Typeahead from "./ui/Typeahead";
 import {
   type WorkflowDef,
@@ -15,7 +15,27 @@ import {
   getStepDefinition,
   type StepDefinition,
 } from "@/lib/workflows/registry";
+import {
+  stepCategory,
+  stepCategoryLabel,
+  stepCategoryOrderIndex,
+} from "@/lib/workflows/step-categories";
 import styles from "../page.module.css";
+
+// One searchable, category-grouped entry in the "Add action" palette.
+interface ActionOption {
+  type: string;
+  name: string;
+  description: string;
+  categoryId: string;
+  categoryLabel: string;
+}
+
+// Match a typed query against the action's name, description, and type slug -
+// not just its name - so searching "grade" or "rubric" surfaces everything.
+const filterActions = createFilterOptions<ActionOption>({
+  stringify: (o) => `${o.name} ${o.description} ${o.type} ${o.categoryLabel}`,
+});
 
 function normalizeBindings(def: WorkflowDef): WorkflowDef {
   const normalized = { ...def };
@@ -154,10 +174,29 @@ export default function WorkflowBuilder({
   onDone: () => void;
 }) {
   const [addStepOpen, setAddStepOpen] = useState(false);
-  const [selectedStepType, setSelectedStepType] = useState<string>("");
   const [appendSourceId, setAppendSourceId] = useState<string>("");
   const [includeSourceId, setIncludeSourceId] = useState<string>("");
   const [includeError, setIncludeError] = useState<string>("");
+
+  // The full action catalog, grouped by category for the palette. Sorted by
+  // category order then name so MUI's groupBy renders contiguous groups; the
+  // "Other" group (categoryOrderIndex last) catches any step type not yet
+  // categorized, so no action can vanish from the builder.
+  const actionOptions = useMemo<ActionOption[]>(() => {
+    return STEP_REGISTRY.map((s) => {
+      const categoryId = stepCategory(s.type);
+      return {
+        type: s.type,
+        name: s.name,
+        description: s.description,
+        categoryId,
+        categoryLabel: stepCategoryLabel(categoryId),
+      };
+    }).sort((a, b) => {
+      const byCategory = stepCategoryOrderIndex(a.categoryId) - stepCategoryOrderIndex(b.categoryId);
+      return byCategory !== 0 ? byCategory : a.name.localeCompare(b.name);
+    });
+  }, []);
 
   // Appends an independent snapshot of another workflow's steps - later
   // edits to the source workflow do not affect this one.
@@ -251,8 +290,8 @@ export default function WorkflowBuilder({
     };
     const normalized = normalizeBindings(next);
     onChange(normalized);
-    setAddStepOpen(false);
-    setSelectedStepType("");
+    // Palette stays open so several actions can be added in a row; the "Done"
+    // button closes it.
   };
 
   const handleRemoveStep = (index: number) => {
@@ -404,45 +443,49 @@ export default function WorkflowBuilder({
               variant="outlined"
               onClick={() => setAddStepOpen(true)}
             >
-              Add step
+              Add action
             </Button>
           ) : (
             <>
-              <TextField
-                select
+              <Autocomplete<ActionOption>
+                options={actionOptions}
+                groupBy={(o) => o.categoryLabel}
+                getOptionLabel={(o) => o.name}
+                filterOptions={filterActions}
+                isOptionEqualToValue={(a, b) => a.type === b.type}
+                value={null}
+                blurOnSelect
+                clearOnBlur
                 size="small"
-                value={selectedStepType}
-                onChange={(e) => setSelectedStepType(e.target.value)}
-                style={{ width: "240px" }}
-              >
-                <MenuItem value="">Select a step</MenuItem>
-                {STEP_REGISTRY.map((s) => (
-                  <MenuItem key={s.type} value={s.type}>
-                    {s.name}
-                  </MenuItem>
-                ))}
-              </TextField>
+                sx={{ width: 320 }}
+                onChange={(_, option) => {
+                  if (option) handleAddStep(option.type);
+                }}
+                renderOption={(props, o) => (
+                  <li {...(props as React.HTMLAttributes<HTMLLIElement>)} key={o.type}>
+                    <span style={{ display: "flex", flexDirection: "column" }}>
+                      <span>{o.name}</span>
+                      <span style={{ fontSize: "0.78rem", color: "var(--text-secondary)" }}>
+                        {o.description}
+                      </span>
+                    </span>
+                  </li>
+                )}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    autoFocus
+                    label="Add action"
+                    placeholder="Search actions..."
+                  />
+                )}
+              />
               <Button
                 size="small"
                 variant="outlined"
-                onClick={() => {
-                  if (selectedStepType) {
-                    handleAddStep(selectedStepType);
-                  }
-                }}
-                disabled={!selectedStepType}
+                onClick={() => setAddStepOpen(false)}
               >
-                Add
-              </Button>
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={() => {
-                  setAddStepOpen(false);
-                  setSelectedStepType("");
-                }}
-              >
-                Cancel
+                Done
               </Button>
             </>
           )}

@@ -39,14 +39,20 @@ export function isScopeableListType(type: string): boolean {
 export async function expandScopedValue(
   type: string,
   value: string,
-  ctx: { activeInstitution: string | null }
+  ctx: { activeInstitution: string | null; filterHubByInstitution?: boolean }
 ): Promise<string> {
   if (!isScopeableListType(type)) return value;
   if (value.trim() !== ALL_SCOPE) return value;
 
   if (type === "hubCourseList") {
     const r = await listCourseHubAction();
-    return "error" in r ? "" : r.courses.map((c) => c.id).join("\n");
+    if ("error" in r) return "";
+    let courses = r.courses;
+    if (ctx.filterHubByInstitution) {
+      const inst = (ctx.activeInstitution || "").trim();
+      courses = courses.filter((c) => (c.institution ?? "").trim() === inst);
+    }
+    return courses.map((c) => c.id).join("\n");
   }
   if (type === "lmsCourseList") {
     const inst = (ctx.activeInstitution || "").trim();

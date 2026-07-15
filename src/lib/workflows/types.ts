@@ -209,6 +209,9 @@ function isSingleEntityType(type: string): boolean {
  * family set to "*" (all) covers a LIST input but NOT a single input (which
  * cannot express "all"), keeping that single input in the run form. */
 export function scopeCoversType(scope: WorkflowScope | undefined, type: string): boolean {
+  // Institution "*" (all) is filled per-iteration by institution fan-out, so it
+  // covers an institution input (which is therefore not asked at run time).
+  if (type === "institution" && (scope?.institution ?? "").trim() === "*") return true;
   return applyWorkflowScope(type, "", scope).trim().length > 0;
 }
 

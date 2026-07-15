@@ -43,6 +43,50 @@ describe("scopeCoversType", () => {
     expect(scopeCoversType({ hubCourse: "*" }, "hubCourse")).toBe(false);
     expect(scopeCoversType({ hubCourse: "*" }, "hubCourseList")).toBe(true);
   });
+
+  it("treats institution '*' as covering an institution input (fan-out fills it)", () => {
+    // Unlike other single-entity families, institution "*" IS covered: fan-out
+    // runs the workflow once per institution, so the input is never asked.
+    expect(scopeCoversType({ institution: "*" }, "institution")).toBe(true);
+    expect(scopeCoversType({ institution: "MCC" }, "institution")).toBe(true);
+    expect(scopeCoversType({}, "institution")).toBe(false);
+    expect(scopeCoversType(undefined, "institution")).toBe(false);
+  });
+});
+
+describe("collectRuntimeFields under institution fan-out", () => {
+  const inputs: Record<string, StepInputSpec[]> = {
+    stepA: [
+      { key: "institution", label: "Institution", type: "institution", required: true },
+      { key: "topic", label: "Topic", type: "text", required: true },
+    ],
+  };
+  const lookup = (type: string) => inputs[type];
+  const def: WorkflowDef = {
+    id: "w",
+    name: "W",
+    description: "",
+    steps: [
+      {
+        type: "stepA",
+        bindings: {
+          institution: { source: "runtime", fieldKey: "institution" },
+          topic: { source: "runtime", fieldKey: "topic" },
+        },
+      },
+    ],
+  };
+
+  it("does not ask for the institution when the scope targets all institutions", () => {
+    const scoped: WorkflowDef = { ...def, scope: { institution: "*" } };
+    const fields = collectRuntimeFields(scoped, lookup);
+    expect(fields.map((f) => f.fieldKey)).toEqual(["topic"]);
+  });
+
+  it("still asks for the institution when no institution scope is set", () => {
+    const fields = collectRuntimeFields(def, lookup);
+    expect(fields.map((f) => f.fieldKey).sort()).toEqual(["institution", "topic"]);
+  });
 });
 
 describe("applyWorkflowScope", () => {

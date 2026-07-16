@@ -206,8 +206,10 @@ export interface ResolvedSlideSpec {
   loopLabel?: string;
 }
 
-// Module-local counter for stable ID generation across sessions.
+// Module-local counters for stable ID generation across sessions.
 let slideCounter = 0;
+let loopCounter = 0;
+let templateCounter = 0;
 
 export function newDeckSlide(role: SlideRole = "concept"): DeckSlide {
   const roleDef = getSlideRole(role);
@@ -225,8 +227,20 @@ export function newDeckSlide(role: SlideRole = "concept"): DeckSlide {
   };
 }
 
+export function newDeckLoopGroup(): DeckLoopGroup {
+  const id = `loop-${Date.now().toString(36)}-${(loopCounter++).toString(36)}`;
+
+  return {
+    id,
+    label: "Per item",
+    source: "runtime",
+    items: [],
+    runtimeLabel: "Items",
+  };
+}
+
 export function emptyDeckTemplate(name: string): DeckTemplate {
-  const id = `deck-${Date.now().toString(36)}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`;
+  const id = `deck-${Date.now().toString(36)}-${(templateCounter++).toString(36)}`;
 
   return {
     id,
@@ -236,6 +250,18 @@ export function emptyDeckTemplate(name: string): DeckTemplate {
     tone: "",
     slides: [newDeckSlide("title")],
     loops: [],
+  };
+}
+
+export function duplicateDeckTemplate(template: DeckTemplate, name: string): DeckTemplate {
+  const id = `deck-${Date.now().toString(36)}-${(templateCounter++).toString(36)}`;
+
+  return {
+    ...template,
+    id,
+    name,
+    slides: [...template.slides],
+    loops: [...template.loops],
   };
 }
 

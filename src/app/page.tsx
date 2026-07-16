@@ -14,6 +14,7 @@ import FilesTab from "./components/FilesTab";
 import DraftedGradesTab from "./components/DraftedGradesTab";
 import MessageDraftsTab from "./components/MessageDraftsTab";
 import WorkflowsTab from "./components/WorkflowsTab";
+import PowerPointDesignTab from "./components/PowerPointDesignTab";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
 import WorkflowTriggerWatcher from "./components/WorkflowTriggerWatcher";
 import LessonPlanPreview from "./components/LessonPlanPreview";
@@ -40,7 +41,7 @@ import { VIEW_KEY } from "./components/content-tab/constants";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "courses" | "manual" | "workflows" | "files" | "drafts";
+type ActiveTab = "courses" | "manual" | "workflows" | "files" | "drafts" | "ppt-design";
 // The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
 type ManualView = "course-planning" | "content" | "version-control" | "recording";
 const MANUAL_VIEW_KEY = "ta-manual-view";
@@ -158,7 +159,7 @@ export default function Home() {
     const saved = localStorage.getItem("ta-active-tab");
     // Migrate legacy "grade-drafts" to "drafts".
     if (saved === "grade-drafts") return "drafts";
-    return saved === "courses" || saved === "workflows" || saved === "files" || saved === "drafts"
+    return saved === "courses" || saved === "workflows" || saved === "files" || saved === "drafts" || saved === "ppt-design"
       ? saved
       : "manual";
   });
@@ -785,6 +786,7 @@ export default function Home() {
             disableRipple
           />
           <Tab label="Workflows" value="workflows" disableRipple />
+          <Tab label="PowerPoint Design" value="ppt-design" disableRipple />
           <Tab label={<NavTabLabel text="Files" count={filesInbox} />} value="files" disableRipple />
           <Tab label={<NavTabLabel text="Drafts" count={draftsInbox} />} value="drafts" disableRipple />
         </Tabs>
@@ -971,6 +973,8 @@ export default function Home() {
         )}
 
         {activeTab === "workflows" && <WorkflowsTab />}
+
+        {activeTab === "ppt-design" && <PowerPointDesignTab />}
 
       </div>
 

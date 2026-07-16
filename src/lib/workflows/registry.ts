@@ -145,7 +145,7 @@ import {
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
 import type { MessageDraftPayload } from "@/lib/message-drafts";
-import type { GradingRun, GradingRunEntry } from "@/lib/grade";
+import type { GradingRun, GradingRunEntry, GradeResult } from "@/lib/grade";
 import type { InstitutionField } from "@/lib/institution-fields";
 import type { RepoPermission } from "@/lib/github";
 import type { CommonResourceItem } from "@/lib/common-resources";
@@ -8915,6 +8915,203 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { gradeSummary },
         summary: { kind: "text", text: gradeSummary },
+      };
+    },
+  },
+
+  {
+    type: "batch-grade-repos-to-draft",
+    name: "Batch grade student repos to a draft",
+    description:
+      "Grade every student's repo for the current week against a rubric synthesized from the week's README, and save the results as a reviewable grading draft (postable to Canvas when an assignment URL is given).",
+    inputs: [
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: true,
+        help: "Uses the tile's Student repos and current week.",
+      },
+      {
+        key: "week",
+        label: "Current week (optional)",
+        type: "number",
+        required: false,
+        help: "Bind from Find the current week and module, or leave blank to derive from the tile's start date.",
+      },
+      {
+        key: "instructionsRepo",
+        label: "Instructions repo (optional)",
+        type: "repo",
+        required: false,
+        help: "Repo holding the week's assignment README used to synthesize the rubric. Defaults to the tile's first linked repo.",
+      },
+      {
+        key: "rubric",
+        label: "Rubric (optional)",
+        type: "longtext",
+        required: false,
+        help: "Provide a rubric directly instead of synthesizing one from the README.",
+      },
+      {
+        key: "assignmentUrl",
+        label: "Canvas assignment URL (optional)",
+        type: "text",
+        required: false,
+        help: "The Canvas assignment these repo grades map to. Provide it to make the draft postable to Canvas.",
+      },
+      {
+        key: "pointsPossible",
+        label: "Points possible (optional)",
+        type: "number",
+        required: false,
+      },
+    ],
+    outputs: [
+      { key: "draftId", label: "Draft id", type: "text" },
+      { key: "graded", label: "Repos graded", type: "number" },
+      { key: "moduleName", label: "Module", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      // Step 1: Load the tile.
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      if (!hubCourseId) throw new Error("Choose a course tile.");
+
+      onProgress("Reading the course...");
+      const list = await listCourseHubAction();
+      if ("error" in list) throw new Error(list.error);
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (!tile) throw new Error("Course tile not found.");
+
+      // Step 2: Get student repos.
+      const students = (tile.studentRepos ?? []).filter((s) => s.repo && s.repo.trim());
+      if (students.length === 0) {
+        throw new Error("Add student repos to the course tile first (the Student repos tile).");
+      }
+
+      // Step 3: Resolve the week and module name.
+      const boundWeek = Number(values.week);
+      const rawWeek = Number.isFinite(boundWeek) && boundWeek > 0 ? boundWeek : currentCourseWeek(tile.startDate, Date.now());
+      if (rawWeek === null) {
+        throw new Error(
+          `"${tile.name}" has no start date set - add one on the course tile, or bind a week.`
+        );
+      }
+      const status = courseProgressStatus(rawWeek, tile.weeks);
+      const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
+      const topic = csvToSchedule(tile.csvData ?? "").find((e) => e.week === displayWeek)?.topic?.trim() ?? "";
+      const moduleName =
+        status === "not-started"
+          ? "Not started"
+          : status === "complete"
+            ? "Complete"
+            : `Module ${String(displayWeek).padStart(2, "0")}${topic ? `: ${topic}` : ""}`;
+
+      // Step 4: Get instructions text (README) for rubric synthesis.
+      let instructions = "";
+      const instrRepoRef = String(values.instructionsRepo ?? "").trim() || (tile.repos?.[0]?.repo ?? "").toString();
+      if (instrRepoRef) {
+        try {
+          onProgress("Reading the instructions repo...");
+          const r = await ingestRepoAction(instrRepoRef);
+          if ("error" in r) {
+            onProgress(`Note: could not ingest instructions repo: ${r.error}`);
+          } else {
+            const wk = displayWeek;
+            const re = new RegExp(`(week|wk|module|unit)[^0-9]?0*${wk}(?![0-9])`, "i");
+            const matched = r.digest.files.filter((f) => re.test(f.path));
+
+            if (matched.length > 0) {
+              const readmeFile = matched.find((f) => /readme/i.test(f.path));
+              if (readmeFile) {
+                instructions = readmeFile.content;
+              } else {
+                instructions = matched[0].content;
+              }
+            } else {
+              instructions = r.digest.text;
+            }
+          }
+        } catch (err) {
+          onProgress(`Note: error reading instructions repo: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // Step 5: Get or synthesize rubric.
+      let rubric = String(values.rubric ?? "").trim();
+      if (!rubric) {
+        onProgress("Generating rubric...");
+        const rr = await generateAssignmentRubricAction(
+          moduleName + (topic ? `: ${topic}` : ""),
+          instructions,
+          helpers.provider
+        );
+        if (typeof rr === "string") {
+          rubric = rr;
+        } else {
+          onProgress(`Note: rubric generation failed: ${rr.error}`);
+        }
+      }
+
+      if (!rubric && !instructions) {
+        throw new Error("Provide a rubric or an instructions repo with the week's README.");
+      }
+
+      // Step 6: Grade each student repo.
+      const results: GradeResult[] = [];
+      const notes: string[] = [];
+
+      for (let i = 0; i < students.length; i++) {
+        const student = students[i];
+        try {
+          onProgress(`Grading ${i + 1}/${students.length}...`);
+          const r = await gradeRepoAction(student.repo, instructions, rubric, helpers.provider);
+
+          if ("error" in r) {
+            notes.push(`${student.student || student.repo}: ${r.error}`);
+            continue;
+          }
+
+          const gr = r.run.results[0];
+          if (!gr) {
+            notes.push(`${student.student || student.repo}: no result returned`);
+            continue;
+          }
+
+          gr.student = student.student || gr.student;
+          gr.userId = student.canvasUserId && /^\d+$/.test(student.canvasUserId) ? Number(student.canvasUserId) : undefined;
+          results.push(gr);
+        } catch (err) {
+          notes.push(
+            `${student.student || student.repo}: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+
+      // Step 7: Assemble GradingRunEntry and save the draft.
+      const rubricAreaNames = results[0]?.rubricAreas.map((a) => a.area) ?? [];
+      const entry: GradingRunEntry = {
+        courseName: tile.name,
+        assignmentName: moduleName,
+        canvasUrl: String(values.assignmentUrl ?? "").trim(),
+        run: { results, rubricAreaNames, fullCreditChecklist: [], speedGraderUrl: null },
+        institution: tile.institution || undefined,
+        pointsPossible:
+          String(values.pointsPossible ?? "").trim() !== "" && Number.isFinite(Number(values.pointsPossible))
+            ? Number(values.pointsPossible)
+            : null,
+      };
+
+      const summary = `${tile.name} - ${moduleName}: graded ${results.length} repo(s)`;
+      const saveRes = await saveGradingDraftAction(summary, { runs: [entry] }, helpers.workflowId, helpers.workflowName);
+      if ("error" in saveRes) throw new Error(saveRes.error);
+
+      return {
+        outputs: { draftId: saveRes.id, graded: results.length, moduleName },
+        summary: {
+          kind: "text",
+          text: `${summary}.${notes.length ? ` (${notes.join("; ")})` : ""}`,
+        },
       };
     },
   },

@@ -114,6 +114,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "generate-full-credit-checklist",
     "generate-model-answer",
     "grade-repo",
+    "batch-grade-repos-to-draft",
     "grade-one-submission",
   ],
   lms: [

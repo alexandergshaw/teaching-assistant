@@ -7,7 +7,9 @@ import { useSupabase } from "@/context/SupabaseProvider";
 import { listPendingGradingDrafts, deleteGradingDraft, type GradingDraft, type GradingDraftPayload } from "@/lib/grading-drafts";
 import type { GradingRunEntry, GradeResult } from "@/lib/grade";
 import { useDraftedGradesInbox } from "./DraftedGradesInbox";
-import { updateGradingDraftPayloadAction, postGradingDraftAction } from "../actions";
+import { updateGradingDraftPayloadAction, postGradingDraftAction, pullSubmissionAction } from "../actions";
+import { parseCanvasCourseId } from "@/lib/canvas-url";
+import type { CanvasSubmissionDetail } from "@/lib/canvas";
 import styles from "../page.module.css";
 
 export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: (id: string) => void }) {
@@ -25,6 +27,10 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
   const [edits, setEdits] = useState<Record<string, { totalScore: string; overallComment: string }>>({});
   const [confirmPost, setConfirmPost] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState<Set<string>>(new Set());
+  const [submissions, setSubmissions] = useState<
+    Record<string, { status: "loading" | "ready" | "error"; data?: CanvasSubmissionDetail; error?: string }>
+  >({});
 
   // Toolbar state (persisted)
   const [search, setSearch] = useState<string>(() => {
@@ -288,6 +294,38 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     });
   };
 
+  const submissionTarget = (entry: GradingRunEntry, result: GradeResult) => {
+    if (typeof result.userId !== "number") return null;
+    const courseId = parseCanvasCourseId(entry.canvasUrl);
+    const assignmentId = entry.canvasUrl.match(/\/assignments\/(\d+)/)?.[1] ?? null;
+    const code = (entry.institution ?? "").trim();
+    if (!courseId || !assignmentId || !code) return null;
+    return { code, courseId, assignmentId, userId: result.userId };
+  };
+
+  const togglePreview = (key: string, entry: GradingRunEntry, result: GradeResult) => {
+    setPreviewOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) { next.delete(key); return next; }
+      next.add(key);
+      return next;
+    });
+    // Lazy-load once.
+    if (previewOpen.has(key) || submissions[key]) return;
+    const t = submissionTarget(entry, result);
+    if (!t) return;
+    setSubmissions((prev) => ({ ...prev, [key]: { status: "loading" } }));
+    void (async () => {
+      const res = await pullSubmissionAction(t.code, t.courseId, t.assignmentId, t.userId);
+      setSubmissions((prev) => ({
+        ...prev,
+        [key]: "error" in res
+          ? { status: "error", error: res.error }
+          : { status: "ready", data: res.submission },
+      }));
+    })();
+  };
+
   const formatDateTime = (iso: string): string => {
     const date = new Date(iso);
     return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -469,6 +507,15 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                               >
                                 {isExpanded ? "Hide" : "Details"}
                               </Button>
+                              {submissionTarget(entry, result) && (
+                                <Button
+                                  size="small"
+                                  variant="text"
+                                  onClick={() => togglePreview(expandKey, entry, result)}
+                                >
+                                  {previewOpen.has(expandKey) ? "Hide submission" : "Preview"}
+                                </Button>
+                              )}
                             </div>
                             {isExpanded && (
                               <div className={styles.draftExpand}>
@@ -504,6 +551,33 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                 {result.rubricAreas.length === 0 && !result.overallComment && (!result.feedback || result.feedback === result.overallComment) && (
                                   <span className={styles.fieldHint}>No additional detail.</span>
                                 )}
+                              </div>
+                            )}
+                            {previewOpen.has(expandKey) && (
+                              <div className={styles.draftExpand}>
+                                {(() => {
+                                  const sub = submissions[expandKey];
+                                  if (!sub || sub.status === "loading") return <span className={styles.fieldHint}>Loading submission...</span>;
+                                  if (sub.status === "error") return <div className={styles.error}>{sub.error || "Could not load the submission."}</div>;
+                                  const d = sub.data!;
+                                  return (
+                                    <>
+                                      <div className={styles.fieldHint} style={{ margin: 0 }}>
+                                        Submission ({d.workflowState}{d.submittedAt ? `, ${new Date(d.submittedAt).toLocaleString()}` : ""})
+                                      </div>
+                                      {d.text && <p className={styles.draftFeedback}>{d.text}</p>}
+                                      {d.files.map((f, i) => (
+                                        <div key={i} className={styles.fieldHint} style={{ margin: 0 }}>File: {f.name}</div>
+                                      ))}
+                                      {!d.text && d.files.length === 0 && <span className={styles.fieldHint}>No submission content.</span>}
+                                      {d.speedGraderUrl && (
+                                        <a href={d.speedGraderUrl} target="_blank" rel="noreferrer" className={styles.linkButton} style={{ marginTop: 4 }}>
+                                          Open in SpeedGrader
+                                        </a>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                               </div>
                             )}
                           </div>

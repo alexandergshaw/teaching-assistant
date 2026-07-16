@@ -180,6 +180,7 @@ import { type AccessibleItemType, type Issue } from "@/lib/accessibility/types";
 import { callLlm, normalizeProvider, type LlmProvider, type LlmPart } from "@/lib/llm";
 import {
   githubConfigured,
+  githubWebhookSecret,
   listRepos,
   listOwnedOrgs,
   listOrgRepos,
@@ -206,6 +207,7 @@ import {
   listOrgMembers,
   inviteOrgMember,
   setOrgMemberRole,
+  createOrgPushHook,
   listRepoCollaborators,
   setRepoCollaborator,
   createPullRequest,
@@ -7950,6 +7952,43 @@ export async function checkStudentActivityAction(
     return { rows };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not read student activity." };
+  }
+}
+
+/** The stable public base url this deployment is reachable at, for outbound webhook
+ * registration. Must be the production domain (GitHub cannot reach preview/localhost). */
+function publicWebhookBaseUrl(): string {
+  const explicit = process.env.WEBHOOK_BASE_URL?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  const vercelProd = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  if (vercelProd) return `https://${vercelProd}`;
+  return "https://teaching-assistant-pi.vercel.app";
+}
+
+/** Auto-register the GitHub org-level push webhook that feeds /api/github/webhook so
+ * repo-push triggers fire instantly. Idempotent. Never returns the webhook secret. */
+export async function registerOrgPushWebhookAction(
+  org: string
+): Promise<
+  | { ok: true; url: string; hookId: number; alreadyExisted: boolean }
+  | { ok: false; url: string; error: string }
+> {
+  const url = `${publicWebhookBaseUrl()}/api/github/webhook`;
+  try {
+    await requireOwner();
+    const cleanOrg = org.trim();
+    if (!cleanOrg) return { ok: false, url, error: "Provide a GitHub organization." };
+    if (!githubConfigured()) {
+      return { ok: false, url, error: "GitHub is not configured. Set the GITHUB_TOKEN environment variable." };
+    }
+    const secret = githubWebhookSecret();
+    if (!secret) {
+      return { ok: false, url, error: "Set the GITHUB_WEBHOOK_SECRET environment variable to enable instant webhooks." };
+    }
+    const { id, alreadyExisted } = await createOrgPushHook(cleanOrg, url, secret);
+    return { ok: true, url, hookId: id, alreadyExisted };
+  } catch (err) {
+    return { ok: false, url, error: err instanceof Error ? err.message : "Could not register the webhook." };
   }
 }
 

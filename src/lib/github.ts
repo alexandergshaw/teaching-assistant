@@ -18,6 +18,15 @@ export function githubConfigured(): boolean {
   return !!process.env.GITHUB_TOKEN?.trim();
 }
 
+/** The GitHub webhook signing secret (trimmed), or null if unset/blank. Both the
+ * registration action and the /api/github/webhook verifier read the secret through
+ * this one accessor so the signing key and the verifying key can never diverge
+ * (e.g. from a trailing newline pasted into the env var). */
+export function githubWebhookSecret(): string | null {
+  const s = process.env.GITHUB_WEBHOOK_SECRET?.trim();
+  return s ? s : null;
+}
+
 function ghError(status: number, detail: string): string {
   let message = "";
   try {
@@ -958,6 +967,58 @@ export async function setOrgMemberRole(org: string, username: string, role: "adm
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ role }),
   });
+}
+
+// ── Org webhooks ──────────────────────────────────────────────────────────────
+export interface OrgHook {
+  id: number;
+  url: string;
+  events: string[];
+  active: boolean;
+}
+
+/** List an org's webhooks (needs the token's admin:org_hook scope). */
+export async function listOrgHooks(org: string): Promise<OrgHook[]> {
+  const hooks = await ghJson<Array<{ id?: number; active?: boolean; events?: string[]; config?: { url?: string } }>>(
+    `/orgs/${org}/hooks?per_page=100`
+  );
+  return hooks
+    .filter((h): h is { id: number; active?: boolean; events?: string[]; config?: { url?: string } } => typeof h.id === "number")
+    .map((h) => ({ id: h.id, url: h.config?.url ?? "", events: h.events ?? [], active: h.active ?? false }));
+}
+
+/** Idempotently register an org-level push webhook that POSTs to `url`. If a hook
+ * with the same payload url already exists, self-heals it (forces active, subscribed
+ * to push, signed with the current secret) via PATCH instead of creating a duplicate.
+ * `secret` is used by GitHub to sign each delivery (X-Hub-Signature-256); it is never
+ * logged or returned. Needs the token's admin:org_hook scope. */
+export async function createOrgPushHook(
+  org: string,
+  url: string,
+  secret: string
+): Promise<{ id: number; alreadyExisted: boolean }> {
+  const config = { url, content_type: "json", secret, insecure_ssl: "0" };
+  const existing = await listOrgHooks(org);
+  const match = existing.find((h) => h.url === url);
+  if (match) {
+    // Self-heal: force the existing same-url hook to be active, subscribed to
+    // push, and signed with the current secret (covers a previously disabled or
+    // mis-scoped hook and secret rotation). PATCH rather than POST because GitHub
+    // rejects a duplicate-url POST with 422.
+    await ghFetch(`/orgs/${org}/hooks/${match.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: true, events: ["push"], config }),
+    });
+    return { id: match.id, alreadyExisted: true };
+  }
+  const created = await ghJson<{ id?: number }>(`/orgs/${org}/hooks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "web", active: true, events: ["push"], config }),
+  });
+  if (typeof created.id !== "number") throw new Error("GitHub did not return a webhook id.");
+  return { id: created.id, alreadyExisted: false };
 }
 
 // ── Per-repo collaborator access ────────────────────────────────────────────

@@ -45,7 +45,7 @@ import { isScopeableListType, expandScopedValue, ALL_SCOPE, resolveClassRepoRef,
 import { isInstitutionFanout, resolveFanoutInstitutions, scopeForInstitution } from "@/lib/workflows/fanout";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
-import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction, runSubmissionCodeAction } from "@/app/actions";
+import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction, runSubmissionCodeAction, registerOrgPushWebhookAction } from "@/app/actions";
 import type { CodeRunResult } from "@/lib/code-runner";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import {
@@ -608,6 +608,11 @@ export default function WorkflowsTab() {
   } | null>(null);
   const [triggerBusy, setTriggerBusy] = useState(false);
   const [triggerRemoveConfirm, setTriggerRemoveConfirm] = useState<string | null>(null);
+  const [webhookSetup, setWebhookSetup] = useState<
+    | null
+    | { ok: true; org: string; url: string; alreadyExisted: boolean }
+    | { ok: false; org: string; url: string; error: string }
+  >(null);
 
   // Parsed course exports keyed by course id; promises so concurrent readers
   // (module picker + running steps) share one download.
@@ -2001,6 +2006,22 @@ export default function WorkflowsTab() {
       });
       setTriggers((prev) => [created, ...(prev ?? [])]);
       setTriggerForm(null);
+      if (triggerForm.eventType === "repo-push") {
+        const hookOrg = (triggerForm.config.org ?? "").trim();
+        if (hookOrg) {
+          void registerOrgPushWebhookAction(hookOrg)
+            .then((res) => {
+              setWebhookSetup(
+                res.ok
+                  ? { ok: true, org: hookOrg, url: res.url, alreadyExisted: res.alreadyExisted }
+                  : { ok: false, org: hookOrg, url: res.url, error: res.error }
+              );
+            })
+            .catch(() => {
+              /* best-effort: the ~15-min poller still fires the trigger */
+            });
+        }
+      }
     } catch (err) {
       setTriggerError(err instanceof Error ? err.message : "Could not save the trigger.");
     } finally {
@@ -4331,6 +4352,40 @@ export default function WorkflowsTab() {
             })()}
 
             {triggerError && <p className={styles.error}>{triggerError}</p>}
+
+            {webhookSetup && (
+              <div style={{ padding: "12px", marginBottom: "12px", borderRadius: "4px", backgroundColor: webhookSetup.ok ? "var(--success-bg, rgba(76, 175, 80, 0.1))" : "var(--field-bg)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: "12px" }}>
+                  <p style={{ margin: 0, fontSize: "0.9em", lineHeight: "1.4" }}>
+                    {webhookSetup.ok && !webhookSetup.alreadyExisted && (
+                      <>Instant push webhook registered on <strong>{webhookSetup.org}</strong>. Pushes now fire this trigger immediately.</>
+                    )}
+                    {webhookSetup.ok && webhookSetup.alreadyExisted && (
+                      <>Instant push webhook already active on <strong>{webhookSetup.org}</strong>.</>
+                    )}
+                    {!webhookSetup.ok && (
+                      <>
+                        Could not auto-register the instant webhook ({webhookSetup.error}). The trigger still works via the periodic poller. To enable instant firing, add a webhook under {webhookSetup.org} org settings with Payload URL <code style={{ backgroundColor: "var(--field-bg)", padding: "2px 6px", borderRadius: "2px", wordBreak: "break-all" }}>{webhookSetup.url}</code> (shown selectable), Content type application/json, Secret set to your GITHUB_WEBHOOK_SECRET value, and only the push event.
+                      </>
+                    )}
+                  </p>
+                  <button
+                    onClick={() => setWebhookSetup(null)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "var(--text-secondary)",
+                      cursor: "pointer",
+                      padding: 0,
+                      flex: "none",
+                      fontSize: "0.85em",
+                    }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
 
             {(triggers ?? []).some((t) => t.workflowId === selectedDef.id) && (
               <div style={{ marginTop: 16 }}>

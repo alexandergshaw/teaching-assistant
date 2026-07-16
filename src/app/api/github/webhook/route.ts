@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { createServiceClient } from "@/lib/supabase/server";
 import { runAsOwner } from "@/lib/supabase/owner-context";
 import { isOwnerEmail } from "@/lib/owner";
+import { githubWebhookSecret } from "@/lib/github";
 import {
   listEnabledRepoPushTriggers,
   matchRepoPushTriggers,
@@ -49,7 +50,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const secret = process.env.GITHUB_WEBHOOK_SECRET;
+    const secret = githubWebhookSecret();
     if (!secret) {
       return NextResponse.json({ error: "Webhook not configured." }, { status: 500 });
     }

@@ -39,7 +39,10 @@ import { VIEW_KEY } from "./components/content-tab/constants";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "courses" | "course-planning" | "content" | "recording" | "files" | "workflows" | "grade-drafts";
+type ActiveTab = "courses" | "manual" | "workflows" | "files" | "grade-drafts";
+// The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
+type ManualView = "course-planning" | "content" | "recording";
+const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 type BuildView = "new" | "prebuilt";
 const BUILD_VIEW_KEY = "ta-build-view";
@@ -147,18 +150,31 @@ export default function Home() {
   const { count: draftsInbox, markSeen: markDraftsSeen } = useDraftedGradesInbox();
   const [testState] = useActionState(testGeminiAction, initialTestState);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
-    if (typeof window === "undefined") return "course-planning";
+    if (typeof window === "undefined") return "manual";
     const saved = localStorage.getItem("ta-active-tab");
-    // Grading and Communications are now subtabs of LMS Integration ("content").
-    if (saved === "grading" || saved === "canvas") return "content";
-    // Pre Built Courses is now a subtab of Build Courses ("course-planning").
-    if (saved === "lesson-planning") return "course-planning";
-    // Version Control tab is now a subtab of Integrations ("content").
-    if (saved === "version-control") {
-      localStorage.setItem(VIEW_KEY, "version-control");
+    // Build Courses, Integrations, and Recording (and their legacy tab names) are
+    // now subtabs of the Manual tab; anything that is not still a top-level tab
+    // lands on Manual.
+    return saved === "courses" || saved === "workflows" || saved === "files" || saved === "grade-drafts"
+      ? saved
+      : "manual";
+  });
+  const [manualView, setManualView] = useState<ManualView>(() => {
+    if (typeof window === "undefined") return "course-planning";
+    const savedManual = localStorage.getItem(MANUAL_VIEW_KEY);
+    if (savedManual === "course-planning" || savedManual === "content" || savedManual === "recording") {
+      return savedManual;
+    }
+    // First run under the Manual grouping: derive the subtab from the legacy
+    // top-level tab the user last had open.
+    const saved = localStorage.getItem("ta-active-tab");
+    if (saved === "recording") return "recording";
+    if (saved === "content" || saved === "grading" || saved === "canvas" || saved === "version-control") {
+      if (saved === "version-control") localStorage.setItem(VIEW_KEY, "version-control");
       return "content";
     }
-    return saved === "courses" || saved === "course-planning" || saved === "content" || saved === "recording" || saved === "files" || saved === "workflows" || saved === "grade-drafts" ? saved : "course-planning";
+    // course-planning / lesson-planning / anything else -> Build Courses.
+    return "course-planning";
   });
   const [buildView, setBuildViewState] = useState<BuildView>(() => {
     if (typeof window === "undefined") return "prebuilt";
@@ -197,6 +213,10 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem("ta-active-tab", activeTab);
   }, [activeTab]);
+
+  useEffect(() => {
+    localStorage.setItem(MANUAL_VIEW_KEY, manualView);
+  }, [manualView]);
 
   useEffect(() => {
     if (activeTab === "files") {
@@ -729,14 +749,12 @@ export default function Home() {
             value="courses"
             disableRipple
           />
-          <Tab label="Build Courses" value="course-planning" disableRipple />
-          <Tab label="Workflows" value="workflows" disableRipple />
           <Tab
-            label={<NavTabLabel text="Integrations" count={totalNeedsGrading + totalUnread + vcAttention} />}
-            value="content"
+            label={<NavTabLabel text="Manual" count={totalNeedsGrading + totalUnread + vcAttention} />}
+            value="manual"
             disableRipple
           />
-          <Tab label="Recording" value="recording" disableRipple />
+          <Tab label="Workflows" value="workflows" disableRipple />
           <Tab label={<NavTabLabel text="Files" count={filesInbox} />} value="files" disableRipple />
           <Tab label={<NavTabLabel text="Grade Drafts" count={draftsInbox} />} value="grade-drafts" disableRipple />
         </Tabs>
@@ -744,12 +762,16 @@ export default function Home() {
         {activeTab === "courses" && (
           <CoursesTab
             onNavigate={(tab) => {
-              // Course handoffs (syllabus prefill) live in the New Build flow.
-              if (tab === "course-planning") setBuildView("new");
-              // Version Control tab is now a subtab of Integrations ("content").
-              if (tab === "version-control") {
+              if (tab === "course-planning") {
+                // Course handoffs (syllabus prefill) live in the New Build flow.
+                setBuildView("new");
+                setManualView("course-planning");
+                setActiveTab("manual");
+              } else if (tab === "version-control") {
+                // Version Control is a subtab of Integrations, under Manual.
                 localStorage.setItem(VIEW_KEY, "version-control");
-                setActiveTab("content");
+                setManualView("content");
+                setActiveTab("manual");
               } else {
                 setActiveTab(tab as ActiveTab);
               }
@@ -757,54 +779,116 @@ export default function Home() {
           />
         )}
 
-        {activeTab === "course-planning" && (() => {
-          const buildSwitcher = (
-            <div className={styles.lessonInnerTabs} role="tablist" aria-label="Course build modes">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={buildView === "new"}
-                className={`${styles.lessonInnerTab}${buildView === "new" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                onClick={() => setBuildView("new")}
-              >
-                New Build
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={buildView === "prebuilt"}
-                className={`${styles.lessonInnerTab}${buildView === "prebuilt" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                onClick={() => setBuildView("prebuilt")}
-              >
-                Pre Built
-              </button>
+        {activeTab === "manual" && (
+          <>
+            <div className={styles.manualSubnav}>
+              <div className={styles.lessonInnerTabs} role="tablist" aria-label="Manual tools">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={manualView === "course-planning"}
+                  className={`${styles.lessonInnerTab}${manualView === "course-planning" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                  onClick={() => setManualView("course-planning")}
+                >
+                  Build Courses
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={manualView === "content"}
+                  className={`${styles.lessonInnerTab}${manualView === "content" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                  onClick={() => setManualView("content")}
+                >
+                  <span className={styles.tabLabelWrap}>
+                    Integrations
+                    {totalNeedsGrading + totalUnread + vcAttention > 0 && (
+                      <span className={styles.navBadge}>{totalNeedsGrading + totalUnread + vcAttention}</span>
+                    )}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={manualView === "recording"}
+                  className={`${styles.lessonInnerTab}${manualView === "recording" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                  onClick={() => setManualView("recording")}
+                >
+                  Recording
+                </button>
+              </div>
             </div>
-          );
-          return buildView === "new" ? (
-            <CoursePlanningTab innerTabs={buildSwitcher} />
-          ) : (
-            <LessonPlanningForm
-              innerTabs={buildSwitcher}
-              moduleObjectives={moduleObjectives}
-              onModuleObjectivesChange={setModuleObjectives}
-              moduleTitle={moduleTitle}
-              onModuleTitleChange={setModuleTitle}
-              isCourseEngine={provider === "other"}
-              lessonContext={lessonContext}
-              onLessonContextChange={setLessonContext}
-              contextFileRef={lessonContextFileRef}
-              homeworkText={homeworkText}
-              onHomeworkTextChange={setHomeworkText}
-              homeworkFileRef={homeworkFileRef}
-              lessonError={lessonError}
-              isGeneratingLesson={isGeneratingLesson}
-              onGenerate={handleGenerateLesson}
-            />
-          );
-        })()}
 
-        <div style={{ display: activeTab === "recording" ? undefined : "none" }}>
-          <RecordingTab active={activeTab === "recording"} />
+            {manualView === "course-planning" && (() => {
+              const buildSwitcher = (
+                <div className={styles.lessonInnerTabs} role="tablist" aria-label="Course build modes">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={buildView === "new"}
+                    className={`${styles.lessonInnerTab}${buildView === "new" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                    onClick={() => setBuildView("new")}
+                  >
+                    New Build
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={buildView === "prebuilt"}
+                    className={`${styles.lessonInnerTab}${buildView === "prebuilt" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                    onClick={() => setBuildView("prebuilt")}
+                  >
+                    Pre Built
+                  </button>
+                </div>
+              );
+              return buildView === "new" ? (
+                <CoursePlanningTab innerTabs={buildSwitcher} />
+              ) : (
+                <LessonPlanningForm
+                  innerTabs={buildSwitcher}
+                  moduleObjectives={moduleObjectives}
+                  onModuleObjectivesChange={setModuleObjectives}
+                  moduleTitle={moduleTitle}
+                  onModuleTitleChange={setModuleTitle}
+                  isCourseEngine={provider === "other"}
+                  lessonContext={lessonContext}
+                  onLessonContextChange={setLessonContext}
+                  contextFileRef={lessonContextFileRef}
+                  homeworkText={homeworkText}
+                  onHomeworkTextChange={setHomeworkText}
+                  homeworkFileRef={homeworkFileRef}
+                  lessonError={lessonError}
+                  isGeneratingLesson={isGeneratingLesson}
+                  onGenerate={handleGenerateLesson}
+                />
+              );
+            })()}
+
+            {manualView === "content" && (
+              <ContentTab
+                grading={
+                  <GradingTab
+                    formAction={formAction}
+                    pending={pending}
+                    state={state}
+                    testState={testState}
+                    copiedKey={copiedKey}
+                    onCopy={handleCopy}
+                    onOpenPreview={handleOpenPreview}
+                  />
+                }
+                announcements={<CanvasTab view="announcements" />}
+                inbox={<CanvasTab view="inbox" />}
+                versionControl={<VersionControlTab />}
+              />
+            )}
+          </>
+        )}
+
+        {/* Kept mounted at all times so an in-progress recording survives switching
+            subtabs or top-level tabs; only shown on Manual > Recording. */}
+        <div style={{ display: activeTab === "manual" && manualView === "recording" ? undefined : "none" }}>
+          <RecordingTab active={activeTab === "manual" && manualView === "recording"} />
         </div>
 
         {activeTab === "files" && <FilesTab />}
@@ -812,25 +896,6 @@ export default function Home() {
         {activeTab === "grade-drafts" && <DraftedGradesTab onReviewDrafts={() => setActiveTab("workflows")} />}
 
         {activeTab === "workflows" && <WorkflowsTab />}
-
-        {activeTab === "content" && (
-          <ContentTab
-            grading={
-              <GradingTab
-                formAction={formAction}
-                pending={pending}
-                state={state}
-                testState={testState}
-                copiedKey={copiedKey}
-                onCopy={handleCopy}
-                onOpenPreview={handleOpenPreview}
-              />
-            }
-            announcements={<CanvasTab view="announcements" />}
-            inbox={<CanvasTab view="inbox" />}
-            versionControl={<VersionControlTab />}
-          />
-        )}
 
       </div>
 

@@ -5761,3 +5761,13 @@ a.instFieldValue:hover {
     white-space: normal;
   }
 }
+
+.manualSubnav {
+  padding: 20px 36px 0;
+}
+
+@media (max-width: 600px) {
+  .manualSubnav {
+    padding: 16px 24px 0;
+  }
+}

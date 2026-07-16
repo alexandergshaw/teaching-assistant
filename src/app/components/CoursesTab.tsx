@@ -100,7 +100,7 @@ interface CourseForm {
 }
 
 // Fields that can be edited inline on tiles.
-type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime";
+type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos";
 
 const EMPTY_FORM: CourseForm = {
   id: null,
@@ -218,6 +218,22 @@ function rowsToRoster(rows: Array<{ student: string; username: string }>): strin
     .join("\n");
 }
 
+// Serialize/parse the student-repo rows to/from the tileEdit text value.
+function studentReposToRows(text: string): Array<{ student: string; canvasUserId: string; repo: string }> {
+  return text.split("\n").map((line) => {
+    const parts = line.split("|");
+    return {
+      student: (parts[0] ?? "").trim(),
+      canvasUserId: (parts[1] ?? "").trim(),
+      repo: (parts[2] ?? "").trim(),
+    };
+  }).filter((r) => r.student || r.canvasUserId || r.repo);
+}
+
+function rowsToStudentReposText(rows: Array<{ student: string; canvasUserId: string; repo: string }>): string {
+  return rows.map((r) => `${r.student} | ${r.canvasUserId} | ${r.repo}`).join("\n");
+}
+
 // Read a File as a bare base64 string (no data: prefix).
 function readFileBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -291,6 +307,7 @@ const TILE_LABELS: Record<string, string> = {
   lms: "LMS",
   integrations: "Integrations",
   roster: "Roster",
+  studentRepos: "Student repos",
   csv: "Schedule of Topics",
   rubric: "Rubric",
   lmsExports: "LMS Exports",
@@ -392,6 +409,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [tileSaving, setTileSaving] = useState(false);
   const [lmsBusyTile, setLmsBusyTile] = useState<string | null>(null);
   const [expandedRosterId, setExpandedRosterId] = useState<string | null>(null);
+  const [expandedStudentReposId, setExpandedStudentReposId] = useState<string | null>(null);
   const [csvPreview, setCsvPreview] = useState<{ name: string; csv: string } | null>(null);
   const [csvRemoveConfirm, setCsvRemoveConfirm] = useState<string | null>(null);
   const [uploadingCsv, setUploadingCsv] = useState(false);
@@ -1758,7 +1776,8 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       : field === "tests" ? (c.tests !== null ? String(c.tests) : "")
       : field === "lms" ? (c.lms || institutionLms(c))
       : field === "dayTime" ? (c.dayTime ?? "")
-      : ((c[field as Exclude<InlineField, "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime">] ?? "") as string);
+      : field === "studentRepos" ? rowsToStudentReposText((c.studentRepos ?? []).map((r) => ({ student: r.student, canvasUserId: r.canvasUserId ?? "", repo: r.repo })))
+      : ((c[field as Exclude<InlineField, "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos">] ?? "") as string);
     setTileEdit({ id: c.id, field, value });
     if (field === "lms") {
       setLmsCourseDraft(null);
@@ -1798,6 +1817,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         ...(lmsCourseDraft !== null ? { canvasUrl: lmsCourseDraft || null } : {}),
       }
       : tileEdit.field === "dayTime" ? { dayTime: tileEdit.value }
+      : tileEdit.field === "studentRepos" ? { studentRepos: studentReposToRows(tileEdit.value).map((r) => ({ student: r.student, canvasUserId: r.canvasUserId || null, repo: r.repo })) }
       : { [tileEdit.field]: tileEdit.value };
     const r = await updateCourseHubAction(course.id, { ...courseToInput(course), ...patch });
     setTileSaving(false);
@@ -2105,6 +2125,52 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         </div>
         <div>
           <Button variant="text" size="small" onClick={() => setRows([...rows, { student: "New student", username: "" }])}>
+            Add student
+          </Button>
+        </div>
+        <div className={styles.tileEditorActions}>
+          <Button variant="contained" size="small" disabled={tileSaving} onClick={() => void saveTileEdit()}>
+            {tileSaving ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="text" size="small" disabled={tileSaving} onClick={() => setTileEdit(null)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  // Render the student repos table editor (student/canvasUserId/repo triplets + save/cancel).
+  const studentReposTableEditor = () => {
+    if (!tileEdit) return null;
+    const rows = studentReposToRows(tileEdit.value);
+    const setRows = (next: Array<{ student: string; canvasUserId: string; repo: string }>) =>
+      setTileEdit((t) => (t ? { ...t, value: rowsToStudentReposText(next) } : t));
+    const update = (i: number, patch: Partial<{ student: string; canvasUserId: string; repo: string }>) =>
+      setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    return (
+      <div className={styles.tileEditor}>
+        <div style={{ display: "flex", gap: 6 }}>
+          <span className={styles.ghMeta} style={{ flex: 1 }}>Student</span>
+          <span className={styles.ghMeta} style={{ width: 150 }}>Canvas user id</span>
+          <span className={styles.ghMeta} style={{ flex: 1 }}>Repo</span>
+          <span style={{ width: 24 }} />
+        </div>
+        <div style={{ maxHeight: 240, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+          {rows.map((r, i) => (
+            <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <TextField size="small" value={r.student} onChange={(e) => update(i, { student: e.target.value })} sx={{ flex: 1 }} placeholder="Smith, John" />
+              <TextField size="small" value={r.canvasUserId} onChange={(e) => update(i, { canvasUserId: e.target.value })} sx={{ width: 150 }} placeholder="canvas-id" />
+              <TextField size="small" value={r.repo} onChange={(e) => update(i, { repo: e.target.value })} sx={{ flex: 1 }} placeholder="owner/repo" />
+              <button type="button" className={styles.linkButton} title="Remove student" onClick={() => setRows(rows.filter((_, idx) => idx !== i))} style={{ width: 24, color: "var(--danger)" }}>
+                x
+              </button>
+            </div>
+          ))}
+          {rows.length === 0 && <p className={styles.fieldHint} style={{ margin: 0 }}>No student repos yet.</p>}
+        </div>
+        <div>
+          <Button variant="text" size="small" onClick={() => setRows([...rows, { student: "New student", canvasUserId: "", repo: "" }])}>
             Add student
           </Button>
         </div>
@@ -3101,6 +3167,61 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                       </div>
                     )}
                   </>
+                )}
+          </div>
+        );
+      case "studentRepos":
+        return (
+          <div className={`${styles.courseResource} ${styles.courseResourceClickable}`} data-tile-editing={tileEdit?.id === c.id && tileEdit?.field === "studentRepos" ? "true" : undefined} onClick={tileClick(() => startTileEdit(c, "studentRepos"))}>
+            <div className={styles.courseResourceHead}>
+              <span className={styles.courseResourceLabel}>{tileGrabHandle("studentRepos")}{tileHideButton("studentRepos", c)}Student repos</span>
+              <button
+                type="button"
+                className={styles.tileEditBtn}
+                title="Edit"
+                onClick={() => startTileEdit(c, "studentRepos")}
+              >
+                <PencilIcon />
+              </button>
+            </div>
+            {tileEdit?.id === c.id && tileEdit?.field === "studentRepos"
+              ? studentReposTableEditor()
+              : c.studentRepos && c.studentRepos.length > 0
+                ? (
+                  <>
+                    <span className={styles.courseResourceValue}>
+                      {c.studentRepos.length} student{c.studentRepos.length > 1 ? "s" : ""} with repo{c.studentRepos.length > 1 ? "s" : ""}
+                    </span>
+                    <div className={styles.courseResourceActions}>
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        onClick={() => setExpandedStudentReposId(expandedStudentReposId === c.id ? null : c.id)}
+                      >
+                        {expandedStudentReposId === c.id ? "Hide" : "View"}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        onClick={() => {
+                          const text = c.studentRepos.map((r) => `${r.student} -> ${r.repo}`).join("\n");
+                          void navigator.clipboard.writeText(text);
+                        }}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    {expandedStudentReposId === c.id && (
+                      <div className={styles.rosterPreview}>
+                        {c.studentRepos.map((r, i) => (
+                          <div key={i}>{`${r.student} -> ${r.repo}`}</div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )
+                : (
+                  <span className={styles.courseResourceEmpty}>No student repos yet</span>
                 )}
           </div>
         );

@@ -9,7 +9,7 @@ import { updateMessageDraftPayloadAction, postMessageDraftAction } from "../acti
 import { useDraftedGradesInbox } from "./DraftedGradesInbox";
 import styles from "../page.module.css";
 
-export default function MessageDraftsTab() {
+export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: (id: string) => void }) {
   const { supabase, user } = useSupabase();
   const { refresh: refreshBadge } = useDraftedGradesInbox();
 
@@ -218,6 +218,16 @@ export default function MessageDraftsTab() {
                           ? `reply to conversation ${draft.payload.conversationId ?? "?"}`
                           : `announcement${draft.payload.title ? `: ${draft.payload.title}` : ""}`}
                       </div>
+                      {draft.workflowId && draft.workflowName && onOpenWorkflow && (
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          style={{ marginTop: 4 }}
+                          onClick={() => onOpenWorkflow(draft.workflowId!)}
+                        >
+                          From workflow: {draft.workflowName}
+                        </button>
+                      )}
                     </div>
                     <div className={styles.draftSectionActions}>
                       {editingId === draft.id ? (

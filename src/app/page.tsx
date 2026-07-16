@@ -729,6 +729,11 @@ export default function Home() {
     }, 1600);
   };
 
+  const openWorkflow = (id: string) => {
+    if (typeof window !== "undefined") localStorage.setItem("ta-workflows-selected", id);
+    setActiveTab("workflows");
+  };
+
   return (
     <>
       <TopBar />
@@ -954,8 +959,8 @@ export default function Home() {
               </div>
             </div>
 
-            {draftsView === "grades" && <DraftedGradesTab />}
-            {draftsView === "messages" && <MessageDraftsTab />}
+            {draftsView === "grades" && <DraftedGradesTab onOpenWorkflow={openWorkflow} />}
+            {draftsView === "messages" && <MessageDraftsTab onOpenWorkflow={openWorkflow} />}
           </>
         )}
 

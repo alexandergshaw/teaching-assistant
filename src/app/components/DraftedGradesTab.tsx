@@ -10,7 +10,7 @@ import { useDraftedGradesInbox } from "./DraftedGradesInbox";
 import { updateGradingDraftPayloadAction, postGradingDraftAction } from "../actions";
 import styles from "../page.module.css";
 
-export default function DraftedGradesTab() {
+export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: (id: string) => void }) {
   const { supabase, user } = useSupabase();
   const { refresh: refreshDraftsBadge } = useDraftedGradesInbox();
 
@@ -386,6 +386,16 @@ export default function DraftedGradesTab() {
                       <div className={styles.draftSectionMeta}>
                         {formatDateTime(draft.createdAt)} · {groups.reduce((total, g) => total + g.results.length, 0)} grade{groups.reduce((total, g) => total + g.results.length, 0) === 1 ? "" : "s"}
                       </div>
+                      {draft.workflowId && draft.workflowName && onOpenWorkflow && (
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          style={{ marginTop: 4 }}
+                          onClick={() => onOpenWorkflow(draft.workflowId!)}
+                        >
+                          From workflow: {draft.workflowName}
+                        </button>
+                      )}
                     </div>
                     <div className={styles.draftSectionActions}>
                       {editingDraftId === draft.id ? (

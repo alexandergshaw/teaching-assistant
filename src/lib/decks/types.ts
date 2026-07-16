@@ -72,6 +72,7 @@ export type SlideRole =
   | "title" | "agenda" | "objectives" | "concept" | "definition"
   | "example" | "walkthrough" | "practice" | "answer" | "quiz"
   | "discussion" | "activity" | "case-study" | "summary" | "reference"
+  | "deadlines" | "office-hours"
   | "section" | "custom";
 
 export interface SlideRoleDef {
@@ -205,6 +206,22 @@ export const SLIDE_ROLES: SlideRoleDef[] = [
     promptContract: "further reading / documentation links",
     codeDefault: false,
     maxBulletsDefault: 5,
+  },
+  {
+    role: "deadlines",
+    label: "Deadlines",
+    hint: "Assignments, quizzes, and due dates this week. 3-5 bullets.",
+    promptContract: "the assignments, quizzes, and deadlines due this week, each with a due date",
+    codeDefault: false,
+    maxBulletsDefault: 5,
+  },
+  {
+    role: "office-hours",
+    label: "Office Hours",
+    hint: "Office hours / support availability this week. 2-4 bullets.",
+    promptContract: "the instructor's office hours and support availability this week, with days, times, and how to join",
+    codeDefault: false,
+    maxBulletsDefault: 4,
   },
   {
     role: "section",

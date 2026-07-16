@@ -152,7 +152,7 @@ import type { GradingRun, GradingRunEntry, GradeResult } from "@/lib/grade";
 import type { InstitutionField } from "@/lib/institution-fields";
 import type { RepoPermission } from "@/lib/github";
 import type { CommonResourceItem } from "@/lib/common-resources";
-import { buildSlidesPptx, type PptxTheme } from "@/lib/pptx";
+import { buildSlidesPptx } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import { parseCanvasCourseId, detectCanvasUrlKind } from "@/lib/canvas-url";
@@ -6365,17 +6365,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
         loopItems[g.id] = g.source === "literal" && g.items.length > 0 ? g.items : concepts;
       }
       onProgress("Generating the slide deck...");
-      const ctx: DeckGenContext = { subject, audience, loopItems };
+      const ctx: DeckGenContext = { subject, audience, tone: template.tone, loopItems };
       const deck = await generateDeckFromTemplate(template, ctx, helpers.provider);
       if ("error" in deck) throw new Error(deck.error);
-      const pptxTheme: PptxTheme | undefined = template.theme
-        ? {
-            backgroundKind: template.theme.backgroundKind,
-            backgroundColor: template.theme.backgroundColor,
-            backgroundColor2: template.theme.backgroundColor2,
-            fontColor: template.theme.fontColor,
-          }
-        : undefined;
       const res = await savePresentationDraftAction(
         `Presentation: ${deck.presentationTitle}`,
         { presentationTitle: deck.presentationTitle, slides: deck.slides, templateName: template.name, subject, theme: template.theme },
@@ -6383,18 +6375,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         helpers.workflowName
       );
       if ("error" in res) throw new Error(res.error);
-      // Best-effort: also drop a rendered .pptx into the Files library.
-      if (helpers.saveBundle) {
-        try {
-          const buf = await buildSlidesPptx({ presentationTitle: deck.presentationTitle, slides: deck.slides, author: helpers.author, theme: pptxTheme });
-          await helpers.saveBundle(
-            new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" }),
-            `${deck.presentationTitle}.pptx`
-          );
-        } catch (err) {
-          onProgress(`Saved the draft; could not render the .pptx file (${err instanceof Error ? err.message : "unknown"}).`);
-        }
-      }
+      // The saved Presentation Draft is the deliverable; users download the rendered .pptx from Drafts > Presentations.
       return {
         outputs: { draftId: res.id, slideCount: String(deck.slides.length) },
         summary: { kind: "text", text: `Generated a ${deck.slides.length}-slide deck from "${template.name}" and saved it to Drafts > Presentations.` },

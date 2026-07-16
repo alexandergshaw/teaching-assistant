@@ -277,7 +277,6 @@ export interface ResolvedSlideSpec {
 // Module-local counters for stable ID generation across sessions.
 let slideCounter = 0;
 let loopCounter = 0;
-let templateCounter = 0;
 
 export function newDeckSlide(role: SlideRole = "concept"): DeckSlide {
   const roleDef = getSlideRole(role);
@@ -308,7 +307,7 @@ export function newDeckLoopGroup(): DeckLoopGroup {
 }
 
 export function emptyDeckTemplate(name: string): DeckTemplate {
-  const id = `deck-${Date.now().toString(36)}-${(templateCounter++).toString(36)}`;
+  const id = crypto.randomUUID();
 
   return {
     id,
@@ -323,14 +322,14 @@ export function emptyDeckTemplate(name: string): DeckTemplate {
 }
 
 export function duplicateDeckTemplate(template: DeckTemplate, name: string): DeckTemplate {
-  const id = `deck-${Date.now().toString(36)}-${(templateCounter++).toString(36)}`;
+  const id = crypto.randomUUID();
 
   return {
     ...template,
     id,
     name,
-    slides: [...template.slides],
-    loops: [...template.loops],
+    slides: template.slides.map((s) => ({ ...s })),
+    loops: template.loops.map((l) => ({ ...l, items: [...l.items] })),
     theme: { ...template.theme },
   };
 }

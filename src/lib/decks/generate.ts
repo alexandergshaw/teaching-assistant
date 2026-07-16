@@ -5,7 +5,7 @@
  */
 
 import { callLlm, type LlmProvider } from "@/lib/llm";
-import { SLIDE_DECK_JSON_SHAPE, SLIDE_STRUCTURE_REQUIREMENTS } from "@/lib/slide-prompt";
+import { SLIDE_DECK_JSON_SHAPE } from "@/lib/slide-prompt";
 import type { PptxSlide } from "@/lib/pptx";
 import {
   DeckTemplate,
@@ -89,7 +89,12 @@ Return ONLY valid JSON with exactly ${resolved.length} slides, in the exact orde
 ${SLIDE_DECK_JSON_SHAPE}
 
 Requirements:
-${SLIDE_STRUCTURE_REQUIREMENTS}`;
+- Produce EXACTLY the ${resolved.length} slides listed above, in that exact order and count. Do NOT add, remove, merge, or reorder slides, and do NOT insert a case study, extra practice, or closing slides unless they appear in the list.
+- Each bullet must be a complete, self-contained sentence (or two) a student fully understands with no instructor present: define every term and state why it matters.
+- Respect each slide's "Max N bullets". A slide marked "Max 0 bullets" MUST have an empty "bullets" array.
+- Any slide whose title must begin with a prefix (Example:/Walkthrough:/Practice:/Answer:/Case Study:) MUST start with that exact prefix.
+- For Example/Walkthrough/Practice/Answer slides, include "code" and "codeLanguage": the Walkthrough and Practice reuse the SAME code as their Example, the Practice must NOT reveal the solution, and the Answer gives the correct, runnable solution.
+- Do not include any text outside the JSON object.`;
 }
 
 /**
@@ -177,7 +182,7 @@ export function scaffoldDeck(
 
     const slide: PptxSlide = {
       title,
-      bullets: bullets.slice(0, spec.maxBullets || 4),
+      bullets: bullets.slice(0, spec.maxBullets),
     };
 
     if (spec.includeCode) {
@@ -244,6 +249,13 @@ export async function generateDeckFromTemplate(
         presentationTitle?: string;
         slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
       };
+      const anyUsable =
+        Array.isArray(parsed.slides) &&
+        parsed.slides.some((s) => typeof s.title === "string" && Array.isArray(s.bullets));
+      if (!anyUsable && attempt === 1) {
+        parsed = null;
+        continue;
+      }
       break;
     } catch (err) {
       if (attempt === 1) {
@@ -264,15 +276,17 @@ export async function generateDeckFromTemplate(
     return { error: "Model did not return a valid slides array." };
   }
 
-  let slides: PptxSlide[] = parsed.slides
-    .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
-    .map((s, idx) => {
-      const spec = resolved[idx];
-      const maxBullets = spec?.maxBullets || 4;
-      return toDeckSlide(s, maxBullets);
-    });
-
-  slides = propagateExampleCode(slides);
+  const mapped: PptxSlide[] = [];
+  parsed.slides.forEach((s, idx) => {
+    if (typeof s.title !== "string" || !Array.isArray(s.bullets)) return;
+    const spec = resolved[idx];
+    const maxBullets = spec ? spec.maxBullets : 4;
+    mapped.push(toDeckSlide(s, maxBullets));
+  });
+  if (mapped.length === 0) {
+    return { error: "The model returned no usable slides. Try generating again." };
+  }
+  const slides = propagateExampleCode(mapped);
 
   return {
     presentationTitle: parsed.presentationTitle ?? template.name ?? ctx.subject,

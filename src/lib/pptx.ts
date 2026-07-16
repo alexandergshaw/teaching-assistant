@@ -110,9 +110,16 @@ export async function buildSlidesPptx({
     const titleColor = hexColor(theme.fontColor);
     const bgProps = slideBackground(theme);
 
+    // If theme has gradient image data, define a slide master once to embed it only once.
+    if (bgProps.data) {
+      prs.defineSlideMaster({ title: "THEME_BG", background: bgProps });
+    }
+
     // ── Title slide (themed) ──
-    const titleSlide = prs.addSlide();
-    titleSlide.background = bgProps;
+    const titleSlide = bgProps.data ? prs.addSlide({ masterName: "THEME_BG" }) : prs.addSlide();
+    if (!bgProps.data) {
+      titleSlide.background = bgProps;
+    }
 
     // Optional subtitle label above the title
     if (subtitle) {
@@ -132,8 +139,10 @@ export async function buildSlidesPptx({
 
     // ── Content slides (themed) ──
     for (const slide of slides) {
-      const s = prs.addSlide();
-      s.background = bgProps;
+      const s = bgProps.data ? prs.addSlide({ masterName: "THEME_BG" }) : prs.addSlide();
+      if (!bgProps.data) {
+        s.background = bgProps;
+      }
 
       // Slide title at top
       s.addText(slide.title, {

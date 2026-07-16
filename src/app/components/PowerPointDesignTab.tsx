@@ -17,6 +17,7 @@ import {
 } from "@mui/material";
 import TabHeader from "./TabHeader";
 import { useSupabase } from "@/context/SupabaseProvider";
+import { useDraftedGradesInbox } from "./DraftedGradesInbox";
 import {
   listDeckTemplates,
   upsertDeckTemplate,
@@ -73,6 +74,7 @@ function gradientPng(t: DeckTheme): string | undefined {
 
 export default function PowerPointDesignTab() {
   const { supabase, user } = useSupabase();
+  const draftedGradesInbox = useDraftedGradesInbox();
 
   const pendingRef = useRef<DeckTemplate | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -225,6 +227,10 @@ export default function PowerPointDesignTab() {
     // when template changes, suppressing cascading render warning
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoopItems(result);
+    setGeneratedDeck(null);
+    setEditedSlides([]);
+    setEditingSlideIdx(null);
+    setGenerateError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id]);
 
@@ -399,11 +405,15 @@ export default function PowerPointDesignTab() {
     try {
       const resolvedLoopItems: Record<string, string[]> = {};
       for (const group of selected.loops) {
-        const items = loopItems[group.id] || "";
-        resolvedLoopItems[group.id] = items
-          .split("\n")
-          .map((s) => s.trim())
-          .filter(Boolean);
+        if (group.source === "literal") {
+          resolvedLoopItems[group.id] = group.items;
+        } else {
+          const items = loopItems[group.id] || "";
+          resolvedLoopItems[group.id] = items
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean);
+        }
       }
 
       const ctx = {
@@ -523,6 +533,7 @@ export default function PowerPointDesignTab() {
       if ("error" in res) {
         setDraftNote({ kind: "error", text: res.error });
       } else {
+        draftedGradesInbox.refresh();
         setDraftNote({
           kind: "success",
           text: "Saved to Drafts > Presentations",
@@ -1337,8 +1348,10 @@ export default function PowerPointDesignTab() {
                                   variant="outlined"
                                   size="small"
                                   onClick={() => {
+                                    setEditedSlides((prev) =>
+                                      prev.map((s, i) => (i === idx ? generatedDeck!.slides[idx] : s))
+                                    );
                                     setEditingSlideIdx(null);
-                                    setEditedSlides([...generatedDeck!.slides]);
                                   }}
                                   sx={{ textTransform: "none" }}
                                 >

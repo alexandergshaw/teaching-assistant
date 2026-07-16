@@ -315,6 +315,15 @@ import {
   type MessageDraftPayload,
 } from "@/lib/message-drafts";
 import {
+  getPresentationDraft,
+  createPresentationDraft,
+  markPresentationDraftReviewed,
+  updatePresentationDraft,
+  deletePresentationDraft,
+  listPendingPresentationDrafts,
+  type PresentationDraftPayload,
+} from "@/lib/presentation-drafts";
+import {
   getCredentials,
   getValidAccessToken,
   deleteCredentials,
@@ -1381,6 +1390,159 @@ export async function postMessageDraftAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post the message." };
+  }
+}
+
+// ── Presentation Drafts (Chunk 4) ──────────────────────────────────────────
+
+/** Save a new pending presentation draft. */
+export async function savePresentationDraftAction(
+  summary: string,
+  payload: PresentationDraftPayload,
+  workflowId?: string,
+  workflowName?: string
+): Promise<{ id: string } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const draft = await createPresentationDraft(supabase, user.id, {
+      summary,
+      payload,
+      workflowId,
+      workflowName,
+    });
+    return { id: draft.id };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not save the presentation draft.",
+    };
+  }
+}
+
+/** List pending presentation drafts for the owner. */
+export async function listPendingPresentationDraftsAction(): Promise<
+  { drafts: Array<{ id: string; status: string; summary: string; payload: PresentationDraftPayload; createdAt: string; workflowId?: string; workflowName?: string }> } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const drafts = await listPendingPresentationDrafts(supabase, user.id);
+    return {
+      drafts: drafts.map((d) => ({
+        id: d.id,
+        status: d.status,
+        summary: d.summary,
+        payload: d.payload,
+        createdAt: d.createdAt,
+        workflowId: d.workflowId,
+        workflowName: d.workflowName,
+      })),
+    };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not load presentation drafts.",
+    };
+  }
+}
+
+/** One draft's full payload. */
+export async function getPresentationDraftAction(
+  id: string
+): Promise<
+  | {
+      draft: {
+        id: string;
+        status: "pending" | "reviewed";
+        summary: string;
+        payload: PresentationDraftPayload;
+      };
+    }
+  | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const draft = await getPresentationDraft(supabase, user.id, id);
+    if (!draft) {
+      return { error: "That presentation draft was not found." };
+    }
+    return {
+      draft: {
+        id: draft.id,
+        status: draft.status,
+        summary: draft.summary,
+        payload: draft.payload,
+      },
+    };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not load the presentation draft.",
+    };
+  }
+}
+
+/** Mark a draft reviewed. Idempotent. */
+export async function markPresentationDraftReviewedAction(
+  id: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    await markPresentationDraftReviewed(supabase, user.id, id);
+    return { ok: true };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not update the presentation draft.",
+    };
+  }
+}
+
+/** Delete a draft outright. */
+export async function deletePresentationDraftAction(
+  id: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    await deletePresentationDraft(supabase, user.id, id);
+    return { ok: true };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not delete the presentation draft.",
+    };
+  }
+}
+
+/** Update a draft's payload. */
+export async function updatePresentationDraftPayloadAction(
+  id: string,
+  payload: PresentationDraftPayload
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    await updatePresentationDraft(supabase, user.id, id, { payload });
+    return { ok: true };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not save the presentation draft.",
+    };
+  }
+}
+
+/** Count of the owner's PENDING presentation drafts. */
+export async function countPendingPresentationDrafts(): Promise<{ count: number }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const { count } = await supabase
+      .from("presentation_drafts")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("status", "pending");
+    return { count: count ?? 0 };
+  } catch {
+    return { count: 0 };
   }
 }
 

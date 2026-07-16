@@ -38,7 +38,7 @@ import {
   type SlideRole,
   type LoopSourceKind,
 } from "@/lib/decks/types";
-import { generateDeckFromTemplateAction } from "@/app/actions";
+import { generateDeckFromTemplateAction, savePresentationDraftAction } from "@/app/actions";
 import { buildSlidesPptx, type PptxSlide } from "@/lib/pptx";
 import { saveRecordingFile } from "@/lib/recording-files";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -104,6 +104,8 @@ export default function PowerPointDesignTab() {
   const [editingSlideIdx, setEditingSlideIdx] = useState<number | null>(null);
   const [editedSlides, setEditedSlides] = useState<PptxSlide[]>([]);
   const [savingFile, setSavingFile] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftNote, setDraftNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
   // Persist subject and audience
   useEffect(() => {
@@ -454,6 +456,40 @@ export default function PowerPointDesignTab() {
       setGenerateError(err instanceof Error ? err.message : "Could not save file");
     } finally {
       setSavingFile(false);
+    }
+  };
+
+  // Handle save as draft
+  const handleSaveDraft = async () => {
+    if (!generatedDeck) return;
+    setSavingDraft(true);
+    try {
+      const payload = {
+        presentationTitle: generatedDeck.presentationTitle,
+        slides: editedSlides,
+        templateName: selected.name,
+        subject,
+      };
+      const res = await savePresentationDraftAction(
+        `Presentation: ${generatedDeck.presentationTitle}`,
+        payload
+      );
+      if ("error" in res) {
+        setDraftNote({ kind: "error", text: res.error });
+      } else {
+        setDraftNote({
+          kind: "success",
+          text: "Saved to Drafts > Presentations",
+        });
+        setTimeout(() => setDraftNote(null), 3000);
+      }
+    } catch (err) {
+      setDraftNote({
+        kind: "error",
+        text: err instanceof Error ? err.message : "Could not save draft",
+      });
+    } finally {
+      setSavingDraft(false);
     }
   };
 
@@ -1133,6 +1169,26 @@ export default function PowerPointDesignTab() {
                     ))}
                   </div>
 
+                  {/* Draft note */}
+                  {draftNote && (
+                    <div
+                      style={{
+                        padding: "0.75rem",
+                        marginBottom: "1rem",
+                        backgroundColor:
+                          draftNote.kind === "error"
+                            ? "rgba(220, 38, 38, 0.1)"
+                            : "rgba(16, 185, 129, 0.1)",
+                        color:
+                          draftNote.kind === "error" ? "#991b1b" : "#065f46",
+                        borderRadius: "4px",
+                        fontSize: "0.9rem",
+                      }}
+                    >
+                      {draftNote.text}
+                    </div>
+                  )}
+
                   {/* Export/save actions */}
                   <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
                     <Button
@@ -1155,12 +1211,12 @@ export default function PowerPointDesignTab() {
                     <Button
                       variant="outlined"
                       size="small"
-                      disabled
+                      disabled={savingDraft}
+                      onClick={handleSaveDraft}
                       sx={{ textTransform: "none" }}
                     >
-                      Save as draft
+                      {savingDraft ? "Saving..." : "Save as draft"}
                     </Button>
-                    {/* Chunk 4 wires this to presentation drafts */}
                   </div>
 
                   <Button

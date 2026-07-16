@@ -857,6 +857,41 @@ export interface Database {
           workflow_name?: string | null;
         };
       };
+      presentation_drafts: {
+        Row: {
+          id: string;
+          user_id: string;
+          status: string;
+          summary: string;
+          payload: Json;
+          workflow_id: string | null;
+          workflow_name: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          status?: string;
+          summary?: string;
+          payload?: Json;
+          workflow_id?: string | null;
+          workflow_name?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          status?: string;
+          summary?: string;
+          payload?: Json;
+          workflow_id?: string | null;
+          workflow_name?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
     };
     Views: Record<string, { Row: Record<string, unknown> }>;
     Functions: Record<string, { Args: Record<string, unknown>; Returns: unknown }>;

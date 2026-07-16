@@ -3244,7 +3244,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         help: "Optional .imscc/zip exports; parsed for extra tile details.",
       },
     ],
-    outputs: [{ key: "courses", label: "Course list", type: "courseList" }],
+    outputs: [{ key: "courses", label: "Course list", type: "courseList" }, { key: "hasCourses", label: "Has courses", type: "boolean" }],
     run: async (values, helpers, onProgress) => {
       const institution = String(values.institution ?? "").trim() || (helpers.activeInstitution ?? "").trim();
       const term = String(values.term ?? "").trim();
@@ -3348,7 +3348,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       ];
 
       return {
-        outputs: { courses: payload },
+        outputs: { courses: payload, hasCourses: payload.length > 0 ? "1" : "" },
         summary: {
           kind: "list",
           label: `${payload.length} course(s) ready to import`,
@@ -3710,6 +3710,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "moduleName", label: "Current module", type: "text" },
       { key: "topic", label: "Current topic", type: "text" },
       { key: "status", label: "Status", type: "text" },
+      { key: "inProgress", label: "Course in progress", type: "boolean" },
     ],
     run: async (values, helpers, onProgress) => {
       const hubCourseId = String(values.hubCourse ?? "").trim();
@@ -3755,6 +3756,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           moduleName,
           topic,
           status,
+          inProgress: status === "in-progress" ? "1" : "",
         },
         summary: { kind: "text", text: summaryText },
       };
@@ -4590,7 +4592,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         help: "Used when no course tiles are selected: every course at this institution with assignments awaiting grading is included.",
       },
     ],
-    outputs: [{ key: "plan", label: "Grading plan", type: "courseList" }],
+    outputs: [{ key: "plan", label: "Grading plan", type: "courseList" }, { key: "hasWork", label: "Has work to grade", type: "boolean" }],
     run: async (values, helpers, onProgress) => {
       const ids = String(values.courses ?? "")
         .split("\n")
@@ -4777,7 +4779,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       }
 
       const result: StepRunResult = {
-        outputs: { plan },
+        outputs: { plan, hasWork: plan.length > 0 ? "1" : "" },
         summary: { kind: "list", label: "Grading queue", items: lines },
       };
 
@@ -5898,6 +5900,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     ],
     outputs: [
       { key: "announcements", label: "Announcements", type: "longtext" },
+      { key: "hasAnnouncements", label: "Has announcements", type: "boolean" },
     ],
     run: async (values, helpers, onProgress) => {
       // Scopeable list input: newline-joined course URLs (a single URL is a
@@ -5908,7 +5911,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         .filter(Boolean);
       if (courses.length === 0) {
         return {
-          outputs: { announcements: "" },
+          outputs: { announcements: "", hasAnnouncements: "" },
           summary: { kind: "text", text: "Skipped - no LMS course selected." },
         };
       }
@@ -5941,7 +5944,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       }
 
       return {
-        outputs: { announcements: outLines.join("\n") },
+        outputs: { announcements: outLines.join("\n"), hasAnnouncements: total > 0 ? "1" : "" },
         summary: {
           kind: "list",
           label: `${total} announcement(s) across ${courses.length} course(s)`,
@@ -6437,6 +6440,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "slotsIso", label: "Open slots (ISO)", type: "longtext" },
       { key: "slots", label: "Open slots", type: "longtext" },
       { key: "timeZone", label: "Time zone", type: "text" },
+      { key: "hasSlots", label: "Has open slots", type: "boolean" },
     ],
     run: async (values, helpers, onProgress) => {
       const tz = String(values.timeZone ?? "").trim() || undefined;
@@ -6452,6 +6456,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           slotsIso,
           slots: slotsText,
           timeZone: r.timeZone,
+          hasSlots: r.slots.length > 0 ? "1" : "",
         },
         summary: {
           kind: "list",
@@ -7019,6 +7024,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     ],
     outputs: [
       { key: "topics", label: "Topics", type: "longtext" },
+      { key: "hasTopics", label: "Has topics", type: "boolean" },
     ],
     run: async (values, helpers, onProgress) => {
       const repo = String(values.repo ?? "").trim();
@@ -7029,7 +7035,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       if ("error" in r) throw new Error(r.error);
 
       return {
-        outputs: { topics: r.topics.join("\n") },
+        outputs: { topics: r.topics.join("\n"), hasTopics: r.topics.length > 0 ? "1" : "" },
         summary: {
           kind: "list",
           label: `${r.topics.length} topic(s)`,
@@ -9403,6 +9409,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     outputs: [
       { key: "brokenLinks", label: "Broken links", type: "longtext" },
       { key: "state", label: "Scan state", type: "text" },
+      { key: "hasBrokenLinks", label: "Has broken links", type: "boolean" },
     ],
     run: async (values, helpers, onProgress) => {
       // Scopeable list input: newline-joined course URLs (a single URL is a
@@ -9449,7 +9456,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const state = multi ? [...new Set(states)].join(",") : states[0] ?? "none";
 
       return {
-        outputs: { brokenLinks: outLines.join("\n").trim(), state },
+        outputs: { brokenLinks: outLines.join("\n").trim(), state, hasBrokenLinks: totalBroken > 0 ? "1" : "" },
         summary: {
           kind: "list",
           label: `${totalBroken} broken link(s) across ${courses.length} course(s)`,
@@ -10347,6 +10354,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     outputs: [
       { key: "roster", label: "Roster", type: "longtext" },
       { key: "count", label: "Students", type: "number" },
+      { key: "hasStudents", label: "Has students", type: "boolean" },
     ],
     run: async (values, helpers, onProgress) => {
       const url = String(values.course ?? "").trim();
@@ -10362,7 +10370,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const rosterText = rosterLines.join("\n");
       const items = r.students.length > 0 ? r.students.map((s) => s.name) : ["(none)"];
       return {
-        outputs: { roster: rosterText, count: r.students.length },
+        outputs: { roster: rosterText, count: r.students.length, hasStudents: r.students.length > 0 ? "1" : "" },
         summary: { kind: "list", label: `${r.students.length} student(s)`, items },
       };
     },

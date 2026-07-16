@@ -178,6 +178,7 @@ function courseToInput(c: Course) {
     dayTime: c.dayTime ?? "",
     customTiles: c.customTiles,
     hiddenTiles: c.hiddenTiles,
+    studentRepos: c.studentRepos,
   };
 }
 

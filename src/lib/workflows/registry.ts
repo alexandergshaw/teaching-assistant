@@ -230,6 +230,7 @@ function courseToInputPayload(c: Course): CourseInput {
     lms: c.lms,
     dayTime: c.dayTime,
     customTiles: c.customTiles,
+    studentRepos: c.studentRepos,
   };
 }
 

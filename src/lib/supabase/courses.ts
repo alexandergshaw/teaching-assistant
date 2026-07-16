@@ -41,6 +41,14 @@ export interface CourseCustomTile {
   groupId: string;
 }
 
+/** A per-student {student, canvasUserId, repo} mapping. */
+export interface CourseStudentRepo {
+  student: string;
+  canvasUserId: string | null;
+  repo: string;
+  username?: string | null;
+}
+
 /** A course and the resources bundled with it. */
 export interface Course {
   id: string;
@@ -75,6 +83,7 @@ export interface Course {
   customTiles: CourseCustomTile[];
   /** Built-in tile keys hidden on this course's card only. */
   hiddenTiles: string[];
+  studentRepos: CourseStudentRepo[];
   updatedAt: string;
 }
 
@@ -105,10 +114,11 @@ export interface CourseInput {
   dayTime?: string | null;
   customTiles?: CourseCustomTile[];
   hiddenTiles?: string[];
+  studentRepos?: CourseStudentRepo[];
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, materials_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, materials_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -150,6 +160,7 @@ interface CourseRow {
   materials_zip_size: number | null;
   custom_tiles: Array<{ id: string; label: string; value: string; groupId: string }> | null;
   hidden_tiles: string[] | null;
+  student_repos: Array<{ student: string; canvasUserId: string | null; repo: string; username?: string | null }> | null;
   updated_at: string;
 }
 
@@ -186,6 +197,16 @@ function toCourse(r: CourseRow): Course {
     materialsZipSize: r.materials_zip_size,
     customTiles: Array.isArray(r.custom_tiles) ? r.custom_tiles.filter((x) => x && typeof x.id === "string" && typeof x.label === "string") : [],
     hiddenTiles: Array.isArray(r.hidden_tiles) ? r.hidden_tiles.filter((x) => typeof x === "string") : [],
+    studentRepos: Array.isArray(r.student_repos)
+      ? (r.student_repos as unknown[])
+          .filter((t): t is Record<string, unknown> => !!t && typeof t === "object")
+          .map((t) => ({
+            student: typeof t.student === "string" ? t.student : "",
+            canvasUserId: typeof t.canvasUserId === "string" ? t.canvasUserId : null,
+            repo: typeof t.repo === "string" ? t.repo : "",
+            username: typeof t.username === "string" ? t.username : null,
+          }))
+      : [],
     updatedAt: r.updated_at,
   };
 }
@@ -229,6 +250,9 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     day_time: clean(input.dayTime),
     custom_tiles: Array.isArray(input.customTiles) ? (input.customTiles as unknown as Json) : undefined,
     hidden_tiles: Array.isArray(input.hiddenTiles) ? (input.hiddenTiles as unknown as Json) : undefined,
+    student_repos: Array.isArray(input.studentRepos)
+      ? (input.studentRepos as unknown as Json)
+      : undefined,
     // Omit materials_zip_* fields: inserts use NULL defaults, updates preserve existing
     // values. updateCourseMaterials is the sole writer of these columns.
     // Omit materials_files and export_files: dedicated writers only (appendCourseMaterialFile,

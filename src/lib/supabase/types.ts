@@ -185,6 +185,7 @@ export interface Database {
           materials_zip_size: bigint | null;
           custom_tiles: Json;
           hidden_tiles: Json;
+          student_repos: Json;
           created_at: string;
           updated_at: string;
         };
@@ -221,6 +222,7 @@ export interface Database {
           materials_zip_size?: bigint | null;
           custom_tiles?: Json;
           hidden_tiles?: Json;
+          student_repos?: Json;
           created_at?: string;
           updated_at?: string;
         };
@@ -257,6 +259,7 @@ export interface Database {
           materials_zip_size?: bigint | null;
           custom_tiles?: Json;
           hidden_tiles?: Json;
+          student_repos?: Json;
           created_at?: string;
           updated_at?: string;
         };

@@ -152,6 +152,10 @@ export interface WorkflowStepConfig {
     remap: Record<string, InputBinding>;
     bindOverrides?: Record<string, InputBinding>;
   };
+  /** Optional gate: the step runs only when the bound boolean resolves to
+   * `expected`. Bound to an earlier step's boolean output (source "step"), or a
+   * literal/runtime boolean. Undefined = always run. */
+  runIf?: { binding: InputBinding; expected: boolean };
 }
 
 /**
@@ -422,8 +426,13 @@ function expandWithTopIndices(
           bindings[key] = b;
         }
       }
+      let runIf = step.runIf;
+      if (runIf && runIf.binding.source === "step") {
+        const mapped = defToExpanded.get(runIf.binding.stepIndex);
+        if (mapped !== undefined) runIf = { ...runIf, binding: { ...runIf.binding, stepIndex: mapped } };
+      }
       defToExpanded.set(defIndex, steps.length);
-      steps.push({ ...step, bindings });
+      steps.push({ ...step, bindings, runIf });
       origins.push(null);
       topIndices.push(defIndex);
       return;
@@ -521,7 +530,18 @@ function expandWithTopIndices(
         }
       }
 
-      steps.push({ ...s, bindings });
+      let inclRunIf = s.runIf;
+      if (inclRunIf && inclRunIf.binding.source === "step") {
+        const keptTarget = keptMap.get(inclRunIf.binding.stepIndex);
+        if (keptTarget !== undefined) {
+          inclRunIf = { ...inclRunIf, binding: { ...inclRunIf.binding, stepIndex: keptTarget } };
+        } else {
+          // The gate targeted a step this include dropped; remap covers input
+          // bindings only, not conditions - drop the gate so the step runs.
+          inclRunIf = undefined;
+        }
+      }
+      steps.push({ ...s, bindings, runIf: inclRunIf });
       origins.push(source.name);
       topIndices.push(defIndex);
     });

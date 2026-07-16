@@ -427,7 +427,7 @@ export default function WorkflowsTab() {
   );
 
   type StepState = {
-    status: "pending" | "running" | "done" | "error" | "disabled";
+    status: "pending" | "running" | "done" | "error" | "disabled" | "skipped";
     progress: string | null;
     summary: StepRunSummary | null;
     error: string | null;
@@ -1476,6 +1476,7 @@ export default function WorkflowsTab() {
       const stepOutputs: Array<Record<string, unknown>> = [];
       const failedSteps = new Set<number>();
       const disabledRunIndices = new Set<number>();
+      const skippedRunIndices = new Set<number>();
 
       for (let i = 0; i < expanded.steps.length; i++) {
       const step = expanded.steps[i];
@@ -1500,6 +1501,67 @@ export default function WorkflowsTab() {
         });
         failedSteps.add(i);
         disabledRunIndices.add(i);
+        continue;
+      }
+
+      // "Run only if": a gated step whose condition is not met (or whose gating
+      // step failed) is skipped - dependents cascade through failedSteps like a
+      // disabled step, and it is not itself a failure.
+      if (step.runIf) {
+        const cond = step.runIf;
+        let condVal: unknown = "";
+        let gateUnavailable = false;
+        if (cond.binding.source === "step") {
+          if (failedSteps.has(cond.binding.stepIndex)) gateUnavailable = true;
+          else condVal = stepOutputs[cond.binding.stepIndex]?.[cond.binding.outputKey];
+        } else if (cond.binding.source === "literal") {
+          condVal = cond.binding.value;
+        } else if (cond.binding.source === "runtime") {
+          condVal = values[cond.binding.fieldKey] ?? "";
+        }
+        const v = String(condVal).trim().toLowerCase();
+        const truthy = v !== "" && v !== "0" && v !== "false";
+        if (gateUnavailable || truthy !== cond.expected) {
+          setRunState((prev) => {
+            const next = [...prev];
+            const steps = [...next[g].steps];
+            steps[i] = {
+              status: "skipped",
+              progress: null,
+              summary: null,
+              error: null,
+            };
+            next[g] = { ...next[g], steps };
+            return next;
+          });
+          failedSteps.add(i);
+          skippedRunIndices.add(i);
+          continue;
+        }
+      }
+
+      // A step that consumes a gated-off (skipped) step's output is itself skipped
+      // cleanly - the skip cascades transitively. (Disabled / genuinely-failed
+      // dependencies still error via the binding-resolution branch below.)
+      if (
+        Object.values(step.bindings).some(
+          (b) => b.source === "step" && skippedRunIndices.has(b.stepIndex)
+        )
+      ) {
+        setRunState((prev) => {
+          const next = [...prev];
+          const steps = [...next[g].steps];
+          steps[i] = {
+            status: "skipped",
+            progress: null,
+            summary: null,
+            error: null,
+          };
+          next[g] = { ...next[g], steps };
+          return next;
+        });
+        failedSteps.add(i);
+        skippedRunIndices.add(i);
         continue;
       }
 
@@ -1722,7 +1784,7 @@ export default function WorkflowsTab() {
         failedSteps.add(i);
       }
     }
-      anyGenuineFailure = anyGenuineFailure || failedSteps.size > disabledRunIndices.size;
+      anyGenuineFailure = anyGenuineFailure || failedSteps.size > disabledRunIndices.size + skippedRunIndices.size;
     }
 
     // A genuine failure or cancel must not fire the mid-run handoff - but
@@ -2876,7 +2938,9 @@ export default function WorkflowsTab() {
                                 ? styles.ghBadgeSuccess
                                 : state.status === "disabled"
                                   ? styles.ghBadgeNeutral
-                                  : "";
+                                  : state.status === "skipped"
+                                    ? styles.ghBadgeNeutral
+                                    : "";
 
                         return (
                           <div
@@ -2920,7 +2984,9 @@ export default function WorkflowsTab() {
                                   ? "Failed"
                                   : state.status === "disabled"
                                     ? "Disabled"
-                                    : state.status}
+                                    : state.status === "skipped"
+                                      ? "Skipped"
+                                      : state.status}
                               </span>
                             </div>
 

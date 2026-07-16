@@ -230,6 +230,69 @@ describe("runWorkflowUnattended", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("cascade-skips a step that depends on a runIf-skipped step, and keeps the run ok", async () => {
+    const defs: Record<string, StepDefinition> = {
+      boolProvider: {
+        type: "boolProvider",
+        name: "Bool Provider",
+        description: "",
+        inputs: [],
+        outputs: [{ key: "enabled", label: "Enabled", type: "text" }],
+        run: async () => ({ outputs: { enabled: "false" }, summary: { kind: "text", text: "" } }),
+      },
+      gated: {
+        type: "gated",
+        name: "Gated",
+        description: "",
+        inputs: [{ key: "flag", label: "Flag", type: "text", required: true }],
+        outputs: [{ key: "result", label: "Result", type: "text" }],
+        run: async (values) => ({
+          outputs: { result: `gated-${values.flag}` },
+          summary: { kind: "text", text: "" },
+        }),
+      },
+      dependent: {
+        type: "dependent",
+        name: "Dependent",
+        description: "",
+        inputs: [{ key: "input", label: "Input", type: "text", required: true }],
+        outputs: [],
+        run: async () => ({ outputs: {}, summary: { kind: "text", text: "" } }),
+      },
+    };
+    const def: WorkflowDef = {
+      id: "t",
+      name: "t",
+      description: "",
+      steps: [
+        { type: "boolProvider", bindings: {} },
+        {
+          type: "gated",
+          bindings: { flag: { source: "step", stepIndex: 0, outputKey: "enabled" } },
+          runIf: { binding: { source: "step", stepIndex: 0, outputKey: "enabled" }, expected: true },
+        },
+        {
+          type: "dependent",
+          bindings: { input: { source: "step", stepIndex: 1, outputKey: "result" } },
+        },
+      ],
+    };
+
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+    });
+
+    expect(result.steps[0].status).toBe("done");
+    expect(result.steps[1].status).toBe("skipped");
+    expect(result.steps[2].status).toBe("skipped");
+    expect(result.ok).toBe(true);
+  });
+
   it("aborts the whole run instead of hanging when a step unexpectedly requires input", async () => {
     const defs: Record<string, StepDefinition> = {
       pauser: {

@@ -39,7 +39,7 @@ import { isInstitutionFanout, scopeForInstitution, resolveFanoutInstitutions } f
 export interface StepRunOutcome {
   index: number;
   type: string;
-  status: "done" | "error" | "disabled" | "needs-interaction";
+  status: "done" | "error" | "disabled" | "needs-interaction" | "skipped";
   error: string | null;
   summary: StepRunSummary | null;
   institution?: string;
@@ -97,6 +97,7 @@ async function runExpandedBodyOnce(opts: {
   const stepOutputs: Array<Record<string, unknown>> = [];
   const failedSteps = new Set<number>();
   const disabledRunIndices = new Set<number>();
+  const skippedRunIndices = new Set<number>();
   const outcomes: StepRunOutcome[] = [];
   const noopProgress = () => {};
 
@@ -110,6 +111,45 @@ async function runExpandedBodyOnce(opts: {
       failedSteps.add(i);
       disabledRunIndices.add(i);
       outcomes.push({ index: i, type: step.type, status: "disabled", error: null, summary: null });
+      continue;
+    }
+
+    // "Run only if": a gated step whose condition is not met (or whose gating
+    // step failed) is skipped - dependents cascade through failedSteps like a
+    // disabled step, and it is not itself a failure.
+    if (step.runIf) {
+      const cond = step.runIf;
+      let condVal: unknown = "";
+      let gateUnavailable = false;
+      if (cond.binding.source === "step") {
+        if (failedSteps.has(cond.binding.stepIndex)) gateUnavailable = true;
+        else condVal = stepOutputs[cond.binding.stepIndex]?.[cond.binding.outputKey];
+      } else if (cond.binding.source === "literal") {
+        condVal = cond.binding.value;
+      } else if (cond.binding.source === "runtime") {
+        condVal = fieldValues[cond.binding.fieldKey] ?? "";
+      }
+      const v = String(condVal).trim().toLowerCase();
+      const truthy = v !== "" && v !== "0" && v !== "false";
+      if (gateUnavailable || truthy !== cond.expected) {
+        failedSteps.add(i);
+        skippedRunIndices.add(i);
+        outcomes.push({ index: i, type: step.type, status: "skipped", error: null, summary: null });
+        continue;
+      }
+    }
+
+    // A step that consumes a gated-off (skipped) step's output is itself skipped
+    // cleanly - the skip cascades transitively. (Disabled / genuinely-failed
+    // dependencies still error via the binding-resolution branch below.)
+    if (
+      Object.values(step.bindings).some(
+        (b) => b.source === "step" && skippedRunIndices.has(b.stepIndex)
+      )
+    ) {
+      failedSteps.add(i);
+      skippedRunIndices.add(i);
+      outcomes.push({ index: i, type: step.type, status: "skipped", error: null, summary: null });
       continue;
     }
 
@@ -223,7 +263,9 @@ async function runExpandedBodyOnce(opts: {
     }
   }
 
-  const genuineFailures = [...failedSteps].filter((i) => !disabledRunIndices.has(i));
+  const genuineFailures = [...failedSteps].filter(
+    (i) => !disabledRunIndices.has(i) && !skippedRunIndices.has(i)
+  );
   return { ok: genuineFailures.length === 0, steps: outcomes };
 }
 

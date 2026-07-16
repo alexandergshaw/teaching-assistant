@@ -8269,6 +8269,161 @@ export const STEP_REGISTRY: StepDefinition[] = [
   },
 
   {
+    type: "pull-fallback-sources",
+    name: "Pull from fallback sources",
+    description:
+      "Pull a priority-ordered list of sources (LMS links and/or GitHub repos) one after another, with a mode that controls how far it goes.",
+    inputs: [
+      {
+        key: "sources",
+        label: "Sources (one per line, in priority order)",
+        type: "longtext",
+        required: true,
+        help: "One source per line, highest priority first: a Canvas URL (assignment/discussion/course) or a GitHub repo (owner/name or a github.com URL).",
+      },
+      {
+        key: "mode",
+        label: "Mode",
+        type: "text",
+        required: false,
+        help: "until-success (default): stop at the first source that returns content. all-sources: pull every source and combine. until-failure: pull in order and stop at the first source that fails or is empty.",
+      },
+    ],
+    outputs: [
+      { key: "material", label: "Pulled material", type: "longtext" },
+      { key: "sourcesUsed", label: "Sources used", type: "text" },
+      { key: "hasResult", label: "Got a result", type: "boolean" },
+      { key: "count", label: "Sources pulled", type: "number" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const lines = String(values.sources ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (lines.length === 0) throw new Error("Add at least one source.");
+
+      const mode = String(values.mode ?? "").trim().toLowerCase() || "until-success";
+      const validModes = ["until-success", "all-sources", "until-failure"];
+      if (!validModes.includes(mode)) {
+        throw new Error("Mode must be until-success, all-sources, or until-failure.");
+      }
+
+      // Per-source pull helper: classify, fetch, and return result.
+      const pullSource = async (
+        line: string
+      ): Promise<{ ok: boolean; text: string; note: string; label: string }> => {
+        const kind = classifyRubricSource(line);
+
+        if (kind === "lms") {
+          try {
+            const r = await fetchCanvasMetaAction(line);
+            if ("error" in r) {
+              return { ok: false, text: "", note: `${line}: ${r.error}`, label: line };
+            }
+            const combined = [r.rubricText, r.description].filter(Boolean).join("\n\n");
+            if (combined.trim()) {
+              return { ok: true, text: combined, note: "", label: line };
+            }
+            return { ok: false, text: "", note: `${line}: resolved but empty`, label: line };
+          } catch (err) {
+            return {
+              ok: false,
+              text: "",
+              note: `${line}: ${err instanceof Error ? err.message : String(err)}`,
+              label: line,
+            };
+          }
+        }
+
+        if (kind === "repo") {
+          try {
+            const r = await ingestRepoAction(line);
+            if ("error" in r) {
+              return { ok: false, text: "", note: `${line}: ${r.error}`, label: line };
+            }
+            const combined = [r.digest.description, r.digest.text].filter(Boolean).join("\n\n");
+            if (combined.trim()) {
+              return { ok: true, text: combined, note: "", label: line };
+            }
+            return { ok: false, text: "", note: `${line}: resolved but empty`, label: line };
+          } catch (err) {
+            return {
+              ok: false,
+              text: "",
+              note: `${line}: ${err instanceof Error ? err.message : String(err)}`,
+              label: line,
+            };
+          }
+        }
+
+        // topic or skip: not a pullable source
+        return {
+          ok: false,
+          text: "",
+          note: `${line}: not a pullable source (use a Canvas URL or GitHub repo)`,
+          label: line,
+        };
+      };
+
+      const notes: string[] = [];
+      const sources: { text: string; label: string }[] = [];
+      let stoppedAt: string | null = null;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        onProgress(`Pulling source ${i + 1}/${lines.length}...`);
+        const result = await pullSource(line);
+
+        if (result.ok) {
+          sources.push({ text: result.text, label: result.label });
+          if (mode === "until-success") {
+            // Stop at first success
+            break;
+          }
+          // For all-sources and until-failure, continue
+        } else {
+          notes.push(result.note);
+          if (mode === "until-failure") {
+            // Stop at first failure
+            stoppedAt = result.label;
+            break;
+          }
+          // For until-success and all-sources, continue
+        }
+      }
+
+      const material = sources.map((s) => s.text).join("\n\n---\n\n");
+      const sourcesUsed = sources.map((s) => s.label).join(", ");
+      const hasResult = material.trim() ? "1" : "";
+      const count = sources.length;
+
+      let modeDesc = mode;
+      if (mode === "until-success") {
+        modeDesc = "until-success";
+      } else if (mode === "all-sources") {
+        modeDesc = "all-sources";
+      } else if (mode === "until-failure") {
+        modeDesc = "until-failure";
+      }
+
+      const notesText =
+        notes.length > 0 && stoppedAt
+          ? `Stopped at ${stoppedAt}. Skipped/failed: ${notes.join("; ")}.`
+          : notes.length > 0
+            ? `Skipped/failed: ${notes.join("; ")}.`
+            : "";
+
+      return {
+        outputs: { material, sourcesUsed, hasResult, count },
+        summary: {
+          kind: "text" as const,
+          text: `${modeDesc}: pulled ${count} source(s). ${notesText}`.trim(),
+        },
+      };
+    },
+  },
+
+  {
     type: "bulk-associate-rubric",
     name: "Attach a rubric to assignments",
     description: "Associate one rubric with many assignments across a course at once. Attended-only.",

@@ -298,13 +298,124 @@ export default function PowerPointDesignTab() {
     commit(next);
   };
 
-  // Add a loop group
-  const handleAddLoopGroup = () => {
+  // Add a loop group with one starter slide
+  const handleAddLoop = () => {
     if (!selected) return;
-    const newGroup = newDeckLoopGroup();
+    const group = newDeckLoopGroup();
+    const s = newDeckSlide("concept");
+    s.loopGroupId = group.id;
     const next = {
       ...selected,
-      loops: [...selected.loops, newGroup],
+      loops: [...selected.loops, group],
+      slides: [...selected.slides, s],
+    };
+    commit(next);
+  };
+
+  // Add a slide to an existing loop (insert after last member)
+  const handleAddSlideToLoop = (gid: string) => {
+    if (!selected) return;
+    const s = newDeckSlide("concept");
+    s.loopGroupId = gid;
+    // Find the index of the last slide with this loopGroupId
+    let lastIdx = -1;
+    for (let i = selected.slides.length - 1; i >= 0; i--) {
+      if (selected.slides[i].loopGroupId === gid) {
+        lastIdx = i;
+        break;
+      }
+    }
+    const newSlides = [...selected.slides];
+    newSlides.splice(lastIdx + 1, 0, s);
+    const next = {
+      ...selected,
+      slides: newSlides,
+    };
+    commit(next);
+  };
+
+  // Remove loop group and set members to loopGroupId = null
+  const handleUngroupLoop = (gid: string) => {
+    if (!selected) return;
+    const next = {
+      ...selected,
+      loops: selected.loops.filter((g) => g.id !== gid),
+      slides: selected.slides.map((s) =>
+        s.loopGroupId === gid ? { ...s, loopGroupId: null } : s
+      ),
+    };
+    commit(next);
+  };
+
+  // Move an entire loop block up or down
+  const handleMoveLoop = (gid: string, dir: "up" | "down") => {
+    if (!selected) return;
+    // Find the contiguous range [start, end) of slides with loopGroupId === gid
+    let start = -1;
+    let end = -1;
+    for (let i = 0; i < selected.slides.length; i++) {
+      if (selected.slides[i].loopGroupId === gid) {
+        if (start === -1) start = i;
+        end = i + 1;
+      } else if (start !== -1) {
+        break;
+      }
+    }
+    if (start === -1) return;
+
+    const newSlides = [...selected.slides];
+    if (dir === "up") {
+      if (start === 0) return;
+      // Find the preceding unit
+      const pEnd = start;
+      let pStart = start - 1;
+      if (selected.slides[pStart].loopGroupId === null) {
+        pStart = pEnd - 1;
+      } else {
+        // Preceding loop; find its start
+        const pGid = selected.slides[pStart].loopGroupId;
+        while (pStart > 0 && selected.slides[pStart - 1].loopGroupId === pGid) {
+          pStart--;
+        }
+      }
+      // Swap: [pStart, pEnd) and [start, end)
+      const pBlock = newSlides.splice(pStart, pEnd - pStart);
+      newSlides.splice(start - (pEnd - pStart), 0, ...pBlock);
+    } else {
+      if (end === selected.slides.length) return;
+      // Find the following unit
+      const nStart = end;
+      let nEnd = end + 1;
+      if (selected.slides[nStart].loopGroupId === null) {
+        nEnd = nStart + 1;
+      } else {
+        // Following loop; find its end
+        const nGid = selected.slides[nStart].loopGroupId;
+        while (nEnd < selected.slides.length && selected.slides[nEnd].loopGroupId === nGid) {
+          nEnd++;
+        }
+      }
+      // Swap: [start, end) and [nStart, nEnd)
+      const nBlock = newSlides.splice(nStart, nEnd - nStart);
+      newSlides.splice(start, 0, ...nBlock);
+    }
+    const next = {
+      ...selected,
+      slides: newSlides,
+    };
+    commit(next);
+  };
+
+  // Wrap a single slide in a new loop
+  const handleWrapSlideInLoop = (slideId: string) => {
+    if (!selected) return;
+    const group = newDeckLoopGroup();
+    const next = {
+      ...selected,
+      loops: [...selected.loops, group],
+      slides: selected.slides.map((s) =>
+        s.id === slideId ? { ...s, loopGroupId: group.id } : s
+      ),
     };
     commit(next);
   };
@@ -319,32 +430,6 @@ export default function PowerPointDesignTab() {
       ),
     };
     commit(next);
-  };
-
-  // Remove a loop group
-  const handleRemoveLoopGroup = (loopId: string) => {
-    if (!selected) return;
-    const next = {
-      ...selected,
-      loops: selected.loops.filter((g) => g.id !== loopId),
-      slides: selected.slides.map((s) =>
-        s.loopGroupId === loopId ? { ...s, loopGroupId: null } : s
-      ),
-    };
-    commit(next);
-  };
-
-  // Check if a loop group is contiguous
-  const isLoopContiguous = (loopId: string): boolean => {
-    if (!selected) return true;
-    const indices = selected.slides
-      .map((s, i) => (s.loopGroupId === loopId ? i : -1))
-      .filter((i) => i !== -1);
-    if (indices.length === 0) return true;
-    for (let i = 0; i < indices.length - 1; i++) {
-      if (indices[i + 1] !== indices[i] + 1) return false;
-    }
-    return true;
   };
 
   // Add a slide
@@ -380,11 +465,22 @@ export default function PowerPointDesignTab() {
     commit(next);
   };
 
-  // Move a slide up or down
+  // Move a slide up or down (respecting loop boundaries)
   const handleMoveSlide = (index: number, direction: "up" | "down") => {
     if (!selected) return;
     const newIndex = direction === "up" ? index - 1 : index + 1;
     if (newIndex < 0 || newIndex >= selected.slides.length) return;
+
+    const slide = selected.slides[index];
+    const adjacent = selected.slides[newIndex];
+
+    // If moving within a loop, both must have same loopGroupId
+    if (slide.loopGroupId !== null) {
+      if (adjacent.loopGroupId !== slide.loopGroupId) return;
+    } else {
+      // If moving a plain slide, adjacent must also be plain
+      if (adjacent.loopGroupId !== null) return;
+    }
 
     const swapped = [...selected.slides];
     [swapped[index], swapped[newIndex]] = [swapped[newIndex], swapped[index]];
@@ -905,257 +1001,435 @@ export default function PowerPointDesignTab() {
               </Collapse>
             </div>
 
-            {/* Loops panel */}
-            <div style={{ marginBottom: "1.5rem" }}>
-              <h3 style={{ margin: "0 0 1rem 0", fontSize: "0.95rem", fontWeight: 600 }}>
-                Loops (repeat a block of slides for a list)
-              </h3>
-              {selected.loops.length === 0 ? (
-                <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "1rem" }}>
-                  No loop groups defined.
-                </div>
-              ) : (
-                selected.loops.map((group) => (
-                  <Card key={group.id} style={{ marginBottom: "1rem" }}>
-                    <CardContent>
-                      <TextField
-                        label="Label"
-                        value={group.label}
-                        onChange={(e) => handleUpdateLoopGroup(group.id, { label: e.target.value })}
-                        disabled={isReadOnly}
-                        fullWidth
-                        size="small"
-                        style={{ marginBottom: "1rem" }}
-                      />
-                      <Select
-                        value={group.source}
-                        onChange={(e) => handleUpdateLoopGroup(group.id, { source: e.target.value as LoopSourceKind })}
-                        disabled={isReadOnly}
-                        fullWidth
-                        size="small"
-                        style={{ marginBottom: "1rem" }}
-                      >
-                        <MenuItem value="runtime">Ask at generate time</MenuItem>
-                        <MenuItem value="literal">Fixed list</MenuItem>
-                        <MenuItem value="courseTopics">Course topics</MenuItem>
-                      </Select>
 
-                      {group.source === "literal" && (
-                        <TextField
-                          label="Items (one per line)"
-                          value={group.items.join("\n")}
-                          onChange={(e) => handleUpdateLoopGroup(group.id, { items: e.target.value.split("\n").filter(Boolean) })}
-                          disabled={isReadOnly}
-                          fullWidth
-                          multiline
-                          rows={3}
-                          size="small"
-                          style={{ marginBottom: "1rem" }}
-                        />
-                      )}
-
-                      {group.source === "runtime" && (
-                        <TextField
-                          label="Prompt label"
-                          value={group.runtimeLabel || ""}
-                          onChange={(e) => handleUpdateLoopGroup(group.id, { runtimeLabel: e.target.value })}
-                          disabled={isReadOnly}
-                          fullWidth
-                          size="small"
-                          style={{ marginBottom: "1rem" }}
-                          placeholder="e.g., Concepts"
-                        />
-                      )}
-
-                      {group.source === "courseTopics" && (
-                        <FormHelperText style={{ marginBottom: "1rem" }}>
-                          You will pick a course when you generate.
-                        </FormHelperText>
-                      )}
-
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={() => handleRemoveLoopGroup(group.id)}
-                        disabled={isReadOnly}
-                        sx={{ textTransform: "none" }}
-                      >
-                        Remove group
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))
-              )}
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={handleAddLoopGroup}
-                disabled={isReadOnly}
-                sx={{ textTransform: "none" }}
-              >
-                Add loop group
-              </Button>
-            </div>
-
-            {/* Slides panel */}
+            {/* Slides panel with visual loop containers */}
             <div style={{ marginBottom: "1.5rem" }}>
               <h3 style={{ margin: "0 0 1rem 0", fontSize: "0.95rem", fontWeight: 600 }}>
                 Slides ({selected.slides.length})
               </h3>
-              {selected.slides.map((slide, idx) => {
-                const isLoopContiguousHere = isLoopContiguous(slide.loopGroupId ?? "");
-                return (
-                  <Card key={slide.id} style={{ marginBottom: "1rem" }}>
-                    <CardContent>
-                      <Select
-                        value={slide.role}
-                        onChange={(e) => handleUpdateSlide(slide.id, { role: e.target.value as SlideRole })}
-                        disabled={isReadOnly}
-                        fullWidth
-                        size="small"
-                        style={{ marginBottom: "1rem" }}
+
+              {/* Render algorithm: walk slides and emit SlideCard or LoopContainer */}
+              {(() => {
+                const items: React.ReactNode[] = [];
+                const processed = new Set<number>();
+
+                for (let idx = 0; idx < selected.slides.length; idx++) {
+                  if (processed.has(idx)) continue;
+
+                  const slide = selected.slides[idx];
+                  if (slide.loopGroupId) {
+                    const gid = slide.loopGroupId;
+                    let endIdx = idx;
+                    while (endIdx < selected.slides.length && selected.slides[endIdx].loopGroupId === gid) {
+                      processed.add(endIdx);
+                      endIdx++;
+                    }
+
+                    const members = selected.slides.slice(idx, endIdx);
+                    const group = selected.loops.find((g) => g.id === gid);
+
+                    // Compute move buttons disabled states
+                    const canMoveLoopUp = idx > 0;
+                    const canMoveLoopDown = endIdx < selected.slides.length;
+
+                    items.push(
+                      <div
+                        key={`loop-${gid}-${idx}`}
+                        style={{
+                          border: "1px solid var(--field-border)",
+                          borderRadius: "4px",
+                          backgroundColor: "var(--field-bg)",
+                          marginBottom: "1rem",
+                          overflow: "hidden",
+                        }}
                       >
-                        {SLIDE_ROLES.map((r) => (
-                          <MenuItem key={r.role} value={r.role}>
-                            {r.label}
-                          </MenuItem>
-                        ))}
-                      </Select>
+                        {/* Loop container header */}
+                        <div style={{ padding: "1rem", borderBottom: "1px solid var(--field-border)" }}>
+                          <div style={{ display: "flex", gap: "1rem", alignItems: "flex-start", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+                            <TextField
+                              label="Label"
+                              value={group?.label || ""}
+                              onChange={(e) => handleUpdateLoopGroup(gid, { label: e.target.value })}
+                              disabled={isReadOnly}
+                              size="small"
+                              sx={{ flex: "1 1 200px", minWidth: "150px" }}
+                            />
+                            <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", paddingTop: "0.75rem" }}>
+                              Repeats these {members.length} slides for each item
+                            </div>
+                          </div>
 
-                      <TextField
-                        label="Title (optional)"
-                        value={slide.title}
-                        onChange={(e) => handleUpdateSlide(slide.id, { title: e.target.value })}
-                        disabled={isReadOnly}
-                        fullWidth
-                        size="small"
-                        style={{ marginBottom: "1rem" }}
-                      />
+                          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+                            <Select
+                              value={group?.source || "runtime"}
+                              onChange={(e) => handleUpdateLoopGroup(gid, { source: e.target.value as LoopSourceKind })}
+                              disabled={isReadOnly}
+                              size="small"
+                              sx={{ flex: "1 1 200px", minWidth: "150px" }}
+                            >
+                              <MenuItem value="runtime">Ask at generate time</MenuItem>
+                              <MenuItem value="literal">Fixed list</MenuItem>
+                              <MenuItem value="courseTopics">Course topics</MenuItem>
+                            </Select>
+                          </div>
 
-                      <TextField
-                        label="Notes - what should be on this slide"
-                        value={slide.notes}
-                        onChange={(e) => handleUpdateSlide(slide.id, { notes: e.target.value })}
-                        disabled={isReadOnly}
-                        fullWidth
-                        multiline
-                        rows={3}
-                        size="small"
-                        style={{ marginBottom: "1rem" }}
-                        placeholder={getSlideRole(slide.role)?.hint}
-                      />
+                          {group?.source === "literal" && (
+                            <TextField
+                              label="Items (one per line)"
+                              value={group.items.join("\n")}
+                              onChange={(e) => handleUpdateLoopGroup(gid, { items: e.target.value.split("\n").filter(Boolean) })}
+                              disabled={isReadOnly}
+                              fullWidth
+                              multiline
+                              rows={3}
+                              size="small"
+                              style={{ marginBottom: "0.75rem" }}
+                            />
+                          )}
 
-                      <FormControlLabel
-                        control={
-                          <Checkbox
-                            checked={slide.includeCode}
-                            onChange={(e) => {
-                              const willInclude = e.target.checked;
-                              const lang = willInclude ? (slide.codeLanguage || "python") : "";
-                              handleUpdateSlide(slide.id, {
-                                includeCode: willInclude,
-                                codeLanguage: lang,
-                              });
-                            }}
-                            disabled={isReadOnly}
-                          />
-                        }
-                        label="Include code"
-                        style={{ marginBottom: "1rem" }}
-                      />
+                          {group?.source === "runtime" && (
+                            <TextField
+                              label="Prompt label"
+                              value={group.runtimeLabel || ""}
+                              onChange={(e) => handleUpdateLoopGroup(gid, { runtimeLabel: e.target.value })}
+                              disabled={isReadOnly}
+                              fullWidth
+                              size="small"
+                              style={{ marginBottom: "0.75rem" }}
+                              placeholder="e.g., Concepts"
+                            />
+                          )}
 
-                      {slide.includeCode && (
-                        <TextField
-                          label="Language"
-                          value={slide.codeLanguage}
-                          onChange={(e) => handleUpdateSlide(slide.id, { codeLanguage: e.target.value })}
-                          disabled={isReadOnly}
-                          fullWidth
-                          size="small"
-                          style={{ marginBottom: "1rem" }}
-                          placeholder="python"
-                        />
-                      )}
+                          {group?.source === "courseTopics" && (
+                            <FormHelperText style={{ marginBottom: "0.75rem" }}>
+                              You will pick a course when you generate.
+                            </FormHelperText>
+                          )}
 
-                      <TextField
-                        label="Max bullets"
-                        type="number"
-                        value={slide.maxBullets}
-                        onChange={(e) => handleUpdateSlide(slide.id, { maxBullets: parseInt(e.target.value) || 0 })}
-                        disabled={isReadOnly}
-                        fullWidth
-                        size="small"
-                        style={{ marginBottom: "1rem" }}
-                        slotProps={{ htmlInput: { min: 0 } }}
-                        helperText={`Role default: ${getSlideRole(slide.role)?.maxBulletsDefault ?? "N/A"}`}
-                      />
-
-                      <Select
-                        value={slide.loopGroupId || "none"}
-                        onChange={(e) => handleUpdateSlide(slide.id, { loopGroupId: e.target.value === "none" ? null : e.target.value })}
-                        disabled={isReadOnly}
-                        fullWidth
-                        size="small"
-                        style={{ marginBottom: "1rem" }}
-                      >
-                        <MenuItem value="none">None</MenuItem>
-                        {selected.loops.map((g) => (
-                          <MenuItem key={g.id} value={g.id}>
-                            {g.label}
-                          </MenuItem>
-                        ))}
-                      </Select>
-
-                      {slide.loopGroupId && !isLoopContiguousHere && (
-                        <div style={{ padding: "0.75rem", backgroundColor: "rgba(255, 193, 7, 0.1)", borderRadius: "4px", fontSize: "0.85rem", marginBottom: "1rem", color: "var(--text-secondary)" }}>
-                          Loop slides should be adjacent to repeat together.
+                          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => handleMoveLoop(gid, "up")}
+                              disabled={isReadOnly || !canMoveLoopUp}
+                              sx={{ textTransform: "none" }}
+                            >
+                              Move loop up
+                            </Button>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => handleMoveLoop(gid, "down")}
+                              disabled={isReadOnly || !canMoveLoopDown}
+                              sx={{ textTransform: "none" }}
+                            >
+                              Move loop down
+                            </Button>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => handleUngroupLoop(gid)}
+                              disabled={isReadOnly}
+                              sx={{ textTransform: "none" }}
+                            >
+                              Ungroup
+                            </Button>
+                          </div>
                         </div>
-                      )}
 
-                      <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => handleMoveSlide(idx, "up")}
-                          disabled={isReadOnly || idx === 0}
-                          sx={{ textTransform: "none" }}
-                        >
-                          Move up
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => handleMoveSlide(idx, "down")}
-                          disabled={isReadOnly || idx === selected.slides.length - 1}
-                          sx={{ textTransform: "none" }}
-                        >
-                          Move down
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => handleRemoveSlide(slide.id)}
-                          disabled={isReadOnly}
-                          sx={{ textTransform: "none" }}
-                        >
-                          Remove
-                        </Button>
+                        {/* Loop member slides */}
+                        <div style={{ padding: "0.75rem" }}>
+                          {members.map((member, memberIdx) => (
+                            <Card key={member.id} style={{ marginBottom: "0.75rem" }}>
+                              <CardContent>
+                                <Select
+                                  value={member.role}
+                                  onChange={(e) => handleUpdateSlide(member.id, { role: e.target.value as SlideRole })}
+                                  disabled={isReadOnly}
+                                  fullWidth
+                                  size="small"
+                                  style={{ marginBottom: "1rem" }}
+                                >
+                                  {SLIDE_ROLES.map((r) => (
+                                    <MenuItem key={r.role} value={r.role}>
+                                      {r.label}
+                                    </MenuItem>
+                                  ))}
+                                </Select>
+
+                                <TextField
+                                  label="Title (optional)"
+                                  value={member.title}
+                                  onChange={(e) => handleUpdateSlide(member.id, { title: e.target.value })}
+                                  disabled={isReadOnly}
+                                  fullWidth
+                                  size="small"
+                                  style={{ marginBottom: "1rem" }}
+                                />
+
+                                <TextField
+                                  label="Notes - what should be on this slide"
+                                  value={member.notes}
+                                  onChange={(e) => handleUpdateSlide(member.id, { notes: e.target.value })}
+                                  disabled={isReadOnly}
+                                  fullWidth
+                                  multiline
+                                  rows={3}
+                                  size="small"
+                                  style={{ marginBottom: "1rem" }}
+                                  placeholder={getSlideRole(member.role)?.hint}
+                                />
+
+                                <FormControlLabel
+                                  control={
+                                    <Checkbox
+                                      checked={member.includeCode}
+                                      onChange={(e) => {
+                                        const willInclude = e.target.checked;
+                                        const lang = willInclude ? (member.codeLanguage || "python") : "";
+                                        handleUpdateSlide(member.id, {
+                                          includeCode: willInclude,
+                                          codeLanguage: lang,
+                                        });
+                                      }}
+                                      disabled={isReadOnly}
+                                    />
+                                  }
+                                  label="Include code"
+                                  style={{ marginBottom: "1rem" }}
+                                />
+
+                                {member.includeCode && (
+                                  <TextField
+                                    label="Language"
+                                    value={member.codeLanguage}
+                                    onChange={(e) => handleUpdateSlide(member.id, { codeLanguage: e.target.value })}
+                                    disabled={isReadOnly}
+                                    fullWidth
+                                    size="small"
+                                    style={{ marginBottom: "1rem" }}
+                                    placeholder="python"
+                                  />
+                                )}
+
+                                <TextField
+                                  label="Max bullets"
+                                  type="number"
+                                  value={member.maxBullets}
+                                  onChange={(e) => handleUpdateSlide(member.id, { maxBullets: parseInt(e.target.value) || 0 })}
+                                  disabled={isReadOnly}
+                                  fullWidth
+                                  size="small"
+                                  style={{ marginBottom: "1rem" }}
+                                  slotProps={{ htmlInput: { min: 0 } }}
+                                  helperText={`Role default: ${getSlideRole(member.role)?.maxBulletsDefault ?? "N/A"}`}
+                                />
+
+                                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "1rem" }}>
+                                  <Button
+                                    variant="outlined"
+                                    size="small"
+                                    onClick={() => handleMoveSlide(idx + memberIdx, "up")}
+                                    disabled={isReadOnly || memberIdx === 0}
+                                    sx={{ textTransform: "none" }}
+                                  >
+                                    Move up
+                                  </Button>
+                                  <Button
+                                    variant="outlined"
+                                    size="small"
+                                    onClick={() => handleMoveSlide(idx + memberIdx, "down")}
+                                    disabled={isReadOnly || memberIdx === members.length - 1}
+                                    sx={{ textTransform: "none" }}
+                                  >
+                                    Move down
+                                  </Button>
+                                  <Button
+                                    variant="outlined"
+                                    size="small"
+                                    onClick={() => handleRemoveSlide(member.id)}
+                                    disabled={isReadOnly}
+                                    sx={{ textTransform: "none" }}
+                                  >
+                                    Remove
+                                  </Button>
+                                  <Button
+                                    variant="outlined"
+                                    size="small"
+                                    onClick={() => handleUpdateSlide(member.id, { loopGroupId: null })}
+                                    disabled={isReadOnly}
+                                    sx={{ textTransform: "none" }}
+                                  >
+                                    Remove from loop
+                                  </Button>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+
+                        {/* Add slide to loop footer */}
+                        <div style={{ padding: "0.75rem", borderTop: "1px solid var(--field-border)", backgroundColor: "rgba(0,0,0,0.01)" }}>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => handleAddSlideToLoop(gid)}
+                            disabled={isReadOnly}
+                            sx={{ textTransform: "none" }}
+                          >
+                            Add slide to this loop
+                          </Button>
+                        </div>
                       </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                    );
+                  } else {
+                    // Plain slide (not in a loop)
+                    processed.add(idx);
+                    const canMoveUp = idx > 0 && !selected.slides[idx - 1].loopGroupId;
+                    const canMoveDown = idx < selected.slides.length - 1 && !selected.slides[idx + 1].loopGroupId;
+
+                    items.push(
+                      <Card key={slide.id} style={{ marginBottom: "1rem" }}>
+                        <CardContent>
+                          <Select
+                            value={slide.role}
+                            onChange={(e) => handleUpdateSlide(slide.id, { role: e.target.value as SlideRole })}
+                            disabled={isReadOnly}
+                            fullWidth
+                            size="small"
+                            style={{ marginBottom: "1rem" }}
+                          >
+                            {SLIDE_ROLES.map((r) => (
+                              <MenuItem key={r.role} value={r.role}>
+                                {r.label}
+                              </MenuItem>
+                            ))}
+                          </Select>
+
+                          <TextField
+                            label="Title (optional)"
+                            value={slide.title}
+                            onChange={(e) => handleUpdateSlide(slide.id, { title: e.target.value })}
+                            disabled={isReadOnly}
+                            fullWidth
+                            size="small"
+                            style={{ marginBottom: "1rem" }}
+                          />
+
+                          <TextField
+                            label="Notes - what should be on this slide"
+                            value={slide.notes}
+                            onChange={(e) => handleUpdateSlide(slide.id, { notes: e.target.value })}
+                            disabled={isReadOnly}
+                            fullWidth
+                            multiline
+                            rows={3}
+                            size="small"
+                            style={{ marginBottom: "1rem" }}
+                            placeholder={getSlideRole(slide.role)?.hint}
+                          />
+
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={slide.includeCode}
+                                onChange={(e) => {
+                                  const willInclude = e.target.checked;
+                                  const lang = willInclude ? (slide.codeLanguage || "python") : "";
+                                  handleUpdateSlide(slide.id, {
+                                    includeCode: willInclude,
+                                    codeLanguage: lang,
+                                  });
+                                }}
+                                disabled={isReadOnly}
+                              />
+                            }
+                            label="Include code"
+                            style={{ marginBottom: "1rem" }}
+                          />
+
+                          {slide.includeCode && (
+                            <TextField
+                              label="Language"
+                              value={slide.codeLanguage}
+                              onChange={(e) => handleUpdateSlide(slide.id, { codeLanguage: e.target.value })}
+                              disabled={isReadOnly}
+                              fullWidth
+                              size="small"
+                              style={{ marginBottom: "1rem" }}
+                              placeholder="python"
+                            />
+                          )}
+
+                          <TextField
+                            label="Max bullets"
+                            type="number"
+                            value={slide.maxBullets}
+                            onChange={(e) => handleUpdateSlide(slide.id, { maxBullets: parseInt(e.target.value) || 0 })}
+                            disabled={isReadOnly}
+                            fullWidth
+                            size="small"
+                            style={{ marginBottom: "1rem" }}
+                            slotProps={{ htmlInput: { min: 0 } }}
+                            helperText={`Role default: ${getSlideRole(slide.role)?.maxBulletsDefault ?? "N/A"}`}
+                          />
+
+                          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "1rem" }}>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => handleMoveSlide(idx, "up")}
+                              disabled={isReadOnly || !canMoveUp}
+                              sx={{ textTransform: "none" }}
+                            >
+                              Move up
+                            </Button>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => handleMoveSlide(idx, "down")}
+                              disabled={isReadOnly || !canMoveDown}
+                              sx={{ textTransform: "none" }}
+                            >
+                              Move down
+                            </Button>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => handleRemoveSlide(slide.id)}
+                              disabled={isReadOnly}
+                              sx={{ textTransform: "none" }}
+                            >
+                              Remove
+                            </Button>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => handleWrapSlideInLoop(slide.id)}
+                              disabled={isReadOnly}
+                              sx={{ textTransform: "none" }}
+                            >
+                              Make loop
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  }
+                }
+                return items;
+              })()}
             </div>
 
-            {/* Add slide control */}
+            {/* Add slide / Add loop control */}
             <div style={{ marginBottom: "1.5rem", padding: "1rem", backgroundColor: "var(--field-bg)", borderRadius: "4px" }}>
-              <h4 style={{ margin: "0 0 1rem 0", fontSize: "0.9rem" }}>Add slide</h4>
-              <div style={{ display: "flex", gap: "0.5rem" }}>
+              <h4 style={{ margin: "0 0 1rem 0", fontSize: "0.9rem" }}>Add content</h4>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                 <Select
                   defaultValue="concept"
                   disabled={isReadOnly}
                   size="small"
-                  sx={{ flex: 1 }}
+                  sx={{ flex: "1 1 150px", minWidth: "120px" }}
                   onChange={(e) => {
                     handleAddSlide(e.target.value);
                     (e.target as HTMLSelectElement).value = "concept";
@@ -1175,6 +1449,15 @@ export default function PowerPointDesignTab() {
                   sx={{ textTransform: "none" }}
                 >
                   Add slide
+                </Button>
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={handleAddLoop}
+                  disabled={isReadOnly}
+                  sx={{ textTransform: "none" }}
+                >
+                  Add loop
                 </Button>
               </div>
             </div>

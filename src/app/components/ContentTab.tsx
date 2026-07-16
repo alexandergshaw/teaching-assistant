@@ -208,9 +208,13 @@ export default function ContentTab({
   return (
     <div className={styles.card}>
       <TabHeader
-        eyebrow="Integrations"
-        title="LMS & version control"
-        subtitle="Manage a Canvas course's modules, pages, files, grading, and communications, or work with the GitHub side of your courses under Version Control. Changes are written to Canvas when you save."
+        eyebrow={versionControl ? "Integrations" : "LMS"}
+        title={versionControl ? "LMS & version control" : "LMS content"}
+        subtitle={
+          versionControl
+            ? "Manage a Canvas course's modules, pages, files, grading, and communications, or work with the GitHub side of your courses under Version Control. Changes are written to Canvas when you save."
+            : "Manage a Canvas course's modules, pages, files, grading, and communications. Changes are written to Canvas when you save."
+        }
       />
 
       <div className={styles.lessonInnerTabs}>

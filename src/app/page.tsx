@@ -41,7 +41,7 @@ const initialTestState: TestGeminiState = { result: null, error: null };
 
 type ActiveTab = "courses" | "manual" | "workflows" | "files" | "grade-drafts";
 // The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
-type ManualView = "course-planning" | "content" | "recording";
+type ManualView = "course-planning" | "content" | "version-control" | "recording";
 const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 type BuildView = "new" | "prebuilt";
@@ -161,19 +161,26 @@ export default function Home() {
   });
   const [manualView, setManualView] = useState<ManualView>(() => {
     if (typeof window === "undefined") return "course-planning";
+    // A user who was viewing Version Control (inside the old Integrations, tracked
+    // by VIEW_KEY) lands on the new standalone Version Control subtab; reset the
+    // LMS content view so ContentTab does not open on a now-removed VC subtab.
+    if (localStorage.getItem(VIEW_KEY) === "version-control") {
+      localStorage.setItem(VIEW_KEY, "modules");
+      return "version-control";
+    }
     const savedManual = localStorage.getItem(MANUAL_VIEW_KEY);
-    if (savedManual === "course-planning" || savedManual === "content" || savedManual === "recording") {
+    if (
+      savedManual === "course-planning" ||
+      savedManual === "content" ||
+      savedManual === "version-control" ||
+      savedManual === "recording"
+    ) {
       return savedManual;
     }
-    // First run under the Manual grouping: derive the subtab from the legacy
-    // top-level tab the user last had open.
     const saved = localStorage.getItem("ta-active-tab");
     if (saved === "recording") return "recording";
-    if (saved === "content" || saved === "grading" || saved === "canvas" || saved === "version-control") {
-      if (saved === "version-control") localStorage.setItem(VIEW_KEY, "version-control");
-      return "content";
-    }
-    // course-planning / lesson-planning / anything else -> Build Courses.
+    if (saved === "version-control") return "version-control";
+    if (saved === "content" || saved === "grading" || saved === "canvas") return "content";
     return "course-planning";
   });
   const [buildView, setBuildViewState] = useState<BuildView>(() => {
@@ -768,9 +775,7 @@ export default function Home() {
                 setManualView("course-planning");
                 setActiveTab("manual");
               } else if (tab === "version-control") {
-                // Version Control is a subtab of Integrations, under Manual.
-                localStorage.setItem(VIEW_KEY, "version-control");
-                setManualView("content");
+                setManualView("version-control");
                 setActiveTab("manual");
               } else {
                 setActiveTab(tab as ActiveTab);
@@ -800,10 +805,22 @@ export default function Home() {
                   onClick={() => setManualView("content")}
                 >
                   <span className={styles.tabLabelWrap}>
-                    Integrations
-                    {totalNeedsGrading + totalUnread + vcAttention > 0 && (
-                      <span className={styles.navBadge}>{totalNeedsGrading + totalUnread + vcAttention}</span>
+                    LMS
+                    {totalNeedsGrading + totalUnread > 0 && (
+                      <span className={styles.navBadge}>{totalNeedsGrading + totalUnread}</span>
                     )}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={manualView === "version-control"}
+                  className={`${styles.lessonInnerTab}${manualView === "version-control" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                  onClick={() => setManualView("version-control")}
+                >
+                  <span className={styles.tabLabelWrap}>
+                    Version Control
+                    {vcAttention > 0 && <span className={styles.navBadge}>{vcAttention}</span>}
                   </span>
                 </button>
                 <button
@@ -879,9 +896,10 @@ export default function Home() {
                 }
                 announcements={<CanvasTab view="announcements" />}
                 inbox={<CanvasTab view="inbox" />}
-                versionControl={<VersionControlTab />}
               />
             )}
+
+            {manualView === "version-control" && <VersionControlTab />}
           </>
         )}
 

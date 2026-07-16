@@ -12,6 +12,7 @@ import GradingTab from "./components/GradingTab";
 import RecordingTab from "./components/RecordingTab";
 import FilesTab from "./components/FilesTab";
 import DraftedGradesTab from "./components/DraftedGradesTab";
+import MessageDraftsTab from "./components/MessageDraftsTab";
 import WorkflowsTab from "./components/WorkflowsTab";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
 import WorkflowTriggerWatcher from "./components/WorkflowTriggerWatcher";
@@ -39,13 +40,16 @@ import { VIEW_KEY } from "./components/content-tab/constants";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "courses" | "manual" | "workflows" | "files" | "grade-drafts";
+type ActiveTab = "courses" | "manual" | "workflows" | "files" | "drafts";
 // The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
 type ManualView = "course-planning" | "content" | "version-control" | "recording";
 const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 type BuildView = "new" | "prebuilt";
 const BUILD_VIEW_KEY = "ta-build-view";
+// The Drafts tab groups Grades and Messages as subtabs.
+type DraftsView = "grades" | "messages";
+const DRAFTS_VIEW_KEY = "ta-drafts-view";
 
 // The hosted Course Engine runs on Vercel, which caps the request body at
 // ~4.5 MB. Reject larger uploads client-side with a clear message rather than
@@ -147,15 +151,14 @@ export default function Home() {
   const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
   const { total: vcAttention } = useVcCounts();
   const { count: filesInbox, markSeen: markFilesSeen } = useFilesInbox();
-  const { count: draftsInbox, markSeen: markDraftsSeen } = useDraftedGradesInbox();
+  const { count: draftsInbox, refresh: refreshDrafts } = useDraftedGradesInbox();
   const [testState] = useActionState(testGeminiAction, initialTestState);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "manual";
     const saved = localStorage.getItem("ta-active-tab");
-    // Build Courses, Integrations, and Recording (and their legacy tab names) are
-    // now subtabs of the Manual tab; anything that is not still a top-level tab
-    // lands on Manual.
-    return saved === "courses" || saved === "workflows" || saved === "files" || saved === "grade-drafts"
+    // Migrate legacy "grade-drafts" to "drafts".
+    if (saved === "grade-drafts") return "drafts";
+    return saved === "courses" || saved === "workflows" || saved === "files" || saved === "drafts"
       ? saved
       : "manual";
   });
@@ -193,6 +196,11 @@ export default function Home() {
     setBuildViewState(v);
     if (typeof window !== "undefined") localStorage.setItem(BUILD_VIEW_KEY, v);
   };
+  const [draftsView, setDraftsView] = useState<DraftsView>(() => {
+    if (typeof window === "undefined") return "grades";
+    const saved = localStorage.getItem(DRAFTS_VIEW_KEY);
+    return saved === "grades" || saved === "messages" ? saved : "grades";
+  });
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -226,16 +234,20 @@ export default function Home() {
   }, [manualView]);
 
   useEffect(() => {
+    localStorage.setItem(DRAFTS_VIEW_KEY, draftsView);
+  }, [draftsView]);
+
+  useEffect(() => {
     if (activeTab === "files") {
       markFilesSeen();
     }
   }, [activeTab, markFilesSeen]);
 
   useEffect(() => {
-    if (activeTab === "grade-drafts") {
-      markDraftsSeen();
+    if (activeTab === "drafts") {
+      refreshDrafts();
     }
-  }, [activeTab, markDraftsSeen]);
+  }, [activeTab, refreshDrafts]);
 
   useEffect(() => {
     return () => {
@@ -763,7 +775,7 @@ export default function Home() {
           />
           <Tab label="Workflows" value="workflows" disableRipple />
           <Tab label={<NavTabLabel text="Files" count={filesInbox} />} value="files" disableRipple />
-          <Tab label={<NavTabLabel text="Grade Drafts" count={draftsInbox} />} value="grade-drafts" disableRipple />
+          <Tab label={<NavTabLabel text="Drafts" count={draftsInbox} />} value="drafts" disableRipple />
         </Tabs>
 
         {activeTab === "courses" && (
@@ -911,7 +923,38 @@ export default function Home() {
 
         {activeTab === "files" && <FilesTab />}
 
-        {activeTab === "grade-drafts" && <DraftedGradesTab onReviewDrafts={() => setActiveTab("workflows")} />}
+        {activeTab === "drafts" && (
+          <>
+            <div className={styles.manualSubnav}>
+              <div className={styles.lessonInnerTabs} role="tablist" aria-label="Drafts">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={draftsView === "grades"}
+                  className={`${styles.lessonInnerTab}${draftsView === "grades" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                  onClick={() => setDraftsView("grades")}
+                >
+                  <span className={styles.tabLabelWrap}>
+                    Grades
+                    {draftsInbox > 0 && <span className={styles.navBadge}>{draftsInbox}</span>}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={draftsView === "messages"}
+                  className={`${styles.lessonInnerTab}${draftsView === "messages" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                  onClick={() => setDraftsView("messages")}
+                >
+                  Messages
+                </button>
+              </div>
+            </div>
+
+            {draftsView === "grades" && <DraftedGradesTab onReviewDrafts={() => setActiveTab("workflows")} />}
+            {draftsView === "messages" && <MessageDraftsTab />}
+          </>
+        )}
 
         {activeTab === "workflows" && <WorkflowsTab />}
 

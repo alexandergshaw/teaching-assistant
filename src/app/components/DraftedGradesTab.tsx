@@ -6,10 +6,12 @@ import TabHeader from "./TabHeader";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { listPendingGradingDrafts, deleteGradingDraft, type GradingDraft } from "@/lib/grading-drafts";
 import type { GradingRunEntry, GradeResult } from "@/lib/grade";
+import { useDraftedGradesInbox } from "./DraftedGradesInbox";
 import styles from "../page.module.css";
 
 export default function DraftedGradesTab({ onReviewDrafts }: { onReviewDrafts?: () => void }) {
   const { supabase, user } = useSupabase();
+  const { refresh: refreshDraftsBadge } = useDraftedGradesInbox();
 
   // Data state
   const [drafts, setDrafts] = useState<GradingDraft[] | null>(null);
@@ -85,6 +87,7 @@ export default function DraftedGradesTab({ onReviewDrafts }: { onReviewDrafts?: 
 
     setConfirmDelete(null);
     setDrafts((prev) => (prev ? prev.filter((d) => d.id !== draft.id) : null));
+    refreshDraftsBadge();
 
     try {
       await deleteGradingDraft(supabase, user!.id, draft.id);

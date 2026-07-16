@@ -64,6 +64,7 @@ import {
   listPendingGradingDraftsAction,
   getGradingDraftAction,
   markGradingDraftReviewedAction,
+  saveMessageDraftAction,
   listConversationsAction,
   getConversationAction,
   draftMessageReplyAction,
@@ -143,6 +144,7 @@ import {
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
+import type { MessageDraftPayload } from "@/lib/message-drafts";
 import type { GradingRun, GradingRunEntry } from "@/lib/grade";
 import type { InstitutionField } from "@/lib/institution-fields";
 import type { RepoPermission } from "@/lib/github";
@@ -6220,6 +6222,51 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const r = await draftMessageReplyAction(thread, instructions, helpers.provider);
       if ("error" in r) throw new Error(r.error);
       return { outputs: { draftReply: r.body }, summary: { kind: "text", text: r.body } };
+    },
+  },
+
+  {
+    type: "save-message-draft",
+    name: "Save a message draft",
+    description: "Persist a drafted reply or announcement to your Drafts tab (Messages) for later review and sending.",
+    inputs: [
+      { key: "body", label: "Message body", type: "longtext", required: true, help: "The drafted message, e.g. wired from Draft a reply to a student message." },
+      { key: "kind", label: "Kind", type: "text", required: false, help: "reply (default) or announcement." },
+      { key: "conversationId", label: "Conversation id (reply)", type: "text", required: false, help: "For a reply: the conversation to send to." },
+      { key: "courseUrl", label: "Course URL (announcement)", type: "lmsCourse", required: false, help: "For an announcement: the Canvas course." },
+      { key: "title", label: "Title (announcement)", type: "text", required: false },
+      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
+      { key: "context", label: "Context (optional)", type: "longtext", required: false, help: "Original thread text, kept for review." },
+    ],
+    outputs: [{ key: "draftId", label: "Draft id", type: "text" }],
+    run: async (values, helpers) => {
+      const body = String(values.body ?? "").trim();
+      if (!body) {
+        throw new Error("Provide the message body to save.");
+      }
+
+      const kind = String(values.kind ?? "").trim().toLowerCase() === "announcement" ? "announcement" : "reply";
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || "";
+
+      const payload: MessageDraftPayload = {
+        kind,
+        body,
+        conversationId: String(values.conversationId ?? "").trim() || undefined,
+        courseUrl: String(values.courseUrl ?? "").trim() || undefined,
+        title: String(values.title ?? "").trim() || undefined,
+        institution: inst || undefined,
+        context: String(values.context ?? "").trim() || undefined,
+      };
+
+      const summary = kind === "reply" ? "Drafted reply" : "Drafted announcement";
+
+      const res = await saveMessageDraftAction(summary, payload);
+      if ("error" in res) throw new Error(res.error);
+
+      return {
+        outputs: { draftId: res.id },
+        summary: { kind: "text", text: `Saved a ${kind} draft to Drafts > Messages.` },
+      };
     },
   },
 

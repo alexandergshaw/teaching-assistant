@@ -60,6 +60,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "grade-one-submission",
   "read-inbox",
   "draft-message-reply",
+  "save-message-draft",
   "triage-inbox",
   "detect-meeting-request",
   "find-open-slots",

@@ -299,6 +299,14 @@ import {
   type GradingDraftPayload,
 } from "@/lib/grading-drafts";
 import {
+  getMessageDraft,
+  createMessageDraft,
+  markMessageDraftReviewed,
+  updateMessageDraft,
+  deleteMessageDraft,
+  type MessageDraftPayload,
+} from "@/lib/message-drafts";
+import {
   getCredentials,
   getValidAccessToken,
   deleteCredentials,
@@ -1202,6 +1210,165 @@ export async function postGradingDraftAction(
     return { posted, failed };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post the grades." };
+  }
+}
+
+// ── Message drafts ───────────────────────────────────────────────────────
+//
+// Persistence for the save-message-draft workflow step's output. Every action
+// below is owner-gated and uses the service-role client + the owner's own id
+// (from requireOwner()) - the same pattern as the grading-draft actions - so
+// it works identically whether called from a signed-in browser session or,
+// via requireOwner()'s runAsOwner impersonation, from inside a headless cron
+// run. NONE of these actions post anything to Canvas; posting only ever
+// happens through createAnnouncementAction or replyToConversationAction above,
+// called from the post-message step after the user approves a draft.
+
+/** Save a new pending message draft. */
+export async function saveMessageDraftAction(
+  summary: string,
+  payload: MessageDraftPayload
+): Promise<{ id: string } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const draft = await createMessageDraft(supabase, user.id, { summary, payload });
+    return { id: draft.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the message draft." };
+  }
+}
+
+/** One draft's full payload. */
+export async function getMessageDraftAction(
+  id: string
+): Promise<
+  | {
+      draft: {
+        id: string;
+        status: "pending" | "reviewed";
+        summary: string;
+        payload: MessageDraftPayload;
+      };
+    }
+  | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const draft = await getMessageDraft(supabase, user.id, id);
+    if (!draft) {
+      return { error: "That message draft was not found." };
+    }
+    return {
+      draft: {
+        id: draft.id,
+        status: draft.status,
+        summary: draft.summary,
+        payload: draft.payload,
+      },
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the message draft." };
+  }
+}
+
+/** Mark a draft reviewed. Idempotent. */
+export async function markMessageDraftReviewedAction(
+  id: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    await markMessageDraftReviewed(supabase, user.id, id);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the message draft." };
+  }
+}
+
+/** Delete a draft outright. */
+export async function deleteMessageDraftAction(
+  id: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    await deleteMessageDraft(supabase, user.id, id);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not delete the message draft." };
+  }
+}
+
+/** Update a draft's payload. */
+export async function updateMessageDraftPayloadAction(
+  id: string,
+  payload: MessageDraftPayload
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    await updateMessageDraft(supabase, user.id, id, { payload });
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the message draft." };
+  }
+}
+
+/** Count of the owner's PENDING message drafts. */
+export async function countPendingMessageDrafts(): Promise<{ count: number }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const { count } = await supabase
+      .from("message_drafts")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("status", "pending");
+    return { count: count ?? 0 };
+  } catch {
+    return { count: 0 };
+  }
+}
+
+/** Post a message draft to Canvas (as a reply or announcement), then mark it reviewed. */
+export async function postMessageDraftAction(
+  id: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const draft = await getMessageDraft(supabase, user.id, id);
+    if (!draft) return { error: "That message draft was not found." };
+
+    const { payload } = draft;
+
+    if (payload.kind === "reply") {
+      if (!payload.conversationId || !/^\d+$/.test(payload.conversationId)) {
+        return { error: "Invalid or missing conversation id for reply." };
+      }
+      const res = await replyToConversationAction(Number(payload.conversationId), payload.body, payload.institution || undefined);
+      if ("error" in res) throw new Error(res.error);
+    } else if (payload.kind === "announcement") {
+      if (!payload.courseUrl) {
+        return { error: "Invalid or missing course URL for announcement." };
+      }
+      const res = await createAnnouncementAction(
+        payload.courseUrl,
+        payload.title || "Announcement",
+        payload.body,
+        payload.institution || undefined
+      );
+      if ("error" in res) throw new Error(res.error);
+    } else {
+      return { error: "Unknown message draft kind." };
+    }
+
+    await markMessageDraftReviewed(supabase, user.id, id);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not post the message." };
   }
 }
 

@@ -142,6 +142,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
   messaging: [
     "read-inbox",
     "draft-message-reply",
+    "save-message-draft",
     "reply-to-conversation",
     "triage-inbox",
     "detect-meeting-request",

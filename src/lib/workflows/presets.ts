@@ -717,6 +717,29 @@ export const MODULE_SLIDES_FROM_TEMPLATE: WorkflowDef = {
   ],
 };
 
+export const WEEKLY_LECTURE_DECK: WorkflowDef = {
+  id: "weekly-lecture-deck",
+  preset: true,
+  name: "Weekly lecture deck",
+  description:
+    "Detect the course's current week and module, then generate a slide deck from a PowerPoint Design template for that module into Drafts > Presentations. Pick the course and template once; schedule it to run every week.",
+  steps: [
+    {
+      type: "course-progress",
+      bindings: { hubCourse: { source: "runtime", fieldKey: "hubCourse" } },
+    },
+    {
+      type: "generate-presentation-from-template",
+      bindings: {
+        // Shares the one course picker with step 1; the deck's subject is the
+        // detected current module so each week's deck is named for that module.
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        subject: { source: "step", stepIndex: 0, outputKey: "moduleName" },
+      },
+    },
+  ],
+};
+
 export const WEEKLY_KICKOFF_ANNOUNCEMENT: WorkflowDef = {
   id: "weekly-kickoff-announcement",
   preset: true,
@@ -771,6 +794,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     ASSIGNMENT_KIT,
     GROW_KNOWLEDGE_BASE,
     MODULE_SLIDES_FROM_TEMPLATE,
+    WEEKLY_LECTURE_DECK,
     WEEKLY_KICKOFF_ANNOUNCEMENT,
     COURSE_KICKOFF,
     COURSE_REFRESH,

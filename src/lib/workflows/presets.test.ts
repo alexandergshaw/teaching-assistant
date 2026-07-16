@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { allWorkflows } from "./presets";
 import { getStepDefinition } from "./registry";
-import { outputFeedsInput } from "./types";
+import { outputFeedsInput, collectRuntimeFields } from "./types";
 
 // The seven presets added to lead the Workflows page, in their expected order.
 const NEW_PRESET_IDS = [
@@ -62,4 +62,41 @@ describe("new lead presets", () => {
       });
     });
   }
+});
+
+describe("deck-template presets ask for the template", () => {
+  const all = allWorkflows([]);
+  const byId = new Map(all.map((w) => [w.id, w]));
+
+  for (const id of ["module-slides-from-template", "weekly-lecture-deck"]) {
+    it(`${id} surfaces a required template field in the run form`, () => {
+      const wf = byId.get(id);
+      expect(wf, `preset ${id} is registered`).toBeTruthy();
+      const fields = collectRuntimeFields(wf!, (t) => getStepDefinition(t)?.inputs);
+      const templateField = fields.find((f) => f.fieldKey === "template");
+      expect(templateField, `${id}: run form never asks for the template`).toBeTruthy();
+      expect(templateField!.type).toBe("deckTemplate");
+      expect(templateField!.required).toBe(true);
+    });
+  }
+
+  it("every preset's required inputs are bound (runtime or wired), never silently unasked", () => {
+    for (const wf of all) {
+      wf.steps.forEach((step, i) => {
+        // include-workflow is a composition step with no registry def; its inputs
+        // come from the workflow it inlines, so it is not checked here.
+        if (step.type === "include-workflow") return;
+        const def = getStepDefinition(step.type);
+        expect(def, `${wf.id} step ${i}: unknown step type ${step.type}`).toBeTruthy();
+        for (const inp of def!.inputs) {
+          if (inp.required) {
+            expect(
+              step.bindings[inp.key],
+              `${wf.id} step ${i}: required input "${inp.key}" is unbound (would never be asked)`
+            ).toBeTruthy();
+          }
+        }
+      });
+    }
+  });
 });

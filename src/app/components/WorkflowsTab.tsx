@@ -1157,15 +1157,19 @@ export default function WorkflowsTab() {
       try {
         const list = await listDeckTemplatesAction();
         if (!cancelled) {
+          const presets = DECK_PRESETS.map((p) => ({ id: p.id, name: p.name }));
           if ("error" in list) {
+            // Still offer the built-in presets so the picker is never stuck empty.
+            setDeckTemplates(presets);
             setDeckTemplatesError(list.error);
           } else {
-            setDeckTemplates([...DECK_PRESETS.map((p) => ({ id: p.id, name: p.name })), ...list.templates.map((t) => ({ id: t.id, name: t.name }))]);
+            setDeckTemplates([...presets, ...list.templates.map((t) => ({ id: t.id, name: t.name }))]);
             setDeckTemplatesError(null);
           }
         }
       } catch (err) {
         if (!cancelled) {
+          setDeckTemplates(DECK_PRESETS.map((p) => ({ id: p.id, name: p.name })));
           setDeckTemplatesError(err instanceof Error ? err.message : "Could not load templates.");
         }
       }

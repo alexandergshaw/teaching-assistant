@@ -712,7 +712,17 @@ export const MODULE_SLIDES_FROM_TEMPLATE: WorkflowDef = {
   steps: [
     {
       type: "generate-presentation-from-template",
-      bindings: {},
+      // Explicit runtime bindings so the run form actually asks for each input
+      // (collectRuntimeFields only surfaces inputs with an explicit runtime
+      // binding; an empty bindings object asks for nothing).
+      bindings: {
+        template: { source: "runtime", fieldKey: "template" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        moduleId: { source: "runtime", fieldKey: "moduleId" },
+        subject: { source: "runtime", fieldKey: "subject" },
+        concepts: { source: "runtime", fieldKey: "concepts" },
+        audience: { source: "runtime", fieldKey: "audience" },
+      },
     },
   ],
 };
@@ -733,8 +743,14 @@ export const WEEKLY_LECTURE_DECK: WorkflowDef = {
       bindings: {
         // Shares the one course picker with step 1; the deck's subject is the
         // detected current module so each week's deck is named for that module.
+        // The other inputs need explicit runtime bindings to be asked in the run
+        // form (collectRuntimeFields ignores unbound inputs).
+        template: { source: "runtime", fieldKey: "template" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         subject: { source: "step", stepIndex: 0, outputKey: "moduleName" },
+        moduleId: { source: "runtime", fieldKey: "moduleId" },
+        concepts: { source: "runtime", fieldKey: "concepts" },
+        audience: { source: "runtime", fieldKey: "audience" },
       },
     },
   ],

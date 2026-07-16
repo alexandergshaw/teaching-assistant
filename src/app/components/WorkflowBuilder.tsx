@@ -160,6 +160,17 @@ function remapStepReferences(
   // Own bindings demote to the input key they fill.
   const bindings = remapRecord(step.bindings, (recordKey) => recordKey);
 
+  // A "run only if" gate bound to a step output must follow the same index
+  // remap; if the gate step is removed (mapIndex -> null) the gate is dropped.
+  let runIf = step.runIf;
+  if (runIf && runIf.binding.source === "step") {
+    const mapped = mapIndex(runIf.binding.stepIndex);
+    runIf =
+      mapped === null
+        ? undefined
+        : { ...runIf, binding: { ...runIf.binding, stepIndex: mapped } };
+  }
+
   if (step.type === "include-workflow" && step.include) {
     // remap/bindOverrides values demote to the binding's own outputKey.
     const include = { ...step.include };
@@ -173,10 +184,10 @@ function remapStepReferences(
         (_key, binding) => binding.outputKey
       );
     }
-    return { ...step, bindings, include };
+    return { ...step, bindings, include, runIf };
   }
 
-  return { ...step, bindings };
+  return { ...step, bindings, runIf };
 }
 
 export default function WorkflowBuilder({
@@ -404,6 +415,20 @@ export default function WorkflowBuilder({
     onChange(next);
   };
 
+  const handleRunIfChange = (
+    stepIndex: number,
+    binding: InputBinding | null,
+    expected: boolean
+  ) => {
+    const next = {
+      ...def,
+      steps: def.steps.map((s, i) =>
+        i === stepIndex ? { ...s, runIf: binding ? { binding, expected } : undefined } : s
+      ),
+    };
+    onChange(next);
+  };
+
   return (
     <div>
       <div className={styles.form}>
@@ -445,6 +470,7 @@ export default function WorkflowBuilder({
             onMove={handleMoveStep}
             onRemove={handleRemoveStep}
             onBindingChange={handleBindingChange}
+            onRunIfChange={handleRunIfChange}
             picker={picker}
             scope={def.scope}
           />
@@ -603,6 +629,7 @@ function StepCard({
   onMove,
   onRemove,
   onBindingChange,
+  onRunIfChange,
   picker,
   scope,
 }: {
@@ -621,6 +648,7 @@ function StepCard({
     outputKey?: string,
     literalValue?: string
   ) => void;
+  onRunIfChange: (stepIndex: number, binding: InputBinding | null, expected: boolean) => void;
   picker: BuilderPickerData;
   scope?: WorkflowScope;
 }) {
@@ -770,6 +798,73 @@ function StepCard({
           courseScoped={courseScoped}
         />
       ))}
+
+      {(() => {
+        const boolOutputs: Array<{ stepIndex: number; outputKey: string; label: string }> = [];
+        for (let j = 0; j < stepIndex; j++) {
+          const def2 = getStepDefinition(allSteps[j].type);
+          if (!def2) continue;
+          for (const out of def2.outputs) {
+            if (out.type === "boolean") {
+              boolOutputs.push({ stepIndex: j, outputKey: out.key, label: `Step ${j + 1}: ${out.label}` });
+            }
+          }
+        }
+        if (boolOutputs.length === 0) return null;
+
+        const runIf = step.runIf;
+        const current =
+          runIf && runIf.binding.source === "step"
+            ? `${runIf.binding.stepIndex}:${runIf.binding.outputKey}`
+            : "always";
+        const expected = runIf ? runIf.expected : true;
+
+        return (
+          <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <label style={{ flex: 0, minWidth: "120px", fontSize: "0.85rem" }}>Run only if</label>
+            <TextField
+              select
+              size="small"
+              value={current}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "always") {
+                  onRunIfChange(stepIndex, null, true);
+                } else {
+                  const [siStr, ok] = v.split(":");
+                  onRunIfChange(
+                    stepIndex,
+                    { source: "step", stepIndex: Number(siStr), outputKey: ok },
+                    expected
+                  );
+                }
+              }}
+              style={{ minWidth: 220 }}
+            >
+              <MenuItem value="always">Always run</MenuItem>
+              {boolOutputs.map((o) => (
+                <MenuItem key={`${o.stepIndex}:${o.outputKey}`} value={`${o.stepIndex}:${o.outputKey}`}>
+                  {o.label}
+                </MenuItem>
+              ))}
+            </TextField>
+            {current !== "always" && runIf && runIf.binding.source === "step" && (
+              <TextField
+                select
+                size="small"
+                value={expected ? "true" : "false"}
+                onChange={(e) =>
+                  onRunIfChange(stepIndex, runIf.binding, e.target.value === "true")
+                }
+                style={{ minWidth: 120 }}
+              >
+                <MenuItem value="true">is true</MenuItem>
+                <MenuItem value="false">is false</MenuItem>
+              </TextField>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

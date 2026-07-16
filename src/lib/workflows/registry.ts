@@ -170,7 +170,7 @@ import { parseGeneratedRubric } from "@/app/utils/rubric";
 import type { RubricCriterionInput, DueDateUpdate } from "@/lib/canvas-modules";
 import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
 import { planCartridgeModules, currentCourseWeek, courseProgressStatus } from "@/lib/week-numbering";
-import { parseLmsModuleValue } from "@/lib/workflows/module-value";
+import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
 import { buildGradingReviewRows, countPostableResults, stripGradingRunEntriesForDraft } from "@/lib/workflows/grading-review-rows";
 
@@ -8419,6 +8419,209 @@ export const STEP_REGISTRY: StepDefinition[] = [
           kind: "text" as const,
           text: `${modeDesc}: pulled ${count} source(s). ${notesText}`.trim(),
         },
+      };
+    },
+  },
+
+  {
+    type: "pull-current-materials",
+    name: "Pull current module materials",
+    description:
+      "Pull the current week/module's materials for a course tile from its LMS course and/or GitHub repos. The current module is taken from the bound week (e.g. from Find the current week and module) or derived from the tile's start date and schedule; the LMS module is the one at the current week's position.",
+    inputs: [
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: true,
+        help: "The current week/module is derived from this tile (start date + schedule), and its LMS course is one source.",
+      },
+      {
+        key: "week",
+        label: "Current week (optional)",
+        type: "number",
+        required: false,
+        help: "Bind from Find the current week and module, or leave blank to derive from the tile's start date.",
+      },
+      {
+        key: "repos",
+        label: "GitHub repos (one per line, optional)",
+        type: "longtext",
+        required: false,
+        help: "Also pull the week's materials from these repos (owner/name or a github.com URL), one per line.",
+      },
+    ],
+    outputs: [
+      { key: "materials", label: "Materials", type: "longtext" },
+      { key: "moduleName", label: "Module", type: "text" },
+      { key: "week", label: "Week", type: "number" },
+      { key: "sourcesUsed", label: "Sources used", type: "text" },
+      { key: "hasMaterials", label: "Got materials", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      // Step 1: Load the hub course tile.
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      if (!hubCourseId) throw new Error("Choose a course tile.");
+
+      onProgress("Reading the course...");
+      const list = await listCourseHubAction();
+      if ("error" in list) throw new Error(list.error);
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (!tile) throw new Error("Course tile not found.");
+
+      // Step 2: Resolve the week.
+      const boundWeek = Number(values.week);
+      let rawWeek = Number.isFinite(boundWeek) && boundWeek > 0 ? boundWeek : currentCourseWeek(tile.startDate, Date.now());
+      if (rawWeek === null) {
+        throw new Error(
+          `"${tile.name}" has no start date set - add one on the course tile, or bind a week.`
+        );
+      }
+      const status = courseProgressStatus(rawWeek, tile.weeks);
+      const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
+
+      // Topic from the course schedule CSV, when present.
+      const topic = csvToSchedule(tile.csvData ?? "").find((e) => e.week === displayWeek)?.topic?.trim() ?? "";
+      let moduleName =
+        status === "not-started"
+          ? "Not started"
+          : status === "complete"
+            ? "Complete"
+            : `Module ${String(displayWeek).padStart(2, "0")}${topic ? `: ${topic}` : ""}`;
+
+      // Step 3: Collect materials into chunks.
+      const MATERIALS_CAP = 20000;
+      const chunks: string[] = [];
+      const notes: string[] = [];
+      const used: string[] = [];
+      let total = 0;
+      let truncated = false;
+
+      const push = (text: string) => {
+        if (!text) return;
+        if (total >= MATERIALS_CAP) {
+          truncated = true;
+          return;
+        }
+        const slice = text.slice(0, MATERIALS_CAP - total);
+        if (slice.length < text.length) truncated = true;
+        chunks.push(slice);
+        total += slice.length;
+      };
+
+      // Step 4: LMS pull (only if tile has a canvas URL and status is in-progress).
+      const canvasUrlTrimmed = String(tile.canvasUrl ?? "").trim();
+      if (
+        canvasUrlTrimmed &&
+        status !== "not-started" &&
+        status !== "complete"
+      ) {
+        try {
+          onProgress("Reading the LMS course modules...");
+          const content = await listCourseContentAction(canvasUrlTrimmed, helpers.activeInstitution || undefined);
+          if ("error" in content) {
+            notes.push(`LMS: ${content.error}`);
+          } else {
+            const mod = content.modules[displayWeek - 1];
+            if (!mod) {
+              notes.push(`no LMS module at week ${displayWeek}`);
+            } else {
+              const g = await gatherModuleMaterials(
+                tile,
+                liveModuleValue(mod.id, mod.name),
+                helpers,
+                onProgress
+              );
+              push(g.materialsText);
+              if (g.notes && g.notes.length > 0) {
+                notes.push(...g.notes);
+              }
+              if (g.moduleName) moduleName = g.moduleName;
+              if (g.materialsText.trim()) {
+                used.push(`LMS module "${g.moduleName}"`);
+              }
+            }
+          }
+        } catch (err) {
+          notes.push(`LMS error: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // Step 5: Repo pull (for each non-empty line in repos).
+      const repoLines = String(values.repos ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      for (let i = 0; i < repoLines.length; i++) {
+        const line = repoLines[i];
+        try {
+          onProgress(`Reading repo ${i + 1}...`);
+          const r = await ingestRepoAction(line);
+          if ("error" in r) {
+            notes.push(`repo ${line}: ${r.error}`);
+            continue;
+          }
+
+          // Prefer week-matched files.
+          const wk = displayWeek;
+          const re = new RegExp(`(week|wk|module|unit)[^0-9]?0*${wk}(?![0-9])`, "i");
+          const matched = r.digest.files.filter((f) => re.test(f.path));
+
+          let repoPushed = false;
+          if (matched.length > 0) {
+            const matchedText = matched
+              .map((f) => `# ${f.path}\n${f.content}`)
+              .join("\n\n");
+            push(matchedText);
+            repoPushed = true;
+          } else {
+            const fallbackText = [r.digest.description, r.digest.text]
+              .filter(Boolean)
+              .join("\n\n");
+            if (fallbackText.trim()) {
+              push(fallbackText);
+              repoPushed = true;
+            }
+          }
+
+          if (repoPushed) {
+            used.push(
+              `repo ${line}${matched.length > 0 ? ` (week ${wk} files)` : ""}`
+            );
+          } else {
+            notes.push(`repo ${line}: had no readable material`);
+          }
+        } catch (err) {
+          notes.push(`repo ${line}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      if (truncated) {
+        notes.push("materials truncated to ~20000 characters");
+      }
+
+      // Step 6: Build outputs.
+      const materials = chunks.join("\n\n---\n\n");
+      const hasMaterials = materials.trim() ? "1" : "";
+
+      const summaryText = `${tile.name} - ${moduleName}: ${
+        used.length > 0
+          ? `pulled from ${used.join(", ")}`
+          : "no materials found"
+      }${
+        notes.length > 0 ? ` (${notes.join("; ")})` : ""
+      }.`;
+
+      return {
+        outputs: {
+          materials,
+          moduleName,
+          week: displayWeek,
+          sourcesUsed: used.join(", "),
+          hasMaterials,
+        },
+        summary: { kind: "text" as const, text: summaryText },
       };
     },
   },

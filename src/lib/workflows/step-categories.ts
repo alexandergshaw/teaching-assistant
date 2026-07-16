@@ -98,6 +98,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "find-banked-rubric",
     "resolve-rubric",
     "pull-fallback-sources",
+    "pull-current-materials",
     "bulk-associate-rubric",
     "lms-rubric",
   ],

@@ -100,6 +100,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "find-banked-rubric",
   "resolve-rubric",
   "pull-fallback-sources",
+  "pull-current-materials",
   "run-submission-code",
   "list-ci-artifacts",
   "check-broken-links",

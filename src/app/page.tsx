@@ -250,6 +250,12 @@ export default function Home() {
   }, [activeTab, refreshDrafts]);
 
   useEffect(() => {
+    if (typeof document === "undefined") return;
+    const total = totalNeedsGrading + totalUnread + vcAttention + filesInbox + draftsInbox;
+    document.title = total > 0 ? `(${total}) Teaching Assistant` : "Teaching Assistant";
+  }, [totalNeedsGrading, totalUnread, vcAttention, filesInbox, draftsInbox]);
+
+  useEffect(() => {
     return () => {
       if (copyResetTimerRef.current !== null) {
         window.clearTimeout(copyResetTimerRef.current);

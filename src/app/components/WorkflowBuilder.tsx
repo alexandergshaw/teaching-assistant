@@ -979,6 +979,15 @@ function InputBindingRow({
                 onBindingChange(stepIndex, input.key, "literal", undefined, undefined, v)
               }
             />
+          ) : input.options && input.options.length > 0 ? (
+            <OptionsSelect
+              options={input.options}
+              multi={input.multi}
+              value={currentLiteralValue}
+              onChange={(v) =>
+                onBindingChange(stepIndex, input.key, "literal", undefined, undefined, v)
+              }
+            />
           ) : (
             <LiteralEditor
               type={input.type}
@@ -1184,6 +1193,58 @@ function LiteralEditor({
       minRows={type === "longtext" ? 3 : undefined}
       sx={sx}
     />
+  );
+}
+
+// Edits a literal value as a select over a fixed option list. Multi-select
+// stores the chosen options newline-joined (what the step reads as text).
+function OptionsSelect({
+  options,
+  multi,
+  value,
+  onChange,
+}: {
+  options: string[];
+  multi?: boolean;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const selected = value.split("\n").map((s) => s.trim()).filter(Boolean);
+  if (multi) {
+    return (
+      <TextField
+        select
+        size="small"
+        value={selected}
+        onChange={(e) => {
+          const next = e.target.value as unknown as string[];
+          onChange(next.join("\n"));
+        }}
+        sx={{ flex: 1, minWidth: 200 }}
+        slotProps={{ select: { multiple: true, renderValue: (sel: unknown) => (sel as string[]).join(", ") || "Choose options" } }}
+      >
+        {options.map((opt) => (
+          <MenuItem key={opt} value={opt}>
+            {opt}
+          </MenuItem>
+        ))}
+      </TextField>
+    );
+  }
+  return (
+    <TextField
+      select
+      size="small"
+      value={selected[0] ?? ""}
+      onChange={(e) => onChange(e.target.value)}
+      sx={{ flex: 1, minWidth: 200 }}
+    >
+      {options.map((opt) => (
+        <MenuItem key={opt} value={opt}>
+          {opt}
+        </MenuItem>
+      ))}
+    </TextField>
   );
 }
 

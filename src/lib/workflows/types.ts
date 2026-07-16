@@ -112,6 +112,11 @@ export interface StepInputSpec {
    * current module - shown as "From workflow scope" and not asked at run time,
    * the same as a course-derived module input. */
   courseDerived?: boolean;
+  /** When set, a "Fixed value" (literal) binding for this input is edited in the
+   * builder as a select of these options instead of a free text field. */
+  options?: string[];
+  /** With `options`, allow selecting several (stored newline-joined). Default single. */
+  multi?: boolean;
 }
 
 export interface StepOutputSpec {

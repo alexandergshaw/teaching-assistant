@@ -6186,7 +6186,26 @@ export const STEP_REGISTRY: StepDefinition[] = [
     description: "Draft a courteous reply to a student's message thread, ready to review and send in a later step.",
     inputs: [
       { key: "thread", label: "Conversation thread", type: "longtext", required: true, help: "The thread text, e.g. wired from Read the message inbox." },
-      { key: "instructions", label: "Reply guidance", type: "longtext", required: false, help: "Optional - what the reply should say or emphasize." },
+      {
+        key: "instructions",
+        label: "Reply guidance",
+        type: "longtext",
+        required: false,
+        multi: true,
+        options: [
+          "Warm and encouraging tone",
+          "Concise and to the point",
+          "Acknowledge the student's concern",
+          "Point them to office hours",
+          "Reference the syllabus or course policy",
+          "Offer to meet or schedule a call",
+          "Clarify the deadline or extension policy",
+          "Ask a clarifying question",
+          "Provide step-by-step guidance",
+          "Encourage using available resources",
+        ],
+        help: "Optional. Choose one or more guidance options (or, when asked at run time, type your own).",
+      },
     ],
     outputs: [
       { key: "draftReply", label: "Draft reply", type: "longtext" },

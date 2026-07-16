@@ -1339,7 +1339,7 @@ export default function WorkflowsTab() {
       // lmsModule stays out of the list: without a live LMS connection the
       // field renders only a fallback hint, so a required flag on it must
       // not block the run.
-      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "lmsCourseList", "hubCourse", "org", "orgList", "institution", "hubCourseList", "uploads"];
+      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "lmsCourseList", "hubCourse", "org", "orgList", "institution", "hubCourseList", "uploads", "deckTemplate"];
       if (!fieldTypes.includes(field.type)) continue;
 
       if (field.type === "uploads") {

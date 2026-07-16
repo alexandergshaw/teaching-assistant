@@ -151,7 +151,7 @@ export default function Home() {
   const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
   const { total: vcAttention } = useVcCounts();
   const { count: filesInbox, markSeen: markFilesSeen } = useFilesInbox();
-  const { count: draftsInbox, refresh: refreshDrafts } = useDraftedGradesInbox();
+  const { count: draftsInbox, gradesCount: draftsGradesCount, messagesCount: draftsMessagesCount, refresh: refreshDrafts } = useDraftedGradesInbox();
   const [testState] = useActionState(testGeminiAction, initialTestState);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "manual";
@@ -936,7 +936,7 @@ export default function Home() {
                 >
                   <span className={styles.tabLabelWrap}>
                     Grades
-                    {draftsInbox > 0 && <span className={styles.navBadge}>{draftsInbox}</span>}
+                    {draftsGradesCount > 0 && <span className={styles.navBadge}>{draftsGradesCount}</span>}
                   </span>
                 </button>
                 <button
@@ -946,7 +946,10 @@ export default function Home() {
                   className={`${styles.lessonInnerTab}${draftsView === "messages" ? ` ${styles.lessonInnerTabActive}` : ""}`}
                   onClick={() => setDraftsView("messages")}
                 >
-                  Messages
+                  <span className={styles.tabLabelWrap}>
+                    Messages
+                    {draftsMessagesCount > 0 && <span className={styles.navBadge}>{draftsMessagesCount}</span>}
+                  </span>
                 </button>
               </div>
             </div>

@@ -13,16 +13,20 @@ import { AsyncLocalStorage } from "node:async_hooks";
  * The bypass is safe ONLY because of who is allowed to call runAsOwner and
  * under what conditions:
  *   - The callers are src/app/api/cron/run-schedules/route.ts (which also runs
- *     the unattended event-trigger loop via src/lib/workflow-trigger-runner.ts)
- *     and src/app/api/triggers/[token]/route.ts (the inbound webhook endpoint).
+ *     the unattended event-trigger loop via src/lib/workflow-trigger-runner.ts),
+ *     src/app/api/triggers/[token]/route.ts (the inbound webhook endpoint for
+ *     external webhooks), and src/app/api/github/webhook/route.ts (the GitHub
+ *     push webhook endpoint).
  *   - Each caller calls runAsOwner ONLY after (a) authenticating the request
  *     against a server-only secret - the cron route verifies an
  *     `Authorization: Bearer <token>` header against the CRON_SECRET env var;
- *     the webhook route matches the unguessable per-trigger `webhook_token`
- *     from the URL against an enabled trigger row - and (b) resolving the
+ *     the token-webhook route matches the unguessable per-trigger `webhook_token`
+ *     from the URL against an enabled trigger row; the GitHub webhook route
+ *     verifies the HMAC signature over the raw body (X-Hub-Signature-256)
+ *     against the GITHUB_WEBHOOK_SECRET env var - and (b) resolving the
  *     target user via the Supabase service-role admin API and confirming
  *     isOwnerEmail on the result, i.e. re-checking the exact allowlist
- *     requireOwner() itself enforces on the normal path. Both also gate the
+ *     requireOwner() itself enforces on the normal path. All three also gate the
  *     workflow through isHeadlessSafeWorkflow before running it.
  *   - This module exports nothing that a client component could import: it
  *     has no "use client" directive and is never imported by one. Grep

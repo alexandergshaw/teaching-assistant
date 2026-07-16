@@ -19,6 +19,8 @@ import {
   LIFECYCLE_EVENT_TYPES,
   parseInstitutionsConfig,
   ALL_INSTITUTIONS,
+  matchRepoPushTriggers,
+  advanceRepoPushCursor,
   type WorkflowTrigger,
 } from "@/lib/workflow-triggers";
 import type { Database, Json } from "./supabase/types";
@@ -642,5 +644,171 @@ describe("generateWebhookToken", () => {
     const a = generateWebhookToken();
     const b = generateWebhookToken();
     expect(a).not.toBe(b);
+  });
+});
+
+describe("matchRepoPushTriggers", () => {
+  it("matches triggers with matching org (case-insensitive) and no prefix", () => {
+    const triggers = [
+      makeTrigger({
+        id: "t1",
+        eventType: "repo-push",
+        eventConfig: { org: "acme" },
+      }),
+    ];
+    const matches = matchRepoPushTriggers(triggers, "ACME", "some-repo");
+    expect(matches).toHaveLength(1);
+    expect(matches[0].id).toBe("t1");
+  });
+
+  it("matches triggers with matching org and repo prefix (case-insensitive)", () => {
+    const triggers = [
+      makeTrigger({
+        id: "t1",
+        eventType: "repo-push",
+        eventConfig: { org: "acme", prefix: "cs101-" },
+      }),
+    ];
+    const matches = matchRepoPushTriggers(triggers, "ACME", "cs101-jane");
+    expect(matches).toHaveLength(1);
+    expect(matches[0].id).toBe("t1");
+  });
+
+  it("does not match when prefix does not match", () => {
+    const triggers = [
+      makeTrigger({
+        id: "t1",
+        eventType: "repo-push",
+        eventConfig: { org: "acme", prefix: "cs101-" },
+      }),
+    ];
+    const matches = matchRepoPushTriggers(triggers, "acme", "misc-jane");
+    expect(matches).toHaveLength(0);
+  });
+
+  it("matches multiple triggers for the same push when multiple rules apply", () => {
+    const triggers = [
+      makeTrigger({
+        id: "t1",
+        eventType: "repo-push",
+        eventConfig: { org: "acme" },
+      }),
+      makeTrigger({
+        id: "t2",
+        eventType: "repo-push",
+        eventConfig: { org: "acme", prefix: "cs101-" },
+      }),
+    ];
+    const matches = matchRepoPushTriggers(triggers, "ACME", "cs101-jane");
+    expect(matches).toHaveLength(2);
+    expect(matches.map((t) => t.id).sort()).toEqual(["t1", "t2"]);
+  });
+
+  it("does not match different organizations", () => {
+    const triggers = [
+      makeTrigger({
+        id: "t1",
+        eventType: "repo-push",
+        eventConfig: { org: "other" },
+      }),
+    ];
+    const matches = matchRepoPushTriggers(triggers, "acme", "any-repo");
+    expect(matches).toHaveLength(0);
+  });
+
+  it("never matches non-repo-push triggers", () => {
+    const triggers = [
+      makeTrigger({
+        id: "t1",
+        eventType: "submission-received",
+        eventConfig: { org: "acme" },
+      }),
+    ];
+    const matches = matchRepoPushTriggers(triggers, "acme", "any-repo");
+    expect(matches).toHaveLength(0);
+  });
+
+  it("handles a complex scenario with mixed org/prefix rules", () => {
+    const triggers = [
+      makeTrigger({
+        id: "t1",
+        eventType: "repo-push",
+        eventConfig: { org: "acme" },
+      }),
+      makeTrigger({
+        id: "t2",
+        eventType: "repo-push",
+        eventConfig: { org: "acme", prefix: "cs101-" },
+      }),
+      makeTrigger({
+        id: "t3",
+        eventType: "repo-push",
+        eventConfig: { org: "other" },
+      }),
+    ];
+    const push1 = matchRepoPushTriggers(triggers, "acme", "misc");
+    expect(push1.map((t) => t.id)).toEqual(["t1"]);
+    const push2 = matchRepoPushTriggers(triggers, "acme", "cs101-jane");
+    expect(push2.map((t) => t.id).sort()).toEqual(["t1", "t2"]);
+    const push3 = matchRepoPushTriggers(triggers, "other", "x");
+    expect(push3.map((t) => t.id)).toEqual(["t3"]);
+  });
+});
+
+describe("advanceRepoPushCursor", () => {
+  it("advances a null cursor to a new repo entry", () => {
+    const result = advanceRepoPushCursor(null, "my-repo", "2026-07-14T12:00:00Z");
+    expect(result).toEqual({ repos: { "my-repo": "2026-07-14T12:00:00Z" } });
+  });
+
+  it("advances an empty object cursor to a new repo entry", () => {
+    const result = advanceRepoPushCursor({} as Json, "my-repo", "2026-07-14T12:00:00Z");
+    expect(result).toEqual({ repos: { "my-repo": "2026-07-14T12:00:00Z" } });
+  });
+
+  it("preserves existing repos when adding a new one", () => {
+    const cursor = { repos: { "other-repo": "2026-07-01T00:00:00Z" } } as Json;
+    const result = advanceRepoPushCursor(cursor, "my-repo", "2026-07-14T12:00:00Z");
+    expect(result).toEqual({
+      repos: {
+        "other-repo": "2026-07-01T00:00:00Z",
+        "my-repo": "2026-07-14T12:00:00Z",
+      },
+    });
+  });
+
+  it("updates an existing repo's timestamp", () => {
+    const cursor = { repos: { "my-repo": "2026-07-01T00:00:00Z" } } as Json;
+    const result = advanceRepoPushCursor(cursor, "my-repo", "2026-07-14T12:00:00Z");
+    expect(result).toEqual({
+      repos: { "my-repo": "2026-07-14T12:00:00Z" },
+    });
+  });
+
+  it("preserves other top-level cursor keys when advancing", () => {
+    const cursor = { repos: { "other-repo": "2026-07-01T00:00:00Z" }, foo: 1, bar: "baz" } as Json;
+    const result = advanceRepoPushCursor(cursor, "my-repo", "2026-07-14T12:00:00Z");
+    expect(result).toEqual({
+      foo: 1,
+      bar: "baz",
+      repos: {
+        "other-repo": "2026-07-01T00:00:00Z",
+        "my-repo": "2026-07-14T12:00:00Z",
+      },
+    });
+  });
+
+  it("handles a non-object cursor by treating it as empty", () => {
+    const result = advanceRepoPushCursor("not-an-object" as unknown as Json, "my-repo", "2026-07-14T12:00:00Z");
+    expect(result).toEqual({ repos: { "my-repo": "2026-07-14T12:00:00Z" } });
+  });
+
+  it("handles a cursor with a non-object repos key by treating repos as empty", () => {
+    const cursor = { repos: "invalid", other: "data" } as unknown as Json;
+    const result = advanceRepoPushCursor(cursor, "my-repo", "2026-07-14T12:00:00Z");
+    expect(result).toEqual({
+      other: "data",
+      repos: { "my-repo": "2026-07-14T12:00:00Z" },
+    });
   });
 });

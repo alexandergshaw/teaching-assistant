@@ -1025,6 +1025,58 @@ export async function listUnattendedTriggersDue(
   return ((data ?? []) as TriggerRow[]).map(mapTrigger);
 }
 
+/** Enabled, unattended repo-push triggers across all users (service-role only). */
+export async function listEnabledRepoPushTriggers(
+  supabase: SupabaseClient<Database>
+): Promise<WorkflowTrigger[]> {
+  const { data, error } = await table(supabase)
+    .select("*")
+    .eq("event_type", "repo-push")
+    .eq("enabled", true)
+    .eq("unattended", true);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as TriggerRow[]).map(mapTrigger);
+}
+
+/** Pure: repo-push triggers matching an incoming push's org + repo name.
+ * Matches when the trigger's config.org equals the org (case-insensitive) and
+ * the repo name starts with config.prefix (empty prefix = all repos). */
+export function matchRepoPushTriggers(
+  triggers: WorkflowTrigger[],
+  org: string,
+  repoName: string
+): WorkflowTrigger[] {
+  const o = org.trim().toLowerCase();
+  const rn = repoName.trim().toLowerCase();
+  return triggers.filter((t) => {
+    if (t.eventType !== "repo-push") return false;
+    const cfg = (t.eventConfig ?? {}) as Record<string, unknown>;
+    const cfgOrg = String(cfg.org ?? "").trim().toLowerCase();
+    if (!cfgOrg || cfgOrg !== o) return false;
+    const prefix = String(cfg.prefix ?? "").trim().toLowerCase();
+    return rn.startsWith(prefix);
+  });
+}
+
+/** Pure: advance a repo-push cursor so a pushed repo is marked seen at
+ * commitTimestamp (mirrors decideRepoPush's cursor.repos map), preventing the
+ * poller from re-firing the same push. */
+export function advanceRepoPushCursor(
+  cursor: Json | null,
+  repo: string,
+  commitTimestamp: string
+): Json {
+  const prev =
+    cursor && typeof cursor === "object" && !Array.isArray(cursor)
+      ? (cursor as Record<string, unknown>)
+      : {};
+  const prevRepos =
+    prev.repos && typeof prev.repos === "object" && !Array.isArray(prev.repos)
+      ? (prev.repos as Record<string, string>)
+      : {};
+  return { ...prev, repos: { ...prevRepos, [repo]: commitTimestamp } } as unknown as Json;
+}
+
 /** Look up a single enabled webhook trigger by its token (service-role client;
  * the token is the trust boundary). Returns null when no enabled row matches. */
 export async function findEnabledWebhookTrigger(

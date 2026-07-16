@@ -179,6 +179,12 @@ import { buildDocxFromPlainText } from "@/lib/docx";
 import { type AccessibleItemType, type Issue } from "@/lib/accessibility/types";
 import { callLlm, normalizeProvider, type LlmProvider, type LlmPart } from "@/lib/llm";
 import {
+  generateDeckFromTemplate,
+  type DeckGenContext,
+  type GeneratedDeck,
+} from "@/lib/decks/generate";
+import { type DeckTemplate } from "@/lib/decks/types";
+import {
   githubConfigured,
   githubWebhookSecret,
   listRepos,
@@ -6625,6 +6631,21 @@ ${SLIDE_STRUCTURE_REQUIREMENTS}`;
     presentationTitle: parsed.presentationTitle ?? assignmentName,
     slides,
   };
+}
+
+export async function generateDeckFromTemplateAction(
+  template: DeckTemplate,
+  ctx: DeckGenContext,
+  provider: LlmProvider
+): Promise<GeneratedDeck | { error: string }> {
+  try {
+    await requireOwner();
+    if (!template || !Array.isArray(template.slides) || template.slides.length === 0)
+      return { error: "Add at least one slide to the template first." };
+    return await generateDeckFromTemplate(template, ctx, provider);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate the deck." };
+  }
 }
 
 async function generateModuleIntroForAssignment(

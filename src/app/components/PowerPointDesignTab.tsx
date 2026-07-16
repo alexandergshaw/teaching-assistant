@@ -12,6 +12,7 @@ import {
   CardContent,
   Collapse,
   FormHelperText,
+  CircularProgress,
 } from "@mui/material";
 import TabHeader from "./TabHeader";
 import { useSupabase } from "@/context/SupabaseProvider";
@@ -37,7 +38,13 @@ import {
   type SlideRole,
   type LoopSourceKind,
 } from "@/lib/decks/types";
+import { generateDeckFromTemplateAction } from "@/app/actions";
+import { buildSlidesPptx, type PptxSlide } from "@/lib/pptx";
+import { saveRecordingFile } from "@/lib/recording-files";
+import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
+
+const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 export default function PowerPointDesignTab() {
   const { supabase, user } = useSupabase();
@@ -80,6 +87,52 @@ export default function PowerPointDesignTab() {
       // Ignore storage failures
     }
   }, [settingsOpen]);
+
+  // Generation state
+  const [generatedDeck, setGeneratedDeck] = useState<{ presentationTitle: string; slides: PptxSlide[] } | null>(null);
+  const [subject, setSubject] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-ppt-gen-subject") || "";
+  });
+  const [audience, setAudience] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("ta-ppt-gen-audience") || "";
+  });
+  const [loopItems, setLoopItems] = useState<Record<string, string>>({});
+  const [generateBusy, setGenerateBusy] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [editingSlideIdx, setEditingSlideIdx] = useState<number | null>(null);
+  const [editedSlides, setEditedSlides] = useState<PptxSlide[]>([]);
+  const [savingFile, setSavingFile] = useState(false);
+
+  // Persist subject and audience
+  useEffect(() => {
+    try {
+      localStorage.setItem("ta-ppt-gen-subject", subject);
+    } catch {
+      // Ignore
+    }
+  }, [subject]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ta-ppt-gen-audience", audience);
+    } catch {
+      // Ignore
+    }
+  }, [audience]);
+
+  // Persist loop items
+  useEffect(() => {
+    try {
+      for (const [groupId, items] of Object.entries(loopItems)) {
+        const key = `ta-ppt-gen-loop-${groupId}`;
+        localStorage.setItem(key, items);
+      }
+    } catch {
+      // Ignore
+    }
+  }, [loopItems]);
 
   // Load custom templates from Supabase on mount
   useEffect(() => {
@@ -129,6 +182,24 @@ export default function PowerPointDesignTab() {
   // Combined list: presets + custom
   const allTemplates = useMemo(() => [...DECK_PRESETS, ...custom], [custom]);
   const selected = allTemplates.find((t) => t.id === selectedId) || DECK_PRESETS[0];
+
+  // Sync loop items when selected template changes
+  useEffect(() => {
+    if (!selected || !selected.loops) return;
+
+    const result: Record<string, string> = {};
+    for (const group of selected.loops) {
+      const key = `ta-ppt-gen-loop-${group.id}`;
+      if (typeof window !== "undefined") {
+        result[group.id] = localStorage.getItem(key) || "";
+      }
+    }
+    // Intentionally syncing from external storage (localStorage) into state
+    // when template changes, suppressing cascading render warning
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoopItems(result);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
 
   // Create a new template
   const handleNewTemplate = async () => {
@@ -290,6 +361,100 @@ export default function PowerPointDesignTab() {
       slides: swapped,
     };
     commit(next);
+  };
+
+  // Handle deck generation
+  const handleGenerateDeck = async () => {
+    if (!selected) return;
+    setGenerateBusy(true);
+    setGenerateError(null);
+
+    try {
+      const resolvedLoopItems: Record<string, string[]> = {};
+      for (const group of selected.loops) {
+        const items = loopItems[group.id] || "";
+        resolvedLoopItems[group.id] = items
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+
+      const ctx = {
+        subject: subject || selected.name,
+        audience: audience || selected.audience,
+        loopItems: resolvedLoopItems,
+      };
+
+      const result = await generateDeckFromTemplateAction(selected, ctx, getStoredProvider());
+
+      if ("error" in result) {
+        setGenerateError(result.error);
+      } else {
+        setGeneratedDeck(result);
+        setEditedSlides([...result.slides]);
+        setEditingSlideIdx(null);
+      }
+    } catch (err) {
+      setGenerateError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setGenerateBusy(false);
+    }
+  };
+
+  // Handle slide edit
+  const handleEditSlide = (idx: number, updates: Partial<PptxSlide>) => {
+    const updated = [...editedSlides];
+    updated[idx] = { ...updated[idx], ...updates };
+    setEditedSlides(updated);
+  };
+
+  // Handle download
+  const handleDownloadPptx = async () => {
+    if (!generatedDeck) return;
+    try {
+      const buf = await buildSlidesPptx({
+        presentationTitle: generatedDeck.presentationTitle,
+        slides: editedSlides,
+        author: user?.user_metadata?.full_name || undefined,
+      });
+      const blob = new Blob([buf], { type: PPTX_MIME });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${generatedDeck.presentationTitle}.pptx`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Download failed:", err);
+    }
+  };
+
+  // Handle save to Files
+  const handleSaveToFiles = async () => {
+    if (!generatedDeck || !user || !supabase) return;
+    setSavingFile(true);
+    try {
+      const buf = await buildSlidesPptx({
+        presentationTitle: generatedDeck.presentationTitle,
+        slides: editedSlides,
+        author: user?.user_metadata?.full_name || undefined,
+      });
+      const blob = new Blob([buf], { type: PPTX_MIME });
+      await saveRecordingFile(supabase, user.id, blob, {
+        name: `${generatedDeck.presentationTitle}.pptx`,
+        kind: "file",
+        mimeType: PPTX_MIME,
+        durationSec: null,
+        fileExt: "pptx",
+        source: null,
+        origin: "manual",
+      });
+      setGenerateError(null);
+    } catch (err) {
+      setGenerateError(err instanceof Error ? err.message : "Could not save file");
+    } finally {
+      setSavingFile(false);
+    }
   };
 
   const isReadOnly = selected && isPresetDeckId(selected.id);
@@ -764,19 +929,255 @@ export default function PowerPointDesignTab() {
               </div>
             </div>
 
-            {/* Chunk 3 placeholder - Generate panel will go here */}
-            <div style={{ padding: "1.5rem", backgroundColor: "var(--field-bg)", borderRadius: "4px", border: "1px dashed var(--field-border)" }}>
-              {/* Chunk 3 will add the Generate -> preview -> export panel here. */}
-              <p style={{ margin: "0 0 1rem 0", fontSize: "0.9rem", color: "var(--text-secondary)" }}>
-                Preview, export, and generation coming soon.
-              </p>
-              <Button
-                variant="contained"
-                disabled
-                sx={{ textTransform: "none" }}
-              >
-                Generate deck
-              </Button>
+            {/* Generate panel */}
+            <div style={{ padding: "1.5rem", backgroundColor: "var(--field-bg)", borderRadius: "4px", marginBottom: "1.5rem" }}>
+              <h3 style={{ margin: "0 0 1rem 0", fontSize: "0.95rem", fontWeight: 600 }}>
+                Generate Deck
+              </h3>
+
+              {!generatedDeck ? (
+                <>
+                  {/* Generate inputs */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginBottom: "1.5rem" }}>
+                    <TextField
+                      label="Subject / topic"
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                      fullWidth
+                      size="small"
+                      placeholder={selected?.name || "e.g., Python Loops"}
+                    />
+                    <TextField
+                      label="Audience"
+                      value={audience}
+                      onChange={(e) => setAudience(e.target.value)}
+                      fullWidth
+                      size="small"
+                      placeholder={selected?.audience || "e.g., Intro CS undergraduates"}
+                    />
+
+                    {/* Loop items inputs */}
+                    {selected && selected.loops.map((group) => (
+                      <div key={group.id}>
+                        {group.source === "literal" && (
+                          <div style={{ padding: "0.75rem", backgroundColor: "rgba(0,0,0,0.02)", borderRadius: "4px" }}>
+                            <div style={{ fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem" }}>
+                              {group.label}
+                            </div>
+                            {group.items.length > 0 ? (
+                              <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                                {group.items.map((item, i) => (
+                                  <span key={i} style={{ backgroundColor: "rgba(0,0,0,0.1)", padding: "0.25rem 0.5rem", borderRadius: "3px" }}>
+                                    {item}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                                No items defined
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {group.source === "runtime" && (
+                          <TextField
+                            label={group.runtimeLabel || group.label}
+                            value={loopItems[group.id] || ""}
+                            onChange={(e) => setLoopItems({ ...loopItems, [group.id]: e.target.value })}
+                            fullWidth
+                            multiline
+                            rows={3}
+                            size="small"
+                            placeholder="One item per line"
+                            helperText="Enter items (one per line) to repeat the slides"
+                          />
+                        )}
+
+                        {group.source === "courseTopics" && (
+                          <div style={{ padding: "0.75rem", backgroundColor: "rgba(0,0,0,0.02)", borderRadius: "4px" }}>
+                            <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "0.75rem" }}>
+                              Course topics not wired yet - type them here
+                            </div>
+                            <TextField
+                              label={group.label}
+                              value={loopItems[group.id] || ""}
+                              onChange={(e) => setLoopItems({ ...loopItems, [group.id]: e.target.value })}
+                              fullWidth
+                              multiline
+                              rows={3}
+                              size="small"
+                              placeholder="One topic per line"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {generateError && (
+                    <div style={{ padding: "0.75rem", backgroundColor: "rgba(255,0,0,0.1)", borderRadius: "4px", fontSize: "0.85rem", color: "red", marginBottom: "1rem" }}>
+                      {generateError}
+                    </div>
+                  )}
+
+                  <Button
+                    variant="contained"
+                    onClick={handleGenerateDeck}
+                    disabled={generateBusy || !subject}
+                    sx={{ textTransform: "none" }}
+                  >
+                    {generateBusy ? (
+                      <>
+                        <CircularProgress size={16} sx={{ marginRight: "0.5rem" }} /> Generating...
+                      </>
+                    ) : (
+                      "Generate deck"
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {/* Preview slides */}
+                  <div style={{ marginBottom: "1.5rem" }}>
+                    <h4 style={{ margin: "0 0 1rem 0", fontSize: "0.9rem", fontWeight: 600 }}>
+                      Preview ({editedSlides.length} slides)
+                    </h4>
+                    {editedSlides.map((slide, idx) => (
+                      <Card key={idx} style={{ marginBottom: "1rem" }}>
+                        <CardContent>
+                          {editingSlideIdx === idx ? (
+                            <>
+                              <TextField
+                                label="Title"
+                                value={slide.title}
+                                onChange={(e) => handleEditSlide(idx, { title: e.target.value })}
+                                fullWidth
+                                size="small"
+                                style={{ marginBottom: "1rem" }}
+                              />
+                              <TextField
+                                label="Bullets (one per line)"
+                                value={slide.bullets.join("\n")}
+                                onChange={(e) => handleEditSlide(idx, { bullets: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) })}
+                                fullWidth
+                                multiline
+                                rows={3}
+                                size="small"
+                                style={{ marginBottom: "1rem" }}
+                              />
+                              {slide.code && (
+                                <TextField
+                                  label="Code"
+                                  value={slide.code}
+                                  onChange={(e) => handleEditSlide(idx, { code: e.target.value })}
+                                  fullWidth
+                                  multiline
+                                  rows={4}
+                                  size="small"
+                                  style={{ marginBottom: "1rem", fontFamily: "monospace" }}
+                                />
+                              )}
+                              <div style={{ display: "flex", gap: "0.5rem" }}>
+                                <Button
+                                  variant="contained"
+                                  size="small"
+                                  onClick={() => setEditingSlideIdx(null)}
+                                  sx={{ textTransform: "none" }}
+                                >
+                                  Done
+                                </Button>
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  onClick={() => {
+                                    setEditingSlideIdx(null);
+                                    setEditedSlides([...generatedDeck!.slides]);
+                                  }}
+                                  sx={{ textTransform: "none" }}
+                                >
+                                  Discard
+                                </Button>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "0.75rem" }}>
+                                <h5 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 600 }}>{slide.title}</h5>
+                                <Button
+                                  variant="text"
+                                  size="small"
+                                  onClick={() => setEditingSlideIdx(idx)}
+                                  sx={{ textTransform: "none" }}
+                                >
+                                  Edit
+                                </Button>
+                              </div>
+                              {slide.bullets.length > 0 && (
+                                <ul style={{ margin: "0.5rem 0", paddingLeft: "1.5rem", fontSize: "0.9rem" }}>
+                                  {slide.bullets.map((bullet, i) => (
+                                    <li key={i}>{bullet}</li>
+                                  ))}
+                                </ul>
+                              )}
+                              {slide.code && (
+                                <div style={{ marginTop: "0.75rem", padding: "0.75rem", backgroundColor: "rgba(0,0,0,0.05)", borderRadius: "4px", fontFamily: "monospace", fontSize: "0.8rem", overflow: "auto", maxHeight: "150px", color: "var(--text-secondary)" }}>
+                                  {slide.codeLanguage && <div style={{ fontSize: "0.75rem", fontWeight: 500, marginBottom: "0.25rem" }}>{slide.codeLanguage.toUpperCase()}</div>}
+                                  <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{slide.code}</pre>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+
+                  {/* Export/save actions */}
+                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={handleDownloadPptx}
+                      sx={{ textTransform: "none" }}
+                    >
+                      Download .pptx
+                    </Button>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={handleSaveToFiles}
+                      disabled={savingFile}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {savingFile ? "Saving..." : "Save to Files"}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled
+                      sx={{ textTransform: "none" }}
+                    >
+                      Save as draft
+                    </Button>
+                    {/* Chunk 4 wires this to presentation drafts */}
+                  </div>
+
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => {
+                      setGeneratedDeck(null);
+                      setEditedSlides([]);
+                      setEditingSlideIdx(null);
+                      setGenerateError(null);
+                    }}
+                    sx={{ textTransform: "none" }}
+                  >
+                    Regenerate
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         )}

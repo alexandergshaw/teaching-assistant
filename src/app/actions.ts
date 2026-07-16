@@ -184,6 +184,8 @@ import {
   type GeneratedDeck,
 } from "@/lib/decks/generate";
 import { type DeckTemplate } from "@/lib/decks/types";
+import { listDeckTemplates } from "@/lib/deck-templates";
+import { DECK_PRESETS } from "@/lib/decks/presets";
 import {
   githubConfigured,
   githubWebhookSecret,
@@ -1543,6 +1545,40 @@ export async function countPendingPresentationDrafts(): Promise<{ count: number 
     return { count: count ?? 0 };
   } catch {
     return { count: 0 };
+  }
+}
+
+// ── Deck Templates (Chunk 5) ──────────────────────────────────────────
+
+/** List all saved deck templates for the owner. */
+export async function listDeckTemplatesAction(): Promise<{ templates: DeckTemplate[] } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    return { templates: await listDeckTemplates(supabase, user.id) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list templates." };
+  }
+}
+
+/** Load a deck template by id or name (including presets). */
+export async function getDeckTemplateAction(
+  idOrName: string
+): Promise<{ template: DeckTemplate } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const all = await listDeckTemplates(supabase, user.id);
+    const key = String(idOrName ?? "").trim();
+    // Also let presets resolve by id/name so a workflow can target a built-in template.
+    const pool = [...DECK_PRESETS, ...all];
+    const found =
+      pool.find((t) => t.id === key) ||
+      pool.find((t) => t.name.trim().toLowerCase() === key.toLowerCase());
+    if (!found) return { error: `No deck template matches "${key}".` };
+    return { template: found };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the template." };
   }
 }
 

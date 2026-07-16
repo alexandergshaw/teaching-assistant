@@ -141,10 +141,13 @@ import {
   exportCourseCartridgeAction,
   updateRepoAction,
   deleteOrgReposAction,
+  getDeckTemplateAction,
+  savePresentationDraftAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
 import type { MessageDraftPayload } from "@/lib/message-drafts";
+import { generateDeckFromTemplate, type DeckGenContext } from "@/lib/decks/generate";
 import type { GradingRun, GradingRunEntry, GradeResult } from "@/lib/grade";
 import type { InstitutionField } from "@/lib/institution-fields";
 import type { RepoPermission } from "@/lib/github";
@@ -6325,6 +6328,68 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { draftId: res.id },
         summary: { kind: "text", text: `Saved a ${kind} draft to Drafts > Messages.` },
+      };
+    },
+  },
+
+  {
+    type: "generate-presentation-from-template",
+    name: "Generate a presentation from a template",
+    description: "Generate a slide deck from a saved PowerPoint Design template (the assistant fills each slide role) and save it to Drafts > Presentations for review. Repeats any loop block over the concepts you list.",
+    inputs: [
+      { key: "template", label: "Template (id or name)", type: "text", required: true, help: "A template from the PowerPoint Design tab, by name or id." },
+      { key: "subject", label: "Subject / topic", type: "text", required: true, help: "What the deck is about." },
+      { key: "concepts", label: "Concepts (one per line)", type: "longtext", required: false, help: "Items for the repeated loop block (concept -> example -> practice -> answer, etc.)." },
+      { key: "audience", label: "Audience", type: "text", required: false },
+    ],
+    outputs: [
+      { key: "draftId", label: "Draft id", type: "text" },
+      { key: "slideCount", label: "Slide count", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const key = String(values.template ?? "").trim();
+      if (!key) throw new Error("Provide the template name or id.");
+      const subject = String(values.subject ?? "").trim();
+      if (!subject) throw new Error("Provide the deck subject.");
+      const tplRes = await getDeckTemplateAction(key);
+      if ("error" in tplRes) throw new Error(tplRes.error);
+      const template = tplRes.template;
+      const concepts = String(values.concepts ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const audience = String(values.audience ?? "").trim() || template.audience || undefined;
+      // Map the concepts list to every loop group whose source is not a fixed literal list.
+      const loopItems: Record<string, string[]> = {};
+      for (const g of template.loops) {
+        loopItems[g.id] = g.source === "literal" && g.items.length > 0 ? g.items : concepts;
+      }
+      onProgress("Generating the slide deck...");
+      const ctx: DeckGenContext = { subject, audience, loopItems };
+      const deck = await generateDeckFromTemplate(template, ctx, helpers.provider);
+      if ("error" in deck) throw new Error(deck.error);
+      const res = await savePresentationDraftAction(
+        `Presentation: ${deck.presentationTitle}`,
+        { presentationTitle: deck.presentationTitle, slides: deck.slides, templateName: template.name, subject },
+        helpers.workflowId,
+        helpers.workflowName
+      );
+      if ("error" in res) throw new Error(res.error);
+      // Best-effort: also drop a rendered .pptx into the Files library.
+      if (helpers.saveBundle) {
+        try {
+          const buf = await buildSlidesPptx({ presentationTitle: deck.presentationTitle, slides: deck.slides, author: helpers.author });
+          await helpers.saveBundle(
+            new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" }),
+            `${deck.presentationTitle}.pptx`
+          );
+        } catch (err) {
+          onProgress(`Saved the draft; could not render the .pptx file (${err instanceof Error ? err.message : "unknown"}).`);
+        }
+      }
+      return {
+        outputs: { draftId: res.id, slideCount: String(deck.slides.length) },
+        summary: { kind: "text", text: `Generated a ${deck.slides.length}-slide deck from "${template.name}" and saved it to Drafts > Presentations.` },
       };
     },
   },

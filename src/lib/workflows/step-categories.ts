@@ -79,6 +79,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "synthesize-narration",
     "generate-avatar-video",
     "poll-avatar-video",
+    "generate-presentation-from-template",
   ],
   assignments: [
     "generate-assignment-brief",

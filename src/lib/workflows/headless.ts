@@ -124,6 +124,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "poll-migration-state",
   "export-course-cartridge",
   "course-progress",
+  "generate-presentation-from-template",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

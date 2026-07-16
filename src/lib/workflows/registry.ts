@@ -6337,9 +6337,11 @@ export const STEP_REGISTRY: StepDefinition[] = [
     name: "Generate a presentation from a template",
     description: "Generate a slide deck from a saved PowerPoint Design template (the assistant fills each slide role) and save it to Drafts > Presentations for review. Repeats any loop block over the concepts you list.",
     inputs: [
-      { key: "template", label: "Template (id or name)", type: "text", required: true, help: "A template from the PowerPoint Design tab, by name or id." },
-      { key: "subject", label: "Subject / topic", type: "text", required: true, help: "What the deck is about." },
-      { key: "concepts", label: "Concepts (one per line)", type: "longtext", required: false, help: "Items for the repeated loop block (concept -> example -> practice -> answer, etc.)." },
+      { key: "template", label: "Template", type: "deckTemplate", required: true, help: "Pick a PowerPoint Design template." },
+      { key: "hubCourse", label: "Course", type: "hubCourse", required: false, help: "Pick the course whose module to build from (optional)." },
+      { key: "moduleId", label: "Module", type: "lmsModule", required: false, help: "Pick a module from the course's LMS connection or export; its materials ground the deck." },
+      { key: "subject", label: "Subject / topic", type: "text", required: false, help: "Defaults to the picked module or the template name." },
+      { key: "concepts", label: "Concepts (one per line)", type: "longtext", required: false, help: "Loop items; defaults to the module's topics when a module is picked." },
       { key: "audience", label: "Audience", type: "text", required: false },
     ],
     outputs: [
@@ -6348,24 +6350,41 @@ export const STEP_REGISTRY: StepDefinition[] = [
     ],
     run: async (values, helpers, onProgress) => {
       const key = String(values.template ?? "").trim();
-      if (!key) throw new Error("Provide the template name or id.");
-      const subject = String(values.subject ?? "").trim();
-      if (!subject) throw new Error("Provide the deck subject.");
+      if (!key) throw new Error("Provide the template.");
       const tplRes = await getDeckTemplateAction(key);
       if ("error" in tplRes) throw new Error(tplRes.error);
       const template = tplRes.template;
+
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      const moduleIdRaw = String(values.moduleId ?? "").trim();
+      let moduleName = "";
+      let materials: string | undefined;
+      let moduleNotes: string[] = [];
+      if (hubCourseId) {
+        const list = await listCourseHubAction();
+        if ("error" in list) throw new Error(list.error);
+        const tile = list.courses.find((c) => c.id === hubCourseId);
+        if (tile) {
+          onProgress("Gathering module materials...");
+          const g = await gatherModuleMaterials(tile, moduleIdRaw, helpers, onProgress);
+          moduleName = g.moduleName;
+          materials = g.materialsText || undefined;
+          moduleNotes = g.notes;
+        }
+      }
+      const subject = String(values.subject ?? "").trim() || moduleName || template.name;
       const concepts = String(values.concepts ?? "")
         .split("\n")
         .map((s) => s.trim())
         .filter(Boolean);
+      const effectiveConcepts = concepts.length > 0 ? concepts : moduleNotes;
       const audience = String(values.audience ?? "").trim() || template.audience || undefined;
-      // Map the concepts list to every loop group whose source is not a fixed literal list.
       const loopItems: Record<string, string[]> = {};
       for (const g of template.loops) {
-        loopItems[g.id] = g.source === "literal" && g.items.length > 0 ? g.items : concepts;
+        loopItems[g.id] = g.source === "literal" && g.items.length > 0 ? g.items : effectiveConcepts;
       }
       onProgress("Generating the slide deck...");
-      const ctx: DeckGenContext = { subject, audience, tone: template.tone, loopItems };
+      const ctx: DeckGenContext = { subject, audience, tone: template.tone, materials, loopItems };
       const deck = await generateDeckFromTemplate(template, ctx, helpers.provider);
       if ("error" in deck) throw new Error(deck.error);
       const res = await savePresentationDraftAction(
@@ -6375,10 +6394,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
         helpers.workflowName
       );
       if ("error" in res) throw new Error(res.error);
-      // The saved Presentation Draft is the deliverable; users download the rendered .pptx from Drafts > Presentations.
       return {
         outputs: { draftId: res.id, slideCount: String(deck.slides.length) },
-        summary: { kind: "text", text: `Generated a ${deck.slides.length}-slide deck from "${template.name}" and saved it to Drafts > Presentations.` },
+        summary: { kind: "text", text: `Generated a ${deck.slides.length}-slide deck from "${template.name}"${moduleName ? ` for ${moduleName}` : ""} and saved it to Drafts > Presentations.` },
       };
     },
   },

@@ -703,6 +703,20 @@ export const GROW_KNOWLEDGE_BASE: WorkflowDef = {
   ],
 };
 
+export const MODULE_SLIDES_FROM_TEMPLATE: WorkflowDef = {
+  id: "module-slides-from-template",
+  preset: true,
+  name: "Module slides from a template",
+  description:
+    "Pick a module and a PowerPoint Design template; generate a deck for that module into Drafts > Presentations.",
+  steps: [
+    {
+      type: "generate-presentation-from-template",
+      bindings: {},
+    },
+  ],
+};
+
 export const WEEKLY_KICKOFF_ANNOUNCEMENT: WorkflowDef = {
   id: "weekly-kickoff-announcement",
   preset: true,
@@ -756,6 +770,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     QUIZ_FROM_REPO,
     ASSIGNMENT_KIT,
     GROW_KNOWLEDGE_BASE,
+    MODULE_SLIDES_FROM_TEMPLATE,
     WEEKLY_KICKOFF_ANNOUNCEMENT,
     COURSE_KICKOFF,
     COURSE_REFRESH,

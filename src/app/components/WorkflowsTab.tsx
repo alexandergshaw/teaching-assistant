@@ -45,7 +45,7 @@ import { isScopeableListType, expandScopedValue, ALL_SCOPE, resolveClassRepoRef,
 import { isInstitutionFanout, resolveFanoutInstitutions, scopeForInstitution } from "@/lib/workflows/fanout";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
-import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction, runSubmissionCodeAction, registerOrgPushWebhookAction } from "@/app/actions";
+import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction, listMyOrgsAction, listCoursesAction, listCourseContentAction, runSubmissionCodeAction, registerOrgPushWebhookAction, listDeckTemplatesAction } from "@/app/actions";
 import type { CodeRunResult } from "@/lib/code-runner";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import {
@@ -70,6 +70,7 @@ import {
   allWorkflows,
   COURSE_KICKOFF,
 } from "@/lib/workflows/presets";
+import { DECK_PRESETS } from "@/lib/decks/presets";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
 import {
   getStepDefinition,
@@ -580,6 +581,9 @@ export default function WorkflowsTab() {
 
   const [hubCourses, setHubCourses] = useState<Array<{ id: string; name: string; canvasUrl: string | null; repos: string[] }> | null>(null);
   const [hubCoursesError, setHubCoursesError] = useState<string | null>(null);
+
+  const [deckTemplates, setDeckTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [deckTemplatesError, setDeckTemplatesError] = useState<string | null>(null);
 
   const [lmsCourseOptions, setLmsCourseOptions] = useState<Array<{ url: string; name: string }> | null>(null);
   const [lmsCourseOptionsError, setLmsCourseOptionsError] = useState<string | null>(null);
@@ -1140,6 +1144,37 @@ export default function WorkflowsTab() {
       cancelled = true;
     };
   }, [runtimeFields, hubCourses, scheduleForm, schedules, triggerForm, panel]);
+
+  useEffect(() => {
+    const needsDeckTemplates =
+      runtimeFields.some((f) => f.type === "deckTemplate") ||
+      panel === "build";
+    if (!needsDeckTemplates || deckTemplates !== null) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const list = await listDeckTemplatesAction();
+        if (!cancelled) {
+          if ("error" in list) {
+            setDeckTemplatesError(list.error);
+          } else {
+            setDeckTemplates([...DECK_PRESETS.map((p) => ({ id: p.id, name: p.name })), ...list.templates.map((t) => ({ id: t.id, name: t.name }))]);
+            setDeckTemplatesError(null);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setDeckTemplatesError(err instanceof Error ? err.message : "Could not load templates.");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [runtimeFields, deckTemplates, panel]);
 
   useEffect(() => {
     const needsLmsCourseList =
@@ -2631,6 +2666,45 @@ export default function WorkflowsTab() {
                     </TextField>
                     {hubCoursesError && (
                       <p className={styles.error}>{hubCoursesError}</p>
+                    )}
+                  </div>
+                );
+              } else if (field.type === "deckTemplate") {
+                return (
+                  <div key={field.fieldKey} className={styles.field}>
+                    <label>{field.label}</label>
+                    <TextField
+                      select
+                      size="small"
+                      fullWidth
+                      value={value}
+                      onChange={(e) =>
+                        handleValueChange(field.fieldKey, e.target.value)
+                      }
+                    >
+                      {deckTemplates === null ? (
+                        <MenuItem disabled>Loading templates...</MenuItem>
+                      ) : deckTemplates.length > 0 ? (
+                        [
+                          ...deckTemplates.map((template) => (
+                            <MenuItem key={template.id} value={template.id}>
+                              {template.name}
+                            </MenuItem>
+                          )),
+                          ...(value && !deckTemplates.some((t) => t.id === value)
+                            ? [
+                                <MenuItem key="stale" value={value}>
+                                  Previous template (reselect)
+                                </MenuItem>,
+                              ]
+                            : []),
+                        ]
+                      ) : (
+                        <MenuItem disabled>No templates - create one in the PowerPoint Design tab</MenuItem>
+                      )}
+                    </TextField>
+                    {deckTemplatesError && (
+                      <p className={styles.error}>{deckTemplatesError}</p>
                     )}
                   </div>
                 );

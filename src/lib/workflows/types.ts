@@ -34,7 +34,8 @@ export type WorkflowValueType =
   | "uploads"
   | "lmsModule"
   | "courseList"
-  | "orgList";
+  | "orgList"
+  | "deckTemplate";
 
 // Value types that can carry a fixed ("preset") value in the builder, so a
 // workflow can hard-set the input and run unmonitored without prompting. Beyond
@@ -55,6 +56,7 @@ export const LITERAL_CAPABLE_TYPES: ReadonlySet<string> = new Set([
   "org",
   "orgList",
   "institution",
+  "deckTemplate",
 ]);
 
 // A single-item value type -> its scopeable list type. Lets a single-item

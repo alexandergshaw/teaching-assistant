@@ -27,6 +27,7 @@ export interface BuilderPickerData {
   hubCourses: Array<{ id: string; name: string }> | null;
   institutions: string[];
   orgs: string[] | null;
+  deckTemplates?: Array<{ id: string; name: string }> | null;
 }
 import {
   STEP_REGISTRY,
@@ -1264,6 +1265,20 @@ function LiteralEditor({
       <div style={{ flex: 1, minWidth: 200 }}>
         <GithubRepoPicker value={value} onChange={onChange} />
       </div>
+    );
+  }
+  if (type === "deckTemplate") {
+    const opts = picker.deckTemplates ?? [];
+    const missing = !!value && !opts.some((t) => t.id === value);
+    return (
+      <TextField select size="small" value={value} onChange={(e) => onChange(e.target.value)} sx={sx}
+        helperText={picker.deckTemplates === null ? "Loading templates..." : opts.length === 0 ? "No templates yet." : undefined}>
+        <MenuItem value="">Choose a template</MenuItem>
+        {missing && <MenuItem value={value}>{value} (unavailable)</MenuItem>}
+        {opts.map((t) => (
+          <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
+        ))}
+      </TextField>
     );
   }
   // lmsCourse / lmsCourseList / text / longtext / number: the builder has no

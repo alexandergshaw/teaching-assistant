@@ -183,9 +183,11 @@ import {
   type DeckGenContext,
   type GeneratedDeck,
 } from "@/lib/decks/generate";
-import { type DeckTemplate } from "@/lib/decks/types";
+import { type DeckTemplate, type DeckTheme } from "@/lib/decks/types";
 import { listDeckTemplates } from "@/lib/deck-templates";
 import { DECK_PRESETS } from "@/lib/decks/presets";
+import { buildSlidesPptx, type PptxSlide, type PptxTheme } from "@/lib/pptx";
+import { saveRecordingFile } from "@/lib/recording-files";
 import {
   githubConfigured,
   githubWebhookSecret,
@@ -6843,6 +6845,60 @@ export async function generateDeckFromTemplateAction(
     return await generateDeckFromTemplate(template, ctx, provider);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate the deck." };
+  }
+}
+
+const PRESENTATION_PPTX_MIME =
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+/** Render a generated deck to a real .pptx and store it in the Files library
+ * (kind "file", tagged source "workflow"), so a workflow-generated presentation
+ * appears in the Files menu in addition to its Drafts > Presentations draft.
+ * Gradient themes fall back to a solid fill here (no browser canvas server-side);
+ * the Drafts download renders the true gradient. */
+export async function savePresentationFileAction(input: {
+  presentationTitle: string;
+  slides: PptxSlide[];
+  theme?: DeckTheme | null;
+  author?: string;
+  workflowName?: string | null;
+}): Promise<{ id: string } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    if (!Array.isArray(input.slides) || input.slides.length === 0) {
+      return { error: "No slides to save." };
+    }
+    const theme: PptxTheme | undefined = input.theme
+      ? {
+          backgroundKind: input.theme.backgroundKind,
+          backgroundColor: input.theme.backgroundColor,
+          backgroundColor2: input.theme.backgroundColor2,
+          fontColor: input.theme.fontColor,
+        }
+      : undefined;
+    const title = (input.presentationTitle || "Presentation").trim() || "Presentation";
+    const buf = await buildSlidesPptx({
+      presentationTitle: title,
+      slides: input.slides,
+      author: input.author,
+      theme,
+    });
+    const blob = new Blob([buf], { type: PRESENTATION_PPTX_MIME });
+    const safeName = title.replace(/[\\/:*?"<>|]+/g, "-").slice(0, 120) || "Presentation";
+    const file = await saveRecordingFile(supabase, user.id, blob, {
+      name: `${safeName}.pptx`,
+      kind: "file",
+      mimeType: PRESENTATION_PPTX_MIME,
+      durationSec: null,
+      fileExt: "pptx",
+      source: "workflow",
+      origin: "unattended",
+      workflowName: input.workflowName ?? null,
+    });
+    return { id: file.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the presentation file." };
   }
 }
 

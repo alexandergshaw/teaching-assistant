@@ -143,6 +143,7 @@ import {
   deleteOrgReposAction,
   getDeckTemplateAction,
   savePresentationDraftAction,
+  savePresentationFileAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
@@ -6394,9 +6395,28 @@ export const STEP_REGISTRY: StepDefinition[] = [
         helpers.workflowName
       );
       if ("error" in res) throw new Error(res.error);
+      // Also drop a real, downloadable .pptx into the Files library (best-effort;
+      // the reviewable draft above is the primary deliverable).
+      let savedToFiles = false;
+      try {
+        const fileRes = await savePresentationFileAction({
+          presentationTitle: deck.presentationTitle,
+          slides: deck.slides,
+          theme: template.theme,
+          author: helpers.author,
+          workflowName: helpers.workflowName ?? null,
+        });
+        if ("error" in fileRes) {
+          onProgress(`Saved the draft; could not save the .pptx to Files (${fileRes.error}).`);
+        } else {
+          savedToFiles = true;
+        }
+      } catch (err) {
+        onProgress(`Saved the draft; could not save the .pptx to Files (${err instanceof Error ? err.message : "unknown"}).`);
+      }
       return {
         outputs: { draftId: res.id, slideCount: String(deck.slides.length) },
-        summary: { kind: "text", text: `Generated a ${deck.slides.length}-slide deck from "${template.name}"${moduleName ? ` for ${moduleName}` : ""} and saved it to Drafts > Presentations.` },
+        summary: { kind: "text", text: `Generated a ${deck.slides.length}-slide deck from "${template.name}"${moduleName ? ` for ${moduleName}` : ""} and saved it to Drafts > Presentations${savedToFiles ? " and the Files library" : ""}.` },
       };
     },
   },

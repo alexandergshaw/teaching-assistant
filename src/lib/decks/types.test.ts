@@ -17,6 +17,7 @@ describe("getSlideRole", () => {
 describe("expandTemplate", () => {
   it("returns one spec per slide for a template with no loops", () => {
     const template = emptyDeckTemplate("Test");
+    if (!template.theme) template.theme = { backgroundKind: "solid", backgroundColor: "#ffffff", backgroundColor2: "#e2e8f0", gradientAngle: 135, fontColor: "#1e293b" };
     template.slides.push(newDeckSlide("concept"));
     template.slides.push(newDeckSlide("example"));
 
@@ -31,6 +32,7 @@ describe("expandTemplate", () => {
 
   it("repeats a 3-slide loop block over two items, yielding 6 specs with loopItem cycling", () => {
     const template = emptyDeckTemplate("Test");
+    if (!template.theme) template.theme = { backgroundKind: "solid", backgroundColor: "#ffffff", backgroundColor2: "#e2e8f0", gradientAngle: 135, fontColor: "#1e293b" };
 
     const loopGroupId = "loop-concepts";
     const loopGroup = {
@@ -86,6 +88,7 @@ describe("expandTemplate", () => {
 
   it("emits a loop block once when the item list is empty", () => {
     const template = emptyDeckTemplate("Test");
+    if (!template.theme) template.theme = { backgroundKind: "solid", backgroundColor: "#ffffff", backgroundColor2: "#e2e8f0", gradientAngle: 135, fontColor: "#1e293b" };
 
     const loopGroupId = "loop-empty";
     const loopGroup = {

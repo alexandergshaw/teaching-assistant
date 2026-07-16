@@ -13,11 +13,35 @@ import {
   updatePresentationDraftPayloadAction,
   markPresentationDraftReviewedAction,
 } from "../actions";
-import { buildSlidesPptx } from "@/lib/pptx";
+import { buildSlidesPptx, type PptxTheme } from "@/lib/pptx";
+import type { DeckTheme } from "@/lib/decks/types";
 import { useDraftedGradesInbox } from "./DraftedGradesInbox";
 import styles from "../page.module.css";
 
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+function gradientPng(t: DeckTheme): string | undefined {
+  if (t.backgroundKind !== "gradient" || typeof document === "undefined") return undefined;
+  const c = document.createElement("canvas");
+  c.width = 1280;
+  c.height = 720;
+  const ctx = c.getContext("2d");
+  if (!ctx) return undefined;
+  const rad = (t.gradientAngle * Math.PI) / 180;
+  const x = Math.cos(rad);
+  const y = Math.sin(rad);
+  const g = ctx.createLinearGradient(
+    640 - x * 640,
+    360 - y * 360,
+    640 + x * 640,
+    360 + y * 360
+  );
+  g.addColorStop(0, t.backgroundColor);
+  g.addColorStop(1, t.backgroundColor2);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 1280, 720);
+  return c.toDataURL("image/png");
+}
 
 export default function PresentationDraftsTab({
   onOpenWorkflow,
@@ -176,10 +200,20 @@ export default function PresentationDraftsTab({
   const handleDownload = async (draft: PresentationDraft) => {
     setDownloadingId(draft.id);
     try {
+      const pptxTheme: PptxTheme | undefined = draft.payload.theme
+        ? {
+            backgroundKind: draft.payload.theme.backgroundKind,
+            backgroundColor: draft.payload.theme.backgroundColor,
+            backgroundColor2: draft.payload.theme.backgroundColor2,
+            fontColor: draft.payload.theme.fontColor,
+            backgroundImageData: gradientPng(draft.payload.theme),
+          }
+        : undefined;
       const arrayBuffer = await buildSlidesPptx({
         presentationTitle: draft.payload.presentationTitle,
         slides: draft.payload.slides,
         author: user?.email || "Teaching Assistant",
+        theme: pptxTheme,
       });
       const blob = new Blob([arrayBuffer], { type: PPTX_MIME });
       const url = URL.createObjectURL(blob);

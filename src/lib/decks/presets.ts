@@ -1,6 +1,7 @@
 // Built-in reusable presentation templates (presets).
 
 import type { DeckTemplate, DeckSlide, DeckLoopGroup } from "./types";
+import { DEFAULT_DECK_THEME } from "./types";
 
 function presetSlide(id: string, role: DeckTemplate["slides"][0]["role"], loopGroupId: string | null = null): DeckSlide {
   return {
@@ -43,6 +44,13 @@ export const DECK_PRESETS: DeckTemplate[] = [
       presetSlide("preset-coding-lecture-s10", "quiz"),
     ],
     loops: [PRESET_CODING_LECTURE_LOOP],
+    theme: {
+      backgroundKind: "solid",
+      backgroundColor: "#1a2744",
+      backgroundColor2: "#0f172a",
+      gradientAngle: 135,
+      fontColor: "#ffffff",
+    },
   },
   {
     id: "preset-lecture-quiz",
@@ -61,6 +69,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
       presetSlide("preset-lecture-quiz-s8", "quiz"),
     ],
     loops: [],
+    theme: { ...DEFAULT_DECK_THEME },
   },
   {
     id: "preset-review-session",
@@ -85,6 +94,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         runtimeLabel: "Topics",
       },
     ],
+    theme: { ...DEFAULT_DECK_THEME },
   },
 ];
 

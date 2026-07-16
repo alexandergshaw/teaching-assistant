@@ -13,6 +13,7 @@ import {
   Collapse,
   FormHelperText,
   CircularProgress,
+  Slider,
 } from "@mui/material";
 import TabHeader from "./TabHeader";
 import { useSupabase } from "@/context/SupabaseProvider";
@@ -37,14 +38,38 @@ import {
   type DeckLoopGroup,
   type SlideRole,
   type LoopSourceKind,
+  type DeckTheme,
 } from "@/lib/decks/types";
 import { generateDeckFromTemplateAction, savePresentationDraftAction } from "@/app/actions";
-import { buildSlidesPptx, type PptxSlide } from "@/lib/pptx";
+import { buildSlidesPptx, type PptxSlide, type PptxTheme } from "@/lib/pptx";
 import { saveRecordingFile } from "@/lib/recording-files";
 import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
 
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+function gradientPng(t: DeckTheme): string | undefined {
+  if (t.backgroundKind !== "gradient" || typeof document === "undefined") return undefined;
+  const c = document.createElement("canvas");
+  c.width = 1280;
+  c.height = 720;
+  const ctx = c.getContext("2d");
+  if (!ctx) return undefined;
+  const rad = (t.gradientAngle * Math.PI) / 180;
+  const x = Math.cos(rad);
+  const y = Math.sin(rad);
+  const g = ctx.createLinearGradient(
+    640 - x * 640,
+    360 - y * 360,
+    640 + x * 640,
+    360 + y * 360
+  );
+  g.addColorStop(0, t.backgroundColor);
+  g.addColorStop(1, t.backgroundColor2);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 1280, 720);
+  return c.toDataURL("image/png");
+}
 
 export default function PowerPointDesignTab() {
   const { supabase, user } = useSupabase();
@@ -412,12 +437,22 @@ export default function PowerPointDesignTab() {
 
   // Handle download
   const handleDownloadPptx = async () => {
-    if (!generatedDeck) return;
+    if (!generatedDeck || !selected) return;
     try {
+      const pptxTheme: PptxTheme | undefined = selected.theme
+        ? {
+            backgroundKind: selected.theme.backgroundKind,
+            backgroundColor: selected.theme.backgroundColor,
+            backgroundColor2: selected.theme.backgroundColor2,
+            fontColor: selected.theme.fontColor,
+            backgroundImageData: gradientPng(selected.theme),
+          }
+        : undefined;
       const buf = await buildSlidesPptx({
         presentationTitle: generatedDeck.presentationTitle,
         slides: editedSlides,
         author: user?.user_metadata?.full_name || undefined,
+        theme: pptxTheme,
       });
       const blob = new Blob([buf], { type: PPTX_MIME });
       const url = URL.createObjectURL(blob);
@@ -433,13 +468,23 @@ export default function PowerPointDesignTab() {
 
   // Handle save to Files
   const handleSaveToFiles = async () => {
-    if (!generatedDeck || !user || !supabase) return;
+    if (!generatedDeck || !user || !supabase || !selected) return;
     setSavingFile(true);
     try {
+      const pptxTheme: PptxTheme | undefined = selected.theme
+        ? {
+            backgroundKind: selected.theme.backgroundKind,
+            backgroundColor: selected.theme.backgroundColor,
+            backgroundColor2: selected.theme.backgroundColor2,
+            fontColor: selected.theme.fontColor,
+            backgroundImageData: gradientPng(selected.theme),
+          }
+        : undefined;
       const buf = await buildSlidesPptx({
         presentationTitle: generatedDeck.presentationTitle,
         slides: editedSlides,
         author: user?.user_metadata?.full_name || undefined,
+        theme: pptxTheme,
       });
       const blob = new Blob([buf], { type: PPTX_MIME });
       await saveRecordingFile(supabase, user.id, blob, {
@@ -461,7 +506,7 @@ export default function PowerPointDesignTab() {
 
   // Handle save as draft
   const handleSaveDraft = async () => {
-    if (!generatedDeck) return;
+    if (!generatedDeck || !selected) return;
     setSavingDraft(true);
     try {
       const payload = {
@@ -469,6 +514,7 @@ export default function PowerPointDesignTab() {
         slides: editedSlides,
         templateName: selected.name,
         subject,
+        theme: selected.theme,
       };
       const res = await savePresentationDraftAction(
         `Presentation: ${generatedDeck.presentationTitle}`,
@@ -687,6 +733,163 @@ export default function PowerPointDesignTab() {
                     fullWidth
                     size="small"
                   />
+                  {!isReadOnly && (
+                    <>
+                      <div style={{ marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid var(--field-border)" }}>
+                        <h4 style={{ margin: "0 0 1rem 0", fontSize: "0.9rem", fontWeight: 600 }}>
+                          Theme
+                        </h4>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                          <div>
+                            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem" }}>
+                              Background
+                            </label>
+                            <Select
+                              value={selected.theme.backgroundKind}
+                              onChange={(e) => {
+                                const next = {
+                                  ...selected,
+                                  theme: {
+                                    ...selected.theme,
+                                    backgroundKind: e.target.value as "solid" | "gradient",
+                                  },
+                                };
+                                commit(next);
+                              }}
+                              fullWidth
+                              size="small"
+                            >
+                              <MenuItem value="solid">Solid color</MenuItem>
+                              <MenuItem value="gradient">Gradient</MenuItem>
+                            </Select>
+                          </div>
+
+                          <div>
+                            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem" }}>
+                              {selected.theme.backgroundKind === "gradient" ? "Gradient start" : "Background color"}
+                            </label>
+                            <input
+                              type="color"
+                              value={selected.theme.backgroundColor}
+                              onChange={(e) => {
+                                const next = {
+                                  ...selected,
+                                  theme: {
+                                    ...selected.theme,
+                                    backgroundColor: e.target.value,
+                                  },
+                                };
+                                commit(next);
+                              }}
+                              style={{
+                                width: "100%",
+                                height: "40px",
+                                border: "1px solid var(--field-border)",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                              }}
+                            />
+                          </div>
+
+                          {selected.theme.backgroundKind === "gradient" && (
+                            <>
+                              <div>
+                                <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem" }}>
+                                  Gradient end
+                                </label>
+                                <input
+                                  type="color"
+                                  value={selected.theme.backgroundColor2}
+                                  onChange={(e) => {
+                                    const next = {
+                                      ...selected,
+                                      theme: {
+                                        ...selected.theme,
+                                        backgroundColor2: e.target.value,
+                                      },
+                                    };
+                                    commit(next);
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    height: "40px",
+                                    border: "1px solid var(--field-border)",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                  }}
+                                />
+                              </div>
+
+                              <div>
+                                <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem" }}>
+                                  Angle: {selected.theme.gradientAngle}°
+                                </label>
+                                <Slider
+                                  value={selected.theme.gradientAngle}
+                                  onChange={(e, val) => {
+                                    const next = {
+                                      ...selected,
+                                      theme: {
+                                        ...selected.theme,
+                                        gradientAngle: typeof val === "number" ? val : val[0],
+                                      },
+                                    };
+                                    commit(next);
+                                  }}
+                                  min={0}
+                                  max={360}
+                                  step={15}
+                                />
+                              </div>
+                            </>
+                          )}
+
+                          <div>
+                            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem" }}>
+                              Text color
+                            </label>
+                            <input
+                              type="color"
+                              value={selected.theme.fontColor}
+                              onChange={(e) => {
+                                const next = {
+                                  ...selected,
+                                  theme: {
+                                    ...selected.theme,
+                                    fontColor: e.target.value,
+                                  },
+                                };
+                                commit(next);
+                              }}
+                              style={{
+                                width: "100%",
+                                height: "40px",
+                                border: "1px solid var(--field-border)",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                              }}
+                            />
+                          </div>
+
+                          <div
+                            style={{
+                              marginTop: "0.5rem",
+                              padding: "1rem",
+                              borderRadius: "4px",
+                              background: selected.theme.backgroundKind === "gradient"
+                                ? `linear-gradient(${selected.theme.gradientAngle}deg, ${selected.theme.backgroundColor}, ${selected.theme.backgroundColor2})`
+                                : selected.theme.backgroundColor,
+                              color: selected.theme.fontColor,
+                              textAlign: "center",
+                              fontSize: "0.85rem",
+                            }}
+                          >
+                            Preview
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </Collapse>
             </div>
@@ -1079,8 +1282,15 @@ export default function PowerPointDesignTab() {
                     <h4 style={{ margin: "0 0 1rem 0", fontSize: "0.9rem", fontWeight: 600 }}>
                       Preview ({editedSlides.length} slides)
                     </h4>
-                    {editedSlides.map((slide, idx) => (
-                      <Card key={idx} style={{ marginBottom: "1rem" }}>
+                    {editedSlides.map((slide, idx) => {
+                      const slideStyle = {
+                        background: selected.theme.backgroundKind === "gradient"
+                          ? `linear-gradient(${selected.theme.gradientAngle}deg, ${selected.theme.backgroundColor}, ${selected.theme.backgroundColor2})`
+                          : selected.theme.backgroundColor,
+                        color: selected.theme.fontColor,
+                      };
+                      return (
+                      <Card key={idx} style={{ marginBottom: "1rem", ...slideStyle }}>
                         <CardContent>
                           {editingSlideIdx === idx ? (
                             <>
@@ -1166,7 +1376,8 @@ export default function PowerPointDesignTab() {
                           )}
                         </CardContent>
                       </Card>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   {/* Draft note */}

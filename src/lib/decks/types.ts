@@ -1,6 +1,73 @@
 // Domain model for reusable presentation templates: slide roles, loop groups, deck structure.
 // Pure, unit-testable; no I/O or React dependencies.
 
+export type DeckBackgroundKind = "solid" | "gradient";
+
+export interface DeckTheme {
+  backgroundKind: DeckBackgroundKind;
+  backgroundColor: string;
+  backgroundColor2: string;
+  gradientAngle: number;
+  fontColor: string;
+}
+
+export const DEFAULT_DECK_THEME: DeckTheme = {
+  backgroundKind: "solid",
+  backgroundColor: "#ffffff",
+  backgroundColor2: "#e2e8f0",
+  gradientAngle: 135,
+  fontColor: "#1e293b",
+};
+
+export function coerceDeckTheme(raw: unknown): DeckTheme {
+  if (!raw || typeof raw !== "object") {
+    return { ...DEFAULT_DECK_THEME };
+  }
+
+  const obj = raw as Record<string, unknown>;
+  const backgroundKind =
+    obj.backgroundKind === "gradient" ? "gradient" : "solid";
+
+  const isValidHex = (hex: unknown): boolean => {
+    if (typeof hex !== "string") return false;
+    const cleaned = hex.startsWith("#") ? hex.substring(1) : hex;
+    return /^[0-9a-fA-F]{6}$/.test(cleaned);
+  };
+
+  const parseHex = (hex: unknown, fallback: string): string => {
+    if (!isValidHex(hex)) return fallback;
+    const str = hex as string;
+    return str.startsWith("#") ? str : `#${str}`;
+  };
+
+  const backgroundColor = parseHex(
+    obj.backgroundColor,
+    DEFAULT_DECK_THEME.backgroundColor
+  );
+  const backgroundColor2 = parseHex(
+    obj.backgroundColor2,
+    DEFAULT_DECK_THEME.backgroundColor2
+  );
+
+  const gradientAngle =
+    typeof obj.gradientAngle === "number"
+      ? Math.max(0, Math.min(360, obj.gradientAngle))
+      : DEFAULT_DECK_THEME.gradientAngle;
+
+  const fontColor = parseHex(
+    obj.fontColor,
+    DEFAULT_DECK_THEME.fontColor
+  );
+
+  return {
+    backgroundKind,
+    backgroundColor,
+    backgroundColor2,
+    gradientAngle,
+    fontColor,
+  };
+}
+
 export type SlideRole =
   | "title" | "agenda" | "objectives" | "concept" | "definition"
   | "example" | "walkthrough" | "practice" | "answer" | "quiz"
@@ -191,6 +258,7 @@ export interface DeckTemplate {
   tone: string;
   slides: DeckSlide[];
   loops: DeckLoopGroup[];
+  theme: DeckTheme;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -250,6 +318,7 @@ export function emptyDeckTemplate(name: string): DeckTemplate {
     tone: "",
     slides: [newDeckSlide("title")],
     loops: [],
+    theme: { ...DEFAULT_DECK_THEME },
   };
 }
 
@@ -262,6 +331,7 @@ export function duplicateDeckTemplate(template: DeckTemplate, name: string): Dec
     name,
     slides: [...template.slides],
     loops: [...template.loops],
+    theme: { ...template.theme },
   };
 }
 

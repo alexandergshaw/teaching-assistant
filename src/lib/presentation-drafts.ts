@@ -13,6 +13,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "./supabase/types";
+import type { DeckTheme } from "./decks/types";
+import { coerceDeckTheme } from "./decks/types";
 
 export type PresentationDraftStatus = "pending" | "reviewed";
 
@@ -28,6 +30,7 @@ export interface PresentationDraftPayload {
   slides: PresentationDraftSlide[];
   templateName?: string;
   subject?: string;
+  theme?: DeckTheme;
 }
 
 export interface PresentationDraft {
@@ -53,6 +56,7 @@ export function coercePresentationDraftPayload(raw: unknown): PresentationDraftP
   const presentationTitle = typeof o.presentationTitle === "string" ? o.presentationTitle : "";
   const templateName = typeof o.templateName === "string" ? o.templateName : undefined;
   const subject = typeof o.subject === "string" ? o.subject : undefined;
+  const theme = o.theme ? coerceDeckTheme(o.theme) : undefined;
 
   let slides: PresentationDraftSlide[] = [];
   if (Array.isArray(o.slides)) {
@@ -81,6 +85,7 @@ export function coercePresentationDraftPayload(raw: unknown): PresentationDraftP
     slides,
     ...(templateName ? { templateName } : {}),
     ...(subject ? { subject } : {}),
+    ...(theme ? { theme } : {}),
   };
 }
 

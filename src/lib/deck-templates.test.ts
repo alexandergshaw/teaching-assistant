@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { mapDeckTemplate } from "./deck-templates";
+import { DEFAULT_DECK_THEME } from "./decks/types";
 import type { Database, Json } from "./supabase/types";
 
 type Row = Database["public"]["Tables"]["deck_templates"]["Row"];
@@ -14,6 +15,7 @@ function row(overrides: Partial<Row> = {}): Row {
     loops: [] as unknown as Json,
     audience: "",
     tone: "",
+    theme: DEFAULT_DECK_THEME as unknown as Json,
     created_at: "2026-08-01T00:00:00Z",
     updated_at: "2026-08-01T00:00:00Z",
     ...overrides,

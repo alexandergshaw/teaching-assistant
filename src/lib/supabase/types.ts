@@ -546,6 +546,7 @@ export interface Database {
           loops: Json;
           audience: string;
           tone: string;
+          theme: Json;
           created_at: string;
           updated_at: string;
         };
@@ -558,6 +559,7 @@ export interface Database {
           loops?: Json;
           audience?: string;
           tone?: string;
+          theme?: Json;
           created_at?: string;
           updated_at?: string;
         };
@@ -570,6 +572,7 @@ export interface Database {
           loops?: Json;
           audience?: string;
           tone?: string;
+          theme?: Json;
           created_at?: string;
           updated_at?: string;
         };

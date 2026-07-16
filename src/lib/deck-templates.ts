@@ -3,6 +3,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "./supabase/types";
 import type { DeckTemplate, DeckSlide, DeckLoopGroup } from "@/lib/decks/types";
+import { coerceDeckTheme } from "@/lib/decks/types";
 
 export async function listDeckTemplates(
   supabase: SupabaseClient<Database>,
@@ -38,6 +39,7 @@ export async function upsertDeckTemplate(
       loops: template.loops as unknown as Json,
       audience: template.audience,
       tone: template.tone,
+      theme: template.theme as unknown as Json,
       updated_at: new Date().toISOString(),
     }, { onConflict: "id" });
 
@@ -68,6 +70,7 @@ export function mapDeckTemplate(row: Database["public"]["Tables"]["deck_template
   const loops = Array.isArray(row.loops)
     ? (row.loops as unknown as DeckLoopGroup[])
     : [];
+  const theme = coerceDeckTheme(row.theme);
 
   return {
     id: row.id,
@@ -77,6 +80,7 @@ export function mapDeckTemplate(row: Database["public"]["Tables"]["deck_template
     tone: row.tone ?? "",
     slides,
     loops,
+    theme,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

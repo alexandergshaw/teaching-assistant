@@ -951,7 +951,7 @@ export default function Home() {
               </div>
             </div>
 
-            {draftsView === "grades" && <DraftedGradesTab onReviewDrafts={() => setActiveTab("workflows")} />}
+            {draftsView === "grades" && <DraftedGradesTab />}
             {draftsView === "messages" && <MessageDraftsTab />}
           </>
         )}

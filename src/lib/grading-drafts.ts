@@ -251,6 +251,23 @@ export async function markGradingDraftReviewed(
   }
 }
 
+/** Overwrite a draft's payload (e.g. after the user edits scores/comments in
+ * the Drafts tab). Scoped to the owner; leaves status unchanged. */
+export async function updateGradingDraft(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  id: string,
+  input: { payload: GradingDraftPayload }
+): Promise<void> {
+  const { error } = await table(supabase)
+    .update({ payload: input.payload as unknown as Json, updated_at: new Date().toISOString() })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
 export async function deleteGradingDraft(
   supabase: SupabaseClient<Database>,
   userId: string,

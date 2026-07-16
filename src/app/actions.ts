@@ -294,6 +294,7 @@ import {
   getGradingDraft,
   createGradingDraft,
   markGradingDraftReviewed,
+  updateGradingDraft,
   deleteGradingDraft,
   type GradingDraftPayload,
 } from "@/lib/grading-drafts";
@@ -1138,6 +1139,69 @@ export async function deleteGradingDraftAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not delete the grading draft." };
+  }
+}
+
+/** Persist edited scores/comments back to a pending draft. */
+export async function updateGradingDraftPayloadAction(
+  id: string,
+  payload: GradingDraftPayload
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    await updateGradingDraft(supabase, user.id, id, { payload });
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the grading draft." };
+  }
+}
+
+/** Post EVERY gradable result in a draft to Canvas, then mark it reviewed.
+ * Mirrors the post-grades step's payload construction. */
+export async function postGradingDraftAction(
+  id: string
+): Promise<{ posted: number; failed: number } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const draft = await getGradingDraft(supabase, user.id, id);
+    if (!draft) return { error: "That grading draft was not found." };
+
+    let posted = 0;
+    let failed = 0;
+    const fractionRegex = /(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/;
+
+    for (const entry of draft.payload.runs) {
+      if (entry.offline || !entry.canvasUrl) continue;
+      const grades = entry.run.results
+        .filter((r) => typeof r.userId === "number")
+        .map((r) => {
+          const m = r.totalScore.match(fractionRegex);
+          const grade = m ? m[1] : (r.totalScore.match(/-?\d+(?:\.\d+)?/) ?? [])[0] ?? "";
+          return {
+            userId: r.userId as number,
+            grade,
+            comment: r.overallComment,
+            rubricAreas: r.rubricAreas,
+          };
+        });
+      if (grades.length === 0) continue;
+      const res = await postCanvasGradesAction(entry.canvasUrl, grades);
+      if ("error" in res) {
+        failed += grades.length;
+      } else {
+        posted += res.posted;
+        failed += res.failures.length;
+      }
+    }
+
+    if (failed === 0) {
+      await markGradingDraftReviewed(supabase, user.id, id);
+    }
+    return { posted, failed };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not post the grades." };
   }
 }
 

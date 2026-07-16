@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import { Button, TextField, MenuItem } from "@mui/material";
 import TabHeader from "./TabHeader";
 import { useSupabase } from "@/context/SupabaseProvider";
-import { listPendingGradingDrafts, deleteGradingDraft, type GradingDraft } from "@/lib/grading-drafts";
+import { listPendingGradingDrafts, deleteGradingDraft, type GradingDraft, type GradingDraftPayload } from "@/lib/grading-drafts";
 import type { GradingRunEntry, GradeResult } from "@/lib/grade";
 import { useDraftedGradesInbox } from "./DraftedGradesInbox";
+import { updateGradingDraftPayloadAction, postGradingDraftAction } from "../actions";
 import styles from "../page.module.css";
 
-export default function DraftedGradesTab({ onReviewDrafts }: { onReviewDrafts?: () => void }) {
+export default function DraftedGradesTab() {
   const { supabase, user } = useSupabase();
   const { refresh: refreshDraftsBadge } = useDraftedGradesInbox();
 
@@ -20,6 +21,10 @@ export default function DraftedGradesTab({ onReviewDrafts }: { onReviewDrafts?: 
   const [note, setNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [edits, setEdits] = useState<Record<string, { totalScore: string; overallComment: string }>>({});
+  const [confirmPost, setConfirmPost] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
   // Toolbar state (persisted)
   const [search, setSearch] = useState<string>(() => {
@@ -98,6 +103,80 @@ export default function DraftedGradesTab({ onReviewDrafts }: { onReviewDrafts?: 
         text: err instanceof Error ? err.message : "Delete failed",
       });
       void reload();
+    }
+  };
+
+  const startEdit = (draft: GradingDraft) => {
+    const seed: Record<string, { totalScore: string; overallComment: string }> = {};
+    draft.payload.runs.forEach((entry, runIdx) => {
+      entry.run.results.forEach((r, resultIdx) => {
+        seed[`${draft.id}:${runIdx}:${resultIdx}`] = {
+          totalScore: r.totalScore,
+          overallComment: r.overallComment,
+        };
+      });
+    });
+    setEdits(seed);
+    setEditingDraftId(draft.id);
+    setConfirmPost(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingDraftId(null);
+    setEdits({});
+  };
+
+  const saveEdit = async (draft: GradingDraft) => {
+    const newPayload: GradingDraftPayload = {
+      runs: draft.payload.runs.map((entry, runIdx) => ({
+        ...entry,
+        run: {
+          ...entry.run,
+          results: entry.run.results.map((r, resultIdx) => {
+            const e = edits[`${draft.id}:${runIdx}:${resultIdx}`];
+            return e ? { ...r, totalScore: e.totalScore, overallComment: e.overallComment } : r;
+          }),
+        },
+      })),
+    };
+    setBusy(draft.id);
+    try {
+      const res = await updateGradingDraftPayloadAction(draft.id, newPayload);
+      if ("error" in res) throw new Error(res.error);
+      setDrafts((prev) => (prev ? prev.map((d) => (d.id === draft.id ? { ...d, payload: newPayload } : d)) : null));
+      setNote({ kind: "success", text: "Draft updated." });
+      cancelEdit();
+    } catch (err) {
+      setNote({ kind: "error", text: err instanceof Error ? err.message : "Could not save." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handlePost = async (draft: GradingDraft) => {
+    if (confirmPost !== draft.id) {
+      setConfirmPost(draft.id);
+      return;
+    }
+    setConfirmPost(null);
+    setBusy(draft.id);
+    try {
+      const res = await postGradingDraftAction(draft.id);
+      if ("error" in res) throw new Error(res.error);
+      if (res.failed === 0) {
+        setDrafts((prev) => (prev ? prev.filter((d) => d.id !== draft.id) : null));
+      } else {
+        void reload();
+      }
+      refreshDraftsBadge();
+      setNote({
+        kind: res.failed > 0 ? "error" : "success",
+        text: `Posted ${res.posted} grade${res.posted === 1 ? "" : "s"}${res.failed > 0 ? `, ${res.failed} failed - draft kept for retry` : ""}.`,
+      });
+    } catch (err) {
+      setNote({ kind: "error", text: err instanceof Error ? err.message : "Could not post grades." });
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -309,17 +388,28 @@ export default function DraftedGradesTab({ onReviewDrafts }: { onReviewDrafts?: 
                       </div>
                     </div>
                     <div className={styles.draftSectionActions}>
-                      <Button variant="outlined" size="small" onClick={() => onReviewDrafts?.()}>
-                        Review & post
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        color="error"
-                        onClick={() => void handleDelete(draft)}
-                      >
-                        {confirmDelete === draft.id ? "Confirm delete" : "Delete"}
-                      </Button>
+                      {editingDraftId === draft.id ? (
+                        <>
+                          <Button variant="contained" size="small" disabled={busy === draft.id} onClick={() => void saveEdit(draft)}>
+                            {busy === draft.id ? "Saving..." : "Save"}
+                          </Button>
+                          <Button variant="outlined" size="small" disabled={busy === draft.id} onClick={cancelEdit}>
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button variant="outlined" size="small" onClick={() => startEdit(draft)}>
+                            Edit
+                          </Button>
+                          <Button variant="contained" size="small" disabled={busy === draft.id} onClick={() => void handlePost(draft)}>
+                            {busy === draft.id ? "Posting..." : confirmPost === draft.id ? "Confirm post" : "Post"}
+                          </Button>
+                          <Button variant="outlined" size="small" color="error" onClick={() => void handleDelete(draft)}>
+                            {confirmDelete === draft.id ? "Confirm delete" : "Delete"}
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -336,10 +426,32 @@ export default function DraftedGradesTab({ onReviewDrafts }: { onReviewDrafts?: 
                           <div key={expandKey}>
                             <div className={styles.draftGradeRow}>
                               <div className={styles.draftGradeStudent}>{result.student}</div>
-                              <div className={styles.draftGradeScore}>{result.totalScore || "—"}</div>
-                              <div className={styles.draftGradeComment} title={result.overallComment}>
-                                {result.overallComment || ""}
-                              </div>
+                              {editingDraftId === draft.id ? (
+                                <TextField
+                                  size="small"
+                                  value={edits[expandKey]?.totalScore ?? result.totalScore}
+                                  onChange={(e) =>
+                                    setEdits((prev) => ({ ...prev, [expandKey]: { ...(prev[expandKey] ?? { totalScore: result.totalScore, overallComment: result.overallComment }), totalScore: e.target.value } }))
+                                  }
+                                  sx={{ width: 90 }}
+                                />
+                              ) : (
+                                <div className={styles.draftGradeScore}>{result.totalScore || "—"}</div>
+                              )}
+                              {editingDraftId === draft.id ? (
+                                <TextField
+                                  size="small"
+                                  value={edits[expandKey]?.overallComment ?? result.overallComment}
+                                  onChange={(e) =>
+                                    setEdits((prev) => ({ ...prev, [expandKey]: { ...(prev[expandKey] ?? { totalScore: result.totalScore, overallComment: result.overallComment }), overallComment: e.target.value } }))
+                                  }
+                                  sx={{ flex: 1, minWidth: 160 }}
+                                />
+                              ) : (
+                                <div className={styles.draftGradeComment} title={result.overallComment}>
+                                  {result.overallComment || ""}
+                                </div>
+                              )}
                               <Button
                                 size="small"
                                 variant="text"

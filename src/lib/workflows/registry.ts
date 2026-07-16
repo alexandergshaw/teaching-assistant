@@ -6063,12 +6063,14 @@ export const STEP_REGISTRY: StepDefinition[] = [
         label: "Conversation id",
         type: "text",
         required: false,
-        help: "Optional - load this thread's full text; leave blank to just list the inbox.",
+        help: "Optional. A numeric id loads that one thread. Enter \"unread\" to load every unread thread. Leave blank to just list the inbox.",
       },
     ],
     outputs: [
       { key: "conversations", label: "Inbox list", type: "longtext" },
       { key: "thread", label: "Selected thread", type: "longtext" },
+      { key: "unreadCount", label: "Unread count", type: "number" },
+      { key: "hasUnread", label: "Has unread", type: "boolean" },
     ],
     run: async (values, helpers, onProgress) => {
       const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || undefined;
@@ -6091,11 +6093,64 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       const conversations = convLines.join("\n");
 
+      // Compute unread set and outputs for all modes
+      const unread = r.conversations.filter((c) => c.workflowState === "unread");
+      const unreadCount = unread.length;
+      const hasUnread = unreadCount > 0 ? "1" : "";
+
       let thread = "";
-      const convId = String(values.conversationId ?? "").trim();
-      if (convId && /^\d+$/.test(convId)) {
+      const convIdRaw = String(values.conversationId ?? "").trim();
+      const lower = convIdRaw.toLowerCase();
+
+      // Three-way branch on conversationId
+      if (lower === "unread" || lower === "all unread" || lower === "any unread" || lower === "all-unread" || lower === "any-unread") {
+        // Unread mode: load all unread threads
+        onProgress(`Loading ${unread.length} unread thread(s)...`);
+        const threadParts: string[] = [];
+        let totalLength = 0;
+        const maxLength = 20000;
+
+        for (let i = 0; i < unread.length; i++) {
+          const conv = unread[i];
+          try {
+            const d = await getConversationAction(conv.id, inst);
+            if ("error" in d) {
+              continue;
+            }
+
+            const threadLines = [`Subject: ${d.conversation.subject}`, ""];
+            threadLines.push("Participants: " + d.conversation.participants.join(", "));
+            threadLines.push("");
+
+            for (const msg of d.conversation.messages) {
+              threadLines.push(`${msg.author}: ${msg.body}`);
+              if (msg.createdAt) {
+                threadLines.push(`(${msg.createdAt})`);
+              }
+              threadLines.push("");
+            }
+
+            const threadText = threadLines.join("\n");
+            const partWithSeparator = threadParts.length === 0 ? threadText : `\n\n=====\n\n${threadText}`;
+
+            if (totalLength + partWithSeparator.length > maxLength) {
+              threadParts.push(`\n\n... (truncated; ${i} of ${unread.length} unread threads shown)`);
+              break;
+            }
+
+            threadParts.push(partWithSeparator);
+            totalLength += partWithSeparator.length;
+          } catch {
+            // Skip per-thread load failures
+            continue;
+          }
+        }
+
+        thread = threadParts.join("");
+      } else if (/^\d+$/.test(convIdRaw)) {
+        // Single-id mode: keep existing behavior
         onProgress("Loading thread...");
-        const d = await getConversationAction(Number(convId), inst);
+        const d = await getConversationAction(Number(convIdRaw), inst);
         if ("error" in d) throw new Error(d.error);
 
         const threadLines = [`Subject: ${d.conversation.subject}`, ""];
@@ -6112,12 +6167,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
         thread = threadLines.join("\n");
       }
+      // else: list-only mode, thread stays ""
 
       return {
-        outputs: { conversations, thread },
+        outputs: { conversations, thread, unreadCount, hasUnread },
         summary: {
           kind: "list",
-          label: `${r.conversations.length} conversation(s)`,
+          label: `${r.conversations.length} conversation(s), ${unreadCount} unread`,
           items: subjects.length ? subjects : ["(inbox empty)"],
         },
       };
@@ -8471,7 +8527,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       // Step 2: Resolve the week.
       const boundWeek = Number(values.week);
-      let rawWeek = Number.isFinite(boundWeek) && boundWeek > 0 ? boundWeek : currentCourseWeek(tile.startDate, Date.now());
+      const rawWeek = Number.isFinite(boundWeek) && boundWeek > 0 ? boundWeek : currentCourseWeek(tile.startDate, Date.now());
       if (rawWeek === null) {
         throw new Error(
           `"${tile.name}" has no start date set - add one on the course tile, or bind a week.`

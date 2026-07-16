@@ -410,6 +410,32 @@ export const REVIEW_GRADING_DRAFTS: WorkflowDef = {
   ],
 };
 
+export const BATCH_GRADE_REPOS: WorkflowDef = {
+  id: "batch-grade-student-repos",
+  preset: true,
+  name: "Batch Grade Student Repos",
+  description:
+    "At the end of the week, grade every student's repo for the current module against a rubric synthesized from the week's README, and save the results as a reviewable draft (postable to Canvas). Set up the course tile's Student repos first.",
+  steps: [
+    {
+      type: "course-progress",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+      },
+    },
+    {
+      type: "batch-grade-repos-to-draft",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        week: { source: "step", stepIndex: 0, outputKey: "week" },
+        instructionsRepo: { source: "runtime", fieldKey: "instructionsRepo" },
+        assignmentUrl: { source: "runtime", fieldKey: "assignmentUrl" },
+        pointsPossible: { source: "runtime", fieldKey: "pointsPossible" },
+      },
+    },
+  ],
+};
+
 export const STUDENT_REPOS: WorkflowDef = {
   id: "student-repo-assignment",
   preset: true,
@@ -698,6 +724,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     GRADE_SUBMISSIONS,
     GRADE_TO_DRAFT,
     REVIEW_GRADING_DRAFTS,
+    BATCH_GRADE_REPOS,
     PREPARE_LECTURE,
     LECTURE_QA,
     UPDATE_COURSE_TECH,

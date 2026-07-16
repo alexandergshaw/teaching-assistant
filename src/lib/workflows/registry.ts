@@ -351,6 +351,10 @@ export interface StepRunHelpers {
   /** Parsed newest LMS export package from the course's export tile, or null
    * when the course has none. */
   loadCourseExport: ((courseId: string) => Promise<CartridgeCourseData | null>) | null;
+  /** Id + name of the workflow currently running, when known - so a step can
+   * tag its durable output (e.g. drafts) with the producing workflow. */
+  workflowId?: string;
+  workflowName?: string;
 }
 
 export type StepRunSummary =
@@ -5499,7 +5503,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       // posts to Canvas.
       const strippedRuns = stripGradingRunEntriesForDraft(runs);
 
-      const saveResult = await saveGradingDraftAction(summary, { runs: strippedRuns });
+      const saveResult = await saveGradingDraftAction(summary, { runs: strippedRuns }, helpers.workflowId, helpers.workflowName);
       if ("error" in saveResult) {
         throw new Error(`Could not save the grading draft: ${saveResult.error}`);
       }
@@ -6260,7 +6264,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       const summary = kind === "reply" ? "Drafted reply" : "Drafted announcement";
 
-      const res = await saveMessageDraftAction(summary, payload);
+      const res = await saveMessageDraftAction(summary, payload, helpers.workflowId, helpers.workflowName);
       if ("error" in res) throw new Error(res.error);
 
       return {

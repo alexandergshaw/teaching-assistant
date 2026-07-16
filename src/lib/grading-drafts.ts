@@ -37,6 +37,8 @@ export interface GradingDraft {
   payload: GradingDraftPayload;
   createdAt: string;
   updatedAt: string;
+  workflowId?: string;
+  workflowName?: string;
 }
 
 /** Lightweight listing shape for pickers - avoids shipping every draft's
@@ -172,6 +174,8 @@ export function mapDraft(row: DraftRow): GradingDraft {
     payload: coerceGradingDraftPayload(row.payload),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    workflowId: row.workflow_id ?? undefined,
+    workflowName: row.workflow_name ?? undefined,
   };
 }
 
@@ -218,7 +222,7 @@ export async function getGradingDraft(
 export async function createGradingDraft(
   supabase: SupabaseClient<Database>,
   userId: string,
-  input: { summary: string; payload: GradingDraftPayload }
+  input: { summary: string; payload: GradingDraftPayload; workflowId?: string; workflowName?: string }
 ): Promise<GradingDraft> {
   const { data, error } = await table(supabase)
     .insert({
@@ -226,6 +230,8 @@ export async function createGradingDraft(
       status: "pending",
       summary: input.summary,
       payload: input.payload as unknown as Json,
+      workflow_id: input.workflowId ?? null,
+      workflow_name: input.workflowName ?? null,
     })
     .select("*")
     .single();

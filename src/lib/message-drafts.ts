@@ -36,6 +36,8 @@ export interface MessageDraft {
   payload: MessageDraftPayload;
   createdAt: string;
   updatedAt: string;
+  workflowId?: string;
+  workflowName?: string;
 }
 
 type DraftRow = Database["public"]["Tables"]["message_drafts"]["Row"];
@@ -75,6 +77,8 @@ export function mapDraft(row: DraftRow): MessageDraft {
     payload: coerceMessageDraftPayload(row.payload),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    workflowId: row.workflow_id ?? undefined,
+    workflowName: row.workflow_name ?? undefined,
   };
 }
 
@@ -120,7 +124,7 @@ export async function getMessageDraft(
 export async function createMessageDraft(
   supabase: SupabaseClient<Database>,
   userId: string,
-  input: { summary: string; payload: MessageDraftPayload }
+  input: { summary: string; payload: MessageDraftPayload; workflowId?: string; workflowName?: string }
 ): Promise<MessageDraft> {
   const { data, error } = await table(supabase)
     .insert({
@@ -128,6 +132,8 @@ export async function createMessageDraft(
       status: "pending",
       summary: input.summary,
       payload: input.payload as unknown as Json,
+      workflow_id: input.workflowId ?? null,
+      workflow_name: input.workflowName ?? null,
     })
     .select("*")
     .single();

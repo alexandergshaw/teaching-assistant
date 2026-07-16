@@ -13,6 +13,8 @@ function makeRow(overrides: Partial<DraftRow> = {}): DraftRow {
     payload: { runs: [] } as unknown as DraftRow["payload"],
     created_at: "2026-07-13T00:00:00.000Z",
     updated_at: "2026-07-13T00:00:00.000Z",
+    workflow_id: null,
+    workflow_name: null,
     ...overrides,
   };
 }

@@ -405,9 +405,10 @@ export function buildServerStepRunHelpers(opts: {
   institution: string | null;
   provider: LlmProvider;
   author: string;
+  workflowId?: string;
   workflowName?: string;
 }): StepRunHelpers {
-  const { supabase, userId, institution, provider, author, workflowName } = opts;
+  const { supabase, userId, institution, provider, author, workflowId, workflowName } = opts;
 
   return {
     activeInstitution: institution,
@@ -477,5 +478,7 @@ export function buildServerStepRunHelpers(opts: {
       const blob = await downloadCourseZipBlob(supabase, latest);
       return await parseCartridgeBlob(blob);
     },
+    workflowId,
+    workflowName,
   };
 }

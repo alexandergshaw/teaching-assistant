@@ -131,7 +131,7 @@ export async function GET(req: NextRequest) {
             disabledTopIndices: new Set(schedule.disabledSteps),
             helpers: buildServerStepRunHelpers({
               supabase, userId: schedule.userId, institution: schedule.institution,
-              provider, author: resolveDocumentAuthor(userRes.user), workflowName: def!.name,
+              provider, author: resolveDocumentAuthor(userRes.user), workflowId: schedule.workflowId, workflowName: def!.name,
             }),
             deadlineMs: runDeadlineMs,
             skipInstitutions: new Set(progress.doneInstitutions),
@@ -188,7 +188,7 @@ export async function GET(req: NextRequest) {
           disabledTopIndices: new Set(schedule.disabledSteps),
           helpers: buildServerStepRunHelpers({
             supabase, userId: schedule.userId, institution: schedule.institution,
-            provider, author: resolveDocumentAuthor(userRes.user), workflowName: def.name,
+            provider, author: resolveDocumentAuthor(userRes.user), workflowId: schedule.workflowId, workflowName: def.name,
           }),
           deadlineMs: runDeadlineMs,
         })

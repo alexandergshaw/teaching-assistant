@@ -755,6 +755,8 @@ export interface Database {
           payload: Json;
           created_at: string;
           updated_at: string;
+          workflow_id: string | null;
+          workflow_name: string | null;
         };
         Insert: {
           id?: string;
@@ -764,6 +766,8 @@ export interface Database {
           payload?: Json;
           created_at?: string;
           updated_at?: string;
+          workflow_id?: string | null;
+          workflow_name?: string | null;
         };
         Update: {
           id?: string;
@@ -773,6 +777,8 @@ export interface Database {
           payload?: Json;
           created_at?: string;
           updated_at?: string;
+          workflow_id?: string | null;
+          workflow_name?: string | null;
         };
       };
       message_drafts: {
@@ -784,6 +790,8 @@ export interface Database {
           payload: Json;
           created_at: string;
           updated_at: string;
+          workflow_id: string | null;
+          workflow_name: string | null;
         };
         Insert: {
           id?: string;
@@ -793,6 +801,8 @@ export interface Database {
           payload?: Json;
           created_at?: string;
           updated_at?: string;
+          workflow_id?: string | null;
+          workflow_name?: string | null;
         };
         Update: {
           id?: string;
@@ -802,6 +812,8 @@ export interface Database {
           payload?: Json;
           created_at?: string;
           updated_at?: string;
+          workflow_id?: string | null;
+          workflow_name?: string | null;
         };
       };
     };

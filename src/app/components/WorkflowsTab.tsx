@@ -1455,6 +1455,8 @@ export default function WorkflowsTab() {
               loadInstitutionFields(supabase, user.id, acronym)
           : null,
       loadCourseExport: user && supabase ? loadCourseExportData : null,
+      workflowId: selectedDef.id,
+      workflowName: selectedDef.name,
     };
 
     // Expanded steps carry bindings already translated into expanded

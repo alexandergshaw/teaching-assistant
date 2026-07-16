@@ -1056,12 +1056,14 @@ export async function postCanvasGradesAction(
 /** Save a new pending grading draft (the grade-to-draft step's output). */
 export async function saveGradingDraftAction(
   summary: string,
-  payload: GradingDraftPayload
+  payload: GradingDraftPayload,
+  workflowId?: string,
+  workflowName?: string
 ): Promise<{ id: string } | { error: string }> {
   try {
     const user = await requireOwner();
     const supabase = createServiceClient();
-    const draft = await createGradingDraft(supabase, user.id, { summary, payload });
+    const draft = await createGradingDraft(supabase, user.id, { summary, payload, workflowId, workflowName });
     return { id: draft.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the grading draft." };
@@ -1227,12 +1229,14 @@ export async function postGradingDraftAction(
 /** Save a new pending message draft. */
 export async function saveMessageDraftAction(
   summary: string,
-  payload: MessageDraftPayload
+  payload: MessageDraftPayload,
+  workflowId?: string,
+  workflowName?: string
 ): Promise<{ id: string } | { error: string }> {
   try {
     const user = await requireOwner();
     const supabase = createServiceClient();
-    const draft = await createMessageDraft(supabase, user.id, { summary, payload });
+    const draft = await createMessageDraft(supabase, user.id, { summary, payload, workflowId, workflowName });
     return { id: draft.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the message draft." };

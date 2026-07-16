@@ -142,13 +142,14 @@ import {
   updateRepoAction,
   deleteOrgReposAction,
   getDeckTemplateAction,
+  generateDeckFromTemplateAction,
   savePresentationDraftAction,
   savePresentationFileAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { SlideData } from "@/app/actions";
 import type { MessageDraftPayload } from "@/lib/message-drafts";
-import { generateDeckFromTemplate, type DeckGenContext } from "@/lib/decks/generate";
+import { type DeckGenContext } from "@/lib/decks/generate";
 import type { GradingRun, GradingRunEntry, GradeResult } from "@/lib/grade";
 import type { InstitutionField } from "@/lib/institution-fields";
 import type { RepoPermission } from "@/lib/github";
@@ -6386,7 +6387,11 @@ export const STEP_REGISTRY: StepDefinition[] = [
       }
       onProgress("Generating the slide deck...");
       const ctx: DeckGenContext = { subject, audience, tone: template.tone, materials, loopItems };
-      const deck = await generateDeckFromTemplate(template, ctx, helpers.provider);
+      // Call the server ACTION (not the shared core directly) so the LLM call
+      // runs server-side. Attended workflow runs execute this step in the
+      // browser, where process.env.GEMINI_API_KEY does not exist; the action
+      // runs on the server where it does. Unattended runs work either way.
+      const deck = await generateDeckFromTemplateAction(template, ctx, helpers.provider);
       if ("error" in deck) throw new Error(deck.error);
       const res = await savePresentationDraftAction(
         `Presentation: ${deck.presentationTitle}`,

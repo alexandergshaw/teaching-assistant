@@ -22,6 +22,7 @@ import {
   updateWorkflowSchedule,
   deleteWorkflowSchedule,
   computeNextRunAt,
+  describeScheduleCadence,
   MIN_INTERVAL_MINUTES,
   type WorkflowSchedule,
   type ScheduleRepeat,
@@ -651,6 +652,20 @@ export default function WorkflowsTab() {
         : false,
     [selectedDef, workflows]
   );
+
+  // Per-workflow map of enabled automation (schedules and triggers) for use in
+  // the sidebar dots and the Automate panel overview.
+  const automationByWorkflow = useMemo(() => {
+    const map = new Map<string, { scheduled: boolean; triggered: boolean; scheduleCount: number; triggerCount: number }>();
+    const ensure = (id: string) => {
+      let e = map.get(id);
+      if (!e) { e = { scheduled: false, triggered: false, scheduleCount: 0, triggerCount: 0 }; map.set(id, e); }
+      return e;
+    };
+    for (const s of schedules ?? []) { if (s.enabled) { const e = ensure(s.workflowId); e.scheduled = true; e.scheduleCount++; } }
+    for (const t of triggers ?? []) { if (t.enabled) { const e = ensure(t.workflowId); e.triggered = true; e.triggerCount++; } }
+    return map;
+  }, [schedules, triggers]);
 
   // Steps whose top-level index the user has disabled are excluded here so
   // the run form never asks for inputs needed only by a disabled step (a
@@ -2058,9 +2073,28 @@ export default function WorkflowsTab() {
                 color: "var(--text-primary)",
                 fontWeight: w.id === selectedWorkflowId ? 600 : 400,
                 fontSize: "0.9em",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
               }}
             >
-              {w.name}{w.preset ? " (preset)" : ""}
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {w.name}{w.preset ? " (preset)" : ""}
+              </span>
+              {(() => {
+                const a = automationByWorkflow.get(w.id);
+                if (!a || (!a.scheduled && !a.triggered)) return null;
+                return (
+                  <span className={styles.ghBadges} style={{ flex: "none" }}>
+                    {a.scheduled && (
+                      <span className={styles.ghDot} style={{ color: "var(--accent)" }} title="Scheduled" aria-label="Scheduled" />
+                    )}
+                    {a.triggered && (
+                      <span className={styles.ghDot} style={{ color: "var(--success)" }} title="Has triggers" aria-label="Has triggers" />
+                    )}
+                  </span>
+                );
+              })()}
             </button>
           ))}
           {filteredWorkflows.length === 0 && (
@@ -3817,6 +3851,41 @@ export default function WorkflowsTab() {
 
               {panel === "automate" && (
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--field-border)" }}>
+            <div style={{ marginBottom: 20 }}>
+              <h3 style={{ margin: "0 0 8px 0", fontSize: "0.95rem" }}>Scheduled & triggered workflows</h3>
+              {(() => {
+                const automated = workflows.filter((w) => {
+                  const a = automationByWorkflow.get(w.id);
+                  return a && (a.scheduled || a.triggered);
+                });
+                if (automated.length === 0) {
+                  return <div className={styles.fieldHint}>No workflows are scheduled or have triggers yet.</div>;
+                }
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {automated.map((w) => {
+                      const wfSchedules = (schedules ?? []).filter((s) => s.workflowId === w.id && s.enabled);
+                      const wfTriggers = (triggers ?? []).filter((t) => t.workflowId === w.id && t.enabled);
+                      return (
+                        <div key={w.id} style={{ borderLeft: "2px solid var(--field-border)", paddingLeft: 10 }}>
+                          <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{w.name}</div>
+                          {wfSchedules.map((s) => (
+                            <div key={s.id} className={styles.fieldHint} style={{ margin: 0 }}>
+                              Scheduled {describeScheduleCadence(s)}{s.unattended ? " (unattended)" : ""}
+                            </div>
+                          ))}
+                          {wfTriggers.map((t) => (
+                            <div key={t.id} className={styles.fieldHint} style={{ margin: 0 }}>
+                              Trigger: {describeTrigger(t)}{t.unattended ? " (unattended)" : ""}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
             <h3 style={{ fontSize: "0.95rem", margin: "0 0 4px 0" }}>Schedule</h3>
             <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>
               Run this workflow at a set time, optionally repeating.
@@ -3969,16 +4038,6 @@ export default function WorkflowsTab() {
                     ? hubCourses?.find((c) => c.id === s.courseId)?.name ?? "course"
                     : null;
                   const attachment = [courseName, s.institution].filter(Boolean).join(", ");
-                  const repeatLabel =
-                    s.repeat === "daily"
-                      ? "daily"
-                      : s.repeat === "weekly"
-                        ? "weekly"
-                        : s.repeat === "interval" && s.intervalMinutes
-                          ? s.intervalMinutes % 60 === 0
-                            ? `every ${s.intervalMinutes / 60} hr`
-                            : `every ${s.intervalMinutes} min`
-                          : "once";
                   return (
                     <div key={s.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--field-border)", fontSize: "0.85em" }}>
                       <span style={{ fontWeight: 600 }}>{s.workflowName}</span>
@@ -3987,7 +4046,7 @@ export default function WorkflowsTab() {
                       )}
                       <span style={{ color: "var(--text-secondary)" }}>
                         {s.enabled
-                          ? `next run ${new Date(s.nextRunAt).toLocaleString()} (${repeatLabel})`
+                          ? `next run ${new Date(s.nextRunAt).toLocaleString()} (${describeScheduleCadence(s)})`
                           : "disabled"}
                         {attachment ? ` - ${attachment}` : ""}
                       </span>

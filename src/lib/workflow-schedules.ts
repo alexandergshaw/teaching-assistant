@@ -137,6 +137,27 @@ export function reenableSchedule(schedule: WorkflowSchedule): { ok: boolean; nex
   };
 }
 
+/**
+ * Human-readable cadence label for a schedule: "daily", "weekly (Monday)",
+ * "every 2 hr", "every 30 min", or "once".
+ */
+export function describeScheduleCadence(s: WorkflowSchedule): string {
+  if (s.repeat === "daily") return "daily";
+  if (s.repeat === "weekly") {
+    if (s.nextRunAt) {
+      const wd = new Date(s.nextRunAt).toLocaleDateString(undefined, { weekday: "long" });
+      return `weekly (${wd})`;
+    }
+    return "weekly";
+  }
+  if (s.repeat === "interval" && s.intervalMinutes) {
+    return s.intervalMinutes % 60 === 0
+      ? `every ${s.intervalMinutes / 60} hr`
+      : `every ${s.intervalMinutes} min`;
+  }
+  return "once";
+}
+
 type ScheduleRow = Database["public"]["Tables"]["workflow_schedules"]["Row"];
 
 // Exported (not just used internally) so the row-shape handling - string-only

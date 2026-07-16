@@ -137,6 +137,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
   announcements: [
     "list-announcements",
     "draft-announcement",
+    "compose-weekly-announcement",
     "post-announcement",
     "schedule-lecture-announcement",
   ],

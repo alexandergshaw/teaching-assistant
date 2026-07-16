@@ -5991,6 +5991,57 @@ export const STEP_REGISTRY: StepDefinition[] = [
   },
 
   {
+    type: "compose-weekly-announcement",
+    name: "Compose a weekly announcement",
+    description: "Compose a start-of-week announcement (what students will learn, what they will do, upcoming deadlines, and things to be aware of) from the week's module materials.",
+    inputs: [
+      {
+        key: "moduleName",
+        label: "Module / week",
+        type: "text",
+        required: false,
+        help: "e.g. bound from Find the current week and module.",
+      },
+      {
+        key: "materials",
+        label: "Module materials",
+        type: "longtext",
+        required: false,
+        help: "The week's materials, e.g. bound from Pull current module materials.",
+      },
+      {
+        key: "extraNotes",
+        label: "Extra notes (optional)",
+        type: "longtext",
+        required: false,
+        help: "Upcoming deadlines or anything else to be aware of.",
+      },
+    ],
+    outputs: [
+      { key: "announcementTitle", label: "Announcement title", type: "text" },
+      { key: "announcement", label: "Announcement body", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const moduleName = String(values.moduleName ?? "").trim() || "this week's module";
+      const materials = String(values.materials ?? "").trim();
+      const extraNotes = String(values.extraNotes ?? "").trim();
+      const instruction = [
+        `Write a warm, professional start-of-week course announcement for ${moduleName}.`,
+        `Organize it into clear sections: what students will learn this week, what they will be doing this week, any upcoming deadlines, and anything else to be aware of.`,
+        materials ? `Base it on these module materials:\n${materials}` : "",
+        extraNotes ? `Also incorporate these notes (deadlines / things to be aware of):\n${extraNotes}` : "",
+      ].filter(Boolean).join("\n\n");
+      onProgress("Composing the weekly announcement...");
+      const r = await draftAnnouncementAction(instruction, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+      return {
+        outputs: { announcementTitle: r.title, announcement: r.message },
+        summary: { kind: "text", text: `${r.title}\n\n${r.message}` },
+      };
+    },
+  },
+
+  {
     type: "post-announcement",
     name: "Post an announcement",
     description: "Publish an announcement to the LMS course (immediately, or scheduled for a future date). Attended-only: wire the title and body from Draft an announcement, or type them in.",

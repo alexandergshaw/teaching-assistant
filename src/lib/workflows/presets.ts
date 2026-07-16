@@ -703,6 +703,46 @@ export const GROW_KNOWLEDGE_BASE: WorkflowDef = {
   ],
 };
 
+export const WEEKLY_KICKOFF_ANNOUNCEMENT: WorkflowDef = {
+  id: "weekly-kickoff-announcement",
+  preset: true,
+  name: "Weekly Kickoff Announcement",
+  description:
+    "At the start of the week, pull the current module's materials and draft an announcement (what we are learning, what we are doing, upcoming deadlines, and things to be aware of) to review and send.",
+  steps: [
+    {
+      type: "course-progress",
+      bindings: { hubCourse: { source: "runtime", fieldKey: "hubCourse" } },
+    },
+    {
+      type: "pull-current-materials",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        week: { source: "step", stepIndex: 0, outputKey: "week" },
+        repos: { source: "runtime", fieldKey: "repos" },
+      },
+    },
+    {
+      type: "compose-weekly-announcement",
+      bindings: {
+        moduleName: { source: "step", stepIndex: 0, outputKey: "moduleName" },
+        materials: { source: "step", stepIndex: 1, outputKey: "materials" },
+        extraNotes: { source: "runtime", fieldKey: "extraNotes" },
+      },
+    },
+    {
+      type: "save-message-draft",
+      bindings: {
+        kind: { source: "literal", value: "announcement" },
+        body: { source: "step", stepIndex: 2, outputKey: "announcement" },
+        title: { source: "step", stepIndex: 2, outputKey: "announcementTitle" },
+        courseUrl: { source: "runtime", fieldKey: "courseUrl" },
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+  ],
+};
+
 /**
  * Merge built-in presets with custom workflows.
  * Returns presets first, then custom workflows.
@@ -716,6 +756,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     QUIZ_FROM_REPO,
     ASSIGNMENT_KIT,
     GROW_KNOWLEDGE_BASE,
+    WEEKLY_KICKOFF_ANNOUNCEMENT,
     COURSE_KICKOFF,
     COURSE_REFRESH,
     STARTER_MATERIALS,

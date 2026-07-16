@@ -536,6 +536,44 @@ export interface Database {
           updated_at?: string;
         };
       };
+      deck_templates: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          description: string;
+          slides: Json;
+          loops: Json;
+          audience: string;
+          tone: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          user_id: string;
+          name: string;
+          description?: string;
+          slides?: Json;
+          loops?: Json;
+          audience?: string;
+          tone?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          description?: string;
+          slides?: Json;
+          loops?: Json;
+          audience?: string;
+          tone?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       common_resources: {
         Row: {
           user_id: string;

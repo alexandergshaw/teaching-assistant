@@ -61,6 +61,7 @@ import {
   postCanvasGradesAction,
   pullSubmissionAction,
   saveGradingDraftAction,
+  draftZerosForMissingAction,
   listPendingGradingDraftsAction,
   getGradingDraftAction,
   markGradingDraftReviewedAction,
@@ -9267,6 +9268,37 @@ export const STEP_REGISTRY: StepDefinition[] = [
           text: `${summary}.${notes.length ? ` (${notes.join("; ")})` : ""}`,
         },
       };
+    },
+  },
+
+  {
+    type: "draft-missing-zeros",
+    name: "Draft zeros for missing submissions",
+    description:
+      "For a Canvas course, draft a grade of 0 for every student who has not submitted an assignment by its deadline (already-graded students and students with an unexpired extension are skipped). Saves a grading draft you review in Drafts > Grades before posting to Canvas.",
+    inputs: [
+      { key: "course", label: "Course", type: "lmsCourse", required: true, help: "The Canvas course URL." },
+      {
+        key: "assignment",
+        label: "Assignment (optional)",
+        type: "text",
+        required: false,
+        help: "A single assignment URL or id. Leave empty to sweep every past-due assignment in the course.",
+      },
+    ],
+    outputs: [
+      { key: "draftId", label: "Draft id", type: "text" },
+      { key: "zeroed", label: "Zeros drafted", type: "text" },
+    ],
+    run: async (values) => {
+      const courseUrl = String(values.course ?? "").trim();
+      if (!courseUrl) throw new Error("Provide the Canvas course URL.");
+      const res = await draftZerosForMissingAction({
+        courseUrl,
+        assignmentId: String(values.assignment ?? "").trim() || undefined,
+      });
+      if ("error" in res) throw new Error(res.error);
+      return { outputs: { draftId: res.draftId ?? "", zeroed: String(res.zeroed) }, summary: { kind: "text", text: res.summary } };
     },
   },
 

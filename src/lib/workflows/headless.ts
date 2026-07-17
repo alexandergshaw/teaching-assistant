@@ -58,6 +58,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // happens through the app-open review-grading-draft -> post-grades pair,
   // which is why "review-grading-draft" is deliberately NOT in this set.
   "grade-to-draft",
+  "draft-missing-zeros",
   "grade-one-submission",
   "read-inbox",
   "draft-message-reply",

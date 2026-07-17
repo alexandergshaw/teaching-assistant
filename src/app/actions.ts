@@ -13,6 +13,7 @@ import {
   scaleResultToPoints,
   canvasWorkToEntry,
   type GradingRun,
+  type GradingRunEntry,
   type StudentSubmissionEntry,
   type SubmittedFileInfo,
 } from "@/lib/grade";
@@ -75,6 +76,8 @@ import {
   listStudents,
   listCourseRoster,
   fetchSubmissionDetail,
+  listAssignmentNonSubmitters,
+  listAssignmentBriefsWithDue,
   type CanvasAnnouncement,
   type CanvasConversationSummary,
   type CanvasConversationDetail,
@@ -86,7 +89,7 @@ import {
   type CanvasSubmissionDetail,
   type CanvasStudentWork,
 } from "@/lib/canvas";
-import { listPreconfiguredInstitutionCodes } from "@/lib/canvas-core";
+import { listPreconfiguredInstitutionCodes, resolveInstitution } from "@/lib/canvas-core";
 import {
   listModules,
   createModule,
@@ -310,6 +313,7 @@ import {
   deleteGradingDraft,
   type GradingDraftPayload,
 } from "@/lib/grading-drafts";
+import { buildZeroGradingEntry, isZeroableAssignment } from "@/lib/grade-zeros";
 import {
   getMessageDraft,
   createMessageDraft,
@@ -1088,6 +1092,148 @@ export async function saveGradingDraftAction(
     return { id: draft.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the grading draft." };
+  }
+}
+
+/**
+ * Draft zeros for students who did not submit an assignment by its deadline.
+ * Resolves the Canvas course URL, fetches non-submitters, builds grading entries,
+ * and saves a draft ready for review.
+ */
+export async function draftZerosForMissingAction(input: {
+  courseUrl: string;
+  assignmentId?: string;
+}): Promise<
+  { draftId: string | null; assignmentsAffected: number; zeroed: number; summary: string } | { error: string }
+> {
+  try {
+    await requireOwner();
+    const supabase = createServiceClient();
+
+    // Resolve institution/token from course URL
+    const { baseUrl, token, institution } = resolveInstitution(input.courseUrl);
+
+    // Parse course ID from URL
+    const courseMatch = input.courseUrl.match(/courses\/(\d+)/);
+    if (!courseMatch || !courseMatch[1]) {
+      return { error: "Could not parse the Canvas course ID from the URL." };
+    }
+    const courseId = courseMatch[1];
+
+    // Get current time for due date comparison
+    const nowIso = new Date().toISOString();
+
+    // Determine target assignment IDs
+    let targetIds: string[] = [];
+    if (input.assignmentId && input.assignmentId.trim()) {
+      // Single assignment: extract numeric ID from URL or bare id
+      const assignId = input.assignmentId.trim();
+      const match = assignId.match(/assignments\/(\d+)/);
+      const bareId = match ? match[1] : /^\d+$/.test(assignId) ? assignId : null;
+      if (bareId) {
+        targetIds = [bareId];
+      } else {
+        return { error: "Could not parse the assignment ID. Provide a URL or numeric ID." };
+      }
+    } else {
+      // Sweep all past-due zeroable assignments
+      const briefs = await listAssignmentBriefsWithDue(baseUrl, token, institution, courseId);
+      const now = new Date(nowIso).getTime();
+      targetIds = briefs
+        .filter(
+          (b) =>
+            b.dueAt &&
+            new Date(b.dueAt).getTime() < now &&
+            isZeroableAssignment({
+              submissionTypes: b.submissionTypes,
+              gradingType: b.gradingType,
+              published: b.published,
+              omitFromFinalGrade: b.omitFromFinalGrade,
+            })
+        )
+        .map((b) => b.assignmentId);
+    }
+
+    if (targetIds.length === 0) {
+      return {
+        draftId: null,
+        assignmentsAffected: 0,
+        zeroed: 0,
+        summary: "No missing submissions past the deadline were found.",
+      };
+    }
+
+    // Build grading entries for each target assignment
+    const entries: GradingRunEntry[] = [];
+    let totalZeroed = 0;
+
+    for (const assignmentId of targetIds) {
+      const result = await listAssignmentNonSubmitters(
+        baseUrl,
+        token,
+        institution,
+        courseId,
+        assignmentId,
+        nowIso
+      );
+
+      if (!result.eligible) {
+        if (input.assignmentId) {
+          return {
+            draftId: null,
+            assignmentsAffected: 0,
+            zeroed: 0,
+            summary: `That assignment ${result.ineligibleReason ?? "cannot be auto-zeroed"}, so no zeros were drafted.`,
+          };
+        }
+        continue;
+      }
+
+      if (result.nonSubmitters.length === 0) {
+        continue;
+      }
+
+      totalZeroed += result.nonSubmitters.length;
+      const entry = buildZeroGradingEntry({
+        courseName: "Course",
+        assignmentName: result.assignmentName,
+        canvasUrl: `${baseUrl}/courses/${courseId}/assignments/${assignmentId}`,
+        institution: institution.code,
+        assignmentId,
+        pointsPossible: result.pointsPossible,
+        nonSubmitters: result.nonSubmitters,
+      });
+
+      entries.push(entry);
+    }
+
+    if (entries.length === 0) {
+      return {
+        draftId: null,
+        assignmentsAffected: 0,
+        zeroed: 0,
+        summary: "No missing submissions past the deadline were found.",
+      };
+    }
+
+    // Save the draft
+    const user = await requireOwner();
+    const summary = `Drafted 0 for ${totalZeroed} missing submission(s) across ${entries.length} assignment(s).`;
+    const draft = await createGradingDraft(supabase, user.id, {
+      summary,
+      payload: { runs: entries },
+    });
+
+    return {
+      draftId: draft.id,
+      assignmentsAffected: entries.length,
+      zeroed: totalZeroed,
+      summary,
+    };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not draft zeros for missing submissions.",
+    };
   }
 }
 

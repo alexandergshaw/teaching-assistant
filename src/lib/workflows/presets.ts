@@ -436,6 +436,23 @@ export const BATCH_GRADE_REPOS: WorkflowDef = {
   ],
 };
 
+export const ZERO_MISSING_SUBMISSIONS: WorkflowDef = {
+  id: "zero-missing-submissions",
+  preset: true,
+  name: "Zero out missing submissions",
+  description:
+    "Draft a grade of 0 for students who did not submit an assignment by its deadline, ready to review in Drafts > Grades and post to Canvas.",
+  steps: [
+    {
+      type: "draft-missing-zeros",
+      bindings: {
+        course: { source: "runtime", fieldKey: "course" },
+        assignment: { source: "runtime", fieldKey: "assignment" },
+      },
+    },
+  ],
+};
+
 export const STUDENT_REPOS: WorkflowDef = {
   id: "student-repo-assignment",
   preset: true,
@@ -821,6 +838,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     GRADE_TO_DRAFT,
     REVIEW_GRADING_DRAFTS,
     BATCH_GRADE_REPOS,
+    ZERO_MISSING_SUBMISSIONS,
     PREPARE_LECTURE,
     LECTURE_QA,
     UPDATE_COURSE_TECH,

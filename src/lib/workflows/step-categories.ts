@@ -108,6 +108,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "collect-offline-submissions",
     "grade-submissions",
     "grade-to-draft",
+    "draft-missing-zeros",
     "review-grading-draft",
     "discard-grading-draft",
     "post-grades",

@@ -2045,6 +2045,31 @@ export default function WorkflowsTab() {
         return;
       }
     }
+    // The deadline trigger inherits the course/institution the workflow is
+    // already set for ("This workflow is for") when its own fields are blank, so
+    // they are not entered twice. Snapshotted here (like the run values) so the
+    // client and server evaluate the trigger identically.
+    let eventConfig = triggerForm.config;
+    if (triggerForm.eventType === "deadline-passed") {
+      const scope = selectedDef.scope ?? {};
+      const scopeCourse = (scope.lmsCourse ?? "").trim();
+      const singleCourse =
+        scopeCourse && scopeCourse !== "*" && !scopeCourse.includes("\n") ? scopeCourse : "";
+      const scopeInst = (scope.institution ?? "").trim();
+      const singleInst = scopeInst && scopeInst !== "*" ? scopeInst : "";
+      eventConfig = {
+        ...triggerForm.config,
+        course: (triggerForm.config.course ?? "").trim() || singleCourse,
+        institution:
+          (triggerForm.config.institution ?? "").trim() || singleInst || (triggerForm.institution ?? ""),
+      };
+      if (!eventConfig.course.trim()) {
+        setTriggerError(
+          "Set the course here, or set what this workflow is for (a single Canvas course) under Build."
+        );
+        return;
+      }
+    }
     setTriggerBusy(true);
     setTriggerError(null);
     try {
@@ -2053,7 +2078,7 @@ export default function WorkflowsTab() {
         workflowName: selectedDef.name,
         fieldValues: values,
         eventType: triggerForm.eventType,
-        eventConfig: triggerForm.config,
+        eventConfig,
         // Only meaningful when selectedHeadlessSafe gated the checkbox visible
         // AND the event source can be evaluated server-side; app-open triggers
         // ignore it. provider/disabledSteps are snapshotted regardless.

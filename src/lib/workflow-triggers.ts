@@ -696,8 +696,8 @@ export const EVENT_SOURCES: EventSourceDef[] = [
     description: "Fires when an assignment's due date passes in the LMS course - once per deadline, from when the trigger is created onward. Pair it with Zero out missing submissions to auto-draft zeros after each deadline.",
     category: "course",
     configFields: [
-      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
-      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
+      { key: "course", label: "LMS course", type: "lmsCourse", required: false, help: "Leave blank to watch the course the workflow is set for (This workflow is for)." },
+      { key: "institution", label: "Institution", type: "institution", required: false, help: "Leave blank to use the workflow's institution, then the active one." },
     ],
     minPollMinutes: 60,
     serverEvaluable: true,

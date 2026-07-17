@@ -893,6 +893,18 @@ export async function listCourseRoster(code: string, courseId: string): Promise<
   return entries;
 }
 
+/** List assignment due dates for a course (code-based). */
+export async function listCourseAssignmentDueDates(
+  code: string,
+  courseId: string
+): Promise<Array<{ assignmentId: string; name: string; dueAt: string | null }>> {
+  const { baseUrl, token, institution } = resolveInstitutionByCode(code);
+  const briefs = await listAssignmentBriefsWithDue(baseUrl, token, institution, courseId);
+  return briefs
+    .filter((b) => b.published !== false && b.dueAt)
+    .map((b) => ({ assignmentId: b.assignmentId, name: b.name, dueAt: b.dueAt }));
+}
+
 interface CanvasAssignmentDetailItem {
   id?: number;
   name?: string;

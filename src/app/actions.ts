@@ -75,6 +75,7 @@ import {
   listAssignments,
   listStudents,
   listCourseRoster,
+  listCourseAssignmentDueDates,
   fetchSubmissionDetail,
   listAssignmentNonSubmitters,
   listAssignmentBriefsWithDue,
@@ -1792,6 +1793,18 @@ export async function listCourseRosterAction(
     return { students: await listCourseRoster(code.trim().toUpperCase(), courseId) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load the roster." };
+  }
+}
+
+export async function listCourseAssignmentDueDatesAction(
+  code: string,
+  courseId: string
+): Promise<{ assignments: Array<{ assignmentId: string; name: string; dueAt: string | null }> } | { error: string }> {
+  try {
+    await requireOwner();
+    return { assignments: await listCourseAssignmentDueDates(code.trim().toUpperCase(), courseId) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load assignment due dates." };
   }
 }
 

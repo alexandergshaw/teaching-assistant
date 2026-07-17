@@ -6,6 +6,7 @@ import {
   decideRepoInactive,
   decideBrokenLinks,
   decideRosterChanged,
+  decideDeadlinePassed,
   decideCourseStart,
   decideWorkflowCompleted,
   isTriggerDueForCheck,
@@ -272,6 +273,61 @@ describe("decideRosterChanged", () => {
     const d = decideRosterChanged(base.cursor, ["a", "c"]);
     expect(d.fired).toBe(true);
     expect(d.cursor).toEqual({ sig: "a\nc", count: 2 });
+  });
+});
+
+describe("decideDeadlinePassed", () => {
+  it("first eval sets the baseline and does not fire", () => {
+    const d = decideDeadlinePassed(null, [{ assignmentId: "a1", name: "Assignment 1", dueAt: "2026-07-10T00:00:00Z" }], "2026-07-14T00:00:00Z");
+    expect(d.fired).toBe(false);
+    expect(d.cursor).toEqual({ lastCheck: "2026-07-14T00:00:00Z" });
+  });
+
+  it("does not fire when no assignment is between lastCheck and now", () => {
+    const base = decideDeadlinePassed(null, [], "2026-07-14T00:00:00Z");
+    const d = decideDeadlinePassed(base.cursor, [{ assignmentId: "a1", name: "Assignment 1", dueAt: "2026-07-20T00:00:00Z" }], "2026-07-15T00:00:00Z");
+    expect(d.fired).toBe(false);
+    expect(d.cursor).toEqual({ lastCheck: "2026-07-15T00:00:00Z" });
+  });
+
+  it("fires when an assignment dueAt is between lastCheck and now", () => {
+    const base = decideDeadlinePassed(null, [], "2026-07-14T00:00:00Z");
+    const d = decideDeadlinePassed(base.cursor, [{ assignmentId: "a1", name: "Assignment 1", dueAt: "2026-07-14T12:00:00Z" }], "2026-07-15T00:00:00Z");
+    expect(d.fired).toBe(true);
+    expect(d.cursor).toEqual({ lastCheck: "2026-07-15T00:00:00Z" });
+    expect(d.detail).toContain("Assignment 1");
+  });
+
+  it("fires when an assignment dueAt equals now exactly", () => {
+    const base = decideDeadlinePassed(null, [], "2026-07-14T00:00:00Z");
+    const d = decideDeadlinePassed(base.cursor, [{ assignmentId: "a1", name: "Assignment 1", dueAt: "2026-07-15T00:00:00Z" }], "2026-07-15T00:00:00Z");
+    expect(d.fired).toBe(true);
+    expect(d.cursor).toEqual({ lastCheck: "2026-07-15T00:00:00Z" });
+  });
+
+  it("does not fire for assignments with null dueAt", () => {
+    const base = decideDeadlinePassed(null, [], "2026-07-14T00:00:00Z");
+    const d = decideDeadlinePassed(base.cursor, [{ assignmentId: "a1", name: "Assignment 1", dueAt: null }], "2026-07-15T00:00:00Z");
+    expect(d.fired).toBe(false);
+    expect(d.cursor).toEqual({ lastCheck: "2026-07-15T00:00:00Z" });
+  });
+
+  it("does not fire for assignments with dueAt in the future", () => {
+    const base = decideDeadlinePassed(null, [], "2026-07-14T00:00:00Z");
+    const d = decideDeadlinePassed(base.cursor, [{ assignmentId: "a1", name: "Assignment 1", dueAt: "2026-07-20T00:00:00Z" }], "2026-07-15T00:00:00Z");
+    expect(d.fired).toBe(false);
+    expect(d.cursor).toEqual({ lastCheck: "2026-07-15T00:00:00Z" });
+  });
+
+  it("fires for multiple assignments in the interval", () => {
+    const base = decideDeadlinePassed(null, [], "2026-07-14T00:00:00Z");
+    const d = decideDeadlinePassed(base.cursor, [
+      { assignmentId: "a1", name: "Assignment 1", dueAt: "2026-07-14T12:00:00Z" },
+      { assignmentId: "a2", name: "Assignment 2", dueAt: "2026-07-14T18:00:00Z" },
+    ], "2026-07-15T00:00:00Z");
+    expect(d.fired).toBe(true);
+    expect(d.detail).toContain("Assignment 1");
+    expect(d.detail).toContain("Assignment 2");
   });
 });
 

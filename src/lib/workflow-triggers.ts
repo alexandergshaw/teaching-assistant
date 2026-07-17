@@ -27,6 +27,7 @@ import {
   listCourseRosterAction,
   listCourseHubAction,
   listConfiguredInstitutionsAction,
+  listCourseAssignmentDueDatesAction,
 } from "@/app/actions";
 
 // ---------------------------------------------------------------------------
@@ -46,7 +47,8 @@ export type TriggerEventType =
   | "workflow-completed"
   | "webhook"
   | "app-open"
-  | "app-focused";
+  | "app-focused"
+  | "deadline-passed";
 
 export type TriggerEventCategory =
   | "lms"
@@ -345,6 +347,32 @@ export function decideCourseStart(cursor: Json | null, startDateIso: string | nu
     cursor: reached ? { fired: true } : { fired: false },
     detail: reached ? "Course start reached." : `Starts ${startDateIso}.`,
   };
+}
+
+/** Pure: decide whether any assignment deadline crossed since the last check.
+ * First evaluation sets a baseline and does NOT fire (so already-passed
+ * deadlines from before the trigger existed are ignored). */
+export function decideDeadlinePassed(
+  cursor: Json | null,
+  assignments: Array<{ assignmentId: string; name: string; dueAt: string | null }>,
+  nowIso: string
+): { fired: boolean; cursor: Json; detail: string } {
+  const prev = asObject(cursor);
+  const lastCheck = prev && typeof prev.lastCheck === "string" ? (prev.lastCheck as string) : null;
+  const now = new Date(nowIso).getTime();
+  if (!lastCheck) {
+    return { fired: false, cursor: { lastCheck: nowIso }, detail: "Baseline set; will fire when a deadline passes." };
+  }
+  const last = new Date(lastCheck).getTime();
+  const passed = assignments.filter((a) => {
+    if (!a.dueAt) return false;
+    const due = new Date(a.dueAt).getTime();
+    return Number.isFinite(due) && due > last && due <= now;
+  });
+  if (passed.length === 0) {
+    return { fired: false, cursor: { lastCheck: nowIso }, detail: "No deadlines passed." };
+  }
+  return { fired: true, cursor: { lastCheck: nowIso }, detail: `Deadline passed: ${passed.map((a) => a.name).join(", ")}` };
 }
 
 /** Fire when a run of the source workflow appears among `runsSince` that
@@ -660,6 +688,29 @@ export const EVENT_SOURCES: EventSourceDef[] = [
       const ids = r.students.map((s) => s.loginId || s.name);
       const d = decideRosterChanged(cursor, ids);
       return { ...d, fireValues: { studentCount: String(ids.length), institution: inst } };
+    },
+  },
+  {
+    type: "deadline-passed",
+    label: "An assignment deadline passes",
+    description: "Fires when an assignment's due date passes in the LMS course - once per deadline, from when the trigger is created onward. Pair it with Zero out missing submissions to auto-draft zeros after each deadline.",
+    category: "course",
+    configFields: [
+      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
+      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
+    ],
+    minPollMinutes: 60,
+    serverEvaluable: true,
+    evaluate: async (config, cursor, ctx) => {
+      const courseUrl = (config.course ?? "").trim();
+      const courseId = parseCanvasCourseId(courseUrl);
+      if (!courseId) return { fired: false, cursor: cursor ?? {}, detail: "The course URL has no course id." };
+      const inst = resolveInstitution(config, ctx);
+      if (!inst) return { fired: false, cursor: cursor ?? {}, detail: "No institution configured." };
+      const r = await listCourseAssignmentDueDatesAction(inst, courseId);
+      if ("error" in r) return { fired: false, cursor: cursor ?? {}, detail: r.error };
+      const d = decideDeadlinePassed(cursor, r.assignments, new Date().toISOString());
+      return { ...d, fireValues: { course: courseUrl } };
     },
   },
   {

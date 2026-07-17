@@ -1285,6 +1285,27 @@ export default function WorkflowsTab() {
     }
   };
 
+  // A preset is read-only, so its "This workflow is for" targets cannot be
+  // edited in place. Setting them creates the user's own editable copy carrying
+  // that scope and selects it - the same customize-by-duplicate model as the
+  // Duplicate button (and the only shape whose scope persists server-side so
+  // scheduled/triggered runs honor it), just reachable straight from the panel.
+  const handlePresetScope = (scope: WorkflowScope) => {
+    if (!selectedDef) return;
+    const copied: WorkflowDef = {
+      id: crypto.randomUUID(),
+      name: `${selectedDef.name} (copy)`,
+      description: selectedDef.description,
+      steps: JSON.parse(JSON.stringify(selectedDef.steps)),
+      scope,
+    };
+    updateCustom([...custom, copied]);
+    if (user && supabase) {
+      void upsertWorkflowDef(supabase, user.id, copied).catch(console.error);
+    }
+    handleWorkflowChange(copied.id);
+  };
+
   const handleValueChange = (fieldKey: string, value: string) => {
     const field = runtimeFields.find((f) => f.fieldKey === fieldKey);
 
@@ -2206,16 +2227,23 @@ export default function WorkflowsTab() {
 
               {panel === "build" && (
                 <>
-                  {selectedDef && !selectedDef.preset && (
-                    <WorkflowScopeControl
-                      scope={selectedDef.scope ?? {}}
-                      onChange={handleScopeChange}
-                      hubCourses={hubCourses}
-                      institutions={institutions}
-                      orgs={orgs}
-                      lmsCourseOptions={lmsCourseOptions}
-                      activeInstitution={activeInstitution || null}
-                    />
+                  {selectedDef && (
+                    <>
+                      {selectedDef.preset && (
+                        <p className={styles.fieldHint} style={{ marginBottom: 4 }}>
+                          Setting what this workflow is for saves it as your own editable copy.
+                        </p>
+                      )}
+                      <WorkflowScopeControl
+                        scope={selectedDef.scope ?? {}}
+                        onChange={selectedDef.preset ? handlePresetScope : handleScopeChange}
+                        hubCourses={hubCourses}
+                        institutions={institutions}
+                        orgs={orgs}
+                        lmsCourseOptions={lmsCourseOptions}
+                        activeInstitution={activeInstitution || null}
+                      />
+                    </>
                   )}
                   {selectedDef && (
                     <>

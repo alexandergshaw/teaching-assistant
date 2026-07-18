@@ -125,3 +125,60 @@ export function buildRosterUpdate(input: {
     conflicts,
   };
 }
+
+export function mergeCanvasRoster(
+  existing: RosterStudentRepo[],
+  students: Array<{ id: string; name: string }>
+): { studentRepos: RosterStudentRepo[]; roster: string; added: number } {
+  // Create a map of existing entries by canvasUserId
+  const existingByUserId = new Map<string, RosterStudentRepo>();
+  const nullIdEntries: RosterStudentRepo[] = [];
+
+  for (const entry of existing) {
+    if (entry.canvasUserId) {
+      existingByUserId.set(entry.canvasUserId, { ...entry });
+    } else {
+      nullIdEntries.push({ ...entry });
+    }
+  }
+
+  // Track how many new students we add
+  let added = 0;
+
+  // Process Canvas students
+  for (const student of students) {
+    const existingEntry = existingByUserId.get(student.id);
+    if (existingEntry) {
+      // Matched: update student name when different; never touch username or repo
+      if (existingEntry.student !== student.name) {
+        existingEntry.student = student.name;
+      }
+    } else {
+      // Unmatched: append new entry
+      existingByUserId.set(student.id, {
+        student: student.name,
+        canvasUserId: student.id,
+        repo: "",
+        username: null,
+      });
+      added++;
+    }
+  }
+
+  // Combine matched/updated entries with null-id entries
+  const studentRepos = [
+    ...Array.from(existingByUserId.values()),
+    ...nullIdEntries,
+  ];
+
+  // Derive roster text exactly like buildRosterUpdate: only entries with username
+  const rosterLines: string[] = [];
+  for (const entry of studentRepos) {
+    if (entry.username) {
+      rosterLines.push(`${entry.student} | ${entry.username}`);
+    }
+  }
+  const roster = rosterLines.join("\n");
+
+  return { studentRepos, roster, added };
+}

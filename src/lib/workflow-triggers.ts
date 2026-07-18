@@ -28,6 +28,7 @@ import {
   listCourseHubAction,
   listConfiguredInstitutionsAction,
   listCourseAssignmentDueDatesAction,
+  listConversationsAction,
 } from "@/app/actions";
 
 // ---------------------------------------------------------------------------
@@ -205,6 +206,45 @@ function readStringMap(cursor: Json | null, key: string): Record<string, string>
 // ---------------------------------------------------------------------------
 
 type Decision = { fired: boolean; cursor: Json; detail: string };
+
+/** Fire when a new message lands in a conversation thread or a new conversation
+ * appears. Returns a Decision with an additional `advanced` field containing
+ * conversation IDs (or a count string) of the new/advanced conversations, for
+ * the evaluator to emit in fireValues.
+ *
+ * Canvas orders conversations by recency, so a thread reappearing on the first
+ * page (a new entry in rows) or a timestamp advance implies a new message. */
+export function decideNewMessages(
+  cursor: Json | null,
+  rows: Array<{ institution: string; id: number; lastMessageAt: string | null }>
+): { fired: boolean; cursor: Json; detail: string; advanced: string[] } {
+  const prev = readStringMap(cursor, "convs");
+  const firstEval = prev === null;
+  const curr: Record<string, string> = {};
+  const advanced: string[] = [];
+
+  for (const r of rows) {
+    const key = `${r.institution}:${r.id}`;
+    const lma = r.lastMessageAt ?? "";
+    curr[key] = lma;
+    if (firstEval || !lma) continue;
+    const p = prev[key];
+    const isNew = p === undefined;
+    if ((isNew || lma > p) && lma) advanced.push(String(r.id));
+  }
+
+  const fired = !firstEval && advanced.length > 0;
+  return {
+    fired,
+    cursor: { convs: curr },
+    detail: firstEval
+      ? `Baseline: ${rows.length} conversation(s).`
+      : fired
+        ? `New messages: ${advanced.length > 5 ? advanced.length : advanced.join(", ")}`
+        : "No new messages.",
+    advanced,
+  };
+}
 
 /** Fire when the current count strictly exceeds the last-seen count. */
 export function decideCountRise(cursor: Json | null, current: number): Decision {
@@ -525,7 +565,7 @@ export const EVENT_SOURCES: EventSourceDef[] = [
   {
     type: "message-received",
     label: "A message is received",
-    description: "Fires when the unread inbox count rises - i.e. a new message arrived.",
+    description: "Fires when a new message lands in the inbox - a new conversation appears or an existing thread gets a new message.",
     category: "lms",
     configFields: [
       { key: "institutions", label: "Institutions", type: "institutions", required: false, help: "Defaults to the active institution; pick several or choose all." },
@@ -537,11 +577,30 @@ export const EVENT_SOURCES: EventSourceDef[] = [
       if ("error" in resolved) return { fired: false, cursor: cursor ?? {}, detail: resolved.error };
       const insts = resolved.list;
       if (insts.length === 0) return { fired: false, cursor: cursor ?? {}, detail: "No institution configured." };
-      const r = await getUnreadCountsAction(insts);
-      if ("error" in r) return { fired: false, cursor: cursor ?? {}, detail: r.error };
-      const unread = r.counts.reduce((n, c) => n + c.unread, 0);
-      const d = decideCountRise(cursor, unread);
-      return { ...d, fireValues: { unread: String(unread), institutions: insts.join(", ") } };
+
+      const allRows: Array<{ institution: string; id: number; lastMessageAt: string | null }> = [];
+      const allConversations: Array<{ institution: string; workflowState: string }> = [];
+
+      for (const inst of insts) {
+        const r = await listConversationsAction(inst);
+        if ("error" in r) return { fired: false, cursor: cursor ?? {}, detail: r.error };
+        for (const conv of r.conversations) {
+          allRows.push({ institution: inst, id: conv.id, lastMessageAt: conv.lastMessageAt });
+          allConversations.push({ institution: inst, workflowState: conv.workflowState });
+        }
+      }
+
+      const d = decideNewMessages(cursor, allRows);
+      const unread = allConversations.filter((c) => c.workflowState === "unread").length;
+
+      return {
+        ...d,
+        fireValues: {
+          unread: String(unread),
+          institutions: insts.join(", "),
+          newMessages: String(d.advanced.length),
+        },
+      };
     },
   },
   {

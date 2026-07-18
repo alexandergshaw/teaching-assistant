@@ -151,10 +151,15 @@ import {
   draftStudentNudgesAction,
   listCourseGradeSummariesAction,
   listCourseAssignmentDueDatesAction,
+  listConfiguredInstitutionsAction,
+  listAssignmentDueDatesByUrlAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import { extractGithubHandle } from "@/lib/github-usernames";
-import { buildRosterUpdate } from "@/lib/workflows/roster-merge";
+import { buildRosterUpdate, mergeCanvasRoster } from "@/lib/workflows/roster-merge";
+import { nextLectureWeek } from "@/lib/workflows/next-week";
+import { filterUpcoming, formatDeadlineReport } from "@/lib/workflows/deadline-report";
+import type { DeadlineSection } from "@/lib/workflows/deadline-report";
 import type { SlideData } from "@/app/actions";
 import type { MessageDraftPayload } from "@/lib/message-drafts";
 import { type DeckGenContext } from "@/lib/decks/generate";
@@ -346,6 +351,8 @@ export interface TermCoursePreviewRow {
   termName: string | null;
   canvasUrl: string;
   note: string;
+  institution?: string;
+  startAt?: string | null;
 }
 
 export interface StepRunHelpers {
@@ -3538,13 +3545,17 @@ export const STEP_REGISTRY: StepDefinition[] = [
         key: "institution",
         label: "Institution",
         type: "institution",
-        required: true,
+        required: false,
+        help: "Applied to rows that do not carry their own institution (the multi-institution scan sets one per row).",
       },
     ],
-    outputs: [],
+    outputs: [
+      { key: "created", label: "Cards created", type: "number" },
+      { key: "hasCreated", label: "Any created?", type: "boolean" },
+    ],
     run: async (values, helpers, onProgress) => {
       const rows = values.courses as TermCoursePreviewRow[];
-      const institution = String(values.institution ?? "").trim() || (helpers.activeInstitution ?? "").trim();
+      const boundInstitution = String(values.institution ?? "").trim() || (helpers.activeInstitution ?? "").trim();
 
       onProgress("Loading existing course cards...");
       const hub = await listCourseHubAction();
@@ -3552,19 +3563,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         throw new Error(hub.error);
       }
 
-      const wanted = String(institution ?? "").trim().toUpperCase();
-      const existingIds = new Set(
-        hub.courses
-          .filter((c) => (c.institution ?? "").trim().toUpperCase() === wanted)
-          .map((c) => parseCanvasCourseId(c.canvasUrl ?? ""))
-          .filter((id): id is string => Boolean(id))
-      );
-
-      const existingNameTerms = new Set(
-        hub.courses
-          .filter((c) => (c.institution ?? "").trim().toUpperCase() === wanted)
-          .map((c) => `${(c.name ?? "").trim().toLowerCase()}||${(c.term ?? "").trim().toLowerCase()}`)
-      );
+      const dedupeSetsByInst = new Map<string, { ids: Set<string>; nameTerms: Set<string> }>();
 
       const lines: string[] = [];
       let created = 0;
@@ -3574,8 +3573,29 @@ export const STEP_REGISTRY: StepDefinition[] = [
       for (const row of rows) {
         // Fail-forward: one bad row records its error and the loop moves on.
         try {
+          const effectiveInst = (row.institution || boundInstitution).trim().toUpperCase();
+          if (!effectiveInst) {
+            lines.push(`${row.name}: no institution - skipped`);
+            continue;
+          }
+
+          if (!dedupeSetsByInst.has(effectiveInst)) {
+            const existing = hub.courses.filter((c) => (c.institution ?? "").trim().toUpperCase() === effectiveInst);
+            dedupeSetsByInst.set(effectiveInst, {
+              ids: new Set(
+                existing
+                  .map((c) => parseCanvasCourseId(c.canvasUrl ?? ""))
+                  .filter((id): id is string => Boolean(id))
+              ),
+              nameTerms: new Set(
+                existing.map((c) => `${(c.name ?? "").trim().toLowerCase()}||${(c.term ?? "").trim().toLowerCase()}`)
+              ),
+            });
+          }
+
+          const dedupe = dedupeSetsByInst.get(effectiveInst)!;
           const nameKey = `${(row.name ?? "").trim().toLowerCase()}||${(row.termName ?? "").trim().toLowerCase()}`;
-          if (row.lmsId ? existingIds.has(row.lmsId) : existingNameTerms.has(nameKey)) {
+          if (row.lmsId ? dedupe.ids.has(row.lmsId) : dedupe.nameTerms.has(nameKey)) {
             lines.push(`${row.name}: already exists`);
             skipped++;
             continue;
@@ -3587,8 +3607,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
             courseCode: row.courseCode,
             term: row.termName,
             canvasUrl: row.canvasUrl || null,
-            institution,
+            institution: effectiveInst,
             lms: row.canvasUrl ? "canvas" : null,
+            startDate: row.startAt ? row.startAt.slice(0, 10) : null,
           });
 
           if ("error" in made) {
@@ -3596,9 +3617,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
           }
 
           if (row.lmsId) {
-            existingIds.add(row.lmsId);
+            dedupe.ids.add(row.lmsId);
           } else {
-            existingNameTerms.add(nameKey);
+            dedupe.nameTerms.add(nameKey);
           }
           lines.push(`${row.name}: created`);
           created++;
@@ -3611,7 +3632,10 @@ export const STEP_REGISTRY: StepDefinition[] = [
       }
 
       return {
-        outputs: {},
+        outputs: {
+          created: String(created),
+          hasCreated: created > 0 ? "1" : "",
+        },
         summary: {
           kind: "list",
           label: `${created} created, ${skipped} skipped${
@@ -10815,9 +10839,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
     description:
       "List every published assignment with a due date inside the next N days across the chosen Canvas courses. Feed the list to an announcement draft or a briefing.",
     inputs: [
-      { key: "courses", label: "LMS courses", type: "lmsCourseList", required: true, help: "One, several, or all courses at the institution." },
+      { key: "courses", label: "LMS courses", type: "lmsCourseList", required: false, help: "One, several, or all courses. Leave blank to scan every course at every configured institution." },
       { key: "daysAhead", label: "Days ahead", type: "number", required: false, help: "How many days ahead to look. Default 7." },
-      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
+      { key: "institution", label: "Institution", type: "institution", required: false, help: "Fallback for relative /courses/<id> URLs; each full course URL resolves its own institution automatically." },
     ],
     outputs: [
       { key: "deadlines", label: "Upcoming deadlines", type: "longtext" },
@@ -10825,11 +10849,6 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "hasUpcoming", label: "Any upcoming?", type: "boolean" },
     ],
     run: async (values, helpers, onProgress) => {
-      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || "";
-      if (!inst) {
-        throw new Error("Provide an institution (or set one active).");
-      }
-
       const daysAheadRaw = String(values.daysAhead ?? "").trim();
       const daysAhead = Number.isFinite(Number(daysAheadRaw)) && Number(daysAheadRaw) >= 1 ? Math.floor(Number(daysAheadRaw)) : 7;
 
@@ -10838,53 +10857,76 @@ export const STEP_REGISTRY: StepDefinition[] = [
         .map((s) => s.trim())
         .filter(Boolean);
 
-      onProgress("Checking deadlines...");
+      const institutionInput = String(values.institution ?? "").trim();
 
-      const lines: string[] = [];
-      const now = Date.now();
-      const cutoff = now + daysAhead * 864e5;
-      let matches = 0;
-      const multi = courseLines.length > 1;
+      const nowMs = Date.now();
+      const sections: DeadlineSection[] = [];
 
-      for (const courseUrl of courseLines) {
-        const courseId = parseCanvasCourseId(courseUrl);
-        if (!courseId) {
-          lines.push(`${courseUrl}: Invalid Canvas course URL.`);
-          continue;
+      if (courseLines.length === 0) {
+        // Blank courses: scan all institutions
+        onProgress("Loading configured institutions...");
+        const listResult = await listConfiguredInstitutionsAction();
+        if ("error" in listResult) {
+          throw new Error(listResult.error);
+        }
+        if (listResult.acronyms.length === 0) {
+          throw new Error("No institutions are configured on the server.");
         }
 
-        const res = await listCourseAssignmentDueDatesAction(inst, courseId);
-        if ("error" in res) {
-          lines.push(`${courseUrl}: ${res.error}`);
-          continue;
+        for (const inst of listResult.acronyms) {
+          onProgress(`Scanning ${inst}...`);
+
+          // Fetch courses for this institution
+          const coursesResult = await listCoursesByTermAction(inst, "");
+          if ("error" in coursesResult) {
+            sections.push({ course: inst, error: coursesResult.error, assignments: [] });
+            continue;
+          }
+
+          // Fetch deadlines for each course
+          for (const courseRow of coursesResult.courses) {
+            const assignmentsResult = await listCourseAssignmentDueDatesAction(inst, courseRow.id);
+            if ("error" in assignmentsResult) {
+              sections.push({ course: `${inst} ${courseRow.name}`, error: assignmentsResult.error, assignments: [] });
+              continue;
+            }
+
+            const filtered = filterUpcoming(assignmentsResult.assignments, nowMs, daysAhead);
+            sections.push({
+              course: `${inst} ${courseRow.name}`,
+              assignments: filtered,
+            });
+          }
         }
+      } else {
+        // Courses provided: fetch each by URL
+        for (const courseUrl of courseLines) {
+          onProgress(`Scanning ${courseUrl}...`);
+          const res = await listAssignmentDueDatesByUrlAction(courseUrl, institutionInput || helpers.activeInstitution || undefined);
+          if ("error" in res) {
+            sections.push({ course: courseUrl, error: res.error, assignments: [] });
+            continue;
+          }
 
-        if (multi) lines.push(`# ${courseUrl}`);
-
-        const upcoming = res.assignments.filter((a) => {
-          if (a.dueAt === null) return false;
-          const dueTime = new Date(a.dueAt).getTime();
-          return dueTime >= now && dueTime <= cutoff;
-        });
-
-        for (const a of upcoming) {
-          matches++;
-          const dueStr = new Date(a.dueAt!).toLocaleString();
-          lines.push(`- ${a.name} - due ${dueStr}`);
+          const filtered = filterUpcoming(res.assignments, nowMs, daysAhead);
+          sections.push({
+            course: courseUrl,
+            assignments: filtered,
+          });
         }
       }
 
-      const deadlines = matches > 0 ? lines.join("\n") : `No deadlines in the next ${daysAhead} day(s).`;
+      const report = formatDeadlineReport(sections, daysAhead);
 
       return {
         outputs: {
-          deadlines,
-          count: String(matches),
-          hasUpcoming: matches > 0 ? "1" : "",
+          deadlines: report.deadlines,
+          count: String(report.count),
+          hasUpcoming: report.count > 0 ? "1" : "",
         },
-        summary: matches > 0
-          ? { kind: "list", label: `Deadlines in the next ${daysAhead} day(s)`, items: lines.filter((l) => !l.startsWith("#")) }
-          : { kind: "text", text: deadlines },
+        summary: report.count > 0
+          ? { kind: "list", label: `Deadlines in the next ${daysAhead} day(s)`, items: report.items }
+          : { kind: "text", text: report.deadlines },
       };
     },
   },
@@ -11168,6 +11210,606 @@ export const STEP_REGISTRY: StepDefinition[] = [
           atRisk,
           count: String(totalAtRisk),
           hasAtRisk: totalAtRisk > 0 ? "1" : "",
+        },
+        summary: { kind: "text", text: report },
+      };
+    },
+  },
+
+  {
+    type: "draft-upcoming-lectures",
+    name: "Draft next week's lectures",
+    description:
+      "For every selected course tile, detect NEXT week's module from the tile's schedule and draft a lesson plan, a lecture script, and a slide deck into the tile's materials. Courses that are finished, not yet near their start, or missing a schedule row are skipped with a note.",
+    inputs: [
+      {
+        key: "courses",
+        label: "Course tiles",
+        type: "hubCourseList",
+        required: true,
+        help: "One, several, or all course tiles.",
+      },
+      {
+        key: "minutes",
+        label: "Script minutes",
+        type: "number",
+        required: false,
+        help: "Target lecture script length in minutes (1-30). Default 20.",
+      },
+      {
+        key: "extraNotes",
+        label: "Extra notes (optional)",
+        type: "longtext",
+        required: false,
+        help: "Optional guidance folded into every generated document.",
+      },
+    ],
+    outputs: [
+      { key: "report", label: "Report", type: "longtext" },
+      { key: "prepared", label: "Courses prepared", type: "number" },
+      { key: "hasPrepared", label: "Any prepared?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const ids = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      if (ids.length === 0) {
+        throw new Error("Select at least one course tile.");
+      }
+
+      let minutesVal = Number(values.minutes ?? 20);
+      if (Number.isNaN(minutesVal) || minutesVal < 1 || minutesVal > 30) {
+        minutesVal = 20;
+      } else {
+        minutesVal = Math.round(minutesVal);
+      }
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const extraNotes = String(values.extraNotes ?? "").trim();
+      const reportLines: string[] = [];
+      let prepared = 0;
+
+      for (const id of ids) {
+        const tile = hub.courses.find((c) => c.id === id);
+        if (!tile) {
+          reportLines.push(`${id}: course tile not found - skipped`);
+          continue;
+        }
+
+        try {
+          onProgress(`Drafting week for ${tile.name}...`);
+          const nw = nextLectureWeek({
+            startDate: tile.startDate,
+            weeks: tile.weeks,
+            nowMs: Date.now(),
+          });
+
+          if ("skip" in nw) {
+            reportLines.push(`${tile.name}: skipped - ${nw.skip}.`);
+            continue;
+          }
+
+          const schedule = csvToSchedule(tile.csvData ?? "");
+          const row = schedule.find((w) => w.week === nw.week);
+          if (!row || !row.topic) {
+            reportLines.push(
+              `${tile.name}: skipped - no schedule row for week ${nw.week}.`
+            );
+            continue;
+          }
+
+          const objectives = extraNotes
+            ? `Topic: ${row.topic}\n${row.summary}\n${extraNotes}`
+            : `Topic: ${row.topic}\n${row.summary}`;
+
+          const sanitize = (s: string) =>
+            s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+
+          let tilePrepared = false;
+
+          try {
+            onProgress(`Generating lecture script for ${tile.name}...`);
+            const scriptResult = await generateLectureScriptAction(
+              row.topic,
+              objectives,
+              minutesVal,
+              helpers.provider
+            );
+            if ("error" in scriptResult) {
+              throw new Error(scriptResult.error);
+            }
+
+            const scriptText = [
+              `# ${tile.name} - Week ${nw.week} Lecture Script`,
+              `## ${row.topic}`,
+              scriptResult.script,
+            ].join("\n");
+            const scriptDocx = await buildDocxFromPlainText(scriptText, [], helpers.author);
+            const scriptBlob = new Blob([new Uint8Array(scriptDocx)], {
+              type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            });
+            const scriptFileName = `${sanitize(tile.name)}_Week${nw.week}_LectureScript.docx`;
+
+            if (helpers.saveCourseMaterialFile) {
+              try {
+                await helpers.saveCourseMaterialFile(tile.id, scriptBlob, scriptFileName);
+                tilePrepared = true;
+              } catch (err) {
+                reportLines.push(
+                  `${tile.name}: failed to save lecture script - ${
+                    err instanceof Error ? err.message : String(err)
+                  }`
+                );
+              }
+            } else {
+              reportLines.push(`${tile.name}: sign in to save files`);
+            }
+          } catch (err) {
+            reportLines.push(
+              `${tile.name}: lecture script generation failed - ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          }
+
+          try {
+            onProgress(`Generating lesson plan for ${tile.name}...`);
+            const planResult = await generateLessonPlanAction(
+              objectives,
+              String(extraNotes ?? ""),
+              [],
+              undefined,
+              undefined,
+              helpers.provider
+            );
+            if ("error" in planResult) {
+              throw new Error(planResult.error);
+            }
+
+            const planLines: string[] = [
+              `# ${tile.name} - Week ${nw.week} Lesson Plan`,
+            ];
+            for (const slide of planResult.slides) {
+              planLines.push(slide.title);
+              for (const bullet of slide.bullets) {
+                planLines.push(`- ${bullet}`);
+              }
+              if (slide.code) {
+                planLines.push(
+                  `\n(Code: ${slide.codeLanguage || "code"})\n${slide.code}\n`
+                );
+              }
+              planLines.push("");
+            }
+            const planDocx = await buildDocxFromPlainText(planLines.join("\n"), [], helpers.author);
+            const planBlob = new Blob([new Uint8Array(planDocx)], {
+              type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            });
+            const planFileName = `${sanitize(tile.name)}_Week${nw.week}_LessonPlan.docx`;
+
+            if (helpers.saveCourseMaterialFile) {
+              try {
+                await helpers.saveCourseMaterialFile(tile.id, planBlob, planFileName);
+                tilePrepared = true;
+              } catch (err) {
+                reportLines.push(
+                  `${tile.name}: failed to save lesson plan - ${
+                    err instanceof Error ? err.message : String(err)
+                  }`
+                );
+              }
+            }
+          } catch (err) {
+            reportLines.push(
+              `${tile.name}: lesson plan generation failed - ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          }
+
+          try {
+            onProgress(`Generating slides for ${tile.name}...`);
+            const slidePrompt = `Create a lecture slide deck for week ${nw.week} of ${tile.name} on "${row.topic}". ${
+              row.summary
+            }${extraNotes ? ` ${extraNotes}` : ""}`;
+            const slideResult = await generateSlidesAction(slidePrompt, helpers.provider);
+            if ("error" in slideResult) {
+              throw new Error(slideResult.error);
+            }
+
+            const pptxData = await buildSlidesPptx({
+              presentationTitle: slideResult.presentationTitle,
+              slides: slideResult.slides,
+              subtitle: `Week ${nw.week} - ${row.topic}`,
+              author: helpers.author,
+            });
+            const slideBlob = new Blob([pptxData], {
+              type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            });
+            const slideFileName = `${sanitize(tile.name)}_Week${nw.week}_Slides.pptx`;
+
+            if (helpers.saveCourseMaterialFile) {
+              try {
+                await helpers.saveCourseMaterialFile(tile.id, slideBlob, slideFileName);
+                tilePrepared = true;
+              } catch (err) {
+                reportLines.push(
+                  `${tile.name}: failed to save slides - ${
+                    err instanceof Error ? err.message : String(err)
+                  }`
+                );
+              }
+            }
+          } catch (err) {
+            reportLines.push(
+              `${tile.name}: slide generation failed - ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          }
+
+          if (tilePrepared) {
+            reportLines.push(`${tile.name}: prepared week ${nw.week}`);
+            prepared++;
+          }
+        } catch (err) {
+          reportLines.push(
+            `${tile.name}: ${err instanceof Error ? err.message : "failed"}`
+          );
+        }
+      }
+
+      const report = reportLines.join("\n");
+      return {
+        outputs: {
+          report,
+          prepared: String(prepared),
+          hasPrepared: prepared > 0 ? "1" : "",
+        },
+        summary: { kind: "text", text: report },
+      };
+    },
+  },
+
+  {
+    type: "scan-term-courses",
+    name: "Scan term courses across institutions",
+    description:
+      "Fetch the term's courses from every configured institution's LMS and split them into NEW (no course tile yet) and ALREADY IMPORTED - the start-of-term diff. Optionally pauses so you can review before later steps create anything.",
+    inputs: [
+      {
+        key: "institutions",
+        label: "Institutions",
+        type: "longtext",
+        required: false,
+        help: "One institution acronym per line. Blank scans every configured institution.",
+      },
+      {
+        key: "term",
+        label: "Term",
+        type: "text",
+        required: false,
+        help: "Matched against the LMS term name (e.g. Fall 2026). Blank lists every course you teach.",
+      },
+      {
+        key: "confirm",
+        label: "Pause to review?",
+        type: "boolean",
+        required: false,
+        help: "Pause after the scan so you can review the diff before later steps run.",
+      },
+    ],
+    outputs: [
+      { key: "newCourses", label: "New courses", type: "courseList" },
+      { key: "coverage", label: "Coverage report", type: "longtext" },
+      { key: "newCount", label: "New count", type: "number" },
+      { key: "existingCount", label: "Already imported", type: "number" },
+      { key: "hasNew", label: "Any new?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      let insts: string[] = [];
+      const instInput = String(values.institutions ?? "").trim();
+      if (instInput) {
+        insts = instInput
+          .split("\n")
+          .map((s) => s.trim().toUpperCase())
+          .filter(Boolean);
+      } else {
+        onProgress("Loading configured institutions...");
+        const listResult = await listConfiguredInstitutionsAction();
+        if ("error" in listResult) {
+          throw new Error(listResult.error);
+        }
+        if (listResult.acronyms.length === 0) {
+          throw new Error("No institutions are configured on the server.");
+        }
+        insts = listResult.acronyms.map((a) => a.toUpperCase());
+      }
+
+      onProgress("Loading course hub...");
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const termInput = String(values.term ?? "").trim();
+      const coverageLines: string[] = [];
+      const newCoursesData: TermCoursePreviewRow[] = [];
+      let totalNew = 0;
+      let totalExisting = 0;
+
+      for (const inst of insts) {
+        try {
+          onProgress(`Scanning ${inst} for courses...`);
+
+          const coursesResult = await listCoursesByTermAction(inst, termInput);
+          if ("error" in coursesResult) {
+            coverageLines.push(`${inst}: ${coursesResult.error}`);
+            continue;
+          }
+
+          const existingIds = new Set(
+            hub.courses
+              .filter((c) => (c.institution ?? "").trim().toUpperCase() === inst)
+              .map((c) => parseCanvasCourseId(c.canvasUrl ?? ""))
+              .filter((id): id is string => Boolean(id))
+          );
+
+          const existingNameTerms = new Set(
+            hub.courses
+              .filter((c) => (c.institution ?? "").trim().toUpperCase() === inst)
+              .map((c) => `${(c.name ?? "").trim().toLowerCase()}||${(c.term ?? "").trim().toLowerCase()}`)
+          );
+
+          const newLines: string[] = [];
+          const importedLines: string[] = [];
+          let newCount = 0;
+          let existingCount = 0;
+
+          for (const row of coursesResult.courses) {
+            const nameKey = `${(row.name ?? "").trim().toLowerCase()}||${(row.termName ?? "").trim().toLowerCase()}`;
+            const isNew = row.id
+              ? !existingIds.has(row.id)
+              : !existingNameTerms.has(nameKey);
+
+            if (isNew) {
+              newCount++;
+              const code = row.courseCode ? ` [${row.courseCode}]` : "";
+              newLines.push(`  - NEW: ${row.name}${code}`);
+              newCoursesData.push({
+                lmsId: row.id ?? "",
+                name: row.name,
+                courseCode: row.courseCode,
+                termName: row.termName,
+                canvasUrl: row.id ? `/courses/${row.id}` : "",
+                note: "",
+                institution: inst,
+                startAt: row.startAt ?? null,
+              });
+            } else {
+              existingCount++;
+              const tile = hub.courses.find(
+                (c) =>
+                  (c.institution ?? "").trim().toUpperCase() === inst &&
+                  (row.id
+                    ? parseCanvasCourseId(c.canvasUrl ?? "") === row.id
+                    : `${(c.name ?? "").trim().toLowerCase()}||${(c.term ?? "").trim().toLowerCase()}` === nameKey)
+              );
+              const tileName = tile?.name ?? "unknown";
+              importedLines.push(`  - imported: ${row.name} (tile ${tileName})`);
+            }
+          }
+
+          totalNew += newCount;
+          totalExisting += existingCount;
+
+          coverageLines.push(`${inst}: ${coursesResult.courses.length} course(s) - ${newCount} new, ${existingCount} already imported`);
+          coverageLines.push(...newLines, ...importedLines);
+        } catch (err) {
+          coverageLines.push(
+            `${inst}: ${err instanceof Error ? err.message : "failed to scan"}`
+          );
+        }
+      }
+
+      const coverage = coverageLines.join("\n");
+      const shouldConfirm = String(values.confirm ?? "") === "1";
+
+      const result: StepRunResult = {
+        outputs: {
+          newCourses: JSON.stringify(newCoursesData),
+          coverage,
+          newCount: String(totalNew),
+          existingCount: String(totalExisting),
+          hasNew: totalNew > 0 ? "1" : "",
+        },
+        summary: {
+          kind: "list",
+          label: `${totalNew} new course(s), ${totalExisting} already imported`,
+          items: coverageLines,
+        },
+      };
+
+      if (shouldConfirm) {
+        result.requireConfirmation =
+          "Continue to create cards for the NEW courses? Already-imported courses are left untouched.";
+      }
+
+      return result;
+    },
+  },
+
+  {
+    type: "sync-course-tiles-from-lms",
+    name: "Sync course tiles from the LMS",
+    description:
+      "For each selected course tile with a Canvas link, pull what the LMS knows - course code, term, start date, and the student roster - and fill in ONLY the tile fields that are empty. Existing values are never overwritten and roster merging preserves GitHub username links and repo bindings.",
+    inputs: [
+      {
+        key: "courses",
+        label: "Course tiles",
+        type: "hubCourseList",
+        required: true,
+        help: "One, several, or all course tiles.",
+      },
+      {
+        key: "includeRoster",
+        label: "Pull rosters?",
+        type: "boolean",
+        required: false,
+        help: "Also merge each course's student roster into the tile.",
+      },
+    ],
+    outputs: [
+      { key: "report", label: "Report", type: "longtext" },
+      { key: "updated", label: "Tiles updated", type: "number" },
+      { key: "hasUpdated", label: "Any updated?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const ids = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const includeRoster = String(values.includeRoster ?? "") === "1";
+      type LmsTermCourse = {
+        id: string;
+        name: string;
+        courseCode: string | null;
+        termName: string | null;
+        startAt: string | null;
+      };
+      const termCoursesByInst = new Map<string, Map<string, LmsTermCourse>>();
+      const reportLines: string[] = [];
+      let updated = 0;
+
+      for (const id of ids) {
+        const tile = hub.courses.find((c) => c.id === id);
+        if (!tile) {
+          reportLines.push(`${id}: course tile not found - skipped`);
+          continue;
+        }
+
+        try {
+          onProgress(`Syncing ${tile.name}...`);
+
+          const courseId = parseCanvasCourseId(tile.canvasUrl ?? "");
+          if (!courseId) {
+            reportLines.push(`${tile.name}: no LMS link - skipped`);
+            continue;
+          }
+
+          const inst = (tile.institution ?? "").trim().toUpperCase();
+          if (!inst) {
+            reportLines.push(`${tile.name}: no institution on the tile - skipped`);
+            continue;
+          }
+
+          if (!termCoursesByInst.has(inst)) {
+            const coursesResult = await listCoursesByTermAction(inst, "");
+            if ("error" in coursesResult) {
+              reportLines.push(`${tile.name}: failed to fetch courses from ${inst} - ${coursesResult.error}`);
+              continue;
+            }
+            const courseMap = new Map<string, LmsTermCourse>();
+            for (const row of coursesResult.courses) {
+              if (row.id) {
+                courseMap.set(row.id, row);
+              }
+            }
+            termCoursesByInst.set(inst, courseMap);
+          }
+
+          const courseMap = termCoursesByInst.get(inst)!;
+          const lmsRow = courseMap.get(courseId);
+
+          const overrides: Partial<CourseInput> = {};
+
+          if (!tile.courseCode && lmsRow?.courseCode) {
+            overrides.courseCode = lmsRow.courseCode;
+          }
+          if (!tile.term && lmsRow?.termName) {
+            overrides.term = lmsRow.termName;
+          }
+          if (!tile.startDate && lmsRow?.startAt) {
+            overrides.startDate = lmsRow.startAt.slice(0, 10);
+          }
+          if (!tile.lms && tile.canvasUrl) {
+            overrides.lms = "canvas";
+          }
+
+          let addedStudents = 0;
+          if (includeRoster) {
+            try {
+              const rosterResult = await listCourseRosterAction(inst, courseId);
+              if ("error" in rosterResult) {
+                reportLines.push(
+                  `${tile.name}: failed to fetch roster - ${rosterResult.error}`
+                );
+              } else {
+                const merged = mergeCanvasRoster(
+                  tile.studentRepos ?? [],
+                  rosterResult.students.map((s) => ({
+                    id: s.id,
+                    name: s.name,
+                  }))
+                );
+                if (merged.added > 0) {
+                  addedStudents = merged.added;
+                  overrides.studentRepos = merged.studentRepos;
+                  overrides.roster = merged.roster;
+                }
+              }
+            } catch (err) {
+              reportLines.push(
+                `${tile.name}: roster sync failed - ${
+                  err instanceof Error ? err.message : String(err)
+                }`
+              );
+            }
+          }
+
+          if (Object.keys(overrides).length > 0) {
+            const updatePayload = {
+              ...courseToInputPayload(tile),
+              ...overrides,
+            };
+            const updateResult = await updateCourseHubAction(id, updatePayload);
+            if ("error" in updateResult) {
+              throw new Error(updateResult.error);
+            }
+
+            const fields = Object.keys(overrides).join(", ");
+            const added = addedStudents > 0 ? ` +${addedStudents} student(s)` : "";
+            reportLines.push(`${tile.name}: filled ${fields}${added}`);
+            updated++;
+          } else {
+            reportLines.push(`${tile.name}: already complete`);
+          }
+        } catch (err) {
+          reportLines.push(
+            `${tile.name}: ${err instanceof Error ? err.message : "failed"}`
+          );
+        }
+      }
+
+      const report = reportLines.join("\n");
+      return {
+        outputs: {
+          report,
+          updated: String(updated),
+          hasUpdated: updated > 0 ? "1" : "",
         },
         summary: { kind: "text", text: report },
       };

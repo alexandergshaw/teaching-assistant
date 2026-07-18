@@ -730,7 +730,8 @@ interface CanvasCourseWithTermListItem {
   id?: number;
   name?: string;
   course_code?: string | null;
-  term?: { id?: number; name?: string } | null;
+  start_at?: string | null;
+  term?: { id?: number; name?: string; start_at?: string | null } | null;
 }
 
 /** List teacher courses with term information, optionally filtering by term name. */
@@ -743,6 +744,7 @@ export async function listCoursesByTerm(
     name: string;
     courseCode: string | null;
     termName: string | null;
+    startAt: string | null;
   }>
 > {
   const ctx = resolveInstitutionByCode(code);
@@ -753,6 +755,7 @@ export async function listCoursesByTerm(
     name: string;
     courseCode: string | null;
     termName: string | null;
+    startAt: string | null;
   }> = [];
 
   while (next) {
@@ -773,6 +776,7 @@ export async function listCoursesByTerm(
             name: course.name?.trim() || `Course ${course.id}`,
             courseCode: course.course_code ?? null,
             termName,
+            startAt: course.start_at ?? course.term?.start_at ?? null,
           });
         }
       }

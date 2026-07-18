@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRosterUpdate, type RosterStudentRepo, type RosterSubmission } from "./roster-merge";
+import { buildRosterUpdate, mergeCanvasRoster, type RosterStudentRepo, type RosterSubmission } from "./roster-merge";
 
 describe("buildRosterUpdate", () => {
   it("preserves existing repo on re-run", () => {
@@ -170,5 +170,198 @@ describe("buildRosterUpdate", () => {
     });
     expect(result.studentRepos).toHaveLength(2);
     expect(result.roster.split("\n")).toContain("Manual | manual-gh");
+  });
+});
+
+describe("mergeCanvasRoster", () => {
+  it("appends new students from Canvas", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+    ];
+    const students = [
+      { id: "101", name: "Alice" },
+      { id: "102", name: "Bob" },
+    ];
+
+    const result = mergeCanvasRoster(existing, students);
+
+    expect(result.added).toBe(1);
+    expect(result.studentRepos).toHaveLength(2);
+    const bob = result.studentRepos.find((r) => r.canvasUserId === "102");
+    expect(bob).toEqual({
+      student: "Bob",
+      canvasUserId: "102",
+      repo: "",
+      username: null,
+    });
+  });
+
+  it("preserves repo and username on match", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+    ];
+    const students = [{ id: "101", name: "Alice" }];
+
+    const result = mergeCanvasRoster(existing, students);
+
+    expect(result.added).toBe(0);
+    expect(result.studentRepos).toHaveLength(1);
+    expect(result.studentRepos[0]).toEqual({
+      student: "Alice",
+      canvasUserId: "101",
+      repo: "org/alice",
+      username: "alice-gh",
+    });
+  });
+
+  it("updates a changed student name", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice Smith", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+    ];
+    const students = [{ id: "101", name: "Alice Jane Smith" }];
+
+    const result = mergeCanvasRoster(existing, students);
+
+    expect(result.added).toBe(0);
+    expect(result.studentRepos[0].student).toBe("Alice Jane Smith");
+    expect(result.studentRepos[0].repo).toBe("org/alice");
+    expect(result.studentRepos[0].username).toBe("alice-gh");
+  });
+
+  it("leaves manual entries (null canvasUserId) untouched", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Manual", canvasUserId: null, repo: "org/manual", username: "manual-gh" },
+    ];
+    const students = [{ id: "101", name: "Alice" }];
+
+    const result = mergeCanvasRoster(existing, students);
+
+    expect(result.studentRepos).toHaveLength(2);
+    expect(result.studentRepos).toContainEqual({
+      student: "Manual",
+      canvasUserId: null,
+      repo: "org/manual",
+      username: "manual-gh",
+    });
+    expect(result.added).toBe(1);
+  });
+
+  it("derives roster text from entries with username only", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "NoUsername", canvasUserId: "100", repo: "org/prev", username: null },
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+    ];
+    const students = [
+      { id: "100", name: "NoUsername" },
+      { id: "101", name: "Alice" },
+      { id: "102", name: "Bob" },
+    ];
+
+    const result = mergeCanvasRoster(existing, students);
+
+    const rosterLines = result.roster.split("\n").filter((line) => line);
+    expect(rosterLines).toHaveLength(1);
+    expect(rosterLines).toContain("Alice | alice-gh");
+    expect(result.roster).not.toContain("NoUsername");
+    expect(result.roster).not.toContain("Bob");
+  });
+
+  it("returns correct added count", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+      { student: "Bob", canvasUserId: "102", repo: "org/bob", username: "bob-gh" },
+    ];
+    const students = [
+      { id: "101", name: "Alice" },
+      { id: "102", name: "Bob" },
+      { id: "103", name: "Charlie" },
+      { id: "104", name: "Diana" },
+    ];
+
+    const result = mergeCanvasRoster(existing, students);
+
+    expect(result.added).toBe(2);
+  });
+
+  it("preserves all existing entries regardless of Canvas roster", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+      { student: "OldStudent", canvasUserId: "999", repo: "org/old", username: "old-gh" },
+    ];
+    const students = [{ id: "101", name: "Alice" }];
+
+    const result = mergeCanvasRoster(existing, students);
+
+    expect(result.studentRepos).toHaveLength(2);
+    expect(result.studentRepos).toContainEqual({
+      student: "OldStudent",
+      canvasUserId: "999",
+      repo: "org/old",
+      username: "old-gh",
+    });
+  });
+
+  it("handles empty existing roster", () => {
+    const students = [
+      { id: "101", name: "Alice" },
+      { id: "102", name: "Bob" },
+    ];
+
+    const result = mergeCanvasRoster([], students);
+
+    expect(result.added).toBe(2);
+    expect(result.studentRepos).toHaveLength(2);
+    expect(result.roster).toBe("");
+  });
+
+  it("handles empty Canvas roster", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+      { student: "Bob", canvasUserId: "102", repo: "org/bob", username: "bob-gh" },
+    ];
+
+    const result = mergeCanvasRoster(existing, []);
+
+    expect(result.added).toBe(0);
+    expect(result.studentRepos).toHaveLength(2);
+    const rosterLines = result.roster.split("\n");
+    expect(rosterLines).toContain("Alice | alice-gh");
+    expect(rosterLines).toContain("Bob | bob-gh");
+  });
+
+  it("does not duplicate entries when all Canvas students already exist", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+      { student: "Bob", canvasUserId: "102", repo: "org/bob", username: "bob-gh" },
+    ];
+    const students = [
+      { id: "101", name: "Alice" },
+      { id: "102", name: "Bob" },
+    ];
+
+    const result = mergeCanvasRoster(existing, students);
+
+    expect(result.added).toBe(0);
+    expect(result.studentRepos).toHaveLength(2);
+  });
+
+  it("handles mixed manual and Canvas entries", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Manual", canvasUserId: null, repo: "org/manual", username: "manual-gh" },
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+    ];
+    const students = [
+      { id: "101", name: "Alice" },
+      { id: "102", name: "Bob" },
+    ];
+
+    const result = mergeCanvasRoster(existing, students);
+
+    expect(result.added).toBe(1);
+    expect(result.studentRepos).toHaveLength(3);
+    const rosterLines = result.roster.split("\n").filter((line) => line);
+    expect(rosterLines).toHaveLength(2);
+    expect(rosterLines).toContain("Manual | manual-gh");
+    expect(rosterLines).toContain("Alice | alice-gh");
   });
 });

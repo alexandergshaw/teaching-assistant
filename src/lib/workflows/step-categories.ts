@@ -59,6 +59,8 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "starter-materials",
     "fetch-course-roster",
     "link-github-usernames",
+    "scan-term-courses",
+    "sync-course-tiles-from-lms",
   ],
   content: [
     "lecture-zip",
@@ -72,6 +74,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "generate-document",
     "revise-generated-document",
     "find-practice-problems",
+    "draft-upcoming-lectures",
   ],
   media: [
     "generate-slides-standalone",

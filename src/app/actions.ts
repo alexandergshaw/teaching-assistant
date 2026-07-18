@@ -94,7 +94,7 @@ import {
   type CanvasStudentWork,
   type CanvasTextSubmission,
 } from "@/lib/canvas";
-import { listPreconfiguredInstitutionCodes, resolveInstitution } from "@/lib/canvas-core";
+import { listPreconfiguredInstitutionCodes, resolveInstitution, resolveInstitutionByCode } from "@/lib/canvas-core";
 import {
   listModules,
   createModule,
@@ -2172,6 +2172,58 @@ export async function listCourseAssignmentDueDatesAction(
   }
 }
 
+export async function listAssignmentDueDatesByUrlAction(
+  courseUrl: string,
+  fallbackAcronym?: string
+): Promise<{ assignments: Array<{ assignmentId: string; name: string; dueAt: string | null }>; institution: string } | { error: string }> {
+  try {
+    await requireOwner();
+
+    // Check if the URL is absolute (parseable as a full URL)
+    let isAbsolute = false;
+    try {
+      new URL(courseUrl);
+      isAbsolute = true;
+    } catch {
+      // relative URL
+    }
+
+    // Resolve institution from URL, with fallback to acronym for relative URLs only
+    let resolved;
+    try {
+      resolved = resolveInstitution(courseUrl);
+    } catch (e) {
+      // Absolute URLs must resolve from their host; don't fall back to acronym
+      if (isAbsolute) {
+        return { error: e instanceof Error ? e.message : "Could not match the course URL to a configured institution." };
+      }
+      // Relative URLs can fall back to the provided acronym
+      try {
+        resolved = resolveInstitutionByCode((fallbackAcronym ?? "").trim().toUpperCase());
+      } catch {
+        return { error: "Could not match the course URL to a configured institution." };
+      }
+    }
+
+    // Parse course ID from URL
+    const courseMatch = courseUrl.match(/courses\/(\d+)/);
+    if (!courseMatch || !courseMatch[1]) {
+      return { error: "Could not parse the Canvas course ID from the URL." };
+    }
+    const courseId = courseMatch[1];
+
+    // Fetch assignments and filter to published ones
+    const briefs = await listAssignmentBriefsWithDue(resolved.baseUrl, resolved.token, resolved.institution, courseId);
+    const assignments = briefs
+      .filter((b) => b.published !== false)
+      .map((b) => ({ assignmentId: b.assignmentId, name: b.name, dueAt: b.dueAt }));
+
+    return { assignments, institution: resolved.institution.code };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load assignment due dates." };
+  }
+}
+
 export async function pullSubmissionAction(
   code: string,
   courseId: string,
@@ -2295,6 +2347,7 @@ export async function listCoursesByTermAction(
         name: string;
         courseCode: string | null;
         termName: string | null;
+        startAt: string | null;
       }>;
     }
   | { error: string }

@@ -848,7 +848,7 @@ export const MORNING_BRIEFING: WorkflowDef = {
   preset: true,
   name: "Morning Briefing",
   description:
-    "One schedulable digest of everything that needs you today: unread Canvas messages per institution, how many submissions need grading, and every deadline in the next 7 days - composed into a Markdown briefing (saved to Files on unattended runs). Runs fully headless: schedule it for each morning.",
+    "One schedulable digest of everything that needs you today: unread Canvas messages per institution, how many submissions need grading, and every deadline in the next 7 days across every configured institution (pick courses to narrow) - composed into a Markdown briefing (saved to Files on unattended runs). Runs fully headless: schedule it for each morning.",
   steps: [
     {
       type: "get-unread-and-notifications",
@@ -1004,7 +1004,7 @@ export const DEADLINE_REMINDER_DRAFTS: WorkflowDef = {
   preset: true,
   name: "Upcoming Deadline Reminders",
   description:
-    "Find every deadline in the next 3 days, draft a friendly reminder announcement about them, and save it to Drafts > Messages for review - only when something is actually due.",
+    "Find every deadline in the next 3 days across your courses, draft a friendly reminder announcement about them, and save it to Drafts > Messages for review - only when something is actually due.",
   steps: [
     {
       type: "list-upcoming-deadlines",
@@ -1194,6 +1194,59 @@ export const COPILOT_PR_SHEPHERD: WorkflowDef = {
   ],
 };
 
+export const NEXT_WEEK_LECTURES: WorkflowDef = {
+  id: "next-week-lectures",
+  preset: true,
+  name: "Draft Next Week's Lectures (all courses)",
+  description:
+    "Every course tile across every institution: detect next week's module from the tile's schedule and draft a lesson plan, lecture script, and slide deck into the tile's materials. Fully headless - schedule it for Friday and walk into Monday with every lecture drafted. Finished or not-yet-started courses are skipped automatically.",
+  steps: [
+    {
+      type: "draft-upcoming-lectures",
+      bindings: {
+        courses: { source: "literal", value: "*" },
+        minutes: { source: "literal", value: "20" },
+        extraNotes: { source: "runtime", fieldKey: "extraNotes" },
+      },
+    },
+  ],
+};
+
+export const TERM_KICKOFF_IMPORT: WorkflowDef = {
+  id: "term-kickoff-import",
+  preset: true,
+  name: "Term Kickoff Import",
+  description:
+    "Run once at the start of each term: scans every configured institution's LMS for the term's courses, shows which are already on the hub and which are new, pauses for your approval, creates a card for each new course, then fills every tile with what the LMS knows - Canvas link, course code, term, start date, and student roster. Already-imported courses are never duplicated and existing tile values are never overwritten.",
+  steps: [
+    {
+      type: "scan-term-courses",
+      bindings: {
+        institutions: { source: "runtime", fieldKey: "institutions" },
+        term: { source: "runtime", fieldKey: "term" },
+        confirm: { source: "literal", value: "1" },
+      },
+    },
+    {
+      type: "create-course-cards",
+      bindings: {
+        courses: { source: "step", stepIndex: 0, outputKey: "newCourses" },
+      },
+      runIf: {
+        binding: { source: "step", stepIndex: 0, outputKey: "hasNew" },
+        expected: true,
+      },
+    },
+    {
+      type: "sync-course-tiles-from-lms",
+      bindings: {
+        courses: { source: "literal", value: "*" },
+        includeRoster: { source: "literal", value: "1" },
+      },
+    },
+  ],
+};
+
 /**
  * Merge built-in presets with custom workflows.
  * Returns presets first, then custom workflows.
@@ -1235,6 +1288,8 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     QUIZ_PIPELINE,
     COURSE_HEALTH_CHECK,
     COPILOT_PR_SHEPHERD,
+    NEXT_WEEK_LECTURES,
+    TERM_KICKOFF_IMPORT,
     ...custom,
   ];
 }

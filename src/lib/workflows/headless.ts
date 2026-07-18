@@ -138,6 +138,8 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // Creates the quiz unpublished; publish from Canvas when ready.
   "create-canvas-quiz",
   "gradebook-health-report",
+  "draft-upcoming-lectures",
+  "sync-course-tiles-from-lms",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in
@@ -185,6 +187,15 @@ export const CONDITIONALLY_HEADLESS_SAFE: Record<
   "prepare-lecture": (step) => {
     const b = step.bindings.autonomous;
     return b?.source === "literal" && b.value === "1";
+  },
+  // scan-term-courses pauses to review the course diff UNLESS its `confirm`
+  // input is fixed off. It is headless-safe only when the workflow PINS
+  // confirm to a literal "" or does not set it, so a schedule/trigger cannot
+  // smuggle in an interactive run that would then abort unattended. Inversely,
+  // when confirm is pinned to literal "1", the step is interactive by design.
+  "scan-term-courses": (step) => {
+    const b = step.bindings.confirm;
+    return !b || (b.source === "literal" && b.value !== "1");
   },
 };
 

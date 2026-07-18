@@ -843,6 +843,357 @@ export const WEEKLY_KICKOFF_ANNOUNCEMENT: WorkflowDef = {
   ],
 };
 
+export const MORNING_BRIEFING: WorkflowDef = {
+  id: "morning-briefing",
+  preset: true,
+  name: "Morning Briefing",
+  description:
+    "One schedulable digest of everything that needs you today: unread Canvas messages per institution, how many submissions need grading, and every deadline in the next 7 days - composed into a Markdown briefing (saved to Files on unattended runs). Runs fully headless: schedule it for each morning.",
+  steps: [
+    {
+      type: "get-unread-and-notifications",
+      bindings: {
+        institutions: { source: "runtime", fieldKey: "institutions" },
+      },
+    },
+    {
+      type: "check-needs-grading",
+      bindings: {
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+    {
+      type: "list-upcoming-deadlines",
+      bindings: {
+        courses: { source: "runtime", fieldKey: "courses" },
+        daysAhead: { source: "literal", value: "7" },
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+    {
+      type: "compose-briefing",
+      bindings: {
+        title: { source: "literal", value: "Morning Briefing" },
+        section1: { source: "step", stepIndex: 0, outputKey: "breakdown" },
+        section2: { source: "step", stepIndex: 1, outputKey: "summary" },
+        section3: { source: "step", stepIndex: 2, outputKey: "deadlines" },
+      },
+    },
+  ],
+};
+
+export const INBOX_REPLY_DRAFTS: WorkflowDef = {
+  id: "inbox-reply-drafts",
+  preset: true,
+  name: "Inbox Replies to Drafts",
+  description:
+    "Read every unread Canvas conversation and draft a courteous reply for each thread into Drafts > Messages. Nothing sends until you review. Headless - schedule it and walk into an inbox of ready drafts.",
+  steps: [
+    {
+      type: "read-inbox",
+      bindings: {
+        institution: { source: "runtime", fieldKey: "institution" },
+        conversationId: { source: "literal", value: "unread" },
+      },
+    },
+    {
+      type: "draft-message-reply",
+      bindings: {
+        thread: { source: "step", stepIndex: 0, outputKey: "thread" },
+        instructions: { source: "runtime", fieldKey: "guidance" },
+      },
+      runIf: {
+        binding: { source: "step", stepIndex: 0, outputKey: "hasUnread" },
+        expected: true,
+      },
+    },
+    {
+      type: "save-message-draft",
+      bindings: {
+        body: { source: "step", stepIndex: 1, outputKey: "draftReply" },
+        kind: { source: "literal", value: "reply" },
+        context: { source: "step", stepIndex: 0, outputKey: "thread" },
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+  ],
+};
+
+export const MEETING_REQUEST_AUTOPILOT: WorkflowDef = {
+  id: "meeting-request-autopilot",
+  preset: true,
+  name: "Meeting Request Autopilot",
+  description:
+    "Read unread messages; when one asks for a meeting, pull your real open calendar slots and draft a reply offering them - saved to Drafts > Messages for review.",
+  steps: [
+    {
+      type: "read-inbox",
+      bindings: {
+        institution: { source: "runtime", fieldKey: "institution" },
+        conversationId: { source: "literal", value: "unread" },
+      },
+    },
+    {
+      type: "detect-meeting-request",
+      bindings: {
+        thread: { source: "step", stepIndex: 0, outputKey: "thread" },
+      },
+      runIf: {
+        binding: { source: "step", stepIndex: 0, outputKey: "hasUnread" },
+        expected: true,
+      },
+    },
+    {
+      type: "find-open-slots",
+      bindings: {
+        timeZone: { source: "runtime", fieldKey: "timeZone" },
+      },
+      runIf: {
+        binding: { source: "step", stepIndex: 1, outputKey: "isMeetingRequest" },
+        expected: true,
+      },
+    },
+    {
+      type: "draft-meeting-reply",
+      bindings: {
+        thread: { source: "step", stepIndex: 0, outputKey: "thread" },
+        slotsIso: { source: "step", stepIndex: 2, outputKey: "slotsIso" },
+        timeZone: { source: "runtime", fieldKey: "timeZone" },
+      },
+    },
+    {
+      type: "save-message-draft",
+      bindings: {
+        body: { source: "step", stepIndex: 3, outputKey: "reply" },
+        kind: { source: "literal", value: "reply" },
+        context: { source: "step", stepIndex: 0, outputKey: "thread" },
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+  ],
+};
+
+export const GRADE_WHEN_NEEDED: WorkflowDef = {
+  id: "grade-when-needed",
+  preset: true,
+  name: "Grade When Needed",
+  description:
+    "Check whether anything needs grading at the institution; only when there is work, run the unattended draft grader. The cheap check runs every tick, the expensive grading only when needed - ideal on a schedule.",
+  steps: [
+    {
+      type: "check-needs-grading",
+      bindings: {
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+    {
+      type: "grade-to-draft",
+      bindings: {
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+      runIf: {
+        binding: { source: "step", stepIndex: 0, outputKey: "hasWork" },
+        expected: true,
+      },
+    },
+  ],
+};
+
+export const DEADLINE_REMINDER_DRAFTS: WorkflowDef = {
+  id: "deadline-reminder-drafts",
+  preset: true,
+  name: "Upcoming Deadline Reminders",
+  description:
+    "Find every deadline in the next 3 days, draft a friendly reminder announcement about them, and save it to Drafts > Messages for review - only when something is actually due.",
+  steps: [
+    {
+      type: "list-upcoming-deadlines",
+      bindings: {
+        courses: { source: "runtime", fieldKey: "courses" },
+        daysAhead: { source: "literal", value: "3" },
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+    {
+      type: "compose-briefing",
+      bindings: {
+        title: { source: "literal", value: "Draft a friendly reminder announcement for these upcoming deadlines" },
+        section1: { source: "step", stepIndex: 0, outputKey: "deadlines" },
+      },
+      runIf: {
+        binding: { source: "step", stepIndex: 0, outputKey: "hasUpcoming" },
+        expected: true,
+      },
+    },
+    {
+      type: "draft-announcement",
+      bindings: {
+        instruction: { source: "step", stepIndex: 1, outputKey: "briefing" },
+      },
+    },
+    {
+      type: "save-message-draft",
+      bindings: {
+        kind: { source: "literal", value: "announcement" },
+        body: { source: "step", stepIndex: 2, outputKey: "announcement" },
+        title: { source: "step", stepIndex: 2, outputKey: "announcementTitle" },
+        courseUrl: { source: "runtime", fieldKey: "courseUrl" },
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+  ],
+};
+
+export const NUDGE_MISSING_SUBMISSIONS: WorkflowDef = {
+  id: "nudge-missing-submissions",
+  preset: true,
+  name: "Nudge Missing Submissions",
+  description:
+    "List every student missing past-due work in a course, then draft a short personalized reminder to each, saved to Drafts > Messages. Pair it with the 'An assignment deadline passes' trigger to nudge automatically after every deadline - you still approve every message.",
+  steps: [
+    {
+      type: "list-missing-submissions",
+      bindings: {
+        course: { source: "runtime", fieldKey: "course" },
+        assignment: { source: "runtime", fieldKey: "assignment" },
+      },
+    },
+    {
+      type: "draft-student-nudges",
+      bindings: {
+        course: { source: "runtime", fieldKey: "course" },
+        missingJson: { source: "step", stepIndex: 0, outputKey: "missingJson" },
+        extraNotes: { source: "runtime", fieldKey: "extraNotes" },
+      },
+      runIf: {
+        binding: { source: "step", stepIndex: 0, outputKey: "hasMissing" },
+        expected: true,
+      },
+    },
+  ],
+};
+
+export const QUIZ_PIPELINE: WorkflowDef = {
+  id: "quiz-pipeline",
+  preset: true,
+  name: "Quiz from Repo (end to end)",
+  description:
+    "Mine a repo's topics, generate questions, create the (unpublished) Canvas quiz shell, and import the questions into it - the whole quiz pipeline in one run. Publish from Canvas when happy.",
+  steps: [
+    {
+      type: "extract-topics-from-repo",
+      bindings: {
+        repo: { source: "runtime", fieldKey: "repo" },
+      },
+    },
+    {
+      type: "generate-quiz-from-material",
+      bindings: {
+        material: { source: "step", stepIndex: 0, outputKey: "topics" },
+        count: { source: "runtime", fieldKey: "count" },
+      },
+    },
+    {
+      type: "create-canvas-quiz",
+      bindings: {
+        course: { source: "runtime", fieldKey: "course" },
+        title: { source: "runtime", fieldKey: "quizTitle" },
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+    {
+      type: "import-quiz-questions",
+      bindings: {
+        course: { source: "runtime", fieldKey: "course" },
+        quizId: { source: "step", stepIndex: 2, outputKey: "quizId" },
+        questionsJson: { source: "step", stepIndex: 1, outputKey: "questionsJson" },
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+  ],
+};
+
+export const COURSE_HEALTH_CHECK: WorkflowDef = {
+  id: "course-health-check",
+  preset: true,
+  name: "Course Health Check",
+  description:
+    "One report card per course: broken links in the LMS, gradebook averages with at-risk students, and stale student repos - composed into a single briefing (saved to Files on unattended runs).",
+  steps: [
+    {
+      type: "check-broken-links",
+      bindings: {
+        course: { source: "runtime", fieldKey: "courses" },
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+    {
+      type: "gradebook-health-report",
+      bindings: {
+        courses: { source: "runtime", fieldKey: "courses" },
+        threshold: { source: "runtime", fieldKey: "threshold" },
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+    {
+      type: "check-student-activity",
+      bindings: {
+        org: { source: "runtime", fieldKey: "org" },
+        prefix: { source: "runtime", fieldKey: "prefix" },
+      },
+    },
+    {
+      type: "compose-briefing",
+      bindings: {
+        title: { source: "literal", value: "Course Health Check" },
+        section1: { source: "step", stepIndex: 0, outputKey: "brokenLinks" },
+        section2: { source: "step", stepIndex: 1, outputKey: "report" },
+        section3: { source: "step", stepIndex: 2, outputKey: "activity" },
+      },
+    },
+  ],
+};
+
+export const COPILOT_PR_SHEPHERD: WorkflowDef = {
+  id: "copilot-pr-shepherd",
+  preset: true,
+  name: "Copilot PR Shepherd",
+  description:
+    "See every Copilot agent task and its pull request on a repo, read a PR's full diff, leave your review verdict, and merge - one guided pass instead of four GitHub tabs. Attended by design.",
+  steps: [
+    {
+      type: "poll-copilot-tasks",
+      bindings: {
+        repo: { source: "runtime", fieldKey: "repo" },
+      },
+    },
+    {
+      type: "read-pr-diff",
+      bindings: {
+        repo: { source: "runtime", fieldKey: "repo" },
+        prNumber: { source: "runtime", fieldKey: "prNumber" },
+      },
+    },
+    {
+      type: "review-pull-request",
+      bindings: {
+        repo: { source: "runtime", fieldKey: "repo" },
+        prNumber: { source: "runtime", fieldKey: "prNumber" },
+        verdict: { source: "runtime", fieldKey: "verdict" },
+        body: { source: "runtime", fieldKey: "reviewComment" },
+      },
+    },
+    {
+      type: "merge-pull-request",
+      bindings: {
+        repo: { source: "runtime", fieldKey: "repo" },
+        prNumber: { source: "runtime", fieldKey: "prNumber" },
+        method: { source: "runtime", fieldKey: "method" },
+      },
+    },
+  ],
+};
+
 /**
  * Merge built-in presets with custom workflows.
  * Returns presets first, then custom workflows.
@@ -875,6 +1226,15 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     REPO_AGENT_UPDATE,
     STUDENT_REPOS,
     CLASS_ROSTER_AND_REPOS,
+    MORNING_BRIEFING,
+    INBOX_REPLY_DRAFTS,
+    MEETING_REQUEST_AUTOPILOT,
+    GRADE_WHEN_NEEDED,
+    DEADLINE_REMINDER_DRAFTS,
+    NUDGE_MISSING_SUBMISSIONS,
+    QUIZ_PIPELINE,
+    COURSE_HEALTH_CHECK,
+    COPILOT_PR_SHEPHERD,
     ...custom,
   ];
 }

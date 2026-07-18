@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scaffoldAnnouncement, scaffoldMessageReply } from "./communication";
+import { scaffoldAnnouncement, scaffoldMessageReply, scaffoldStudentNudge } from "./communication";
 
 describe("scaffoldAnnouncement", () => {
   it("derives a subject line and wraps the instruction in a body", () => {
@@ -54,5 +54,29 @@ describe("scaffoldMessageReply", () => {
     const r = scaffoldMessageReply("Pat: I missed the deadline.", "let them resubmit by Friday");
     expect(r.body).toMatch(/\[Respond here\./);
     expect(r.body).toContain("resubmit by Friday");
+  });
+});
+
+describe("scaffoldStudentNudge", () => {
+  it("greets the student by first name and lists missing assignments as bullets", () => {
+    const nudge = scaffoldStudentNudge("Alice Johnson", ["Homework 1", "Quiz 2"], "");
+    expect(nudge).toContain("Hi Alice,");
+    expect(nudge).toContain("- Homework 1");
+    expect(nudge).toContain("- Quiz 2");
+    expect(nudge).toContain("Best,");
+    expect(nudge).toContain("Your instructor");
+  });
+
+  it("folds in extra notes when provided", () => {
+    const nudge = scaffoldStudentNudge("Bob Smith", ["Project"], "Remember you can submit up to 3 days late.");
+    expect(nudge).toContain("- Project");
+    expect(nudge).toContain("Remember you can submit up to 3 days late.");
+  });
+
+  it("falls back to a generic greeting when the name has no recognizable parts", () => {
+    const nudge = scaffoldStudentNudge("123", ["Assignment"], "");
+    expect(nudge).toContain("Hi,");
+    expect(nudge).toContain("- Assignment");
+    expect(nudge).toMatch(/reach out/i);
   });
 });

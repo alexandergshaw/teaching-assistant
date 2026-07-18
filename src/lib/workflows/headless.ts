@@ -127,6 +127,17 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "export-course-cartridge",
   "course-progress",
   "generate-presentation-from-template",
+  // Run without pausing; creating quiz questions unattended matches the
+  // lms-assignments precedent and completes the scheduled quiz pipeline.
+  "import-quiz-questions",
+  "list-upcoming-deadlines",
+  "list-missing-submissions",
+  // Draft-only; never sends until a human reviews in the Drafts UI.
+  "draft-student-nudges",
+  "compose-briefing",
+  // Creates the quiz unpublished; publish from Canvas when ready.
+  "create-canvas-quiz",
+  "gradebook-health-report",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

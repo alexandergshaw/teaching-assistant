@@ -108,3 +108,33 @@ export function scaffoldMessageReply(threadText: string, instructions = ""): { b
 
   return { body: stripLongDashes(lines.join("\n\n")) };
 }
+
+/**
+ * A warm, short reminder to a student with missing submissions. Greets by
+ * first name, lists the missing assignments, folds in optional notes, and
+ * offers help. Deterministic templating with no LLM involvement.
+ */
+export function scaffoldStudentNudge(studentName: string, missingAssignments: string[], extraNotes: string): string {
+  const first = studentName.split(/\s+/)[0]?.replace(/[^A-Za-z'-]/g, "") || "";
+  const greeting = first ? `Hi ${capitalizeFirst(first)},` : "Hi,";
+
+  const lines: string[] = [greeting];
+
+  if (missingAssignments.length > 0) {
+    lines.push("I noticed you haven't submitted the following:");
+    missingAssignments.forEach((assignment) => {
+      lines.push(`- ${assignment}`);
+    });
+    lines.push("If you're having trouble or need an extension, please reach out.");
+  } else {
+    lines.push("I wanted to check in about your recent submissions.");
+  }
+
+  if (extraNotes.trim()) {
+    lines.push(extraNotes.trim());
+  }
+
+  lines.push("Best,\nYour instructor");
+
+  return stripLongDashes(lines.join("\n\n"));
+}

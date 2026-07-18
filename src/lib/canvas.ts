@@ -893,6 +893,43 @@ export async function listCourseRoster(code: string, courseId: string): Promise<
   return entries;
 }
 
+/** List students' current and final scores for a course. */
+export async function listStudentGradeSummaries(
+  code: string,
+  courseId: string
+): Promise<Array<{ userId: string; name: string; currentScore: number | null; finalScore: number | null }>> {
+  const { institution, token, baseUrl } = resolveInstitutionByCode(code);
+  let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/enrollments?type[]=StudentEnrollment&state[]=active&per_page=100`;
+  const summaries: Array<{ userId: string; name: string; currentScore: number | null; finalScore: number | null }> = [];
+
+  while (next) {
+    const response = await fetch(next, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      throw canvasError(response.status, institution);
+    }
+    const page = (await response.json()) as Array<{
+      user_id?: number;
+      user?: { name?: string; sortable_name?: string };
+      grades?: { current_score?: number | null; final_score?: number | null };
+    }>;
+    for (const row of page) {
+      if (typeof row.user_id === "number") {
+        summaries.push({
+          userId: String(row.user_id),
+          name: row.user?.name ?? row.user?.sortable_name ?? "Student",
+          currentScore: row.grades?.current_score ?? null,
+          finalScore: row.grades?.final_score ?? null,
+        });
+      }
+    }
+    next = parseNextLink(response.headers.get("link"));
+  }
+
+  return summaries;
+}
+
 /** A student's text submission from an assignment. */
 export interface CanvasTextSubmission {
   userId: number;
@@ -1809,6 +1846,44 @@ export async function setConversationWorkflowState(
 
   const response = await fetch(`${baseUrl}/api/v1/conversations/${id}`, {
     method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: params.toString(),
+  });
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+}
+
+/** Create a new conversation (direct message) to one student in a course. */
+export async function createConversation(
+  courseUrl: string,
+  recipientUserId: string,
+  body: string,
+  subject?: string
+): Promise<void> {
+  if (!body.trim()) throw new Error("A message needs a body.");
+  const { institution, token, baseUrl } = resolveInstitution(courseUrl);
+
+  const courseIdMatch = courseUrl.match(/\/courses\/(\d+)/);
+  if (!courseIdMatch) {
+    throw new Error("Could not read a course from that URL. Expected a link like .../courses/123.");
+  }
+  const courseId = courseIdMatch[1];
+
+  const params = new URLSearchParams();
+  params.append("recipients[]", recipientUserId);
+  params.append("body", body.trim());
+  if (subject && subject.trim()) {
+    params.append("subject", subject.trim());
+  }
+  params.append("context_code", `course_${courseId}`);
+  params.append("force_new", "1");
+
+  const response = await fetch(`${baseUrl}/api/v1/conversations`, {
+    method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/x-www-form-urlencoded",

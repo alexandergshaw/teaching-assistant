@@ -147,6 +147,10 @@ import {
   generateDeckFromTemplateAction,
   savePresentationDraftAction,
   savePresentationFileAction,
+  listMissingSubmissionsAction,
+  draftStudentNudgesAction,
+  listCourseGradeSummariesAction,
+  listCourseAssignmentDueDatesAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import { extractGithubHandle } from "@/lib/github-usernames";
@@ -6840,6 +6844,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "needsGrading", label: "Submissions needing grading", type: "number" },
       { key: "unread", label: "Unread messages", type: "number" },
       { key: "hasWork", label: "Has work waiting", type: "boolean" },
+      { key: "summary", label: "Summary", type: "longtext" },
     ],
     run: async (values, helpers, onProgress) => {
       const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || "";
@@ -6861,6 +6866,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           needsGrading,
           unread,
           hasWork: needsGrading > 0 ? "1" : "",
+          summary: `${inst}: ${needsGrading} submission(s) need grading, ${unread} unread message(s)`,
         },
         summary: {
           kind: "text",
@@ -10800,6 +10806,371 @@ export const STEP_REGISTRY: StepDefinition[] = [
         }
       }
       return { outputs: { deleted }, summary: { kind: "list", label: `Deleted ${deleted} of ${r.results.length} repo(s)`, items: lines.length ? lines : ["(none)"] } };
+    },
+  },
+
+  {
+    type: "list-upcoming-deadlines",
+    name: "List upcoming deadlines",
+    description:
+      "List every published assignment with a due date inside the next N days across the chosen Canvas courses. Feed the list to an announcement draft or a briefing.",
+    inputs: [
+      { key: "courses", label: "LMS courses", type: "lmsCourseList", required: true, help: "One, several, or all courses at the institution." },
+      { key: "daysAhead", label: "Days ahead", type: "number", required: false, help: "How many days ahead to look. Default 7." },
+      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
+    ],
+    outputs: [
+      { key: "deadlines", label: "Upcoming deadlines", type: "longtext" },
+      { key: "count", label: "How many", type: "number" },
+      { key: "hasUpcoming", label: "Any upcoming?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || "";
+      if (!inst) {
+        throw new Error("Provide an institution (or set one active).");
+      }
+
+      const daysAheadRaw = String(values.daysAhead ?? "").trim();
+      const daysAhead = Number.isFinite(Number(daysAheadRaw)) && Number(daysAheadRaw) >= 1 ? Math.floor(Number(daysAheadRaw)) : 7;
+
+      const courseLines = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      onProgress("Checking deadlines...");
+
+      const lines: string[] = [];
+      const now = Date.now();
+      const cutoff = now + daysAhead * 864e5;
+      let matches = 0;
+      const multi = courseLines.length > 1;
+
+      for (const courseUrl of courseLines) {
+        const courseId = parseCanvasCourseId(courseUrl);
+        if (!courseId) {
+          lines.push(`${courseUrl}: Invalid Canvas course URL.`);
+          continue;
+        }
+
+        const res = await listCourseAssignmentDueDatesAction(inst, courseId);
+        if ("error" in res) {
+          lines.push(`${courseUrl}: ${res.error}`);
+          continue;
+        }
+
+        if (multi) lines.push(`# ${courseUrl}`);
+
+        const upcoming = res.assignments.filter((a) => {
+          if (a.dueAt === null) return false;
+          const dueTime = new Date(a.dueAt).getTime();
+          return dueTime >= now && dueTime <= cutoff;
+        });
+
+        for (const a of upcoming) {
+          matches++;
+          const dueStr = new Date(a.dueAt!).toLocaleString();
+          lines.push(`- ${a.name} - due ${dueStr}`);
+        }
+      }
+
+      const deadlines = matches > 0 ? lines.join("\n") : `No deadlines in the next ${daysAhead} day(s).`;
+
+      return {
+        outputs: {
+          deadlines,
+          count: String(matches),
+          hasUpcoming: matches > 0 ? "1" : "",
+        },
+        summary: matches > 0
+          ? { kind: "list", label: `Deadlines in the next ${daysAhead} day(s)`, items: lines.filter((l) => !l.startsWith("#")) }
+          : { kind: "text", text: deadlines },
+      };
+    },
+  },
+
+  {
+    type: "list-missing-submissions",
+    name: "List missing submissions",
+    description:
+      "Report every student who has not submitted a past-due assignment in a Canvas course (already-graded students and unexpired extensions are skipped). Report only - drafts nothing; pair with Draft student nudges or Draft zeros for missing submissions.",
+    inputs: [
+      { key: "course", label: "Course", type: "lmsCourse", required: true, help: "The Canvas course URL." },
+      { key: "assignment", label: "Assignment (optional)", type: "text", required: false, help: "A single assignment URL or id. Leave empty to sweep every past-due assignment in the course." },
+    ],
+    outputs: [
+      { key: "missingJson", label: "Missing (JSON)", type: "longtext" },
+      { key: "missing", label: "Missing (readable)", type: "longtext" },
+      { key: "count", label: "How many", type: "number" },
+      { key: "hasMissing", label: "Any missing?", type: "boolean" },
+    ],
+    run: async (values) => {
+      const courseUrl = String(values.course ?? "").trim();
+      if (!courseUrl) {
+        throw new Error("Select an LMS course.");
+      }
+
+      const res = await listMissingSubmissionsAction({
+        courseUrl,
+        assignmentId: String(values.assignment ?? "").trim() || undefined,
+      });
+      if ("error" in res) {
+        throw new Error(res.error);
+      }
+
+      const missingJson = JSON.stringify(res.missing);
+      const pairs = res.missing.reduce((sum, a) => sum + a.students.length, 0);
+
+      const missingLines: string[] = [];
+      for (const assignment of res.missing) {
+        missingLines.push(`${assignment.assignmentName} (due ${assignment.dueAt ?? "unknown"})`);
+        for (const student of assignment.students) {
+          missingLines.push(`- ${student.name}`);
+        }
+      }
+
+      const missing = missingLines.length > 0 ? missingLines.join("\n") : "No missing submissions found.";
+
+      return {
+        outputs: {
+          missingJson,
+          missing,
+          count: String(pairs),
+          hasMissing: pairs > 0 ? "1" : "",
+        },
+        summary: { kind: "text", text: res.summary },
+      };
+    },
+  },
+
+  {
+    type: "draft-student-nudges",
+    name: "Draft student nudges",
+    description:
+      "Draft one short, personalized reminder message per student with missing work, saved to Drafts > Messages for review. Nothing is sent until you approve each message.",
+    inputs: [
+      { key: "course", label: "Course", type: "lmsCourse", required: true, help: "The Canvas course URL." },
+      { key: "missingJson", label: "Missing submissions (JSON)", type: "longtext", required: true, help: "Wired from List missing submissions." },
+      { key: "extraNotes", label: "Extra notes (optional)", type: "longtext", required: false, help: "Folded into every nudge - e.g. mention the late policy or an upcoming deadline." },
+    ],
+    outputs: [
+      { key: "drafted", label: "Drafts saved", type: "number" },
+      { key: "hasDrafted", label: "Any drafted?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const courseUrl = String(values.course ?? "").trim();
+      if (!courseUrl) {
+        throw new Error("Select an LMS course.");
+      }
+
+      const missingJson = String(values.missingJson ?? "").trim();
+      if (!missingJson) {
+        throw new Error("Provide the missing submissions JSON.");
+      }
+
+      const extraNotes = String(values.extraNotes ?? "").trim();
+
+      onProgress("Drafting nudges...");
+      const res = await draftStudentNudgesAction(courseUrl, missingJson, extraNotes, helpers.provider, helpers.workflowId, helpers.workflowName);
+      if ("error" in res) {
+        throw new Error(res.error);
+      }
+
+      return {
+        outputs: {
+          drafted: String(res.drafted),
+          hasDrafted: res.drafted > 0 ? "1" : "",
+        },
+        summary: {
+          kind: "text",
+          text: res.drafted > 0
+            ? `Drafted ${res.drafted} nudge message(s) - review in Drafts > Messages.`
+            : "No nudges drafted - no students with missing work.",
+        },
+      };
+    },
+  },
+
+  {
+    type: "compose-briefing",
+    name: "Compose a briefing",
+    description:
+      "Stitch up to four text sections into one titled Markdown briefing - deterministic, no AI. Unattended runs save it to the Files tab via the run report.",
+    inputs: [
+      { key: "title", label: "Title", type: "text", required: true },
+      { key: "section1", label: "Section 1", type: "longtext", required: false, help: "Sections are included in order; empty ones are skipped." },
+      { key: "section2", label: "Section 2", type: "longtext", required: false },
+      { key: "section3", label: "Section 3", type: "longtext", required: false },
+      { key: "section4", label: "Section 4", type: "longtext", required: false },
+    ],
+    outputs: [
+      { key: "briefing", label: "Briefing", type: "longtext" },
+    ],
+    run: async (values) => {
+      const title = String(values.title ?? "").trim();
+      if (!title) {
+        throw new Error("Provide a title for the briefing.");
+      }
+
+      const sections = [1, 2, 3, 4]
+        .map((i) => String(values[`section${i}` as keyof typeof values] ?? "").trim())
+        .filter(Boolean);
+
+      const briefing = `# ${title}` + (sections.length > 0 ? `\n\n${sections.join("\n\n")}` : "");
+
+      return {
+        outputs: { briefing },
+        summary: { kind: "text", text: briefing },
+      };
+    },
+  },
+
+  {
+    type: "create-canvas-quiz",
+    name: "Create a Canvas quiz",
+    description:
+      "Create an empty classic quiz (unpublished) in a Canvas course, ready for Import quiz questions. Points come from the questions you import; publish it from Canvas when ready.",
+    inputs: [
+      { key: "course", label: "LMS course", type: "lmsCourse", required: true },
+      { key: "title", label: "Quiz title", type: "text", required: true },
+      { key: "description", label: "Description (optional)", type: "longtext", required: false },
+      { key: "dueAt", label: "Due date (optional)", type: "date", required: false },
+      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the institution matching the course URL." },
+    ],
+    outputs: [
+      { key: "quizId", label: "Quiz id", type: "text" },
+      { key: "quizUrl", label: "Quiz URL", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const courseUrl = String(values.course ?? "").trim();
+      if (!courseUrl) {
+        throw new Error("Select an LMS course.");
+      }
+
+      const title = String(values.title ?? "").trim();
+      if (!title) {
+        throw new Error("Provide a quiz title.");
+      }
+
+      const description = String(values.description ?? "").trim() || undefined;
+      const dueAt = String(values.dueAt ?? "").trim() || null;
+      const inst = String(values.institution ?? "").trim() || undefined;
+
+      onProgress("Creating quiz...");
+      const res = await createGradableAction(courseUrl, "Quiz", { title, description, dueAt }, inst);
+      if ("error" in res) {
+        throw new Error(res.error);
+      }
+
+      const quizId = String(res.id);
+      const quizUrl = `${courseUrl.replace(/\/+$/, "")}/quizzes/${quizId}`;
+
+      return {
+        outputs: { quizId, quizUrl },
+        summary: { kind: "link", label: title, url: quizUrl },
+      };
+    },
+  },
+
+  {
+    type: "gradebook-health-report",
+    name: "Gradebook health report",
+    description:
+      "Pull every student's current score for the chosen courses, compute the class average, and flag at-risk students below a threshold (or with no score yet).",
+    inputs: [
+      { key: "courses", label: "LMS courses", type: "lmsCourseList", required: true, help: "One, several, or all courses at the institution." },
+      { key: "threshold", label: "At-risk below (percent)", type: "number", required: false, help: "Default 70." },
+      { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
+    ],
+    outputs: [
+      { key: "report", label: "Report", type: "longtext" },
+      { key: "atRisk", label: "At-risk students", type: "longtext" },
+      { key: "count", label: "At-risk count", type: "number" },
+      { key: "hasAtRisk", label: "Any at risk?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || "";
+      if (!inst) {
+        throw new Error("Provide an institution (or set one active).");
+      }
+
+      const thresholdRaw = String(values.threshold ?? "").trim();
+      const threshold = Number.isFinite(Number(thresholdRaw)) && Number(thresholdRaw) >= 0 ? Number(thresholdRaw) : 70;
+
+      const courseLines = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const reportLines: string[] = [];
+      const atRiskLines: string[] = [];
+      let totalAtRisk = 0;
+      const multi = courseLines.length > 1;
+
+      for (const courseUrl of courseLines) {
+        const courseId = parseCanvasCourseId(courseUrl);
+        if (!courseId) {
+          reportLines.push(`${courseUrl}: Invalid Canvas course URL.`);
+          continue;
+        }
+
+        onProgress(`Reading gradebook for ${multi ? courseUrl : "..."}`);
+
+        const res = await listCourseGradeSummariesAction(inst, courseId);
+        if ("error" in res) {
+          reportLines.push(`${courseUrl}: ${res.error}`);
+          continue;
+        }
+
+        reportLines.push(`## ${courseUrl}`);
+
+        const scores = res.students.map((s) => (s.currentScore !== null ? s.currentScore : null)).filter((s) => s !== null) as number[];
+        const avg = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : null;
+
+        if (avg !== null) {
+          reportLines.push(`Average current score: ${avg}% (${res.students.length} student(s))`);
+        } else {
+          reportLines.push("Average current score: no scores yet");
+        }
+
+        const courseAtRisk: string[] = [];
+        for (const student of res.students) {
+          const isAtRisk = student.currentScore === null || student.currentScore < threshold;
+          if (isAtRisk) {
+            totalAtRisk++;
+            const scoreStr = student.currentScore !== null ? `${student.currentScore}%` : "no score yet";
+            const line = `- ${student.name} - ${scoreStr}`;
+            courseAtRisk.push(line);
+          }
+        }
+
+        if (courseAtRisk.length > 0) {
+          reportLines.push("At risk:");
+          reportLines.push(...courseAtRisk);
+        } else {
+          reportLines.push("No students at risk.");
+        }
+
+        if (multi) {
+          atRiskLines.push(`# ${courseUrl}`);
+          atRiskLines.push(...courseAtRisk);
+        } else {
+          atRiskLines.push(...courseAtRisk);
+        }
+      }
+
+      const report = reportLines.join("\n");
+      const atRisk = atRiskLines.length > 0 ? atRiskLines.join("\n") : "(no at-risk students)";
+
+      return {
+        outputs: {
+          report,
+          atRisk,
+          count: String(totalAtRisk),
+          hasAtRisk: totalAtRisk > 0 ? "1" : "",
+        },
+        summary: { kind: "text", text: report },
+      };
     },
   },
 ];

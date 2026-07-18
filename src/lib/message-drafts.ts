@@ -16,7 +16,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "./supabase/types";
 
 export type MessageDraftStatus = "pending" | "reviewed";
-export type MessageDraftKind = "reply" | "announcement";
+export type MessageDraftKind = "reply" | "announcement" | "message";
 
 export interface MessageDraftPayload {
   kind: MessageDraftKind;
@@ -26,6 +26,8 @@ export interface MessageDraftPayload {
   title?: string;
   institution?: string;
   context?: string;
+  recipientUserId?: string;
+  recipientName?: string;
 }
 
 export interface MessageDraft {
@@ -44,17 +46,22 @@ type DraftRow = Database["public"]["Tables"]["message_drafts"]["Row"];
 
 /** Coerce an untyped jsonb payload into a typed MessageDraftPayload,
  * dropping anything malformed rather than throwing - a hand-edited or
- * partially-written row degrades gracefully. */
+ * partially-written row degrades gracefully. Kind "message" represents a new
+ * conversation to one student; recipientUserId and recipientName (both Canvas
+ * user id as string and display name) are required to post a message draft. */
 export function coerceMessageDraftPayload(raw: unknown): MessageDraftPayload {
   if (!raw || typeof raw !== "object") return { kind: "reply", body: "" };
   const o = raw as Record<string, unknown>;
-  const kind = String(o.kind ?? "").trim().toLowerCase() === "announcement" ? "announcement" : "reply";
+  const kindStr = String(o.kind ?? "").trim().toLowerCase();
+  const kind: MessageDraftKind = kindStr === "announcement" || kindStr === "message" ? (kindStr as MessageDraftKind) : "reply";
   const body = typeof o.body === "string" ? o.body : "";
   const conversationId = typeof o.conversationId === "string" ? o.conversationId : undefined;
   const courseUrl = typeof o.courseUrl === "string" ? o.courseUrl : undefined;
   const title = typeof o.title === "string" ? o.title : undefined;
   const institution = typeof o.institution === "string" ? o.institution : undefined;
   const context = typeof o.context === "string" ? o.context : undefined;
+  const recipientUserId = typeof o.recipientUserId === "string" ? o.recipientUserId.trim() || undefined : undefined;
+  const recipientName = typeof o.recipientName === "string" ? o.recipientName.trim() || undefined : undefined;
 
   return {
     kind,
@@ -64,6 +71,8 @@ export function coerceMessageDraftPayload(raw: unknown): MessageDraftPayload {
     ...(title ? { title } : {}),
     ...(institution ? { institution } : {}),
     ...(context ? { context } : {}),
+    ...(recipientUserId ? { recipientUserId } : {}),
+    ...(recipientName ? { recipientName } : {}),
   };
 }
 

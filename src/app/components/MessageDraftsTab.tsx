@@ -139,7 +139,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
       setDrafts((prev) => (prev ? prev.filter((d) => d.id !== draft.id) : null));
       refreshBadge();
       const successMsg =
-        draft.payload.kind === "reply" ? "Reply sent." : "Announcement posted.";
+        draft.payload.kind === "reply" ? "Reply sent." : draft.payload.kind === "message" ? "Message sent." : "Announcement posted.";
       setNote({ kind: "success", text: successMsg });
     } catch (err) {
       setNote({ kind: "error", text: err instanceof Error ? err.message : "Could not post the message." });
@@ -170,7 +170,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
       <TabHeader
         eyebrow="Drafts"
         title="Drafted messages"
-        subtitle="AI-drafted replies and announcements awaiting review. Edit and send them here; nothing is sent until you post."
+        subtitle="AI-drafted replies, messages, and announcements awaiting review. Edit and send them here; nothing is sent until you post."
       />
 
       {note && (
@@ -211,11 +211,13 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                   <div className={styles.draftSectionHead}>
                     <div>
                       <div className={styles.draftSectionTitle}>
-                        {draft.summary || (draft.payload.kind === "reply" ? "Drafted reply" : "Drafted announcement")}
+                        {draft.summary || (draft.payload.kind === "reply" ? "Drafted reply" : draft.payload.kind === "message" ? "Drafted message" : "Drafted announcement")}
                       </div>
                       <div className={styles.draftSectionMeta}>
                         {formatDateTime(draft.createdAt)} · {draft.payload.kind === "reply"
                           ? `reply to conversation ${draft.payload.conversationId ?? "?"}`
+                          : draft.payload.kind === "message"
+                          ? `message to ${draft.payload.recipientName || "student"}`
                           : `announcement${draft.payload.title ? `: ${draft.payload.title}` : ""}`}
                       </div>
                       {draft.workflowId && draft.workflowName && onOpenWorkflow && (

@@ -31,7 +31,7 @@ import { SLIDE_DECK_JSON_SHAPE, SLIDE_STRUCTURE_REQUIREMENTS, slideDeckJsonShape
 import { detectMeetingRequestEmbedded } from "@/lib/embedded/meeting";
 import { scaffoldModuleIntro, scaffoldAssignment } from "@/lib/embedded/content";
 import { scaffoldLessonPlan, scaffoldExamples } from "@/lib/embedded/deck";
-import { scaffoldAnnouncement, scaffoldMessageReply } from "@/lib/embedded/communication";
+import { scaffoldAnnouncement, scaffoldMessageReply, scaffoldStudentNudge } from "@/lib/embedded/communication";
 import { scaffoldDocument, scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
 import { deriveAltTextFromHtml, deriveLinkTextFromHtml } from "@/lib/embedded/accessibility";
 import { scaffoldCourseProjectRubric, scaffoldCourseOutline, scaffoldCopilotPrompt } from "@/lib/embedded/course";
@@ -65,6 +65,7 @@ import {
   listConversations,
   getConversation,
   replyToConversation,
+  createConversation,
   listGradingQueue,
   getNeedsGradingCount,
   getUnreadCount,
@@ -80,6 +81,7 @@ import {
   fetchSubmissionDetail,
   listAssignmentNonSubmitters,
   listAssignmentBriefsWithDue,
+  listStudentGradeSummaries,
   type CanvasAnnouncement,
   type CanvasConversationSummary,
   type CanvasConversationDetail,
@@ -1098,6 +1100,134 @@ export async function saveGradingDraftAction(
   }
 }
 
+export type MissingAssignmentReport = {
+  assignmentId: string;
+  assignmentName: string;
+  dueAt: string | null;
+  pointsPossible: number | null;
+  students: Array<{ userId: number; name: string }>;
+};
+
+/**
+ * List every student who has not submitted a past-due assignment in a Canvas
+ * course (already-graded students and unexpired extensions are skipped).
+ * Report only - creates no draft, writes nothing.
+ */
+export async function listMissingSubmissionsAction(input: {
+  courseUrl: string;
+  assignmentId?: string;
+}): Promise<{ missing: MissingAssignmentReport[]; summary: string } | { error: string }> {
+  try {
+    await requireOwner();
+
+    // Resolve institution/token from course URL
+    const { baseUrl, token, institution } = resolveInstitution(input.courseUrl);
+
+    // Parse course ID from URL
+    const courseMatch = input.courseUrl.match(/courses\/(\d+)/);
+    if (!courseMatch || !courseMatch[1]) {
+      return { error: "Could not parse the Canvas course ID from the URL." };
+    }
+    const courseId = courseMatch[1];
+
+    // Get current time for due date comparison
+    const nowIso = new Date().toISOString();
+
+    // Determine target assignment IDs
+    let targetIds: string[] = [];
+    if (input.assignmentId && input.assignmentId.trim()) {
+      // Single assignment: extract numeric ID from URL or bare id
+      const assignId = input.assignmentId.trim();
+      const match = assignId.match(/assignments\/(\d+)/);
+      const bareId = match ? match[1] : /^\d+$/.test(assignId) ? assignId : null;
+      if (bareId) {
+        targetIds = [bareId];
+      } else {
+        return { error: "Could not parse the assignment ID. Provide a URL or numeric ID." };
+      }
+    } else {
+      // Sweep all past-due zeroable assignments
+      const briefs = await listAssignmentBriefsWithDue(baseUrl, token, institution, courseId);
+      const now = new Date(nowIso).getTime();
+      targetIds = briefs
+        .filter(
+          (b) =>
+            b.dueAt &&
+            new Date(b.dueAt).getTime() < now &&
+            isZeroableAssignment({
+              submissionTypes: b.submissionTypes,
+              gradingType: b.gradingType,
+              published: b.published,
+              omitFromFinalGrade: b.omitFromFinalGrade,
+            })
+        )
+        .map((b) => b.assignmentId);
+    }
+
+    if (targetIds.length === 0) {
+      return {
+        missing: [],
+        summary: "No missing submissions found.",
+      };
+    }
+
+    // Collect missing submissions per assignment
+    const missing: MissingAssignmentReport[] = [];
+
+    for (const assignmentId of targetIds) {
+      const result = await listAssignmentNonSubmitters(
+        baseUrl,
+        token,
+        institution,
+        courseId,
+        assignmentId,
+        nowIso
+      );
+
+      if (!result.eligible) {
+        if (input.assignmentId) {
+          return {
+            missing: [],
+            summary: `That assignment ${result.ineligibleReason ?? "cannot be processed"}.`,
+          };
+        }
+        continue;
+      }
+
+      if (result.nonSubmitters.length === 0) {
+        continue;
+      }
+
+      missing.push({
+        assignmentId,
+        assignmentName: result.assignmentName,
+        dueAt: result.dueAt ?? null,
+        pointsPossible: result.pointsPossible ?? null,
+        students: result.nonSubmitters.map((s) => ({
+          userId: s.userId,
+          name: s.name,
+        })),
+      });
+    }
+
+    if (missing.length === 0) {
+      return {
+        missing: [],
+        summary: "No missing submissions found.",
+      };
+    }
+
+    const totalStudents = missing.reduce((sum, a) => sum + a.students.length, 0);
+    const summary = `${totalStudents} student(s) missing work across ${missing.length} assignment(s).`;
+
+    return { missing, summary };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not list missing submissions.",
+    };
+  }
+}
+
 /**
  * Draft zeros for students who did not submit an assignment by its deadline.
  * Resolves the Canvas course URL, fetches non-submitters, builds grading entries,
@@ -1396,6 +1526,170 @@ export async function postGradingDraftAction(
 // happens through createAnnouncementAction or replyToConversationAction above,
 // called from the post-message step after the user approves a draft.
 
+/**
+ * Draft one short, personalized reminder message per student with missing work.
+ * Saved to Drafts > Messages for review. Nothing sends until approved.
+ * Falls back to deterministic scaffold if LLM fails.
+ */
+export async function draftStudentNudgesAction(
+  courseUrl: string,
+  missingJson: string,
+  extraNotes: string,
+  provider: LlmProvider = "gemini",
+  workflowId?: string,
+  workflowName?: string
+): Promise<{ drafted: number; preview: string } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+
+    // Parse missing assignments JSON
+    let missing: MissingAssignmentReport[];
+    try {
+      missing = JSON.parse(missingJson) as MissingAssignmentReport[];
+    } catch {
+      return { error: "Provide the missing-submissions JSON from List missing submissions." };
+    }
+
+    if (!Array.isArray(missing)) {
+      return { error: "Provide the missing-submissions JSON from List missing submissions." };
+    }
+
+    // Group by student userId
+    const studentMap = new Map<number, { name: string; lines: string[] }>();
+
+    for (const assignment of missing) {
+      for (const student of assignment.students) {
+        if (!studentMap.has(student.userId)) {
+          studentMap.set(student.userId, { name: student.name, lines: [] });
+        }
+        const line = `${assignment.assignmentName}${assignment.dueAt ? ` (was due ${assignment.dueAt})` : ""}`;
+        studentMap.get(student.userId)!.lines.push(line);
+      }
+    }
+
+    if (studentMap.size === 0) {
+      return { drafted: 0, preview: "No students to nudge." };
+    }
+
+    const students = Array.from(studentMap.entries())
+      .map(([userId, { name, lines }]) => ({ userId, name, lines }))
+      .sort((a, b) => a.userId - b.userId);
+
+    // Prepare messages per student
+    const studentMessages = new Map<number, { name: string; body: string }>();
+
+    if (provider === "embedded") {
+      // Use deterministic scaffold for each student
+      for (const { userId, name, lines } of students) {
+        const body = scaffoldStudentNudge(name, lines, extraNotes);
+        studentMessages.set(userId, { name, body });
+      }
+    } else {
+      // Use LLM to generate all nudges at once
+      const studentLines = students
+        .map((s) => `\nStudent: ${s.name} (ID: ${s.userId})\nMissing:\n${s.lines.map((l) => `  - ${l}`).join("\n")}`)
+        .join("\n");
+
+      const prompt = `You are an instructor sending personalized reminder messages to students with missing work.
+
+STUDENTS AND THEIR MISSING ASSIGNMENTS:
+${studentLines}
+
+EXTRA CONTEXT FOR ALL MESSAGES:
+${extraNotes.trim() || "(none)"}
+
+Draft one short, warm reminder message for EACH student. Messages should be plain text, no emojis, no threats. Mention each missing assignment by name. Fold in the extra context when relevant. Sign off "Your instructor".
+
+Return ONLY a valid JSON array with exactly one object per student:
+[
+  {"userId": 123, "message": "..."},
+  {"userId": 456, "message": "..."}
+]
+
+Do not include any text outside the JSON array.`;
+
+      const result = await callLlm(
+        {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.5, maxOutputTokens: 4096 },
+        },
+        provider
+      );
+
+      // Parse LLM result
+      let llmMessages: Array<{ userId: number; message: string }> = [];
+      if (result.ok) {
+        try {
+          const jsonText = jsonObjectSlice(result.text);
+          if (jsonText) {
+            const parsed = parseLenientJsonArray(jsonText);
+            if (parsed) {
+              llmMessages = parsed.map((obj: unknown) => {
+                const o = obj as { userId?: unknown; message?: unknown };
+                return {
+                  userId: typeof o.userId === "number" ? o.userId : -1,
+                  message: typeof o.message === "string" ? o.message : "",
+                };
+              });
+            }
+          }
+        } catch {
+          // Fall through to scaffold fallback
+        }
+      }
+
+      // Assign messages, fallback to scaffold for missing students
+      for (const { userId, name, lines } of students) {
+        const llmMsg = llmMessages.find((m) => m.userId === userId);
+        if (llmMsg && llmMsg.message.trim()) {
+          studentMessages.set(userId, { name, body: llmMsg.message.trim() });
+        } else {
+          const body = scaffoldStudentNudge(name, lines, extraNotes);
+          studentMessages.set(userId, { name, body });
+        }
+      }
+    }
+
+    // Save one draft per student
+    let drafted = 0;
+    let firstPreview = "";
+
+    for (const { userId, name, lines } of students) {
+      const msg = studentMessages.get(userId);
+      if (!msg) continue;
+
+      const context = lines.map((l) => `- ${l}`).join("\n");
+      const summary = `Nudge ${name} - ${lines.length} missing assignment(s)`;
+
+      await createMessageDraft(supabase, user.id, {
+        summary,
+        payload: {
+          kind: "message",
+          body: msg.body,
+          courseUrl,
+          recipientUserId: String(userId),
+          recipientName: name,
+          context,
+        },
+        workflowId,
+        workflowName,
+      });
+
+      drafted += 1;
+      if (drafted === 1) {
+        firstPreview = msg.body;
+      }
+    }
+
+    return { drafted, preview: firstPreview };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not draft student nudges.",
+    };
+  }
+}
+
 /** Save a new pending message draft. */
 export async function saveMessageDraftAction(
   summary: string,
@@ -1506,7 +1800,27 @@ export async function countPendingMessageDrafts(): Promise<{ count: number }> {
   }
 }
 
-/** Post a message draft to Canvas (as a reply or announcement), then mark it reviewed. */
+/**
+ * Send a new direct Canvas conversation message to a single student.
+ */
+export async function sendCanvasMessageAction(
+  courseUrl: string,
+  recipientUserId: string,
+  body: string,
+  subject?: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    await requireOwner();
+    await createConversation(courseUrl, recipientUserId, body, subject);
+    return { ok: true };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not send the message.",
+    };
+  }
+}
+
+/** Post a message draft to Canvas (as a reply, announcement, or new message), then mark it reviewed. */
 export async function postMessageDraftAction(
   id: string
 ): Promise<{ ok: true } | { error: string }> {
@@ -1533,6 +1847,17 @@ export async function postMessageDraftAction(
         payload.title || "Announcement",
         payload.body,
         payload.institution || undefined
+      );
+      if ("error" in res) throw new Error(res.error);
+    } else if (payload.kind === "message") {
+      if (!payload.courseUrl || !payload.recipientUserId || !/^\d+$/.test(payload.recipientUserId)) {
+        return { error: "Invalid or missing recipient for message." };
+      }
+      const res = await sendCanvasMessageAction(
+        payload.courseUrl,
+        payload.recipientUserId,
+        payload.body,
+        payload.title || undefined
       );
       if ("error" in res) throw new Error(res.error);
     } else {
@@ -1795,6 +2120,24 @@ export async function listCourseRosterAction(
     return { students: await listCourseRoster(code.trim().toUpperCase(), courseId) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load the roster." };
+  }
+}
+
+export async function listCourseGradeSummariesAction(
+  code: string,
+  courseId: string
+): Promise<
+  | {
+      students: Array<{ userId: string; name: string; currentScore: number | null; finalScore: number | null }>;
+    }
+  | { error: string }
+> {
+  try {
+    await requireOwner();
+    const summaries = await listStudentGradeSummaries(code.trim().toUpperCase(), courseId);
+    return { students: summaries };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load grade summaries." };
   }
 }
 

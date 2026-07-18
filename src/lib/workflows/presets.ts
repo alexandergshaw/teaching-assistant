@@ -475,6 +475,36 @@ export const STUDENT_REPOS: WorkflowDef = {
   ],
 };
 
+export const CLASS_ROSTER_AND_REPOS: WorkflowDef = {
+  id: "class-roster-and-repos",
+  preset: true,
+  name: "Roster and student repos from GitHub usernames",
+  description:
+    "Read a Canvas assignment where students submitted their GitHub username, write the class roster and link each username to a student on the course tile, then create one template repo per student in a GitHub org and add each student as an outside collaborator.",
+  steps: [
+    {
+      type: "link-github-usernames",
+      bindings: {
+        course: { source: "runtime", fieldKey: "course" },
+        assignment: { source: "runtime", fieldKey: "assignment" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+    {
+      type: "assign-student-repos",
+      bindings: {
+        org: { source: "runtime", fieldKey: "org" },
+        templateRepo: { source: "runtime", fieldKey: "templateRepo" },
+        rosterCourse: { source: "runtime", fieldKey: "hubCourse" },
+        prefix: { source: "runtime", fieldKey: "prefix" },
+        permission: { source: "runtime", fieldKey: "permission" },
+        visibility: { source: "runtime", fieldKey: "visibility" },
+      },
+    },
+  ],
+};
+
 export const DRAFT_AND_POST_ANNOUNCEMENT: WorkflowDef = {
   id: "draft-and-post-announcement",
   preset: true,
@@ -844,6 +874,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     UPDATE_COURSE_TECH,
     REPO_AGENT_UPDATE,
     STUDENT_REPOS,
+    CLASS_ROSTER_AND_REPOS,
     ...custom,
   ];
 }

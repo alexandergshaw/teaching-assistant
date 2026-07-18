@@ -56,6 +56,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "save-zip-to-course",
     "starter-materials",
     "fetch-course-roster",
+    "link-github-usernames",
   ],
   content: [
     "lecture-zip",

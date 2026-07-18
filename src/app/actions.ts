@@ -75,6 +75,7 @@ import {
   listAssignments,
   listStudents,
   listCourseRoster,
+  listAssignmentTextSubmissions,
   listCourseAssignmentDueDates,
   fetchSubmissionDetail,
   listAssignmentNonSubmitters,
@@ -89,6 +90,7 @@ import {
   type CanvasRosterEntry,
   type CanvasSubmissionDetail,
   type CanvasStudentWork,
+  type CanvasTextSubmission,
 } from "@/lib/canvas";
 import { listPreconfiguredInstitutionCodes, resolveInstitution } from "@/lib/canvas-core";
 import {
@@ -1793,6 +1795,25 @@ export async function listCourseRosterAction(
     return { students: await listCourseRoster(code.trim().toUpperCase(), courseId) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load the roster." };
+  }
+}
+
+export async function listAssignmentTextSubmissionsAction(
+  code: string,
+  courseId: string,
+  assignmentId: string
+): Promise<{ submissions: CanvasTextSubmission[] } | { error: string }> {
+  try {
+    await requireOwner();
+    return {
+      submissions: await listAssignmentTextSubmissions(
+        code.trim().toUpperCase(),
+        courseId,
+        assignmentId
+      ),
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not read submissions." };
   }
 }
 

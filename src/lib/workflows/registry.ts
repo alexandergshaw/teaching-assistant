@@ -137,6 +137,7 @@ import {
   getMigrationStateAction,
   submitSelectiveImportAction,
   listCourseRosterAction,
+  listAssignmentTextSubmissionsAction,
   inviteOrgMemberAction,
   setRepoCollaboratorAction,
   exportCourseCartridgeAction,
@@ -148,6 +149,8 @@ import {
   savePresentationFileAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
+import { extractGithubHandle } from "@/lib/github-usernames";
+import { buildRosterUpdate } from "@/lib/workflows/roster-merge";
 import type { SlideData } from "@/app/actions";
 import type { MessageDraftPayload } from "@/lib/message-drafts";
 import { type DeckGenContext } from "@/lib/decks/generate";
@@ -1825,6 +1828,147 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summary: {
           kind: "text",
           text: `Deleted ${c.modules.length} module(s).`,
+        },
+      };
+    },
+  },
+
+  {
+    type: "link-github-usernames",
+    name: "Link GitHub usernames to roster",
+    description: "Read a Canvas assignment where students submitted their GitHub username as text, write the course tile's roster, and link each username to the student name on the tile.",
+    inputs: [
+      {
+        key: "course",
+        label: "Canvas course",
+        type: "lmsCourse",
+        required: true,
+        help: "The Canvas course with the assignment.",
+      },
+      {
+        key: "assignment",
+        label: "Assignment (URL)",
+        type: "text",
+        required: true,
+        help: "The Canvas assignment where students submitted their GitHub username (its URL contains /assignments/<id>).",
+      },
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: true,
+        help: "The tile whose roster and GitHub links to write.",
+      },
+      {
+        key: "institution",
+        label: "Institution",
+        type: "institution",
+        required: false,
+      },
+    ],
+    outputs: [
+      { key: "roster", label: "Roster", type: "longtext" },
+      { key: "linked", label: "Linked", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const courseUrl = String(values.course ?? "").trim();
+      if (!courseUrl) {
+        throw new Error("Select a Canvas course.");
+      }
+      const courseId = parseCanvasCourseId(courseUrl);
+      if (!courseId) {
+        throw new Error("The course URL must contain a course id.");
+      }
+
+      const assignmentUrl = String(values.assignment ?? "").trim();
+      if (!assignmentUrl) {
+        throw new Error("Paste the assignment URL.");
+      }
+      const assignmentMatch = assignmentUrl.match(/\/assignments\/(\d+)/);
+      if (!assignmentMatch || !assignmentMatch[1]) {
+        throw new Error("The assignment URL must contain /assignments/<id>.");
+      }
+      const assignmentId = assignmentMatch[1];
+
+      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || "";
+      if (!inst) {
+        throw new Error("Select an institution.");
+      }
+
+      onProgress("Loading submissions...");
+      const subResult = await listAssignmentTextSubmissionsAction(inst, courseId, assignmentId);
+      if ("error" in subResult) {
+        throw new Error(subResult.error);
+      }
+
+      const okRows: Array<{
+        student: string;
+        canvasUserId: string;
+        username: string;
+      }> = [];
+      const ambiguousNotes: string[] = [];
+
+      for (const s of subResult.submissions) {
+        const { handle, ok } = extractGithubHandle(s.submittedText);
+        if (ok) {
+          okRows.push({
+            student: s.name,
+            canvasUserId: String(s.userId),
+            username: handle,
+          });
+        } else if (handle) {
+          ambiguousNotes.push(`${s.name}: "${s.submittedText}"`);
+        }
+      }
+
+      onProgress("Loading course tile...");
+      const listResult = await listCourseHubAction();
+      if ("error" in listResult) {
+        throw new Error(listResult.error);
+      }
+
+      const tileId = String(values.hubCourse ?? "").trim();
+      const tile = listResult.courses.find((c) => c.id === tileId);
+      if (!tile) {
+        throw new Error("Could not find the course tile.");
+      }
+
+      if (okRows.length === 0) {
+        const ambiguousNote = ambiguousNotes.length ? ` (${ambiguousNotes.length} ambiguous submission(s) need manual review.)` : "";
+        return {
+          outputs: { roster: tile.roster ?? "", linked: "0" },
+          summary: {
+            kind: "text",
+            text: `Found no clean GitHub usernames in submissions; the tile was not changed.${ambiguousNote}`,
+          },
+        };
+      }
+
+      onProgress("Building roster...");
+      const updateResult = buildRosterUpdate({
+        submissions: okRows,
+        existingStudentRepos: tile.studentRepos ?? [],
+      });
+
+      onProgress("Saving roster...");
+      const writeResult = await updateCourseHubAction(tile.id, {
+        ...courseToInputPayload(tile),
+        roster: updateResult.roster,
+        studentRepos: updateResult.studentRepos,
+      });
+
+      if ("error" in writeResult) {
+        throw new Error(writeResult.error);
+      }
+
+      const allNotes = [...updateResult.conflicts, ...ambiguousNotes];
+      const conflictSummary = allNotes.length ? ` Needs review: ${allNotes.join("; ")}` : "";
+
+      return {
+        outputs: { roster: updateResult.roster, linked: String(updateResult.linked) },
+        summary: {
+          kind: "text",
+          text: `Linked ${updateResult.linked} GitHub username(s) to ${tile.name}.${conflictSummary}`,
         },
       };
     },

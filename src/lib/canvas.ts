@@ -893,6 +893,56 @@ export async function listCourseRoster(code: string, courseId: string): Promise<
   return entries;
 }
 
+/** A student's text submission from an assignment. */
+export interface CanvasTextSubmission {
+  userId: number;
+  name: string;
+  submittedText: string;
+}
+
+/** List a course's students' text submissions for an assignment (code-based). */
+export async function listAssignmentTextSubmissions(
+  code: string,
+  courseId: string,
+  assignmentId: string
+): Promise<CanvasTextSubmission[]> {
+  const { institution, token, baseUrl } = resolveInstitutionByCode(code);
+  let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions?per_page=100&include[]=user`;
+  const submissions: CanvasSubmission[] = [];
+
+  while (next) {
+    const response = await fetch(next, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      throw canvasError(response.status, institution);
+    }
+    const page = (await response.json()) as CanvasSubmission[];
+    submissions.push(...page);
+    next = parseNextLink(response.headers.get("link"));
+  }
+
+  const results: CanvasTextSubmission[] = [];
+  for (const submission of submissions) {
+    const userId = submission.user_id;
+    if (typeof userId !== "number") {
+      continue;
+    }
+
+    const name =
+      submission.user?.name?.trim() ||
+      submission.user?.sortable_name?.trim() ||
+      `User ${userId}`;
+
+    const submittedText = submission.body ? htmlToText(submission.body).trim() : "";
+
+    results.push({ userId, name, submittedText });
+  }
+
+  results.sort((a, b) => a.name.localeCompare(b.name));
+  return results;
+}
+
 /** List assignment due dates for a course (code-based). */
 export async function listCourseAssignmentDueDates(
   code: string,

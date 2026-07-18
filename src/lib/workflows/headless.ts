@@ -121,6 +121,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "detect-repo-frontend",
   "fetch-assignment-brief",
   "fetch-course-roster",
+  "link-github-usernames",
   "copy-course-content",
   "poll-migration-state",
   "export-course-cartridge",

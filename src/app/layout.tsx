@@ -7,6 +7,7 @@ import { InstitutionCountsProvider } from "./components/InstitutionCounts";
 import { VcCountsProvider } from "./components/VcCounts";
 import { FilesInboxProvider } from "./components/FilesInbox";
 import { DraftedGradesInboxProvider } from "./components/DraftedGradesInbox";
+import { MailInboxProvider } from "./components/MailInbox";
 import { AccessibilityProvider } from "./components/AccessibilityProvider";
 import { SupabaseProvider } from "@/context/SupabaseProvider";
 import AppThemeProvider from "./components/AppThemeProvider";
@@ -33,7 +34,9 @@ export default function RootLayout({
               <VcCountsProvider>
                 <FilesInboxProvider>
                   <DraftedGradesInboxProvider>
-                    <AccessibilityProvider>{children}</AccessibilityProvider>
+                    <MailInboxProvider>
+                      <AccessibilityProvider>{children}</AccessibilityProvider>
+                    </MailInboxProvider>
                   </DraftedGradesInboxProvider>
                 </FilesInboxProvider>
               </VcCountsProvider>

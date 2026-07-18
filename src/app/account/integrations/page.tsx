@@ -30,11 +30,17 @@ export default function IntegrationsPage() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const [outlookConnected, setOutlookConnected] = useState<string[]>([]);
+  const [outlookCanSend, setOutlookCanSend] = useState<string[]>([]);
+  const [outlookCanMarkRead, setOutlookCanMarkRead] = useState<string[]>([]);
   const [outlookBusy, setOutlookBusy] = useState<string | null>(null);
 
   const refreshOutlook = useCallback(async () => {
     const r = await getOutlookStatusAction();
-    if (!("error" in r)) setOutlookConnected(r.connected);
+    if (!("error" in r)) {
+      setOutlookConnected(r.connected);
+      setOutlookCanSend(r.canSend);
+      setOutlookCanMarkRead(r.canMarkRead ?? []);
+    }
   }, []);
 
   useEffect(() => {
@@ -44,7 +50,11 @@ export default function IntegrationsPage() {
       if (!active) return;
       if ("error" in g) setError(g.error);
       else setConnected(g.connected);
-      if (!("error" in o)) setOutlookConnected(o.connected);
+      if (!("error" in o)) {
+        setOutlookConnected(o.connected);
+        setOutlookCanSend(o.canSend);
+        setOutlookCanMarkRead(o.canMarkRead ?? []);
+      }
       setLoading(false);
 
       const params = new URLSearchParams(window.location.search);
@@ -148,28 +158,44 @@ export default function IntegrationsPage() {
             ) : (
               institutions.map((code) => {
                 const isConnected = outlookConnected.includes(code);
+                const canSend = outlookCanSend.includes(code);
                 return (
-                  <div key={code} className={styles.row} style={{ alignItems: "center", gap: 10 }}>
-                    <span style={{ minWidth: 64, fontWeight: 600 }}>{code}</span>
-                    {isConnected ? (
-                      <>
-                        <span className={styles.pill}>Active</span>
-                        <a className={styles.secondary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>
-                          Reconnect
+                  <div key={code}>
+                    <div className={styles.row} style={{ alignItems: "center", gap: 10 }}>
+                      <span style={{ minWidth: 64, fontWeight: 600 }}>{code}</span>
+                      {isConnected ? (
+                        <>
+                          <span className={styles.pill}>Active</span>
+                          <a className={styles.secondary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>
+                            Reconnect
+                          </a>
+                          <button
+                            type="button"
+                            className={styles.remove}
+                            onClick={() => disconnectSchool(code)}
+                            disabled={outlookBusy === code}
+                          >
+                            Disconnect
+                          </button>
+                        </>
+                      ) : (
+                        <a className={styles.primary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>
+                          Connect Outlook
                         </a>
-                        <button
-                          type="button"
-                          className={styles.remove}
-                          onClick={() => disconnectSchool(code)}
-                          disabled={outlookBusy === code}
-                        >
-                          Disconnect
-                        </button>
-                      </>
-                    ) : (
-                      <a className={styles.primary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>
-                        Connect Outlook
-                      </a>
+                      )}
+                    </div>
+                    {isConnected && (
+                      <div className={styles.empty} style={{ marginTop: 8, fontSize: "0.9em" }}>
+                        Email sending: {canSend ? (
+                          "enabled"
+                        ) : (
+                          <>
+                            not granted - <a className={styles.secondary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>
+                              reconnect to enable
+                            </a>
+                          </>
+                        )}. Mailbox updates: {outlookCanMarkRead.includes(code) ? "enabled" : <>not granted - <a className={styles.secondary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>reconnect to enable</a></>}.
+                      </div>
                     )}
                   </div>
                 );

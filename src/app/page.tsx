@@ -16,6 +16,7 @@ import MessageDraftsTab from "./components/MessageDraftsTab";
 import PresentationDraftsTab from "./components/PresentationDraftsTab";
 import WorkflowsTab from "./components/WorkflowsTab";
 import PowerPointDesignTab from "./components/PowerPointDesignTab";
+import MailTab from "./components/MailTab";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
 import WorkflowTriggerWatcher from "./components/WorkflowTriggerWatcher";
 import LessonPlanPreview from "./components/LessonPlanPreview";
@@ -26,6 +27,7 @@ import { useInstitutionCounts } from "./components/InstitutionCounts";
 import { useVcCounts } from "./components/VcCounts";
 import { useFilesInbox } from "./components/FilesInbox";
 import { useDraftedGradesInbox } from "./components/DraftedGradesInbox";
+import { useMailInbox } from "./components/MailInbox";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { stampDocxAppProperties } from "@/lib/docx";
@@ -42,7 +44,7 @@ import { VIEW_KEY } from "./components/content-tab/constants";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "courses" | "manual" | "workflows" | "files" | "drafts" | "ppt-design";
+type ActiveTab = "courses" | "manual" | "workflows" | "files" | "drafts" | "ppt-design" | "mail";
 // The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
 type ManualView = "course-planning" | "content" | "version-control" | "recording";
 const MANUAL_VIEW_KEY = "ta-manual-view";
@@ -154,13 +156,14 @@ export default function Home() {
   const { total: vcAttention } = useVcCounts();
   const { count: filesInbox, markSeen: markFilesSeen } = useFilesInbox();
   const { count: draftsInbox, gradesCount: draftsGradesCount, messagesCount: draftsMessagesCount, presentationsCount: draftsPresentationsCount, refresh: refreshDrafts } = useDraftedGradesInbox();
+  const { unreadMail, refresh: refreshMail } = useMailInbox();
   const [testState] = useActionState(testGeminiAction, initialTestState);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "manual";
     const saved = localStorage.getItem("ta-active-tab");
     // Migrate legacy "grade-drafts" to "drafts".
     if (saved === "grade-drafts") return "drafts";
-    return saved === "courses" || saved === "workflows" || saved === "files" || saved === "drafts" || saved === "ppt-design"
+    return saved === "courses" || saved === "workflows" || saved === "files" || saved === "drafts" || saved === "ppt-design" || saved === "mail"
       ? saved
       : "manual";
   });
@@ -252,10 +255,16 @@ export default function Home() {
   }, [activeTab, refreshDrafts]);
 
   useEffect(() => {
+    if (activeTab === "mail") {
+      refreshMail();
+    }
+  }, [activeTab, refreshMail]);
+
+  useEffect(() => {
     if (typeof document === "undefined") return;
-    const total = totalNeedsGrading + totalUnread + vcAttention + filesInbox + draftsInbox;
+    const total = totalNeedsGrading + totalUnread + vcAttention + filesInbox + draftsInbox + unreadMail;
     document.title = total > 0 ? `(${total}) Teaching Assistant` : "Teaching Assistant";
-  }, [totalNeedsGrading, totalUnread, vcAttention, filesInbox, draftsInbox]);
+  }, [totalNeedsGrading, totalUnread, vcAttention, filesInbox, draftsInbox, unreadMail]);
 
   useEffect(() => {
     return () => {
@@ -790,6 +799,7 @@ export default function Home() {
           <Tab label="PowerPoint Design" value="ppt-design" disableRipple />
           <Tab label={<NavTabLabel text="Files" count={filesInbox} />} value="files" disableRipple />
           <Tab label={<NavTabLabel text="Drafts" count={draftsInbox} />} value="drafts" disableRipple />
+          <Tab label={<NavTabLabel text="Mail" count={unreadMail} />} value="mail" disableRipple />
         </Tabs>
 
         {activeTab === "courses" && (
@@ -989,6 +999,8 @@ export default function Home() {
         {activeTab === "workflows" && <WorkflowsTab />}
 
         {activeTab === "ppt-design" && <PowerPointDesignTab />}
+
+        {activeTab === "mail" && <MailTab />}
 
       </div>
 

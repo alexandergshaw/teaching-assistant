@@ -101,6 +101,23 @@ export async function listConnectedInstitutions(userId: string): Promise<string[
   return rows.filter((r) => !!r.refresh_token).map((r) => r.institution);
 }
 
+/** The institution codes and their granted scopes for usable (refresh-token) Outlook connections. */
+export async function listConnectedInstitutionsWithScope(
+  userId: string
+): Promise<Array<{ institution: string; scope: string | null }>> {
+  const { data, error } = await table().select("institution, refresh_token, scope").eq("user_id", userId);
+  if (error) {
+    console.error("[microsoft-credentials] Could not list connections with scope:", error.message);
+    return [];
+  }
+  const rows = (data ?? []) as Array<{
+    institution: string;
+    refresh_token: string | null;
+    scope: string | null;
+  }>;
+  return rows.filter((r) => !!r.refresh_token).map((r) => ({ institution: r.institution, scope: r.scope }));
+}
+
 /**
  * Return a usable access token for the user + school, refreshing (and persisting
  * the rotated token) when the current one is missing or near expiry. Returns null

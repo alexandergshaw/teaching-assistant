@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRosterUpdate, mergeCanvasRoster, type RosterStudentRepo, type RosterSubmission } from "./roster-merge";
+import { buildRosterUpdate, mergeCanvasRoster, mergeImportedRoster, type RosterStudentRepo, type RosterSubmission } from "./roster-merge";
 
 describe("buildRosterUpdate", () => {
   it("preserves existing repo on re-run", () => {
@@ -363,5 +363,275 @@ describe("mergeCanvasRoster", () => {
     expect(rosterLines).toHaveLength(2);
     expect(rosterLines).toContain("Manual | manual-gh");
     expect(rosterLines).toContain("Alice | alice-gh");
+  });
+});
+
+describe("mergeImportedRoster", () => {
+  it("matches by externalId (canvasUserId)", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+    ];
+    const students = [
+      { name: "Alice", externalId: "101", email: "alice@example.com" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    expect(result.matched).toBe(1);
+    expect(result.added).toBe(0);
+    expect(result.studentRepos).toHaveLength(1);
+    expect(result.studentRepos[0]).toEqual({
+      student: "Alice",
+      canvasUserId: "101",
+      repo: "org/alice",
+      username: "alice-gh",
+      email: "alice@example.com",
+    });
+  });
+
+  it("matches by email (case-insensitive)", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: null, repo: "org/alice", username: "alice-gh" },
+    ];
+    const students = [
+      { name: "Alice", email: "Alice@Example.COM" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    expect(result.matched).toBe(1);
+    expect(result.added).toBe(0);
+    expect(result.studentRepos).toHaveLength(1);
+    expect(result.studentRepos[0].email).toBe("Alice@Example.COM");
+  });
+
+  it("matches by exact name when externalId and email don't match", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice Smith", canvasUserId: null, repo: "org/alice", username: "alice-gh" },
+    ];
+    const students = [
+      { name: "Alice Smith", email: "alice@example.com" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    expect(result.matched).toBe(1);
+    expect(result.added).toBe(0);
+    expect(result.studentRepos[0].email).toBe("alice@example.com");
+  });
+
+  it("never overwrites existing email, username, or repo", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-old", email: "old@example.com" },
+    ];
+    const students = [
+      { name: "Alice", externalId: "101", email: "new@example.com" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    expect(result.studentRepos[0]).toEqual({
+      student: "Alice",
+      canvasUserId: "101",
+      repo: "org/alice",
+      username: "alice-old",
+      email: "old@example.com",
+    });
+  });
+
+  it("adds email to matched entries when absent", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+    ];
+    const students = [
+      { name: "Alice", externalId: "101", email: "alice@example.com" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    expect(result.studentRepos[0].email).toBe("alice@example.com");
+  });
+
+  it("creates new entry for unmatched student", () => {
+    const existing: RosterStudentRepo[] = [];
+    const students = [
+      { name: "Bob", email: "bob@example.com", externalId: "102" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    expect(result.added).toBe(1);
+    expect(result.matched).toBe(0);
+    expect(result.studentRepos).toHaveLength(1);
+    expect(result.studentRepos[0]).toEqual({
+      student: "Bob",
+      canvasUserId: "102",
+      repo: "",
+      username: null,
+      email: "bob@example.com",
+    });
+  });
+
+  it("preserves existing entries that are not matched", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+      { student: "Charlie", canvasUserId: "103", repo: "org/charlie", username: "charlie-gh" },
+    ];
+    const students = [
+      { name: "Alice", externalId: "101" },
+      { name: "Bob", externalId: "102" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    expect(result.studentRepos).toHaveLength(3);
+    expect(result.matched).toBe(1);
+    expect(result.added).toBe(1);
+    const charlie = result.studentRepos.find((r) => r.canvasUserId === "103");
+    expect(charlie).toBeDefined();
+  });
+
+  it("derives roster from entries with username only", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+      { student: "Bob", canvasUserId: "102", repo: "org/bob" },
+    ];
+    const students = [
+      { name: "Alice", externalId: "101" },
+      { name: "Bob", externalId: "102" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    const rosterLines = result.roster.split("\n").filter((line) => line);
+    expect(rosterLines).toHaveLength(1);
+    expect(rosterLines).toContain("Alice | alice-gh");
+    expect(result.roster).not.toContain("Bob");
+  });
+
+  it("handles null-id existing entries (manual entries)", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Manual", canvasUserId: null, repo: "org/manual", username: "manual-gh" },
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+    ];
+    const students = [
+      { name: "Alice", externalId: "101" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    expect(result.studentRepos).toHaveLength(2);
+    expect(result.studentRepos).toContainEqual({
+      student: "Manual",
+      canvasUserId: null,
+      repo: "org/manual",
+      username: "manual-gh",
+    });
+  });
+
+  it("returns correct added and matched counts", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice" },
+      { student: "Bob", canvasUserId: "102", repo: "org/bob" },
+    ];
+    const students = [
+      { name: "Alice", externalId: "101" },
+      { name: "Bob", externalId: "102" },
+      { name: "Charlie", externalId: "103" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    expect(result.matched).toBe(2);
+    expect(result.added).toBe(1);
+  });
+
+  it("handles empty existing roster", () => {
+    const students = [
+      { name: "Alice", email: "alice@example.com", externalId: "101" },
+      { name: "Bob", email: "bob@example.com" },
+    ];
+
+    const result = mergeImportedRoster([], students);
+
+    expect(result.added).toBe(2);
+    expect(result.matched).toBe(0);
+    expect(result.studentRepos).toHaveLength(2);
+  });
+
+  it("handles empty imported roster", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", username: "alice-gh" },
+    ];
+
+    const result = mergeImportedRoster(existing, []);
+
+    expect(result.added).toBe(0);
+    expect(result.matched).toBe(0);
+    expect(result.studentRepos).toHaveLength(1);
+  });
+
+  it("matches by email when externalId is not provided", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: null, repo: "org/alice", email: "alice@example.com" },
+    ];
+    const students = [
+      { name: "Different Name", email: "alice@example.com" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    expect(result.matched).toBe(1);
+    expect(result.added).toBe(0);
+  });
+
+  it("priority: externalId takes precedence over email", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", email: "alice@example.com" },
+      { student: "Bob", canvasUserId: null, repo: "org/bob", email: "bob@example.com" },
+    ];
+    const students = [
+      { name: "Different Name", externalId: "101", email: "alice@example.com" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    // Should match Alice by externalId, not Bob by email
+    expect(result.matched).toBe(1);
+    const matched = result.studentRepos.find((r) => r.canvasUserId === "101");
+    expect(matched).toBeDefined();
+  });
+
+  it("never duplicates entries when multiple match criteria apply", () => {
+    const existing: RosterStudentRepo[] = [
+      { student: "Alice", canvasUserId: "101", repo: "org/alice", email: "alice@example.com", username: "alice-gh" },
+    ];
+    const students = [
+      { name: "Alice", externalId: "101", email: "alice@example.com" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    expect(result.studentRepos).toHaveLength(1);
+    expect(result.matched).toBe(1);
+    expect(result.added).toBe(0);
+  });
+
+  it("unmatched student without email sets email to undefined", () => {
+    const existing: RosterStudentRepo[] = [];
+    const students = [
+      { name: "Alice" },
+    ];
+
+    const result = mergeImportedRoster(existing, students);
+
+    expect(result.added).toBe(1);
+    expect(result.studentRepos[0]).toEqual({
+      student: "Alice",
+      canvasUserId: null,
+      repo: "",
+      username: null,
+      email: undefined,
+    });
   });
 });

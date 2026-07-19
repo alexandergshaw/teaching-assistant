@@ -9,6 +9,7 @@ export interface RosterStudentRepo {
   canvasUserId: string | null;
   repo: string;
   username?: string | null;
+  email?: string | null;
 }
 
 export interface RosterSubmission {
@@ -181,4 +182,119 @@ export function mergeCanvasRoster(
   const roster = rosterLines.join("\n");
 
   return { studentRepos, roster, added };
+}
+
+export function mergeImportedRoster(
+  existing: RosterStudentRepo[],
+  students: Array<{ name: string; email?: string; externalId?: string }>
+): { studentRepos: RosterStudentRepo[]; roster: string; added: number; matched: number } {
+  // Make a shallow copy of existing entries for tracking and updates
+  const existingCopy = existing.map((e) => ({ ...e }));
+
+  // Create maps for matching: by externalId (canvasUserId), by email (case-insensitive), by name
+  const existingByUserId = new Map<string, RosterStudentRepo>();
+  const existingByEmail = new Map<string, RosterStudentRepo>();
+  const existingByName = new Map<string, RosterStudentRepo>();
+
+  for (const entry of existingCopy) {
+    if (entry.canvasUserId) {
+      existingByUserId.set(entry.canvasUserId, entry);
+    }
+
+    if (entry.email) {
+      const emailKey = entry.email.toLowerCase();
+      existingByEmail.set(emailKey, entry);
+    }
+
+    existingByName.set(entry.student, entry);
+  }
+
+  let added = 0;
+  let matched = 0;
+
+  // Track which imported students were matched (by index)
+  const matchedStudentIndices = new Set<number>();
+  // Track which existing entries were matched (by reference)
+  const matchedEntries = new Set<RosterStudentRepo>();
+
+  // Process imported students with priority: externalId, then email, then name
+  for (let i = 0; i < students.length; i++) {
+    const student = students[i];
+    let existingEntry: RosterStudentRepo | undefined;
+    let matchedThisStudent = false;
+
+    // Priority 1: Match by externalId (canvasUserId)
+    if (student.externalId) {
+      existingEntry = existingByUserId.get(student.externalId);
+      if (existingEntry && !matchedEntries.has(existingEntry)) {
+        matchedEntries.add(existingEntry);
+        matchedStudentIndices.add(i);
+        matchedThisStudent = true;
+      }
+    }
+
+    // Priority 2: Match by email (case-insensitive)
+    if (!matchedThisStudent && student.email) {
+      const emailKey = student.email.toLowerCase();
+      existingEntry = existingByEmail.get(emailKey);
+      if (existingEntry && !matchedEntries.has(existingEntry)) {
+        matchedEntries.add(existingEntry);
+        matchedStudentIndices.add(i);
+        matchedThisStudent = true;
+      }
+    }
+
+    // Priority 3: Match by exact name
+    if (!matchedThisStudent) {
+      existingEntry = existingByName.get(student.name);
+      if (existingEntry && !matchedEntries.has(existingEntry)) {
+        matchedEntries.add(existingEntry);
+        matchedStudentIndices.add(i);
+        matchedThisStudent = true;
+      }
+    }
+
+    if (matchedThisStudent && existingEntry) {
+      // Update matched entry: gain email when absent (never overwrite)
+      if (student.email && !existingEntry.email) {
+        existingEntry.email = student.email;
+      }
+      matched++;
+    }
+  }
+
+  // Rebuild the student repos list: all existing entries + new unmatched students
+  const result: RosterStudentRepo[] = [];
+
+  // Add ALL existing entries (matched or not - never drop entries)
+  for (const entry of existingCopy) {
+    result.push(entry);
+  }
+
+  // Add unmatched imported students (those whose index is not in matchedStudentIndices)
+  for (let i = 0; i < students.length; i++) {
+    if (!matchedStudentIndices.has(i)) {
+      const student = students[i];
+      // Create new entry for unmatched student
+      result.push({
+        student: student.name,
+        canvasUserId: student.externalId ?? null,
+        repo: "",
+        username: null,
+        email: student.email,
+      });
+      added++;
+    }
+  }
+
+  // Derive roster text from entries with username only (unchanged from existing pattern)
+  const rosterLines: string[] = [];
+  for (const entry of result) {
+    if (entry.username) {
+      rosterLines.push(`${entry.student} | ${entry.username}`);
+    }
+  }
+  const roster = rosterLines.join("\n");
+
+  return { studentRepos: result, roster, added, matched };
 }

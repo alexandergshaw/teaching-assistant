@@ -179,4 +179,71 @@ describe("coerceMessageDraftPayload", () => {
     expect(payload.conversationId).toBeUndefined();
     expect(payload.courseUrl).toBeUndefined();
   });
+
+  it("carries recipientEmail and hubCourseId when present and valid", () => {
+    const payload = coerceMessageDraftPayload({
+      kind: "announcement",
+      body: "Important announcement",
+      recipientEmail: "student@example.com",
+      hubCourseId: "course-123",
+    });
+    expect(payload.recipientEmail).toBe("student@example.com");
+    expect(payload.hubCourseId).toBe("course-123");
+  });
+
+  it("trims whitespace from recipientEmail and hubCourseId", () => {
+    const payload = coerceMessageDraftPayload({
+      kind: "announcement",
+      body: "test",
+      recipientEmail: "  student@example.com  ",
+      hubCourseId: "  course-123  ",
+    });
+    expect(payload.recipientEmail).toBe("student@example.com");
+    expect(payload.hubCourseId).toBe("course-123");
+  });
+
+  it("drops recipientEmail and hubCourseId when they are empty strings after trimming", () => {
+    const payload = coerceMessageDraftPayload({
+      kind: "announcement",
+      body: "test",
+      recipientEmail: "   ",
+      hubCourseId: "   ",
+    });
+    expect(payload.recipientEmail).toBeUndefined();
+    expect(payload.hubCourseId).toBeUndefined();
+  });
+
+  it("drops recipientEmail and hubCourseId when they are not strings", () => {
+    const payload = coerceMessageDraftPayload({
+      kind: "announcement",
+      body: "test",
+      recipientEmail: 123,
+      hubCourseId: ["course-123"],
+    });
+    expect(payload.recipientEmail).toBeUndefined();
+    expect(payload.hubCourseId).toBeUndefined();
+  });
+
+  it("round-trips an announcement payload with recipientEmail and hubCourseId", () => {
+    const row = {
+      id: "m1",
+      user_id: "u1",
+      status: "pending" as const,
+      summary: "Announcement for course",
+      payload: {
+        kind: "announcement",
+        body: "Welcome to the course!",
+        recipientEmail: "instructor@example.com",
+        hubCourseId: "hub-course-abc",
+      } as unknown as DraftRow["payload"],
+      created_at: "2026-07-13T00:00:00.000Z",
+      updated_at: "2026-07-13T00:00:00.000Z",
+      workflow_id: null,
+      workflow_name: null,
+    };
+    const draft = mapDraft(row);
+    expect(draft.payload.kind).toBe("announcement");
+    expect(draft.payload.recipientEmail).toBe("instructor@example.com");
+    expect(draft.payload.hubCourseId).toBe("hub-course-abc");
+  });
 });

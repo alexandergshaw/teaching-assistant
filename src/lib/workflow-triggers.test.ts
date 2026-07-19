@@ -4,6 +4,7 @@ import {
   decideThresholdEdge,
   decideRepoPush,
   decideNewMessages,
+  decideNewEmails,
   decideRepoInactive,
   decideBrokenLinks,
   decideRosterChanged,
@@ -300,6 +301,116 @@ describe("decideNewMessages", () => {
       { institution: "MCC", id: 2, lastMessageAt: "2026-07-13T12:00:00Z" },
     ]);
     expect(d.advanced).toEqual(["1", "2"]);
+  });
+});
+
+describe("decideNewEmails", () => {
+  it("first eval records a baseline and does not fire", () => {
+    const d = decideNewEmails(null, [
+      { institution: "MCC", id: "email-1", receivedAt: "2026-07-13T10:00:00Z" },
+    ]);
+    expect(d.fired).toBe(false);
+    expect(d.cursor).toEqual({ emails: { "MCC:email-1": "2026-07-13T10:00:00Z" } });
+    expect(d.advanced).toEqual([]);
+  });
+
+  it("fires when an email's receivedAt advances to a lexicographically greater ISO string", () => {
+    const base = decideNewEmails(null, [{ institution: "MCC", id: "email-1", receivedAt: "2026-07-13T10:00:00Z" }]);
+    const d = decideNewEmails(base.cursor, [{ institution: "MCC", id: "email-1", receivedAt: "2026-07-13T15:00:00Z" }]);
+    expect(d.fired).toBe(true);
+    expect(d.cursor).toEqual({ emails: { "MCC:email-1": "2026-07-13T15:00:00Z" } });
+    expect(d.advanced).toEqual(["email-1"]);
+  });
+
+  it("does not fire when the receivedAt is unchanged", () => {
+    const base = decideNewEmails(null, [{ institution: "MCC", id: "email-1", receivedAt: "2026-07-13T10:00:00Z" }]);
+    const d = decideNewEmails(base.cursor, [{ institution: "MCC", id: "email-1", receivedAt: "2026-07-13T10:00:00Z" }]);
+    expect(d.fired).toBe(false);
+    expect(d.cursor).toEqual({ emails: { "MCC:email-1": "2026-07-13T10:00:00Z" } });
+    expect(d.advanced).toEqual([]);
+  });
+
+  it("fires for a brand-new email appearing with a non-empty receivedAt on a non-first eval", () => {
+    const base = decideNewEmails(null, [{ institution: "MCC", id: "email-1", receivedAt: "2026-07-13T10:00:00Z" }]);
+    const d = decideNewEmails(base.cursor, [
+      { institution: "MCC", id: "email-1", receivedAt: "2026-07-13T10:00:00Z" },
+      { institution: "MCC", id: "email-2", receivedAt: "2026-07-13T12:00:00Z" },
+    ]);
+    expect(d.fired).toBe(true);
+    expect(d.cursor).toEqual({
+      emails: { "MCC:email-1": "2026-07-13T10:00:00Z", "MCC:email-2": "2026-07-13T12:00:00Z" },
+    });
+    expect(d.advanced).toEqual(["email-2"]);
+  });
+
+  it("an email with a null receivedAt is stored as empty string and never triggers by itself", () => {
+    const base = decideNewEmails(null, [{ institution: "MCC", id: "email-1", receivedAt: null }]);
+    expect(base.fired).toBe(false);
+    expect(base.cursor).toEqual({ emails: { "MCC:email-1": "" } });
+    expect(base.advanced).toEqual([]);
+    const d = decideNewEmails(base.cursor, [{ institution: "MCC", id: "email-1", receivedAt: null }]);
+    expect(d.fired).toBe(false);
+    expect(d.cursor).toEqual({ emails: { "MCC:email-1": "" } });
+    expect(d.advanced).toEqual([]);
+  });
+
+  it("does not fire when emails are steady with no changes", () => {
+    const base = decideNewEmails(null, [
+      { institution: "MCC", id: "email-1", receivedAt: "2026-07-13T10:00:00Z" },
+      { institution: "MCC", id: "email-2", receivedAt: "2026-07-13T11:00:00Z" },
+    ]);
+    const d = decideNewEmails(base.cursor, [
+      { institution: "MCC", id: "email-1", receivedAt: "2026-07-13T10:00:00Z" },
+      { institution: "MCC", id: "email-2", receivedAt: "2026-07-13T11:00:00Z" },
+    ]);
+    expect(d.fired).toBe(false);
+    expect(d.advanced).toEqual([]);
+  });
+
+  it("legacy cursor { count: 3 } re-baselines silently without firing", () => {
+    const d = decideNewEmails({ count: 3 } as unknown as Json, [
+      { institution: "MCC", id: "email-1", receivedAt: "2026-07-13T10:00:00Z" },
+      { institution: "MCC", id: "email-2", receivedAt: "2026-07-13T11:00:00Z" },
+    ]);
+    expect(d.fired).toBe(false);
+    expect(d.cursor).toEqual({ emails: { "MCC:email-1": "2026-07-13T10:00:00Z", "MCC:email-2": "2026-07-13T11:00:00Z" } });
+    expect(d.advanced).toEqual([]);
+    const d2 = decideNewEmails(d.cursor, [
+      { institution: "MCC", id: "email-1", receivedAt: "2026-07-13T10:00:00Z" },
+      { institution: "MCC", id: "email-2", receivedAt: "2026-07-13T12:00:00Z" },
+    ]);
+    expect(d2.fired).toBe(true);
+    expect(d2.advanced).toEqual(["email-2"]);
+  });
+
+  it("cursor round-trip: output from one call feeds into the next", () => {
+    const d1 = decideNewEmails(null, [{ institution: "UT", id: "msg-1", receivedAt: "2026-07-13T10:00:00Z" }]);
+    const d2 = decideNewEmails(d1.cursor, [
+      { institution: "UT", id: "msg-1", receivedAt: "2026-07-13T15:00:00Z" },
+      { institution: "MPCC", id: "msg-2", receivedAt: "2026-07-13T11:00:00Z" },
+    ]);
+    expect(d2.fired).toBe(true);
+    expect(d2.cursor).toEqual({
+      emails: { "UT:msg-1": "2026-07-13T15:00:00Z", "MPCC:msg-2": "2026-07-13T11:00:00Z" },
+    });
+    expect(d2.advanced).toEqual(["msg-1", "msg-2"]);
+  });
+
+  it("handles multiple institutions keyed correctly", () => {
+    const d = decideNewEmails(null, [
+      { institution: "MCC", id: "email-1", receivedAt: "2026-07-13T10:00:00Z" },
+      { institution: "UT", id: "email-1", receivedAt: "2026-07-13T11:00:00Z" },
+    ]);
+    expect(d.cursor).toEqual({ emails: { "MCC:email-1": "2026-07-13T10:00:00Z", "UT:email-1": "2026-07-13T11:00:00Z" } });
+  });
+
+  it("advanced field contains email ids as strings", () => {
+    const base = decideNewEmails(null, [{ institution: "MCC", id: "email-1", receivedAt: "2026-07-13T10:00:00Z" }]);
+    const d = decideNewEmails(base.cursor, [
+      { institution: "MCC", id: "email-1", receivedAt: "2026-07-13T15:00:00Z" },
+      { institution: "MCC", id: "email-2", receivedAt: "2026-07-13T12:00:00Z" },
+    ]);
+    expect(d.advanced).toEqual(["email-1", "email-2"]);
   });
 });
 
@@ -680,6 +791,27 @@ describe("describeTrigger", () => {
 });
 
 describe("EVENT_SOURCES / getEventSource", () => {
+  it("the exact set of event source types (canary)", () => {
+    const types = EVENT_SOURCES.map((s) => s.type).sort();
+    expect(types).toEqual([
+      "app-focused",
+      "app-open",
+      "broken-links",
+      "course-start",
+      "deadline-passed",
+      "lms-email-received",
+      "message-received",
+      "needs-grading-threshold",
+      "repo-inactive",
+      "repo-push",
+      "roster-changed",
+      "submission-received",
+      "unread-threshold",
+      "webhook",
+      "workflow-completed",
+    ]);
+  });
+
   it("every source has a unique type", () => {
     const types = EVENT_SOURCES.map((s) => s.type);
     expect(new Set(types).size).toBe(types.length);

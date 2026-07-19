@@ -124,6 +124,9 @@ describe("deep-check presets", () => {
   const DEEP_CHECK_PRESET_IDS = [
     "next-week-lectures",
     "term-kickoff-import",
+    "closed-institution-onboarding",
+    "review-and-export-grades-csv",
+    "nudge-missing-from-gradebook",
   ];
 
   for (const id of DEEP_CHECK_PRESET_IDS) {

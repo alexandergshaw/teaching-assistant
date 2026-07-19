@@ -47,6 +47,7 @@ export interface CourseStudentRepo {
   canvasUserId: string | null;
   repo: string;
   username?: string | null;
+  email?: string | null;
 }
 
 /** A course and the resources bundled with it. */
@@ -160,7 +161,7 @@ interface CourseRow {
   materials_zip_size: number | null;
   custom_tiles: Array<{ id: string; label: string; value: string; groupId: string }> | null;
   hidden_tiles: string[] | null;
-  student_repos: Array<{ student: string; canvasUserId: string | null; repo: string; username?: string | null }> | null;
+  student_repos: Array<{ student: string; canvasUserId: string | null; repo: string; username?: string | null; email?: string | null }> | null;
   updated_at: string;
 }
 
@@ -205,6 +206,7 @@ function toCourse(r: CourseRow): Course {
             canvasUserId: typeof t.canvasUserId === "string" ? t.canvasUserId : null,
             repo: typeof t.repo === "string" ? t.repo : "",
             username: typeof t.username === "string" ? t.username : null,
+            email: typeof t.email === "string" ? t.email : null,
           }))
       : [],
     updatedAt: r.updated_at,

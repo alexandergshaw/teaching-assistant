@@ -25,6 +25,7 @@ export const DEFAULT_INSTITUTION_FIELDS: InstitutionField[] = [
   { id: "lmsUrl", label: "LMS", type: "lms", value: "", lms: "" },
   { id: "syllabusTemplate", label: "Syllabus template", type: "syllabusTemplate", value: "" },
   { id: "email", label: "Email", type: "text", value: "" },
+  { id: "calendarFeedUrl", label: "Calendar feed (.ics)", type: "url", value: "" },
 ];
 
 export async function loadInstitutionFields(
@@ -94,3 +95,51 @@ function mapInstitutionFields(
 ): unknown[] {
   return Array.isArray(row.fields) ? row.fields : [];
 }
+
+export async function listAllInstitutionFields(
+  supabase: SupabaseClient<Database>,
+  userId: string
+): Promise<Array<{ acronym: string; fields: InstitutionField[] }>> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: rows, error } = await (supabase.from("institution_fields").select("acronym, fields").eq("user_id", userId) as any);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!rows) {
+    return [];
+  }
+
+  const result: Array<{ acronym: string; fields: InstitutionField[] }> = [];
+
+  for (const row of rows) {
+    if (typeof row.acronym !== "string") {
+      continue;
+    }
+    const mapped = Array.isArray(row.fields) ? row.fields : [];
+    const fields: InstitutionField[] = [];
+    for (const entry of mapped) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+      const raw = entry as Record<string, unknown>;
+      if (typeof raw.id !== "string" || typeof raw.label !== "string") {
+        continue;
+      }
+      fields.push({
+        id: raw.id as string,
+        label: raw.label as string,
+        type: raw.type === "date" || raw.type === "url" || raw.type === "syllabusTemplate" || raw.type === "lms" ? raw.type : "text",
+        value: typeof raw.value === "string" ? (raw.value as string) : "",
+        lms: typeof raw.lms === "string" ? raw.lms : "",
+      });
+    }
+    result.push({ acronym: row.acronym, fields });
+  }
+
+  return result;
+}
+
+/** Convention: every field whose id starts with "calendarFeedUrl" holds one
+ * ICS URL; helpers that read feeds collect them in id order. */

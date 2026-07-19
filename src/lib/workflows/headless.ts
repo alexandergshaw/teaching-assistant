@@ -131,6 +131,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // lms-assignments precedent and completes the scheduled quiz pipeline.
   "import-quiz-questions",
   "list-upcoming-deadlines",
+  "list-deadlines-from-feed",
   "list-missing-submissions",
   // Draft-only; never sends until a human reviews in the Drafts UI.
   "draft-student-nudges",
@@ -140,6 +141,13 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "gradebook-health-report",
   "draft-upcoming-lectures",
   "sync-course-tiles-from-lms",
+  "import-gradebook-csv",
+  "import-roster-from-csv",
+  "export-grades-for-lms",
+  "create-course-tile",
+  "configure-institution-feeds",
+  "check-mailbox-connection",
+  "read-email-inboxes",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

@@ -29,7 +29,11 @@ import {
   listConfiguredInstitutionsAction,
   listCourseAssignmentDueDatesAction,
   listConversationsAction,
+  listOutlookMessagesAction,
+  listInstitutionFeedUrlsAction,
+  fetchIcsFeedAction,
 } from "@/app/actions";
+import { parseIcsEvents } from "./ics";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,7 +53,8 @@ export type TriggerEventType =
   | "webhook"
   | "app-open"
   | "app-focused"
-  | "deadline-passed";
+  | "deadline-passed"
+  | "lms-email-received";
 
 export type TriggerEventCategory =
   | "lms"
@@ -242,6 +247,41 @@ export function decideNewMessages(
       : fired
         ? `New messages: ${advanced.length > 5 ? advanced.length : advanced.join(", ")}`
         : "No new messages.",
+    advanced,
+  };
+}
+
+/** Fire when a new email arrives in the Outlook inbox. Similar to decideNewMessages
+ * but for individual emails rather than Canvas conversations. Fires when an email
+ * with a new id appears or when an email's receivedAt timestamp advances. */
+export function decideNewEmails(
+  cursor: Json | null,
+  rows: Array<{ institution: string; id: string; receivedAt: string | null }>
+): { fired: boolean; cursor: Json; detail: string; advanced: string[] } {
+  const prev = readStringMap(cursor, "emails");
+  const firstEval = prev === null;
+  const curr: Record<string, string> = {};
+  const advanced: string[] = [];
+
+  for (const r of rows) {
+    const key = `${r.institution}:${r.id}`;
+    const ra = r.receivedAt ?? "";
+    curr[key] = ra;
+    if (firstEval || !ra) continue;
+    const p = prev[key];
+    const isNew = p === undefined;
+    if ((isNew || ra > p) && ra) advanced.push(r.id);
+  }
+
+  const fired = !firstEval && advanced.length > 0;
+  return {
+    fired,
+    cursor: { emails: curr },
+    detail: firstEval
+      ? `Baseline: ${rows.length} email(s).`
+      : fired
+        ? `New emails: ${advanced.length > 5 ? advanced.length : advanced.join(", ")}`
+        : "No new emails.",
     advanced,
   };
 }
@@ -763,13 +803,131 @@ export const EVENT_SOURCES: EventSourceDef[] = [
     evaluate: async (config, cursor, ctx) => {
       const courseUrl = (config.course ?? "").trim();
       const courseId = parseCanvasCourseId(courseUrl);
-      if (!courseId) return { fired: false, cursor: cursor ?? {}, detail: "The course URL has no course id." };
       const inst = resolveInstitution(config, ctx);
       if (!inst) return { fired: false, cursor: cursor ?? {}, detail: "No institution configured." };
-      const r = await listCourseAssignmentDueDatesAction(inst, courseId);
-      if ("error" in r) return { fired: false, cursor: cursor ?? {}, detail: r.error };
-      const d = decideDeadlinePassed(cursor, r.assignments, new Date().toISOString());
+
+      let assignments: Array<{ assignmentId: string; name: string; dueAt: string | null }> | undefined;
+      let apiError: string | null = null;
+
+      if (courseId) {
+        const r = await listCourseAssignmentDueDatesAction(inst, courseId);
+        if ("error" in r) {
+          apiError = r.error;
+        } else {
+          assignments = r.assignments;
+        }
+      }
+
+      if (!assignments) {
+        const feedResult = await listInstitutionFeedUrlsAction(inst);
+        if (!("error" in feedResult) && feedResult.feedUrls.length > 0) {
+          const feedAssignments: Array<{
+            assignmentId: string;
+            name: string;
+            dueAt: string | null;
+          }> = [];
+          for (const feedUrl of feedResult.feedUrls) {
+            const fetchResult = await fetchIcsFeedAction(feedUrl);
+            if ("error" in fetchResult) {
+              return { fired: false, cursor: cursor ?? {}, detail: fetchResult.error };
+            }
+            const events = parseIcsEvents(fetchResult.ics);
+            for (const event of events) {
+              feedAssignments.push({
+                assignmentId: event.uid,
+                name: event.summary,
+                dueAt: event.startsAt,
+              });
+            }
+          }
+          assignments = feedAssignments;
+        }
+      }
+
+      if (!assignments) {
+        const errorMsg = apiError || "No assignment data available.";
+        return { fired: false, cursor: cursor ?? {}, detail: errorMsg };
+      }
+
+      const d = decideDeadlinePassed(cursor, assignments, new Date().toISOString());
       return { ...d, fireValues: { course: courseUrl } };
+    },
+  },
+  {
+    type: "lms-email-received",
+    label: "An LMS notification email arrives",
+    description: "Watches the connected Outlook inbox for LMS notification emails (messages, submissions) - works at institutions with no LMS API.",
+    category: "lms",
+    configFields: [
+      { key: "institutions", label: "Institutions", type: "institutions", required: false, help: "Defaults to the active institution; pick several or choose all." },
+      { key: "filter", label: "Email type", type: "text", required: false, help: "messages, submissions, or blank for both." },
+      { key: "senders", label: "Extra sender domains", type: "text", required: false, help: "Extra sender domains, one per line, added to the built-in LMS notifier domains." },
+    ],
+    minPollMinutes: 15,
+    serverEvaluable: true,
+    evaluate: async (config, cursor, ctx) => {
+      const resolved = await resolveInstitutionList(config, ctx);
+      if ("error" in resolved) return { fired: false, cursor: cursor ?? {}, detail: resolved.error };
+      const insts = resolved.list;
+      if (insts.length === 0) return { fired: false, cursor: cursor ?? {}, detail: "No institution configured." };
+
+      const builtInDomains = [
+        "instructure.com",
+        "blackboard.com",
+        "d2l.com",
+        "brightspace.com",
+      ];
+      const extraSenders = (config.senders ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const allowedDomains = [...builtInDomains, ...extraSenders];
+
+      const filter = (config.filter ?? "").trim().toLowerCase();
+      const filterMessages = !filter || filter === "messages";
+      const filterSubmissions = !filter || filter === "submissions";
+
+      const allRows: Array<{
+        institution: string;
+        id: string;
+        receivedAt: string | null;
+      }> = [];
+
+      for (const inst of insts) {
+        const r = await listOutlookMessagesAction(inst);
+        if ("error" in r) return { fired: false, cursor: cursor ?? {}, detail: r.error };
+
+        for (const msg of r.messages) {
+          const fromDomain = msg.fromAddress
+            .split("@")
+            .slice(1)
+            .join("@")
+            .toLowerCase();
+          if (!allowedDomains.some((d) => fromDomain.endsWith(d))) continue;
+
+          // A blank filter means "messages or submissions" - an LMS-domain
+          // email must still look like one of the two (a weekly digest from
+          // the same sender should not fire the trigger).
+          const isMsg = /message|conversation|inbox/i.test(msg.subject);
+          const isSub = /submi|assignment|turned in/i.test(msg.subject);
+          if ((filterMessages && isMsg) || (filterSubmissions && isSub)) {
+            allRows.push({
+              institution: inst,
+              id: msg.id,
+              receivedAt: msg.receivedDateTime,
+            });
+          }
+        }
+      }
+
+      const d = decideNewEmails(cursor, allRows);
+      return {
+        ...d,
+        fireValues: {
+          newEmails: String(d.advanced.length),
+          institutions: insts.join(", "),
+        },
+      };
     },
   },
   {

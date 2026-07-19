@@ -5,7 +5,7 @@ import { Button, TextField } from "@mui/material";
 import TabHeader from "./TabHeader";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { listPendingMessageDrafts, deleteMessageDraft, type MessageDraft } from "@/lib/message-drafts";
-import { updateMessageDraftPayloadAction, postMessageDraftAction } from "../actions";
+import { updateMessageDraftPayloadAction, postMessageDraftAction, sendMessageDraftByEmailAction } from "../actions";
 import { useDraftedGradesInbox } from "./DraftedGradesInbox";
 import styles from "../page.module.css";
 
@@ -20,6 +20,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
   const [note, setNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmPost, setConfirmPost] = useState<string | null>(null);
+  const [confirmEmail, setConfirmEmail] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
@@ -148,6 +149,26 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     }
   };
 
+  const handleSendByEmail = async (draft: MessageDraft) => {
+    if (confirmEmail !== draft.id) {
+      setConfirmEmail(draft.id);
+      return;
+    }
+    setConfirmEmail(null);
+    setBusy(draft.id);
+    try {
+      const res = await sendMessageDraftByEmailAction(draft.id);
+      if ("error" in res) throw new Error(res.error);
+      setDrafts((prev) => (prev ? prev.filter((d) => d.id !== draft.id) : null));
+      refreshBadge();
+      setNote({ kind: "success", text: "Sent by email." });
+    } catch (err) {
+      setNote({ kind: "error", text: err instanceof Error ? err.message : "Could not send the message by email." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const toggleExpand = (key: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -217,7 +238,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                         {formatDateTime(draft.createdAt)} · {draft.payload.kind === "reply"
                           ? `reply to conversation ${draft.payload.conversationId ?? "?"}`
                           : draft.payload.kind === "message"
-                          ? `message to ${draft.payload.recipientName || "student"}`
+                          ? `message to ${draft.payload.recipientName || "student"}${draft.payload.recipientEmail ? ` (${draft.payload.recipientEmail})` : ""}`
                           : `announcement${draft.payload.title ? `: ${draft.payload.title}` : ""}`}
                       </div>
                       {draft.workflowId && draft.workflowName && onOpenWorkflow && (
@@ -268,6 +289,16 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                           >
                             {busy === draft.id ? "Sending..." : confirmPost === draft.id ? "Confirm send" : "Send"}
                           </Button>
+                          {(draft.payload.recipientEmail || (draft.payload.kind === "announcement" && draft.payload.hubCourseId)) && (
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              disabled={busy === draft.id}
+                              onClick={() => void handleSendByEmail(draft)}
+                            >
+                              {busy === draft.id ? "Sending..." : confirmEmail === draft.id ? "Confirm send by email" : "Send by email"}
+                            </Button>
+                          )}
                           <Button
                             variant="outlined"
                             size="small"

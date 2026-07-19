@@ -8,7 +8,7 @@
 // domain to lock a single school down; the default "organizations" lets any
 // work/school account connect.
 
-const SCOPES = ["offline_access", "Mail.Read", "User.Read"];
+const SCOPES = ["offline_access", "Mail.Read", "Mail.Send", "Mail.ReadWrite", "User.Read"];
 
 function tenant(): string {
   return process.env.MS_OAUTH_TENANT?.trim() || "organizations";

@@ -153,11 +153,19 @@ import {
   listCourseAssignmentDueDatesAction,
   listConfiguredInstitutionsAction,
   listAssignmentDueDatesByUrlAction,
+  listInstitutionsWithFeedsAction,
+  fetchIcsFeedAction,
+  listInstitutionFeedUrlsAction,
+  saveInstitutionFieldsAction,
+  getOutlookStatusAction,
+  listOutlookMessagesAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import { extractGithubHandle } from "@/lib/github-usernames";
-import { buildRosterUpdate, mergeCanvasRoster } from "@/lib/workflows/roster-merge";
+import { buildRosterUpdate, mergeCanvasRoster, mergeImportedRoster } from "@/lib/workflows/roster-merge";
 import { nextLectureWeek } from "@/lib/workflows/next-week";
+import { parseIcsEvents } from "@/lib/ics";
+import { parseGradebookCsv, missingFromGradebook, fillGradebookCsv, buildCanvasGradebookCsv, buildMoodleGradebookCsv, detectGradebookFormat } from "@/lib/gradebook-csv";
 import { filterUpcoming, formatDeadlineReport } from "@/lib/workflows/deadline-report";
 import type { DeadlineSection } from "@/lib/workflows/deadline-report";
 import type { SlideData } from "@/app/actions";
@@ -6474,6 +6482,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "title", label: "Title (announcement)", type: "text", required: false },
       { key: "institution", label: "Institution", type: "institution", required: false, help: "Defaults to the active institution." },
       { key: "context", label: "Context (optional)", type: "longtext", required: false, help: "Original thread text, kept for review." },
+      { key: "hubCourse", label: "Course tile (announcement)", type: "hubCourse", required: false, help: "For a closed-LMS announcement: the course tile." },
     ],
     outputs: [{ key: "draftId", label: "Draft id", type: "text" }],
     run: async (values, helpers) => {
@@ -6493,6 +6502,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
         title: String(values.title ?? "").trim() || undefined,
         institution: inst || undefined,
         context: String(values.context ?? "").trim() || undefined,
+        recipientEmail: undefined,
+        hubCourseId: String(values.hubCourse ?? "").trim() || undefined,
       };
 
       const summary = kind === "reply" ? "Drafted reply" : "Drafted announcement";
@@ -10837,7 +10848,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "list-upcoming-deadlines",
     name: "List upcoming deadlines",
     description:
-      "List every published assignment with a due date inside the next N days across the chosen Canvas courses. Feed the list to an announcement draft or a briefing.",
+      "List every published assignment with a due date inside the next N days across the chosen Canvas courses, or read calendar feeds at institutions with no API access. Feed the list to an announcement draft or a briefing.",
     inputs: [
       { key: "courses", label: "LMS courses", type: "lmsCourseList", required: false, help: "One, several, or all courses. Leave blank to scan every course at every configured institution." },
       { key: "daysAhead", label: "Days ahead", type: "number", required: false, help: "How many days ahead to look. Default 7." },
@@ -10896,6 +10907,46 @@ export const STEP_REGISTRY: StepDefinition[] = [
               course: `${inst} ${courseRow.name}`,
               assignments: filtered,
             });
+          }
+        }
+
+        // Blank courses fallback: scan feed-only institutions
+        onProgress("Checking for calendar feeds...");
+        const feedsResult = await listInstitutionsWithFeedsAction();
+        if (!("error" in feedsResult)) {
+          for (const { acronym: inst, feedUrls } of feedsResult.institutions) {
+            // Skip institutions already swept via API
+            if (listResult.acronyms.includes(inst)) continue;
+
+            // Per feed URL (fail-forward)
+            for (const feedUrl of feedUrls) {
+              try {
+                onProgress(`Fetching calendar feed for ${inst}...`);
+                const icsResult = await fetchIcsFeedAction(feedUrl);
+                if ("error" in icsResult) {
+                  sections.push({ course: `${inst} calendar feed`, error: icsResult.error, assignments: [] });
+                  continue;
+                }
+
+                const events = parseIcsEvents(icsResult.ics);
+                const assignments = events.map((e) => ({
+                  name: e.summary,
+                  dueAt: e.startsAt,
+                }));
+
+                const filtered = filterUpcoming(assignments, nowMs, daysAhead);
+                sections.push({
+                  course: `${inst} calendar feed`,
+                  assignments: filtered,
+                });
+              } catch (err) {
+                sections.push({
+                  course: `${inst} calendar feed`,
+                  error: err instanceof Error ? err.message : "failed to fetch",
+                  assignments: [],
+                });
+              }
+            }
           }
         }
       } else {
@@ -10991,18 +11042,21 @@ export const STEP_REGISTRY: StepDefinition[] = [
     description:
       "Draft one short, personalized reminder message per student with missing work, saved to Drafts > Messages for review. Nothing is sent until you approve each message.",
     inputs: [
-      { key: "course", label: "Course", type: "lmsCourse", required: true, help: "The Canvas course URL." },
+      { key: "course", label: "Course", type: "lmsCourse", required: false, help: "The Canvas course URL (optional for closed-LMS courses)." },
       { key: "missingJson", label: "Missing submissions (JSON)", type: "longtext", required: true, help: "Wired from List missing submissions." },
       { key: "extraNotes", label: "Extra notes (optional)", type: "longtext", required: false, help: "Folded into every nudge - e.g. mention the late policy or an upcoming deadline." },
+      { key: "hubCourse", label: "Course tile", type: "hubCourse", required: false, help: "Optional - for closed-LMS courses with email-based nudging." },
     ],
     outputs: [
       { key: "drafted", label: "Drafts saved", type: "number" },
       { key: "hasDrafted", label: "Any drafted?", type: "boolean" },
     ],
     run: async (values, helpers, onProgress) => {
-      const courseUrl = String(values.course ?? "").trim();
-      if (!courseUrl) {
-        throw new Error("Select an LMS course.");
+      const courseUrl = String(values.course ?? "").trim() || undefined;
+      const hubCourseId = String(values.hubCourse ?? "").trim() || undefined;
+
+      if (!courseUrl && !hubCourseId) {
+        throw new Error("Provide either an LMS course or select a course tile for closed-LMS email nudging.");
       }
 
       const missingJson = String(values.missingJson ?? "").trim();
@@ -11013,7 +11067,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const extraNotes = String(values.extraNotes ?? "").trim();
 
       onProgress("Drafting nudges...");
-      const res = await draftStudentNudgesAction(courseUrl, missingJson, extraNotes, helpers.provider, helpers.workflowId, helpers.workflowName);
+      const res = await draftStudentNudgesAction(courseUrl ?? "", missingJson, extraNotes, helpers.provider, helpers.workflowId, helpers.workflowName, hubCourseId);
       if ("error" in res) {
         throw new Error(res.error);
       }
@@ -11812,6 +11866,802 @@ export const STEP_REGISTRY: StepDefinition[] = [
           hasUpdated: updated > 0 ? "1" : "",
         },
         summary: { kind: "text", text: report },
+      };
+    },
+  },
+
+  {
+    type: "list-deadlines-from-feed",
+    name: "List deadlines from calendar feed",
+    description: "Read upcoming events from an institution's calendar feed (ICS) and list those due in the next N days.",
+    inputs: [
+      { key: "institution", label: "Institution", type: "institution", required: true },
+      { key: "daysAhead", label: "Days ahead", type: "number", required: false, help: "How many days ahead to look. Default 7." },
+    ],
+    outputs: [
+      { key: "deadlines", label: "Upcoming deadlines", type: "longtext" },
+      { key: "count", label: "How many", type: "number" },
+      { key: "hasUpcoming", label: "Any upcoming?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const inst = String(values.institution ?? "").trim();
+      if (!inst) {
+        throw new Error("Select an institution.");
+      }
+
+      const daysAheadRaw = String(values.daysAhead ?? "").trim();
+      const daysAhead = Number.isFinite(Number(daysAheadRaw)) && Number(daysAheadRaw) >= 1 ? Math.floor(Number(daysAheadRaw)) : 7;
+
+      onProgress("Loading calendar feeds...");
+      const feedsResult = await listInstitutionFeedUrlsAction(inst);
+      if ("error" in feedsResult) {
+        throw new Error(feedsResult.error);
+      }
+
+      if (feedsResult.feedUrls.length === 0) {
+        throw new Error(`No calendar feed is saved for ${inst}. Add one under the institution's fields or run Configure institution feeds.`);
+      }
+
+      const nowMs = Date.now();
+      const sections: DeadlineSection[] = [];
+
+      for (const feedUrl of feedsResult.feedUrls) {
+        try {
+          onProgress(`Fetching calendar feed...`);
+          const icsResult = await fetchIcsFeedAction(feedUrl);
+          if ("error" in icsResult) {
+            sections.push({ course: `${inst} calendar feed`, error: icsResult.error, assignments: [] });
+            continue;
+          }
+
+          const events = parseIcsEvents(icsResult.ics);
+          const assignments = events.map((e) => ({
+            name: e.summary,
+            dueAt: e.startsAt,
+          }));
+
+          const filtered = filterUpcoming(assignments, nowMs, daysAhead);
+          sections.push({
+            course: `${inst} calendar feed`,
+            assignments: filtered,
+          });
+        } catch (err) {
+          sections.push({
+            course: `${inst} calendar feed`,
+            error: err instanceof Error ? err.message : "failed to fetch",
+            assignments: [],
+          });
+        }
+      }
+
+      const report = formatDeadlineReport(sections, daysAhead);
+
+      return {
+        outputs: {
+          deadlines: report.deadlines,
+          count: String(report.count),
+          hasUpcoming: report.count > 0 ? "1" : "",
+        },
+        summary: report.count > 0
+          ? { kind: "list", label: `Deadlines in the next ${daysAhead} day(s)`, items: report.items }
+          : { kind: "text", text: report.deadlines },
+      };
+    },
+  },
+
+  {
+    type: "import-gradebook-csv",
+    name: "Import gradebook CSV",
+    description: "Parse a gradebook export from Canvas, Brightspace, Blackboard, or Moodle; extract students and grades; list missing submissions by item.",
+    inputs: [
+      { key: "gradebook", label: "Gradebook CSV", type: "uploads", required: true, help: "Upload the .csv/.xls/.txt/.tsv gradebook exported from the LMS." },
+      { key: "hubCourse", label: "Course tile", type: "hubCourse", required: false, help: "Optional - merges imported students into the tile's roster." },
+      { key: "assignment", label: "Assignment (optional)", type: "text", required: false, help: "Filter missing submissions to one item name." },
+    ],
+    outputs: [
+      { key: "gradebookJson", label: "Gradebook (JSON)", type: "longtext" },
+      { key: "missingJson", label: "Missing (JSON)", type: "longtext" },
+      { key: "students", label: "Student count", type: "number" },
+      { key: "hasMissing", label: "Any missing?", type: "boolean" },
+      { key: "report", label: "Import report", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const files = Array.isArray(values.gradebook) ? (values.gradebook as File[]) : [];
+      if (files.length === 0) {
+        throw new Error("Upload the gradebook CSV exported from the LMS.");
+      }
+
+      onProgress("Parsing gradebook...");
+      const csv = await files[0].text();
+      const parsed = parseGradebookCsv(csv);
+
+      const studentCount = parsed.students.length;
+      const itemCount = parsed.items.length;
+
+      const assignmentFilter = String(values.assignment ?? "").trim() || undefined;
+      const missing = missingFromGradebook(parsed, assignmentFilter);
+
+      const reportLines: string[] = [];
+      reportLines.push(`Format: ${parsed.format}`);
+      reportLines.push(`Students: ${studentCount}`);
+      reportLines.push(`Items: ${itemCount}`);
+      reportLines.push(`Missing submissions: ${missing.length}`);
+
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      if (hubCourseId) {
+        try {
+          onProgress("Merging roster...");
+          const list = await listCourseHubAction();
+          if ("error" in list) {
+            reportLines.push(`Roster merge failed: ${list.error}`);
+          } else {
+            const tile = list.courses.find((c) => c.id === hubCourseId);
+            if (tile) {
+              const students = parsed.students.map((s) => ({
+                name: s.name,
+                email: s.email,
+                externalId: s.externalId,
+              }));
+              const merged = mergeImportedRoster(tile.studentRepos ?? [], students);
+
+              const overrides: Record<string, unknown> = {};
+              if (merged.added > 0 || merged.matched > 0) {
+                overrides.studentRepos = merged.studentRepos;
+                overrides.roster = merged.roster;
+                reportLines.push(`+${merged.added} added, ${merged.matched} matched`);
+
+                const updateResult = await updateCourseHubAction(hubCourseId, {
+                  ...courseToInputPayload(tile),
+                  ...overrides,
+                });
+                if ("error" in updateResult) {
+                  reportLines.push(`Roster update failed: ${updateResult.error}`);
+                } else {
+                  reportLines.push(`Roster updated successfully`);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          reportLines.push(`Roster merge error: ${err instanceof Error ? err.message : "unknown"}`);
+        }
+      }
+
+      const gradebookJson = JSON.stringify({
+        format: parsed.format,
+        students: parsed.students,
+        items: parsed.items,
+      });
+      const missingJson = JSON.stringify(missing);
+
+      return {
+        outputs: {
+          gradebookJson,
+          missingJson,
+          students: String(studentCount),
+          hasMissing: missing.length > 0 ? "1" : "",
+          report: reportLines.join("\n"),
+        },
+        summary: { kind: "text", text: reportLines.join("\n") },
+      };
+    },
+  },
+
+  {
+    type: "import-roster-from-csv",
+    name: "Import roster from CSV",
+    description: "Parse a roster from a CSV file and merge it into a course tile's student roster.",
+    inputs: [
+      { key: "roster", label: "Roster CSV", type: "uploads", required: true, help: "Upload the .csv/.txt/.tsv roster file." },
+      { key: "hubCourse", label: "Course tile", type: "hubCourse", required: true, help: "The course tile to merge the roster into." },
+    ],
+    outputs: [
+      { key: "added", label: "Students added", type: "number" },
+      { key: "matched", label: "Students matched", type: "number" },
+      { key: "total", label: "Total students", type: "number" },
+      { key: "report", label: "Import report", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const files = Array.isArray(values.roster) ? (values.roster as File[]) : [];
+      if (files.length === 0) {
+        throw new Error("Upload the roster CSV file.");
+      }
+
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      if (!hubCourseId) {
+        throw new Error("Select a course tile.");
+      }
+
+      onProgress("Loading course...");
+      const list = await listCourseHubAction();
+      if ("error" in list) {
+        throw new Error(list.error);
+      }
+
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (!tile) {
+        throw new Error("Course tile not found.");
+      }
+
+      onProgress("Parsing roster...");
+      const csv = await files[0].text();
+
+      let students: Array<{ name: string; email?: string; externalId?: string }> = [];
+
+      // Try parsing as gradebook first
+      const headerLine = csv.split("\n")[0];
+      const format = detectGradebookFormat(headerLine.split(/[,\t]/).map((s) => s.trim()));
+
+      if (format !== "unknown") {
+        const parsed = parseGradebookCsv(csv);
+        students = parsed.students.map((s) => ({
+          name: s.name,
+          email: s.email,
+          externalId: s.externalId,
+        }));
+      } else {
+        // Plain CSV with name/email heuristics and header detection
+        const lines = csv.split("\n").map((l) => l.trim()).filter(Boolean);
+        let startIndex = 0;
+
+        // Detect and skip header row: if first row looks like column labels
+        if (lines.length > 0) {
+          const firstLineParts = lines[0].split(/[,\t]/).map((p) => p.trim());
+          const looksLikeHeader =
+            (firstLineParts.some((p) => /^name$/i.test(p) || /^email$/i.test(p))) &&
+            (!firstLineParts[1] || !firstLineParts[1].includes("@"));
+          if (looksLikeHeader) {
+            startIndex = 1;
+          }
+        }
+
+        for (let i = startIndex; i < lines.length; i++) {
+          const parts = lines[i].split(/[,\t]/).map((p) => p.trim());
+          if (parts.length >= 1) {
+            students.push({
+              name: parts[0],
+              email: parts[1]?.includes("@") ? parts[1] : undefined,
+            });
+          }
+        }
+      }
+
+      if (students.length === 0) {
+        throw new Error("No students found in the roster file.");
+      }
+
+      onProgress("Merging roster...");
+      const merged = mergeImportedRoster(tile.studentRepos ?? [], students);
+
+      const updateResult = await updateCourseHubAction(hubCourseId, {
+        ...courseToInputPayload(tile),
+        studentRepos: merged.studentRepos,
+        roster: merged.roster,
+      });
+
+      if ("error" in updateResult) {
+        throw new Error(updateResult.error);
+      }
+
+      const reportLines: string[] = [];
+      reportLines.push(`Added: ${merged.added}`);
+      reportLines.push(`Matched: ${merged.matched}`);
+      reportLines.push(`Total: ${merged.studentRepos.length}`);
+
+      const report = reportLines.join("\n");
+
+      return {
+        outputs: {
+          added: String(merged.added),
+          matched: String(merged.matched),
+          total: String(merged.studentRepos.length),
+          report,
+        },
+        summary: { kind: "text", text: report },
+      };
+    },
+  },
+
+  {
+    type: "export-grades-for-lms",
+    name: "Export grades for LMS",
+    description: "Convert approved grades from a grading run into a gradebook file ready to upload to Canvas, Brightspace, Blackboard, or Moodle.",
+    inputs: [
+      { key: "runs", label: "Grading runs", type: "courseList", required: true },
+      { key: "approvedGrades", label: "Approved grades", type: "courseList", required: true, help: "The reviewed rows from the grading step." },
+      { key: "template", label: "Gradebook template", type: "uploads", required: false, help: "Optional - an exported gradebook file from the LMS to fill." },
+      { key: "lms", label: "LMS", type: "text", required: true, help: "canvas, brightspace, blackboard, or moodle." },
+      { key: "itemName", label: "Assignment name (optional)", type: "text", required: false, help: "Overrides the assignment name used for the column." },
+      { key: "hubCourse", label: "Course tile", type: "hubCourse", required: false, help: "Optional - saves the file to the course's materials." },
+    ],
+    outputs: [
+      { key: "fileName", label: "File name", type: "text" },
+      { key: "exported", label: "Grades exported", type: "number" },
+      { key: "report", label: "Export report", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      interface RunEntry {
+        courseName: string;
+        assignmentName: string;
+        canvasUrl: string;
+        run: GradingRun;
+        offline?: boolean;
+      }
+
+      const runs = Array.isArray(values.runs) ? (values.runs as RunEntry[]) : [];
+      const approved = Array.isArray(values.approvedGrades) ? (values.approvedGrades as Array<Record<string, string>>) : [];
+
+      if (runs.length === 0) {
+        throw new Error("Provide grading runs to export.");
+      }
+
+      const lmsType = String(values.lms ?? "").trim().toLowerCase();
+      if (!["canvas", "brightspace", "blackboard", "moodle"].includes(lmsType)) {
+        throw new Error("Select a valid LMS: canvas, brightspace, blackboard, or moodle.");
+      }
+
+      const itemNameOverride = String(values.itemName ?? "").trim() || undefined;
+      const templateFiles = Array.isArray(values.template) ? (values.template as File[]) : [];
+      let templateCsv: string | undefined;
+      if (templateFiles.length > 0) {
+        templateCsv = await templateFiles[0].text();
+      }
+
+      // Extract approved scores per the post-grades pattern
+      const approvedByRunIndex = new Map<string, Array<Record<string, string>>>();
+      for (const row of approved) {
+        const runIndex = row.runIndex ?? "";
+        if (!approvedByRunIndex.has(runIndex)) {
+          approvedByRunIndex.set(runIndex, []);
+        }
+        approvedByRunIndex.get(runIndex)!.push(row);
+      }
+
+      const scores: Array<{ name?: string; externalId?: string; username?: string; email?: string; itemName: string; score: string }> = [];
+
+      for (let i = 0; i < runs.length; i++) {
+        const entry = runs[i];
+        if (entry.offline) continue;
+
+        const runApprovedRows = approvedByRunIndex.get(String(i)) ?? [];
+        const itemName = itemNameOverride || entry.assignmentName;
+
+        for (const approvedRow of runApprovedRows) {
+          const resultIndex = approvedRow.resultIndex ? parseInt(approvedRow.resultIndex, 10) : null;
+          if (resultIndex === null || resultIndex < 0 || resultIndex >= entry.run.results.length) continue;
+
+          const result = entry.run.results[resultIndex];
+          const grade = (approvedRow.grade ?? "").trim();
+          if (!grade || !grade.match(/^-?\d+(\.\d+)?$/)) continue;
+
+          scores.push({
+            name: approvedRow.student,
+            externalId: typeof result.userId === "number" ? String(result.userId) : undefined,
+            itemName,
+            score: grade,
+          });
+        }
+      }
+
+      if (scores.length === 0) {
+        throw new Error("No approved grades to export.");
+      }
+
+      // Enrich scores with email from the course tile roster if available
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      if (hubCourseId) {
+        onProgress("Loading course roster...");
+        const listResult = await listCourseHubAction();
+        if (!("error" in listResult)) {
+          const tile = listResult.courses.find((c) => c.id === hubCourseId);
+          if (tile && tile.studentRepos && tile.studentRepos.length > 0) {
+            for (const score of scores) {
+              if (score.email) continue; // Already has email
+              const externalIdNum = score.externalId ? parseInt(score.externalId, 10) : NaN;
+              let matched = false;
+              // Try to match by canvasUserId
+              if (!isNaN(externalIdNum)) {
+                const student = tile.studentRepos.find((s) => s.canvasUserId === String(externalIdNum));
+                if (student && student.email) {
+                  score.email = student.email;
+                  matched = true;
+                }
+              }
+              // Try to match by name if no canvasUserId match
+              if (!matched && score.name) {
+                const student = tile.studentRepos.find(
+                  (s) => s.student.toLowerCase() === score.name!.toLowerCase()
+                );
+                if (student && student.email) {
+                  score.email = student.email;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Check if Moodle export has emails
+      if (lmsType === "moodle") {
+        const hasEmails = scores.some((s) => s.email && s.email.trim());
+        if (!hasEmails) {
+          throw new Error("Moodle export needs student emails - upload the Moodle gradebook as a template or import the roster with emails first.");
+        }
+      }
+
+      onProgress("Building gradebook file...");
+
+      let finalCsv: string;
+      let fileName: string;
+
+      if (templateCsv) {
+        const fillResult = fillGradebookCsv(templateCsv, scores);
+        finalCsv = fillResult.csv;
+        fileName = `grades-${lmsType}-${new Date().toISOString().split("T")[0]}.csv`;
+        if (lmsType === "blackboard" && templateCsv.includes("\t")) {
+          fileName = `grades-${lmsType}-${new Date().toISOString().split("T")[0]}.txt`;
+        }
+      } else {
+        if (["brightspace", "blackboard"].includes(lmsType)) {
+          throw new Error(`Upload the gradebook file downloaded from the LMS - ${lmsType} imports must start from its own export.`);
+        }
+
+        if (lmsType === "canvas") {
+          finalCsv = buildCanvasGradebookCsv(
+            scores.map((s) => ({ name: s.name || "", externalId: s.externalId || "" })),
+            { name: scores[0].itemName, pointsPossible: 100 },
+            new Map(scores.map((s) => [s.externalId || "", s.score]))
+          );
+          fileName = `grades-canvas-${new Date().toISOString().split("T")[0]}.csv`;
+        } else {
+          finalCsv = buildMoodleGradebookCsv(
+            scores.map((s) => ({ email: s.email || "" })),
+            scores[0].itemName,
+            new Map(scores.map((s) => [s.email || "", s.score]))
+          );
+          fileName = `grades-moodle-${new Date().toISOString().split("T")[0]}.csv`;
+        }
+      }
+
+      const blob = new Blob([finalCsv], { type: "text/csv" });
+
+      if (helpers.saveBundle) {
+        try {
+          onProgress("Saving file...");
+          await helpers.saveBundle(blob, fileName);
+        } catch (err) {
+          throw new Error(`Could not save file: ${err instanceof Error ? err.message : "unknown"}`);
+        }
+      }
+
+      if (hubCourseId && helpers.saveCourseMaterialFile) {
+        try {
+          await helpers.saveCourseMaterialFile(hubCourseId, blob, fileName);
+        } catch (err) {
+          throw new Error(`Could not save to course materials: ${err instanceof Error ? err.message : "unknown"}`);
+        }
+      }
+
+      const report = `Exported ${scores.length} grades to ${fileName}`;
+
+      return {
+        outputs: {
+          fileName,
+          exported: String(scores.length),
+          report,
+        },
+        summary: { kind: "text", text: report },
+      };
+    },
+  },
+
+  {
+    type: "create-course-tile",
+    name: "Create a course tile",
+    description: "Create a new course tile with a name, institution, start date, and LMS type.",
+    inputs: [
+      { key: "name", label: "Course name", type: "text", required: true },
+      { key: "institution", label: "Institution", type: "institution", required: false },
+      { key: "startDate", label: "Start date", type: "date", required: false },
+      { key: "weeks", label: "Number of weeks", type: "number", required: false },
+      { key: "lms", label: "LMS", type: "text", required: false, help: "canvas, blackboard, brightspace, moodle, or none." },
+    ],
+    outputs: [
+      { key: "courseId", label: "Course tile", type: "hubCourse" },
+      { key: "created", label: "Created?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const name = String(values.name ?? "").trim();
+      if (!name) {
+        throw new Error("Provide a course name.");
+      }
+
+      onProgress("Checking existing courses...");
+      const list = await listCourseHubAction();
+      if ("error" in list) {
+        throw new Error(list.error);
+      }
+
+      const institution = String(values.institution ?? "").trim();
+      const nameKey = `${name.trim().toLowerCase()}||${institution.trim().toLowerCase()}`;
+
+      // Check if tile already exists
+      for (const tile of list.courses) {
+        const tileKey = `${(tile.name ?? "").trim().toLowerCase()}||${(tile.institution ?? "").trim().toLowerCase()}`;
+        if (tileKey === nameKey) {
+          return {
+            outputs: { courseId: tile.id, created: "" },
+            summary: { kind: "text", text: `Course tile already exists: ${name}` },
+          };
+        }
+      }
+
+      onProgress("Creating course tile...");
+
+      const lms = String(values.lms ?? "").trim().toLowerCase();
+      const lmsType = ["canvas", "blackboard", "brightspace", "moodle"].includes(lms)
+        ? lms
+        : lms === "none"
+          ? null
+          : null;
+
+      const created = await createCourseHubAction({
+        name,
+        institution: institution || undefined,
+        startDate: String(values.startDate ?? "").trim() || undefined,
+        weeks: values.weeks ? Number(values.weeks) : undefined,
+        lms: lmsType,
+      });
+
+      if ("error" in created) {
+        throw new Error(created.error);
+      }
+
+      return {
+        outputs: { courseId: created.course.id, created: "1" },
+        summary: { kind: "text", text: `Created course tile: ${name}` },
+      };
+    },
+  },
+
+  {
+    type: "configure-institution-feeds",
+    name: "Configure institution feeds",
+    description: "Set up calendar feed URLs (ICS) for an institution to enable deadline detection without LMS API access.",
+    inputs: [
+      { key: "institution", label: "Institution", type: "institution", required: true },
+      { key: "calendarFeedUrl", label: "Calendar feed URLs", type: "longtext", required: true, help: "One ICS feed URL per line (from the LMS calendar's export/subscribe)." },
+    ],
+    outputs: [
+      { key: "configured", label: "Configured?", type: "boolean" },
+      { key: "report", label: "Configuration report", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const inst = String(values.institution ?? "").trim();
+      if (!inst) {
+        throw new Error("Select an institution.");
+      }
+
+      const urlsText = String(values.calendarFeedUrl ?? "").trim();
+      if (!urlsText) {
+        throw new Error("Provide at least one calendar feed URL.");
+      }
+
+      const urls = urlsText
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const invalidUrls = urls.filter((u) => !u.startsWith("http://") && !u.startsWith("https://"));
+      if (invalidUrls.length > 0) {
+        throw new Error(`Invalid URLs (must start with http:// or https://): ${invalidUrls.join(", ")}`);
+      }
+
+      onProgress("Validating feeds...");
+      const reportLines: string[] = [];
+      let successCount = 0;
+
+      for (const url of urls) {
+        try {
+          const icsResult = await fetchIcsFeedAction(url);
+          if ("error" in icsResult) {
+            reportLines.push(`${url}: ${icsResult.error}`);
+          } else {
+            const events = parseIcsEvents(icsResult.ics);
+            reportLines.push(`${url}: ${events.length} events`);
+            successCount++;
+          }
+        } catch (err) {
+          reportLines.push(`${url}: ${err instanceof Error ? err.message : "failed to fetch"}`);
+        }
+      }
+
+      if (successCount === 0) {
+        throw new Error("No feeds could be validated. Check the URLs and try again.");
+      }
+
+      onProgress("Saving configuration...");
+
+      if (!helpers.getInstitutionFields) {
+        throw new Error("Sign in to configure institutions.");
+      }
+
+      const getFieldsResult = await helpers.getInstitutionFields(inst);
+
+      // Rebuild field list: keep non-calendarFeedUrl fields, set new calendar fields
+      const newFields = getFieldsResult
+        .filter((f) => !f.id.startsWith("calendarFeedUrl"))
+        .map((f) => ({ ...f }));
+
+      for (let i = 0; i < urls.length; i++) {
+        const fieldId = i === 0 ? "calendarFeedUrl" : `calendarFeedUrl${i + 1}`;
+        const fieldLabel = i === 0 ? "Calendar feed (.ics)" : `Calendar feed ${i + 1} (.ics)`;
+        newFields.push({
+          id: fieldId,
+          label: fieldLabel,
+          type: "url",
+          value: urls[i],
+        });
+      }
+
+      const saveResult = await saveInstitutionFieldsAction(inst, newFields as InstitutionField[]);
+      if ("error" in saveResult) {
+        throw new Error(saveResult.error);
+      }
+
+      const report = reportLines.join("\n");
+
+      return {
+        outputs: {
+          configured: successCount > 0 ? "1" : "",
+          report,
+        },
+        summary: { kind: "text", text: report },
+      };
+    },
+  },
+
+  {
+    type: "check-mailbox-connection",
+    name: "Check mailbox connection",
+    description: "Verify that Outlook is connected and email sending is enabled for an institution.",
+    inputs: [
+      { key: "institution", label: "Institution", type: "institution", required: true },
+    ],
+    outputs: [
+      { key: "connected", label: "Connected?", type: "boolean" },
+      { key: "canSend", label: "Can send?", type: "boolean" },
+      { key: "report", label: "Status report", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const inst = String(values.institution ?? "").trim();
+      if (!inst) {
+        throw new Error("Select an institution.");
+      }
+
+      onProgress("Checking connection...");
+      const status = await getOutlookStatusAction();
+      if ("error" in status) {
+        throw new Error(status.error);
+      }
+
+      const code = inst.toUpperCase();
+      const connected = status.connected.includes(code);
+      const canSend = status.canSend.includes(code);
+
+      let report: string;
+      if (!connected) {
+        report = `Connect Outlook for ${code} under Account > Integrations.`;
+      } else if (!canSend) {
+        report = `Reconnect Outlook to grant email sending (Mail.Send).`;
+      } else {
+        report = `Outlook connected; sending enabled.`;
+      }
+
+      return {
+        outputs: {
+          connected: connected ? "1" : "",
+          canSend: canSend ? "1" : "",
+          report,
+        },
+        summary: { kind: "text", text: report },
+      };
+    },
+  },
+
+  {
+    type: "read-email-inboxes",
+    name: "Read the email inboxes",
+    description: "One digest across every connected college Outlook account: who wrote, what about, and what is still unread. Feed it to the Morning Briefing or gate follow-up steps on hasUnread.",
+    inputs: [
+      { key: "institutions", label: "Institutions", type: "longtext", required: false, help: "One acronym per line; blank reads every connected Outlook account." },
+      { key: "unreadOnly", label: "Unread only?", type: "boolean", required: false, help: "List only unread messages in the digest." },
+      { key: "top", label: "Messages per account", type: "number", required: false, help: "Default 15." },
+    ],
+    outputs: [
+      { key: "digest", label: "Digest", type: "longtext" },
+      { key: "unread", label: "Unread", type: "number" },
+      { key: "total", label: "Total listed", type: "number" },
+      { key: "hasUnread", label: "Any unread?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      onProgress("Checking Outlook connection...");
+      const status = await getOutlookStatusAction();
+      if ("error" in status) {
+        throw new Error(status.error);
+      }
+
+      const institutionsInput = String(values.institutions ?? "")
+        .split("\n")
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean);
+
+      let instList = status.connected;
+      if (institutionsInput.length > 0) {
+        instList = instList.filter((code) => institutionsInput.includes(code));
+      }
+
+      if (instList.length === 0) {
+        throw new Error("Connect Outlook under Account > Integrations first.");
+      }
+
+      const unreadOnly = String(values.unreadOnly ?? "") === "1";
+      const topN = Math.min(Math.max(Number(values.top ?? 15) || 15, 1), 50);
+      const multi = instList.length > 1;
+
+      const outLines: string[] = [];
+      let totalUnread = 0;
+      let totalListed = 0;
+
+      for (let idx = 0; idx < instList.length; idx++) {
+        const inst = instList[idx];
+        const isLast = idx === instList.length - 1;
+
+        onProgress(`Reading ${inst} mailbox...`);
+        const r = await listOutlookMessagesAction(inst);
+
+        if ("error" in r) {
+          outLines.push(`${inst}: ${r.error}`);
+        } else {
+          const messages = r.messages || [];
+          const unreadCount = messages.filter((m) => m.isRead === false).length;
+          totalUnread += unreadCount;
+
+          outLines.push(`${inst}: ${unreadCount} unread of ${messages.length} recent`);
+
+          let messageLines = messages;
+          if (unreadOnly) {
+            messageLines = messageLines.filter((m) => m.isRead === false);
+          }
+
+          const listedMessages = messageLines.slice(0, topN);
+          totalListed += listedMessages.length;
+
+          for (const msg of listedMessages) {
+            const unreadMarker = msg.isRead === false ? "[unread] " : "";
+            outLines.push(`- ${unreadMarker}${msg.fromName} - ${msg.subject}`);
+          }
+        }
+
+        if (multi && !isLast) {
+          outLines.push("");
+        }
+      }
+
+      const digest = outLines.join("\n").trim();
+      const hasUnread = totalUnread > 0;
+
+      return {
+        outputs: {
+          digest,
+          unread: totalUnread,
+          total: totalListed,
+          hasUnread: hasUnread ? "1" : "",
+        },
+        summary: {
+          kind: "text",
+          text: digest || "(No messages)",
+        },
       };
     },
   },

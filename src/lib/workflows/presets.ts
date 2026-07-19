@@ -848,7 +848,7 @@ export const MORNING_BRIEFING: WorkflowDef = {
   preset: true,
   name: "Morning Briefing",
   description:
-    "One schedulable digest of everything that needs you today: unread Canvas messages per institution, how many submissions need grading, and every deadline in the next 7 days across every configured institution (pick courses to narrow) - composed into a Markdown briefing (saved to Files on unattended runs). Runs fully headless: schedule it for each morning.",
+    "One schedulable digest of everything that needs you today: unread Canvas messages per institution, institutional email across your connected accounts, how many submissions need grading, and every deadline in the next 7 days across every configured institution (pick courses to narrow) - composed into a Markdown briefing (saved to Files on unattended runs). Runs fully headless: schedule it for each morning.",
   steps: [
     {
       type: "get-unread-and-notifications",
@@ -871,12 +871,20 @@ export const MORNING_BRIEFING: WorkflowDef = {
       },
     },
     {
+      type: "read-email-inboxes",
+      bindings: {
+        institutions: { source: "runtime", fieldKey: "institutions" },
+        unreadOnly: { source: "literal", value: "1" },
+      },
+    },
+    {
       type: "compose-briefing",
       bindings: {
         title: { source: "literal", value: "Morning Briefing" },
         section1: { source: "step", stepIndex: 0, outputKey: "breakdown" },
         section2: { source: "step", stepIndex: 1, outputKey: "summary" },
         section3: { source: "step", stepIndex: 2, outputKey: "deadlines" },
+        section4: { source: "step", stepIndex: 3, outputKey: "digest" },
       },
     },
   ],
@@ -1247,6 +1255,122 @@ export const TERM_KICKOFF_IMPORT: WorkflowDef = {
   ],
 };
 
+export const CLOSED_INSTITUTION_ONBOARDING: WorkflowDef = {
+  id: "closed-institution-onboarding",
+  preset: true,
+  name: "Closed Institution Onboarding",
+  description:
+    "One guided run to wire up an institution whose LMS has no API access: save its calendar feed and verify upcoming deadlines, create the course tile, import the roster (with emails) from a gradebook CSV, and check the Outlook connection for notification triggers and email sending - ending with a report that includes the remaining manual checklist (set LMS notifications to right away, weekly gradebook download, term cartridge import).",
+  steps: [
+    {
+      type: "configure-institution-feeds",
+      bindings: {
+        institution: { source: "runtime", fieldKey: "institution" },
+        calendarFeedUrl: { source: "runtime", fieldKey: "calendarFeedUrl" },
+      },
+    },
+    {
+      type: "list-deadlines-from-feed",
+      bindings: {
+        institution: { source: "runtime", fieldKey: "institution" },
+        daysAhead: { source: "literal", value: "7" },
+      },
+    },
+    {
+      type: "create-course-tile",
+      bindings: {
+        name: { source: "runtime", fieldKey: "courseName" },
+        institution: { source: "runtime", fieldKey: "institution" },
+        startDate: { source: "runtime", fieldKey: "startDate" },
+        weeks: { source: "runtime", fieldKey: "weeks" },
+        lms: { source: "runtime", fieldKey: "lms" },
+      },
+    },
+    {
+      type: "import-roster-from-csv",
+      bindings: {
+        roster: { source: "runtime", fieldKey: "rosterCsv" },
+        hubCourse: { source: "step", stepIndex: 2, outputKey: "courseId" },
+      },
+    },
+    {
+      type: "check-mailbox-connection",
+      bindings: {
+        institution: { source: "runtime", fieldKey: "institution" },
+      },
+    },
+    {
+      type: "compose-briefing",
+      bindings: {
+        title: { source: "literal", value: "Closed institution onboarding report" },
+        section1: { source: "step", stepIndex: 1, outputKey: "deadlines" },
+        section2: { source: "step", stepIndex: 3, outputKey: "report" },
+        section3: { source: "step", stepIndex: 4, outputKey: "report" },
+        section4: {
+          source: "literal",
+          value:
+            "Manual checklist:\n- In the LMS notification settings, set Messages and Submissions to notify right away.\n- Calendar feed URL locations - Canvas: Calendar > Calendar Feed. Blackboard: Calendar > gear icon. Brightspace: Calendar > Settings > Enable Calendar Feeds > Subscribe. Moodle: Calendar > Export calendar (get URL).\n- Weekly: download the gradebook CSV and run Nudge Missing (from gradebook CSV) or Review Grades and Export for a Closed LMS.\n- Each term: import the generated course cartridge (LMS export step) into the LMS, and re-run this onboarding if feeds change.\n- Optional: point an institutional Power Automate flow at a webhook trigger URL for instant events.",
+        },
+      },
+    },
+  ],
+};
+
+export const REVIEW_AND_EXPORT_GRADES_CSV: WorkflowDef = {
+  id: "review-and-export-grades-csv",
+  preset: true,
+  name: "Review Grades and Export for a Closed LMS",
+  description:
+    "Review the oldest pending grading draft exactly like Review Graded Drafts, then turn the approved scores into an upload-ready gradebook file for Canvas, Brightspace, Blackboard, or Moodle instead of posting to an API. Upload the file in the LMS gradebook to finish.",
+  steps: [
+    {
+      type: "review-grading-draft",
+      bindings: {},
+    },
+    {
+      type: "export-grades-for-lms",
+      bindings: {
+        runs: { source: "step", stepIndex: 0, outputKey: "runs" },
+        approvedGrades: { source: "step", stepIndex: 0, outputKey: "approvedGrades" },
+        template: { source: "runtime", fieldKey: "template" },
+        lms: { source: "runtime", fieldKey: "lms" },
+        itemName: { source: "runtime", fieldKey: "itemName" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+      },
+    },
+  ],
+};
+
+export const NUDGE_MISSING_FROM_GRADEBOOK: WorkflowDef = {
+  id: "nudge-missing-from-gradebook",
+  preset: true,
+  name: "Nudge Missing (from gradebook CSV)",
+  description:
+    "Upload the gradebook CSV exported from any LMS: students with empty grade cells become personalized nudge drafts in Drafts > Messages - with their email attached when the export carries one, so you can send without any LMS API. Nothing sends until you approve.",
+  steps: [
+    {
+      type: "import-gradebook-csv",
+      bindings: {
+        gradebook: { source: "runtime", fieldKey: "gradebook" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        assignment: { source: "runtime", fieldKey: "assignment" },
+      },
+    },
+    {
+      type: "draft-student-nudges",
+      bindings: {
+        missingJson: { source: "step", stepIndex: 0, outputKey: "missingJson" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        extraNotes: { source: "runtime", fieldKey: "extraNotes" },
+      },
+      runIf: {
+        binding: { source: "step", stepIndex: 0, outputKey: "hasMissing" },
+        expected: true,
+      },
+    },
+  ],
+};
+
 /**
  * Merge built-in presets with custom workflows.
  * Returns presets first, then custom workflows.
@@ -1290,6 +1414,9 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     COPILOT_PR_SHEPHERD,
     NEXT_WEEK_LECTURES,
     TERM_KICKOFF_IMPORT,
+    CLOSED_INSTITUTION_ONBOARDING,
+    REVIEW_AND_EXPORT_GRADES_CSV,
+    NUDGE_MISSING_FROM_GRADEBOOK,
     ...custom,
   ];
 }

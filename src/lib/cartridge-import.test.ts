@@ -273,4 +273,221 @@ describe("parseCartridgeBlob", () => {
     expect(data.modules).toEqual([]);
     expect(data.rubrics).toEqual([]);
   });
+
+  it("parses generic IMSCC manifest with title and nested modules", async () => {
+    const { default: JSZip } = await import("jszip");
+    const imsccManifest = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest xmlns="http://www.imsglobal.org/xsd/imscc/imscp_v1p1"
+  xmlns:lomimscc="http://www.imsglobal.org/xsd/imscc/imsccv1p1">
+  <metadata>
+    <lomimscc:lomimscc>
+      <lomimscc:string>Introduction to Computer Science</lomimscc:string>
+    </lomimscc:lomimscc>
+  </metadata>
+  <organizations default="default-org">
+    <organization identifier="default-org">
+      <item identifier="mod1">
+        <title>Module 1: Basics</title>
+        <item identifier="item1">
+          <title>Lecture 1 Slides</title>
+        </item>
+        <item identifier="item2">
+          <title>Assignment 1</title>
+        </item>
+      </item>
+      <item identifier="mod2">
+        <title>Module 2: Advanced Topics</title>
+        <item identifier="item3">
+          <title>Lecture 2 Slides</title>
+        </item>
+      </item>
+    </organization>
+  </organizations>
+</manifest>`;
+
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", imsccManifest);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.hasCourseSettings).toBe(false);
+    expect(data.title).toBe("Introduction to Computer Science");
+    expect(data.modules).toHaveLength(2);
+    expect(data.modules[0].name).toBe("Module 1: Basics");
+    expect(data.modules[0].items).toHaveLength(2);
+    expect(data.modules[0].items[0].title).toBe("Lecture 1 Slides");
+    expect(data.modules[0].items[1].title).toBe("Assignment 1");
+    expect(data.modules[1].name).toBe("Module 2: Advanced Topics");
+    expect(data.modules[1].items).toHaveLength(1);
+    expect(data.modules[1].items[0].title).toBe("Lecture 2 Slides");
+  });
+
+  it("falls back to IMSCC title when Canvas title is missing", async () => {
+    const { default: JSZip } = await import("jszip");
+    const minimalCourseSettings = `<?xml version="1.0" encoding="UTF-8"?>
+<course identifier="test" xmlns="http://canvas.instructure.com/xsd/cccv1p0">
+  <course_code>TEST101</course_code>
+</course>`;
+
+    const imsccManifest = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest xmlns="http://www.imsglobal.org/xsd/imscc/imscp_v1p1"
+  xmlns:lomimscc="http://www.imsglobal.org/xsd/imscc/imsccv1p1">
+  <metadata>
+    <lomimscc:lomimscc>
+      <lomimscc:string>IMSCC Course Title</lomimscc:string>
+    </lomimscc:lomimscc>
+  </metadata>
+  <organizations default="default-org">
+    <organization identifier="default-org"></organization>
+  </organizations>
+</manifest>`;
+
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", imsccManifest);
+    zip.file("course_settings/course_settings.xml", minimalCourseSettings);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.hasCourseSettings).toBe(true);
+    expect(data.title).toBeNull();
+    expect(data.courseCode).toBe("TEST101");
+  });
+
+  it("falls back to IMSCC modules when Canvas modules are missing", async () => {
+    const { default: JSZip } = await import("jszip");
+    const imsccManifest = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest xmlns="http://www.imsglobal.org/xsd/imscc/imscp_v1p1">
+  <organizations default="default-org">
+    <organization identifier="default-org">
+      <item identifier="mod1">
+        <title>Week 1</title>
+      </item>
+    </organization>
+  </organizations>
+</manifest>`;
+
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", imsccManifest);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.hasCourseSettings).toBe(false);
+    expect(data.modules).toHaveLength(1);
+    expect(data.modules[0].name).toBe("Week 1");
+  });
+
+  it("handles IMSCC manifest without organizations gracefully", async () => {
+    const { default: JSZip } = await import("jszip");
+    const imsccManifest = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest xmlns="http://www.imsglobal.org/xsd/imscc/imscp_v1p1"
+  xmlns:lomimscc="http://www.imsglobal.org/xsd/imscc/imsccv1p1">
+  <metadata>
+    <lomimscc:lomimscc>
+      <lomimscc:string>Orphan Course</lomimscc:string>
+    </lomimscc:lomimscc>
+  </metadata>
+</manifest>`;
+
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", imsccManifest);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.title).toBe("Orphan Course");
+    expect(data.modules).toEqual([]);
+  });
+
+  it("rejects Moodle backup archives", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", "<manifest></manifest>");
+    zip.file("moodle_backup.xml", "<backup></backup>");
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    await expect(parseCartridgeBlob(blob)).rejects.toThrow(
+      "Moodle .mbz backups are not supported - export the course as an IMS Common Cartridge instead."
+    );
+  });
+
+  it("rejects gzip-compressed files that fail to unzip", async () => {
+    const gzipMagic = new Uint8Array([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    const blob = new Blob([gzipMagic], { type: "application/gzip" });
+
+    await expect(parseCartridgeBlob(blob)).rejects.toThrow(
+      "Moodle .mbz backups are not supported - export the course as an IMS Common Cartridge instead."
+    );
+  });
+
+  it("tolerates missing manifest when falling back to IMSCC", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.hasCourseSettings).toBe(false);
+    expect(data.title).toBeNull();
+    expect(data.modules).toEqual([]);
+  });
+
+  it("handles IMSCC items without titles gracefully", async () => {
+    const { default: JSZip } = await import("jszip");
+    const imsccManifest = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest xmlns="http://www.imsglobal.org/xsd/imscc/imscp_v1p1">
+  <organizations default="default-org">
+    <organization identifier="default-org">
+      <item identifier="mod1">
+        <title>Module with items</title>
+        <item identifier="item1">
+          <content>Missing title</content>
+        </item>
+        <item identifier="item2">
+          <title>Item with title</title>
+        </item>
+      </item>
+    </organization>
+  </organizations>
+</manifest>`;
+
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", imsccManifest);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.modules).toHaveLength(1);
+    expect(data.modules[0].items).toHaveLength(1);
+    expect(data.modules[0].items[0].title).toBe("Item with title");
+  });
+
+  it("handles IMSCC modules without titles gracefully", async () => {
+    const { default: JSZip } = await import("jszip");
+    const imsccManifest = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest xmlns="http://www.imsglobal.org/xsd/imscc/imscp_v1p1">
+  <organizations default="default-org">
+    <organization identifier="default-org">
+      <item identifier="mod1">
+        <content>Module without title</content>
+      </item>
+      <item identifier="mod2">
+        <title>Valid Module</title>
+      </item>
+    </organization>
+  </organizations>
+</manifest>`;
+
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", imsccManifest);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.modules).toHaveLength(1);
+    expect(data.modules[0].name).toBe("Valid Module");
+  });
 });

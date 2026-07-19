@@ -342,9 +342,22 @@ import {
   deleteCredentials,
 } from "@/lib/google-credentials";
 import {
-  listConnectedInstitutions,
+  listConnectedInstitutionsWithScope,
+  getValidAccessToken as getMicrosoftAccessToken,
   deleteCredentials as deleteMicrosoftCredentials,
 } from "@/lib/microsoft-credentials";
+import {
+  listRecentMessages,
+  sendMail,
+  markMessageRead,
+  type Message,
+} from "@/lib/microsoft-graph";
+import {
+  loadInstitutionFields,
+  saveInstitutionFields,
+  listAllInstitutionFields,
+  type InstitutionField,
+} from "@/lib/institution-fields";
 import {
   listTemplates,
   getTemplate,
@@ -1105,7 +1118,7 @@ export type MissingAssignmentReport = {
   assignmentName: string;
   dueAt: string | null;
   pointsPossible: number | null;
-  students: Array<{ userId: number; name: string }>;
+  students: Array<{ userId?: number; name: string; email?: string }>;
 };
 
 /**
@@ -1527,7 +1540,7 @@ export async function postGradingDraftAction(
 // called from the post-message step after the user approves a draft.
 
 /**
- * Draft one short, personalized reminder message per student with missing work.
+ * E9: Draft one short, personalized reminder message per student with missing work.
  * Saved to Drafts > Messages for review. Nothing sends until approved.
  * Falls back to deterministic scaffold if LLM fails.
  */
@@ -1537,7 +1550,8 @@ export async function draftStudentNudgesAction(
   extraNotes: string,
   provider: LlmProvider = "gemini",
   workflowId?: string,
-  workflowName?: string
+  workflowName?: string,
+  hubCourseId?: string
 ): Promise<{ drafted: number; preview: string } | { error: string }> {
   try {
     const user = await requireOwner();
@@ -1555,16 +1569,22 @@ export async function draftStudentNudgesAction(
       return { error: "Provide the missing-submissions JSON from List missing submissions." };
     }
 
-    // Group by student userId
-    const studentMap = new Map<number, { name: string; lines: string[] }>();
+    // Group by student key (userId ?? email ?? name)
+    const studentMap = new Map<string, { userId?: number; name: string; email?: string; lines: string[] }>();
 
     for (const assignment of missing) {
       for (const student of assignment.students) {
-        if (!studentMap.has(student.userId)) {
-          studentMap.set(student.userId, { name: student.name, lines: [] });
+        const key = String(student.userId ?? student.email ?? student.name);
+        if (!studentMap.has(key)) {
+          studentMap.set(key, {
+            ...(student.userId !== undefined ? { userId: student.userId } : {}),
+            name: student.name,
+            ...(student.email ? { email: student.email } : {}),
+            lines: [],
+          });
         }
         const line = `${assignment.assignmentName}${assignment.dueAt ? ` (was due ${assignment.dueAt})` : ""}`;
-        studentMap.get(student.userId)!.lines.push(line);
+        studentMap.get(key)!.lines.push(line);
       }
     }
 
@@ -1573,22 +1593,33 @@ export async function draftStudentNudgesAction(
     }
 
     const students = Array.from(studentMap.entries())
-      .map(([userId, { name, lines }]) => ({ userId, name, lines }))
-      .sort((a, b) => a.userId - b.userId);
+      .map(([, student]) => student)
+      .sort((a, b) => {
+        if (a.userId && b.userId) return a.userId - b.userId;
+        if (a.userId) return -1;
+        if (b.userId) return 1;
+        return a.name.localeCompare(b.name);
+      });
 
     // Prepare messages per student
-    const studentMessages = new Map<number, { name: string; body: string }>();
+    const studentMessages = new Map<string, { body: string }>();
 
     if (provider === "embedded") {
-      // Use deterministic scaffold for each student
-      for (const { userId, name, lines } of students) {
-        const body = scaffoldStudentNudge(name, lines, extraNotes);
-        studentMessages.set(userId, { name, body });
+      // Use deterministic scaffold for each student. Key from the student's
+      // own row (not a name lookup) so two students sharing a name still
+      // each get their own message.
+      for (const student of students) {
+        const body = scaffoldStudentNudge(student.name, student.lines, extraNotes);
+        const key = String(student.userId ?? student.email ?? student.name);
+        studentMessages.set(key, { body });
       }
     } else {
       // Use LLM to generate all nudges at once
       const studentLines = students
-        .map((s) => `\nStudent: ${s.name} (ID: ${s.userId})\nMissing:\n${s.lines.map((l) => `  - ${l}`).join("\n")}`)
+        .map((s) => {
+          const id = s.userId ? `ID: ${s.userId}` : s.email ? `Email: ${s.email}` : "Name";
+          return `\nStudent: ${s.name} (${id})\nMissing:\n${s.lines.map((l) => `  - ${l}`).join("\n")}`;
+        })
         .join("\n");
 
       const prompt = `You are an instructor sending personalized reminder messages to students with missing work.
@@ -1603,8 +1634,8 @@ Draft one short, warm reminder message for EACH student. Messages should be plai
 
 Return ONLY a valid JSON array with exactly one object per student:
 [
-  {"userId": 123, "message": "..."},
-  {"userId": 456, "message": "..."}
+  {"name": "Student Name", "message": "..."},
+  {"name": "Another Student", "message": "..."}
 ]
 
 Do not include any text outside the JSON array.`;
@@ -1618,7 +1649,7 @@ Do not include any text outside the JSON array.`;
       );
 
       // Parse LLM result
-      let llmMessages: Array<{ userId: number; message: string }> = [];
+      let llmMessages: Array<{ name: string; message: string }> = [];
       if (result.ok) {
         try {
           const jsonText = jsonObjectSlice(result.text);
@@ -1626,9 +1657,9 @@ Do not include any text outside the JSON array.`;
             const parsed = parseLenientJsonArray(jsonText);
             if (parsed) {
               llmMessages = parsed.map((obj: unknown) => {
-                const o = obj as { userId?: unknown; message?: unknown };
+                const o = obj as { name?: unknown; message?: unknown };
                 return {
-                  userId: typeof o.userId === "number" ? o.userId : -1,
+                  name: typeof o.name === "string" ? o.name : "",
                   message: typeof o.message === "string" ? o.message : "",
                 };
               });
@@ -1640,13 +1671,14 @@ Do not include any text outside the JSON array.`;
       }
 
       // Assign messages, fallback to scaffold for missing students
-      for (const { userId, name, lines } of students) {
-        const llmMsg = llmMessages.find((m) => m.userId === userId);
+      for (const student of students) {
+        const llmMsg = llmMessages.find((m) => m.name === student.name);
+        const key = String(student.userId ?? student.email ?? student.name);
         if (llmMsg && llmMsg.message.trim()) {
-          studentMessages.set(userId, { name, body: llmMsg.message.trim() });
+          studentMessages.set(key, { body: llmMsg.message.trim() });
         } else {
-          const body = scaffoldStudentNudge(name, lines, extraNotes);
-          studentMessages.set(userId, { name, body });
+          const body = scaffoldStudentNudge(student.name, student.lines, extraNotes);
+          studentMessages.set(key, { body });
         }
       }
     }
@@ -1655,23 +1687,28 @@ Do not include any text outside the JSON array.`;
     let drafted = 0;
     let firstPreview = "";
 
-    for (const { userId, name, lines } of students) {
-      const msg = studentMessages.get(userId);
+    for (const student of students) {
+      const key = String(student.userId ?? student.email ?? student.name);
+      const msg = studentMessages.get(key);
       if (!msg) continue;
 
-      const context = lines.map((l) => `- ${l}`).join("\n");
-      const summary = `Nudge ${name} - ${lines.length} missing assignment(s)`;
+      const context = student.lines.map((l) => `- ${l}`).join("\n");
+      const summary = `Nudge ${student.name} - ${student.lines.length} missing assignment(s)`;
+
+      const payload: MessageDraftPayload = {
+        kind: "message",
+        body: msg.body,
+        ...(courseUrl.trim() ? { courseUrl } : {}),
+        recipientName: student.name,
+        context,
+        ...(student.userId !== undefined ? { recipientUserId: String(student.userId) } : {}),
+        ...(student.email ? { recipientEmail: student.email } : {}),
+        ...(hubCourseId ? { hubCourseId } : {}),
+      };
 
       await createMessageDraft(supabase, user.id, {
         summary,
-        payload: {
-          kind: "message",
-          body: msg.body,
-          courseUrl,
-          recipientUserId: String(userId),
-          recipientName: name,
-          context,
-        },
+        payload,
         workflowId,
         workflowName,
       });
@@ -5212,13 +5249,339 @@ export async function disconnectGoogleCalendarAction(): Promise<
   }
 }
 
-/** The school (institution) codes the owner has connected Outlook for. */
-export async function getOutlookStatusAction(): Promise<
-  { connected: string[] } | { error: string }
+// ── Closed-LMS integration suite (CHUNK E) ──────────────────────────────────
+
+/** E1: Fetch an ICS feed from a URL (calendar export). */
+export async function fetchIcsFeedAction(url: string): Promise<{ ics: string } | { error: string }> {
+  try {
+    await requireOwner();
+
+    const parsedUrl = new URL(url);
+    if (!parsedUrl.protocol.match(/^https?:$/)) {
+      return { error: "Calendar feed URL must be http or https." };
+    }
+
+    const response = await fetch(url, {
+      headers: { "User-Agent": "teaching-assistant/1.0" },
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      return { error: `Failed to fetch calendar feed: HTTP ${response.status}` };
+    }
+
+    const text = await response.text();
+
+    if (text.length > 2_000_000) {
+      return { error: "The feed is too large." };
+    }
+
+    return { ics: text };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not fetch the calendar feed.",
+    };
+  }
+}
+
+/** E2: Save institution field definitions (e.g. calendar feed URLs). */
+export async function saveInstitutionFieldsAction(
+  acronym: string,
+  fields: InstitutionField[]
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    await saveInstitutionFields(supabase, user.id, acronym, fields);
+    return { ok: true };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not save institution fields.",
+    };
+  }
+}
+
+/** E3: List institutions that have calendar feeds configured. */
+export async function listInstitutionsWithFeedsAction(): Promise<
+  { institutions: Array<{ acronym: string; feedUrls: string[] }> } | { error: string }
 > {
   try {
     const user = await requireOwner();
-    return { connected: await listConnectedInstitutions(user.id) };
+    const supabase = createServiceClient();
+    const allInstitutions = await listAllInstitutionFields(supabase, user.id);
+
+    const institutions = allInstitutions
+      .map(({ acronym, fields }) => {
+        const feedUrls = fields
+          .filter((f) => f.id.startsWith("calendarFeedUrl") && f.value.trim())
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .map((f) => f.value.trim());
+
+        return { acronym, feedUrls };
+      })
+      .filter((i) => i.feedUrls.length > 0);
+
+    return { institutions };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not list institutions with feeds.",
+    };
+  }
+}
+
+/** E4: Get calendar feed URLs for one institution. */
+export async function listInstitutionFeedUrlsAction(acronym: string): Promise<
+  { feedUrls: string[] } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const fields = await loadInstitutionFields(supabase, user.id, acronym);
+
+    const feedUrls = fields
+      .filter((f) => f.id.startsWith("calendarFeedUrl") && f.value.trim())
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((f) => f.value.trim());
+
+    return { feedUrls };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not list institution feed URLs.",
+    };
+  }
+}
+
+/** E5: Fetch recent messages from Outlook inbox. */
+export async function listOutlookMessagesAction(
+  institution: string,
+  sinceIso?: string
+): Promise<
+  { messages: Array<{ id: string; subject: string; fromAddress: string; fromName: string; receivedDateTime: string; isRead: boolean; webLink: string; bodyPreview: string }> } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const token = await getMicrosoftAccessToken(user.id, institution);
+
+    if (!token) {
+      return {
+        error: `Connect Outlook for ${institution} under Account > Integrations first.`,
+      };
+    }
+
+    const messages = await listRecentMessages(token, { top: 50, sinceIso });
+    return { messages };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not list Outlook messages.",
+    };
+  }
+}
+
+/** List all Outlook messages from every connected account. Per-account failures are captured without aborting other accounts. */
+export async function listAllOutlookMessagesAction(
+  sinceIso?: string
+): Promise<
+  { accounts: Array<{ institution: string; messages: Message[]; error?: string }> } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const withScope = await listConnectedInstitutionsWithScope(user.id);
+
+    if (withScope.length === 0) {
+      return {
+        error: "Connect Outlook under Account > Integrations first.",
+      };
+    }
+
+    const accounts: Array<{ institution: string; messages: Message[]; error?: string }> = [];
+
+    for (const { institution } of withScope) {
+      try {
+        const token = await getMicrosoftAccessToken(user.id, institution);
+
+        if (!token) {
+          accounts.push({
+            institution,
+            messages: [],
+            error: `Connect Outlook for ${institution} under Account > Integrations first.`,
+          });
+          continue;
+        }
+
+        const messages = await listRecentMessages(token, { top: 50, sinceIso });
+        accounts.push({ institution, messages });
+      } catch (err) {
+        accounts.push({
+          institution,
+          messages: [],
+          error: err instanceof Error ? err.message : "Could not list messages.",
+        });
+      }
+    }
+
+    return { accounts };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not check Outlook connections.",
+    };
+  }
+}
+
+/** E6: Send an email via Outlook. */
+export async function sendOutlookMailAction(
+  institution: string,
+  to: string[],
+  subject: string,
+  body: string,
+  bcc?: string[]
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const token = await getMicrosoftAccessToken(user.id, institution);
+
+    if (!token) {
+      return {
+        error: `Connect Outlook for ${institution} under Account > Integrations first.`,
+      };
+    }
+
+    await sendMail(token, { to, bcc, subject, body });
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof Error && err.message === "MAIL_SEND_NOT_GRANTED") {
+      return {
+        error: `Outlook is connected but sending is not granted - reconnect Outlook for ${institution} to grant Mail.Send.`,
+      };
+    }
+    return {
+      error: err instanceof Error ? err.message : "Could not send the email.",
+    };
+  }
+}
+
+/**
+ * E7: Send a message draft by email via Outlook.
+ * Only accessible from the Drafts UI, never from workflow steps.
+ * Requires institution and appropriate recipient/course info in the draft payload.
+ */
+export async function sendMessageDraftByEmailAction(id: string): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const draft = await getMessageDraft(supabase, user.id, id);
+
+    if (!draft) {
+      return { error: "That message draft was not found." };
+    }
+
+    const { payload } = draft;
+
+    if (!payload.institution) {
+      return { error: "The draft has no institution to send from." };
+    }
+
+    const institution = payload.institution;
+    let to: string[] = [];
+    let bcc: string[] = [];
+    let subject: string;
+
+    if (payload.kind === "message" || payload.kind === "reply") {
+      if (!payload.recipientEmail) {
+        return { error: "The draft has no recipient email." };
+      }
+      to = [payload.recipientEmail];
+      subject = payload.title || draft.summary;
+    } else if (payload.kind === "announcement") {
+      if (!payload.hubCourseId) {
+        return { error: "The draft has no course to announce to." };
+      }
+
+      const courses = await listCourseHubRows(user.id);
+      const course = courses.find((c) => c.id === payload.hubCourseId);
+
+      if (!course) {
+        return { error: "The course tile was not found." };
+      }
+
+      const emails = course.studentRepos
+        .map((s) => s.email)
+        .filter((e): e is string => typeof e === "string" && e.trim().length > 0)
+        .map((e) => e.trim());
+
+      if (emails.length === 0) {
+        return {
+          error: "No student emails on the course tile roster - run Import roster from CSV first.",
+        };
+      }
+
+      bcc = emails;
+      to = [];
+      subject = payload.title || "Announcement";
+    } else {
+      return { error: "Unknown message draft kind." };
+    }
+
+    const res = await sendOutlookMailAction(institution, to, subject, payload.body, bcc.length > 0 ? bcc : undefined);
+    if ("error" in res) {
+      throw new Error(res.error);
+    }
+
+    await markMessageDraftReviewed(supabase, user.id, id);
+    return { ok: true };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not send the message by email.",
+    };
+  }
+}
+
+/** Mark an Outlook message as read or unread. */
+export async function markOutlookMessageReadAction(
+  institution: string,
+  messageId: string,
+  isRead: boolean
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const token = await getMicrosoftAccessToken(user.id, institution);
+
+    if (!token) {
+      return {
+        error: `Connect Outlook for ${institution} under Account > Integrations first.`,
+      };
+    }
+
+    await markMessageRead(token, messageId, isRead);
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof Error && err.message === "MAIL_READWRITE_NOT_GRANTED") {
+      return {
+        error: `Outlook is connected but mailbox updates are not granted - reconnect Outlook for ${institution} to grant Mail.ReadWrite.`,
+      };
+    }
+    return {
+      error: err instanceof Error ? err.message : "Could not mark message read.",
+    };
+  }
+}
+
+/** E8: Extended Outlook status with scope information (whether Mail.Send and Mail.ReadWrite are granted). */
+export async function getOutlookStatusAction(): Promise<
+  { connected: string[]; canSend: string[]; canMarkRead: string[] } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const withScope = await listConnectedInstitutionsWithScope(user.id);
+
+    const connected = withScope.map((s) => s.institution);
+    const canSend = withScope
+      .filter((s) => s.scope && s.scope.includes("Mail.Send"))
+      .map((s) => s.institution);
+    const canMarkRead = withScope
+      .filter((s) => s.scope && s.scope.includes("Mail.ReadWrite"))
+      .map((s) => s.institution);
+
+    return { connected, canSend, canMarkRead };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not check Outlook connections." };
   }

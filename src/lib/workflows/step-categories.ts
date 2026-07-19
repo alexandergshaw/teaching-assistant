@@ -46,6 +46,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "parse-academic-calendar",
     "course-progress",
     "list-upcoming-deadlines",
+    "list-deadlines-from-feed",
     "compose-briefing",
   ],
   "course-setup": [
@@ -61,6 +62,9 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "link-github-usernames",
     "scan-term-courses",
     "sync-course-tiles-from-lms",
+    "import-roster-from-csv",
+    "create-course-tile",
+    "configure-institution-feeds",
   ],
   content: [
     "lecture-zip",
@@ -126,6 +130,8 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "batch-grade-repos-to-draft",
     "grade-one-submission",
     "list-missing-submissions",
+    "import-gradebook-csv",
+    "export-grades-for-lms",
     "gradebook-health-report",
   ],
   lms: [
@@ -154,6 +160,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
   ],
   messaging: [
     "read-inbox",
+    "read-email-inboxes",
     "draft-message-reply",
     "save-message-draft",
     "reply-to-conversation",
@@ -164,6 +171,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "book-meeting",
     "get-unread-and-notifications",
     "draft-student-nudges",
+    "check-mailbox-connection",
   ],
   github: [
     "repo-from-template",

@@ -67,12 +67,13 @@ export default function MailTab() {
   });
   const [availableInstitutions, setAvailableInstitutions] = useState<string[]>([]);
   const [canMarkRead, setCanMarkRead] = useState<string[]>([]);
+  const [accountErrors, setAccountErrors] = useState<Array<{ institution: string; error: string }>>([]);
   const [expandedReply, setExpandedReply] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
+  const [steerText, setSteerText] = useState("");
   const [draftingReply, setDraftingReply] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [replyNote, setReplyNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
-  const [reconnectHintShown, setReconnectHintShown] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     localStorage.setItem("ta-mail-search", search);
@@ -101,12 +102,12 @@ export default function MailTab() {
 
     const merged: Message[] = [];
     const institutions = new Set<string>();
-    let hasErrors = false;
+    const errors: Array<{ institution: string; error: string }> = [];
 
     for (const account of messagesResult.accounts) {
       institutions.add(account.institution);
       if (account.error) {
-        hasErrors = true;
+        errors.push({ institution: account.institution, error: account.error });
       }
       for (const msg of account.messages) {
         merged.push({
@@ -131,19 +132,13 @@ export default function MailTab() {
 
     setMessages(merged);
     setAvailableInstitutions(Array.from(institutions).sort());
+    setAccountErrors(errors);
 
     if (!("error" in statusResult)) {
       setCanMarkRead(statusResult.canMarkRead ?? []);
     }
 
-    if (hasErrors) {
-      setLoadState({
-        status: "idle",
-        message: "Loaded with some errors (see below). Some accounts may be missing messages.",
-      });
-    } else {
-      setLoadState({ status: "idle", message: "" });
-    }
+    setLoadState({ status: "idle", message: "" });
   }, []);
 
   useEffect(() => {
@@ -191,12 +186,12 @@ export default function MailTab() {
   };
 
   const handleDraftReply = async (msg: Message) => {
-    if (!msg.fromName || !msg.subject || !msg.bodyPreview) return;
+    if (!msg.fromName || !msg.subject) return;
     setDraftingReply(true);
     setReplyNote(null);
 
     const thread = `${msg.fromName} <${msg.fromAddress}>: ${msg.subject}\n${msg.bodyPreview}`;
-    const result = await draftMessageReplyAction(thread, "", provider);
+    const result = await draftMessageReplyAction(thread, steerText, provider);
     setDraftingReply(false);
     if ("error" in result) {
       setReplyNote({ kind: "error", text: result.error });
@@ -226,9 +221,18 @@ export default function MailTab() {
     setReplyNote({ kind: "success", text: "Draft saved - review and send in Drafts > Messages." });
     setExpandedReply(null);
     setReplyText("");
+    setSteerText("");
   };
 
-  if (messages.length === 0 && availableInstitutions.length === 0 && loadState.status === "idle") {
+  const isNoAccountsError =
+    loadState.status === "error" &&
+    loadState.message === "Connect Outlook under Account > Integrations first.";
+
+  if (
+    messages.length === 0 &&
+    availableInstitutions.length === 0 &&
+    (loadState.status === "idle" || isNoAccountsError)
+  ) {
     return (
       <div className={styles.card}>
         <TabHeader
@@ -309,6 +313,17 @@ export default function MailTab() {
       </div>
 
       {loadState.status === "error" && <p className={styles.error}>{loadState.message}</p>}
+
+      {accountErrors.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {accountErrors.map((err) => (
+            <p key={err.institution} className={styles.error}>
+              {err.institution}: {err.error}
+            </p>
+          ))}
+        </div>
+      )}
+
       {loadState.status === "loading" && (
         <div className={styles.loadingState} role="status" aria-live="polite">
           <span className={styles.spinner} aria-hidden="true" />
@@ -323,11 +338,16 @@ export default function MailTab() {
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {filteredMessages.map((msg) => {
-          const unread = !msg.isRead;
-          const isExpanded = expandedReply === msg.id;
-          const canMarkReadForInst = canMarkRead.includes(msg.institution);
-          const hasShownHint = reconnectHintShown.has(msg.institution);
+        {(() => {
+          const hintShownFor = new Set<string>();
+          return filteredMessages.map((msg) => {
+            const unread = !msg.isRead;
+            const isExpanded = expandedReply === msg.id;
+            const canMarkReadForInst = canMarkRead.includes(msg.institution);
+            const showHint = !canMarkReadForInst && !hintShownFor.has(msg.institution);
+            if (showHint) {
+              hintShownFor.add(msg.institution);
+            }
 
           return (
             <div key={msg.id} className={styles.syllabusSectionCard}>
@@ -376,15 +396,11 @@ export default function MailTab() {
                 >
                   {unread ? "Mark read" : "Mark unread"}
                 </Button>
-                {!canMarkReadForInst && !hasShownHint && (
+                {showHint && (
                   <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", width: "100%" }}>
                     Outlook is connected but mailbox updates are not granted - reconnect Outlook for {msg.institution} to grant Mail.ReadWrite.
                   </div>
                 )}
-                {!canMarkReadForInst && !hasShownHint && (() => {
-                  setReconnectHintShown((prev) => new Set([...prev, msg.institution]));
-                  return null;
-                })()}
                 <Button
                   size="small"
                   variant="text"
@@ -392,10 +408,12 @@ export default function MailTab() {
                     if (isExpanded) {
                       setExpandedReply(null);
                       setReplyText("");
+                      setSteerText("");
                       setReplyNote(null);
                     } else {
                       setExpandedReply(msg.id);
                       setReplyText("");
+                      setSteerText("");
                       setReplyNote(null);
                     }
                   }}
@@ -406,6 +424,20 @@ export default function MailTab() {
 
               {isExpanded && (
                 <div className={styles.inboxReplyBox} style={{ marginTop: 10 }}>
+                  <div className={styles.field}>
+                    <label htmlFor={`mail-steer-${msg.id}`} style={{ margin: 0 }}>
+                      How to steer the AI (optional)
+                    </label>
+                    <TextField
+                      id={`mail-steer-${msg.id}`}
+                      size="small"
+                      fullWidth
+                      placeholder="e.g., Be concise; focus on the deadline; acknowledge their concern"
+                      value={steerText}
+                      onChange={(e) => setSteerText(e.target.value)}
+                    />
+                  </div>
+
                   <div className={styles.field}>
                     <label htmlFor={`mail-reply-${msg.id}`} style={{ margin: 0 }}>
                       Your reply
@@ -448,8 +480,9 @@ export default function MailTab() {
                 </div>
               )}
             </div>
-          );
-        })}
+            );
+          });
+        })()}
       </div>
     </div>
   );

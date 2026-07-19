@@ -28,6 +28,8 @@ export interface MessageDraftPayload {
   context?: string;
   recipientUserId?: string;
   recipientName?: string;
+  recipientEmail?: string;
+  hubCourseId?: string;
 }
 
 export interface MessageDraft {
@@ -62,6 +64,8 @@ export function coerceMessageDraftPayload(raw: unknown): MessageDraftPayload {
   const context = typeof o.context === "string" ? o.context : undefined;
   const recipientUserId = typeof o.recipientUserId === "string" ? o.recipientUserId.trim() || undefined : undefined;
   const recipientName = typeof o.recipientName === "string" ? o.recipientName.trim() || undefined : undefined;
+  const recipientEmail = typeof o.recipientEmail === "string" ? o.recipientEmail.trim() || undefined : undefined;
+  const hubCourseId = typeof o.hubCourseId === "string" ? o.hubCourseId.trim() || undefined : undefined;
 
   return {
     kind,
@@ -73,6 +77,8 @@ export function coerceMessageDraftPayload(raw: unknown): MessageDraftPayload {
     ...(context ? { context } : {}),
     ...(recipientUserId ? { recipientUserId } : {}),
     ...(recipientName ? { recipientName } : {}),
+    ...(recipientEmail ? { recipientEmail } : {}),
+    ...(hubCourseId ? { hubCourseId } : {}),
   };
 }
 

@@ -27,6 +27,8 @@ describe("isHeadlessSafeWorkflow", () => {
     expect(isHeadlessSafeWorkflow(byId("quiz-pipeline"), lookup)).toBe(true);
     expect(isHeadlessSafeWorkflow(byId("course-health-check"), lookup)).toBe(true);
     expect(isHeadlessSafeWorkflow(byId("next-week-lectures"), lookup)).toBe(true);
+    expect(isHeadlessSafeWorkflow(byId("closed-institution-onboarding"), lookup)).toBe(true);
+    expect(isHeadlessSafeWorkflow(byId("nudge-missing-from-gradebook"), lookup)).toBe(true);
   });
 
   it("rejects presets with an interactive step", () => {
@@ -36,6 +38,7 @@ describe("isHeadlessSafeWorkflow", () => {
     expect(isHeadlessSafeWorkflow(byId("update-course-tech"), lookup)).toBe(false);
     expect(isHeadlessSafeWorkflow(byId("copilot-pr-shepherd"), lookup)).toBe(false);
     expect(isHeadlessSafeWorkflow(byId("term-kickoff-import"), lookup)).toBe(false);
+    expect(isHeadlessSafeWorkflow(byId("review-and-export-grades-csv"), lookup)).toBe(false);
   });
 
   it("treats prepare-lecture as headless-safe only when autonomous is pinned to literal '1'", () => {
@@ -144,8 +147,8 @@ describe("isHeadlessSafeWorkflow", () => {
     expect(isHeadlessSafeWorkflow(def, () => undefined)).toBe(false);
   });
 
-  it("has exactly 109 headless-safe step types", () => {
-    expect(HEADLESS_SAFE_STEP_TYPES.size).toBe(109);
+  it("has exactly 117 headless-safe step types", () => {
+    expect(HEADLESS_SAFE_STEP_TYPES.size).toBe(117);
   });
 
   it("accepts the unattended grade-to-draft preset (scoring only, no posting)", () => {

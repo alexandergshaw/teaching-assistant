@@ -1371,6 +1371,25 @@ export const NUDGE_MISSING_FROM_GRADEBOOK: WorkflowDef = {
   ],
 };
 
+export const WEEKLY_CONCEPT_ANIMATIONS: WorkflowDef = {
+  id: "weekly-concept-animations",
+  preset: true,
+  name: "Next Week's Concept Animations (all courses)",
+  description:
+    "Every course tile across every institution: detect next week's module and generate a set of professional animated concept visualizations (SVG/CSS, no JavaScript - they render everywhere, including as Canvas pages) into the tile's materials. Fully headless: schedule it for the start of each week alongside Draft Next Week's Lectures. Canvas pages, when enabled, are created unpublished.",
+  steps: [
+    {
+      type: "generate-concept-animations",
+      bindings: {
+        courses: { source: "literal", value: "*" },
+        maxConcepts: { source: "literal", value: "3" },
+        extraNotes: { source: "runtime", fieldKey: "extraNotes" },
+        publish: { source: "runtime", fieldKey: "publish" },
+      },
+    },
+  ],
+};
+
 /**
  * Merge built-in presets with custom workflows.
  * Returns presets first, then custom workflows.
@@ -1417,6 +1436,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     CLOSED_INSTITUTION_ONBOARDING,
     REVIEW_AND_EXPORT_GRADES_CSV,
     NUDGE_MISSING_FROM_GRADEBOOK,
+    WEEKLY_CONCEPT_ANIMATIONS,
     ...custom,
   ];
 }

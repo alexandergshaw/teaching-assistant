@@ -127,6 +127,7 @@ describe("deep-check presets", () => {
     "closed-institution-onboarding",
     "review-and-export-grades-csv",
     "nudge-missing-from-gradebook",
+    "weekly-concept-animations",
   ];
 
   for (const id of DEEP_CHECK_PRESET_IDS) {

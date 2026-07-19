@@ -127,6 +127,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "export-course-cartridge",
   "course-progress",
   "generate-presentation-from-template",
+  "generate-concept-animations",
   // Run without pausing; creating quiz questions unattended matches the
   // lms-assignments precedent and completes the scheduled quiz pipeline.
   "import-quiz-questions",

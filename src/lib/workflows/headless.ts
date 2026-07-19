@@ -126,6 +126,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "poll-migration-state",
   "export-course-cartridge",
   "course-progress",
+  "resolve-week-topic",
   "generate-presentation-from-template",
   "generate-concept-animations",
   // Run without pausing; creating quiz questions unattended matches the

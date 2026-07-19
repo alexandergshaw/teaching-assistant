@@ -197,6 +197,32 @@ describe("validateAnimationHtml", () => {
     expect(result.problems).toContain("Forbidden url() with http");
   });
 
+  it("forbids url() with leading whitespace before scheme", () => {
+    const html = `
+      <svg><rect/></svg>
+      <style>
+        @keyframes f { }
+        div { background: url(\t https://example.com/img.jpg); }
+      </style>
+      ${"x".repeat(1000)}
+    `;
+    const result = validateAnimationHtml(html);
+    expect(result.problems).toContain("Forbidden url() with http");
+  });
+
+  it("forbids url() with quoted whitespace-prefixed scheme", () => {
+    const html = `
+      <svg><rect/></svg>
+      <style>
+        @keyframes f { }
+        div { background: url("\n  http://example.com/img.jpg"); }
+      </style>
+      ${"x".repeat(1000)}
+    `;
+    const result = validateAnimationHtml(html);
+    expect(result.problems).toContain("Forbidden url() with http");
+  });
+
   it("forbids src= with http://", () => {
     const html = `
       <svg><rect/></svg>
@@ -228,6 +254,39 @@ describe("validateAnimationHtml", () => {
     `;
     const result = validateAnimationHtml(html);
     expect(result.problems).toContain("Forbidden <script tag");
+    expect(result.problems).toContain("Forbidden src or href with external URL");
+  });
+
+  it("forbids src= with leading whitespace before http", () => {
+    const html = `
+      <svg><rect/></svg>
+      <img src="\t http://example.com/img.jpg"/>
+      <style>@keyframes f { }</style>
+      ${"x".repeat(1000)}
+    `;
+    const result = validateAnimationHtml(html);
+    expect(result.problems).toContain("Forbidden src or href with external URL");
+  });
+
+  it("forbids href= with leading newline before https", () => {
+    const html = `
+      <svg><rect/></svg>
+      <a href="\n  https://example.com">link</a>
+      <style>@keyframes f { }</style>
+      ${"x".repeat(1000)}
+    `;
+    const result = validateAnimationHtml(html);
+    expect(result.problems).toContain("Forbidden src or href with external URL");
+  });
+
+  it("forbids href= with leading space before //", () => {
+    const html = `
+      <svg><rect/></svg>
+      <a href=" //example.com/page">link</a>
+      <style>@keyframes f { }</style>
+      ${"x".repeat(1000)}
+    `;
+    const result = validateAnimationHtml(html);
     expect(result.problems).toContain("Forbidden src or href with external URL");
   });
 

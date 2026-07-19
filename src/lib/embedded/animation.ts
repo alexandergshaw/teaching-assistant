@@ -68,11 +68,8 @@ ${keyframes}
 }
 
 .stage {
-  transition: fill 200ms ease-out;
-}
-
-.stage.active {
   animation: highlight-stage ${cycleTime}s infinite;
+  transition: fill 200ms ease-out;
 }
 
 .stage-1 { animation-delay: 0s; }
@@ -199,28 +196,19 @@ function buildAnimationSvg(stages: string[]): string {
 }
 
 /**
- * Build the CSS keyframes animation. Each stage highlights in turn over the
- * cycle time, with a staggered delay applied via animation-delay on each stage.
+ * Build the CSS keyframes animation. Emits a single highlight pulse that,
+ * when combined with staggered animation-delay on each stage, lights them
+ * sequentially. Each stage highlights for 1/stageCount of the cycle.
  */
 function buildKeyframes(stageCount: number, cycleTime: number, accentColor: string): string {
-  const stagePercent = 100 / stageCount;
-  const holdStart = 2;
-  const holdEnd = holdStart + (stagePercent - 4);
+  const holdStart = 3;
+  const holdEnd = 100 / stageCount - 3;
 
-  const frames: string[] = [];
-
-  for (let i = 1; i <= stageCount; i++) {
-    const start = (i - 1) * stagePercent;
-    const hold = start + holdStart;
-    const holdE = start + holdEnd;
-
-    frames.push(`  ${start}% { fill: #e8e8e8; }`);
-    frames.push(`  ${hold}% { fill: ${accentColor}; }`);
-    frames.push(`  ${holdE}% { fill: ${accentColor}; }`);
-    frames.push(`  ${start + stagePercent}% { fill: #e8e8e8; }`);
-  }
-
-  return frames.join("\n");
+  return `  0% { fill: #e8e8e8; }
+  ${holdStart}% { fill: ${accentColor}; }
+  ${holdEnd}% { fill: ${accentColor}; }
+  ${100 / stageCount}% { fill: #e8e8e8; }
+  100% { fill: #e8e8e8; }`;
 }
 
 /**

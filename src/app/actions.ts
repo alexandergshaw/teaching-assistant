@@ -38,7 +38,7 @@ import { scaffoldCourseProjectRubric, scaffoldCourseOutline, scaffoldCopilotProm
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { scaffoldConceptAnimation } from "@/lib/embedded/animation";
-import { validateAnimationHtml, wrapAnimationDocument } from "@/lib/animation-html";
+import { validateAnimationHtml } from "@/lib/animation-html";
 import { copyedit, stripLongDashes } from "@/lib/embedded/scaffold";
 import { routeRequest } from "@/lib/embedded/router";
 import { rememberRubric, findRubricForTopic } from "@/lib/research/rubric-bank";
@@ -11207,7 +11207,7 @@ function deriveConceptsFromSummary(
 
   return sentences.slice(0, count).map((sentence) => {
     const words = sentence.split(/\s+/).slice(0, 6);
-    const concept = words.join(" ");
+    const concept = words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
     return {
       concept: concept || topic,
       visualIdea: sentence,

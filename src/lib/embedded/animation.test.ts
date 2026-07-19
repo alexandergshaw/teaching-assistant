@@ -89,4 +89,34 @@ describe("scaffoldConceptAnimation", () => {
     expect(validation.ok).toBe(true);
     expect(validation.problems).toHaveLength(0);
   });
+
+  it("binds animation to .stage selector that exists in markup", () => {
+    const result = scaffoldConceptAnimation("Test Concept", "Test idea");
+    // Verify the CSS binds animation to .stage (not .stage.active)
+    expect(result).toContain(".stage {");
+    expect(result).toContain("animation: highlight-stage");
+    // Verify the markup contains stage elements
+    expect(result).toContain('class="stage stage-1"');
+    expect(result).toContain('class="stage stage-2"');
+    expect(result).toContain('class="stage stage-3"');
+    expect(result).toContain('class="stage stage-4"');
+    // Verify no .stage.active CSS rule exists (animation should be on .stage, not .stage.active)
+    expect(result).not.toContain(".stage.active {");
+  });
+
+  it("emits a single highlight pulse keyframe", () => {
+    const result = scaffoldConceptAnimation("Pulse Test", "Single highlight");
+    // The keyframe should contain the highlight-stage animation
+    expect(result).toContain("@keyframes highlight-stage");
+    // Should have fill transitions at multiple percentages (0%, ~3%, ~22%, ~25%, 100%)
+    expect(result).toContain("fill:");
+    // Should transition from gray to accent and back
+    expect(result).toContain("#e8e8e8");
+    // Should contain the accent color
+    expect(result).toMatch(/#[\da-f]{6}/);
+    // Should NOT contain looping per-stage keyframes (25%, 50%, 75% would appear if it was the old broken version)
+    const percentMatches = result.match(/(\d+)%\s*\{\s*fill:/g) || [];
+    // Should have keyframes at: 0%, ~3%, ~22%, ~25%, 100% = 5 keyframes minimum
+    expect(percentMatches.length).toBeGreaterThanOrEqual(5);
+  });
 });

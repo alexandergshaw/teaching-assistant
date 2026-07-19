@@ -1,4 +1,116 @@
 import { currentCourseWeek, courseProgressStatus } from "@/lib/week-numbering";
+import { csvToSchedule } from "@/lib/workflows/types";
+
+export interface WeekTopicSource {
+  topic: string;
+  summary: string;
+  source: "export" | "schedule" | "topics";
+}
+
+/**
+ * Resolve a week's topic using a three-tier fallback: LMS export modules first,
+ * then schedule CSV, then topics list. Returns the resolved topic/summary and
+ * source, or a skip with a diagnostic message naming what each source offered.
+ */
+export function resolveWeekTopic(input: {
+  modules: Array<{ title: string; position: number; items: Array<{ title: string }> }> | null;
+  csvData: string | null;
+  topics: string | null;
+  week: number;
+}): WeekTopicSource | { skip: string } {
+  const { modules, csvData, topics, week } = input;
+
+  // Priority 1: EXPORT MODULES - find module matching /(?:week|module)\s*(\d+)/i with captured number === week
+  let matchedEmptyRemainder = false;
+  if (modules) {
+    for (const mod of modules) {
+      const m = mod.title.match(/(?:week|module)\s*(\d+)/i);
+      if (m) {
+        const moduleNum = Number(m[1]);
+        if (moduleNum === week) {
+          // Found matching module - strip prefix and separator
+          const remainder = mod.title.slice(m.index! + m[0].length).replace(/^[:|\s\-]+/, "").trim();
+          if (remainder) {
+            // Non-empty remainder - resolve it
+            const summary = mod.items.slice(0, 6).map((item) => item.title).join("; ");
+            return { topic: remainder, summary, source: "export" };
+          }
+          // Empty remainder - fall through to CSV
+          matchedEmptyRemainder = true;
+          break;
+        }
+      }
+    }
+  }
+
+  // Priority 2: SCHEDULE CSV - find row with week === input.week and non-empty topic
+  const schedule = csvToSchedule(csvData ?? "");
+  const csvRow = schedule.find((row) => row.week === week);
+  if (csvRow && csvRow.topic.trim()) {
+    return { topic: csvRow.topic.trim(), summary: csvRow.summary ?? "", source: "schedule" };
+  }
+  // Priority 3: TOPICS LIST - split on newlines, get line[week-1] if non-empty
+  if (topics) {
+    const lines = topics.split("\n");
+    if (week - 1 < lines.length) {
+      const line = lines[week - 1].trim();
+      if (line) {
+        return { topic: line, summary: "", source: "topics" };
+      }
+    }
+  }
+
+  // Priority 4: All sources exhausted - build diagnostic message
+  const fragments: string[] = [];
+
+  // Module fragment
+  if (!modules) {
+    fragments.push("no LMS export on the tile");
+  } else {
+    if (matchedEmptyRemainder) {
+      fragments.push(`module ${week}'s title has no topic text`);
+    } else {
+      const foundNumbers = modules
+        .map((mod) => {
+          const m = mod.title.match(/(?:week|module)\s*(\d+)/i);
+          return m ? Number(m[1]) : null;
+        })
+        .filter((n): n is number => n !== null);
+      if (foundNumbers.length === 0) {
+        fragments.push("LMS export has modules none numbered");
+      } else {
+        const minNum = Math.min(...foundNumbers);
+        const maxNum = Math.max(...foundNumbers);
+        fragments.push(`LMS export has modules ${minNum}-${maxNum}`);
+      }
+    }
+  }
+
+  // CSV fragment
+  if (schedule.length === 0) {
+    fragments.push("no schedule CSV");
+  } else {
+    const maxWeek = Math.max(...schedule.map((row) => row.week));
+    if (maxWeek < week) {
+      fragments.push(`the schedule CSV covers weeks 1-${maxWeek}`);
+    } else {
+      fragments.push(`week ${week}'s schedule row has no topic`);
+    }
+  }
+
+  // Topics fragment
+  if (!topics) {
+    fragments.push("no topics list");
+  } else {
+    const lines = topics.split("\n");
+    if (week - 1 >= lines.length || !lines[week - 1].trim()) {
+      fragments.push(`the topics list has ${lines.length} line(s)`);
+    }
+  }
+
+  const diagnostic = `week ${week} not found - ${fragments.join(", ")}`;
+  return { skip: diagnostic };
+}
 
 /**
  * Determine the week to draft for the next-week-lectures workflow.

@@ -59,13 +59,15 @@ export function validateAnimationHtml(html: string): ValidationResult {
   }
 
   // FORBID: url( with http
-  if (/url\s*\(\s*['"]?https?:/i.test(html)) {
+  // Permit optional leading whitespace inside the quote before the scheme
+  if (/url\s*\(\s*['"]?\s*https?:/i.test(html)) {
     problems.push("Forbidden url() with http");
   }
 
   // FORBID: src= or href= with values starting with http:// https:// or //
   // Must be careful to not match data: or #
-  const attrPattern = /(?:src|href)\s*=\s*['"]?(?:https?:\/\/|\/\/)/i;
+  // Permit optional leading whitespace inside the quote before the scheme
+  const attrPattern = /(?:src|href)\s*=\s*['"]?\s*(?:https?:\/\/|\/\/)/i;
   if (attrPattern.test(html)) {
     problems.push("Forbidden src or href with external URL");
   }

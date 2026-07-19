@@ -165,7 +165,7 @@ import {
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import { extractGithubHandle } from "@/lib/github-usernames";
 import { buildRosterUpdate, mergeCanvasRoster, mergeImportedRoster } from "@/lib/workflows/roster-merge";
-import { nextLectureWeek } from "@/lib/workflows/next-week";
+import { nextLectureWeek, resolveWeekTopic, type WeekTopicSource } from "@/lib/workflows/next-week";
 import { parseIcsEvents } from "@/lib/ics";
 import { parseGradebookCsv, missingFromGradebook, fillGradebookCsv, buildCanvasGradebookCsv, buildMoodleGradebookCsv, detectGradebookFormat } from "@/lib/gradebook-csv";
 import { filterUpcoming, formatDeadlineReport } from "@/lib/workflows/deadline-report";
@@ -640,12 +640,45 @@ async function gatherModuleMaterials(
   return { moduleName, materialsText: chunks.join(""), notes, materialsSource };
 }
 
+// Loads the week's topic using export-first fallback: the course's LMS export
+// first, then the tile's schedule CSV, then its topics list. Returns the resolved
+// topic/summary and source, or a skip with a diagnostic message.
+async function loadTileWeekTopic(
+  tile: Course,
+  week: number,
+  helpers: StepRunHelpers
+): Promise<WeekTopicSource | { skip: string }> {
+  let modules: Array<{ title: string; position: number; items: Array<{ title: string }> }> | null = null;
+  if (helpers.loadCourseExport) {
+    try {
+      const exported = await helpers.loadCourseExport(tile.id);
+      if (exported && typeof exported === "object" && "modules" in exported) {
+        const exportedModules = (exported as { modules: unknown[] }).modules;
+        modules = exportedModules.map((m: unknown) => {
+          const mod = m as { name: string; position: number; items: unknown[] };
+          return {
+            title: mod.name,
+            position: mod.position,
+            items: (mod.items || []).map((item: unknown) => ({
+              title: (item as { title: string }).title || "",
+            })),
+          };
+        });
+      }
+    } catch {
+      // Silently fall through to CSV/topics on export load failure
+    }
+  }
+  return resolveWeekTopic({ modules, csvData: tile.csvData ?? null, topics: tile.topics ?? null, week });
+}
+
 // Loads the workflow-scoped course tile and returns its CURRENT module/week
 // topic + learning-outcomes summary, or null when there is nothing to derive
 // from (no hubCourse, missing tile, no/invalid start date, not-started/complete,
-// or no schedule row for the current week).
+// or no topic can be resolved for the current week (export, schedule CSV, or topics list)). Uses export-first fallback for topic lookup.
 async function deriveCurrentModule(
-  values: Record<string, unknown>
+  values: Record<string, unknown>,
+  helpers: StepRunHelpers
 ): Promise<{ topic: string; summary: string } | null> {
   const hubCourseId = String(values.hubCourse ?? "").trim();
   if (!hubCourseId) return null;
@@ -658,19 +691,29 @@ async function deriveCurrentModule(
   const status = courseProgressStatus(rawWeek, tile.weeks);
   if (status === "not-started" || status === "complete") return null;
   const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
-  const entry = csvToSchedule(tile.csvData ?? "").find((e) => e.week === displayWeek);
-  if (!entry) return null;
-  return { topic: entry.topic?.trim() ?? "", summary: entry.summary?.trim() ?? "" };
+  const weekTopic = await loadTileWeekTopic(tile, displayWeek, helpers);
+  if ("skip" in weekTopic) {
+    // Legacy passthrough, confined to this helper: a schedule row with a bare
+    // summary and no topic still supplies objectives text (the shared
+    // resolver treats a blank topic as unresolved and falls through).
+    const e = csvToSchedule(tile.csvData ?? "").find((x) => x.week === displayWeek);
+    if (e && e.summary.trim()) return { topic: "", summary: e.summary.trim() };
+    return null;
+  }
+  return { topic: weekTopic.topic, summary: weekTopic.summary };
 }
 
 // The Module objectives for a content step: the explicitly provided text, or -
 // when empty and a course tile is given (typically from workflow scope) -
 // derived from that tile's CURRENT module (topic + the week's learning-outcomes
 // summary). Returns "" when nothing can be derived.
-export async function resolveModuleObjectives(values: Record<string, unknown>): Promise<string> {
+export async function resolveModuleObjectives(
+  values: Record<string, unknown>,
+  helpers: StepRunHelpers
+): Promise<string> {
   const explicit = String(values.objectives ?? "").trim();
   if (explicit) return explicit;
-  const mod = await deriveCurrentModule(values);
+  const mod = await deriveCurrentModule(values, helpers);
   if (!mod) return "";
   const parts: string[] = [];
   if (mod.topic) parts.push(`Topic: ${mod.topic}`);
@@ -682,12 +725,13 @@ export async function resolveModuleObjectives(values: Record<string, unknown>): 
 // (e.g. Generate a lecture script): explicit values win per field; whatever is
 // empty is derived from the scoped course's current module.
 export async function resolveModuleContext(
-  values: Record<string, unknown>
+  values: Record<string, unknown>,
+  helpers: StepRunHelpers
 ): Promise<{ topic: string; objectives: string }> {
   const explicitTopic = String(values.topic ?? "").trim();
   const explicitObjectives = String(values.objectives ?? "").trim();
   if (explicitTopic && explicitObjectives) return { topic: explicitTopic, objectives: explicitObjectives };
-  const mod = await deriveCurrentModule(values);
+  const mod = await deriveCurrentModule(values, helpers);
   const parts: string[] = [];
   if (mod?.topic) parts.push(`Topic: ${mod.topic}`);
   if (mod?.summary) parts.push(mod.summary);
@@ -3920,10 +3964,12 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const displayWeek =
         tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
 
-      // Topic for the current week from the course schedule CSV, when present.
-      const schedule = csvToSchedule(tile.csvData ?? "");
-      const entry = schedule.find((e) => e.week === displayWeek);
-      const topic = entry?.topic?.trim() ?? "";
+      // Topic for the current week - export-first fallback to CSV then topics list.
+      let topic = "";
+      const weekTopic = await loadTileWeekTopic(tile, displayWeek, helpers);
+      if (!("skip" in weekTopic)) {
+        topic = weekTopic.topic;
+      }
       const totalLabel = tile.weeks && tile.weeks > 0 ? ` of ${tile.weeks}` : "";
 
       let moduleName: string;
@@ -3948,6 +3994,128 @@ export const STEP_REGISTRY: StepDefinition[] = [
           inProgress: status === "in-progress" ? "1" : "",
         },
         summary: { kind: "text", text: summaryText },
+      };
+    },
+  },
+  {
+    type: "resolve-week-topic",
+    name: "Resolve the week's topic",
+    description:
+      "Find what a course teaches in a given week by checking the sources in priority order: the course's LMS export, then the tile's schedule CSV, then its topics list. Exposes which source answered so later steps can branch on it - gate follow-ups on Found? like the rubric fallback steps.",
+    inputs: [
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: true,
+      },
+      {
+        key: "week",
+        label: "Week (optional)",
+        type: "number",
+        required: false,
+        help: "Absolute week number. Leave blank to use the course's current week.",
+      },
+      {
+        key: "offset",
+        label: "Week offset",
+        type: "number",
+        required: false,
+        help: "Added when Week is blank: 0 = this week (default), 1 = next week.",
+      },
+    ],
+    outputs: [
+      { key: "topic", label: "Topic", type: "text" },
+      { key: "summary", label: "Summary", type: "longtext" },
+      { key: "week", label: "Week", type: "number" },
+      { key: "source", label: "Source", type: "text" },
+      { key: "found", label: "Found?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      if (!hubCourseId) throw new Error("Choose a course tile.");
+
+      onProgress("Reading the course...");
+      const list = await listCourseHubAction();
+      if ("error" in list) throw new Error(list.error);
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (!tile) throw new Error("Course tile not found.");
+
+      // Determine the target week: explicit week input when >= 1; otherwise current week + offset
+      let targetWeek: number;
+      const weekInput = Number(values.week ?? "");
+      if (Number.isFinite(weekInput) && weekInput >= 1) {
+        targetWeek = Math.trunc(weekInput);
+      } else {
+        const rawWeek = currentCourseWeek(tile.startDate, Date.now());
+        if (rawWeek === null) {
+          // Not-started/no start date - return status reason
+          return {
+            outputs: {
+              topic: "",
+              summary: "No start date set on the course tile.",
+              week: "0",
+              source: "",
+              found: "",
+            },
+            summary: {
+              kind: "text" as const,
+              text: "No start date set on the course tile.",
+            },
+          };
+        }
+        const status = courseProgressStatus(rawWeek, tile.weeks);
+        const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
+        if (status === "not-started" || status === "complete") {
+          // Return status reason
+          const statusText = status === "not-started" ? "Not started" : "Complete";
+          return {
+            outputs: {
+              topic: "",
+              summary: statusText,
+              week: "0",
+              source: "",
+              found: "",
+            },
+            summary: {
+              kind: "text" as const,
+              text: statusText,
+            },
+          };
+        }
+        const offsetVal = Math.trunc(Number(values.offset ?? 0) || 0);
+        targetWeek = displayWeek + offsetVal;
+      }
+
+      const weekTopic = await loadTileWeekTopic(tile, targetWeek, helpers);
+      if ("skip" in weekTopic) {
+        return {
+          outputs: {
+            topic: "",
+            summary: weekTopic.skip,
+            week: String(targetWeek),
+            source: "",
+            found: "",
+          },
+          summary: {
+            kind: "text" as const,
+            text: weekTopic.skip,
+          },
+        };
+      }
+
+      return {
+        outputs: {
+          topic: weekTopic.topic,
+          summary: weekTopic.summary,
+          week: String(targetWeek),
+          source: weekTopic.source,
+          found: "1",
+        },
+        summary: {
+          kind: "text" as const,
+          text: `Week ${targetWeek}: ${weekTopic.topic} (from the ${weekTopic.source})`,
+        },
       };
     },
   },
@@ -7362,7 +7530,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "intro", label: "Module intro", type: "longtext" },
     ],
     run: async (values, helpers, onProgress) => {
-      const objectives = await resolveModuleObjectives(values);
+      const objectives = await resolveModuleObjectives(values, helpers);
       if (!objectives) {
         throw new Error("Provide the module objectives, or scope/bind a course tile to derive them from its current module.");
       }
@@ -7400,7 +7568,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "lessonPlan", label: "Lesson plan", type: "longtext" },
     ],
     run: async (values, helpers, onProgress) => {
-      const objectives = await resolveModuleObjectives(values);
+      const objectives = await resolveModuleObjectives(values, helpers);
       if (!objectives) {
         throw new Error("Provide the module objectives, or scope/bind a course tile to derive them from its current module.");
       }
@@ -7475,7 +7643,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       },
     ],
     run: async (values, helpers, onProgress) => {
-      const objectives = await resolveModuleObjectives(values);
+      const objectives = await resolveModuleObjectives(values, helpers);
       if (!objectives) {
         throw new Error("Provide the module objectives, or scope/bind a course tile to derive them from its current module.");
       }
@@ -7894,7 +8062,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "script", label: "Lecture script", type: "longtext" }
     ],
     run: async (values, helpers, onProgress) => {
-      const { topic, objectives } = await resolveModuleContext(values);
+      const { topic, objectives } = await resolveModuleContext(values, helpers);
       if (!topic) throw new Error("Provide a topic, or scope/bind a course tile to derive it from the current module.");
       if (!objectives) throw new Error("Provide the objectives, or scope/bind a course tile to derive them from the current module.");
       const minutesRaw = String(values.minutes ?? "").trim();
@@ -8200,7 +8368,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "assignment", label: "Assignment", type: "longtext" },
     ],
     run: async (values, helpers, onProgress) => {
-      const objectives = await resolveModuleObjectives(values);
+      const objectives = await resolveModuleObjectives(values, helpers);
       if (!objectives) {
         throw new Error("Provide the module objectives, or scope/bind a course tile to derive them from its current module.");
       }
@@ -8647,8 +8815,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
         } else if (status === "complete") {
           moduleLabel = "Complete";
         } else {
-          const entry = csvToSchedule(tile.csvData ?? "").find((e) => e.week === displayWeek);
-          topic = entry?.topic?.trim() ?? "";
+          const wt = await loadTileWeekTopic(tile, displayWeek, helpers);
+          topic = "skip" in wt ? "" : wt.topic;
           moduleLabel = `Module ${String(displayWeek).padStart(2, "0")}${topic ? `: ${topic}` : ""}`;
         }
       }
@@ -8951,7 +9119,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
 
       // Topic from the course schedule CSV, when present.
-      const topic = csvToSchedule(tile.csvData ?? "").find((e) => e.week === displayWeek)?.topic?.trim() ?? "";
+      const wt = await loadTileWeekTopic(tile, displayWeek, helpers);
+      const topic = "skip" in wt ? "" : wt.topic;
       let moduleName =
         status === "not-started"
           ? "Not started"
@@ -9342,7 +9511,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
       }
       const status = courseProgressStatus(rawWeek, tile.weeks);
       const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
-      const topic = csvToSchedule(tile.csvData ?? "").find((e) => e.week === displayWeek)?.topic?.trim() ?? "";
+      const wt = await loadTileWeekTopic(tile, displayWeek, helpers);
+      const topic = "skip" in wt ? "" : wt.topic;
       const moduleName =
         status === "not-started"
           ? "Not started"
@@ -11277,7 +11447,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "draft-upcoming-lectures",
     name: "Draft next week's lectures",
     description:
-      "For every selected course tile, detect NEXT week's module from the tile's schedule and draft a lesson plan, a lecture script, and a slide deck into the tile's materials. Courses that are finished, not yet near their start, or missing a schedule row are skipped with a note.",
+      "For every selected course tile, detect NEXT week's module and draft a lesson plan, a lecture script, and a slide deck into the tile's materials. The week's topic comes from the course's LMS export first, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note.",
     inputs: [
       {
         key: "courses",
@@ -11352,18 +11522,20 @@ export const STEP_REGISTRY: StepDefinition[] = [
             continue;
           }
 
-          const schedule = csvToSchedule(tile.csvData ?? "");
-          const row = schedule.find((w) => w.week === nw.week);
-          if (!row || !row.topic) {
-            reportLines.push(
-              `${tile.name}: skipped - no schedule row for week ${nw.week}.`
-            );
+          const weekTopic = await loadTileWeekTopic(tile, nw.week, helpers);
+          if ("skip" in weekTopic) {
+            reportLines.push(`${tile.name}: skipped - ${weekTopic.skip}.`);
             continue;
           }
 
+          const topic = weekTopic.topic;
+          const summary = weekTopic.summary;
+          const sourceNote = weekTopic.source !== "schedule"
+            ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
+            : "";
           const objectives = extraNotes
-            ? `Topic: ${row.topic}\n${row.summary}\n${extraNotes}`
-            : `Topic: ${row.topic}\n${row.summary}`;
+            ? `Topic: ${topic}\n${summary}\n${extraNotes}`
+            : `Topic: ${topic}\n${summary}`;
 
           const sanitize = (s: string) =>
             s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
@@ -11373,7 +11545,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           try {
             onProgress(`Generating lecture script for ${tile.name}...`);
             const scriptResult = await generateLectureScriptAction(
-              row.topic,
+              topic,
               objectives,
               minutesVal,
               helpers.provider
@@ -11384,7 +11556,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
             const scriptText = [
               `# ${tile.name} - Week ${nw.week} Lecture Script`,
-              `## ${row.topic}`,
+              `## ${topic}`,
               scriptResult.script,
             ].join("\n");
             const scriptDocx = await buildDocxFromPlainText(scriptText, [], helpers.author);
@@ -11472,8 +11644,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
           try {
             onProgress(`Generating slides for ${tile.name}...`);
-            const slidePrompt = `Create a lecture slide deck for week ${nw.week} of ${tile.name} on "${row.topic}". ${
-              row.summary
+            const slidePrompt = `Create a lecture slide deck for week ${nw.week} of ${tile.name} on "${topic}". ${
+              summary
             }${extraNotes ? ` ${extraNotes}` : ""}`;
             const slideResult = await generateSlidesAction(slidePrompt, helpers.provider);
             if ("error" in slideResult) {
@@ -11483,7 +11655,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
             const pptxData = await buildSlidesPptx({
               presentationTitle: slideResult.presentationTitle,
               slides: slideResult.slides,
-              subtitle: `Week ${nw.week} - ${row.topic}`,
+              subtitle: `Week ${nw.week} - ${topic}`,
               author: helpers.author,
             });
             const slideBlob = new Blob([pptxData], {
@@ -11512,7 +11684,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           }
 
           if (tilePrepared) {
-            reportLines.push(`${tile.name}: prepared week ${nw.week}`);
+            reportLines.push(`${tile.name}: prepared week ${nw.week}${sourceNote}`);
             prepared++;
           }
         } catch (err) {
@@ -12576,7 +12748,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "generate-concept-animations",
     name: "Generate concept animations",
     description:
-      "For each selected course tile, detect NEXT week's module and generate a set of animated concept visualizations (self-contained SVG/CSS, no JavaScript) into the tile's materials - optionally also created as unpublished Canvas pages. Courses that are finished, not yet near their start, or missing a schedule row are skipped with a note.",
+      "For each selected course tile, detect NEXT week's module and generate a set of animated concept visualizations (self-contained SVG/CSS, no JavaScript) into the tile's materials - optionally also created as unpublished Canvas pages. The week's topic comes from the course's LMS export first, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note.",
     inputs: [
       {
         key: "courses",
@@ -12660,15 +12832,17 @@ export const STEP_REGISTRY: StepDefinition[] = [
             continue;
           }
 
-          const schedule = csvToSchedule(tile.csvData ?? "");
-          const row = schedule.find((w) => w.week === nw.week);
-          if (!row || !row.topic) {
-            reportLines.push(`${tile.name}: skipped - no schedule row for week ${nw.week}.`);
+          const weekTopic = await loadTileWeekTopic(tile, nw.week, helpers);
+          if ("skip" in weekTopic) {
+            reportLines.push(`${tile.name}: skipped - ${weekTopic.skip}.`);
             continue;
           }
 
-          const topic = row.topic;
-          const summary = row.summary || "";
+          const topic = weekTopic.topic;
+          const summary = weekTopic.summary;
+          const sourceNote = weekTopic.source !== "schedule"
+            ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
+            : "";
           const context = extraNotes
             ? `${tile.name} week ${nw.week}: ${topic}. ${summary}. ${extraNotes}`
             : `${tile.name} week ${nw.week}: ${topic}. ${summary}`;
@@ -12677,7 +12851,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
             s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
 
           const pageNotes: string[] = [];
-          let conceptsProcessed = 0;
+          let tileSaved = 0;
+          let signInNeeded = false;
 
           try {
             onProgress(`Planning concepts for ${tile.name}...`);
@@ -12692,7 +12867,6 @@ export const STEP_REGISTRY: StepDefinition[] = [
             }
 
             for (const { concept, visualIdea } of planResult.concepts) {
-              conceptsProcessed++;
               try {
                 onProgress(`Animating "${concept}" for ${tile.name}...`);
                 const animResult = await generateConceptAnimationAction(
@@ -12713,13 +12887,14 @@ export const STEP_REGISTRY: StepDefinition[] = [
                   try {
                     await helpers.saveCourseMaterialFile(tile.id, blob, fileName);
                     generated++;
+                    tileSaved++;
                   } catch (err) {
                     pageNotes.push(
                       `Failed to save ${concept}: ${err instanceof Error ? err.message : String(err)}`
                     );
                   }
                 } else {
-                  pageNotes.push(`Sign in to save ${concept}`);
+                  signInNeeded = true;
                 }
 
                 if (publish && tile.canvasUrl) {
@@ -12748,8 +12923,12 @@ export const STEP_REGISTRY: StepDefinition[] = [
               }
             }
 
+            if (signInNeeded) {
+              pageNotes.push("Sign in to save animations");
+            }
+
             const notesSuffix = pageNotes.length > 0 ? ` (${pageNotes.join("; ")})` : "";
-            reportLines.push(`${tile.name}: week ${nw.week} (${topic}) - ${conceptsProcessed} animation(s) processed${notesSuffix}`);
+            reportLines.push(`${tile.name}: week ${nw.week} (${topic}) - ${tileSaved} animation(s) saved${sourceNote}${notesSuffix}`);
           } catch (err) {
             reportLines.push(
               `${tile.name}: planning failed - ${err instanceof Error ? err.message : "failed"}`

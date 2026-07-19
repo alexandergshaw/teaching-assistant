@@ -37,6 +37,8 @@ import { deriveAltTextFromHtml, deriveLinkTextFromHtml } from "@/lib/embedded/ac
 import { scaffoldCourseProjectRubric, scaffoldCourseOutline, scaffoldCopilotPrompt } from "@/lib/embedded/course";
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
+import { scaffoldConceptAnimation } from "@/lib/embedded/animation";
+import { validateAnimationHtml, wrapAnimationDocument } from "@/lib/animation-html";
 import { copyedit, stripLongDashes } from "@/lib/embedded/scaffold";
 import { routeRequest } from "@/lib/embedded/router";
 import { rememberRubric, findRubricForTopic } from "@/lib/research/rubric-bank";
@@ -11008,4 +11010,214 @@ export async function countGradingDraftsSince(sinceIso: string): Promise<{ count
   } catch {
     return { count: 0 };
   }
+}
+
+/**
+ * Generate a plan of visualizable concepts from a course topic and summary.
+ * Provider "embedded" uses a deterministic fallback (split summary into sentences).
+ * Otherwise calls the LLM to extract the count most visualizable concepts with
+ * animation ideas. Falls back to embedded derivation if LLM returns empty/malformed
+ * JSON, never failing due to LLM quality issues.
+ */
+export async function generateConceptPlanAction(
+  topic: string,
+  summary: string,
+  count: number,
+  provider: LlmProvider = "gemini"
+): Promise<{ concepts: Array<{ concept: string; visualIdea: string }> } | { error: string }> {
+  try {
+    await requireOwner();
+    const clampedCount = Math.max(1, Math.min(6, count));
+
+    // Embedded Deterministic Engine: split summary into sentences and derive
+    // concepts from them (no model call).
+    if (provider === "embedded") {
+      return { concepts: deriveConceptsFromSummary(topic, summary, clampedCount) };
+    }
+
+    const prompt = `You are an educational designer planning animated concept visualizations for a course week.
+
+TOPIC: ${topic.trim()}
+
+SUMMARY:
+${summary.trim()}
+
+Extract the ${clampedCount} most visualizable concepts from this week's material. A visualizable concept is one where animation (state changes, flows, comparisons, transformations) shows the idea better than static text alone.
+
+Return ONLY valid JSON (no markdown, no code fence, no extra text):
+[
+  { "concept": "...", "visualIdea": "..." },
+  ...
+]
+
+Each object must have:
+- "concept": a concise, specific concept name (2-5 words)
+- "visualIdea": one concrete animation idea (what visual change/flow/comparison depicts it)
+
+Return exactly ${clampedCount} entries or fewer if fewer exist.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 1024 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { concepts: deriveConceptsFromSummary(topic, summary, clampedCount) };
+    }
+
+    const jsonText = result.text.trim();
+    const parsed = parseLenientJsonArray(jsonText);
+
+    if (!parsed || parsed.length === 0) {
+      return { concepts: deriveConceptsFromSummary(topic, summary, clampedCount) };
+    }
+
+    const concepts = parsed
+      .slice(0, clampedCount)
+      .filter(
+        (item): item is { concept: string; visualIdea: string } =>
+          typeof item === "object" &&
+          item !== null &&
+          "concept" in item &&
+          "visualIdea" in item &&
+          typeof (item as Record<string, unknown>).concept === "string" &&
+          typeof (item as Record<string, unknown>).visualIdea === "string"
+      )
+      .map((item) => ({
+        concept: (item.concept as string).trim(),
+        visualIdea: (item.visualIdea as string).trim(),
+      }))
+      .filter((item) => item.concept && item.visualIdea);
+
+    if (concepts.length === 0) {
+      return { concepts: deriveConceptsFromSummary(topic, summary, clampedCount) };
+    }
+
+    return { concepts };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Generate a professional self-contained HTML animation for a single concept.
+ * Provider "embedded" returns scaffoldConceptAnimation directly.
+ * Otherwise calls the LLM with a strict prompt, validates the result, and retries
+ * once with problems appended if validation fails. Falls back to scaffoldConceptAnimation
+ * on persistent validation failures, never failing due to LLM output quality.
+ */
+export async function generateConceptAnimationAction(
+  concept: string,
+  visualIdea: string,
+  context: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ html: string } | { error: string }> {
+  try {
+    await requireOwner();
+
+    // Embedded Deterministic Engine: return the fallback animation.
+    if (provider === "embedded") {
+      return { html: scaffoldConceptAnimation(concept, visualIdea) };
+    }
+
+    const basePrompt = `You are an expert in educational animation and data visualization. Create a self-contained HTML fragment (NO doctype, html, head, or body tags) that teaches the following concept visually.
+
+CONCEPT: ${concept}
+ANIMATION IDEA: ${visualIdea}
+CONTEXT: ${context}
+
+Requirements:
+- Produce ONE HTML fragment only (no wrapper tags).
+- Use SVG with CSS @keyframes and/or SMIL <animate> elements to create a 12-25 second staged loop.
+- The loop should be: Setup (introduce the concept) -> Transformation (show the key change/flow/comparison) -> Result (show the outcome).
+- Include on-canvas captions for each stage (text labels within the SVG or adjacent text).
+- Include a plain-text legend below the animation explaining the stages.
+- Use a muted professional palette (grays with one accent color, e.g., #0066cc).
+- Ensure accessible contrast (text on backgrounds must meet WCAG AA).
+- NO JavaScript whatsoever.
+- NO external images, fonts, or links (data: URIs and internal #ids are fine).
+- NO emojis.
+- Self-contained: all styles inline or in <style>, all content inline.
+
+Output ONLY the HTML fragment itself.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: basePrompt }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { html: scaffoldConceptAnimation(concept, visualIdea) };
+    }
+
+    let html = stripCodeFences(result.text);
+    let validation = validateAnimationHtml(html);
+
+    if (!validation.ok) {
+      const correctionPrompt = basePrompt + `
+
+Your previous attempt violated these requirements:
+${validation.problems.map((p) => "- " + p).join("\n")}
+
+Fix these issues and try again.`;
+
+      const retryResult = await callLlm(
+        {
+          contents: [{ role: "user", parts: [{ text: correctionPrompt }] }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
+        },
+        provider
+      );
+
+      if (retryResult.ok) {
+        html = stripCodeFences(retryResult.text);
+        validation = validateAnimationHtml(html);
+      }
+    }
+
+    if (!validation.ok) {
+      return { html: scaffoldConceptAnimation(concept, visualIdea) };
+    }
+
+    return { html };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Deterministically derive up to count concepts from a summary by splitting
+ * into sentences. Returns { concept: first 6 words titled, visualIdea: the sentence }.
+ */
+function deriveConceptsFromSummary(
+  topic: string,
+  summary: string,
+  count: number
+): Array<{ concept: string; visualIdea: string }> {
+  const sentences = summary
+    .split(/[.!?]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  return sentences.slice(0, count).map((sentence) => {
+    const words = sentence.split(/\s+/).slice(0, 6);
+    const concept = words.join(" ");
+    return {
+      concept: concept || topic,
+      visualIdea: sentence,
+    };
+  });
+}
+
+/**
+ * Strip markdown code fences from text (```...``` or ```language...```).
+ */
+function stripCodeFences(text: string): string {
+  return text.replace(/```[a-z]*\n?/gi, "").trim();
 }

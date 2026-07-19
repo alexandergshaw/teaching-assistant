@@ -38,6 +38,8 @@ import {
   bulkUpdateAction,
   bulkDeleteAction,
   createPageAction,
+  generateConceptPlanAction,
+  generateConceptAnimationAction,
   listCoursesByTermAction,
   createCourseHubAction,
   updateCourseHubAction,
@@ -187,6 +189,7 @@ import { scaffoldCourseOutline } from "@/lib/embedded/course";
 import { extractDefinitions } from "@/lib/embedded/scaffold";
 import { scaffoldQuizQuestions, renderQuizText } from "@/lib/embedded/quiz";
 import { generateEmbeddedRubricText } from "@/lib/embedded-grader/rubric";
+import { wrapAnimationDocument } from "@/lib/animation-html";
 import type {
   StepInputSpec,
   StepOutputSpec,
@@ -12563,6 +12566,209 @@ export const STEP_REGISTRY: StepDefinition[] = [
           connected: connected ? "1" : "",
           canSend: canSend ? "1" : "",
           report,
+        },
+        summary: { kind: "text", text: report },
+      };
+    },
+  },
+
+  {
+    type: "generate-concept-animations",
+    name: "Generate concept animations",
+    description:
+      "For each selected course tile, detect NEXT week's module and generate a set of animated concept visualizations (self-contained SVG/CSS, no JavaScript) into the tile's materials - optionally also created as unpublished Canvas pages. Courses that are finished, not yet near their start, or missing a schedule row are skipped with a note.",
+    inputs: [
+      {
+        key: "courses",
+        label: "Course tiles",
+        type: "hubCourseList",
+        required: true,
+        help: "One, several, or all course tiles.",
+      },
+      {
+        key: "maxConcepts",
+        label: "Concepts per course",
+        type: "number",
+        required: false,
+        help: "How many animations per course. Default 3 (max 6).",
+      },
+      {
+        key: "extraNotes",
+        label: "Extra notes (optional)",
+        type: "longtext",
+        required: false,
+        help: "Optional guidance folded into every animation (e.g. emphasize runtime complexity).",
+      },
+      {
+        key: "publish",
+        label: "Create Canvas pages?",
+        type: "boolean",
+        required: false,
+        help: "Also create each animation as an UNPUBLISHED page in the tile's Canvas course - publish them from Canvas when happy.",
+      },
+    ],
+    outputs: [
+      { key: "report", label: "Report", type: "longtext" },
+      { key: "generated", label: "Animations generated", type: "number" },
+      { key: "hasGenerated", label: "Any generated?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const ids = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      if (ids.length === 0) {
+        throw new Error("Select at least one course tile.");
+      }
+
+      let maxConceptsVal = Number(values.maxConcepts ?? 3);
+      if (Number.isNaN(maxConceptsVal) || maxConceptsVal < 1 || maxConceptsVal > 6) {
+        maxConceptsVal = 3;
+      } else {
+        maxConceptsVal = Math.round(maxConceptsVal);
+      }
+
+      const extraNotes = String(values.extraNotes ?? "").trim();
+      const publish = String(values.publish ?? "") === "1";
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const reportLines: string[] = [];
+      let generated = 0;
+
+      for (const id of ids) {
+        const tile = hub.courses.find((c) => c.id === id);
+        if (!tile) {
+          reportLines.push(`${id}: course tile not found - skipped`);
+          continue;
+        }
+
+        try {
+          onProgress(`Generating animations for ${tile.name}...`);
+          const nw = nextLectureWeek({
+            startDate: tile.startDate,
+            weeks: tile.weeks,
+            nowMs: Date.now(),
+          });
+
+          if ("skip" in nw) {
+            reportLines.push(`${tile.name}: skipped - ${nw.skip}.`);
+            continue;
+          }
+
+          const schedule = csvToSchedule(tile.csvData ?? "");
+          const row = schedule.find((w) => w.week === nw.week);
+          if (!row || !row.topic) {
+            reportLines.push(`${tile.name}: skipped - no schedule row for week ${nw.week}.`);
+            continue;
+          }
+
+          const topic = row.topic;
+          const summary = row.summary || "";
+          const context = extraNotes
+            ? `${tile.name} week ${nw.week}: ${topic}. ${summary}. ${extraNotes}`
+            : `${tile.name} week ${nw.week}: ${topic}. ${summary}`;
+
+          const sanitize = (s: string) =>
+            s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+
+          const pageNotes: string[] = [];
+          let conceptsProcessed = 0;
+
+          try {
+            onProgress(`Planning concepts for ${tile.name}...`);
+            const planResult = await generateConceptPlanAction(
+              topic,
+              summary,
+              maxConceptsVal,
+              helpers.provider
+            );
+            if ("error" in planResult) {
+              throw new Error(planResult.error);
+            }
+
+            for (const { concept, visualIdea } of planResult.concepts) {
+              conceptsProcessed++;
+              try {
+                onProgress(`Animating "${concept}" for ${tile.name}...`);
+                const animResult = await generateConceptAnimationAction(
+                  concept,
+                  visualIdea,
+                  context,
+                  helpers.provider
+                );
+                if ("error" in animResult) {
+                  throw new Error(animResult.error);
+                }
+
+                const fileName = `${sanitize(tile.name)}_Week${nw.week}_${sanitize(concept)}_Animation.html`;
+                const wrapped = wrapAnimationDocument(`${concept} - Week ${nw.week}`, animResult.html);
+                const blob = new Blob([wrapped], { type: "text/html" });
+
+                if (helpers.saveCourseMaterialFile) {
+                  try {
+                    await helpers.saveCourseMaterialFile(tile.id, blob, fileName);
+                    generated++;
+                  } catch (err) {
+                    pageNotes.push(
+                      `Failed to save ${concept}: ${err instanceof Error ? err.message : String(err)}`
+                    );
+                  }
+                } else {
+                  pageNotes.push(`Sign in to save ${concept}`);
+                }
+
+                if (publish && tile.canvasUrl) {
+                  try {
+                    await createPageAction(
+                      tile.canvasUrl,
+                      {
+                        title: `Week ${nw.week}: ${concept} (animation)`,
+                        body: animResult.html,
+                        published: false,
+                      },
+                      tile.institution ?? undefined
+                    );
+                  } catch (err) {
+                    pageNotes.push(
+                      `Failed to create Canvas page for ${concept}: ${
+                        err instanceof Error ? err.message : String(err)
+                      }`
+                    );
+                  }
+                }
+              } catch (err) {
+                pageNotes.push(
+                  `Concept "${concept}": ${err instanceof Error ? err.message : "failed"}`
+                );
+              }
+            }
+
+            const notesSuffix = pageNotes.length > 0 ? ` (${pageNotes.join("; ")})` : "";
+            reportLines.push(`${tile.name}: week ${nw.week} (${topic}) - ${conceptsProcessed} animation(s) processed${notesSuffix}`);
+          } catch (err) {
+            reportLines.push(
+              `${tile.name}: planning failed - ${err instanceof Error ? err.message : "failed"}`
+            );
+            continue;
+          }
+        } catch (err) {
+          reportLines.push(
+            `${tile.name}: ${err instanceof Error ? err.message : "failed"}`
+          );
+        }
+      }
+
+      const report = reportLines.join("\n");
+      return {
+        outputs: {
+          report,
+          generated: String(generated),
+          hasGenerated: generated > 0 ? "1" : "",
         },
         summary: { kind: "text", text: report },
       };

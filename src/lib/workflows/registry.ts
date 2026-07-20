@@ -10457,7 +10457,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "generate-module-answers",
     name: "Generate module homework answers",
-    description: "Generate a full-credit model answer for every homework item (assignments and discussions) in a module and save them as an instructor answer key (plain-text file on the course tile and the Files tab). Answers are saved privately to the course tile and Files tab; never published to the LMS.",
+    description: "Generate a full-credit model answer for every homework item (assignments and discussions) in a module, grounded in the module's objectives and materials, and save them as an instructor answer key (plain-text file on the course tile and the Files tab). Answers are saved privately to the course tile and Files tab; never published to the LMS.",
     inputs: [
       {
         key: "hubCourse",
@@ -10662,6 +10662,24 @@ export const STEP_REGISTRY: StepDefinition[] = [
       // Parse week number from module name for the docx filename
       moduleWeekNumber = parseWeekToken(moduleName);
 
+      // Gather module materials for context grounding
+      let moduleContextTrimmed = "";
+      let materialsSource = "";
+      try {
+        const gathered = await gatherModuleMaterials(
+          tile,
+          liveModuleValue(String(targetModule.id), targetModule.name),
+          helpers,
+          onProgress
+        );
+        if (gathered.materialsText) {
+          moduleContextTrimmed = gathered.materialsText.slice(0, 9000);
+          materialsSource = gathered.materialsSource;
+        }
+      } catch {
+        // Fail-soft: continue without context
+      }
+
       // Collect Assignment and Discussion items
       const answerLines: string[] = [];
       const reportLines: string[] = [];
@@ -10712,7 +10730,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
             continue;
           }
 
-          const description = meta.description.trim();
+          let description = meta.description.trim();
           if (!description) {
             reportLines.push(`${item.title}: skipped (no description)`);
             continue;
@@ -10720,11 +10738,37 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
           const rubric = meta.rubricText ?? "";
 
-          // Generate the model answer
+          // Process linked files (up to 4)
+          const linkedFileIds = meta.linkedFileIds ?? [];
+          const filesToProcess = linkedFileIds.slice(0, 4);
+          if (filesToProcess.length < linkedFileIds.length) {
+            reportLines.push(`${item.title}: skipped ${linkedFileIds.length - filesToProcess.length} linked file(s) beyond the 4-file limit`);
+          }
+
+          for (const fileId of filesToProcess) {
+            try {
+              const filePreview = await previewFileAction(canvasUrl, fileId, inst);
+              if ("error" in filePreview) {
+                reportLines.push(`${item.title}: could not preview linked file ${fileId} - ${filePreview.error}`);
+                continue;
+              }
+
+              const previewText = filePreview.preview.text ?? "";
+              if (previewText) {
+                const trimmedPreview = previewText.slice(0, 4000);
+                description += `\n\nLINKED FILE:\n${trimmedPreview}`;
+              }
+            } catch {
+              reportLines.push(`${item.title}: could not load linked file ${fileId}`);
+            }
+          }
+
+          // Generate the model answer with module context
           const answerResult = await generateModelAnswerAction(
             description,
             rubric,
-            helpers.provider
+            helpers.provider,
+            moduleContextTrimmed
           );
 
           if ("error" in answerResult) {
@@ -10775,6 +10819,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         throw new Error(
           `Failed to generate answers for any items${firstError ? ` - first error: ${firstError}` : ""}.`
         );
+      }
+
+      // Add context report line
+      if (moduleContextTrimmed) {
+        reportLines.push(`answers grounded in module materials (${materialsSource})`);
+      } else {
+        reportLines.push("module context unavailable - answers generated from assignment text only");
       }
 
       // Add report sections

@@ -10,6 +10,11 @@ describe("generate-module-answers step", () => {
     expect(def!.type).toBe("generate-module-answers");
   });
 
+  it("mentions grounding in module materials in the description", () => {
+    const desc = def!.description;
+    expect(desc).toContain("grounded in the module's objectives and materials");
+  });
+
   it("has required inputs: hubCourse", () => {
     const hubCourseInput = def!.inputs.find((i) => i.key === "hubCourse");
     expect(hubCourseInput, "hubCourse input exists").toBeTruthy();

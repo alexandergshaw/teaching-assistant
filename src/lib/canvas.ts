@@ -11,7 +11,7 @@
  */
 
 import JSZip from "jszip";
-import { parseCanvasUrl, type ParsedCanvasUrl } from "./canvas-url";
+import { parseCanvasUrl, type ParsedCanvasUrl, extractCanvasFileIds } from "./canvas-url";
 import {
   canvasError,
   htmlToText,
@@ -421,7 +421,7 @@ async function fetchAssignmentObject(
  */
 export async function fetchCanvasMeta(
   url: string
-): Promise<{ description: string; rubricText: string }> {
+): Promise<{ description: string; rubricText: string; linkedFileIds: number[] }> {
   const parsed = parseCanvasUrl(url);
   if (!parsed) {
     throw new Error(
@@ -439,7 +439,7 @@ export async function fetchCanvasMeta(
 async function fetchCanvasMetaWith(
   ctx: { institution: CanvasInstitution; token: string; baseUrl: string },
   parsed: ParsedCanvasUrl
-): Promise<{ description: string; rubricText: string }> {
+): Promise<{ description: string; rubricText: string; linkedFileIds: number[] }> {
   const { institution, token, baseUrl } = ctx;
 
   if (parsed.kind === "assignment") {
@@ -450,9 +450,12 @@ async function fetchCanvasMetaWith(
       parsed.courseId,
       parsed.id
     );
+    const descriptionHtml = assignment.description ?? "";
+    const linkedFileIds = extractCanvasFileIds(descriptionHtml);
     return {
-      description: assignment.description ? htmlToText(assignment.description) : "",
+      description: descriptionHtml ? htmlToText(descriptionHtml) : "",
       rubricText: formatRubric(assignment.rubric),
+      linkedFileIds,
     };
   }
 
@@ -466,7 +469,9 @@ async function fetchCanvasMetaWith(
     throw canvasError(response.status, institution);
   }
   const topic = (await response.json()) as CanvasDiscussionTopicObject;
-  const description = topic.message ? htmlToText(topic.message) : "";
+  const messageHtml = topic.message ?? "";
+  const linkedFileIds = extractCanvasFileIds(messageHtml);
+  const description = messageHtml ? htmlToText(messageHtml) : "";
 
   let rubricText = formatRubric(topic.assignment?.rubric);
   if (!rubricText && topic.assignment_id) {
@@ -484,7 +489,7 @@ async function fetchCanvasMetaWith(
     }
   }
 
-  return { description, rubricText };
+  return { description, rubricText, linkedFileIds };
 }
 
 /**

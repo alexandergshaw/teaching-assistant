@@ -66,3 +66,41 @@ export function parseCanvasCourseId(url: string): string | null {
   const match = url.match(/\/courses\/(\d+)/);
   return match ? match[1] : null;
 }
+
+/**
+ * Extract Canvas file IDs from raw HTML.
+ * Looks for hrefs like /courses/123/files/456, /files/456, plus /download, /preview, or query suffixes.
+ * Also extracts from data-api-endpoint="...files/123..." attributes.
+ * Returns deduped array in first-appearance order. Empty input or no matches returns [].
+ */
+export function extractCanvasFileIds(html: string): number[] {
+  if (!html || typeof html !== "string") {
+    return [];
+  }
+
+  const fileIds = new Set<number>();
+  const idArray: number[] = [];
+
+  // Match href patterns: /courses/\d+/files/\d+ or /files/\d+ with optional /download, /preview, or query strings
+  const hrefRegex = /href="([^"]*(?:\/courses\/\d+)?\/files\/(\d+)(?:\/download|\/preview)?(?:\?[^"]*)?)[^"]*"/g;
+  let match;
+  while ((match = hrefRegex.exec(html)) !== null) {
+    const fileId = parseInt(match[2], 10);
+    if (!isNaN(fileId) && !fileIds.has(fileId)) {
+      fileIds.add(fileId);
+      idArray.push(fileId);
+    }
+  }
+
+  // Match data-api-endpoint patterns: files/\d+
+  const dataApiRegex = /data-api-endpoint="[^"]*\/files\/(\d+)[^"]*"/g;
+  while ((match = dataApiRegex.exec(html)) !== null) {
+    const fileId = parseInt(match[1], 10);
+    if (!isNaN(fileId) && !fileIds.has(fileId)) {
+      fileIds.add(fileId);
+      idArray.push(fileId);
+    }
+  }
+
+  return idArray;
+}

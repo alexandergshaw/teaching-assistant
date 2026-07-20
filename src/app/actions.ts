@@ -1067,7 +1067,7 @@ function gradingApiToRun(
  */
 export async function fetchCanvasMetaAction(
   url: string
-): Promise<{ description: string; rubricText: string } | { error: string }> {
+): Promise<{ description: string; rubricText: string; linkedFileIds: number[] } | { error: string }> {
   try {
     await requireOwner();
     // Return Canvas's own rubric only; never synthesize one when Canvas has none.
@@ -2576,12 +2576,13 @@ export async function gradeOneSubmissionAction(
 export async function generateModelAnswerAction(
   instructions: string,
   rubric: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  moduleContext: string = ""
 ): Promise<{ modelAnswer: string } | { error: string }> {
   try {
     await requireOwner();
     if (!instructions.trim()) return { error: "Provide the assignment instructions." };
-    const answer = await generateSampleAnswer(instructions, rubric, provider);
+    const answer = await generateSampleAnswer(instructions, rubric, provider, moduleContext);
     return { modelAnswer: typeof answer === "string" ? answer : String(answer) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate a model answer." };

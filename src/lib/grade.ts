@@ -715,19 +715,27 @@ export async function synthesizeFullCreditChecklist(
   }
 }
 
-export async function generateSampleAnswer(
+export function buildSampleAnswerPrompt(
   assignmentInstructions: string,
   rubric: string,
-  provider: LlmProvider = "gemini"
-): Promise<string> {
-  try {
-    const prompt = `You are a teaching assistant writing a model answer key for an assignment.
+  moduleContext: string = ""
+): string {
+  let prompt = `You are a teaching assistant writing a model answer key for an assignment.
 
 ASSIGNMENT INSTRUCTIONS:
 ${assignmentInstructions}
 
 RUBRIC:
-${rubric}
+${rubric}`;
+
+  if (moduleContext) {
+    prompt += `
+
+MODULE MATERIALS (objectives, pages, and other assignments from this module):
+${moduleContext}`;
+  }
+
+  prompt += `
 
 Write a single sample correct answer that would earn full credit against the rubric. It is a reference exemplar for the instructor, not feedback to any student.
 
@@ -737,11 +745,30 @@ Return ONLY valid JSON in this exact shape:
 }
 
 Rules:
-- The sample answer must satisfy every rubric area at the highest level.
+- The sample answer must satisfy every rubric area at the highest level.`;
+
+  if (moduleContext) {
+    prompt += `
+- Ground the answer in the module materials: use the concepts, terminology, and approaches taught in this module.`;
+  }
+
+  prompt += `
 - Be concrete and complete but concise: show the actual answer, not a description of one.
 - For coding assignments include correct, runnable code; for written assignments write the actual prose response.
 - Do not wrap the whole answer in markdown fences.
 - Do not include any text outside the JSON object.`;
+
+  return prompt;
+}
+
+export async function generateSampleAnswer(
+  assignmentInstructions: string,
+  rubric: string,
+  provider: LlmProvider = "gemini",
+  moduleContext: string = ""
+): Promise<string> {
+  try {
+    const prompt = buildSampleAnswerPrompt(assignmentInstructions, rubric, moduleContext);
 
     const result = await callLlm(
       {

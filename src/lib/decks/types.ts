@@ -1,10 +1,12 @@
 // Domain model for reusable presentation templates: slide roles, loop groups, deck structure.
 // Pure, unit-testable; no I/O or React dependencies.
 
-export type DeckBackgroundKind = "solid" | "gradient";
+export type DeckBackgroundKind = "solid" | "gradient" | "classic";
 
 export interface DeckTheme {
   backgroundKind: DeckBackgroundKind;
+  // classic = the app's built-in navy/accent lecture styling; backgroundColor/backgroundColor2/gradientAngle/fontColor
+  // are ignored when kind is classic (their fields stay populated with navy palette values for display).
   backgroundColor: string;
   backgroundColor2: string;
   gradientAngle: number;
@@ -26,7 +28,11 @@ export function coerceDeckTheme(raw: unknown): DeckTheme {
 
   const obj = raw as Record<string, unknown>;
   const backgroundKind =
-    obj.backgroundKind === "gradient" ? "gradient" : "solid";
+    obj.backgroundKind === "gradient"
+      ? "gradient"
+      : obj.backgroundKind === "classic"
+      ? "classic"
+      : "solid";
 
   const isValidHex = (hex: unknown): boolean => {
     if (typeof hex !== "string") return false;

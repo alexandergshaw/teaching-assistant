@@ -24,7 +24,39 @@ const PRESET_CODING_LECTURE_LOOP: DeckLoopGroup = {
   runtimeLabel: "Concepts",
 };
 
+const PRESET_CLASSIC_LECTURE_LOOP: DeckLoopGroup = {
+  id: "preset-classic-lecture-concepts",
+  label: "Concepts",
+  source: "runtime",
+  items: [],
+  runtimeLabel: "Concepts",
+};
+
 export const DECK_PRESETS: DeckTemplate[] = [
+  {
+    id: "preset-classic-lecture",
+    name: "Classic Lecture",
+    description: "The app's standard lecture deck - navy title and header bars with accent highlights. The default styling for every workflow that builds slides.",
+    audience: "Any level",
+    tone: "clear, informative",
+    slides: [
+      presetSlide("preset-classic-s1", "title"),
+      presetSlide("preset-classic-s2", "objectives"),
+      presetSlide("preset-classic-s3", "agenda"),
+      presetSlide("preset-classic-s4", "concept", "preset-classic-lecture-concepts"),
+      presetSlide("preset-classic-s5", "example", "preset-classic-lecture-concepts"),
+      presetSlide("preset-classic-s6", "practice", "preset-classic-lecture-concepts"),
+      presetSlide("preset-classic-s7", "summary"),
+    ],
+    loops: [PRESET_CLASSIC_LECTURE_LOOP],
+    theme: {
+      backgroundKind: "classic",
+      backgroundColor: "#1a2744",
+      backgroundColor2: "#2563eb",
+      gradientAngle: 135,
+      fontColor: "#ffffff",
+    },
+  },
   {
     id: "preset-coding-lecture",
     name: "Coding Concept Lecture",

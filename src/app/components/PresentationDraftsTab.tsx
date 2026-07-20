@@ -21,7 +21,7 @@ import styles from "../page.module.css";
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 function gradientPng(t: DeckTheme): string | undefined {
-  if (t.backgroundKind !== "gradient" || typeof document === "undefined") return undefined;
+  if (t.backgroundKind === "classic" || t.backgroundKind !== "gradient" || typeof document === "undefined") return undefined;
   const c = document.createElement("canvas");
   c.width = 1280;
   c.height = 720;
@@ -200,7 +200,7 @@ export default function PresentationDraftsTab({
   const handleDownload = async (draft: PresentationDraft) => {
     setDownloadingId(draft.id);
     try {
-      const pptxTheme: PptxTheme | undefined = draft.payload.theme
+      const pptxTheme: PptxTheme | undefined = draft.payload.theme && draft.payload.theme.backgroundKind !== "classic"
         ? {
             backgroundKind: draft.payload.theme.backgroundKind,
             backgroundColor: draft.payload.theme.backgroundColor,

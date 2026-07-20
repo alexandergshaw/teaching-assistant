@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { expandTemplate, getSlideRole, newDeckSlide, emptyDeckTemplate } from "./types";
+import { expandTemplate, getSlideRole, newDeckSlide, emptyDeckTemplate, coerceDeckTheme } from "./types";
+import { DECK_PRESETS, isPresetDeckId } from "./presets";
 
 describe("getSlideRole", () => {
   it("returns undefined for an unknown role", () => {
@@ -118,5 +119,64 @@ describe("expandTemplate", () => {
     expect(specs[1].loopItem).toBeUndefined();
     expect(specs[2].role).toBe("practice");
     expect(specs[2].loopItem).toBeUndefined();
+  });
+});
+
+describe("coerceDeckTheme", () => {
+  it("coerces classic kind and round-trips", () => {
+    const theme = {
+      backgroundKind: "classic",
+      backgroundColor: "#1a2744",
+      backgroundColor2: "#2563eb",
+      gradientAngle: 135,
+      fontColor: "#ffffff",
+    };
+    const coerced = coerceDeckTheme(theme);
+    expect(coerced.backgroundKind).toBe("classic");
+    expect(coerced.backgroundColor).toBe("#1a2744");
+    expect(coerced.backgroundColor2).toBe("#2563eb");
+  });
+
+  it("coerces unknown kind to solid", () => {
+    const theme = {
+      backgroundKind: "unknown-kind",
+      backgroundColor: "#ffffff",
+      backgroundColor2: "#e2e8f0",
+      gradientAngle: 135,
+      fontColor: "#1e293b",
+    };
+    const coerced = coerceDeckTheme(theme);
+    expect(coerced.backgroundKind).toBe("solid");
+  });
+});
+
+describe("deck presets", () => {
+  it("preset-classic-lecture exists with id, name, and classic kind", () => {
+    const preset = DECK_PRESETS.find((p) => p.id === "preset-classic-lecture");
+    expect(preset).toBeDefined();
+    expect(preset?.name).toBe("Classic Lecture");
+    expect(preset?.theme.backgroundKind).toBe("classic");
+  });
+
+  it("isPresetDeckId recognizes preset-classic-lecture", () => {
+    expect(isPresetDeckId("preset-classic-lecture")).toBe(true);
+  });
+
+  it("preset-classic-lecture has the correct slide and loop structure", () => {
+    const preset = DECK_PRESETS.find((p) => p.id === "preset-classic-lecture");
+    expect(preset?.slides).toHaveLength(7);
+    expect(preset?.slides[0].role).toBe("title");
+    expect(preset?.slides[1].role).toBe("objectives");
+    expect(preset?.slides[2].role).toBe("agenda");
+    expect(preset?.slides[3].role).toBe("concept");
+    expect(preset?.slides[3].loopGroupId).toBe("preset-classic-lecture-concepts");
+    expect(preset?.slides[4].role).toBe("example");
+    expect(preset?.slides[4].loopGroupId).toBe("preset-classic-lecture-concepts");
+    expect(preset?.slides[5].role).toBe("practice");
+    expect(preset?.slides[5].loopGroupId).toBe("preset-classic-lecture-concepts");
+    expect(preset?.slides[6].role).toBe("summary");
+    expect(preset?.loops).toHaveLength(1);
+    expect(preset?.loops[0].id).toBe("preset-classic-lecture-concepts");
+    expect(preset?.loops[0].runtimeLabel).toBe("Concepts");
   });
 });

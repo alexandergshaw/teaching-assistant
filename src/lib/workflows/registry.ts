@@ -177,7 +177,7 @@ import type { GradingRun, GradingRunEntry, GradeResult } from "@/lib/grade";
 import type { InstitutionField } from "@/lib/institution-fields";
 import type { RepoPermission } from "@/lib/github";
 import type { CommonResourceItem } from "@/lib/common-resources";
-import { buildSlidesPptx } from "@/lib/pptx";
+import { buildSlidesPptx, type PptxTheme } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import { parseCanvasCourseId, detectCanvasUrlKind } from "@/lib/canvas-url";
@@ -741,6 +741,32 @@ export async function resolveModuleContext(
   };
 }
 
+// Resolve a template input to its theme for buildSlidesPptx. Defaults to
+// Classic Lecture; fails forward with a note if the template is not found.
+async function resolveDeckTheme(
+  templateValue: unknown
+): Promise<{ theme: PptxTheme | undefined; templateName: string; note: string | null }> {
+  const idOrName = String(templateValue ?? "").trim() || "preset-classic-lecture";
+  const r = await getDeckTemplateAction(idOrName);
+  if ("error" in r) {
+    return {
+      theme: undefined,
+      templateName: "Classic Lecture",
+      note: `Template "${idOrName}" not found - used Classic Lecture.`,
+    };
+  }
+  const theme: PptxTheme = {
+    backgroundKind: r.template.theme.backgroundKind,
+    backgroundColor: r.template.theme.backgroundColor,
+    backgroundColor2: r.template.theme.backgroundColor2,
+    fontColor: r.template.theme.fontColor,
+    // Note: backgroundImageData server/client-side falls back to solid exactly
+    // like savePresentationFileAction; gradients without the precomputed PNG
+    // render as solid fills.
+  };
+  return { theme, templateName: r.template.name, note: null };
+}
+
 // Classify a resolve-rubric source line: a Canvas assignment/discussion URL is
 // an LMS rubric probe; an owner/name or github.com URL is a repo probe; a bare
 // topic goes to the rubric bank; a URL matching neither handler (e.g. a bare
@@ -936,7 +962,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "lecture-zip",
     name: "Build lecture materials zip",
-    description: "Generate presentation slides and lecture notes as a zip file",
+    description: "Generate presentation slides and lecture notes as a zip file. Slides are styled by a PPT Design template (Classic Lecture by default).",
     inputs: [
       {
         key: "repo",
@@ -970,6 +996,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         type: "schedule",
         required: false,
         help: "When bound, each deck is titled with its module's topic.",
+      },
+      {
+        key: "template",
+        label: "Deck template",
+        type: "deckTemplate",
+        required: false,
+        help: "A PPT Design template that styles the generated slides. Blank uses Classic Lecture (the app's standard look). Slide content still comes from this step's own generator.",
       },
     ],
     outputs: [
@@ -1026,8 +1059,10 @@ export const STEP_REGISTRY: StepDefinition[] = [
         }
       }
 
+      const deck = await resolveDeckTheme(values.template);
       const files: GeneratedCourseFile[] = [];
 
+      if (deck.note) onProgress(deck.note);
       onProgress(`Processing ${plans.length} assignments...`);
       for (const plan of plans) {
         const pptxData = await buildSlidesPptx({
@@ -1035,6 +1070,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           slides: plan.slides,
           subtitle: plan.label,
           author: helpers.author,
+          theme: deck.theme,
         });
 
         files.push({
@@ -4123,7 +4159,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "prepare-lecture",
     name: "Prepare lecture",
     description:
-      "Build a lecture deck from a module's materials and save it to the course tile. Pauses for announcement review unless Autonomous is on; in Autonomous mode with no course tile it prepares a lecture for every tile.",
+      "Build a lecture deck from a module's materials and save it to the course tile. Pauses for announcement review unless Autonomous is on; in Autonomous mode with no course tile it prepares a lecture for every tile. Slides are styled by a PPT Design template (Classic Lecture by default).",
     inputs: [
       {
         key: "hubCourse",
@@ -4146,6 +4182,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Run hands-off: build and save the deck(s) without pausing to review the announcement. With no course tile selected, prepares a lecture for every tile.",
       },
+      {
+        key: "template",
+        label: "Deck template",
+        type: "deckTemplate",
+        required: false,
+        help: "A PPT Design template that styles the generated slides. Blank uses Classic Lecture (the app's standard look). Slide content still comes from this step's own generator.",
+      },
     ],
     outputs: [
       { key: "announcement", label: "Announcement", type: "longtext" },
@@ -4160,6 +4203,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
       if ("error" in list) {
         throw new Error(list.error);
       }
+
+      const deck = await resolveDeckTheme(values.template);
+      if (deck.note) onProgress(deck.note);
 
       // Build the deck + recap for one tile: gather materials, generate the
       // lecture, save the pptx to the tile. Downloads only in the interactive
@@ -4195,6 +4241,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           slides: r.slides,
           subtitle: moduleName,
           author: helpers.author,
+          theme: deck.theme,
         });
         const blob = new Blob([pptxData], {
           type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -11447,7 +11494,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "draft-upcoming-lectures",
     name: "Draft next week's lectures",
     description:
-      "For every selected course tile, detect NEXT week's module and draft a lesson plan, a lecture script, and a slide deck into the tile's materials. The week's topic comes from the course's LMS export first, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note.",
+      "For every selected course tile, detect NEXT week's module and draft a lesson plan, a lecture script, and a slide deck into the tile's materials. The week's topic comes from the course's LMS export first, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note. Slides are styled by a PPT Design template (Classic Lecture by default).",
     inputs: [
       {
         key: "courses",
@@ -11469,6 +11516,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         type: "longtext",
         required: false,
         help: "Optional guidance folded into every generated document.",
+      },
+      {
+        key: "template",
+        label: "Deck template",
+        type: "deckTemplate",
+        required: false,
+        help: "A PPT Design template that styles the generated slides. Blank uses Classic Lecture (the app's standard look). Slide content still comes from this step's own generator.",
       },
     ],
     outputs: [
@@ -11497,6 +11551,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
       if ("error" in hub) {
         throw new Error(hub.error);
       }
+
+      const deck = await resolveDeckTheme(values.template);
+      if (deck.note) onProgress(deck.note);
 
       const extraNotes = String(values.extraNotes ?? "").trim();
       const reportLines: string[] = [];
@@ -11657,6 +11714,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
               slides: slideResult.slides,
               subtitle: `Week ${nw.week} - ${topic}`,
               author: helpers.author,
+              theme: deck.theme,
             });
             const slideBlob = new Blob([pptxData], {
               type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",

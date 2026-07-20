@@ -183,6 +183,18 @@ describe("deck-template presets ask for the template", () => {
     });
   }
 
+  for (const id of ["prepare-lecture", "next-week-lectures", "course-refresh"]) {
+    it(`${id} surfaces an optional deckTemplate field in the run form`, () => {
+      const wf = byId.get(id);
+      expect(wf, `preset ${id} is registered`).toBeTruthy();
+      const fields = collectRuntimeFields(wf!, (t) => getStepDefinition(t)?.inputs);
+      const templateField = fields.find((f) => f.fieldKey === "deckTemplate");
+      expect(templateField, `${id}: run form never asks for the template`).toBeTruthy();
+      expect(templateField!.type).toBe("deckTemplate");
+      expect(templateField!.required).toBe(false);
+    });
+  }
+
   it("every preset's required inputs are bound (runtime or wired), never silently unasked", () => {
     for (const wf of all) {
       wf.steps.forEach((step, i) => {

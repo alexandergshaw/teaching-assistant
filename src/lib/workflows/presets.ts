@@ -100,6 +100,7 @@ export const COURSE_REFRESH: WorkflowDef = {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         includeInstructions: { source: "literal", value: "1" },
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        template: { source: "runtime", fieldKey: "deckTemplate" },
       },
     },
     {
@@ -278,6 +279,7 @@ export const PREPARE_LECTURE: WorkflowDef = {
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         moduleId: { source: "runtime", fieldKey: "lmsModule" },
+        template: { source: "runtime", fieldKey: "deckTemplate" },
       },
     },
     {
@@ -1215,6 +1217,7 @@ export const NEXT_WEEK_LECTURES: WorkflowDef = {
         courses: { source: "literal", value: "*" },
         minutes: { source: "literal", value: "20" },
         extraNotes: { source: "runtime", fieldKey: "extraNotes" },
+        template: { source: "runtime", fieldKey: "deckTemplate" },
       },
     },
   ],

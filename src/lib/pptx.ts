@@ -14,7 +14,7 @@ export interface PptxSlide {
 }
 
 export interface PptxTheme {
-  backgroundKind: "solid" | "gradient";
+  backgroundKind: "solid" | "gradient" | "classic";
   backgroundColor: string;
   backgroundColor2?: string;
   fontColor: string;
@@ -62,6 +62,13 @@ function hexColor(hex: string): string {
   return hex;
 }
 
+/** Normalize a PptxTheme for rendering: classic kind -> undefined (standard navy path). */
+export function normalizePptxTheme(theme?: PptxTheme): PptxTheme | undefined {
+  if (theme === undefined) return undefined;
+  if (theme.backgroundKind === "classic") return undefined;
+  return theme;
+}
+
 // Helper to build slide background from theme
 interface BackgroundProps {
   fill?: string;
@@ -89,6 +96,8 @@ export async function buildSlidesPptx({
   author,
   theme,
 }: BuildSlidesOptions): Promise<ArrayBuffer> {
+  theme = normalizePptxTheme(theme);
+
   const { default: PptxGenJS } = await import("pptxgenjs");
 
   const prs = new PptxGenJS();

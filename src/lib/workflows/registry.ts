@@ -189,7 +189,7 @@ import type { CommonResourceItem } from "@/lib/common-resources";
 import { buildSlidesPptx, type PptxTheme } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
-import { parseCanvasCourseId, detectCanvasUrlKind } from "@/lib/canvas-url";
+import { parseCanvasCourseId, detectCanvasUrlKind, moduleItemContentUrl } from "@/lib/canvas-url";
 import { parseCalendarEmbedded } from "@/lib/embedded/calendar";
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
@@ -643,12 +643,16 @@ async function gatherModuleMaterials(
             }
           } else if (
             (item.type === "Assignment" || item.type === "Discussion") &&
-            item.htmlUrl &&
+            moduleItemContentUrl(canvasUrl, item.type, item.contentId, item.htmlUrl) &&
             descriptionsFetched < DESCRIPTION_FETCH_LIMIT
           ) {
-            // Fetch description for Assignment/Discussion items (up to 6)
+            // Fetch description for Assignment/Discussion items (up to 6).
+            // The item's html_url is the /modules/items/ wrapper link, so the
+            // direct content URL is built from the item's content id.
             descriptionsFetched++;
-            const meta = await fetchCanvasMetaAction(item.htmlUrl);
+            const meta = await fetchCanvasMetaAction(
+              moduleItemContentUrl(canvasUrl, item.type, item.contentId, item.htmlUrl)!
+            );
             if ("error" in meta) {
               throw new Error(meta.error);
             }
@@ -10667,7 +10671,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const assignmentLikeItems = targetModule.items.filter(
         (item: CanvasModuleItem) =>
           (item.type === "Assignment" || item.type === "Discussion") &&
-          item.htmlUrl
+          moduleItemContentUrl(canvasUrl, item.type, item.contentId, item.htmlUrl) !== null
       );
 
       const itemsToProcess = assignmentLikeItems.slice(0, maxItems);
@@ -10692,13 +10696,16 @@ export const STEP_REGISTRY: StepDefinition[] = [
         try {
           onProgress(`Generating answer for: ${item.title}...`);
 
-          if (!item.htmlUrl) {
+          // The module item's html_url is the /modules/items/ wrapper link;
+          // build the direct assignment/discussion URL from its content id.
+          const contentUrl = moduleItemContentUrl(canvasUrl, item.type, item.contentId, item.htmlUrl);
+          if (!contentUrl) {
             reportLines.push(`${item.title}: skipped (no URL)`);
             continue;
           }
 
           // Fetch the description and rubric
-          const meta = await fetchCanvasMetaAction(item.htmlUrl);
+          const meta = await fetchCanvasMetaAction(contentUrl);
           if ("error" in meta) {
             reportLines.push(`${item.title}: ${meta.error}`);
             erroredCount++;
@@ -10760,9 +10767,14 @@ export const STEP_REGISTRY: StepDefinition[] = [
         }
       }
 
-      // Check if all attempted items errored
+      // Check if all attempted items errored. Surface the first per-item
+      // error - the report lines are lost when the step throws, and a bare
+      // "failed for all" message hides the actual cause.
       if (itemsToProcess.length > 0 && erroredCount === itemsToProcess.length) {
-        throw new Error("Failed to generate answers for any items. Check that assignments and discussions have descriptions and are accessible.");
+        const firstError = reportLines.find((l) => !l.endsWith(": OK")) ?? "";
+        throw new Error(
+          `Failed to generate answers for any items${firstError ? ` - first error: ${firstError}` : ""}.`
+        );
       }
 
       // Add report sections

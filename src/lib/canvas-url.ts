@@ -34,6 +34,29 @@ export function detectCanvasUrlKind(url: string): CanvasUrlKind | null {
 }
 
 /**
+ * The canonical content URL for a module item's assignment or discussion.
+ * Canvas module items' html_url is usually the /modules/items/<id> wrapper
+ * link, which parseCanvasUrl rejects - so build the direct URL from the
+ * course URL's /courses/<id> prefix and the item's content id. Falls back to
+ * htmlUrl only when it is itself a parseable assignment/discussion link.
+ * Null when neither route yields a usable URL (caller skips the item).
+ */
+export function moduleItemContentUrl(
+  courseUrl: string,
+  itemType: string,
+  contentId: number | null,
+  htmlUrl: string | null
+): string | null {
+  const base = courseUrl.match(/^(.*\/courses\/\d+)/);
+  if (base && typeof contentId === "number") {
+    if (itemType === "Assignment") return `${base[1]}/assignments/${contentId}`;
+    if (itemType === "Discussion") return `${base[1]}/discussion_topics/${contentId}`;
+  }
+  if (htmlUrl && parseCanvasUrl(htmlUrl)) return htmlUrl;
+  return null;
+}
+
+/**
  * Pull the course id out of any Canvas course URL (a bare
  * .../courses/123, or any deeper link like .../courses/123/announcements).
  * Used by the announcements UI, which only needs the course — not a specific

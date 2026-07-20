@@ -4,13 +4,14 @@
 // only from client components and drives workflow execution.
 
 import type { LlmProvider } from "@/lib/llm";
-import type { ScheduleWeekPlan } from "@/app/actions";
+import type { ScheduleWeekPlan, AssignmentPlan } from "@/app/actions";
 import {
   generateSchedulePlanAction,
   createRepoFromTemplateAction,
   fillAssignmentReadmesAction,
   getRepoZipAction,
   generateLecturePlansAction,
+  generateLectureMaterialsFromScheduleAction,
   listCourseContentAction,
   listAnnouncementsAction,
   draftAnnouncementAction,
@@ -855,6 +856,170 @@ async function resolveDeckTheme(
   return { theme, templateName: r.template.name, note: null };
 }
 
+/**
+ * Assemble lecture materials from assignment plans into files and zip,
+ * handling deck theming, file creation, download/save logic.
+ * Shared by lecture-zip and lecture-materials-from-schedule steps.
+ */
+async function assembleLectureFiles(
+  plans: AssignmentPlan[],
+  values: Record<string, unknown>,
+  helpers: StepRunHelpers,
+  onProgress: (msg: string) => void,
+  baseNameFallback: string
+): Promise<{
+  files: GeneratedCourseFile[];
+  summary: StepRunSummary;
+}> {
+  const includeInstructions =
+    values.includeInstructions === undefined
+      ? true
+      : String(values.includeInstructions) === "1";
+
+  const deck = await resolveDeckTheme(values.template);
+  const files: GeneratedCourseFile[] = [];
+
+  if (deck.note) onProgress(deck.note);
+  onProgress(`Processing ${plans.length} assignments...`);
+  for (const plan of plans) {
+    const pptxData = await buildSlidesPptx({
+      presentationTitle: plan.presentationTitle,
+      slides: plan.slides,
+      subtitle: plan.label,
+      author: helpers.author,
+      theme: deck.theme,
+    });
+
+    files.push({
+      name: `${plan.label} Slides.pptx`,
+      blob: new Blob([pptxData], {
+        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      }),
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      weekNumber: plan.weekNumber,
+      sortOrder: 1,
+      role: "slides",
+    });
+
+    if (plan.moduleIntroduction) {
+      const docxData = await buildDocxFromPlainText(
+        plan.moduleIntroduction,
+        plan.introTemplateHeadings,
+        helpers.author
+      );
+      files.push({
+        name: `${plan.label} Introduction.docx`,
+        blob: new Blob([docxData], {
+          type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }),
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        weekNumber: plan.weekNumber,
+        sortOrder: 0,
+        role: "introduction",
+        pageText: plan.moduleIntroduction,
+      });
+    }
+
+    if (includeInstructions && plan.assignmentInstructions) {
+      const docxData = await buildDocxFromPlainText(
+        plan.assignmentInstructions,
+        plan.instructionsTemplateHeadings,
+        helpers.author
+      );
+      files.push({
+        name: `${plan.label} Instructions.docx`,
+        blob: new Blob([docxData], {
+          type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }),
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        weekNumber: plan.weekNumber,
+        sortOrder: 2,
+        role: "instructions",
+        pageText: plan.assignmentInstructions,
+      });
+    }
+  }
+
+  onProgress("Assembling zip...");
+  const { default: JSZip } = await import("jszip");
+  const zip = new JSZip();
+
+  for (const file of files) {
+    zip.file(file.name, file.blob);
+  }
+
+  const zipBlob = await zip.generateAsync({ type: "blob" });
+
+  // Determine base name from hubCourse or use fallback
+  const hubCourseId = String(values.hubCourse ?? "").trim();
+  let baseName = baseNameFallback;
+  let tileLms = "";
+  if (hubCourseId) {
+    const list = await listCourseHubAction();
+    if (!("error" in list)) {
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (tile?.name?.trim()) {
+        baseName =
+          tile.name.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_") ||
+          baseName;
+      }
+      tileLms = (tile?.lms ?? "").trim().toLowerCase();
+
+      // The course tile's LMS inherits from the institution's LMS field
+      // when unset, matching the Courses tab display.
+      if (!tileLms && tile?.institution && helpers.getInstitutionFields) {
+        const fields = await helpers
+          .getInstitutionFields(tile.institution)
+          .catch(() => []);
+        tileLms = (fields.find((f) => f.id === "lmsUrl")?.lms ?? "")
+          .trim()
+          .toLowerCase();
+      }
+    }
+  }
+
+  // Tile's LMS routes which format the browser downloads; files output
+  // and library save are unaffected. Headless (server) runs have no
+  // `document` to build a download link with, so they always skip the
+  // download itself and rely on the library/tile save below.
+  let downloadSkipped = false;
+  if (typeof document !== "undefined" && tileLms !== "blackboard" && tileLms !== "canvas") {
+    onProgress("Downloading zip...");
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${baseName}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } else {
+    downloadSkipped = true;
+  }
+
+  if (helpers.saveBundle) {
+    try {
+      await helpers.saveBundle(zipBlob, baseName);
+    } catch (err) {
+      console.error("Library save failed:", err);
+    }
+  }
+
+  return {
+    files,
+    summary: {
+      kind: "list",
+      label: downloadSkipped
+        ? `Generated ${files.length} files (zip saved to your library - the ${tileLms} tile downloads a Common Cartridge instead)`
+        : `Generated ${files.length} files (zip downloaded)`,
+      items: files.map((f) => f.name),
+    },
+  };
+}
+
 // Classify a resolve-rubric source line: a Canvas assignment/discussion URL is
 // an LMS rubric probe; an owner/name or github.com URL is a repo probe; a bare
 // topic goes to the rubric bank; a URL matching neither handler (e.g. a bare
@@ -1110,13 +1275,6 @@ export const STEP_REGISTRY: StepDefinition[] = [
         };
       }
 
-      // Course Refresh pins this off via a literal binding; unbound custom
-      // workflows keep instructions.
-      const includeInstructions =
-        values.includeInstructions === undefined
-          ? true
-          : String(values.includeInstructions) === "1";
-
       onProgress("Downloading repository...");
       const z = await getRepoZipAction(repo);
       if ("error" in z) {
@@ -1147,152 +1305,98 @@ export const STEP_REGISTRY: StepDefinition[] = [
         }
       }
 
-      const deck = await resolveDeckTheme(values.template);
-      const files: GeneratedCourseFile[] = [];
-
-      if (deck.note) onProgress(deck.note);
-      onProgress(`Processing ${plans.length} assignments...`);
-      for (const plan of plans) {
-        const pptxData = await buildSlidesPptx({
-          presentationTitle: plan.presentationTitle,
-          slides: plan.slides,
-          subtitle: plan.label,
-          author: helpers.author,
-          theme: deck.theme,
-        });
-
-        files.push({
-          name: `${plan.label} Slides.pptx`,
-          blob: new Blob([pptxData], {
-            type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-          }),
-          mimeType:
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-          weekNumber: plan.weekNumber,
-          sortOrder: 1,
-          role: "slides",
-        });
-
-        if (plan.moduleIntroduction) {
-          const docxData = await buildDocxFromPlainText(
-            plan.moduleIntroduction,
-            plan.introTemplateHeadings,
-            helpers.author
-          );
-          files.push({
-            name: `${plan.label} Introduction.docx`,
-            blob: new Blob([docxData], {
-              type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            }),
-            mimeType:
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            weekNumber: plan.weekNumber,
-            sortOrder: 0,
-            role: "introduction",
-            pageText: plan.moduleIntroduction,
-          });
-        }
-
-        if (includeInstructions && plan.assignmentInstructions) {
-          const docxData = await buildDocxFromPlainText(
-            plan.assignmentInstructions,
-            plan.instructionsTemplateHeadings,
-            helpers.author
-          );
-          files.push({
-            name: `${plan.label} Instructions.docx`,
-            blob: new Blob([docxData], {
-              type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            }),
-            mimeType:
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            weekNumber: plan.weekNumber,
-            sortOrder: 2,
-            role: "instructions",
-            pageText: plan.assignmentInstructions,
-          });
-        }
-      }
-
-      onProgress("Assembling zip...");
-      const { default: JSZip } = await import("jszip");
-      const zip = new JSZip();
-
-      for (const file of files) {
-        zip.file(file.name, file.blob);
-      }
-
-      const zipBlob = await zip.generateAsync({ type: "blob" });
-
-      // When a course tile is bound, the downloaded zip and library bundle
-      // carry the course's name.
-      const hubCourseId = String(values.hubCourse ?? "").trim();
-      let baseName = repo
+      const baseName = repo
         .split("/")
         .pop()
         ?.replace(/[^a-z0-9]/gi, "_")
         .replace(/_+/g, "_") || "lecture_plans";
-      let tileLms = "";
-      if (hubCourseId) {
-        const list = await listCourseHubAction();
-        if (!("error" in list)) {
-          const tile = list.courses.find((c) => c.id === hubCourseId);
-          if (tile?.name?.trim()) {
-            baseName =
-              tile.name.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_") ||
-              baseName;
-          }
-          tileLms = (tile?.lms ?? "").trim().toLowerCase();
 
-          // The course tile's LMS inherits from the institution's LMS field
-          // when unset, matching the Courses tab display.
-          if (!tileLms && tile?.institution && helpers.getInstitutionFields) {
-            const fields = await helpers
-              .getInstitutionFields(tile.institution)
-              .catch(() => []);
-            tileLms = (fields.find((f) => f.id === "lmsUrl")?.lms ?? "")
-              .trim()
-              .toLowerCase();
-          }
-        }
-      }
-
-      // Tile's LMS routes which format the browser downloads; files output
-      // and library save are unaffected. Headless (server) runs have no
-      // `document` to build a download link with, so they always skip the
-      // download itself and rely on the library/tile save below.
-      let downloadSkipped = false;
-      if (typeof document !== "undefined" && tileLms !== "blackboard" && tileLms !== "canvas") {
-        onProgress("Downloading zip...");
-        const url = URL.createObjectURL(zipBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${baseName}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } else {
-        downloadSkipped = true;
-      }
-
-      if (helpers.saveBundle) {
-        try {
-          await helpers.saveBundle(zipBlob, baseName);
-        } catch (err) {
-          console.error("Library save failed:", err);
-        }
-      }
-
+      const result = await assembleLectureFiles(plans, values, helpers, onProgress, baseName);
       return {
-        outputs: { files },
-        summary: {
-          kind: "list",
-          label: downloadSkipped
-            ? `Generated ${files.length} files (zip saved to your library - the ${tileLms} tile downloads a Common Cartridge instead)`
-            : `Generated ${files.length} files (zip downloaded)`,
-          items: files.map((f) => f.name),
-        },
+        outputs: { files: result.files },
+        summary: result.summary,
+      };
+    },
+  },
+
+  {
+    type: "lecture-materials-from-schedule",
+    name: "Build lecture materials from schedule",
+    description: "Generate presentation slides and lecture notes from a course schedule (for courses without a code base).",
+    inputs: [
+      {
+        key: "schedule",
+        label: "Course schedule",
+        type: "schedule",
+        required: true,
+      },
+      {
+        key: "minutes",
+        label: "Lecture duration (minutes)",
+        type: "number",
+        required: true,
+        help: "Target lecture length. Defaults to 50 minutes if blank.",
+      },
+      {
+        key: "description",
+        label: "Course description",
+        type: "longtext",
+        required: false,
+        help: "Provides context for generating slides and materials.",
+      },
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: false,
+        help: "Optional - names the zip after this course tile.",
+      },
+      {
+        key: "includeInstructions",
+        label: "Include assignment instructions",
+        type: "boolean",
+        required: false,
+        help: "Adds each week's Instructions document to the materials.",
+      },
+      {
+        key: "template",
+        label: "Deck template",
+        type: "deckTemplate",
+        required: false,
+        help: "A PPT Design template that styles the generated slides. Blank uses Classic Lecture.",
+      },
+    ],
+    outputs: [
+      { key: "files", label: "Generated files", type: "files" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
+      const minutes = Number(values.minutes);
+      const description = String(values.description ?? "").trim();
+
+      if (!schedule.length) {
+        throw new Error("No schedule provided.");
+      }
+
+      onProgress("Generating lecture materials from schedule...");
+      const scheduleJson = JSON.stringify(schedule);
+      const plans = await generateLectureMaterialsFromScheduleAction(
+        scheduleJson,
+        description,
+        minutes,
+        helpers.provider
+      );
+
+      if ("error" in plans) {
+        throw new Error(plans.error);
+      }
+
+      const baseName = "lecture_materials";
+
+      const result = await assembleLectureFiles(plans, values, helpers, onProgress, baseName);
+      return {
+        outputs: { files: result.files },
+        summary: result.summary,
       };
     },
   },

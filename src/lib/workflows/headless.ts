@@ -28,6 +28,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "repo-from-template",
   "fill-readmes",
   "lecture-zip",
+  "lecture-materials-from-schedule",
   "generate-class-openers",
   "lms-modules",
   "lms-populate",

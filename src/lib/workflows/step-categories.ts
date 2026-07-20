@@ -69,6 +69,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
   ],
   content: [
     "lecture-zip",
+    "lecture-materials-from-schedule",
     "generate-class-openers",
     "prepare-lecture",
     "lecture-qa",

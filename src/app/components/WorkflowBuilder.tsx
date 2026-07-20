@@ -39,6 +39,12 @@ import {
   stepCategoryLabel,
   stepCategoryOrderIndex,
 } from "@/lib/workflows/step-categories";
+import {
+  danglingOutputs,
+  toggleSkipStep,
+  setRemapEntry,
+  sourceStepLabel,
+} from "@/lib/workflows/include-mirror";
 import styles from "../page.module.css";
 
 // One searchable, category-grouped entry in the "Add action" palette.
@@ -208,6 +214,7 @@ export default function WorkflowBuilder({
   const [appendSourceId, setAppendSourceId] = useState<string>("");
   const [includeSourceId, setIncludeSourceId] = useState<string>("");
   const [includeError, setIncludeError] = useState<string>("");
+  const [expandedIncludeStep, setExpandedIncludeStep] = useState<number | null>(null);
 
   // The full action catalog, grouped by category for the palette. Sorted by
   // category order then name so MUI's groupBy renders contiguous groups; the
@@ -430,6 +437,38 @@ export default function WorkflowBuilder({
     onChange(next);
   };
 
+  const handleIncludeChange = (stepIndex: number, include: NonNullable<WorkflowStepConfig["include"]>) => {
+    const source = others.find((w) => w.id === include.workflowId);
+    if (!source) return;
+
+    const candidate: WorkflowDef = {
+      ...def,
+      steps: def.steps.map((s, i) =>
+        i === stepIndex ? { ...s, include } : s
+      ),
+    };
+
+    const allDefs = [...others, candidate];
+    const lookup = (id: string): WorkflowDef | undefined => {
+      return allDefs.find((w) => w.id === id);
+    };
+
+    try {
+      expandWorkflowDef(candidate, lookup);
+      setIncludeError("");
+      onChange(candidate);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("include cycle")) {
+        setIncludeError(
+          `Including "${source.name}" would create a cycle - it already includes this workflow (directly or through another include).`
+        );
+      } else {
+        setIncludeError(msg);
+      }
+    }
+  };
+
   return (
     <div>
       <div className={styles.form}>
@@ -472,6 +511,10 @@ export default function WorkflowBuilder({
             onRemove={handleRemoveStep}
             onBindingChange={handleBindingChange}
             onRunIfChange={handleRunIfChange}
+            onIncludeChange={handleIncludeChange}
+            expandedIncludeStep={expandedIncludeStep}
+            setExpandedIncludeStep={setExpandedIncludeStep}
+            others={others}
             picker={picker}
             scope={def.scope}
           />
@@ -605,7 +648,7 @@ export default function WorkflowBuilder({
           }}
         >
           Append copies a snapshot; Include stays linked (runs the source
-          workflow steps as they are at run time - later edits apply here).
+          workflow steps as they are at run time - later edits apply here). Open an included workflow&apos;s Choose steps to mirror only some of its steps and wire replacements for the outputs of skipped ones.
         </div>
 
         <Button
@@ -631,6 +674,10 @@ function StepCard({
   onRemove,
   onBindingChange,
   onRunIfChange,
+  onIncludeChange,
+  expandedIncludeStep,
+  setExpandedIncludeStep,
+  others,
   picker,
   scope,
 }: {
@@ -650,12 +697,37 @@ function StepCard({
     literalValue?: string
   ) => void;
   onRunIfChange: (stepIndex: number, binding: InputBinding | null, expected: boolean) => void;
+  onIncludeChange: (stepIndex: number, include: NonNullable<WorkflowStepConfig["include"]>) => void;
+  expandedIncludeStep: number | null;
+  setExpandedIncludeStep: (index: number | null) => void;
+  others: WorkflowDef[];
   picker: BuilderPickerData;
   scope?: WorkflowScope;
 }) {
-  // Include steps have no binding rows to edit - they run the referenced
-  // workflow's CURRENT steps at run time.
+  // Include steps allow selecting which source steps to mirror and wiring
+  // replacements for skipped step outputs.
   if (step.type === "include-workflow") {
+    const include = step.include;
+    if (!include) {
+      return (
+        <div
+          style={{
+            border: "1px solid var(--field-border)",
+            borderRadius: 12,
+            padding: 12,
+            background: "var(--field-background)",
+          }}
+        >
+          <p>Malformed include step (missing include data)</p>
+        </div>
+      );
+    }
+
+    const sourceWorkflow = others.find((w) => w.id === include.workflowId);
+    const sourceSteps = sourceWorkflow?.steps ?? [];
+    const isExpanded = expandedIncludeStep === stepIndex;
+    const mirroredCount = sourceSteps.length - include.skipSteps.length;
+
     return (
       <div
         style={{
@@ -670,17 +742,30 @@ function StepCard({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            marginBottom: isExpanded ? 12 : 0,
           }}
         >
-          <div>
+          <div style={{ flex: 1 }}>
             <strong>
               {stepIndex + 1}. Include workflow: {includeSourceName ?? "unknown"}
             </strong>{" "}
             <span style={{ opacity: 0.75 }}>
               (dynamic - runs that workflow&apos;s current steps)
             </span>
+            {include.skipSteps.length > 0 && (
+              <div style={{ fontSize: "0.875rem", opacity: 0.75, marginTop: 4 }}>
+                Mirrors {mirroredCount} of {sourceSteps.length} steps
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 6 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => setExpandedIncludeStep(isExpanded ? null : stepIndex)}
+            >
+              {isExpanded ? "Hide" : "Choose steps"}
+            </Button>
             <Button
               size="small"
               variant="outlined"
@@ -706,6 +791,45 @@ function StepCard({
             </Button>
           </div>
         </div>
+
+        {isExpanded && sourceWorkflow && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: "0.875rem", fontWeight: 500, marginBottom: 8 }}>
+              Select steps to mirror:
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              {sourceSteps.map((srcStep, srcIdx) => (
+                <FormControlLabel
+                  key={srcIdx}
+                  control={
+                    <Checkbox
+                      checked={!include.skipSteps.includes(srcIdx)}
+                      onChange={(e) => {
+                        const newInclude = toggleSkipStep(include, srcIdx, e.target.checked);
+                        onIncludeChange(stepIndex, newInclude);
+                      }}
+                    />
+                  }
+                  label={`${srcIdx + 1}. ${sourceStepLabel(srcStep, srcIdx, others, getStepDefinition)}`}
+                  style={{ display: "block", marginBottom: 4 }}
+                />
+              ))}
+            </div>
+
+            <DanglingOutputRows
+              sourceSteps={sourceSteps}
+              skipSteps={include.skipSteps}
+              include={include}
+              stepIndex={stepIndex}
+              allSteps={allSteps}
+              picker={picker}
+              onRemapChange={(key, binding) => {
+                const newInclude = setRemapEntry(include, key, binding);
+                onIncludeChange(stepIndex, newInclude);
+              }}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -1413,6 +1537,175 @@ function OptionsSelect({
         </MenuItem>
       ))}
     </TextField>
+  );
+}
+
+// Renders rows for each dangling output from skipped steps that are still
+// referenced by kept steps, allowing the user to wire replacements.
+function DanglingOutputRows({
+  sourceSteps,
+  skipSteps,
+  include,
+  stepIndex,
+  allSteps,
+  picker,
+  onRemapChange,
+}: {
+  sourceSteps: WorkflowStepConfig[];
+  skipSteps: number[];
+  include: NonNullable<WorkflowStepConfig["include"]>;
+  stepIndex: number;
+  allSteps: WorkflowStepConfig[];
+  picker: BuilderPickerData;
+  onRemapChange: (key: string, binding: InputBinding | null) => void;
+}) {
+  const dangling = danglingOutputs(sourceSteps, skipSteps, getStepDefinition);
+
+  if (dangling.length === 0) {
+    return null;
+  }
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
+      <div style={{ fontSize: "0.875rem", fontWeight: 500, marginBottom: 8 }}>
+        Wire outputs from skipped steps:
+      </div>
+      {dangling.map((d) => (
+        <DanglingOutputRow
+          key={d.key}
+          danglingOutput={d}
+          include={include}
+          includeStepIndex={stepIndex}
+          allSteps={allSteps}
+          picker={picker}
+          onRemapChange={(binding) => onRemapChange(d.key, binding)}
+        />
+      ))}
+    </div>
+  );
+}
+
+// A single row for wiring a dangling output from a skipped source step.
+function DanglingOutputRow({
+  danglingOutput,
+  include,
+  includeStepIndex,
+  allSteps,
+  picker,
+  onRemapChange,
+}: {
+  danglingOutput: ReturnType<typeof danglingOutputs>[0];
+  include: NonNullable<WorkflowStepConfig["include"]>;
+  includeStepIndex: number;
+  allSteps: WorkflowStepConfig[];
+  picker: BuilderPickerData;
+  onRemapChange: (binding: InputBinding | null) => void;
+}) {
+  const currentRemap = include.remap[danglingOutput.key];
+  let currentSource: "runtime" | "step" | "literal" = "runtime";
+  let currentStepIndex: number | undefined;
+  let currentOutputKey: string | undefined;
+  let currentLiteralValue = "";
+
+  if (currentRemap?.source === "step") {
+    currentSource = "step";
+    currentStepIndex = currentRemap.stepIndex;
+    currentOutputKey = currentRemap.outputKey;
+  } else if (currentRemap?.source === "literal") {
+    currentSource = "literal";
+    currentLiteralValue = currentRemap.value;
+  }
+
+  // Find compatible outputs from earlier steps in the including workflow
+  const compatibleStepOutputs: Array<{
+    stepIndex: number;
+    outputKey: string;
+    label: string;
+  }> = [];
+
+  for (let j = 0; j < includeStepIndex; j++) {
+    const stepDef = getStepDefinition(allSteps[j].type);
+    if (!stepDef) continue;
+    for (const output of stepDef.outputs) {
+      if (outputFeedsInput(output.type, danglingOutput.outputType)) {
+        compatibleStepOutputs.push({
+          stepIndex: j,
+          outputKey: output.key,
+          label: `Step ${j + 1} output: ${output.label}`,
+        });
+      }
+    }
+  }
+
+  const options: Array<{ value: string; label: string }> = [
+    { value: "runtime", label: "Ask when running" },
+    ...compatibleStepOutputs.map((o) => ({
+      value: `step:${o.stepIndex}:${o.outputKey}`,
+      label: o.label,
+    })),
+  ];
+
+  if (LITERAL_CAPABLE_TYPES.has(danglingOutput.outputType)) {
+    options.push({
+      value: "literal",
+      label: ["text", "longtext", "number"].includes(danglingOutput.outputType) ? "Fixed value" : "Preset value",
+    });
+  } else if (danglingOutput.outputType === "files") {
+    options.push({
+      value: "literal",
+      label: "Fixed value (empty - step skips itself)",
+    });
+  }
+
+  const selectValue =
+    currentSource === "step" && currentStepIndex !== undefined
+      ? `step:${currentStepIndex}:${currentOutputKey}`
+      : currentSource === "literal"
+        ? "literal"
+        : "runtime";
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ marginBottom: 0, display: "flex", gap: 8, alignItems: "center" }}>
+        <label style={{ flex: 0, minWidth: "200px", fontSize: "0.85rem" }}>
+          Source step {danglingOutput.droppedIndex + 1}&apos;s&nbsp;{danglingOutput.outputLabel} comes from
+        </label>
+        <TextField
+          select
+          size="small"
+          value={selectValue}
+          onChange={(e) => {
+            const val = e.target.value;
+            if (val === "runtime") {
+              onRemapChange(null);
+            } else if (val === "literal") {
+              onRemapChange({ source: "literal", value: currentLiteralValue });
+            } else if (val.startsWith("step:")) {
+              const parts = val.split(":");
+              const j = Number(parts[1]);
+              const k = parts.slice(2).join(":");
+              onRemapChange({ source: "step", stepIndex: j, outputKey: k });
+            }
+          }}
+          style={{ flex: 1, minWidth: "200px" }}
+        >
+          {options.map((opt) => (
+            <MenuItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </MenuItem>
+          ))}
+        </TextField>
+
+        {currentSource === "literal" && danglingOutput.outputType !== "files" && (
+          <LiteralEditor
+            type={danglingOutput.outputType}
+            value={currentLiteralValue}
+            picker={picker}
+            onChange={(v) => onRemapChange({ source: "literal", value: v })}
+          />
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -68,11 +68,12 @@ describe("isHeadlessSafeWorkflow", () => {
     expect(isHeadlessSafeWorkflow(make(undefined), lookup)).toBe(false);
   });
 
-  it("rejects Course Refresh and Course Kickoff (load-course-tile conditionally pauses)", () => {
-    // Course Kickoff includes Course Refresh's steps, so both are rejected
-    // for the same reason: load-course-tile.
+  it("rejects Course Refresh, Course Kickoff, and Course Kickoff (no codebase) (load-course-tile conditionally pauses)", () => {
+    // Course Kickoff and Course Kickoff (no codebase) include Course Refresh's steps,
+    // so all three are rejected for the same reason: load-course-tile.
     expect(isHeadlessSafeWorkflow(byId("course-refresh"), lookup)).toBe(false);
     expect(isHeadlessSafeWorkflow(byId("course-kickoff"), lookup)).toBe(false);
+    expect(isHeadlessSafeWorkflow(byId("course-kickoff-no-code"), lookup)).toBe(false);
   });
 
   it("rejects a workflow with an include cycle instead of throwing", () => {
@@ -151,8 +152,8 @@ describe("isHeadlessSafeWorkflow", () => {
     expect(isHeadlessSafeWorkflow(def, () => undefined)).toBe(false);
   });
 
-  it("has exactly 126 headless-safe step types", () => {
-    expect(HEADLESS_SAFE_STEP_TYPES.size).toBe(126);
+  it("has exactly 127 headless-safe step types", () => {
+    expect(HEADLESS_SAFE_STEP_TYPES.size).toBe(127);
   });
 
   it("accepts the unattended grade-to-draft preset (scoring only, no posting)", () => {

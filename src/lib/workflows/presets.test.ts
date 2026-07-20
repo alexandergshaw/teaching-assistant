@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { allWorkflows } from "./presets";
 import { getStepDefinition } from "./registry";
-import { outputFeedsInput, collectRuntimeFields } from "./types";
+import { outputFeedsInput, collectRuntimeFields, expandWorkflowDef } from "./types";
+import type { WorkflowDef } from "./types";
 
 // The seven presets added to lead the Workflows page, in their expected order.
 const NEW_PRESET_IDS = [
@@ -181,6 +182,183 @@ describe("problem-solving-companion preset", () => {
         }
       }
     });
+  });
+});
+
+describe("course-kickoff-no-code preset", () => {
+  const all = allWorkflows([]);
+  const byId = new Map(all.map((w) => [w.id, w]));
+
+  it("course-kickoff-no-code expands course-refresh with correct step structure", () => {
+    const wf = byId.get("course-kickoff-no-code");
+    expect(wf, "course-kickoff-no-code is registered").toBeTruthy();
+
+    expect(wf!.steps.length).toBe(4);
+    expect(wf!.steps[0].type).toBe("load-course-tile");
+    expect(wf!.steps[1].type).toBe("generate-schedule");
+    expect(wf!.steps[2].type).toBe("lecture-materials-from-schedule");
+    expect(wf!.steps[3].type).toBe("include-workflow");
+
+    const includeStep = wf!.steps[3];
+    expect(includeStep.include?.workflowId).toBe("course-refresh");
+    expect(includeStep.include?.skipSteps).toEqual([0, 1, 3]);
+    expect(includeStep.include?.remap).toBeTruthy();
+
+    const remap = includeStep.include!.remap;
+    expect(remap["0.repo"].source).toBe("literal");
+    const repoBinding = remap["0.repo"];
+    if (repoBinding.source === "literal") {
+      expect((repoBinding as { source: "literal"; value: string }).value).toBe("");
+    }
+    expect(remap["0.course"].source).toBe("step");
+    expect(remap["3.files"].source).toBe("step");
+  });
+
+  it("course-kickoff-no-code has valid, type-checked bindings", () => {
+    const wf = byId.get("course-kickoff-no-code");
+    expect(wf, "course-kickoff-no-code is registered").toBeTruthy();
+
+    wf!.steps.forEach((step, i) => {
+      if (step.type === "include-workflow") return; // Skip include-workflow steps
+
+      const def = getStepDefinition(step.type);
+      expect(def, `course-kickoff-no-code step ${i}: unknown step type ${step.type}`).toBeTruthy();
+      const inputByKey = new Map(def!.inputs.map((inp) => [inp.key, inp]));
+
+      for (const [key, binding] of Object.entries(step.bindings)) {
+        const input = inputByKey.get(key);
+        expect(
+          input,
+          `course-kickoff-no-code step ${i}: no such input "${key}" on ${step.type}`
+        ).toBeTruthy();
+
+        if (binding.source === "step") {
+          expect(binding.stepIndex, `course-kickoff-no-code step ${i}: forward ref`).toBeLessThan(i);
+          const src = getStepDefinition(wf!.steps[binding.stepIndex].type);
+          expect(src, `course-kickoff-no-code step ${i}: unknown source step`).toBeTruthy();
+          const out = src!.outputs.find((o) => o.key === binding.outputKey);
+          expect(
+            out,
+            `course-kickoff-no-code step ${i}: source has no output "${binding.outputKey}"`
+          ).toBeTruthy();
+          expect(
+            outputFeedsInput(out!.type, input!.type),
+            `course-kickoff-no-code step ${i}: ${out!.type} cannot feed ${input!.type} (input ${key})`
+          ).toBe(true);
+        }
+      }
+
+      for (const inp of def!.inputs) {
+        if (inp.required) {
+          expect(
+            step.bindings[inp.key],
+            `course-kickoff-no-code step ${i}: required input "${inp.key}" is unbound`
+          ).toBeTruthy();
+        }
+      }
+    });
+  });
+
+  it("course-kickoff-no-code expands correctly via expandWorkflowDef", () => {
+    const all = allWorkflows([]);
+    const byId = new Map(all.map((w) => [w.id, w]));
+    const lookup = (id: string) => byId.get(id);
+
+    const wf = byId.get("course-kickoff-no-code");
+    expect(wf, "course-kickoff-no-code is registered").toBeTruthy();
+
+    const expanded = expandWorkflowDef(wf!, lookup);
+    expect(expanded.steps.length, "expansion should produce steps").toBeGreaterThan(0);
+
+    const expandedStepTypes = expanded.steps.map((s) => s.type);
+
+    // Should contain these steps
+    expect(expandedStepTypes).toContain("save-csv-to-course");
+    expect(expandedStepTypes).toContain("save-zip-to-course");
+    expect(expandedStepTypes).toContain("lms-wipe");
+    expect(expandedStepTypes).toContain("lms-rubric");
+    expect(expandedStepTypes).toContain("lms-modules");
+    expect(expandedStepTypes).toContain("lms-populate");
+    expect(expandedStepTypes).toContain("lms-assignments");
+    expect(expandedStepTypes).toContain("blackboard-export");
+    expect(expandedStepTypes).toContain("generate-class-openers");
+    expect(expandedStepTypes).toContain("starter-materials");
+
+    // Should NOT contain these steps
+    expect(expandedStepTypes).not.toContain("schedule-from-repo");
+    expect(expandedStepTypes).not.toContain("lecture-zip");
+  });
+
+  it("course-kickoff-no-code expanded bindings resolve correctly", () => {
+    const all = allWorkflows([]);
+    const byId = new Map(all.map((w) => [w.id, w]));
+    const lookup = (id: string) => byId.get(id);
+
+    const wf = byId.get("course-kickoff-no-code");
+    expect(wf, "course-kickoff-no-code is registered").toBeTruthy();
+
+    const expanded = expandWorkflowDef(wf!, lookup);
+
+    expanded.steps.forEach((step, i) => {
+      const def = getStepDefinition(step.type);
+      expect(def, `expanded step ${i} (${step.type}): unknown step type`).toBeTruthy();
+
+      const inputByKey = new Map(def!.inputs.map((inp) => [inp.key, inp]));
+
+      for (const [key, binding] of Object.entries(step.bindings)) {
+        const input = inputByKey.get(key);
+        expect(input, `expanded step ${i} (${step.type}): no such input "${key}"`).toBeTruthy();
+
+        if (binding.source === "step") {
+          expect(binding.stepIndex, `expanded step ${i}: forward ref`).toBeLessThan(i);
+          const src = getStepDefinition(expanded.steps[binding.stepIndex].type);
+          expect(src, `expanded step ${i}: unknown source step`).toBeTruthy();
+          const out = src!.outputs.find((o) => o.key === binding.outputKey);
+          expect(out, `expanded step ${i}: source has no output "${binding.outputKey}"`).toBeTruthy();
+          expect(
+            outputFeedsInput(out!.type, input!.type),
+            `expanded step ${i}: ${out!.type} cannot feed ${input!.type}`
+          ).toBe(true);
+        }
+      }
+
+      for (const inp of def!.inputs) {
+        if (inp.required) {
+          expect(step.bindings[inp.key], `expanded step ${i}: required input "${inp.key}" is unbound`).toBeTruthy();
+        }
+      }
+    });
+  });
+
+  it("course-kickoff-no-code collectRuntimeFields yields correct scope", () => {
+    const all = allWorkflows([]);
+    const byId = new Map(all.map((w) => [w.id, w]));
+    const lookup = (id: string) => byId.get(id);
+
+    const wf = byId.get("course-kickoff-no-code");
+    expect(wf, "course-kickoff-no-code is registered").toBeTruthy();
+
+    const expanded = expandWorkflowDef(wf!, lookup);
+
+    // Create a mock workflow def with the expanded steps for testing
+    const expandedDef: WorkflowDef = {
+      id: "course-kickoff-no-code",
+      name: wf!.name,
+      description: wf!.description,
+      steps: expanded.steps,
+      scope: wf!.scope,
+    };
+
+    const runtimeFields = collectRuntimeFields(expandedDef, (t) => getStepDefinition(t)?.inputs);
+
+    // Should have hubCourse and deckTemplate
+    expect(runtimeFields.map((f) => f.fieldKey)).toContain("hubCourse");
+    expect(runtimeFields.map((f) => f.fieldKey)).toContain("deckTemplate");
+
+    // Should NOT have repo-related fields
+    expect(runtimeFields.map((f) => f.fieldKey)).not.toContain("repo");
+    expect(runtimeFields.map((f) => f.fieldKey)).not.toContain("templateRepo");
+    expect(runtimeFields.map((f) => f.fieldKey)).not.toContain("newRepoName");
   });
 });
 

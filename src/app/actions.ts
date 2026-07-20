@@ -10488,6 +10488,221 @@ ${courseDescription}`;
 }
 
 /**
+ * Generate lecture materials (slides, module intro, assignment instructions) from a course schedule.
+ * Takes a parsed schedule (ScheduleWeekPlan[] JSON) and generates one AssignmentPlan per week with a topic.
+ * Returns AssignmentPlan[] shaped entries | error.
+ */
+export async function generateLectureMaterialsFromScheduleAction(
+  scheduleJson: string,
+  courseDescription: string,
+  minutes: number,
+  provider: LlmProvider = "gemini"
+): Promise<AssignmentPlan[] | { error: string }> {
+  try {
+    await requireOwner();
+
+    // Parse the schedule JSON
+    let schedule: ScheduleWeekPlan[];
+    try {
+      const parsed = JSON.parse(scheduleJson);
+      if (!Array.isArray(parsed)) {
+        return { error: "Schedule must be a JSON array." };
+      }
+      schedule = parsed;
+    } catch (err) {
+      return {
+        error: err instanceof Error
+          ? `Could not parse schedule JSON: ${err.message}`
+          : "Could not parse schedule JSON.",
+      };
+    }
+
+    if (schedule.length === 0) {
+      return { error: "Schedule is empty." };
+    }
+
+    const lectureDurationMinutes = Math.max(5, Math.min(Number(minutes) || 50, 240));
+
+    // Filter to weeks with a non-empty topic
+    const weeksWithTopics = schedule.filter((w) => w.topic && w.topic.trim());
+
+    if (weeksWithTopics.length === 0) {
+      return { error: "No weeks with topics found in the schedule." };
+    }
+
+    // Generate one plan per week, with concurrency limit to respect LLM rate limits
+    const SCHEDULE_PLAN_CONCURRENCY = 4;
+    const plans = await mapWithConcurrency(
+      weeksWithTopics,
+      SCHEDULE_PLAN_CONCURRENCY,
+      (week, index) =>
+        buildScheduleWeekPlan(
+          week,
+          index,
+          courseDescription,
+          lectureDurationMinutes,
+          provider
+        )
+    );
+
+    if (plans.length === 0) {
+      return { error: "No materials could be generated from the schedule." };
+    }
+
+    return plans;
+  } catch (err) {
+    return {
+      error: err instanceof Error
+        ? err.message
+        : "Could not generate lecture materials from schedule.",
+    };
+  }
+}
+
+/**
+ * Generate a single week's materials (slides + intro + instructions) from the topic and course context.
+ * Mirrors buildAssignmentPlan but operates on schedule week data instead of repo content.
+ */
+async function buildScheduleWeekPlan(
+  week: ScheduleWeekPlan,
+  index: number,
+  courseDescription: string,
+  lectureDurationMinutes: number,
+  provider: LlmProvider
+): Promise<AssignmentPlan> {
+  const weekNumber = week.week || index + 1;
+  const label = `Week ${weekNumber}`;
+  const topic = week.topic.trim();
+  const summary = week.summary?.trim() || "";
+  const assignmentTitle = week.assignmentTitle?.trim() || `Week ${weekNumber} Deliverable`;
+
+  // Generate slides only (one LLM call per week cap)
+  const slidesResult = await generateSlidesFromTopic(topic, summary, courseDescription, lectureDurationMinutes, provider);
+
+  // Degrade gracefully if slide generation fails
+  const slidesFailed = "error" in slidesResult;
+  if (slidesFailed) {
+    console.error(`Slide generation failed for "Week ${weekNumber}": ${slidesResult.error}`);
+  }
+  const slides = slidesFailed ? [] : slidesResult.slides;
+
+  // Build intro and instructions deterministically
+  const moduleIntroduction = scaffoldModuleIntroDoc(label, summary);
+  const assignmentInstructions = scaffoldAssignmentDoc(assignmentTitle, `${topic}\n${summary}`);
+
+  return {
+    assignmentName: `week-${String(weekNumber).padStart(2, "0")}`,
+    slides,
+    slidesFailed: slidesFailed ? true : undefined,
+    presentationTitle: topic || label,
+    label,
+    moduleIntroduction,
+    assignmentInstructions,
+    weekNumber,
+    introTemplateHeadings: [],
+    instructionsTemplateHeadings: [],
+  } satisfies AssignmentPlan;
+}
+
+/**
+ * Generate slides from a schedule week's topic and context.
+ */
+async function generateSlidesFromTopic(
+  topic: string,
+  summary: string,
+  courseDescription: string,
+  lectureDurationMinutes: number,
+  provider: LlmProvider
+): Promise<{ presentationTitle: string; slides: SlideData[] } | { error: string }> {
+  // Embedded Deterministic Engine
+  if (provider === "embedded") {
+    return scaffoldLessonPlan(topic, summary);
+  }
+
+  const prompt = `You are an expert educator creating a lecture slide deck for a course. The slides must be fully self-contained — students reading them after class must be able to understand every concept without relying on any verbal explanation from the instructor.
+
+TOPIC: ${topic}
+
+WEEK SUMMARY: ${summary}
+
+COURSE DESCRIPTION: ${courseDescription}
+
+LECTURE DURATION: ${lectureDurationMinutes} minutes
+
+Based on the topic and summary above, create a complete lecture slide deck that teaches students the key concepts and skills for this week. Scale the number of slides to fit a ${lectureDurationMinutes}-minute lecture (roughly 1–2 minutes per slide on average).
+
+Return ONLY valid JSON:
+${SLIDE_DECK_JSON_SHAPE}
+
+Requirements:
+${SLIDE_STRUCTURE_REQUIREMENTS}`;
+
+  let parsed: {
+    presentationTitle?: string;
+    slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
+  } | null = null;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.6, maxOutputTokens: 12288 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { error: `LLM API error for "${topic}": HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+
+    const jsonText = jsonObjectSlice(result.text);
+    if (!jsonText) {
+      if (attempt === 1) {
+        console.error(`Slide JSON parse failed for "${topic}" (attempt 1): no JSON object in the response`);
+        continue;
+      }
+      return { error: `Could not parse slide data for "${topic}".` };
+    }
+
+    try {
+      parsed = JSON.parse(jsonText) as {
+        presentationTitle?: string;
+        slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
+      };
+      break;
+    } catch (err) {
+      if (attempt === 1) {
+        console.error(
+          `Slide JSON parse failed for "${topic}" (attempt 1): ${err instanceof Error ? err.message : String(err)}`
+        );
+        continue;
+      }
+      return { error: `Could not parse slide data for "${topic}".` };
+    }
+  }
+
+  if (!parsed) {
+    return { error: `Could not parse slide data for "${topic}".` };
+  }
+
+  if (!parsed.slides || !Array.isArray(parsed.slides)) {
+    return { error: `Model did not return a valid slides array for "${topic}".` };
+  }
+
+  let slides: SlideData[] = parsed.slides
+    .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
+    .map((s) => toSlideData(s, 4));
+
+  slides = propagateExampleCodeToFollowups(slides);
+
+  return {
+    presentationTitle: parsed.presentationTitle ?? topic,
+    slides,
+  };
+}
+
+
+/**
  * Generate a course schedule from a repository's actual assignment structure,
  * deriving week plan and test distribution from the found assignment folders.
  * Returns a courseTitle and the structured week plan used by workflows.

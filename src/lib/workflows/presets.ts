@@ -62,6 +62,60 @@ export const COURSE_KICKOFF: WorkflowDef = {
   ],
 };
 
+export const NO_CODE_KICKOFF: WorkflowDef = {
+  id: "course-kickoff-no-code",
+  preset: true,
+  name: "Course Kickoff (no codebase)",
+  description:
+    "For courses without a code base (ethical hacking, project management, business, etc.). Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile and the deck template. Generates the schedule and lecture materials from the schedule topics - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps.",
+  steps: [
+    {
+      type: "load-course-tile",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        allowMissingRepo: { source: "literal", value: "1" },
+      },
+    },
+    {
+      type: "generate-schedule",
+      bindings: {
+        description: { source: "step", stepIndex: 0, outputKey: "description" },
+        weeks: { source: "step", stepIndex: 0, outputKey: "weeks" },
+        tests: { source: "step", stepIndex: 0, outputKey: "tests" },
+      },
+    },
+    {
+      type: "lecture-materials-from-schedule",
+      bindings: {
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        minutes: { source: "literal", value: "50" },
+        description: { source: "step", stepIndex: 0, outputKey: "description" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        includeInstructions: { source: "literal", value: "1" },
+        template: { source: "runtime", fieldKey: "deckTemplate" },
+      },
+    },
+    {
+      type: "include-workflow",
+      bindings: {},
+      include: {
+        workflowId: "course-refresh",
+        skipSteps: [0, 1, 3],
+        remap: {
+          "0.repo": { source: "literal", value: "" },
+          "0.course": { source: "step", stepIndex: 0, outputKey: "course" },
+          "0.startDate": { source: "step", stepIndex: 0, outputKey: "startDate" },
+          "0.description": { source: "step", stepIndex: 0, outputKey: "description" },
+          "1.schedule": { source: "step", stepIndex: 1, outputKey: "schedule" },
+          "1.courseTitle": { source: "step", stepIndex: 1, outputKey: "courseTitle" },
+          "1.weeks": { source: "step", stepIndex: 1, outputKey: "weeks" },
+          "3.files": { source: "step", stepIndex: 2, outputKey: "files" },
+        },
+      },
+    },
+  ],
+};
+
 export const COURSE_REFRESH: WorkflowDef = {
   id: "course-refresh",
   preset: true,
@@ -1551,6 +1605,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     WEEKLY_LECTURE_DECK,
     WEEKLY_KICKOFF_ANNOUNCEMENT,
     COURSE_KICKOFF,
+    NO_CODE_KICKOFF,
     COURSE_REFRESH,
     STARTER_MATERIALS,
     IMPORT_COURSES,

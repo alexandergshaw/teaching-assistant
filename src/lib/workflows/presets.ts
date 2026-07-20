@@ -175,6 +175,8 @@ export const COURSE_REFRESH: WorkflowDef = {
       bindings: {
         course: { source: "step", stepIndex: 0, outputKey: "course" },
         repo: { source: "step", stepIndex: 0, outputKey: "repo" },
+        description: { source: "step", stepIndex: 0, outputKey: "description" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         title: { source: "step", stepIndex: 1, outputKey: "courseTitle" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
       },

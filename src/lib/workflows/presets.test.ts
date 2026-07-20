@@ -330,6 +330,70 @@ describe("course-kickoff-no-code preset", () => {
     });
   });
 
+  it("course-kickoff-no-code lms-rubric step has description and schedule bindings after expansion", () => {
+    const all = allWorkflows([]);
+    const byId = new Map(all.map((w) => [w.id, w]));
+    const lookup = (id: string) => byId.get(id);
+
+    const wf = byId.get("course-kickoff-no-code");
+    expect(wf, "course-kickoff-no-code is registered").toBeTruthy();
+
+    const expanded = expandWorkflowDef(wf!, lookup);
+
+    const rubricStep = expanded.steps.find((s) => s.type === "lms-rubric");
+    expect(rubricStep, "lms-rubric step found in expanded course-kickoff-no-code").toBeTruthy();
+
+    expect(rubricStep!.bindings.repo, "repo binding exists").toBeDefined();
+    expect(rubricStep!.bindings.repo.source).toBe("literal");
+    if (rubricStep!.bindings.repo.source === "literal") {
+      expect(rubricStep!.bindings.repo.value).toBe("");
+    }
+
+    expect(rubricStep!.bindings.description, "description binding exists").toBeDefined();
+    expect(rubricStep!.bindings.description.source).toBe("step");
+    if (rubricStep!.bindings.description.source === "step") {
+      expect(rubricStep!.bindings.description.outputKey).toBe("description");
+    }
+
+    expect(rubricStep!.bindings.schedule, "schedule binding exists").toBeDefined();
+    expect(rubricStep!.bindings.schedule.source).toBe("step");
+    if (rubricStep!.bindings.schedule.source === "step") {
+      expect(rubricStep!.bindings.schedule.outputKey).toBe("schedule");
+    }
+  });
+
+  it("course-kickoff lms-rubric step has description and schedule bindings after expansion", () => {
+    const all = allWorkflows([]);
+    const byId = new Map(all.map((w) => [w.id, w]));
+    const lookup = (id: string) => byId.get(id);
+
+    const wf = byId.get("course-kickoff");
+    expect(wf, "course-kickoff is registered").toBeTruthy();
+
+    const expanded = expandWorkflowDef(wf!, lookup);
+
+    const rubricStep = expanded.steps.find((s) => s.type === "lms-rubric");
+    expect(rubricStep, "lms-rubric step found in expanded course-kickoff").toBeTruthy();
+
+    expect(rubricStep!.bindings.repo, "repo binding exists").toBeDefined();
+    expect(rubricStep!.bindings.repo.source).toBe("step");
+    if (rubricStep!.bindings.repo.source === "step") {
+      expect(rubricStep!.bindings.repo.outputKey).toBe("repo");
+    }
+
+    expect(rubricStep!.bindings.description, "description binding exists").toBeDefined();
+    expect(rubricStep!.bindings.description.source).toBe("step");
+    if (rubricStep!.bindings.description.source === "step") {
+      expect(rubricStep!.bindings.description.outputKey).toBe("description");
+    }
+
+    expect(rubricStep!.bindings.schedule, "schedule binding exists").toBeDefined();
+    expect(rubricStep!.bindings.schedule.source).toBe("step");
+    if (rubricStep!.bindings.schedule.source === "step") {
+      expect(rubricStep!.bindings.schedule.outputKey).toBe("schedule");
+    }
+  });
+
   it("course-kickoff-no-code collectRuntimeFields yields correct scope", () => {
     const all = allWorkflows([]);
     const byId = new Map(all.map((w) => [w.id, w]));

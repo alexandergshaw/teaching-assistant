@@ -8675,6 +8675,42 @@ export async function generateCourseRubricFromZipAction(
 }
 
 /**
+ * Generate a course rubric from course description and schedule (used when
+ * no repository is available). Returns the rubric text or an error.
+ */
+export async function generateCourseRubricFromScheduleAction(
+  courseDescription: string,
+  scheduleJson: string,
+  provider: LlmProvider = "gemini"
+): Promise<string | { error: string }> {
+  try {
+    await requireOwner();
+
+    const { buildRubricSourceFromSchedule } = await import("@/app/utils/rubric");
+
+    let schedule: ScheduleWeekPlan[] = [];
+    try {
+      const parsed = JSON.parse(scheduleJson);
+      if (Array.isArray(parsed)) {
+        schedule = parsed;
+      }
+    } catch {
+      // Tolerate invalid/empty JSON by treating it as no schedule
+    }
+
+    const sourceText = buildRubricSourceFromSchedule(courseDescription, schedule);
+
+    if (!sourceText.trim()) {
+      return { error: "No course description or schedule provided to generate the rubric from." };
+    }
+
+    return await generateRubric(sourceText, provider);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+/**
  * Revise one already-generated lecture-plan document (module intro or assignment
  * instructions) from a freeform instruction, preserving its structure/headings.
  * Used by the document editor's "Revise with AI" before download.

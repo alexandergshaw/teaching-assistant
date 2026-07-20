@@ -1,3 +1,5 @@
+import type { ScheduleWeekPlan } from "@/app/actions";
+
 export type RubricSubcategory = { label: string; description: string };
 export type RubricRow = {
   area: string;
@@ -44,4 +46,48 @@ export function parseGeneratedRubric(text: string): RubricRow[] | null {
   if (current) rows.push(current);
 
   return rows.length > 0 ? rows : null;
+}
+
+/**
+ * Build aggregated instruction text from a course description and schedule,
+ * in the same block style that the zip-based rubric generation uses.
+ * Returns an empty string when there is no description AND no usable weeks.
+ */
+export function buildRubricSourceFromSchedule(
+  courseDescription: string,
+  schedule: ScheduleWeekPlan[]
+): string {
+  const blocks: string[] = [];
+
+  const trimmedDescription = String(courseDescription ?? "").trim();
+  if (trimmedDescription) {
+    blocks.push(`=== Course description ===\n${trimmedDescription}`);
+  }
+
+  for (const week of schedule) {
+    const topic = String(week.topic ?? "").trim();
+    if (!topic) continue;
+
+    const weekHeader = `=== Week ${String(week.week).padStart(2, "0")}: ${topic} ===`;
+    const weekLines: string[] = [weekHeader];
+
+    const summary = String(week.summary ?? "").trim();
+    if (summary) {
+      weekLines.push(summary);
+    }
+
+    const assignmentTitle = String(week.assignmentTitle ?? "").trim();
+    if (assignmentTitle) {
+      weekLines.push(`Deliverable: ${assignmentTitle}`);
+    }
+
+    const testName = String(week.testName ?? "").trim();
+    if (testName) {
+      weekLines.push(`Assessment: ${testName}`);
+    }
+
+    blocks.push(weekLines.join("\n"));
+  }
+
+  return blocks.join("\n\n");
 }

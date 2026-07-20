@@ -31,6 +31,7 @@ import {
   createCourseAssignmentAction,
   createRubricAction,
   generateCourseRubricFromZipAction,
+  generateCourseRubricFromScheduleAction,
   generateCourseScheduleAction,
   getFinalizedSyllabusAction,
   placeSyllabusInModuleAction,
@@ -2567,7 +2568,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "lms-rubric",
     name: "Save rubric to LMS",
-    description: "Generate a course-wide grading rubric from the repository's assignments; save it to the LMS course, onto the course tile, and as a document in the LMS export.",
+    description: "Generate a course-wide grading rubric from the repository's assignments, or from the course description and schedule if no repository is linked; save it to the LMS course, onto the course tile, and as a document in the LMS export.",
     inputs: [
       {
         key: "course",
@@ -2580,7 +2581,21 @@ export const STEP_REGISTRY: StepDefinition[] = [
         key: "repo",
         label: "Repository",
         type: "repo",
-        required: true,
+        required: false,
+        help: "Optional - when blank, the rubric is generated from the course description and schedule instead.",
+      },
+      {
+        key: "description",
+        label: "Course description",
+        type: "longtext",
+        required: false,
+        help: "Powers the no-repository rubric fallback when the repository is blank.",
+      },
+      {
+        key: "schedule",
+        label: "Course schedule",
+        type: "schedule",
+        required: false,
       },
       {
         key: "title",
@@ -2603,8 +2618,10 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const course = String(values.course ?? "").trim();
       const hubCourseId = String(values.hubCourse ?? "").trim();
       const repo = String(values.repo ?? "").trim();
+      const description = String(values.description ?? "").trim();
+      const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
 
-      if (!repo) {
+      if (!repo && !description && schedule.length === 0) {
         return {
           outputs: { rubricFiles: [] },
           summary: { kind: "text", text: "Skipped - no repository linked; the rubric needs the course codebase." },
@@ -2628,15 +2645,28 @@ export const STEP_REGISTRY: StepDefinition[] = [
       let rubricText: string;
       let rubricFiles: GeneratedCourseFile[];
       let criteria: RubricCriterionInput[];
+      let isFromFallback = false;
       try {
-        onProgress("Downloading repository...");
-        const z = await getRepoZipAction(repo);
-        if ("error" in z) throw new Error(z.error);
+        if (repo) {
+          onProgress("Downloading repository...");
+          const z = await getRepoZipAction(repo);
+          if ("error" in z) throw new Error(z.error);
 
-        onProgress("Generating rubric...");
-        const gen = await generateCourseRubricFromZipAction(z.base64, helpers.provider);
-        if (typeof gen !== "string") throw new Error(gen.error);
-        rubricText = gen;
+          onProgress("Generating rubric...");
+          const gen = await generateCourseRubricFromZipAction(z.base64, helpers.provider);
+          if (typeof gen !== "string") throw new Error(gen.error);
+          rubricText = gen;
+        } else {
+          isFromFallback = true;
+          onProgress("Generating rubric from the course description and schedule...");
+          const gen = await generateCourseRubricFromScheduleAction(
+            description,
+            JSON.stringify(schedule),
+            helpers.provider
+          );
+          if (typeof gen !== "string") throw new Error(gen.error);
+          rubricText = gen;
+        }
 
         const rows = parseGeneratedRubric(rubricText);
         if (!rows || rows.length === 0) {
@@ -2683,6 +2713,10 @@ export const STEP_REGISTRY: StepDefinition[] = [
       }
 
       const notes: string[] = [];
+
+      if (isFromFallback) {
+        notes.push("generated from the course description and schedule");
+      }
 
       if (hubCourseId) {
         try {

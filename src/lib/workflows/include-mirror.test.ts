@@ -52,7 +52,7 @@ describe("include-mirror", () => {
       // Step 2 (save-csv-to-course) refs: 1.schedule, 1.courseTitle
       // Step 3 (lecture-zip) refs: 0.repo, 1.schedule
       // Step 5 (lms-wipe) refs: 0.course
-      // Step 6 (lms-rubric) refs: 0.course, 0.repo, 1.title (courseTitle)
+      // Step 6 (lms-rubric) refs: 0.course, 0.repo, 0.description, 1.title (courseTitle), 1.schedule
       // Step 7 (lms-modules) refs: 0.course, 1.weeks
       // Step 8 (lms-populate) refs: 0.course
       // Step 9 (lms-assignments) refs: 0.course, 1.schedule, 0.repo, 0.startDate
@@ -61,6 +61,7 @@ describe("include-mirror", () => {
       // Step 12 (include-workflow) refs: 0.course via bindOverrides
       expect(keys).toEqual([
         "0.course",
+        "0.description",
         "0.repo",
         "0.startDate",
         "1.courseTitle",
@@ -76,6 +77,7 @@ describe("include-mirror", () => {
       // which becomes dangling. All previous dangling outputs still exist.
       expect(keys).toEqual([
         "0.course",
+        "0.description",
         "0.repo",
         "0.startDate",
         "1.courseTitle",

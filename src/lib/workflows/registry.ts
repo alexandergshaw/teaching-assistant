@@ -10457,7 +10457,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "generate-module-answers",
     name: "Generate module homework answers",
-    description: "Generate a full-credit model answer for every homework item (assignments and discussions) in a module and save them as an instructor answer key (docx to the course tile and the Files tab). Answers are saved privately to the course tile and Files tab; never published to the LMS.",
+    description: "Generate a full-credit model answer for every homework item (assignments and discussions) in a module and save them as an instructor answer key (plain-text file on the course tile and the Files tab). Answers are saved privately to the course tile and Files tab; never published to the LMS.",
     inputs: [
       {
         key: "hubCourse",
@@ -10797,22 +10797,16 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       const report = reportLines.join("\n");
 
-      // Build and save the docx
+      // Build and save the answer key as plain text
       if (generatedCount > 0) {
         onProgress("Building document...");
-        const answerMarkdown = answerLines.join("\n");
-
-        const docxData = await buildDocxFromPlainText(
-          answerMarkdown,
-          [],
-          helpers.author
-        );
-        const base64 = Buffer.from(docxData).toString("base64");
+        const answerText = answerLines.join("\n");
+        const base64 = Buffer.from(answerText, "utf-8").toString("base64");
 
         // Determine the filename
-        let filename = `Module ${moduleName} Homework Answers.docx`;
+        let filename = `Module ${moduleName} Homework Answers.txt`;
         if (moduleWeekNumber !== null) {
-          filename = `Module ${moduleWeekNumber} Homework Answers.docx`;
+          filename = `Module ${moduleWeekNumber} Homework Answers.txt`;
         }
 
         // Save to library with workflow tagging
@@ -10820,9 +10814,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
         const libResult = await saveLibraryFileAction({
           name: filename,
           base64,
-          mimeType:
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          fileExt: "docx",
+          mimeType: "text/plain",
+          fileExt: "txt",
           workflowId: helpers.workflowId,
           workflowName: helpers.workflowName,
           workflowRunId: helpers.workflowRunId,
@@ -10836,9 +10829,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         if (helpers.saveCourseMaterialFile) {
           try {
             onProgress("Saving to course tile...");
-            const blob = new Blob([docxData], {
-              type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            });
+            const blob = new Blob([answerText], { type: "text/plain" });
             await helpers.saveCourseMaterialFile(tile.id, blob, filename);
           } catch (err) {
             reportLines.push(

@@ -25,11 +25,11 @@ function row(overrides: Partial<Row> = {}): Row {
 describe("mapDeckTemplate round-trip", () => {
   it("maps slides and loops from jsonb", () => {
     const slides = [
-      { id: "s1", role: "title", title: "Welcome", notes: "", includeCode: false, codeLanguage: "", maxBullets: 0, loopGroupId: null },
-      { id: "s2", role: "concept", title: "", notes: "Explain the concept", includeCode: false, codeLanguage: "", maxBullets: 0, loopGroupId: null },
+      { id: "s1", role: "title", title: "Welcome", notes: "", includeCode: false, codeLanguage: "", maxBullets: 0, loopGroupId: null, depth: "standard" },
+      { id: "s2", role: "concept", title: "", notes: "Explain the concept", includeCode: false, codeLanguage: "", maxBullets: 0, loopGroupId: null, depth: "standard" },
     ];
     const loops = [
-      { id: "loop1", label: "Concepts", source: "runtime", items: [], runtimeLabel: "Concepts" },
+      { id: "loop1", label: "Concepts", source: "runtime", items: [], runtimeLabel: "Concepts", breadth: "standard" },
     ];
 
     const template = mapDeckTemplate(

@@ -149,6 +149,7 @@ import {
   generateDeckFromTemplateAction,
   savePresentationDraftAction,
   savePresentationFileAction,
+  saveLibraryFileAction,
   listMissingSubmissionsAction,
   draftStudentNudgesAction,
   listCourseGradeSummariesAction,
@@ -272,6 +273,31 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
     bytes[i] = binary.charCodeAt(i);
   }
   return new Blob([bytes], { type: mimeType });
+}
+
+// Isomorphic helper: converts Blob to base64 string.
+// Works in both browser (via btoa) and Node.js (via Buffer).
+// Feature-detects the environment; does not assume DOM APIs.
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+
+  if (typeof Buffer !== 'undefined') {
+    // Node.js environment
+    return Buffer.from(bytes).toString('base64');
+  } else if (typeof btoa !== 'undefined') {
+    // Browser environment: chunk the byte array to avoid stack overflow
+    // with very large files (btoa has a limit on string length)
+    const chunkSize = 8192;
+    let binaryStr = '';
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+      binaryStr += String.fromCharCode(...chunk);
+    }
+    return btoa(binaryStr);
+  } else {
+    throw new Error('Neither Buffer nor btoa available for base64 encoding');
+  }
 }
 
 // Parse a tile's Day/Time (e.g. "MW 10:00-11:15", "TTh 2:00 PM") into
@@ -962,7 +988,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "lecture-zip",
     name: "Build lecture materials zip",
-    description: "Generate presentation slides and lecture notes as a zip file. Slides are styled by a PPT Design template (Classic Lecture by default).",
+    description: "Generate presentation slides and lecture notes as a zip file saved to the Files tab. Slides are styled by a PPT Design template (Classic Lecture by default).",
     inputs: [
       {
         key: "repo",
@@ -4159,7 +4185,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "prepare-lecture",
     name: "Prepare lecture",
     description:
-      "Build a lecture deck from a module's materials and save it to the course tile. Pauses for announcement review unless Autonomous is on; in Autonomous mode with no course tile it prepares a lecture for every tile. Slides are styled by a PPT Design template (Classic Lecture by default).",
+      "Build a lecture deck from a module's materials and save it to the course tile and the Files tab. Pauses for announcement review unless Autonomous is on; in Autonomous mode with no course tile it prepares a lecture for every tile. Slides are styled by a PPT Design template (Classic Lecture by default).",
     inputs: [
       {
         key: "hubCourse",
@@ -4269,6 +4295,18 @@ export const STEP_REGISTRY: StepDefinition[] = [
         if (helpers.saveCourseMaterialFile) {
           try {
             await helpers.saveCourseMaterialFile(tile.id, blob, fileName);
+            const base64 = await blobToBase64(blob);
+            const lib = await saveLibraryFileAction({
+              name: fileName,
+              base64,
+              mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+              fileExt: "pptx",
+              workflowId: helpers.workflowId,
+              workflowName: helpers.workflowName,
+            });
+            if ("error" in lib) {
+              notes.push(`library save skipped: ${lib.error}`);
+            }
           } catch (err) {
             notes.push(
               `saving to the course tile failed: ${
@@ -4503,7 +4541,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "lecture-qa",
     name: "Anticipate lecture Q&A",
     description:
-      "Predict the questions students are likely to ask during a lecture and draft instructor-ready answers from the module's materials and optional slide deck.",
+      "Predict the questions students are likely to ask during a lecture and draft instructor-ready answers from the module's materials and optional slide deck. Saved to the course tile and the Files tab.",
     inputs: [
       {
         key: "hubCourse",
@@ -4649,6 +4687,18 @@ export const STEP_REGISTRY: StepDefinition[] = [
       if (helpers.saveCourseMaterialFile) {
         try {
           await helpers.saveCourseMaterialFile(tile.id, blob, fileName);
+          const base64 = await blobToBase64(blob);
+          const lib = await saveLibraryFileAction({
+            name: fileName,
+            base64,
+            mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            fileExt: "docx",
+            workflowId: helpers.workflowId,
+            workflowName: helpers.workflowName,
+          });
+          if ("error" in lib) {
+            notes.push(`library save skipped: ${lib.error}`);
+          }
         } catch (err) {
           notes.push(
             `saving to the course tile failed: ${
@@ -6444,6 +6494,171 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { announcementTitle: r.title, announcement: r.message },
         summary: { kind: "text", text: `${r.title}\n\n${r.message}` },
+      };
+    },
+  },
+
+  {
+    type: "draft-weekly-announcements",
+    name: "Draft weekly announcements",
+    description: "For every selected course tile, draft the week-ahead kickoff announcement - what the coming week covers and what is due - into Drafts > Messages, one per course. Nothing posts until you review. The week's topic comes from the course's LMS export first, then the schedule CSV, then the topics list. All announcements are saved to the course tile and the Files tab.",
+    inputs: [
+      {
+        key: "courses",
+        label: "Course tiles",
+        type: "hubCourseList",
+        required: true,
+        help: "One, several, or all course tiles.",
+      },
+      {
+        key: "weekOffset",
+        label: "Week offset",
+        type: "number",
+        required: false,
+        help: "0 drafts for the current week; 1 (default) for the coming week.",
+      },
+      {
+        key: "extraNotes",
+        label: "Extra notes (optional)",
+        type: "longtext",
+        required: false,
+        help: "Folded into every announcement (e.g. campus events, policy reminders).",
+      },
+    ],
+    outputs: [
+      { key: "drafted", label: "Drafts saved", type: "number" },
+      { key: "hasDrafted", label: "Any drafted?", type: "boolean" },
+      { key: "report", label: "Report", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const ids = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      if (ids.length === 0) {
+        throw new Error("Select at least one course tile.");
+      }
+
+      const raw = String(values.weekOffset ?? "").trim();
+      let offsetVal = raw === "" ? 1 : Math.trunc(Number(raw));
+      if (Number.isNaN(offsetVal) || offsetVal < 0) {
+        offsetVal = 1;
+      }
+
+      const extraNotes = String(values.extraNotes ?? "").trim();
+      const reportLines: string[] = [];
+      let drafted = 0;
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      for (const id of ids) {
+        const tile = hub.courses.find((c) => c.id === id);
+        if (!tile) {
+          reportLines.push(`${id}: course tile not found - skipped`);
+          continue;
+        }
+
+        try {
+          onProgress(`Drafting announcement for ${tile.name}...`);
+
+          let targetWeek: number;
+          let sourceNote = "";
+
+          if (offsetVal === 1) {
+            const nw = nextLectureWeek({
+              startDate: tile.startDate,
+              weeks: tile.weeks,
+              nowMs: Date.now(),
+            });
+            if ("skip" in nw) {
+              reportLines.push(`${tile.name}: skipped - ${nw.skip}.`);
+              continue;
+            }
+            targetWeek = nw.week;
+          } else if (offsetVal === 0) {
+            const cw = currentCourseWeek(tile.startDate, Date.now());
+            if (cw === null) {
+              reportLines.push(`${tile.name}: skipped - course not yet started or finished.`);
+              continue;
+            }
+            const status = courseProgressStatus(cw, tile.weeks);
+            if (status === "not-started" || status === "complete") {
+              reportLines.push(`${tile.name}: skipped - course ${status === "not-started" ? "not yet started" : "finished"}.`);
+              continue;
+            }
+            targetWeek = tile.weeks && tile.weeks > 0 ? Math.min(cw, tile.weeks) : cw;
+          } else {
+            const cw = currentCourseWeek(tile.startDate, Date.now());
+            if (cw === null) {
+              reportLines.push(`${tile.name}: skipped - course not yet started or finished.`);
+              continue;
+            }
+            targetWeek = Math.max(1, cw + offsetVal);
+            if (tile.weeks && tile.weeks > 0 && targetWeek > tile.weeks) {
+              reportLines.push(`${tile.name}: skipped - target week ${targetWeek} is past course end.`);
+              continue;
+            }
+          }
+
+          const weekTopic = await loadTileWeekTopic(tile, targetWeek, helpers);
+          if ("skip" in weekTopic) {
+            reportLines.push(`${tile.name}: skipped - ${weekTopic.skip}.`);
+            continue;
+          }
+
+          const topic = weekTopic.topic;
+          const summary = weekTopic.summary;
+          sourceNote = weekTopic.source !== "schedule"
+            ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
+            : "";
+
+          const instruction = `Draft a week-ahead kickoff announcement for ${tile.name}. Week ${targetWeek} covers: ${topic}. ${summary}${extraNotes ? ` ${extraNotes}` : ""}`;
+
+          const r = await draftAnnouncementAction(instruction, helpers.provider);
+          if ("error" in r) {
+            throw new Error(r.error);
+          }
+
+          const payload: MessageDraftPayload = {
+            kind: "announcement",
+            body: r.message,
+            title: r.title,
+            courseUrl: tile.canvasUrl ?? undefined,
+            hubCourseId: tile.id,
+            institution: tile.institution ?? undefined,
+          };
+
+          const res = await saveMessageDraftAction(
+            `Weekly announcement - ${tile.name} week ${targetWeek}`,
+            payload,
+            helpers.workflowId,
+            helpers.workflowName
+          );
+          if ("error" in res) {
+            throw new Error(res.error);
+          }
+
+          reportLines.push(`${tile.name}: drafted announcement for week ${targetWeek}${sourceNote}`);
+          drafted++;
+        } catch (err) {
+          reportLines.push(
+            `${tile.name}: ${err instanceof Error ? err.message : "failed"}`
+          );
+        }
+      }
+
+      const report = reportLines.join("\n");
+      return {
+        outputs: {
+          drafted: String(drafted),
+          hasDrafted: drafted > 0 ? "1" : "",
+          report,
+        },
+        summary: { kind: "text", text: report },
       };
     },
   },
@@ -11494,7 +11709,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "draft-upcoming-lectures",
     name: "Draft next week's lectures",
     description:
-      "For every selected course tile, detect NEXT week's module and draft a lesson plan, a lecture script, and a slide deck into the tile's materials. The week's topic comes from the course's LMS export first, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note. Slides are styled by a PPT Design template (Classic Lecture by default).",
+      "For every selected course tile, detect NEXT week's module and draft a lesson plan, a lecture script, and a slide deck into the tile's materials. The week's topic comes from the course's LMS export first, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note. Slides are styled by a PPT Design template (Classic Lecture by default). All artifacts are saved to the course tile and the Files tab.",
     inputs: [
       {
         key: "courses",
@@ -11523,6 +11738,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         type: "deckTemplate",
         required: false,
         help: "A PPT Design template that styles the generated slides. Blank uses Classic Lecture (the app's standard look). Slide content still comes from this step's own generator.",
+      },
+      {
+        key: "includeNarration",
+        label: "Narrated audio?",
+        type: "boolean",
+        required: false,
+        help: "Also synthesize a narrated mp3 of each lecture script (ElevenLabs) for asynchronous students.",
       },
     ],
     outputs: [
@@ -11598,18 +11820,20 @@ export const STEP_REGISTRY: StepDefinition[] = [
             s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
 
           let tilePrepared = false;
+          let scriptResult: { script: string } | undefined;
 
           try {
             onProgress(`Generating lecture script for ${tile.name}...`);
-            const scriptResult = await generateLectureScriptAction(
+            const result = await generateLectureScriptAction(
               topic,
               objectives,
               minutesVal,
               helpers.provider
             );
-            if ("error" in scriptResult) {
-              throw new Error(scriptResult.error);
+            if ("error" in result) {
+              throw new Error(result.error);
             }
+            scriptResult = result;
 
             const scriptText = [
               `# ${tile.name} - Week ${nw.week} Lecture Script`,
@@ -11626,6 +11850,18 @@ export const STEP_REGISTRY: StepDefinition[] = [
               try {
                 await helpers.saveCourseMaterialFile(tile.id, scriptBlob, scriptFileName);
                 tilePrepared = true;
+                const scriptBase64 = await blobToBase64(scriptBlob);
+                const scriptLib = await saveLibraryFileAction({
+                  name: scriptFileName,
+                  base64: scriptBase64,
+                  mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                  fileExt: "docx",
+                  workflowId: helpers.workflowId,
+                  workflowName: helpers.workflowName,
+                });
+                if ("error" in scriptLib) {
+                  reportLines.push(`${tile.name}: library save skipped - ${scriptLib.error}`);
+                }
               } catch (err) {
                 reportLines.push(
                   `${tile.name}: failed to save lecture script - ${
@@ -11683,6 +11919,18 @@ export const STEP_REGISTRY: StepDefinition[] = [
               try {
                 await helpers.saveCourseMaterialFile(tile.id, planBlob, planFileName);
                 tilePrepared = true;
+                const planBase64 = await blobToBase64(planBlob);
+                const planLib = await saveLibraryFileAction({
+                  name: planFileName,
+                  base64: planBase64,
+                  mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                  fileExt: "docx",
+                  workflowId: helpers.workflowId,
+                  workflowName: helpers.workflowName,
+                });
+                if ("error" in planLib) {
+                  reportLines.push(`${tile.name}: library save skipped - ${planLib.error}`);
+                }
               } catch (err) {
                 reportLines.push(
                   `${tile.name}: failed to save lesson plan - ${
@@ -11725,6 +11973,18 @@ export const STEP_REGISTRY: StepDefinition[] = [
               try {
                 await helpers.saveCourseMaterialFile(tile.id, slideBlob, slideFileName);
                 tilePrepared = true;
+                const slideBase64 = await blobToBase64(slideBlob);
+                const slideLib = await saveLibraryFileAction({
+                  name: slideFileName,
+                  base64: slideBase64,
+                  mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                  fileExt: "pptx",
+                  workflowId: helpers.workflowId,
+                  workflowName: helpers.workflowName,
+                });
+                if ("error" in slideLib) {
+                  reportLines.push(`${tile.name}: library save skipped - ${slideLib.error}`);
+                }
               } catch (err) {
                 reportLines.push(
                   `${tile.name}: failed to save slides - ${
@@ -11739,6 +11999,50 @@ export const STEP_REGISTRY: StepDefinition[] = [
                 err instanceof Error ? err.message : String(err)
               }`
             );
+          }
+
+          if (tilePrepared && String(values.includeNarration ?? "") === "1" && scriptResult) {
+            try {
+              onProgress(`Synthesizing narration for ${tile.name}...`);
+              const narResult = await synthesizeNarrationAction(scriptResult.script, undefined);
+              if ("error" in narResult) {
+                reportLines.push(
+                  `${tile.name}: narration synthesis failed - ${narResult.error}`
+                );
+              } else {
+                const narFileName = `${sanitize(tile.name)}_Week${nw.week}_Narration.mp3`;
+                if (helpers.saveCourseMaterialFile) {
+                  try {
+                    const narBlob = base64ToBlob(narResult.base64, narResult.mimeType);
+                    await helpers.saveCourseMaterialFile(tile.id, narBlob, narFileName);
+                    const narLib = await saveLibraryFileAction({
+                      name: narFileName,
+                      base64: narResult.base64,
+                      mimeType: narResult.mimeType,
+                      fileExt: "mp3",
+                      workflowId: helpers.workflowId,
+                      workflowName: helpers.workflowName,
+                    });
+                    if ("error" in narLib) {
+                      reportLines.push(`${tile.name}: library save skipped - ${narLib.error}`);
+                    }
+                  } catch (err) {
+                    reportLines.push(
+                      `${tile.name}: failed to save narration - ${
+                        err instanceof Error ? err.message : String(err)
+                      }`
+                    );
+                  }
+                }
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (msg.includes("ELEVENLABS_API_KEY")) {
+                reportLines.push(`${tile.name}: narration unavailable (missing ElevenLabs API key)`);
+              } else {
+                reportLines.push(`${tile.name}: narration synthesis failed - ${msg}`);
+              }
+            }
           }
 
           if (tilePrepared) {
@@ -12806,7 +13110,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "generate-concept-animations",
     name: "Generate concept animations",
     description:
-      "For each selected course tile, detect NEXT week's module and generate a set of animated concept visualizations (self-contained SVG/CSS, no JavaScript) into the tile's materials - optionally also created as unpublished Canvas pages. The week's topic comes from the course's LMS export first, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note.",
+      "For each selected course tile, detect NEXT week's module and generate a set of animated concept visualizations (self-contained SVG/CSS, no JavaScript) into the tile's materials and the Files tab - optionally also created as unpublished Canvas pages. The week's topic comes from the course's LMS export first, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note.",
     inputs: [
       {
         key: "courses",
@@ -12946,6 +13250,18 @@ export const STEP_REGISTRY: StepDefinition[] = [
                     await helpers.saveCourseMaterialFile(tile.id, blob, fileName);
                     generated++;
                     tileSaved++;
+                    const base64 = await blobToBase64(blob);
+                    const animLib = await saveLibraryFileAction({
+                      name: fileName,
+                      base64,
+                      mimeType: "text/html",
+                      fileExt: "html",
+                      workflowId: helpers.workflowId,
+                      workflowName: helpers.workflowName,
+                    });
+                    if ("error" in animLib) {
+                      pageNotes.push(`${concept}: library save skipped - ${animLib.error}`);
+                    }
                   } catch (err) {
                     pageNotes.push(
                       `Failed to save ${concept}: ${err instanceof Error ? err.message : String(err)}`

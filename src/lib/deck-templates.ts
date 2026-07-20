@@ -3,7 +3,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "./supabase/types";
 import type { DeckTemplate, DeckSlide, DeckLoopGroup } from "@/lib/decks/types";
-import { coerceDeckTheme } from "@/lib/decks/types";
+import { coerceDeckTheme, coerceSlideDepth, coerceSectionBreadth } from "@/lib/decks/types";
 
 export async function listDeckTemplates(
   supabase: SupabaseClient<Database>,
@@ -65,10 +65,16 @@ export async function deleteDeckTemplate(
 // Exported so the row -> template mapping is unit-testable without a live Supabase client.
 export function mapDeckTemplate(row: Database["public"]["Tables"]["deck_templates"]["Row"]): DeckTemplate {
   const slides = Array.isArray(row.slides)
-    ? (row.slides as unknown as DeckSlide[])
+    ? (row.slides as unknown as DeckSlide[]).map((s) => ({
+        ...s,
+        depth: coerceSlideDepth(s.depth),
+      }))
     : [];
   const loops = Array.isArray(row.loops)
-    ? (row.loops as unknown as DeckLoopGroup[])
+    ? (row.loops as unknown as DeckLoopGroup[]).map((l) => ({
+        ...l,
+        breadth: coerceSectionBreadth(l.breadth),
+      }))
     : [];
   const theme = coerceDeckTheme(row.theme);
 

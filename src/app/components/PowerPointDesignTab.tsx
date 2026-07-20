@@ -34,6 +34,8 @@ import {
   duplicateDeckTemplate,
   getSlideRole,
   SLIDE_ROLES,
+  SLIDE_DEPTHS,
+  SECTION_BREADTHS,
   type DeckTemplate,
   type DeckSlide,
   type DeckLoopGroup,
@@ -1080,7 +1082,25 @@ export default function PowerPointDesignTab() {
                               <MenuItem value="literal">Fixed list</MenuItem>
                               <MenuItem value="courseTopics">Course topics</MenuItem>
                             </Select>
+                            <Select
+                              value={group?.breadth || "standard"}
+                              onChange={(e) => handleUpdateLoopGroup(gid, { breadth: e.target.value as "core" | "standard" | "full" })}
+                              disabled={isReadOnly}
+                              size="small"
+                              sx={{ flex: "1 1 200px", minWidth: "150px" }}
+                            >
+                              {SECTION_BREADTHS.map((b) => (
+                                <MenuItem key={b.breadth} value={b.breadth}>
+                                  {b.label}
+                                </MenuItem>
+                              ))}
+                            </Select>
                           </div>
+                          {group && (
+                            <FormHelperText style={{ marginBottom: "0.75rem" }}>
+                              {SECTION_BREADTHS.find((b) => b.breadth === group.breadth)?.hint}
+                            </FormHelperText>
+                          )}
 
                           {group?.source === "literal" && (
                             <TextField
@@ -1151,20 +1171,35 @@ export default function PowerPointDesignTab() {
                           {members.map((member, memberIdx) => (
                             <Card key={member.id} style={{ marginBottom: "0.75rem" }}>
                               <CardContent>
-                                <Select
-                                  value={member.role}
-                                  onChange={(e) => handleUpdateSlide(member.id, { role: e.target.value as SlideRole })}
-                                  disabled={isReadOnly}
-                                  fullWidth
-                                  size="small"
-                                  style={{ marginBottom: "1rem" }}
-                                >
-                                  {SLIDE_ROLES.map((r) => (
-                                    <MenuItem key={r.role} value={r.role}>
-                                      {r.label}
-                                    </MenuItem>
-                                  ))}
-                                </Select>
+                                <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+                                  <Select
+                                    value={member.role}
+                                    onChange={(e) => handleUpdateSlide(member.id, { role: e.target.value as SlideRole })}
+                                    disabled={isReadOnly}
+                                    fullWidth
+                                    size="small"
+                                    sx={{ flex: "1 1 200px" }}
+                                  >
+                                    {SLIDE_ROLES.map((r) => (
+                                      <MenuItem key={r.role} value={r.role}>
+                                        {r.label}
+                                      </MenuItem>
+                                    ))}
+                                  </Select>
+                                  <Select
+                                    value={member.depth || "standard"}
+                                    onChange={(e) => handleUpdateSlide(member.id, { depth: e.target.value as "intro" | "standard" | "challenge" })}
+                                    disabled={isReadOnly}
+                                    size="small"
+                                    sx={{ flex: "1 1 180px" }}
+                                  >
+                                    {SLIDE_DEPTHS.map((d) => (
+                                      <MenuItem key={d.depth} value={d.depth}>
+                                        {d.label}
+                                      </MenuItem>
+                                    ))}
+                                  </Select>
+                                </div>
 
                                 <TextField
                                   label="Title (optional)"
@@ -1300,20 +1335,35 @@ export default function PowerPointDesignTab() {
                     items.push(
                       <Card key={slide.id} style={{ marginBottom: "1rem" }}>
                         <CardContent>
-                          <Select
-                            value={slide.role}
-                            onChange={(e) => handleUpdateSlide(slide.id, { role: e.target.value as SlideRole })}
-                            disabled={isReadOnly}
-                            fullWidth
-                            size="small"
-                            style={{ marginBottom: "1rem" }}
-                          >
-                            {SLIDE_ROLES.map((r) => (
-                              <MenuItem key={r.role} value={r.role}>
-                                {r.label}
-                              </MenuItem>
-                            ))}
-                          </Select>
+                          <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+                            <Select
+                              value={slide.role}
+                              onChange={(e) => handleUpdateSlide(slide.id, { role: e.target.value as SlideRole })}
+                              disabled={isReadOnly}
+                              fullWidth
+                              size="small"
+                              sx={{ flex: "1 1 200px" }}
+                            >
+                              {SLIDE_ROLES.map((r) => (
+                                <MenuItem key={r.role} value={r.role}>
+                                  {r.label}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                            <Select
+                              value={slide.depth || "standard"}
+                              onChange={(e) => handleUpdateSlide(slide.id, { depth: e.target.value as "intro" | "standard" | "challenge" })}
+                              disabled={isReadOnly}
+                              size="small"
+                              sx={{ flex: "1 1 180px" }}
+                            >
+                              {SLIDE_DEPTHS.map((d) => (
+                                <MenuItem key={d.depth} value={d.depth}>
+                                  {d.label}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </div>
 
                           <TextField
                             label="Title (optional)"

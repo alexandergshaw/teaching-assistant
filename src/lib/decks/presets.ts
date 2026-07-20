@@ -13,6 +13,7 @@ function presetSlide(id: string, role: DeckTemplate["slides"][0]["role"], loopGr
     codeLanguage: role === "example" || role === "walkthrough" || role === "practice" || role === "answer" ? "python" : "",
     maxBullets: 0,
     loopGroupId,
+    depth: "standard",
   };
 }
 
@@ -22,6 +23,7 @@ const PRESET_CODING_LECTURE_LOOP: DeckLoopGroup = {
   source: "runtime",
   items: [],
   runtimeLabel: "Concepts",
+  breadth: "standard",
 };
 
 const PRESET_CLASSIC_LECTURE_LOOP: DeckLoopGroup = {
@@ -30,6 +32,7 @@ const PRESET_CLASSIC_LECTURE_LOOP: DeckLoopGroup = {
   source: "runtime",
   items: [],
   runtimeLabel: "Concepts",
+  breadth: "standard",
 };
 
 export const DECK_PRESETS: DeckTemplate[] = [
@@ -124,6 +127,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         source: "runtime",
         items: [],
         runtimeLabel: "Topics",
+        breadth: "standard",
       },
     ],
     theme: { ...DEFAULT_DECK_THEME },
@@ -144,6 +148,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 0,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s2",
@@ -154,6 +159,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 4,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s3",
@@ -164,6 +170,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 3,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s4",
@@ -174,6 +181,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 6,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s5",
@@ -184,6 +192,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 4,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s6",
@@ -194,6 +203,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 4,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s7",
@@ -204,6 +214,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "typescript",
         maxBullets: 4,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s8",
@@ -214,6 +225,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 4,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s9",
@@ -224,6 +236,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 4,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s10",
@@ -234,6 +247,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 4,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s11",
@@ -244,6 +258,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 4,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s12",
@@ -254,6 +269,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 4,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s13",
@@ -264,6 +280,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 4,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s14",
@@ -274,6 +291,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 4,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s15",
@@ -284,6 +302,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 5,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s16",
@@ -294,6 +313,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 4,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s17",
@@ -304,6 +324,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 5,
         loopGroupId: null,
+        depth: "standard",
       },
       {
         id: "preset-sdlc-s18",
@@ -314,6 +335,7 @@ export const DECK_PRESETS: DeckTemplate[] = [
         codeLanguage: "",
         maxBullets: 4,
         loopGroupId: null,
+        depth: "standard",
       },
     ],
     loops: [],

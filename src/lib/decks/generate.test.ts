@@ -1,12 +1,17 @@
-import { describe, it, expect } from "vitest";
+﻿import { describe, it, expect } from "vitest";
 import {
   roleTitlePrefix,
   buildDeckPrompt,
   scaffoldDeck,
+  generateDeckFromTemplate,
+  trimBreadthCore,
+  parseLenientJsonArray,
   type DeckGenContext,
 } from "./generate";
 import {
   emptyDeckTemplate,
+  newDeckSlide,
+  newDeckLoopGroup,
   type SlideRole,
 } from "./types";
 
@@ -56,6 +61,7 @@ describe("generate.ts", () => {
           includeCode: false,
           codeLanguage: "",
           maxBullets: 0,
+          depth: "standard" as const,
         },
       ];
       const ctx: DeckGenContext = {
@@ -117,6 +123,7 @@ describe("generate.ts", () => {
           codeLanguage: "python",
           maxBullets: 4,
           loopItem: "for loop",
+          depth: "standard" as const,
         },
       ];
       const ctx: DeckGenContext = {
@@ -144,6 +151,7 @@ describe("generate.ts", () => {
             includeCode: false,
             codeLanguage: "",
             maxBullets: 4,
+          depth: "standard" as const,
           },
         ];
         const prompt = buildDeckPrompt(template, resolved, ctx);
@@ -162,6 +170,7 @@ describe("generate.ts", () => {
           includeCode: true,
           codeLanguage: "javascript",
           maxBullets: 4,
+          depth: "standard" as const,
         },
       ];
       const ctx: DeckGenContext = { subject: "Test", loopItems: {} };
@@ -194,6 +203,7 @@ describe("generate.ts", () => {
           includeCode: false,
           codeLanguage: "",
           maxBullets: 0,
+          depth: "standard" as const,
         },
         {
           role: "concept" as SlideRole,
@@ -202,6 +212,7 @@ describe("generate.ts", () => {
           includeCode: false,
           codeLanguage: "",
           maxBullets: 4,
+          depth: "standard" as const,
         },
       ];
       const ctx: DeckGenContext = { subject: "Loops", loopItems: {} };
@@ -220,6 +231,7 @@ describe("generate.ts", () => {
           includeCode: false,
           codeLanguage: "",
           maxBullets: 4,
+          depth: "standard" as const,
         },
       ];
       const ctx: DeckGenContext = { subject: "Test", loopItems: {} };
@@ -238,6 +250,7 @@ describe("generate.ts", () => {
           includeCode: true,
           codeLanguage: "python",
           maxBullets: 4,
+          depth: "standard" as const,
         },
       ];
       const ctx: DeckGenContext = { subject: "Test", loopItems: {} };
@@ -257,6 +270,7 @@ describe("generate.ts", () => {
           includeCode: false,
           codeLanguage: "",
           maxBullets: 4,
+          depth: "standard" as const,
         },
       ];
       const ctx: DeckGenContext = { subject: "Test", loopItems: {} };
@@ -276,6 +290,7 @@ describe("generate.ts", () => {
           codeLanguage: "",
           maxBullets: 4,
           loopItem: "while loop",
+          depth: "standard" as const,
         },
       ];
       const ctx: DeckGenContext = { subject: "Test", loopItems: {} };
@@ -313,6 +328,7 @@ describe("generate.ts", () => {
           includeCode: false,
           codeLanguage: "",
           maxBullets: 2,
+          depth: "standard" as const,
         },
       ];
       const ctx: DeckGenContext = { subject: "Test", loopItems: {} };
@@ -331,6 +347,7 @@ describe("generate.ts", () => {
           includeCode: false,
           codeLanguage: "",
           maxBullets: 4,
+          depth: "standard" as const,
         },
       ];
       const ctx: DeckGenContext = { subject: "Test", loopItems: {} };
@@ -338,5 +355,322 @@ describe("generate.ts", () => {
       const result = scaffoldDeck(template, resolved, ctx);
       expect(result.slides[0].bullets.length).toBeGreaterThan(0);
     });
+
+    it("prefixes first bullet with 'Intro:' for intro depth", () => {
+      const template = emptyDeckTemplate("Test");
+      const resolved = [
+        {
+          role: "example" as SlideRole,
+          title: "Example",
+          notes: "Getting started",
+          includeCode: false,
+          codeLanguage: "",
+          maxBullets: 4,
+          depth: "intro" as const,
+        },
+      ];
+      const ctx: DeckGenContext = { subject: "Test", loopItems: {} };
+
+      const result = scaffoldDeck(template, resolved, ctx);
+      expect(result.slides[0].bullets[0]).toMatch(/^Intro:/);
+    });
+
+    it("prefixes first bullet with 'Challenge:' for challenge depth", () => {
+      const template = emptyDeckTemplate("Test");
+      const resolved = [
+        {
+          role: "practice" as SlideRole,
+          title: "Practice",
+          notes: "Solve this advanced problem",
+          includeCode: false,
+          codeLanguage: "",
+          maxBullets: 4,
+          depth: "challenge" as const,
+        },
+      ];
+      const ctx: DeckGenContext = { subject: "Test", loopItems: {} };
+
+      const result = scaffoldDeck(template, resolved, ctx);
+      expect(result.slides[0].bullets[0]).toMatch(/^Challenge:/);
+    });
+
+    it("does not prefix bullets for standard depth", () => {
+      const template = emptyDeckTemplate("Test");
+      const resolved = [
+        {
+          role: "concept" as SlideRole,
+          title: "Concept",
+          notes: "Standard treatment",
+          includeCode: false,
+          codeLanguage: "",
+          maxBullets: 4,
+          depth: "standard" as const,
+        },
+      ];
+      const ctx: DeckGenContext = { subject: "Test", loopItems: {} };
+
+      const result = scaffoldDeck(template, resolved, ctx);
+      expect(result.slides[0].bullets[0]).not.toMatch(/^(Intro|Challenge):/);
+    });
+  });
+
+  describe("buildDeckPrompt with depth", () => {
+    it("includes depth hint for intro depth", () => {
+      const template = emptyDeckTemplate("Test");
+      const resolved = [
+        {
+          role: "example" as SlideRole,
+          title: "",
+          notes: "Show a loop example",
+          includeCode: false,
+          codeLanguage: "",
+          maxBullets: 4,
+          depth: "intro" as const,
+        },
+      ];
+      const ctx: DeckGenContext = {
+        subject: "Loops",
+        loopItems: {},
+      };
+
+      const prompt = buildDeckPrompt(template, resolved, ctx);
+      expect(prompt).toContain("Difficulty:");
+      expect(prompt).toContain("introductory");
+      expect(prompt).toContain("gently-scaffolded");
+    });
+
+    it("includes depth hint for challenge depth", () => {
+      const template = emptyDeckTemplate("Test");
+      const resolved = [
+        {
+          role: "practice" as SlideRole,
+          title: "",
+          notes: "Solve an advanced problem",
+          includeCode: false,
+          codeLanguage: "",
+          maxBullets: 4,
+          depth: "challenge" as const,
+        },
+      ];
+      const ctx: DeckGenContext = {
+        subject: "Loops",
+        loopItems: {},
+      };
+
+      const prompt = buildDeckPrompt(template, resolved, ctx);
+      expect(prompt).toContain("Difficulty:");
+      expect(prompt).toContain("challenging");
+      expect(prompt).toContain("edge case");
+    });
+
+    it("does not include Difficulty: for standard depth", () => {
+      const template = emptyDeckTemplate("Test");
+      const resolved = [
+        {
+          role: "concept" as SlideRole,
+          title: "",
+          notes: "Standard concept",
+          includeCode: false,
+          codeLanguage: "",
+          maxBullets: 4,
+          depth: "standard" as const,
+        },
+      ];
+      const ctx: DeckGenContext = {
+        subject: "Loops",
+        loopItems: {},
+      };
+
+      const prompt = buildDeckPrompt(template, resolved, ctx);
+      // Standard depth has empty promptHint, so no "Difficulty:" appended
+      const lines = prompt.split("\n");
+      const slideLines = lines.filter((l) => l.startsWith("Slide 1"));
+      expect(slideLines.some((l) => l.includes("Difficulty:"))).toBe(false);
+    });
+  });
+
+  describe("Standard depth prompt parity", () => {
+    it("generates byte-identical prompts to today for all-standard settings", () => {
+      const template = emptyDeckTemplate("Test Deck");
+      const resolved = [
+        {
+          role: "title" as SlideRole,
+          title: "Introduction",
+          notes: "",
+          includeCode: false,
+          codeLanguage: "",
+          maxBullets: 0,
+          depth: "standard" as const,
+        },
+        {
+          role: "concept" as SlideRole,
+          title: "",
+          notes: "Understanding loops",
+          includeCode: false,
+          codeLanguage: "",
+          maxBullets: 4,
+          depth: "standard" as const,
+        },
+        {
+          role: "example" as SlideRole,
+          title: "",
+          notes: "Loop example",
+          includeCode: true,
+          codeLanguage: "python",
+          maxBullets: 4,
+          depth: "standard" as const,
+        },
+      ];
+      const ctx: DeckGenContext = {
+        subject: "Python Loops",
+        audience: "Intro CS",
+        tone: "clear",
+        loopItems: {},
+      };
+
+      const prompt = buildDeckPrompt(template, resolved, ctx);
+
+      // Verify standard depths don't add Difficulty: lines
+      const lines = prompt.split("\n");
+      const slideLines = lines.filter((l) => l.startsWith("Slide"));
+      for (const line of slideLines) {
+        expect(line).not.toContain("Difficulty:");
+      }
+
+      // Verify structure is preserved
+      expect(prompt).toContain("Python Loops");
+      expect(prompt).toContain("Intro CS");
+      expect(prompt).toContain("Understanding loops");
+      expect(prompt).toContain("Loop example");
+      expect(prompt).toContain("Include code");
+    });
+  });
+
+  describe("Breadth enumeration", () => {
+    describe("trimBreadthCore", () => {
+      it("trims to first 2 seeds", () => {
+        const seeds = ["seed1", "seed2", "seed3", "seed4"];
+        const result = trimBreadthCore(seeds);
+        expect(result).toEqual(["seed1", "seed2"]);
+        expect(result).toHaveLength(2);
+      });
+
+      it("keeps 1 seed when only 1 provided", () => {
+        const seeds = ["seed1"];
+        const result = trimBreadthCore(seeds);
+        expect(result).toEqual(["seed1"]);
+      });
+
+      it("keeps 2 seeds when exactly 2 provided", () => {
+        const seeds = ["seed1", "seed2"];
+        const result = trimBreadthCore(seeds);
+        expect(result).toEqual(["seed1", "seed2"]);
+      });
+
+      it("returns empty array for empty seeds", () => {
+        const seeds: string[] = [];
+        const result = trimBreadthCore(seeds);
+        expect(result).toEqual([]);
+      });
+    });
+
+    it("embedded provider with breadth full keeps original seeds", async () => {
+      const template = emptyDeckTemplate("Test");
+      const loopGroup = newDeckLoopGroup();
+      loopGroup.breadth = "full";
+      loopGroup.items = ["Python", "JavaScript", "Java"];
+      template.loops = [loopGroup];
+
+      // Add a slide that uses this loop group
+      const slide = newDeckSlide("concept");
+      slide.loopGroupId = loopGroup.id;
+      template.slides = [newDeckSlide("title"), slide];
+
+      const ctx: DeckGenContext = {
+        subject: "Languages",
+        loopItems: {},
+      };
+
+      const result = await generateDeckFromTemplate(template, ctx, "embedded");
+
+      // Should not have error
+      if ("error" in result) {
+        throw new Error(`Unexpected error: ${result.error}`);
+      }
+
+      // Embedded provider should fallback to original seeds (3 items)
+      // With 3 seeds, we expect 1 title + 3 concept slides (one per seed)
+      expect(result.slides).toHaveLength(4);
+    });
+
+    it("breadth core with >2 seeds trims to first 2", async () => {
+      const template = emptyDeckTemplate("Test");
+      const loopGroup = newDeckLoopGroup();
+      loopGroup.breadth = "core";
+      loopGroup.items = ["item1", "item2", "item3", "item4"];
+      template.loops = [loopGroup];
+
+      const slide = newDeckSlide("concept");
+      slide.loopGroupId = loopGroup.id;
+      template.slides = [newDeckSlide("title"), slide];
+
+      const ctx: DeckGenContext = {
+        subject: "Core Topics",
+        loopItems: {},
+      };
+
+      const result = await generateDeckFromTemplate(template, ctx, "embedded");
+
+      // Should not have error
+      if ("error" in result) {
+        throw new Error(`Unexpected error: ${result.error}`);
+      }
+
+      // Core breadth with 4 items should trim to 2
+      // Expect 1 title + 2 concept slides (one per trimmed seed)
+      expect(result.slides).toHaveLength(3);
+    });
+
+    describe("parseLenientJsonArray", () => {
+      it("parses JSON array from text", () => {
+        const text = '["item1", "item2", "item3"]';
+        const result = parseLenientJsonArray(text);
+        expect(result).toEqual(["item1", "item2", "item3"]);
+      });
+
+      it("parses fenced JSON array", () => {
+        const text = `\`\`\`json
+["item1", "item2"]
+\`\`\``;
+        const result = parseLenientJsonArray(text);
+        expect(result).toEqual(["item1", "item2"]);
+      });
+
+      it("filters non-string array items", () => {
+        const text = '["item1", 42, "item2", null, "item3"]';
+        const result = parseLenientJsonArray(text);
+        expect(result).toEqual(["item1", "item2", "item3"]);
+      });
+
+      it("returns empty array on parse failure", () => {
+        const text = "not an array";
+        const result = parseLenientJsonArray(text);
+        expect(result).toEqual([]);
+      });
+
+      it("returns empty array for malformed JSON", () => {
+        const text = '[item1, item2]'; // Missing quotes
+        const result = parseLenientJsonArray(text);
+        expect(result).toEqual([]);
+      });
+
+      it("handles empty array", () => {
+        const text = "[]";
+        const result = parseLenientJsonArray(text);
+        expect(result).toEqual([]);
+      });
+    });
   });
 });
+
+

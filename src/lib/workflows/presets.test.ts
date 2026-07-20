@@ -128,6 +128,7 @@ describe("deep-check presets", () => {
     "review-and-export-grades-csv",
     "nudge-missing-from-gradebook",
     "weekly-concept-animations",
+    "weekly-everything-prep",
   ];
 
   for (const id of DEEP_CHECK_PRESET_IDS) {

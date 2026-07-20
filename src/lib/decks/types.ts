@@ -1,6 +1,58 @@
 // Domain model for reusable presentation templates: slide roles, loop groups, deck structure.
 // Pure, unit-testable; no I/O or React dependencies.
 
+export type SlideDepth = "intro" | "standard" | "challenge";
+
+export interface SlideDepthDef {
+  depth: SlideDepth;
+  label: string;
+  promptHint: string;
+}
+
+export const SLIDE_DEPTHS: SlideDepthDef[] = [
+  {
+    depth: "intro",
+    label: "Introductory",
+    promptHint: "an introductory, gently-scaffolded treatment - short, familiar context, no tricks",
+  },
+  {
+    depth: "standard",
+    label: "Standard",
+    promptHint: "",
+  },
+  {
+    depth: "challenge",
+    label: "Challenge",
+    promptHint: "a challenging treatment that combines ideas, includes an edge case, and expects the student to reason through it",
+  },
+];
+
+export type SectionBreadth = "core" | "standard" | "full";
+
+export interface SectionBreadthDef {
+  breadth: SectionBreadth;
+  label: string;
+  hint: string;
+}
+
+export const SECTION_BREADTHS: SectionBreadthDef[] = [
+  {
+    breadth: "core",
+    label: "Core only",
+    hint: "Core only - just the listed items' most essential subtopics",
+  },
+  {
+    breadth: "standard",
+    label: "Standard",
+    hint: "Standard - cover the listed items as given",
+  },
+  {
+    breadth: "full",
+    label: "Full breadth",
+    hint: "Full breadth - enumerate and cover every subtopic of this section's subject",
+  },
+];
+
 export type DeckBackgroundKind = "solid" | "gradient" | "classic";
 
 export interface DeckTheme {
@@ -72,6 +124,20 @@ export function coerceDeckTheme(raw: unknown): DeckTheme {
     gradientAngle,
     fontColor,
   };
+}
+
+export function coerceSlideDepth(raw: unknown): SlideDepth {
+  if (raw === "intro" || raw === "challenge") {
+    return raw;
+  }
+  return "standard";
+}
+
+export function coerceSectionBreadth(raw: unknown): SectionBreadth {
+  if (raw === "core" || raw === "full") {
+    return raw;
+  }
+  return "standard";
 }
 
 export type SlideRole =
@@ -260,6 +326,7 @@ export interface DeckLoopGroup {
   items: string[];
   courseId?: string | null;
   runtimeLabel?: string;
+  breadth: SectionBreadth;
 }
 
 export interface DeckSlide {
@@ -271,6 +338,7 @@ export interface DeckSlide {
   codeLanguage: string;
   maxBullets: number;
   loopGroupId: string | null;
+  depth: SlideDepth;
 }
 
 export interface DeckTemplate {
@@ -293,6 +361,7 @@ export interface ResolvedSlideSpec {
   includeCode: boolean;
   codeLanguage: string;
   maxBullets: number;
+  depth: SlideDepth;
   loopItem?: string;
   loopLabel?: string;
 }
@@ -314,6 +383,7 @@ export function newDeckSlide(role: SlideRole = "concept"): DeckSlide {
     codeLanguage: roleDef?.codeDefault ?? false ? "python" : "",
     maxBullets: 0,
     loopGroupId: null,
+    depth: "standard",
   };
 }
 
@@ -326,6 +396,7 @@ export function newDeckLoopGroup(): DeckLoopGroup {
     source: "runtime",
     items: [],
     runtimeLabel: "Items",
+    breadth: "standard",
   };
 }
 
@@ -351,8 +422,8 @@ export function duplicateDeckTemplate(template: DeckTemplate, name: string): Dec
     ...template,
     id,
     name,
-    slides: template.slides.map((s) => ({ ...s })),
-    loops: template.loops.map((l) => ({ ...l, items: [...l.items] })),
+    slides: template.slides.map((s) => ({ ...s, depth: s.depth })),
+    loops: template.loops.map((l) => ({ ...l, items: [...l.items], breadth: l.breadth })),
     theme: { ...template.theme },
   };
 }
@@ -404,6 +475,7 @@ export function expandTemplate(
             includeCode: blockSlide.includeCode,
             codeLanguage: blockSlide.codeLanguage,
             maxBullets,
+            depth: blockSlide.depth,
             ...(item ? { loopItem: item } : {}),
             ...(loopGroup ? { loopLabel: loopGroup.label } : {}),
           });
@@ -425,6 +497,7 @@ export function expandTemplate(
         includeCode: slide.includeCode,
         codeLanguage: slide.codeLanguage,
         maxBullets,
+        depth: slide.depth,
       });
 
       i++;

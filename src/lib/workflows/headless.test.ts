@@ -30,6 +30,7 @@ describe("isHeadlessSafeWorkflow", () => {
     expect(isHeadlessSafeWorkflow(byId("closed-institution-onboarding"), lookup)).toBe(true);
     expect(isHeadlessSafeWorkflow(byId("nudge-missing-from-gradebook"), lookup)).toBe(true);
     expect(isHeadlessSafeWorkflow(byId("weekly-concept-animations"), lookup)).toBe(true);
+    expect(isHeadlessSafeWorkflow(byId("weekly-everything-prep"), lookup)).toBe(true);
   });
 
   it("rejects presets with an interactive step", () => {
@@ -148,8 +149,8 @@ describe("isHeadlessSafeWorkflow", () => {
     expect(isHeadlessSafeWorkflow(def, () => undefined)).toBe(false);
   });
 
-  it("has exactly 119 headless-safe step types", () => {
-    expect(HEADLESS_SAFE_STEP_TYPES.size).toBe(119);
+  it("has exactly 120 headless-safe step types", () => {
+    expect(HEADLESS_SAFE_STEP_TYPES.size).toBe(120);
   });
 
   it("accepts the unattended grade-to-draft preset (scoring only, no posting)", () => {

@@ -1393,6 +1393,78 @@ export const WEEKLY_CONCEPT_ANIMATIONS: WorkflowDef = {
   ],
 };
 
+export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
+  id: "weekly-everything-prep",
+  preset: true,
+  name: "Weekly Everything Prep (all courses)",
+  description:
+    "The Sunday-night button: for every course at every institution, prepare the coming week for in-person, synchronous online, and asynchronous online students - lecture deck, script, and lesson plan (optionally narrated for async), concept animations, a week-ahead announcement draft per course, the deadline list, a gradebook at-risk report, and a draft-grading pass when anything is waiting - finished with a briefing report. Every artifact lands on the course tile AND in the Files tab; announcements wait in Drafts. Fully headless - schedule it weekly.",
+  steps: [
+    {
+      type: "draft-upcoming-lectures",
+      bindings: {
+        courses: { source: "literal", value: "*" },
+        minutes: { source: "literal", value: "20" },
+        template: { source: "runtime", fieldKey: "deckTemplate" },
+        includeNarration: { source: "runtime", fieldKey: "includeNarration" },
+        extraNotes: { source: "runtime", fieldKey: "extraNotes" },
+      },
+    },
+    {
+      type: "generate-concept-animations",
+      bindings: {
+        courses: { source: "literal", value: "*" },
+        maxConcepts: { source: "literal", value: "3" },
+        extraNotes: { source: "runtime", fieldKey: "extraNotes" },
+        publish: { source: "runtime", fieldKey: "publish" },
+      },
+    },
+    {
+      type: "draft-weekly-announcements",
+      bindings: {
+        courses: { source: "literal", value: "*" },
+        weekOffset: { source: "literal", value: "1" },
+        extraNotes: { source: "runtime", fieldKey: "extraNotes" },
+      },
+    },
+    {
+      type: "list-upcoming-deadlines",
+      bindings: {
+        daysAhead: { source: "literal", value: "7" },
+      },
+    },
+    {
+      type: "gradebook-health-report",
+      bindings: {
+        courses: { source: "literal", value: "*" },
+        threshold: { source: "runtime", fieldKey: "threshold" },
+      },
+    },
+    {
+      type: "check-needs-grading",
+      bindings: {},
+    },
+    {
+      type: "grade-to-draft",
+      bindings: {},
+      runIf: {
+        binding: { source: "step", stepIndex: 5, outputKey: "hasWork" },
+        expected: true,
+      },
+    },
+    {
+      type: "compose-briefing",
+      bindings: {
+        title: { source: "literal", value: "Weekly prep report" },
+        section1: { source: "step", stepIndex: 3, outputKey: "deadlines" },
+        section2: { source: "step", stepIndex: 4, outputKey: "report" },
+        section3: { source: "step", stepIndex: 0, outputKey: "report" },
+        section4: { source: "step", stepIndex: 2, outputKey: "report" },
+      },
+    },
+  ],
+};
+
 /**
  * Merge built-in presets with custom workflows.
  * Returns presets first, then custom workflows.
@@ -1440,6 +1512,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     REVIEW_AND_EXPORT_GRADES_CSV,
     NUDGE_MISSING_FROM_GRADEBOOK,
     WEEKLY_CONCEPT_ANIMATIONS,
+    WEEKLY_EVERYTHING_PREP,
     ...custom,
   ];
 }

@@ -12,6 +12,7 @@ import {
   ResolvedSlideSpec,
   getSlideRole,
   expandTemplate,
+  SLIDE_DEPTHS,
   type SlideRole,
 } from "./types";
 
@@ -74,6 +75,15 @@ export function buildDeckPrompt(
         description += ` Include code (${spec.codeLanguage || "python"}).`;
       }
       description += ` Max ${spec.maxBullets} bullets.`;
+
+      // Inject depth hint for non-standard depths
+      if (spec.depth !== "standard") {
+        const depthDef = SLIDE_DEPTHS.find((d) => d.depth === spec.depth);
+        if (depthDef?.promptHint) {
+          description += ` Difficulty: ${depthDef.promptHint}`;
+        }
+      }
+
       return description;
     })
     .join("\n");
@@ -108,6 +118,97 @@ function sliceJsonObject(text: string): string | null {
   const end = candidate.lastIndexOf("}");
   if (start === -1 || end === -1 || end <= start) return null;
   return candidate.slice(start, end + 1);
+}
+
+/**
+ * Parse a lenient JSON array of strings from text, with optional ```json fence.
+ */
+export function parseLenientJsonArray(text: string): string[] {
+  const trimmed = text.trim();
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
+  const start = candidate.indexOf("[");
+  const end = candidate.lastIndexOf("]");
+  if (start === -1 || end === -1 || end <= start) return [];
+
+  const jsonStr = candidate.slice(start, end + 1);
+  try {
+    const parsed = JSON.parse(jsonStr);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((item) => typeof item === "string");
+    }
+  } catch {
+    // Lenient parse failure returns empty array
+  }
+  return [];
+}
+
+/**
+ * Enumerate the full subtopic list for a breadth="full" loop group.
+ * Returns up to 8 items, with seeds retained first and deduplicated case-insensitively.
+ * Falls back to seeds on embedded provider or LLM failure.
+ */
+async function enumerateBreadthFull(
+  subject: string,
+  seeds: string[],
+  provider: LlmProvider
+): Promise<string[]> {
+  // Embedded provider or fallback
+  if (provider === "embedded") {
+    return seeds;
+  }
+
+  const seedList = seeds.join(", ");
+  const prompt = `You are an expert educator. For the topic "${subject}" with these key items: ${seedList}
+
+Enumerate ALL essential subtopics and concepts that should be covered when teaching this section comprehensively. Return ONLY a valid JSON array of strings, each being a specific subtopic or concept (3-6 words each). Retain the listed items first, then add new subtopics to reach a complete, well-rounded treatment.
+
+Example format: ["item one", "item two", "new subtopic", "another concept"]`;
+
+  try {
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 1024, responseMimeType: "application/json" },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return seeds; // LLM error: fallback to seeds
+    }
+
+    const parsed = parseLenientJsonArray(result.text);
+    if (parsed.length === 0) {
+      return seeds; // Parse failure: fallback to seeds
+    }
+
+    // Deduplicate case-insensitively, retaining seeds first
+    const seedsLower = new Set(seeds.map((s) => s.toLowerCase()));
+    const deduped: string[] = [...seeds]; // Retain seeds first
+    const addedLower = new Set(seedsLower); // Track what's already added
+
+    for (const item of parsed) {
+      const itemLower = item.toLowerCase();
+      if (!addedLower.has(itemLower)) {
+        deduped.push(item);
+        addedLower.add(itemLower);
+      }
+    }
+
+    // Cap at 8 items
+    return deduped.slice(0, 8);
+  } catch {
+    // Any unexpected error: fallback to seeds
+    return seeds;
+  }
+}
+
+/**
+ * Trim a breadth="core" loop group to at most the first 2 seeds.
+ */
+export function trimBreadthCore(seeds: string[]): string[] {
+  return seeds.slice(0, 2);
 }
 
 /**
@@ -180,6 +281,12 @@ export function scaffoldDeck(
       bullets.push(roleDef?.hint || "");
     }
 
+    // Add deterministic depth prefix for non-standard depths
+    if (bullets.length > 0 && spec.depth !== "standard") {
+      const depthPrefix = spec.depth === "intro" ? "Intro:" : "Challenge:";
+      bullets[0] = `${depthPrefix} ${bullets[0]}`;
+    }
+
     const slide: PptxSlide = {
       title,
       bullets: bullets.slice(0, spec.maxBullets),
@@ -203,13 +310,43 @@ export function scaffoldDeck(
  * Generate a deck from a template using the provided LLM provider.
  * If provider === "embedded", returns a deterministic scaffold.
  * Otherwise calls the LLM with a 2-attempt guarded loop (jsonObjectSlice + JSON.parse).
+ *
+ * Breadth enumeration pre-pass: for each loop group with breadth !== "standard",
+ * expand seeds into the full subtopic list (or trim to core) before slide expansion.
  */
 export async function generateDeckFromTemplate(
   template: DeckTemplate,
   ctx: DeckGenContext,
   provider: LlmProvider
 ): Promise<GeneratedDeck | { error: string }> {
-  const resolved = expandTemplate(template, ctx.loopItems);
+  // Breadth enumeration pre-pass: resolve loop items before expandTemplate
+  const loopItemsResolved = { ...ctx.loopItems };
+
+  for (const loopGroup of template.loops) {
+    if (loopGroup.breadth === "standard") {
+      continue; // No enumeration needed
+    }
+
+    const seeds = loopItemsResolved[loopGroup.id] ?? loopGroup.items ?? [];
+    if (seeds.length === 0) {
+      continue; // Nothing to enumerate
+    }
+
+    const subject = `${loopGroup.label} (${seeds.join(", ")})`;
+
+    let enumerated: string[];
+    if (loopGroup.breadth === "full") {
+      enumerated = await enumerateBreadthFull(subject, seeds, provider);
+    } else if (loopGroup.breadth === "core") {
+      enumerated = trimBreadthCore(seeds);
+    } else {
+      enumerated = seeds; // Unknown breadth: keep seeds
+    }
+
+    loopItemsResolved[loopGroup.id] = enumerated;
+  }
+
+  const resolved = expandTemplate(template, loopItemsResolved);
 
   if (provider === "embedded") {
     return scaffoldDeck(template, resolved, ctx);

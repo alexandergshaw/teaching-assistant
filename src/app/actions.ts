@@ -7843,6 +7843,47 @@ export async function savePresentationFileAction(input: {
   }
 }
 
+/** Save a generic file (docx, mp3, html, etc.) to the Files library via base64.
+ * Mirrors savePresentationFileAction persistence: kind "file", source "workflow",
+ * origin "unattended". Rejects base64 longer than 15MB. Returns file id on success
+ * or error message. */
+export async function saveLibraryFileAction(input: {
+  name: string;
+  base64: string;
+  mimeType: string;
+  fileExt: string;
+  workflowId?: string;
+  workflowName?: string;
+}): Promise<{ id: string } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+
+    if (input.base64.length > 15_000_000) {
+      return { error: "The file is too large to save to the library." };
+    }
+
+    const buffer = Buffer.from(input.base64, 'base64');
+    const blob = new Blob([buffer], { type: input.mimeType });
+    const safeName = (input.name || "File").replace(/[\\/:*?"<>|]+/g, "-").slice(0, 120) || "File";
+    const ext = (input.fileExt || "").toLowerCase().replace(/^\./, "");
+
+    const file = await saveRecordingFile(supabase, user.id, blob, {
+      name: ext ? `${safeName}.${ext}` : safeName,
+      kind: "file",
+      mimeType: input.mimeType,
+      durationSec: null,
+      fileExt: ext,
+      source: "workflow",
+      origin: "unattended",
+      workflowName: input.workflowName ?? null,
+    });
+    return { id: file.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the file." };
+  }
+}
+
 async function generateModuleIntroForAssignment(
   assignmentName: string,
   displayTitle: string,

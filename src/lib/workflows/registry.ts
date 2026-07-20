@@ -174,7 +174,7 @@ import {
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import { extractGithubHandle } from "@/lib/github-usernames";
 import { buildRosterUpdate, mergeCanvasRoster, mergeImportedRoster } from "@/lib/workflows/roster-merge";
-import { nextLectureWeek, resolveWeekTopic, type WeekTopicSource } from "@/lib/workflows/next-week";
+import { nextLectureWeek, resolveWeekTopic, mapLiveModulesForTopic, type WeekTopicSource } from "@/lib/workflows/next-week";
 import { parseIcsEvents } from "@/lib/ics";
 import { parseGradebookCsv, missingFromGradebook, fillGradebookCsv, buildCanvasGradebookCsv, buildMoodleGradebookCsv, detectGradebookFormat } from "@/lib/gradebook-csv";
 import { filterUpcoming, formatDeadlineReport } from "@/lib/workflows/deadline-report";
@@ -677,14 +677,71 @@ async function gatherModuleMaterials(
   return { moduleName, materialsText: chunks.join(""), notes, materialsSource };
 }
 
-// Loads the week's topic using export-first fallback: the course's LMS export
-// first, then the tile's schedule CSV, then its topics list. Returns the resolved
-// topic/summary and source, or a skip with a diagnostic message.
+// Module-level cache for live course modules, keyed by canvasUrl.
+// TTL is ~120 seconds to avoid redundant fetches during multi-week/multi-tile runs.
+interface CachedLiveModules {
+  at: number;
+  modules: Array<{ title: string; position: number; items: Array<{ title: string }> }>;
+}
+const liveModulesCache = new Map<string, CachedLiveModules>();
+const LIVE_MODULES_CACHE_TTL_MS = 120_000;
+
+function getCachedLiveModules(
+  canvasUrl: string
+): Array<{ title: string; position: number; items: Array<{ title: string }> }> | null {
+  const cached = liveModulesCache.get(canvasUrl);
+  const now = Date.now();
+  if (cached && now - cached.at < LIVE_MODULES_CACHE_TTL_MS) {
+    return cached.modules;
+  }
+  liveModulesCache.delete(canvasUrl);
+  return null;
+}
+
+function setCachedLiveModules(
+  canvasUrl: string,
+  modules: Array<{ title: string; position: number; items: Array<{ title: string }> }>
+): void {
+  liveModulesCache.set(canvasUrl, { at: Date.now(), modules });
+}
+
+// Loads the week's topic using live-first fallback: live LMS modules first,
+// then the course's LMS export, then the tile's schedule CSV, then its topics list.
+// Returns the resolved topic/summary and source, or a skip with a diagnostic message.
 async function loadTileWeekTopic(
   tile: Course,
   week: number,
   helpers: StepRunHelpers
 ): Promise<WeekTopicSource | { skip: string }> {
+  // Priority 1: Fetch live LMS modules if canvasUrl is set
+  let liveModules: Array<{ title: string; position: number; items: Array<{ title: string }> }> | null = null;
+  if (tile.canvasUrl) {
+    try {
+      // Check cache first
+      const cached = getCachedLiveModules(tile.canvasUrl);
+      if (cached !== null) {
+        liveModules = cached;
+      } else {
+        // Fetch live modules using the server action
+        const institution = tile.institution ?? helpers.activeInstitution ?? undefined;
+        const result = await listCourseContentAction(tile.canvasUrl, institution);
+        if (!("error" in result) && result.modules && result.modules.length > 0) {
+          // Map Canvas modules to resolveWeekTopic shape
+          liveModules = mapLiveModulesForTopic(result.modules);
+        } else {
+          // Cache negative outcome (error or empty modules) to prevent re-fetching
+          liveModules = [];
+        }
+        setCachedLiveModules(tile.canvasUrl, liveModules);
+      }
+    } catch {
+      // Cache negative outcome (exception) to prevent re-fetching
+      setCachedLiveModules(tile.canvasUrl, []);
+      // Silently fall through to export/CSV/topics on live fetch failure
+    }
+  }
+
+  // Priority 2: Load export modules
   let modules: Array<{ title: string; position: number; items: Array<{ title: string }> }> | null = null;
   if (helpers.loadCourseExport) {
     try {
@@ -706,7 +763,13 @@ async function loadTileWeekTopic(
       // Silently fall through to CSV/topics on export load failure
     }
   }
-  return resolveWeekTopic({ modules, csvData: tile.csvData ?? null, topics: tile.topics ?? null, week });
+  return resolveWeekTopic({
+    liveModules,
+    modules,
+    csvData: tile.csvData ?? null,
+    topics: tile.topics ?? null,
+    week,
+  });
 }
 
 // Resolve the current week from deadline data if available, with fallback to start-date arithmetic.
@@ -4428,7 +4491,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "resolve-week-topic",
     name: "Resolve the week's topic",
     description:
-      "Find what a course teaches in a given week by checking the sources in priority order: the course's LMS export, then the tile's schedule CSV, then its topics list. Exposes which source answered so later steps can branch on it - gate follow-ups on Found? like the rubric fallback steps.",
+      "Find what a course teaches in a given week by checking the sources in priority order: the live LMS, then the course's LMS export, then the tile's schedule CSV, then its topics list. Exposes which source answered so later steps can branch on it - gate follow-ups on Found? like the rubric fallback steps.",
     inputs: [
       {
         key: "hubCourse",
@@ -6888,7 +6951,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "draft-weekly-announcements",
     name: "Draft weekly announcements",
-    description: "For every selected course tile, draft kickoff announcements for the coming weeks - what each week covers and what is due - into Drafts > Messages, one per course per week. Nothing posts until you review. The week's topic comes from the course's LMS export first, then the schedule CSV, then the topics list. All announcements are saved to the course tile and the Files tab.",
+    description: "For every selected course tile, draft kickoff announcements for the coming weeks - what each week covers and what is due - into Drafts > Messages, one per course per week. Nothing posts until you review. The week's topic comes from the live LMS first, then the course's LMS export, then the schedule CSV, then the topics list. All announcements are saved to the course tile and the Files tab.",
     inputs: [
       {
         key: "courses",
@@ -6995,7 +7058,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
               const summary = weekTopic.summary;
               if (w === 0) {
                 sourceNote = weekTopic.source !== "schedule"
-                  ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
+                  ? ` (topic from the ${
+                      weekTopic.source === "live"
+                        ? "live LMS"
+                        : weekTopic.source === "export"
+                          ? "LMS export"
+                          : "tile's topics list"
+                    })`
                   : "";
               }
 
@@ -7061,7 +7130,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "draft-weekly-study-guides",
     name: "Draft weekly study guides",
-    description: "For every selected course tile, build study guides for the coming weeks - overview, key concepts, cited readings from the research library, and self-check questions - saved to the course tile and the Files tab as Word documents. Optionally also create each guide as an UNPUBLISHED Canvas page. The week's topic comes from the course's LMS export first, then the tile's schedule CSV, then its topics list.",
+    description: "For every selected course tile, build study guides for the coming weeks - overview, key concepts, cited readings from the research library, and self-check questions - saved to the course tile and the Files tab as Word documents. Optionally also create each guide as an UNPUBLISHED Canvas page. The week's topic comes from the live LMS first, then the course's LMS export, then the tile's schedule CSV, then its topics list.",
     inputs: [
       {
         key: "courses",
@@ -7194,7 +7263,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
               const summary = weekTopic.summary;
               if (w === 0) {
                 sourceNote = weekTopic.source !== "schedule"
-                  ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
+                  ? ` (topic from the ${
+                      weekTopic.source === "live"
+                        ? "live LMS"
+                        : weekTopic.source === "export"
+                          ? "LMS export"
+                          : "tile's topics list"
+                    })`
                   : "";
               }
 
@@ -12392,7 +12467,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "draft-upcoming-lectures",
     name: "Draft next week's lectures",
     description:
-      "For every selected course tile, detect NEXT week's module and draft a lesson plan, a lecture script, and a slide deck into the tile's materials. The week's topic comes from the course's LMS export first, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note. Slides are styled by a PPT Design template (Classic Lecture by default). All artifacts are saved to the course tile and the Files tab.",
+      "For every selected course tile, detect NEXT week's module and draft a lesson plan, a lecture script, and a slide deck into the tile's materials. The week's topic comes from the live LMS first, then the course's LMS export, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note. Slides are styled by a PPT Design template (Classic Lecture by default). All artifacts are saved to the course tile and the Files tab.",
     inputs: [
       {
         key: "courses",
@@ -12529,7 +12604,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
               const summary = weekTopic.summary;
               if (w === 0) {
                 sourceNote = weekTopic.source !== "schedule"
-                  ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
+                  ? ` (topic from the ${
+                      weekTopic.source === "live"
+                        ? "live LMS"
+                        : weekTopic.source === "export"
+                          ? "LMS export"
+                          : "tile's topics list"
+                    })`
                   : "";
               }
               const objectives = extraNotes
@@ -13845,7 +13926,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "generate-concept-animations",
     name: "Generate concept animations",
     description:
-      "For each selected course tile, detect NEXT week's module and generate a set of animated concept visualizations (self-contained SVG/CSS, no JavaScript) into the tile's materials and the Files tab - optionally also created as unpublished Canvas pages. The week's topic comes from the course's LMS export first, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note.",
+      "For each selected course tile, detect NEXT week's module and generate a set of animated concept visualizations (self-contained SVG/CSS, no JavaScript) into the tile's materials and the Files tab - optionally also created as unpublished Canvas pages. The week's topic comes from the live LMS first, then the course's LMS export, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note.",
     inputs: [
       {
         key: "courses",
@@ -13970,7 +14051,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
               const summary = weekTopic.summary;
               if (w === 0) {
                 sourceNote = weekTopic.source !== "schedule"
-                  ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
+                  ? ` (topic from the ${
+                      weekTopic.source === "live"
+                        ? "live LMS"
+                        : weekTopic.source === "export"
+                          ? "LMS export"
+                          : "tile's topics list"
+                    })`
                   : "";
               }
               const context = extraNotes

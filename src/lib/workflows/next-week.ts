@@ -4,23 +4,63 @@ import { csvToSchedule } from "@/lib/workflows/types";
 export interface WeekTopicSource {
   topic: string;
   summary: string;
-  source: "export" | "schedule" | "topics";
+  source: "live" | "export" | "schedule" | "topics";
 }
 
 /**
- * Resolve a week's topic using a three-tier fallback: LMS export modules first,
- * then schedule CSV, then topics list. Returns the resolved topic/summary and
- * source, or a skip with a diagnostic message naming what each source offered.
+ * Map Canvas modules to the shape expected by resolveWeekTopic.
+ * Extracts name -> title, position, and first 6 item titles.
+ * Returns the mapped modules or an empty array if input is empty/invalid.
+ */
+export function mapLiveModulesForTopic(
+  canvasModules: Array<{ name: string; position: number; items: Array<{ title: string }> }>
+): Array<{ title: string; position: number; items: Array<{ title: string }> }> {
+  return canvasModules.map((mod) => ({
+    title: mod.name,
+    position: mod.position,
+    items: (mod.items || []).slice(0, 6).map((item) => ({ title: item.title || "" })),
+  }));
+}
+
+/**
+ * Resolve a week's topic using a four-tier fallback: live LMS modules first,
+ * then LMS export modules, then schedule CSV, then topics list. Returns the
+ * resolved topic/summary and source, or a skip with a diagnostic message
+ * naming what each source offered.
  */
 export function resolveWeekTopic(input: {
+  liveModules?: Array<{ title: string; position: number; items: Array<{ title: string }> }> | null;
   modules: Array<{ title: string; position: number; items: Array<{ title: string }> }> | null;
   csvData: string | null;
   topics: string | null;
   week: number;
 }): WeekTopicSource | { skip: string } {
-  const { modules, csvData, topics, week } = input;
+  const { liveModules, modules, csvData, topics, week } = input;
 
-  // Priority 1: EXPORT MODULES - find module matching /(?:week|module)\s*(\d+)/i with captured number === week
+  // Priority 1: LIVE MODULES - find module matching /(?:week|module)\s*(\d+)/i with captured number === week
+  let liveMatchedEmptyRemainder = false;
+  if (liveModules) {
+    for (const mod of liveModules) {
+      const m = mod.title.match(/(?:week|module)\s*(\d+)/i);
+      if (m) {
+        const moduleNum = Number(m[1]);
+        if (moduleNum === week) {
+          // Found matching module - strip prefix and separator
+          const remainder = mod.title.slice(m.index! + m[0].length).replace(/^[:|\s\-]+/, "").trim();
+          if (remainder) {
+            // Non-empty remainder - resolve it
+            const summary = mod.items.slice(0, 6).map((item) => item.title).join("; ");
+            return { topic: remainder, summary, source: "live" };
+          }
+          // Empty remainder - fall through to export
+          liveMatchedEmptyRemainder = true;
+          break;
+        }
+      }
+    }
+  }
+
+  // Priority 2: EXPORT MODULES - find module matching /(?:week|module)\s*(\d+)/i with captured number === week
   let matchedEmptyRemainder = false;
   if (modules) {
     for (const mod of modules) {
@@ -43,13 +83,13 @@ export function resolveWeekTopic(input: {
     }
   }
 
-  // Priority 2: SCHEDULE CSV - find row with week === input.week and non-empty topic
+  // Priority 3: SCHEDULE CSV - find row with week === input.week and non-empty topic
   const schedule = csvToSchedule(csvData ?? "");
   const csvRow = schedule.find((row) => row.week === week);
   if (csvRow && csvRow.topic.trim()) {
     return { topic: csvRow.topic.trim(), summary: csvRow.summary ?? "", source: "schedule" };
   }
-  // Priority 3: TOPICS LIST - split on newlines, get line[week-1] if non-empty
+  // Priority 4: TOPICS LIST - split on newlines, get line[week-1] if non-empty
   if (topics) {
     const lines = topics.split("\n");
     if (week - 1 < lines.length) {
@@ -60,10 +100,31 @@ export function resolveWeekTopic(input: {
     }
   }
 
-  // Priority 4: All sources exhausted - build diagnostic message
+  // Priority 5: All sources exhausted - build diagnostic message
   const fragments: string[] = [];
 
-  // Module fragment
+  // Live modules fragment (only if liveModules were provided)
+  if (liveModules) {
+    if (liveMatchedEmptyRemainder) {
+      fragments.push(`module ${week}'s live title has no topic text`);
+    } else {
+      const foundNumbers = liveModules
+        .map((mod) => {
+          const m = mod.title.match(/(?:week|module)\s*(\d+)/i);
+          return m ? Number(m[1]) : null;
+        })
+        .filter((n): n is number => n !== null);
+      if (foundNumbers.length === 0) {
+        fragments.push("live LMS has modules none numbered");
+      } else {
+        const minNum = Math.min(...foundNumbers);
+        const maxNum = Math.max(...foundNumbers);
+        fragments.push(`live LMS has modules ${minNum}-${maxNum}`);
+      }
+    }
+  }
+
+  // Export module fragment
   if (!modules) {
     fragments.push("no LMS export on the tile");
   } else {

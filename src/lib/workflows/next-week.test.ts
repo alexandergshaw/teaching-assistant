@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextLectureWeek, resolveWeekTopic } from "./next-week";
+import { nextLectureWeek, resolveWeekTopic, mapLiveModulesForTopic } from "./next-week";
 
 describe("nextLectureWeek", () => {
   // Fixed reference: 2024-07-18 00:00:00 UTC
@@ -269,7 +269,126 @@ describe("nextLectureWeek", () => {
 });
 
 describe("resolveWeekTopic", () => {
-  describe("Priority 1: Export modules", () => {
+  describe("Priority 1: Live modules", () => {
+    it("resolves week from live module with 'Week N' format", () => {
+      const liveModules = [
+        { title: "Week 1: Live Introduction", position: 1, items: [{ title: "Slides" }, { title: "Notes" }] },
+        { title: "Week 2: Live Fundamentals", position: 2, items: [{ title: "Video" }] },
+      ];
+      const result = resolveWeekTopic({ liveModules, modules: null, csvData: null, topics: null, week: 1 });
+      expect(result).toEqual({
+        topic: "Live Introduction",
+        summary: "Slides; Notes",
+        source: "live",
+      });
+    });
+
+    it("prefers live module over export module", () => {
+      const liveModules = [{ title: "Week 1: From Live", position: 1, items: [] }];
+      const modules = [{ title: "Week 1: From Export", position: 1, items: [] }];
+      const result = resolveWeekTopic({ liveModules, modules, csvData: null, topics: null, week: 1 });
+      expect(result).toEqual({ topic: "From Live", summary: "", source: "live" });
+    });
+
+    it("resolves week from live module with 'Module N' format (case insensitive)", () => {
+      const liveModules = [
+        { title: "module 1: Basics", position: 1, items: [{ title: "Content A" }] },
+        { title: "Module 2: Advanced", position: 2, items: [{ title: "Content B" }] },
+      ];
+      const result = resolveWeekTopic({ liveModules, modules: null, csvData: null, topics: null, week: 2 });
+      expect(result).toEqual({ topic: "Advanced", summary: "Content B", source: "live" });
+    });
+
+    it("strips prefix separators in live modules: colon, dash, pipe, whitespace", () => {
+      const liveModules = [
+        { title: "Week 1: Topic1", position: 1, items: [] },
+        { title: "Week 2- Topic2", position: 2, items: [] },
+        { title: "Week 3| Topic3", position: 3, items: [] },
+        { title: "Week 4  Topic4", position: 4, items: [] },
+      ];
+      expect(resolveWeekTopic({ liveModules, modules: null, csvData: null, topics: null, week: 1 })).toEqual({
+        topic: "Topic1",
+        summary: "",
+        source: "live",
+      });
+      expect(resolveWeekTopic({ liveModules, modules: null, csvData: null, topics: null, week: 2 })).toEqual({
+        topic: "Topic2",
+        summary: "",
+        source: "live",
+      });
+    });
+
+    it("includes up to 6 item titles in live summary", () => {
+      const liveModules = [
+        {
+          title: "Week 1: Topic",
+          position: 1,
+          items: [
+            { title: "Item 1" },
+            { title: "Item 2" },
+            { title: "Item 3" },
+            { title: "Item 4" },
+            { title: "Item 5" },
+            { title: "Item 6" },
+            { title: "Item 7" },
+          ],
+        },
+      ];
+      const result = resolveWeekTopic({ liveModules, modules: null, csvData: null, topics: null, week: 1 });
+      expect(result).toEqual({
+        topic: "Topic",
+        summary: "Item 1; Item 2; Item 3; Item 4; Item 5; Item 6",
+        source: "live",
+      });
+    });
+
+    it("falls through when live module remainder is empty (to export)", () => {
+      const liveModules = [{ title: "Week 1:", position: 1, items: [] }];
+      const modules = [{ title: "Week 1: From Export", position: 1, items: [] }];
+      const result = resolveWeekTopic({ liveModules, modules, csvData: null, topics: null, week: 1 });
+      expect(result).toEqual({ topic: "From Export", summary: "", source: "export" });
+    });
+
+    it("falls through when live modules don't have matching week (to export)", () => {
+      const liveModules = [{ title: "Week 2: Topic", position: 1, items: [] }];
+      const modules = [{ title: "Week 1: From Export", position: 1, items: [] }];
+      const result = resolveWeekTopic({ liveModules, modules, csvData: null, topics: null, week: 1 });
+      expect(result).toEqual({ topic: "From Export", summary: "", source: "export" });
+    });
+
+    it("reports matched but empty live remainder in skip diagnostic", () => {
+      const liveModules = [{ title: "Week 6:", position: 1, items: [] }];
+      const result = resolveWeekTopic({
+        liveModules,
+        modules: null,
+        csvData: null,
+        topics: null,
+        week: 6,
+      }) as { skip: string };
+      expect(result.skip).toContain("week 6 not found -");
+      expect(result.skip).toContain("module 6's live title has no topic text");
+    });
+
+    it("handles absent liveModules (backward compatibility)", () => {
+      const modules = [{ title: "Week 1: From Export", position: 1, items: [] }];
+      const result = resolveWeekTopic({
+        liveModules: undefined,
+        modules,
+        csvData: null,
+        topics: null,
+        week: 1,
+      });
+      expect(result).toEqual({ topic: "From Export", summary: "", source: "export" });
+    });
+
+    it("handles null liveModules (backward compatibility)", () => {
+      const modules = [{ title: "Week 1: From Export", position: 1, items: [] }];
+      const result = resolveWeekTopic({ liveModules: null, modules, csvData: null, topics: null, week: 1 });
+      expect(result).toEqual({ topic: "From Export", summary: "", source: "export" });
+    });
+  });
+
+  describe("Priority 2: Export modules", () => {
     it("resolves week from export module with 'Week N' format", () => {
       const modules = [
         { title: "Week 1: Introduction", position: 1, items: [{ title: "Slides" }, { title: "Notes" }] },
@@ -364,7 +483,7 @@ describe("resolveWeekTopic", () => {
       expect(result.skip).toContain("module 6's title has no topic text");
       expect(result.skip).toContain("no schedule CSV");
       expect(result.skip).toContain("no topics list");
-      // Verify all three fragments are present
+      // Verify all three fragments are present (no liveModules provided)
       const fragments = result.skip.split(" - ")[1].split(", ");
       expect(fragments.length).toBe(3);
     });
@@ -379,7 +498,7 @@ describe("resolveWeekTopic", () => {
     });
   });
 
-  describe("Priority 2: Schedule CSV", () => {
+  describe("Priority 3: Schedule CSV", () => {
     it("resolves week from schedule CSV when no export module matches", () => {
       const csvData = "Week,Topic,Summary\n1,CSV Topic,CSV Summary";
       const result = resolveWeekTopic({
@@ -427,7 +546,7 @@ describe("resolveWeekTopic", () => {
     });
   });
 
-  describe("Priority 3: Topics list", () => {
+  describe("Priority 4: Topics list", () => {
     it("resolves week from topics list when no export or CSV", () => {
       const topics = "Week 1 Topic\nWeek 2 Topic\nWeek 3 Topic";
       const result = resolveWeekTopic({
@@ -470,8 +589,8 @@ describe("resolveWeekTopic", () => {
     });
   });
 
-  describe("Priority 4: Skip with diagnostic", () => {
-    it("returns full three-fragment diagnostic when all sources are absent", () => {
+  describe("Priority 5: Skip with diagnostic", () => {
+    it("returns full three-fragment diagnostic when all sources are absent (no liveModules provided)", () => {
       const result = resolveWeekTopic({
         modules: null,
         csvData: null,
@@ -561,23 +680,26 @@ describe("resolveWeekTopic", () => {
       expect(result.skip).toContain("the topics list has 3 line(s)");
     });
 
-    it("includes all three fragments in a single diagnostic", () => {
+    it("includes all four fragments in a single diagnostic when all sources provided but exhausted", () => {
+      const liveModules = [{ title: "Module 2: T2", position: 1, items: [] }];
       const modules = [{ title: "Module 1: T1", position: 1, items: [] }];
       const csvData = "Week,Topic\n1,T1";
       const topics = "T1\nT2";
       const result = resolveWeekTopic({
+        liveModules,
         modules,
         csvData,
         topics,
         week: 5,
       }) as { skip: string };
       expect(result.skip).toContain("week 5 not found -");
+      expect(result.skip).toContain("live LMS has modules 2");
       expect(result.skip).toContain("LMS export has modules 1");
       expect(result.skip).toContain("the schedule CSV covers weeks 1-1");
       expect(result.skip).toContain("the topics list has 2 line(s)");
-      // Verify all three are joined with ", "
+      // Verify all four are joined with ", "
       const fragments = result.skip.split(" - ")[1].split(", ");
-      expect(fragments.length).toBe(3);
+      expect(fragments.length).toBe(4);
     });
   });
 
@@ -699,5 +821,92 @@ describe("resolveWeekTopic", () => {
       });
       expect("skip" in withoutTopics).toBe(true);
     });
+  });
+});
+
+describe("mapLiveModulesForTopic", () => {
+  it("maps Canvas modules to resolveWeekTopic shape", () => {
+    const canvasModules = [
+      {
+        name: "Week 1: Introduction",
+        position: 1,
+        items: [{ title: "Slides" }, { title: "Notes" }, { title: "Recording" }],
+      },
+      {
+        name: "Week 2: Fundamentals",
+        position: 2,
+        items: [{ title: "Video" }],
+      },
+    ];
+    const result = mapLiveModulesForTopic(canvasModules);
+    expect(result).toEqual([
+      {
+        title: "Week 1: Introduction",
+        position: 1,
+        items: [{ title: "Slides" }, { title: "Notes" }, { title: "Recording" }],
+      },
+      {
+        title: "Week 2: Fundamentals",
+        position: 2,
+        items: [{ title: "Video" }],
+      },
+    ]);
+  });
+
+  it("limits items to first 6", () => {
+    const canvasModules = [
+      {
+        name: "Week 1: Topic",
+        position: 1,
+        items: [
+          { title: "Item 1" },
+          { title: "Item 2" },
+          { title: "Item 3" },
+          { title: "Item 4" },
+          { title: "Item 5" },
+          { title: "Item 6" },
+          { title: "Item 7" },
+          { title: "Item 8" },
+        ],
+      },
+    ];
+    const result = mapLiveModulesForTopic(canvasModules);
+    expect(result[0].items).toHaveLength(6);
+    expect(result[0].items.map((i) => i.title)).toEqual(["Item 1", "Item 2", "Item 3", "Item 4", "Item 5", "Item 6"]);
+  });
+
+  it("handles empty input", () => {
+    const result = mapLiveModulesForTopic([]);
+    expect(result).toEqual([]);
+  });
+
+  it("handles modules with no items", () => {
+    const canvasModules = [
+      {
+        name: "Week 1: Topic",
+        position: 1,
+        items: [],
+      },
+    ];
+    const result = mapLiveModulesForTopic(canvasModules);
+    expect(result).toEqual([
+      {
+        title: "Week 1: Topic",
+        position: 1,
+        items: [],
+      },
+    ]);
+  });
+
+  it("handles modules with missing item titles", () => {
+    const canvasModules = [
+      {
+        name: "Week 1: Topic",
+        position: 1,
+        items: [{ title: "Item 1" }, { title: "" }],
+      },
+    ];
+    const result = mapLiveModulesForTopic(canvasModules);
+    expect(result[0].items).toEqual([{ title: "Item 1" }, { title: "" }]);
   });
 });

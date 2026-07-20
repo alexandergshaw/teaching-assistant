@@ -411,6 +411,7 @@ import {
 } from "@/lib/grading-dismissals";
 import { humanizeAssignmentName, stripAssignmentSlugPrefix, looksLikeAssignmentSlug } from "@/lib/assignment-name";
 import { assignWeekNumbers, renumberWeekLabel } from "@/lib/week-numbering";
+import { splitNarrationText } from "@/lib/narration-chunks";
 import type JSZip from "jszip";
 
 // Standard submission guidance appended to every repo-generated assignment instruction
@@ -4550,6 +4551,27 @@ export async function listElevenVoicesAction(): Promise<
 }
 
 /**
+ * Internal helper: make one ElevenLabs text-to-speech call and return the audio buffer.
+ * Throws on !res.ok with the formatted error text.
+ */
+async function synthesizeSegment(
+  key: string,
+  voiceId: string,
+  text: string
+): Promise<Buffer> {
+  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    method: "POST",
+    headers: { "xi-api-key": key, "Content-Type": "application/json" },
+    body: JSON.stringify({ text, model_id: "eleven_multilingual_v2", voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Voice service error (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/**
  * Synthesize one narration segment with ElevenLabs and return it as base64
  * MP3. Called per slide so responses stay small. Uses ELEVENLABS_API_KEY and
  * optional ELEVENLABS_VOICE_ID (defaults to the standard "Rachel" voice until
@@ -4567,17 +4589,47 @@ export async function synthesizeNarrationAction(
     if (!t) return { error: "Nothing to synthesize." };
     if (t.length > 4000) return { error: "That segment is too long for one synthesis call." };
     const voiceId = voiceIdOverride?.trim() || process.env.ELEVENLABS_VOICE_ID?.trim() || "21m00Tcm4TlvDq8ikWAM";
-    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-      method: "POST",
-      headers: { "xi-api-key": key, "Content-Type": "application/json" },
-      body: JSON.stringify({ text: t, model_id: "eleven_multilingual_v2", voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
-    });
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      return { error: `Voice service error (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : ""}` };
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
+    const buf = await synthesizeSegment(key, voiceId, t);
     return { base64: buf.toString("base64"), mimeType: "audio/mpeg" };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not synthesize audio." };
+  }
+}
+
+/**
+ * Synthesize a long narration script by automatically chunking it into segments
+ * (sentence-safe splits, max 3800 chars each) and concatenating the audio.
+ * Handles scripts up to ~38k chars (about 10 segments, 25 minutes of speech).
+ * Returns concatenated MPEG audio frames (standard players read as one stream).
+ */
+export async function synthesizeLongNarrationAction(
+  text: string,
+  voiceIdOverride?: string
+): Promise<{ base64: string; mimeType: string; segments: number } | { error: string }> {
+  try {
+    await requireOwner();
+    const key = process.env.ELEVENLABS_API_KEY?.trim();
+    if (!key) return { error: "Voice generation is not configured. Set ELEVENLABS_API_KEY (and ELEVENLABS_VOICE_ID for your cloned voice)." };
+    const t = text.trim();
+    if (!t) return { error: "Nothing to synthesize." };
+    // 10-chunk ceiling keeps the call inside the platform's 60s function cap.
+    if (t.length > 38_000) return { error: "The script is too long to narrate (about 25 minutes of speech). Reduce the script minutes." };
+    const voiceId = voiceIdOverride?.trim() || process.env.ELEVENLABS_VOICE_ID?.trim() || "21m00Tcm4TlvDq8ikWAM";
+    const chunks = splitNarrationText(t);
+    if (chunks.length > 10) return { error: "The script is too long to narrate (about 25 minutes of speech). Reduce the script minutes." };
+    const buffers: Buffer[] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      try {
+        const buf = await synthesizeSegment(key, voiceId, chunks[i]);
+        buffers.push(buf);
+      } catch (err) {
+        return { error: `Segment ${i + 1} of ${chunks.length}: ${err instanceof Error ? err.message : "Could not synthesize audio."}` };
+      }
+    }
+    // ElevenLabs returns raw MPEG audio frames; byte concatenation of consecutive
+    // segments plays as one continuous stream in standard players.
+    const payload = Buffer.concat(buffers);
+    return { base64: payload.toString("base64"), mimeType: "audio/mpeg", segments: chunks.length };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not synthesize audio." };
   }

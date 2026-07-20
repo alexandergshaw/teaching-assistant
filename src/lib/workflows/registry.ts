@@ -98,7 +98,7 @@ import {
   generateLectureScriptAction,
   reviseLectureSlidesAction,
   extractPptxSlidesAction,
-  synthesizeNarrationAction,
+  synthesizeLongNarrationAction,
   generateAvatarVideoAction,
   getAvatarVideoStatusAction,
   draftAssignmentDescriptionAction,
@@ -8480,7 +8480,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "synthesize-narration",
     name: "Synthesize narration audio",
-    description: "Turn a script into narration audio with the in-house voice, and save it to a course's materials.",
+    description: "Turn a script into narration audio with the in-house voice, and save it to a course's materials. Long scripts are synthesized in segments automatically.",
     inputs: [
       {
         key: "text",
@@ -8518,7 +8518,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       if (!text) throw new Error("Provide the script to synthesize.");
       const voiceId = String(values.voiceId ?? "").trim() || undefined;
       onProgress("Synthesizing narration...");
-      const r = await synthesizeNarrationAction(text, voiceId);
+      const r = await synthesizeLongNarrationAction(text, voiceId);
       if ("error" in r) throw new Error(r.error);
       const blob = base64ToBlob(r.base64, r.mimeType);
       const hubCourse = String(values.hubCourse ?? "").trim();
@@ -12004,7 +12004,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           if (tilePrepared && String(values.includeNarration ?? "") === "1" && scriptResult) {
             try {
               onProgress(`Synthesizing narration for ${tile.name}...`);
-              const narResult = await synthesizeNarrationAction(scriptResult.script, undefined);
+              const narResult = await synthesizeLongNarrationAction(scriptResult.script, undefined);
               if ("error" in narResult) {
                 reportLines.push(
                   `${tile.name}: narration synthesis failed - ${narResult.error}`

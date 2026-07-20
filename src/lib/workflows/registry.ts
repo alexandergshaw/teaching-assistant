@@ -209,8 +209,8 @@ import { scheduleToCsv, csvToSchedule } from "@/lib/workflows/types";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
 import type { RubricCriterionInput, DueDateUpdate } from "@/lib/canvas-modules";
 import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
-import { planCartridgeModules, currentCourseWeek, courseProgressStatus, currentWeekFromDeadlines } from "@/lib/week-numbering";
-import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
+import { planCartridgeModules, currentCourseWeek, courseProgressStatus, currentWeekFromDeadlines, findModuleForWeek } from "@/lib/week-numbering";
+import { parseLmsModuleValue, liveModuleValue, exportModuleValue } from "@/lib/workflows/module-value";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
 import { buildGradingReviewRows, countPostableResults, stripGradingRunEntriesForDraft } from "@/lib/workflows/grading-review-rows";
 
@@ -520,10 +520,12 @@ export interface StepDefinition {
 
 /**
  * Gather the text a lecture-shaped step feeds the model, trying sources in
- * order: the live LMS module (page bodies + file previews + item titles),
- * then on live failure or an export-sourced module pick the course's LMS
- * export tile (item titles + syllabus text), then the tile's own
- * topics/description. Content gathering never hard-fails the step.
+ * order: the live LMS module (page bodies + file previews + assignment/quiz/discussion
+ * descriptions when available + item titles), then on live failure or an export-sourced
+ * module pick the course's LMS export tile (item titles + syllabus text), then the tile's
+ * own topics/description. Assignment/discussion descriptions are fetched for up to 6 items
+ * per module; beyond that, only titles are included. Content gathering never hard-fails
+ * the step.
  */
 async function gatherModuleMaterials(
   tile: Course,
@@ -534,6 +536,7 @@ async function gatherModuleMaterials(
   // Materials cap at ~20000 chars so the deck prompt stays inside the
   // action's own truncation budget; going over surfaces as a note.
   const MATERIALS_CAP = 20000;
+  const DESCRIPTION_FETCH_LIMIT = 6;
   const chunks: string[] = [];
   const notes: string[] = [];
   let total = 0;
@@ -608,6 +611,15 @@ async function gatherModuleMaterials(
       moduleName = courseModule.name;
       materialsSource = `Materials read from LMS module "${courseModule.name}"`;
 
+      // Collect Assignment/Discussion items that support description fetching
+      let descriptionsFetched = 0;
+      const assignmentLikeItems = courseModule.items.filter(
+        (item) =>
+          (item.type === "Assignment" || item.type === "Discussion") &&
+          item.htmlUrl
+      );
+      const hasMoreDescriptions = assignmentLikeItems.length > DESCRIPTION_FETCH_LIMIT;
+
       for (const item of courseModule.items) {
         // Fail-forward per item: unreadable materials become notes.
         try {
@@ -630,11 +642,60 @@ async function gatherModuleMaterials(
               push(`# ${item.title}\n${f.preview.text}\n\n`);
             }
           } else if (
-            item.type === "Assignment" ||
-            item.type === "Quiz" ||
-            item.type === "Discussion"
+            (item.type === "Assignment" || item.type === "Discussion") &&
+            item.htmlUrl &&
+            descriptionsFetched < DESCRIPTION_FETCH_LIMIT
           ) {
-            push(`${item.type}: ${item.title}\n`);
+            // Fetch description for Assignment/Discussion items (up to 6)
+            descriptionsFetched++;
+            const meta = await fetchCanvasMetaAction(item.htmlUrl);
+            if ("error" in meta) {
+              throw new Error(meta.error);
+            }
+            const description = meta.description.trim();
+
+            // Format the header with points and due date when available
+            let headerLine = `${item.type}: ${item.title}`;
+            const suffixes: string[] = [];
+            if (typeof item.pointsPossible === "number" && item.pointsPossible > 0) {
+              suffixes.push(`${item.pointsPossible} point${item.pointsPossible === 1 ? "" : "s"}`);
+            }
+            if (item.dueAt) {
+              const dueDate = new Date(item.dueAt);
+              const dateStr = dueDate.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+              });
+              suffixes.push(`due ${dateStr}`);
+            }
+            if (suffixes.length > 0) {
+              headerLine += ` (${suffixes.join(", ")})`;
+            }
+            push(`${headerLine}\n`);
+
+            if (description) {
+              push(`${description}\n\n`);
+            }
+          } else if (item.type === "Assignment" || item.type === "Quiz" || item.type === "Discussion") {
+            // Title-only line for Quiz items (fetchCanvasMetaAction doesn't support them)
+            // or Assignment/Discussion items beyond the fetch limit
+            let headerLine = `${item.type}: ${item.title}`;
+            const suffixes: string[] = [];
+            if (typeof item.pointsPossible === "number" && item.pointsPossible > 0) {
+              suffixes.push(`${item.pointsPossible} point${item.pointsPossible === 1 ? "" : "s"}`);
+            }
+            if (item.dueAt) {
+              const dueDate = new Date(item.dueAt);
+              const dateStr = dueDate.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+              });
+              suffixes.push(`due ${dateStr}`);
+            }
+            if (suffixes.length > 0) {
+              headerLine += ` (${suffixes.join(", ")})`;
+            }
+            push(`${headerLine}\n`);
           }
         } catch (err) {
           notes.push(
@@ -643,6 +704,12 @@ async function gatherModuleMaterials(
             }`
           );
         }
+      }
+
+      if (hasMoreDescriptions) {
+        notes.push(
+          `further assignment descriptions omitted (${assignmentLikeItems.length - DESCRIPTION_FETCH_LIMIT} more)`
+        );
       }
       gathered = true;
     } catch (err) {
@@ -681,14 +748,14 @@ async function gatherModuleMaterials(
 // TTL is ~120 seconds to avoid redundant fetches during multi-week/multi-tile runs.
 interface CachedLiveModules {
   at: number;
-  modules: Array<{ title: string; position: number; items: Array<{ title: string }> }>;
+  modules: Array<{ id: number; title: string; position: number; items: Array<{ title: string }> }>;
 }
 const liveModulesCache = new Map<string, CachedLiveModules>();
 const LIVE_MODULES_CACHE_TTL_MS = 120_000;
 
 function getCachedLiveModules(
   canvasUrl: string
-): Array<{ title: string; position: number; items: Array<{ title: string }> }> | null {
+): Array<{ id: number; title: string; position: number; items: Array<{ title: string }> }> | null {
   const cached = liveModulesCache.get(canvasUrl);
   const now = Date.now();
   if (cached && now - cached.at < LIVE_MODULES_CACHE_TTL_MS) {
@@ -700,7 +767,7 @@ function getCachedLiveModules(
 
 function setCachedLiveModules(
   canvasUrl: string,
-  modules: Array<{ title: string; position: number; items: Array<{ title: string }> }>
+  modules: Array<{ id: number; title: string; position: number; items: Array<{ title: string }> }>
 ): void {
   liveModulesCache.set(canvasUrl, { at: Date.now(), modules });
 }
@@ -714,7 +781,7 @@ async function loadTileWeekTopic(
   helpers: StepRunHelpers
 ): Promise<WeekTopicSource | { skip: string }> {
   // Priority 1: Fetch live LMS modules if canvasUrl is set
-  let liveModules: Array<{ title: string; position: number; items: Array<{ title: string }> }> | null = null;
+  let liveModules: Array<{ id: number; title: string; position: number; items: Array<{ title: string }> }> | null = null;
   if (tile.canvasUrl) {
     try {
       // Check cache first
@@ -4633,7 +4700,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "prepare-lecture",
     name: "Prepare lecture",
     description:
-      "Build a lecture deck from a module's materials and save it to the course tile and the Files tab. Pauses for announcement review unless Autonomous is on; in Autonomous mode with no course tile it prepares a lecture for every tile. Slides are styled by a PPT Design template (Classic Lecture by default).",
+      "Build a lecture deck from a module's materials (page bodies, files, assignment/homework descriptions, and item titles) and save it to the course tile and the Files tab. Pauses for announcement review unless Autonomous is on; in Autonomous mode with no course tile it prepares a lecture for every tile. Slides are styled by a PPT Design template (Classic Lecture by default).",
     inputs: [
       {
         key: "hubCourse",
@@ -12467,7 +12534,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     type: "draft-upcoming-lectures",
     name: "Draft next week's lectures",
     description:
-      "For every selected course tile, detect NEXT week's module and draft a lesson plan, a lecture script, and a slide deck into the tile's materials. The week's topic comes from the live LMS first, then the course's LMS export, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note. Slides are styled by a PPT Design template (Classic Lecture by default). All artifacts are saved to the course tile and the Files tab.",
+      "For every selected course tile, detect NEXT week's module and draft a lesson plan, a lecture script, and a slide deck into the tile's materials, grounded in everything in the week's module (topics, objectives, homework/assignment descriptions, pages, files). The week's topic comes from the live LMS first, then the course's LMS export, then the tile's schedule CSV, then its topics list. Courses that are finished, not yet near their start, or where no topic is found are skipped with a note. Slides are styled by a PPT Design template (Classic Lecture by default). All artifacts are saved to the course tile and the Files tab.",
     inputs: [
       {
         key: "courses",
@@ -12578,6 +12645,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           let sourceNote = "skip" in weekResolution ? "" : (weekResolution.source === "deadlines" ? " (from module deadlines)" : "");
           let tileSuccessCount = 0;
           let tileEndWeek = startWeek;
+          let tileGroundedInModules = false;
           const sanitize = (s: string) =>
             s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
 
@@ -12613,9 +12681,77 @@ export const STEP_REGISTRY: StepDefinition[] = [
                     })`
                   : "";
               }
-              const objectives = extraNotes
+
+              // Try to gather module materials to ground the lecture in the week's full content
+              let modulesText = "";
+              let groundedInModules = false;
+              try {
+                // Priority 1: Try live modules first
+                type ModuleItem = { title?: string | null; name?: string | null; position?: number; id?: number };
+                let moduleFound: ModuleItem | null = null;
+                if (tile.canvasUrl) {
+                  const cached = getCachedLiveModules(tile.canvasUrl);
+                  if (cached) {
+                    moduleFound = findModuleForWeek(cached, targetWeek);
+                  }
+                }
+
+                // Priority 2: Try export modules if live didn't work
+                if (!moduleFound && helpers.loadCourseExport) {
+                  try {
+                    const exported = await helpers.loadCourseExport(tile.id);
+                    if (exported && typeof exported === "object" && "modules" in exported) {
+                      const exportedModules = (exported as { modules: unknown[] }).modules.map((m: unknown) => {
+                        const mod = m as { name: string; position: number; items: unknown[] };
+                        return {
+                          title: mod.name,
+                          name: mod.name,
+                          position: mod.position,
+                        };
+                      });
+                      moduleFound = findModuleForWeek(exportedModules, targetWeek);
+                    }
+                  } catch {
+                    // Silent fallback
+                  }
+                }
+
+                // If module found, gather its materials
+                if (moduleFound) {
+                  const moduleTitle = moduleFound.title ?? moduleFound.name ?? "";
+                  let moduleId = "";
+                  if (tile.canvasUrl && moduleFound.id) {
+                    // Live module
+                    moduleId = liveModuleValue(moduleFound.id, moduleTitle);
+                  } else {
+                    // Export module
+                    moduleId = exportModuleValue(moduleTitle);
+                  }
+
+                  try {
+                    const gathered = await gatherModuleMaterials(tile, moduleId, helpers, onProgress);
+                    if (gathered.materialsText.trim()) {
+                      // Cap module materials at 12000 chars as per spec
+                      modulesText = gathered.materialsText.trim().slice(0, 12000);
+                      if (modulesText.length < gathered.materialsText.length) {
+                        modulesText += "\n(module materials truncated)";
+                      }
+                      groundedInModules = true;
+                    }
+                  } catch {
+                    // Silent fallback - proceed without module materials
+                  }
+                }
+              } catch {
+                // Silent fallback - proceed without module materials
+              }
+
+              const baseObjectives = extraNotes
                 ? `Topic: ${topic}\n${summary}\n${extraNotes}`
                 : `Topic: ${topic}\n${summary}`;
+              const objectives = modulesText
+                ? `${baseObjectives}\n\nModule materials (topics, objectives, homework, pages):\n${modulesText}`
+                : baseObjectives;
 
               let tilePrepared = false;
               let scriptResult: { script: string } | undefined;
@@ -12683,7 +12819,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
                 onProgress(`Generating lesson plan for ${tile.name}, week ${targetWeek}...`);
                 const planResult = await generateLessonPlanAction(
                   objectives,
-                  String(extraNotes ?? ""),
+                  modulesText || String(extraNotes ?? ""),
                   [],
                   undefined,
                   undefined,
@@ -12749,9 +12885,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
               try {
                 onProgress(`Generating slides for ${tile.name}, week ${targetWeek}...`);
-                const slidePrompt = `Create a lecture slide deck for week ${targetWeek} of ${tile.name} on "${topic}". ${
-                  summary
-                }${extraNotes ? ` ${extraNotes}` : ""}`;
+                const slidePrompt = modulesText
+                  ? `Create a lecture slide deck for week ${targetWeek} of ${tile.name} on "${topic}". ${summary}${extraNotes ? ` ${extraNotes}` : ""}\n\nModule materials (topics, objectives, homework, pages):\n${modulesText}`
+                  : `Create a lecture slide deck for week ${targetWeek} of ${tile.name} on "${topic}". ${summary}${extraNotes ? ` ${extraNotes}` : ""}`;
                 const slideResult = await generateSlidesAction(slidePrompt, helpers.provider);
                 if ("error" in slideResult) {
                   throw new Error(slideResult.error);
@@ -12851,6 +12987,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
                 prepared++;
                 tileSuccessCount++;
                 tileEndWeek = targetWeek;
+                if (groundedInModules) {
+                  tileGroundedInModules = true;
+                }
               }
             } catch (err) {
               reportLines.push(
@@ -12863,7 +13002,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
           // least one week actually produced artifacts, and report the real
           // last-prepared week (the loop may stop early at course end).
           if (tileSuccessCount > 0) {
-            reportLines.push(`${tile.name}: prepared ${tileEndWeek > startWeek ? `weeks ${startWeek}-${tileEndWeek}` : `week ${startWeek}`}${sourceNote}`);
+            const groundingNote = tileGroundedInModules ? " (grounded in module materials)" : "";
+            reportLines.push(`${tile.name}: prepared ${tileEndWeek > startWeek ? `weeks ${startWeek}-${tileEndWeek}` : `week ${startWeek}`}${sourceNote}${groundingNote}`);
           }
         } catch (err) {
           reportLines.push(

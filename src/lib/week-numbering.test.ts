@@ -7,6 +7,7 @@ import {
   courseProgressStatus,
   parseWeekToken,
   currentWeekFromDeadlines,
+  findModuleForWeek,
 } from "./week-numbering";
 
 describe("currentCourseWeek", () => {
@@ -493,5 +494,93 @@ describe("planCartridgeModules", () => {
     const plans = planCartridgeModules(schedule, [1]);
 
     expect(plans[0].assignmentSlug).toBe(null);
+  });
+});
+
+describe("findModuleForWeek", () => {
+  it("finds a module by week token in title", () => {
+    const modules = [
+      { title: "Week 1 Introduction", position: 0 },
+      { title: "Week 2 Basics", position: 1 },
+      { title: "Week 3 Advanced", position: 2 },
+    ];
+    const result = findModuleForWeek(modules, 2);
+    expect(result).toEqual({ title: "Week 2 Basics", position: 1 });
+  });
+
+  it("finds a module by Module token (case insensitive)", () => {
+    const modules = [
+      { title: "Module 1 Intro", position: 0 },
+      { title: "MODULE 5 Topics", position: 1 },
+    ];
+    const result = findModuleForWeek(modules, 5);
+    expect(result).toEqual({ title: "MODULE 5 Topics", position: 1 });
+  });
+
+  it("finds a module with zero-padded week number", () => {
+    const modules = [
+      { title: "Module 01 First", position: 0 },
+      { title: "Module 07 Seventh", position: 1 },
+    ];
+    const result = findModuleForWeek(modules, 7);
+    expect(result).toEqual({ title: "Module 07 Seventh", position: 1 });
+  });
+
+  it("returns first matching module when multiple match (should not happen)", () => {
+    const modules = [
+      { title: "Week 3 Part A", position: 0 },
+      { title: "Week 3 Part B", position: 1 },
+    ];
+    const result = findModuleForWeek(modules, 3);
+    expect(result).toEqual({ title: "Week 3 Part A", position: 0 });
+  });
+
+  it("returns null when no module matches the week", () => {
+    const modules = [
+      { title: "Week 1 Intro", position: 0 },
+      { title: "Week 2 Basics", position: 1 },
+    ];
+    const result = findModuleForWeek(modules, 5);
+    expect(result).toBeNull();
+  });
+
+  it("returns null for week 0 or negative weeks", () => {
+    const modules = [
+      { title: "Week 0 Prep", position: 0 },
+      { title: "Week 1 Intro", position: 1 },
+    ];
+    expect(findModuleForWeek(modules, 0)).toBeNull();
+    expect(findModuleForWeek(modules, -1)).toBeNull();
+  });
+
+  it("returns null for empty modules array", () => {
+    const result = findModuleForWeek([], 1);
+    expect(result).toBeNull();
+  });
+
+  it("falls back to name field when title is missing", () => {
+    const modules = [
+      { name: "Module 2 Topics", position: 0 },
+      { name: "Module 5 Advanced", position: 1 },
+    ];
+    const result = findModuleForWeek(modules, 5);
+    expect(result).toEqual({ name: "Module 5 Advanced", position: 1 });
+  });
+
+  it("uses name when title is null/undefined", () => {
+    const modules = [
+      { title: null, name: "Week 1 Intro", position: 0 },
+      { title: undefined, name: "Week 3 Advanced", position: 1 },
+    ];
+    const result = findModuleForWeek(modules, 3);
+    expect(result).toEqual({ title: undefined, name: "Week 3 Advanced", position: 1 });
+  });
+
+  it("returns null when both title and name lack week token", () => {
+    const modules = [
+      { title: "Introduction", name: "Basics", position: 0 },
+    ];
+    const result = findModuleForWeek(modules, 1);
+    expect(result).toBeNull();
   });
 });

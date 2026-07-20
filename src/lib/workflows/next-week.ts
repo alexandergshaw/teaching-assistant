@@ -9,13 +9,14 @@ export interface WeekTopicSource {
 
 /**
  * Map Canvas modules to the shape expected by resolveWeekTopic.
- * Extracts name -> title, position, and first 6 item titles.
+ * Extracts name -> title, position, id, and first 6 item titles.
  * Returns the mapped modules or an empty array if input is empty/invalid.
  */
 export function mapLiveModulesForTopic(
-  canvasModules: Array<{ name: string; position: number; items: Array<{ title: string }> }>
-): Array<{ title: string; position: number; items: Array<{ title: string }> }> {
+  canvasModules: Array<{ id: number; name: string; position: number; items: Array<{ title: string }> }>
+): Array<{ id: number; title: string; position: number; items: Array<{ title: string }> }> {
   return canvasModules.map((mod) => ({
+    id: mod.id,
     title: mod.name,
     position: mod.position,
     items: (mod.items || []).slice(0, 6).map((item) => ({ title: item.title || "" })),
@@ -29,7 +30,7 @@ export function mapLiveModulesForTopic(
  * naming what each source offered.
  */
 export function resolveWeekTopic(input: {
-  liveModules?: Array<{ title: string; position: number; items: Array<{ title: string }> }> | null;
+  liveModules?: Array<{ id?: number; title: string; position: number; items: Array<{ title: string }> }> | null;
   modules: Array<{ title: string; position: number; items: Array<{ title: string }> }> | null;
   csvData: string | null;
   topics: string | null;

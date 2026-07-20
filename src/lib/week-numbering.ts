@@ -120,6 +120,25 @@ export function parseWeekToken(label: string): number | null {
 }
 
 /**
+ * Find the module whose title's week token matches the given week number.
+ * Returns the first matching module (position order), or null if no match found.
+ * Uses parseWeekToken to extract week numbers from module titles.
+ */
+export function findModuleForWeek(
+  modules: Array<{ title?: string | null; name?: string | null; position?: number; id?: number }>,
+  week: number
+): (typeof modules)[number] | null {
+  if (week <= 0) return null;
+  for (const mod of modules) {
+    const title = mod.title ?? mod.name ?? "";
+    if (parseWeekToken(title) === week) {
+      return mod;
+    }
+  }
+  return null;
+}
+
+/**
  * Determine the current week based on assignment due dates.
  * - Ignores entries with no parseable week token or missing/unparseable dueAt.
  * - Per week, keeps the LATEST due date (a module stays current until its last deadline passes).

@@ -828,11 +828,13 @@ describe("mapLiveModulesForTopic", () => {
   it("maps Canvas modules to resolveWeekTopic shape", () => {
     const canvasModules = [
       {
+        id: 101,
         name: "Week 1: Introduction",
         position: 1,
         items: [{ title: "Slides" }, { title: "Notes" }, { title: "Recording" }],
       },
       {
+        id: 102,
         name: "Week 2: Fundamentals",
         position: 2,
         items: [{ title: "Video" }],
@@ -841,11 +843,13 @@ describe("mapLiveModulesForTopic", () => {
     const result = mapLiveModulesForTopic(canvasModules);
     expect(result).toEqual([
       {
+        id: 101,
         title: "Week 1: Introduction",
         position: 1,
         items: [{ title: "Slides" }, { title: "Notes" }, { title: "Recording" }],
       },
       {
+        id: 102,
         title: "Week 2: Fundamentals",
         position: 2,
         items: [{ title: "Video" }],
@@ -856,6 +860,7 @@ describe("mapLiveModulesForTopic", () => {
   it("limits items to first 6", () => {
     const canvasModules = [
       {
+        id: 101,
         name: "Week 1: Topic",
         position: 1,
         items: [
@@ -883,6 +888,7 @@ describe("mapLiveModulesForTopic", () => {
   it("handles modules with no items", () => {
     const canvasModules = [
       {
+        id: 101,
         name: "Week 1: Topic",
         position: 1,
         items: [],
@@ -891,6 +897,7 @@ describe("mapLiveModulesForTopic", () => {
     const result = mapLiveModulesForTopic(canvasModules);
     expect(result).toEqual([
       {
+        id: 101,
         title: "Week 1: Topic",
         position: 1,
         items: [],
@@ -901,6 +908,7 @@ describe("mapLiveModulesForTopic", () => {
   it("handles modules with missing item titles", () => {
     const canvasModules = [
       {
+        id: 101,
         name: "Week 1: Topic",
         position: 1,
         items: [{ title: "Item 1" }, { title: "" }],

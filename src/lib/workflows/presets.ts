@@ -1590,6 +1590,24 @@ export const PROBLEM_SOLVING_COMPANION: WorkflowDef = {
   ],
 };
 
+export const MODULE_HOMEWORK_ANSWERS: WorkflowDef = {
+  id: "module-homework-answers",
+  preset: true,
+  name: "Module Homework Answers",
+  description:
+    "Generate a full-credit model answer for every assignment and discussion in the current module as an instructor answer key. Answers are saved privately to the course tile and Files tab and never published to the LMS.",
+  steps: [
+    {
+      type: "generate-module-answers",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        moduleId: { source: "runtime", fieldKey: "lmsModule" },
+        maxItems: { source: "literal", value: "6" },
+      },
+    },
+  ],
+};
+
 /**
  * Merge built-in presets with custom workflows.
  * Returns presets first, then custom workflows.
@@ -1641,6 +1659,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     WEEKLY_CONCEPT_ANIMATIONS,
     WEEKLY_EVERYTHING_PREP,
     PROBLEM_SOLVING_COMPANION,
+    MODULE_HOMEWORK_ANSWERS,
     ...custom,
   ];
 }

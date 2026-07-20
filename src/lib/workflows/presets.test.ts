@@ -79,6 +79,7 @@ describe("composed presets", () => {
     "quiz-pipeline",
     "course-health-check",
     "copilot-pr-shepherd",
+    "module-homework-answers",
   ];
 
   for (const id of COMPOSED_PRESET_IDS) {

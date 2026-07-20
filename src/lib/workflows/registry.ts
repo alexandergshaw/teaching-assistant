@@ -207,9 +207,9 @@ import type {
 } from "@/lib/workflows/types";
 import { scheduleToCsv, csvToSchedule } from "@/lib/workflows/types";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
-import type { RubricCriterionInput, DueDateUpdate } from "@/lib/canvas-modules";
+import type { RubricCriterionInput, DueDateUpdate, CanvasModule, CanvasModuleItem } from "@/lib/canvas-modules";
 import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
-import { planCartridgeModules, currentCourseWeek, courseProgressStatus, currentWeekFromDeadlines, findModuleForWeek } from "@/lib/week-numbering";
+import { planCartridgeModules, currentCourseWeek, courseProgressStatus, currentWeekFromDeadlines, findModuleForWeek, parseWeekToken } from "@/lib/week-numbering";
 import { parseLmsModuleValue, liveModuleValue, exportModuleValue } from "@/lib/workflows/module-value";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
 import { buildGradingReviewRows, countPostableResults, stripGradingRunEntriesForDraft } from "@/lib/workflows/grading-review-rows";
@@ -10446,6 +10446,412 @@ export const STEP_REGISTRY: StepDefinition[] = [
       return {
         outputs: { modelAnswer: r.modelAnswer },
         summary: { kind: "text", text: r.modelAnswer },
+      };
+    },
+  },
+
+  {
+    type: "generate-module-answers",
+    name: "Generate module homework answers",
+    description: "Generate a full-credit model answer for every homework item (assignments and discussions) in a module and save them as an instructor answer key (docx to the course tile and the Files tab). Answers are saved privately to the course tile and Files tab; never published to the LMS.",
+    inputs: [
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: true,
+      },
+      {
+        key: "moduleId",
+        label: "Module",
+        type: "lmsModule",
+        required: false,
+        help: "Pick from the live LMS connection or the course's LMS export; without either or if left blank, falls back to the tile's current module.",
+      },
+      {
+        key: "maxItems",
+        label: "Homework items per module to answer",
+        type: "number",
+        required: false,
+        help: "Default 6, max 10.",
+      },
+    ],
+    outputs: [
+      { key: "answers", label: "Answer key", type: "longtext" },
+      { key: "report", label: "Report", type: "longtext" },
+      { key: "generated", label: "Generated count", type: "number" },
+      { key: "hasGenerated", label: "Has generated?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      if (!hubCourseId) {
+        throw new Error("Choose a course tile.");
+      }
+
+      const moduleIdRaw = String(values.moduleId ?? "").trim();
+      const maxItemsRaw = Number(values.maxItems ?? 6);
+      const maxItems = Math.max(1, Math.min(10, maxItemsRaw));
+
+      // Load the tile
+      const list = await listCourseHubAction();
+      if ("error" in list) {
+        throw new Error(list.error);
+      }
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (!tile) {
+        throw new Error("Choose a course tile.");
+      }
+
+      const canvasUrl = (tile.canvasUrl ?? "").trim();
+      const inst = helpers.activeInstitution || undefined;
+      const picked = parseLmsModuleValue(moduleIdRaw);
+
+      // Determine which module to use: picked module or current module
+      let targetModule: CanvasModule | null = null;
+      let moduleName = "";
+      let moduleWeekNumber: number | null = null;
+
+      // Try to resolve the picked module or current module
+      if (picked.liveId || picked.fromExport || picked.name) {
+        // User picked a module or we need to resolve the current module
+        if (!canvasUrl && !picked.fromExport) {
+          // No live connection and not an export module
+          if (moduleIdRaw) {
+            return {
+              outputs: { answers: "", report: "", generated: 0, hasGenerated: "" },
+              summary: {
+                kind: "text",
+                text: "Skipped - generating homework answers needs the live LMS module with its assignment text.",
+              },
+            };
+          }
+          // Fall back to current module, but we can't resolve without LMS
+          return {
+            outputs: { answers: "", report: "", generated: 0, hasGenerated: "" },
+            summary: {
+              kind: "text",
+              text: "Skipped - generating homework answers needs the live LMS module with its assignment text.",
+            },
+          };
+        }
+
+        if (canvasUrl && picked.liveId) {
+          // Fetch from live LMS
+          onProgress("Loading module items...");
+          try {
+            const content = await listCourseContentAction(canvasUrl, inst);
+            if ("error" in content) {
+              throw new Error(content.error);
+            }
+            const foundModule = content.modules.find((m) => String(m.id) === picked.liveId);
+            if (!foundModule) {
+              throw new Error("the chosen module was not found in the LMS course");
+            }
+            targetModule = foundModule;
+            moduleName = foundModule.name;
+          } catch {
+            return {
+              outputs: { answers: "", report: "", generated: 0, hasGenerated: "" },
+              summary: {
+                kind: "text",
+                text: "Skipped - generating homework answers needs the live LMS module with its assignment text.",
+              },
+            };
+          }
+        } else if (picked.fromExport && helpers.loadCourseExport) {
+          // Load from course export (not implemented for answers generation)
+          return {
+            outputs: { answers: "", report: "", generated: 0, hasGenerated: "" },
+            summary: {
+              kind: "text",
+              text: "Skipped - generating homework answers needs the live LMS module with its assignment text.",
+            },
+          };
+        }
+      } else {
+        // No module picked - try to derive the current module
+        if (!canvasUrl) {
+          return {
+            outputs: { answers: "", report: "", generated: 0, hasGenerated: "" },
+            summary: {
+              kind: "text",
+              text: "Skipped - generating homework answers needs the live LMS module with its assignment text.",
+            },
+          };
+        }
+
+        // Use deadline-based current module resolution
+        onProgress("Resolving current module...");
+        try {
+          const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+          if ("skip" in weekResolution) {
+            return {
+              outputs: { answers: "", report: "", generated: 0, hasGenerated: "" },
+              summary: {
+                kind: "text",
+                text: "Skipped - generating homework answers needs the live LMS module with its assignment text.",
+              },
+            };
+          }
+
+          const currentWeek = weekResolution.rawWeek;
+          const status = courseProgressStatus(currentWeek, tile.weeks);
+          if (status === "not-started" || status === "complete") {
+            return {
+              outputs: { answers: "", report: "", generated: 0, hasGenerated: "" },
+              summary: {
+                kind: "text",
+                text: "Skipped - generating homework answers needs the live LMS module with its assignment text.",
+              },
+            };
+          }
+
+          // Fetch modules and find the current one
+          onProgress("Loading modules...");
+          const content = await listCourseContentAction(canvasUrl, inst);
+          if ("error" in content) {
+            throw new Error(content.error);
+          }
+
+          // Find the module matching the current week by iterating through modules
+          let foundByWeek: CanvasModule | null = null;
+          for (const mod of content.modules) {
+            if (parseWeekToken(mod.name) === currentWeek) {
+              foundByWeek = mod;
+              break;
+            }
+          }
+
+          if (!foundByWeek) {
+            return {
+              outputs: { answers: "", report: "", generated: 0, hasGenerated: "" },
+              summary: {
+                kind: "text",
+                text: "Skipped - generating homework answers needs the live LMS module with its assignment text.",
+              },
+            };
+          }
+
+          targetModule = foundByWeek;
+          moduleName = foundByWeek.name;
+        } catch {
+          return {
+            outputs: { answers: "", report: "", generated: 0, hasGenerated: "" },
+            summary: {
+              kind: "text",
+              text: "Skipped - generating homework answers needs the live LMS module with its assignment text.",
+            },
+          };
+        }
+      }
+
+      if (!targetModule) {
+        return {
+          outputs: { answers: "", report: "", generated: 0, hasGenerated: "" },
+          summary: {
+            kind: "text",
+            text: "Skipped - generating homework answers needs the live LMS module with its assignment text.",
+          },
+        };
+      }
+
+      // Parse week number from module name for the docx filename
+      moduleWeekNumber = parseWeekToken(moduleName);
+
+      // Collect Assignment and Discussion items
+      const answerLines: string[] = [];
+      const reportLines: string[] = [];
+      let generatedCount = 0;
+      let erroredCount = 0;
+
+      const assignmentLikeItems = targetModule.items.filter(
+        (item: CanvasModuleItem) =>
+          (item.type === "Assignment" || item.type === "Discussion") &&
+          item.htmlUrl
+      );
+
+      const itemsToProcess = assignmentLikeItems.slice(0, maxItems);
+      const skippedItems = assignmentLikeItems.length - itemsToProcess.length;
+
+      // Categorize non-answerable items
+      const nonAnswerableItems: string[] = [];
+      for (const item of targetModule.items) {
+        if (
+          item.type === "Quiz" ||
+          item.type === "Page" ||
+          item.type === "File" ||
+          item.type === "SubHeader" ||
+          item.type === "ExternalUrl"
+        ) {
+          nonAnswerableItems.push(`${item.type}: ${item.title}`);
+        }
+      }
+
+      // Process each item
+      for (const item of itemsToProcess) {
+        try {
+          onProgress(`Generating answer for: ${item.title}...`);
+
+          if (!item.htmlUrl) {
+            reportLines.push(`${item.title}: skipped (no URL)`);
+            continue;
+          }
+
+          // Fetch the description and rubric
+          const meta = await fetchCanvasMetaAction(item.htmlUrl);
+          if ("error" in meta) {
+            reportLines.push(`${item.title}: ${meta.error}`);
+            erroredCount++;
+            continue;
+          }
+
+          const description = meta.description.trim();
+          if (!description) {
+            reportLines.push(`${item.title}: skipped (no description)`);
+            continue;
+          }
+
+          const rubric = meta.rubricText ?? "";
+
+          // Generate the model answer
+          const answerResult = await generateModelAnswerAction(
+            description,
+            rubric,
+            helpers.provider
+          );
+
+          if ("error" in answerResult) {
+            reportLines.push(`${item.title}: ${answerResult.error}`);
+            erroredCount++;
+            continue;
+          }
+
+          // Add to answer key
+          answerLines.push(`## ${item.title}`);
+
+          // Add points and due date when present
+          const suffixes: string[] = [];
+          if (typeof item.pointsPossible === "number" && item.pointsPossible > 0) {
+            suffixes.push(`${item.pointsPossible} point${item.pointsPossible === 1 ? "" : "s"}`);
+          }
+          if (item.dueAt) {
+            const dueDate = new Date(item.dueAt);
+            const dateStr = dueDate.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+            });
+            suffixes.push(`due ${dateStr}`);
+          }
+          if (suffixes.length > 0) {
+            answerLines.push(`${suffixes.join(", ")}`);
+          }
+
+          answerLines.push("");
+          answerLines.push(answerResult.modelAnswer);
+          answerLines.push("");
+
+          generatedCount++;
+          reportLines.push(`${item.title}: OK`);
+        } catch (err) {
+          reportLines.push(
+            `${item.title}: ${err instanceof Error ? err.message : "error"}`
+          );
+          erroredCount++;
+        }
+      }
+
+      // Check if all attempted items errored
+      if (itemsToProcess.length > 0 && erroredCount === itemsToProcess.length) {
+        throw new Error("Failed to generate answers for any items. Check that assignments and discussions have descriptions and are accessible.");
+      }
+
+      // Add report sections
+      if (skippedItems > 0) {
+        reportLines.push(
+          `Skipped ${skippedItems} assignment/discussion item(s) beyond the ${maxItems}-item limit.`
+        );
+      }
+
+      if (nonAnswerableItems.length > 0) {
+        reportLines.push("Not answerable items:");
+        for (const item of nonAnswerableItems) {
+          if (item.includes("Quiz")) {
+            reportLines.push(`  ${item} (quiz answers not supported)`);
+          } else {
+            reportLines.push(`  ${item}`);
+          }
+        }
+      }
+
+      const report = reportLines.join("\n");
+
+      // Build and save the docx
+      if (generatedCount > 0) {
+        onProgress("Building document...");
+        const answerMarkdown = answerLines.join("\n");
+
+        const docxData = await buildDocxFromPlainText(
+          answerMarkdown,
+          [],
+          helpers.author
+        );
+        const base64 = Buffer.from(docxData).toString("base64");
+
+        // Determine the filename
+        let filename = `Module ${moduleName} Homework Answers.docx`;
+        if (moduleWeekNumber !== null) {
+          filename = `Module ${moduleWeekNumber} Homework Answers.docx`;
+        }
+
+        // Save to library with workflow tagging
+        onProgress("Saving to Files tab...");
+        const libResult = await saveLibraryFileAction({
+          name: filename,
+          base64,
+          mimeType:
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          fileExt: "docx",
+          workflowId: helpers.workflowId,
+          workflowName: helpers.workflowName,
+          workflowRunId: helpers.workflowRunId,
+        });
+
+        if ("error" in libResult) {
+          reportLines.push(`Files tab save failed: ${libResult.error}`);
+        }
+
+        // Save to course tile if available
+        if (helpers.saveCourseMaterialFile) {
+          try {
+            onProgress("Saving to course tile...");
+            const blob = new Blob([docxData], {
+              type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            });
+            await helpers.saveCourseMaterialFile(tile.id, blob, filename);
+          } catch (err) {
+            reportLines.push(
+              `Course tile save failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          }
+        }
+      }
+
+      const answers = answerLines.join("\n");
+
+      return {
+        outputs: {
+          answers,
+          report,
+          generated: generatedCount,
+          hasGenerated: generatedCount > 0 ? "1" : "",
+        },
+        summary: {
+          kind: "list",
+          label: `Generated ${generatedCount} answer(s)`,
+          items: reportLines,
+        },
       };
     },
   },

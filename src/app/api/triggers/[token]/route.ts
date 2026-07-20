@@ -104,6 +104,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       return NextResponse.json({ ok: true, deduped: true, workflow: trigger.workflowName });
     }
 
+    const workflowRunId = crypto.randomUUID();
     const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
       runWorkflowUnattended({
         def,
@@ -116,6 +117,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
           institution: trigger.institution,
           provider,
           author: resolveDocumentAuthor(userRes.user),
+          workflowId: trigger.workflowId,
+          workflowName: trigger.workflowName,
+          workflowRunId,
         }),
       })
     );
@@ -126,6 +130,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
         workflowName: trigger.workflowName,
         status: outcome.ok ? "ok" : "error",
         triggerSource: "webhook",
+        id: workflowRunId,
       });
     } catch {
       // Best-effort: chaining/history is a convenience, never let it break the

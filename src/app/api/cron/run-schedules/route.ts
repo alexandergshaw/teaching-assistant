@@ -123,6 +123,7 @@ export async function GET(req: NextRequest) {
         }
         const progress = claim.progress;
 
+        const workflowRunId = crypto.randomUUID();
         const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
           runWorkflowUnattended({
             def: def!,
@@ -132,6 +133,7 @@ export async function GET(req: NextRequest) {
             helpers: buildServerStepRunHelpers({
               supabase, userId: schedule.userId, institution: schedule.institution,
               provider, author: resolveDocumentAuthor(userRes.user), workflowId: schedule.workflowId, workflowName: def!.name,
+              workflowRunId,
             }),
             deadlineMs: runDeadlineMs,
             skipInstitutions: new Set(progress.doneInstitutions),
@@ -157,7 +159,7 @@ export async function GET(req: NextRequest) {
           try {
             await recordWorkflowRun(supabase, schedule.userId, {
               workflowId: schedule.workflowId, workflowName: def!.name,
-              status: runOk ? "ok" : "error", triggerSource: "schedule",
+              status: runOk ? "ok" : "error", triggerSource: "schedule", id: workflowRunId,
             });
           } catch { /* ignore */ }
         }
@@ -180,6 +182,7 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
+      const workflowRunId = crypto.randomUUID();
       const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
         runWorkflowUnattended({
           def,
@@ -189,6 +192,7 @@ export async function GET(req: NextRequest) {
           helpers: buildServerStepRunHelpers({
             supabase, userId: schedule.userId, institution: schedule.institution,
             provider, author: resolveDocumentAuthor(userRes.user), workflowId: schedule.workflowId, workflowName: def.name,
+            workflowRunId,
           }),
           deadlineMs: runDeadlineMs,
         })
@@ -203,7 +207,7 @@ export async function GET(req: NextRequest) {
       try {
         await recordWorkflowRun(supabase, schedule.userId, {
           workflowId: schedule.workflowId, workflowName: def.name,
-          status: outcome.ok ? "ok" : "error", triggerSource: "schedule",
+          status: outcome.ok ? "ok" : "error", triggerSource: "schedule", id: workflowRunId,
         });
       } catch { /* ignore */ }
     } catch (err) {

@@ -127,6 +127,8 @@ export async function POST(req: NextRequest) {
           ? trigger.provider
           : "gemini";
 
+      const workflowRunId = crypto.randomUUID();
+
       const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
         runWorkflowUnattended({
           def,
@@ -139,11 +141,15 @@ export async function POST(req: NextRequest) {
             institution: trigger.institution,
             provider,
             author: resolveDocumentAuthor(userRes.user),
+            workflowId: trigger.workflowId,
+            workflowName: trigger.workflowName,
+            workflowRunId,
           }),
         })
       );
       try {
         await recordWorkflowRun(supabase, trigger.userId, {
+          id: workflowRunId,
           workflowId: trigger.workflowId,
           workflowName: trigger.workflowName,
           status: outcome.ok ? "ok" : "error",

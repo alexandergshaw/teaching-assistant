@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import TopBar from "../components/TopBar";
+import ProblemsPanel from "../components/ProblemsPanel";
 import { listUnverifiedKnowledgeAction, reviewKnowledgeEntryAction } from "../actions";
 import type { KnowledgeRow } from "@/lib/research/db";
 import styles from "./knowledge.module.css";
@@ -62,6 +63,8 @@ export default function KnowledgeReviewPage() {
     <>
       <TopBar />
       <main className={styles.page}>
+        <ProblemsPanel />
+
         <h1 className={styles.title}>Knowledge review</h1>
         <p className={styles.subtitle}>
           Entries the research loop has learned but no one has checked yet. Verify an entry to let

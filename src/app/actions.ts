@@ -415,6 +415,15 @@ import { splitNarrationText } from "@/lib/narration-chunks";
 import { getUserStyle, saveUserStyle, clearVoiceClone } from "@/lib/user-style";
 import { getRecordingFileUrl } from "@/lib/recording-files";
 import { PROMPT_PREFIX, RESPONSE_PREFIX } from "@/lib/writing-style-prompts";
+import {
+  TOPIC_ROUTES,
+  TOPIC_TO_EXPORT_MAP,
+  TOPIC_TO_DIR_MAP,
+  parseNavItems,
+  matchConcept,
+  insertNavLeaf,
+  insertTopicPageCase,
+} from "@/lib/visualizer";
 import type JSZip from "jszip";
 
 // Standard submission guidance appended to every repo-generated assignment instruction
@@ -1116,6 +1125,238 @@ export async function saveGradingDraftAction(
     return { id: draft.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the grading draft." };
+  }
+}
+
+// ── Cartridge drops ──────────────────────────────────────────────────────
+//
+// Centralized submissions archive upload for closed/LMS-less courses.
+// Workflow trigger fires when new drops appear; triggered workflow grades
+// each drop and produces a gradebook CSV ready to upload, plus a reviewable
+// grading draft. All actions require owner context.
+
+/**
+ * List all status='new' cartridge drop IDs for the owner.
+ * Used by the trigger evaluator (both browser watcher and server runner).
+ */
+export async function listNewCartridgeDropIdsAction(): Promise<
+  { ids: string[]; count: number } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+
+    const { data: rows, error } = await (supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .from("cartridge_drops") as any)
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("status", "new");
+
+    if (error) {
+      return { error: error.message };
+    }
+
+    const ids = (rows || []).map((r: { id: string }) => r.id);
+    return { ids, count: ids.length };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list cartridge drops." };
+  }
+}
+
+/**
+ * List full cartridge_drops rows with status='new', oldest first.
+ * Used by the grade-cartridge-submissions step.
+ */
+export async function listNewCartridgeDropsAction(
+  limit: number
+): Promise<Array<{
+  id: string;
+  name: string;
+  courseLabel: string;
+  assignmentLabel: string;
+  pointsPossible: number | null;
+  rubricText: string | null;
+  lms: string;
+  storagePath: string;
+  sizeBytes: number;
+}> | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+
+    const { data: rows, error } = await (supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .from("cartridge_drops") as any)
+      .select("id, name, course_label, assignment_label, points_possible, rubric_text, lms, storage_path, size_bytes")
+      .eq("user_id", user.id)
+      .eq("status", "new")
+      .order("created_at", { ascending: true })
+      .limit(limit);
+
+    if (error) {
+      return { error: error.message };
+    }
+
+    return ((rows ?? []) as Array<{
+      id: string;
+      name: string;
+      course_label: string;
+      assignment_label: string;
+      points_possible: number | null;
+      rubric_text: string | null;
+      lms: string;
+      storage_path: string;
+      size_bytes: number;
+    }>).map((r) => ({
+      id: r.id,
+      name: r.name,
+      courseLabel: r.course_label,
+      assignmentLabel: r.assignment_label,
+      pointsPossible: r.points_possible,
+      rubricText: r.rubric_text,
+      lms: r.lms,
+      storagePath: r.storage_path,
+      sizeBytes: r.size_bytes,
+    }));
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list cartridge drops." };
+  }
+}
+
+/**
+ * CAS status 'new' -> 'processing'; returns row + zip base64 downloaded from storage.
+ * Enforces 8MB size cap on base64-safe encoding.
+ * Used by the grade-cartridge-submissions step before grading.
+ */
+export async function takeCartridgeDropAction(id: string): Promise<{
+  id: string;
+  courseLabel: string;
+  assignmentLabel: string;
+  pointsPossible: number | null;
+  rubricText: string | null;
+  lms: string;
+  zipBase64: string;
+} | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+
+    // CAS update: status='new' -> 'processing'
+    const { data: rows, error: updateError } = await (supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .from("cartridge_drops") as any)
+      .update({ status: "processing" })
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .eq("status", "new")
+      .select("id, course_label, assignment_label, points_possible, rubric_text, lms, storage_path, size_bytes")
+      .single();
+
+    if (updateError || !rows) {
+      return { error: updateError?.message || "Drop not found or already processing." };
+    }
+
+    // Download from storage
+    const { data: blob, error: downloadError } = await supabase.storage
+      .from("cartridge-drops")
+      .download(rows.storage_path);
+
+    if (downloadError || !blob) {
+      return { error: downloadError?.message || "Could not download the cartridge." };
+    }
+
+    // Convert to base64
+    const arrayBuffer = await blob.arrayBuffer();
+    const zipBase64 = Buffer.from(arrayBuffer).toString("base64");
+
+    // Size cap check (8MB base64-safe)
+    const MAX_BASE64_SIZE = 8_000_000;
+    if (zipBase64.length > MAX_BASE64_SIZE) {
+      return { error: "The cartridge is too large to grade (exceeds 8 MB)." };
+    }
+
+    return {
+      id: rows.id,
+      courseLabel: rows.course_label,
+      assignmentLabel: rows.assignment_label,
+      pointsPossible: rows.points_possible,
+      rubricText: rows.rubric_text,
+      lms: rows.lms,
+      zipBase64,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not take the cartridge drop." };
+  }
+}
+
+/**
+ * Mark a cartridge drop as graded (with CSV) or error.
+ * Uploads CSV to storage at ${userId}/${id}-grades.csv.
+ * Sets csv_storage_path, csv_name, graded_at, and status.
+ * Used by the grade-cartridge-submissions step after grading.
+ */
+export async function finishCartridgeDropAction(
+  id: string,
+  outcome:
+    | { status: "graded"; csvName: string; csvBase64: string }
+    | { status: "error"; error: string }
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+
+    if (outcome.status === "error") {
+      const { error } = await (supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .from("cartridge_drops") as any)
+        .update({
+          status: "error",
+          error: outcome.error,
+        })
+        .eq("id", id)
+        .eq("user_id", user.id);
+
+      if (error) {
+        return { error: error.message };
+      }
+      return { ok: true };
+    }
+
+    // Graded: upload CSV to storage
+    const csvPath = `${user.id}/${id}-grades.csv`;
+    const csvBlob = new Blob([Buffer.from(outcome.csvBase64, "base64")], {
+      type: "text/csv",
+    });
+
+    const { error: uploadError } = await supabase.storage
+      .from("cartridge-drops")
+      .upload(csvPath, csvBlob, { contentType: "text/csv", upsert: true });
+
+    if (uploadError) {
+      return { error: uploadError.message };
+    }
+
+    // Update row with CSV metadata and status='graded'
+    const { error: updateError } = await (supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .from("cartridge_drops") as any)
+      .update({
+        status: "graded",
+        csv_storage_path: csvPath,
+        csv_name: outcome.csvName,
+        graded_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("user_id", user.id);
+
+    if (updateError) {
+      return { error: updateError.message };
+    }
+
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not finish the cartridge drop." };
   }
 }
 
@@ -4737,6 +4978,8 @@ export async function getVoiceSampleUrlAction(): Promise<{ url: string } | { err
         source: null,
         origin: null,
         workflowName: null,
+        workflowId: null,
+        workflowRunId: null,
         createdAt: "",
       },
       3600
@@ -8112,6 +8355,8 @@ export async function savePresentationFileAction(input: {
   theme?: DeckTheme | null;
   author?: string;
   workflowName?: string | null;
+  workflowId?: string;
+  workflowRunId?: string;
 }): Promise<{ id: string } | { error: string }> {
   try {
     const user = await requireOwner();
@@ -8145,6 +8390,8 @@ export async function savePresentationFileAction(input: {
       source: "workflow",
       origin: "unattended",
       workflowName: input.workflowName ?? null,
+      workflowId: input.workflowId ?? null,
+      workflowRunId: input.workflowRunId ?? null,
     });
     return { id: file.id };
   } catch (err) {
@@ -8163,6 +8410,7 @@ export async function saveLibraryFileAction(input: {
   fileExt: string;
   workflowId?: string;
   workflowName?: string;
+  workflowRunId?: string;
 }): Promise<{ id: string } | { error: string }> {
   try {
     const user = await requireOwner();
@@ -8186,6 +8434,8 @@ export async function saveLibraryFileAction(input: {
       source: "workflow",
       origin: "unattended",
       workflowName: input.workflowName ?? null,
+      workflowId: input.workflowId ?? null,
+      workflowRunId: input.workflowRunId ?? null,
     });
     return { id: file.id };
   } catch (err) {
@@ -11222,6 +11472,185 @@ export async function findCaseStudyMaterialAction(
   }
 }
 
+/**
+ * Generate a class opener (case study + warm-up exercise) for a week.
+ * For the embedded provider, builds deterministically from supplied materials.
+ * For other providers, calls the LLM.
+ */
+export async function generateClassOpenerAction(
+  topic: string,
+  summary: string,
+  minutes: number,
+  caseStudyMaterial: CaseStudyMaterial | null,
+  practiceProblems: PracticeProblemEntry[],
+  provider: LlmProvider = "gemini"
+): Promise<{ title: string; text: string } | { error: string }> {
+  try {
+    await requireOwner();
+
+    const minutesNum = Math.max(5, Math.min(minutes, 120));
+    const caseStudyMinutes = Math.round((minutesNum * 0.6) / 5) * 5;
+    const warmupMinutes = Math.round((minutesNum * 0.35) / 5) * 5;
+    const debriefMinutes = Math.max(5, minutesNum - caseStudyMinutes - warmupMinutes);
+
+    if (provider === "embedded") {
+      const title = `Class Opener: ${topic}`;
+      const sections: string[] = [
+        `# ${title}`,
+        "",
+        `## Case study discussion (about ${caseStudyMinutes} minutes)`,
+      ];
+
+      if (caseStudyMaterial) {
+        sections.push(caseStudyMaterial.title);
+        sections.push("");
+        for (const bullet of caseStudyMaterial.bullets) {
+          sections.push(`- ${bullet}`);
+        }
+        sections.push("");
+      } else {
+        sections.push(
+          `Case Study: ${topic}`,
+          "",
+          `This case study explores a real-world application of ${topic}. Consider how the principles of ${topic} applied in practice, and what lessons apply to your learning.`,
+          ""
+        );
+      }
+
+      sections.push(
+        "Discussion Questions:",
+        `1. What key principles of ${topic} were at play in this scenario?`,
+        "2. How might this situation have been different with better planning or execution?",
+        "3. What would you do differently?",
+        "",
+        `## Warm-up coding exercise (about ${warmupMinutes} minutes)`,
+        ""
+      );
+
+      if (practiceProblems.length > 0) {
+        const problem = practiceProblems[0];
+        sections.push(
+          problem.title,
+          "",
+          problem.prompt,
+          ""
+        );
+        if (problem.exampleCode) {
+          sections.push(
+            "Example (reference, not the solution):",
+            "```",
+            problem.exampleCode,
+            "```",
+            ""
+          );
+        }
+      } else {
+        sections.push(
+          "Write a short program or function that demonstrates the key concepts of this week.",
+          "- Start with a clear problem statement",
+          "- Write pseudocode first",
+          "- Implement in your chosen language",
+          ""
+        );
+      }
+
+      sections.push(
+        `## Debrief (about ${debriefMinutes} minutes)`,
+        ""
+      );
+
+      if (practiceProblems.length > 0 && practiceProblems[0].solutionCode) {
+        sections.push(
+          "Solution and key takeaways:",
+          "",
+          "```",
+          practiceProblems[0].solutionCode,
+          "```",
+          "",
+          `Key concepts: The exercise reinforces ${topic} through hands-on practice.`,
+          ""
+        );
+      } else {
+        sections.push(
+          `Key concepts: Focus on how ${topic} connects theory to real practice.`,
+          ""
+        );
+      }
+
+      return {
+        title,
+        text: sections.join("\n"),
+      };
+    }
+
+    const user = await requireOwner();
+    const styleBlock = await getWritingStyleBlock(user.id);
+
+    const caseStudyContext = caseStudyMaterial
+      ? `Case Study Material:\nTitle: ${caseStudyMaterial.title}\n${caseStudyMaterial.bullets.map((b) => `- ${b}`).join("\n")}`
+      : `Topic: ${topic}`;
+
+    const practiceContext =
+      practiceProblems.length > 0
+        ? `Practice Problem:\n${practiceProblems[0].title}\n${practiceProblems[0].prompt}`
+        : `Topic: ${topic}`;
+
+    const llmPrompt = `You are an expert educator creating a class opener (30 minutes max, usually less) combining a case study discussion and warm-up coding exercise.
+
+TOPIC: ${topic}
+SUMMARY: ${summary}
+TARGET DURATION: ${minutesNum} minutes (split roughly: ${caseStudyMinutes} case study, ${warmupMinutes} warm-up exercise, ${debriefMinutes} debrief)
+
+${caseStudyContext}
+
+${practiceContext}
+
+Write the opener as clean plain text using lightweight markdown:
+- The first line is the title: "# Class Opener: [Topic]"
+- Use "## Section Name" headings for the three sections: "Case study discussion", "Warm-up coding exercise", "Debrief"
+- Include timing hints in the headings like "(about 15 minutes)"
+- Use "- " for bullet points and discussion questions
+- For code, use triple backticks with a language identifier
+
+Structure:
+1. Case study discussion section: briefly ground in the real event/context, explain why it matters for this topic, and include 2-3 discussion questions
+2. Warm-up coding exercise: provide a clear task statement, starter code ideas, and hints for an introductory difficulty problem
+3. Debrief: provide the exercise solution (if applicable) and key takeaways for the instructor
+
+Requirements:
+- Return ONLY the document text. No code fences around the whole output, no commentary, no HTML.
+- Be clear, engaging, and professional.
+- Do not invent specific facts, dates, or names not in the provided materials.
+- Make the exercises doable in the target duration.${styleBlock}`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: llmPrompt }] }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 3000 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { error: `Generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+
+    let text = result.text.trim();
+    const fenced = text.match(/```(?:markdown|md|text)?\s*([\s\S]*?)```/i);
+    if (fenced) text = fenced[1].trim();
+    if (!text) {
+      return { error: "The model returned an empty opener." };
+    }
+
+    const titleMatch = text.match(/^# (.+)$/m);
+    const title = titleMatch ? titleMatch[1].trim() : `Class Opener: ${topic}`;
+
+    return { title, text };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate the class opener." };
+  }
+}
+
 export async function generateFullCreditChecklistAction(
   instructions: string,
   rubric: string,
@@ -11563,6 +11992,444 @@ function deriveConceptsFromSummary(
       visualIdea: sentence,
     };
   });
+}
+
+// ── Concept visualizer ──────────────────────────────────────────────────────
+
+/**
+ * Check if a concept exists on the visualizer.
+ * Reads navItems.ts from the visualizer repo and returns the URL if found,
+ * or { found: false } if not found.
+ */
+export async function findVisualizerConceptAction(
+  concept: string
+): Promise<
+  { found: true; url: string; topic: string; slug: string; label: string } |
+  { found: false } |
+  { error: string }
+> {
+  try {
+    await requireOwner();
+    if (!concept.trim()) {
+      return { found: false };
+    }
+
+    const navItemsContent = await getFileText("alexandergshaw", "programming-concept-visualizer", "components/pageComponents/navItems.ts");
+    const entries = parseNavItems(navItemsContent);
+    const match = matchConcept(entries, concept);
+
+    if (!match) {
+      return { found: false };
+    }
+
+    // Find the topic route by reverse-mapping from the export name
+    let topicRoute: string | undefined;
+    for (const [key, exportName] of Object.entries(TOPIC_TO_EXPORT_MAP)) {
+      if (exportName === match.topicExport) {
+        topicRoute = TOPIC_ROUTES[key];
+        break;
+      }
+    }
+    if (!topicRoute) {
+      return { found: false };
+    }
+
+    const url = `https://programming-concept-visualizer.vercel.app${topicRoute}?concept=${encodeURIComponent(match.value)}`;
+    return {
+      found: true,
+      url,
+      topic: match.topicExport,
+      slug: match.value,
+      label: match.label,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not find the visualizer concept." };
+  }
+}
+
+/**
+ * Create a new concept page on the visualizer.
+ * Generates a React component, commits it to the repo, and updates navItems.ts and the topic page.
+ * Returns the URL of the created concept or an error.
+ */
+export async function createVisualizerConceptAction(
+  concept: string,
+  context: string = "",
+  provider: LlmProvider = "gemini"
+): Promise<{ url: string; slug: string; topic: string } | { error: string }> {
+  try {
+    await requireOwner();
+
+    if (provider === "embedded") {
+      return { error: "Creating visualizer pages requires an LLM provider." };
+    }
+
+    if (!concept.trim()) {
+      return { error: "Enter a concept name." };
+    }
+
+    // Pick the best topic for the concept using LLM
+    const topicKeys = Object.keys(TOPIC_ROUTES).join(", ");
+    const topicPrompt = `Given the concept "${concept}"${context ? ` and context "${context}"` : ""}, choose the BEST category from: ${topicKeys}. Return ONLY the key (no other text).`;
+
+    const topicResult = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: topicPrompt }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 50 },
+      },
+      provider
+    );
+
+    if (!topicResult.ok) {
+      return { error: "Could not determine the best topic for this concept." };
+    }
+
+    let topic = topicResult.text.trim().toLowerCase();
+    if (!TOPIC_ROUTES[topic]) {
+      topic = "programming-basics";
+    }
+
+    // Generate the component
+    const componentPrompt = `You are a React/TypeScript expert building educational concept visualizations.
+
+Create a React component named "${concept.replace(/[^a-zA-Z0-9]/g, "")}Concept" that teaches "${concept}"${context ? ` with this context: "${context}"` : ""}.
+
+Requirements:
+- Export a default function component (no 'use client')
+- Import ConceptWrapper, TableOfContents, Section, CalloutBox, CodeSnippet from components/common
+- Structure: ConceptWrapper with title/description, wrapping TableOfContents with Sections
+- Include at least: a "Big Idea" section with a CalloutBox, a "Code Walkthrough" section with CodeSnippet, and a "Common Mistakes" section
+- Use ONLY theme tokens for colors: var(--ink), var(--info), var(--success), var(--warning), var(--danger), or themed MUI props
+- NO hardcoded hex colors or emojis
+- NO external imports except from components/common
+- Valid TypeScript
+
+Return ONLY the complete component code (starting with import statements).`;
+
+    const componentResult = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: componentPrompt }] }],
+        generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
+      },
+      provider
+    );
+
+    if (!componentResult.ok) {
+      return { error: "Could not generate the component." };
+    }
+
+    let componentCode = componentResult.text.trim();
+
+    // Validate the component (retry once on validation failure)
+    let validationAttempt = 0;
+    while (validationAttempt < 2) {
+      const hasExportDefault = /export\s+default\s+function/.test(componentCode);
+      const hasConceptWrapper = /ConceptWrapper/.test(componentCode);
+      const hasHexColor = /#[0-9a-fA-F]{3,8}\b/.test(componentCode);
+
+      if (hasExportDefault && hasConceptWrapper && !hasHexColor) {
+        // Validation passed
+        break;
+      }
+
+      validationAttempt++;
+      if (validationAttempt < 2) {
+        // Retry once
+        const retryResult = await callLlm(
+          {
+            contents: [{ role: "user", parts: [{ text: componentPrompt }] }],
+            generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
+          },
+          provider
+        );
+
+        if (!retryResult.ok) {
+          return { error: "Could not regenerate the component after validation failure." };
+        }
+
+        componentCode = retryResult.text.trim();
+      } else {
+        // Both attempts failed
+        if (!hasExportDefault || !hasConceptWrapper) {
+          return { error: "Generated component is invalid. Missing required structure." };
+        }
+        if (hasHexColor) {
+          return { error: "Generated component contains hardcoded colors. Please regenerate." };
+        }
+      }
+    }
+
+    // Normalize the slug from the concept name
+    const slug = concept
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
+    if (!slug) {
+      return { error: "Could not generate a valid slug from the concept name." };
+    }
+
+    const componentName = concept.replace(/[^a-zA-Z0-9]/g, "");
+    const componentFileName = `${componentName}Concept.tsx`;
+    const topicDirName = TOPIC_TO_DIR_MAP[topic];
+    if (!topicDirName) {
+      return { error: "Unknown topic directory mapping." };
+    }
+
+    // Read current navItems and topic page
+    const navItemsContent = await getFileText("alexandergshaw", "programming-concept-visualizer", "components/pageComponents/navItems.ts");
+    const topicPagePath = `components/pageComponents/${topicDirName}/${topicDirName}Page.tsx`;
+    const topicPageContent = await getFileText("alexandergshaw", "programming-concept-visualizer", topicPagePath);
+
+    // Update navItems with the correct export name
+    const topicExportName = TOPIC_TO_EXPORT_MAP[topic];
+    if (!topicExportName) {
+      return { error: "Unknown topic export mapping." };
+    }
+
+    const updatedNavItems = insertNavLeaf(navItemsContent, topicExportName, concept, slug);
+    if (!updatedNavItems) {
+      return { error: "Concept already exists or could not update navItems." };
+    }
+
+    // Update topic page
+    const updatedTopicPage = insertTopicPageCase(
+      topicPageContent,
+      `${componentName}Concept`,
+      slug,
+      `./${componentName}Concept`
+    );
+    if (!updatedTopicPage) {
+      return { error: "Could not update topic page." };
+    }
+
+    // Commit three files: component first, topic page second, navItems last
+    const componentPath = `components/pageComponents/${topicDirName}/${componentFileName}`;
+    await putFile("alexandergshaw", "programming-concept-visualizer", componentPath, componentCode, `feat(concepts): Add ${concept} concept component`);
+    await putFile("alexandergshaw", "programming-concept-visualizer", topicPagePath, updatedTopicPage, `feat(concepts): Add ${concept} case to ${topicDirName}Page`);
+    await putFile("alexandergshaw", "programming-concept-visualizer", "components/pageComponents/navItems.ts", updatedNavItems, `feat(concepts): Add ${concept} to navigation`);
+
+    const url = `https://programming-concept-visualizer.vercel.app${TOPIC_ROUTES[topic]}?concept=${encodeURIComponent(slug)}`;
+    return { url, slug, topic };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the visualizer concept." };
+  }
+}
+
+/**
+ * List all open problems for the user.
+ */
+export async function listOpenProblemsAction(): Promise<
+  { problems: Array<{ id: string; title: string; detail: string }>; count: number } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const { listProblems } = await import("@/lib/problems");
+    const allProblems = await listProblems(supabase, user.id);
+    const openProblems = allProblems.filter((p) => p.status === "open");
+    return {
+      problems: openProblems.map((p) => ({
+        id: p.id,
+        title: p.title,
+        detail: p.detail,
+      })),
+      count: openProblems.length,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to list open problems." };
+  }
+}
+
+/**
+ * List all solutions for a specific problem.
+ */
+export async function listProblemSolutionsAction(
+  problemId: string
+): Promise<{ solutions: Array<{ title: string; approach: string }> } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const { listSolutionsForProblem } = await import("@/lib/problems");
+    const solutions = await listSolutionsForProblem(supabase, user.id, problemId);
+    return {
+      solutions: solutions.map((s) => ({
+        title: s.title,
+        approach: s.approach,
+      })),
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to list solutions." };
+  }
+}
+
+/**
+ * Process all open problems: generate and save solutions for each one.
+ */
+export async function processProblemSolutionsAction(
+  problemsJson: string,
+  provider: LlmProvider
+): Promise<
+  {
+    report: string;
+    proposedCount: number;
+  } | { error: string }
+> {
+  try {
+    await requireOwner();
+
+    let problems: Array<{ id: string; title: string; detail: string }>;
+    try {
+      problems = JSON.parse(problemsJson);
+    } catch {
+      return { error: "Problems JSON is invalid." };
+    }
+
+    if (!Array.isArray(problems)) {
+      return { error: "Problems must be a JSON array." };
+    }
+
+    const reportLines: string[] = [];
+    let proposedCount = 0;
+
+    for (const problem of problems) {
+      try {
+        const priorResult = await listProblemSolutionsAction(problem.id);
+        const priorSolutions = "error" in priorResult ? [] : priorResult.solutions;
+
+        const result = await proposeProblemSolutionsAction(problem, priorSolutions, provider);
+
+        if ("error" in result) {
+          reportLines.push(`${problem.title}: ${result.error}`);
+          continue;
+        }
+
+        proposedCount += result.solutions.length;
+        reportLines.push(`${problem.title}: Proposed ${result.solutions.length} solution(s).`);
+
+        for (const sol of result.solutions) {
+          reportLines.push(`  - ${sol.title}`);
+          reportLines.push(`    ${sol.approach}`);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        reportLines.push(`${problem.title}: Failed - ${message}`);
+      }
+    }
+
+    return {
+      report: reportLines.join("\n"),
+      proposedCount,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Propose 2-3 NEW solutions to an open problem, ensuring they differ from all
+ * prior solutions. Inserts solutions via insertSolutions with the service client.
+ * Returns solutions or error.
+ */
+export async function proposeProblemSolutionsAction(
+  problem: { id: string; title: string; detail: string },
+  priorSolutions: Array<{ title: string; approach: string }>,
+  provider: LlmProvider
+): Promise<{ solutions: Array<{ title: string; approach: string }> } | { error: string }> {
+  try {
+    const user = await requireOwner();
+
+    if (provider === "embedded") {
+      return { error: "Proposing solutions requires an LLM provider." };
+    }
+
+    const priorList = priorSolutions.length > 0
+      ? priorSolutions.map(s => `${s.title}\n${s.approach}`).join("\n---\n")
+      : "(none)";
+
+    const prompt = `You are helping solve a user's problem. The problem is:
+
+PROBLEM TITLE: ${problem.title}
+PROBLEM DETAIL: ${problem.detail || "(no additional detail)"}
+
+The user has already received these solution proposals (by title and approach):
+${priorList}
+
+Now propose 2-3 BRAND NEW solutions that are materially different from every prior solution. Each solution must use a different mechanism or angle, not a rewording of existing proposals.
+
+Return ONLY a valid JSON array:
+[
+  {"title": "Solution Name", "approach": "3-6 sentences describing the concrete, actionable approach."},
+  {"title": "Another Solution", "approach": "..."}
+]
+
+Ensure each approach is 3-6 sentences, concrete, and actionable.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { error: "Failed to generate solutions." };
+    }
+
+    let solutions = parseLenientJsonArray(result.text) as
+      | Array<{ title?: string; approach?: string }>
+      | null;
+    if (!solutions || solutions.length < 2 || solutions.length > 3) {
+      solutions = null;
+    }
+
+    if (!solutions) {
+      const retryPrompt = `${prompt}
+
+Remember: Return ONLY the JSON array with 2-3 solutions, nothing else. Each must be different from every prior solution.`;
+      const retryResult = await callLlm(
+        {
+          contents: [{ role: "user", parts: [{ text: retryPrompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+        },
+        provider
+      );
+
+      if (!retryResult.ok) {
+        return { error: "Failed to generate solutions on retry." };
+      }
+
+      solutions = parseLenientJsonArray(retryResult.text) as
+        | Array<{ title?: string; approach?: string }>
+        | null;
+    }
+
+    if (!solutions || solutions.length < 2 || solutions.length > 3) {
+      return { error: "Could not generate valid 2-3 solutions." };
+    }
+
+    const validated: Array<{ title: string; approach: string }> = [];
+    for (const sol of solutions) {
+      const title = typeof sol.title === "string" ? sol.title.trim() : "";
+      const approach = typeof sol.approach === "string" ? sol.approach.trim() : "";
+      if (title && approach) {
+        validated.push({ title, approach });
+      }
+    }
+
+    if (validated.length < 2) {
+      return { error: "Generated solutions had empty fields." };
+    }
+
+    const supabase = createServiceClient();
+    const { insertSolutions } = await import("@/lib/problems");
+    await insertSolutions(supabase, user.id, problem.id, validated);
+
+    return { solutions: validated };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
 }
 
 /**

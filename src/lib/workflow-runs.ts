@@ -24,9 +24,11 @@ export async function recordWorkflowRun(
     workflowName: string;
     status: "ok" | "error";
     triggerSource: TriggerSource;
+    id?: string;
   }
 ): Promise<void> {
   const { error } = await table(supabase).insert({
+    ...(input.id && { id: input.id }),
     user_id: userId,
     workflow_id: input.workflowId,
     workflow_name: input.workflowName,
@@ -74,5 +76,48 @@ export async function runsSinceForWorkflow(
   return ((data ?? []) as Array<{ created_at: string; status: string }>).map((r) => ({
     createdAt: r.created_at,
     status: r.status,
+  }));
+}
+
+/** The most recent run of any workflow for a user (excluding a given workflow
+ * to prevent self-triggering), or null if no runs exist. Used for "any workflow"
+ * triggers. */
+export async function latestRunAnyWorkflow(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  excludeWorkflowId: string
+): Promise<{ createdAt: string; status: string; workflowName: string } | null> {
+  const { data, error } = await table(supabase)
+    .select("created_at, status, workflow_name")
+    .eq("user_id", userId)
+    .neq("workflow_id", excludeWorkflowId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as Array<{ created_at: string; status: string; workflow_name: string }>;
+  return rows.length ? { createdAt: rows[0].created_at, status: rows[0].status, workflowName: rows[0].workflow_name } : null;
+}
+
+/** All runs of ANY workflow strictly newer than `sinceIso`, excluding the
+ * given workflow, oldest first (bounded). Used when a trigger watches for any
+ * workflow completion and needs to exclude its own workflow to prevent loops. */
+export async function runsSinceAnyWorkflow(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  sinceIso: string,
+  excludeWorkflowId: string
+): Promise<Array<{ createdAt: string; status: string; workflowName: string }>> {
+  const { data, error } = await table(supabase)
+    .select("created_at, status, workflow_name")
+    .eq("user_id", userId)
+    .gt("created_at", sinceIso)
+    .neq("workflow_id", excludeWorkflowId)
+    .order("created_at", { ascending: true })
+    .limit(100);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Array<{ created_at: string; status: string; workflow_name: string }>).map((r) => ({
+    createdAt: r.created_at,
+    status: r.status,
+    workflowName: r.workflow_name,
   }));
 }

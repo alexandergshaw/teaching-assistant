@@ -106,41 +106,53 @@ function practiceSlidePair(
   ];
 }
 
-/** Additional practice + answer pair (the end-of-deck review set), titled
- *  "Additional Practice:" so it is distinct from the inline per-concept Practice. */
-function additionalPracticePair(phrase: string, problem: PracticeProblemEntry): SlideScaffold[] {
+/** Post-lecture practice + answer pair: 2 problems per concept at increasing
+ *  difficulty. The first is moderate (intro-difficulty or the first available),
+ *  the second is challenging (core-difficulty or the second available). */
+function postLecturePracticePair(phrase: string, problems: PracticeProblemEntry[], index: number): SlideScaffold[] {
+  if (index >= problems.length) {
+    // Not enough problems; fall back to placeholder if this is the first one
+    if (index === 0) {
+      return placeholderPostLecturePracticePair(phrase, problems[0]?.language ?? "");
+    }
+    return [];
+  }
+
+  const problem = problems[index];
   const title = titleCase(phrase.split(/\s+/).slice(0, 6).join(" "));
+  const difficultyLabel = index === 0 ? "(moderate)" : "(challenging)";
+
   return [
     {
-      title: `Additional Practice: ${title}`,
-      bullets: [problem.prompt, "Try this on your own, then check your work against the answer."],
+      title: `Post-Lecture Practice: ${title}`,
+      bullets: [problem.prompt, `Self-study problem ${index + 1} of 2. ${difficultyLabel}`],
       code: problem.exampleCode,
       codeLanguage: problem.language,
     },
     {
       title: `Answer: ${title}`,
-      bullets: ["One correct solution to the additional practice challenge."],
+      bullets: ["One correct solution to the post-lecture practice challenge."],
       code: problem.solutionCode,
       codeLanguage: problem.language,
     },
   ];
 }
 
-/** A clearly-marked, instructor-completed additional-practice pair, used when the
- *  curated library has no problem for a concept so the review set is never empty.
- *  The engine never invents a verified solution, so the answer points the student
- *  back to the deck's worked examples and leaves the model solution to the instructor. */
-function placeholderPracticePair(phrase: string, language: string): SlideScaffold[] {
+/** A clearly-marked, instructor-completed post-lecture-practice pair, used when
+ *  the curated library has insufficient problems. The engine never invents a
+ *  verified solution, so the answer points the student back to the deck's
+ *  worked examples and leaves the solution to the instructor. */
+function placeholderPostLecturePracticePair(phrase: string, language: string): SlideScaffold[] {
   const title = titleCase(phrase.split(/\s+/).slice(0, 6).join(" "));
   if (language) {
     return [
       {
-        title: `Additional Practice: ${title}`,
+        title: `Post-Lecture Practice: ${title}`,
         bullets: [
-          `Write a short ${language} snippet that applies ${phrase}, then run it.`,
-          "Confirm the output matches what you expect.",
+          `Write a short ${language} snippet that applies ${phrase} in a new way, then run it.`,
+          "Self-study problem 1 of 2. (moderate)",
         ],
-        code: `# Additional practice: ${phrase}\n# Write your solution below.\n`,
+        code: `# Post-lecture practice: ${phrase}\n# Write your solution below.\n`,
         codeLanguage: language,
       },
       {
@@ -154,10 +166,10 @@ function placeholderPracticePair(phrase: string, language: string): SlideScaffol
   }
   return [
     {
-      title: `Additional Practice: ${title}`,
+      title: `Post-Lecture Practice: ${title}`,
       bullets: [
         `Apply ${phrase} to a new problem and show each step of your reasoning.`,
-        "Explain why your approach works.",
+        "Self-study problem 1 of 2. (moderate)",
       ],
     },
     {
@@ -276,23 +288,66 @@ export async function scaffoldLessonPlan(objectives: string, context = ""): Prom
         : ["Recap the key ideas from this lesson"],
   };
 
-  // Additional practice: 2-3 more curated problems per objective (skipping any
-  // already used inline above), each with its answer. When no curated problem
-  // exists for a concept, include a clearly-marked placeholder so the review
-  // set is never empty.
-  const additionalPracticeSlides: SlideScaffold[] = [];
+  // Post-lecture practice: exactly 2 problems per concept at increasing difficulty.
+  // First problem is intro/moderate, second is core/challenging. The order preference
+  // is intro-difficulty first, then core-difficulty for the second; fall back to
+  // whatever the bank has, never crash when fewer are available.
+  const postLecturePracticeIntroSlide: SlideScaffold = {
+    title: "Post-Lecture Practice",
+    bullets: [
+      "Self-study practice problems to deepen your understanding.",
+      "For each concept, try 2 problems at increasing difficulty before checking the answers.",
+    ],
+  };
+
+  const postLecturePracticeSlides: SlideScaffold[] = [postLecturePracticeIntroSlide];
   for (const objective of bullets.slice(0, 8)) {
     const phrase = objective.replace(/[.:;,]+$/, "").trim().toLowerCase();
-    const extras = (await findPracticeProblems(phrase, 5)).filter((p) => !usedProblems.has(p.id)).slice(0, 3);
-    if (extras.length > 0) {
-      for (const problem of extras) {
-        usedProblems.add(problem.id);
-        additionalPracticeSlides.push(...additionalPracticePair(phrase, problem));
+    const candidates = (await findPracticeProblems(phrase, 6)).filter((p) => !usedProblems.has(p.id));
+
+    // Prefer intro difficulty first, then core difficulty for the second problem.
+    // If only core or only intro available, use what we have.
+    let problem1: PracticeProblemEntry | undefined;
+    let problem2: PracticeProblemEntry | undefined;
+
+    const introProblems = candidates.filter((p) => p.difficulty === "intro");
+    const coreProblems = candidates.filter((p) => p.difficulty === "core");
+
+    if (introProblems.length > 0) {
+      problem1 = introProblems[0];
+      usedProblems.add(problem1.id);
+    } else if (coreProblems.length > 0) {
+      problem1 = coreProblems[0];
+      usedProblems.add(problem1.id);
+    }
+
+    if (problem1) {
+      // Get the second problem from remaining candidates, preferring core difficulty.
+      const remaining = candidates.filter((p) => p.id !== problem1!.id);
+      if (remaining.length > 0) {
+        // Prefer core-difficulty for problem2, fall back to whatever is available.
+        const coreCandidates = remaining.filter((p) => p.difficulty === "core");
+        problem2 = coreCandidates.length > 0 ? coreCandidates[0] : remaining[0];
+        usedProblems.add(problem2.id);
       }
+    }
+
+    // Add the first problem (moderate difficulty).
+    if (problem1) {
+      postLecturePracticeSlides.push(...postLecturePracticePair(phrase, [problem1], 0));
     } else {
-      // No curated problem for this concept: always include one clearly-marked,
-      // instructor-completed pair so the review set is never empty.
-      additionalPracticeSlides.push(...placeholderPracticePair(phrase, fallbackLanguage));
+      postLecturePracticeSlides.push(...placeholderPostLecturePracticePair(phrase, fallbackLanguage));
+    }
+
+    // Add the second problem (challenging difficulty).
+    if (problem2) {
+      postLecturePracticeSlides.push(...postLecturePracticePair(phrase, [problem1!, problem2], 1));
+    } else {
+      // If we don't have a second problem, add a placeholder for it (always).
+      postLecturePracticeSlides.push(...placeholderPostLecturePracticePair(phrase, fallbackLanguage).slice(0, 2).map((s) => ({
+        ...s,
+        bullets: s.bullets.map((b) => b.replace("problem 1 of 2", "problem 2 of 2").replace("(moderate)", "(challenging)")),
+      })));
     }
   }
 
@@ -316,7 +371,7 @@ export async function scaffoldLessonPlan(objectives: string, context = ""): Prom
   };
 
   const closingSlides: SlideScaffold[] = [
-    ...additionalPracticeSlides,
+    ...postLecturePracticeSlides,
     documentationConceptsSlide,
     documentationReferencesSlide,
   ];

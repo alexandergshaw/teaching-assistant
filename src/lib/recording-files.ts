@@ -16,6 +16,8 @@ export interface RecordingFile {
   source: string | null;
   origin: string | null;
   workflowName: string | null;
+  workflowId: string | null;
+  workflowRunId: string | null;
   createdAt: string;
 }
 
@@ -56,7 +58,7 @@ export async function saveRecordingFile(
   supabase: SupabaseClient<Database>,
   userId: string,
   blob: Blob,
-  meta: { name: string; kind: "recording" | "captioned" | "narrated" | "bundle" | "file"; mimeType: string; durationSec: number | null; fileExt?: string; source?: string | null; origin?: string | null; workflowName?: string | null }
+  meta: { name: string; kind: "recording" | "captioned" | "narrated" | "bundle" | "file"; mimeType: string; durationSec: number | null; fileExt?: string; source?: string | null; origin?: string | null; workflowName?: string | null; workflowId?: string | null; workflowRunId?: string | null }
 ): Promise<RecordingFile> {
   const id = crypto.randomUUID();
   let ext = meta.fileExt;
@@ -90,6 +92,8 @@ export async function saveRecordingFile(
       source: meta.source ?? null,
       origin: meta.origin ?? null,
       workflow_name: meta.workflowName ?? null,
+      workflow_id: meta.workflowId ?? null,
+      workflow_run_id: meta.workflowRunId ?? null,
     })
     .select()
     .single();
@@ -200,6 +204,8 @@ function mapRecordingFile(row: Database["public"]["Tables"]["recording_files"]["
     source: row.source,
     origin: row.origin,
     workflowName: row.workflow_name,
+    workflowId: row.workflow_id,
+    workflowRunId: row.workflow_run_id,
     createdAt: row.created_at,
   };
 }

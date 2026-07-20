@@ -8,6 +8,7 @@ import {
   decideRepoInactive,
   decideBrokenLinks,
   decideRosterChanged,
+  decideCartridgeDrops,
   decideDeadlinePassed,
   decideCourseStart,
   decideWorkflowCompleted,
@@ -499,6 +500,33 @@ describe("decideRosterChanged", () => {
   });
 });
 
+describe("decideCartridgeDrops", () => {
+  it("fires when there are new drops", () => {
+    const d = decideCartridgeDrops(null, ["drop-1", "drop-2"]);
+    expect(d.fired).toBe(true);
+    expect(d.cursor).toEqual({ ids: "drop-1\ndrop-2", count: 2 });
+    expect(d.detail).toContain("2 new drop(s) to grade.");
+  });
+
+  it("does not fire when the drop list is empty", () => {
+    const d = decideCartridgeDrops(null, []);
+    expect(d.fired).toBe(false);
+    expect(d.cursor).toEqual({ ids: "", count: 0 });
+    expect(d.detail).toContain("No new drops.");
+  });
+
+  it("has the correct cursor shape with ids and count", () => {
+    const d = decideCartridgeDrops(null, ["a", "b", "c"]);
+    expect(d.cursor).toEqual({ ids: "a\nb\nc", count: 3 });
+  });
+
+  it("sorts ids consistently in the cursor for observability", () => {
+    const d1 = decideCartridgeDrops(null, ["z", "a", "m"]);
+    const d2 = decideCartridgeDrops(null, ["a", "m", "z"]);
+    expect(d1.cursor).toEqual(d2.cursor);
+  });
+});
+
 describe("decideDeadlinePassed", () => {
   it("first eval sets the baseline and does not fire", () => {
     const d = decideDeadlinePassed(null, [{ assignmentId: "a1", name: "Assignment 1", dueAt: "2026-07-10T00:00:00Z" }], "2026-07-14T00:00:00Z");
@@ -653,6 +681,34 @@ describe("decideWorkflowCompleted", () => {
     // is not re-examined on the next poll.
     expect(d.cursor).toEqual({ lastAt: "2026-07-11T00:00:00.000Z" });
   });
+
+  it("any-workflow: baseline first eval sets cursor without firing", () => {
+    const d = decideWorkflowCompleted(null, { baselineLatest: "2026-07-10T00:00:00.000Z", runsSince: [] }, false);
+    expect(d.fired).toBe(false);
+    expect(d.cursor).toEqual({ lastAt: "2026-07-10T00:00:00.000Z" });
+  });
+
+  it("any-workflow: fires on a new foreign run", () => {
+    const base = decideWorkflowCompleted(null, { baselineLatest: "2026-07-10T00:00:00.000Z", runsSince: [] }, false);
+    const d = decideWorkflowCompleted(
+      base.cursor,
+      { baselineLatest: null, runsSince: [{ createdAt: "2026-07-11T00:00:00.000Z", status: "ok" }] },
+      false
+    );
+    expect(d.fired).toBe(true);
+    expect(d.cursor).toEqual({ lastAt: "2026-07-11T00:00:00.000Z" });
+  });
+
+  it("any-workflow: does NOT fire on excluded own workflow, cursor unchanged", () => {
+    const base = decideWorkflowCompleted(null, { baselineLatest: "2026-07-10T00:00:00.000Z", runsSince: [] }, false);
+    const d = decideWorkflowCompleted(
+      base.cursor,
+      { baselineLatest: null, runsSince: [] },
+      false
+    );
+    expect(d.fired).toBe(false);
+    expect(d.cursor).toEqual(base.cursor);
+  });
 });
 
 describe("isTriggerDueForCheck", () => {
@@ -757,6 +813,12 @@ describe("mapTrigger", () => {
     const t = mapTrigger(row);
     expect(t.cursor).toBeNull();
   });
+
+  it("passes through the cartridge-uploaded event type correctly", () => {
+    const row = makeRow({ event_type: "cartridge-uploaded" });
+    const t = mapTrigger(row);
+    expect(t.eventType).toBe("cartridge-uploaded");
+  });
 });
 
 describe("describeTrigger", () => {
@@ -797,6 +859,7 @@ describe("EVENT_SOURCES / getEventSource", () => {
       "app-focused",
       "app-open",
       "broken-links",
+      "cartridge-uploaded",
       "course-start",
       "deadline-passed",
       "lms-email-received",
@@ -854,6 +917,13 @@ describe("EVENT_SOURCES / getEventSource", () => {
       // never due for the poller
       expect(isTriggerDueForCheck(makeTrigger({ eventType: type, lastCheckedAt: null }), new Date())).toBe(false);
     }
+  });
+
+  it("cartridge-uploaded event source has serverEvaluable true", () => {
+    const s = getEventSource("cartridge-uploaded");
+    expect(s).toBeDefined();
+    expect(s?.serverEvaluable).toBe(true);
+    expect(s?.evaluate).toBeDefined();
   });
 });
 

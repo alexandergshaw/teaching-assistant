@@ -163,6 +163,14 @@ export const COURSE_REFRESH: WorkflowDef = {
       },
     },
     {
+      type: "generate-class-openers",
+      bindings: {
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        minutes: { source: "literal", value: "30" },
+      },
+    },
+    {
       // Starter Materials runs last against the tile's LMS course. The
       // absorbed step's courses input expects a newline-joined
       // lmsCourseList; step 0's "course" output is a single URL, which is
@@ -407,6 +415,22 @@ export const REVIEW_GRADING_DRAFTS: WorkflowDef = {
       bindings: {
         runs: { source: "step", stepIndex: 0, outputKey: "runs" },
         approvedGrades: { source: "step", stepIndex: 0, outputKey: "approvedGrades" },
+      },
+    },
+  ],
+};
+
+export const CARTRIDGE_GRADING: WorkflowDef = {
+  id: "cartridge-grading",
+  preset: true,
+  name: "Grade Dropped Cartridges",
+  description:
+    "Grades submission archives uploaded to the Cartridge drop panel and produces gradebook CSVs ready to upload back to your LMS, plus a reviewable grading draft. Pair it with a Cartridge uploaded trigger to grade new drops automatically.",
+  steps: [
+    {
+      type: "grade-cartridge-submissions",
+      bindings: {
+        maxDrops: { source: "literal", value: "3" },
       },
     },
   ],
@@ -1423,6 +1447,14 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
       },
     },
     {
+      type: "ensure-visualizer-pages",
+      bindings: {
+        courses: { source: "literal", value: "*" },
+        lookahead: { source: "runtime", fieldKey: "lookahead" },
+        maxConcepts: { source: "literal", value: "3" },
+      },
+    },
+    {
       type: "draft-weekly-announcements",
       bindings: {
         courses: { source: "literal", value: "*" },
@@ -1451,7 +1483,7 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
       type: "grade-to-draft",
       bindings: {},
       runIf: {
-        binding: { source: "step", stepIndex: 5, outputKey: "hasWork" },
+        binding: { source: "step", stepIndex: 6, outputKey: "hasWork" },
         expected: true,
       },
     },
@@ -1469,10 +1501,34 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
       type: "compose-briefing",
       bindings: {
         title: { source: "literal", value: "Weekly prep report" },
-        section1: { source: "step", stepIndex: 3, outputKey: "deadlines" },
-        section2: { source: "step", stepIndex: 4, outputKey: "report" },
+        section1: { source: "step", stepIndex: 4, outputKey: "deadlines" },
+        section2: { source: "step", stepIndex: 5, outputKey: "report" },
         section3: { source: "step", stepIndex: 0, outputKey: "report" },
-        section4: { source: "step", stepIndex: 2, outputKey: "report" },
+        section4: { source: "step", stepIndex: 3, outputKey: "report" },
+      },
+    },
+  ],
+};
+
+export const PROBLEM_SOLVING_COMPANION: WorkflowDef = {
+  id: "problem-solving-companion",
+  preset: true,
+  name: "Propose Solutions to Open Problems",
+  description:
+    "When another workflow completes, read your open problems and propose 2-3 fresh solutions for each one. Solutions accumulate over time and are visible in the Problems panel. Runs fully headless.",
+  steps: [
+    {
+      type: "list-open-problems",
+      bindings: {},
+    },
+    {
+      type: "propose-problem-solutions",
+      bindings: {
+        problems: { source: "step", stepIndex: 0, outputKey: "problems" },
+      },
+      runIf: {
+        binding: { source: "step", stepIndex: 0, outputKey: "hasProblems" },
+        expected: true,
       },
     },
   ],
@@ -1501,6 +1557,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     ASSIGN_DUE_DATES,
     GRADE_SUBMISSIONS,
     GRADE_TO_DRAFT,
+    CARTRIDGE_GRADING,
     REVIEW_GRADING_DRAFTS,
     BATCH_GRADE_REPOS,
     ZERO_MISSING_SUBMISSIONS,
@@ -1526,6 +1583,7 @@ export function allWorkflows(custom: WorkflowDef[]): WorkflowDef[] {
     NUDGE_MISSING_FROM_GRADEBOOK,
     WEEKLY_CONCEPT_ANIMATIONS,
     WEEKLY_EVERYTHING_PREP,
+    PROBLEM_SOLVING_COMPANION,
     ...custom,
   ];
 }

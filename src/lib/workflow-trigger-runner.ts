@@ -19,7 +19,7 @@ import {
   claimAndAdvanceTrigger,
   touchTriggerChecked,
 } from "@/lib/workflow-triggers";
-import { recordWorkflowRun, latestWorkflowRun, runsSinceForWorkflow } from "@/lib/workflow-runs";
+import { recordWorkflowRun, latestWorkflowRun, runsSinceForWorkflow, latestRunAnyWorkflow, runsSinceAnyWorkflow } from "@/lib/workflow-runs";
 import { runWorkflowUnattended, buildServerStepRunHelpers } from "@/lib/workflows/server-runner";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
 import { listWorkflowDefs } from "@/lib/workflow-defs";
@@ -93,6 +93,9 @@ export async function runDueUnattendedTriggers(
           activeInstitution: trigger.institution ?? null,
           latestRun: (workflowId) => latestWorkflowRun(supabase, trigger.userId, workflowId),
           runsSince: (workflowId, sinceIso) => runsSinceForWorkflow(supabase, trigger.userId, workflowId, sinceIso),
+          excludeWorkflowId: trigger.workflowId,
+          latestRunAny: (excludeId) => latestRunAnyWorkflow(supabase, trigger.userId, excludeId),
+          runsSinceAny: (sinceIso, excludeId) => runsSinceAnyWorkflow(supabase, trigger.userId, sinceIso, excludeId),
         })
       );
 
@@ -117,6 +120,7 @@ export async function runDueUnattendedTriggers(
           : "gemini";
 
       const runDeadlineMs = now.getTime() + 50_000;
+      const workflowRunId = crypto.randomUUID();
       const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
         runWorkflowUnattended({
           def,
@@ -129,6 +133,9 @@ export async function runDueUnattendedTriggers(
             institution: trigger.institution,
             provider,
             author: resolveDocumentAuthor(userRes.user),
+            workflowId: trigger.workflowId,
+            workflowName: trigger.workflowName,
+            workflowRunId,
           }),
           deadlineMs: runDeadlineMs,
         })
@@ -142,6 +149,7 @@ export async function runDueUnattendedTriggers(
           workflowName: trigger.workflowName,
           status: outcome.ok ? "ok" : "error",
           triggerSource: "trigger",
+          id: workflowRunId,
         });
       } catch {
         // swallow - logging is a convenience, not a correctness requirement.

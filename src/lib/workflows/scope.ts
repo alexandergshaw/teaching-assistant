@@ -40,6 +40,8 @@ export function isScopeableListType(type: string): boolean {
 export async function expandScopedValue(
   type: string,
   value: string,
+  // filterHubByInstitution is vestigial: hub-tile filtering now keys off
+  // activeInstitution alone (see below), so passing it changes nothing.
   ctx: { activeInstitution: string | null; filterHubByInstitution?: boolean }
 ): Promise<string> {
   if (!isScopeableListType(type)) return value;
@@ -49,8 +51,16 @@ export async function expandScopedValue(
     const r = await listCourseHubAction();
     if ("error" in r) return "";
     let courses = r.courses;
-    if (ctx.filterHubByInstitution) {
-      const inst = (ctx.activeInstitution || "").trim();
+    // "*" is institution-scoped whenever the run has a concrete institution
+    // (workflow scope, a schedule's pinned institution, a fan-out iteration,
+    // or the app's active institution) - matching lmsCourseList "*" below,
+    // which has always enumerated only the active institution. Without this,
+    // two per-institution runs each expand "*" to EVERY tile and process the
+    // other institution's courses too (duplicate announcements/drafts).
+    // Matching is case-insensitive on the acronym; tiles with no institution
+    // expand only in institution-less runs.
+    const inst = (ctx.activeInstitution || "").trim().toUpperCase();
+    if (inst) {
       courses = courses.filter((c) => (c.institution ?? "").trim().toUpperCase() === inst);
     }
     return courses.map((c) => c.id).join("\n");

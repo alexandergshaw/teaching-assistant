@@ -10,7 +10,7 @@ import {
   lifecycleCooldownElapsed,
   type TriggerEvalResult,
 } from "@/lib/workflow-triggers";
-import { latestWorkflowRun, runsSinceForWorkflow } from "@/lib/workflow-runs";
+import { latestWorkflowRun, runsSinceForWorkflow, latestRunAnyWorkflow, runsSinceAnyWorkflow } from "@/lib/workflow-runs";
 import { enqueueScheduledRun } from "@/lib/workflow-schedule-handoff";
 import { readActiveInstitution } from "@/lib/institutions";
 
@@ -100,6 +100,9 @@ export default function WorkflowTriggerWatcher({
           activeInstitution,
           latestRun: (workflowId) => latestWorkflowRun(supabase, user.id, workflowId),
           runsSince: (workflowId, sinceIso) => runsSinceForWorkflow(supabase, user.id, workflowId, sinceIso),
+          excludeWorkflowId: trigger.workflowId,
+          latestRunAny: (excludeId) => latestRunAnyWorkflow(supabase, user.id, excludeId),
+          runsSinceAny: (sinceIso, excludeId) => runsSinceAnyWorkflow(supabase, user.id, sinceIso, excludeId),
         });
         const claimed = await claimAndAdvanceTrigger(supabase, trigger, result, now);
         if (!claimed || cancelled) return;

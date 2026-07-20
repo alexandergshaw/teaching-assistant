@@ -5,6 +5,8 @@ import {
   planCartridgeModules,
   currentCourseWeek,
   courseProgressStatus,
+  parseWeekToken,
+  currentWeekFromDeadlines,
 } from "./week-numbering";
 
 describe("currentCourseWeek", () => {
@@ -47,6 +49,245 @@ describe("courseProgressStatus", () => {
   it("stays in-progress when the total is unknown", () => {
     expect(courseProgressStatus(99, null)).toBe("in-progress");
     expect(courseProgressStatus(99, 0)).toBe("in-progress");
+  });
+});
+
+describe("parseWeekToken", () => {
+  it("parses 'Week N' format", () => {
+    expect(parseWeekToken("Week 6 Deliverable")).toBe(6);
+  });
+
+  it("parses 'Module N' format (case insensitive)", () => {
+    expect(parseWeekToken("Module 7 Assignment")).toBe(7);
+    expect(parseWeekToken("module 3 test")).toBe(3);
+    expect(parseWeekToken("MODULE 5 exam")).toBe(5);
+  });
+
+  it("handles zero-padded numbers", () => {
+    expect(parseWeekToken("Week 06 Deliverable")).toBe(6);
+    expect(parseWeekToken("Module 03 Assignment")).toBe(3);
+  });
+
+  it("handles different separators (spaces, underscores, dashes)", () => {
+    expect(parseWeekToken("Week 5 Topic")).toBe(5);
+    expect(parseWeekToken("Week_5_Topic")).toBe(5);
+    expect(parseWeekToken("Week-5-Topic")).toBe(5);
+    expect(parseWeekToken("Module 4 Assignment")).toBe(4);
+    expect(parseWeekToken("Module_4_Assignment")).toBe(4);
+    expect(parseWeekToken("Module-4-Assignment")).toBe(4);
+  });
+
+  it("returns null when no week/module token found", () => {
+    expect(parseWeekToken("Assignment 1")).toBeNull();
+    expect(parseWeekToken("Project 2")).toBeNull();
+    expect(parseWeekToken("Exam 3")).toBeNull();
+  });
+
+  it("returns null for empty string", () => {
+    expect(parseWeekToken("")).toBeNull();
+  });
+
+  it("parses first match only", () => {
+    expect(parseWeekToken("Week 1 or Week 2")).toBe(1);
+  });
+});
+
+describe("currentWeekFromDeadlines", () => {
+  const nowMs = Date.UTC(2024, 6, 18); // 2024-07-18 00:00:00 UTC
+
+  describe("Basic functionality", () => {
+    it("returns the earliest week with an unpasssed deadline", () => {
+      const entries = [
+        { name: "Week 6 Deliverable", dueAt: "2024-07-25" }, // 7 days in future (passed nowMs)
+        { name: "Week 7 Deliverable", dueAt: "2024-08-01" }, // 14 days in future
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toEqual({
+        week: 6,
+        pastLastDeadline: false,
+      });
+    });
+
+    it("returns the smallest week when multiple deadlines are in the future", () => {
+      const entries = [
+        { name: "Module 5 Assignment", dueAt: "2024-08-10" },
+        { name: "Module 3 Assignment", dueAt: "2024-07-20" },
+        { name: "Module 7 Assignment", dueAt: "2024-08-20" },
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toEqual({
+        week: 3,
+        pastLastDeadline: false,
+      });
+    });
+  });
+
+  describe("Per-week latest deadline", () => {
+    it("keeps the latest due date when a week has multiple deadlines", () => {
+      const entries = [
+        { name: "Week 4 Assignment", dueAt: "2024-07-20" }, // Earlier
+        { name: "Week 4 Quiz", dueAt: "2024-07-25" }, // Later (used)
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toEqual({
+        week: 4,
+        pastLastDeadline: false,
+      });
+    });
+
+    it("module stays current until its latest deadline passes", () => {
+      const entries = [
+        { name: "Week 6 Assignment", dueAt: "2024-07-15" }, // Past
+        { name: "Week 6 Quiz", dueAt: "2024-07-22" }, // Future
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toEqual({
+        week: 6,
+        pastLastDeadline: false,
+      });
+    });
+  });
+
+  describe("Deadline exactly at nowMs (inclusive)", () => {
+    it("treats deadline at nowMs as not yet passed", () => {
+      const entries = [
+        { name: "Week 5 Deliverable", dueAt: "2024-07-18" }, // Exactly at nowMs
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toEqual({
+        week: 5,
+        pastLastDeadline: false,
+      });
+    });
+  });
+
+  describe("All deadlines passed", () => {
+    it("returns maxWeek + 1 with pastLastDeadline true", () => {
+      const entries = [
+        { name: "Week 4 Assignment", dueAt: "2024-07-15" },
+        { name: "Week 6 Assignment", dueAt: "2024-07-17" },
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toEqual({
+        week: 7,
+        pastLastDeadline: true,
+      });
+    });
+
+    it("handles single past deadline", () => {
+      const entries = [
+        { name: "Week 3 Deliverable", dueAt: "2024-07-10" },
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toEqual({
+        week: 4,
+        pastLastDeadline: true,
+      });
+    });
+  });
+
+  describe("Invalid/missing data", () => {
+    it("ignores entries with no parseable week token", () => {
+      const entries = [
+        { name: "Assignment 1", dueAt: "2024-07-25" }, // No week token
+        { name: "Week 5 Deliverable", dueAt: "2024-07-25" },
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toEqual({
+        week: 5,
+        pastLastDeadline: false,
+      });
+    });
+
+    it("ignores entries with null dueAt", () => {
+      const entries = [
+        { name: "Week 4 Assignment", dueAt: null },
+        { name: "Week 6 Assignment", dueAt: "2024-07-25" },
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toEqual({
+        week: 6,
+        pastLastDeadline: false,
+      });
+    });
+
+    it("ignores entries with unparseable dueAt", () => {
+      const entries = [
+        { name: "Week 4 Assignment", dueAt: "not-a-date" },
+        { name: "Week 6 Assignment", dueAt: "2024-07-25" },
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toEqual({
+        week: 6,
+        pastLastDeadline: false,
+      });
+    });
+
+    it("returns null when no usable entries", () => {
+      const entries = [
+        { name: "Assignment 1", dueAt: "2024-07-25" },
+        { name: "Project 2", dueAt: "2024-08-01" },
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toBeNull();
+    });
+
+    it("returns null for empty array", () => {
+      expect(currentWeekFromDeadlines([], nowMs)).toBeNull();
+    });
+
+    it("ignores zero week numbers", () => {
+      const entries = [
+        { name: "Week 0 Test", dueAt: "2024-07-25" },
+        { name: "Week 5 Deliverable", dueAt: "2024-08-01" },
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toEqual({
+        week: 5,
+        pastLastDeadline: false,
+      });
+    });
+  });
+
+  describe("Mixed week/module naming", () => {
+    it("handles Week and Module interchangeably", () => {
+      const entries = [
+        { name: "Week 3 Assignment", dueAt: "2024-07-15" },
+        { name: "Module 4 Assignment", dueAt: "2024-07-25" },
+        { name: "Week 5 Assignment", dueAt: "2024-08-01" },
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toEqual({
+        week: 4,
+        pastLastDeadline: false,
+      });
+    });
+  });
+
+  describe("Weeks out of order", () => {
+    it("correctly identifies current week when entries are unordered", () => {
+      const entries = [
+        { name: "Week 7 Deliverable", dueAt: "2024-08-15" },
+        { name: "Week 3 Deliverable", dueAt: "2024-07-19" },
+        { name: "Week 5 Deliverable", dueAt: "2024-07-25" },
+        { name: "Week 1 Deliverable", dueAt: "2024-07-10" },
+      ];
+      expect(currentWeekFromDeadlines(entries, nowMs)).toEqual({
+        week: 3,
+        pastLastDeadline: false,
+      });
+    });
+  });
+
+  describe("Smoke test with currentCourseWeek", () => {
+    it("courseProgressStatus correctly classifies deadline-based rawWeek", () => {
+      const entries = [
+        { name: "Week 5 Deliverable", dueAt: "2024-07-10" },
+      ];
+      const result = currentWeekFromDeadlines(entries, nowMs);
+      if (result && !result.pastLastDeadline) {
+        const status = courseProgressStatus(result.week, 10);
+        expect(status).toBe("in-progress");
+      }
+    });
+
+    it("courseProgressStatus marks past-the-end as complete", () => {
+      const entries = [
+        { name: "Week 5 Deliverable", dueAt: "2024-07-10" },
+      ];
+      const result = currentWeekFromDeadlines(entries, nowMs);
+      if (result && result.pastLastDeadline) {
+        const status = courseProgressStatus(result.week, 5);
+        expect(status).toBe("complete");
+      }
+    });
   });
 });
 

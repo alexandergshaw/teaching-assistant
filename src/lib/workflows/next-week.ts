@@ -117,23 +117,36 @@ export function resolveWeekTopic(input: {
  * - If the course hasn't started and will start within the next 7 days, return week 1.
  * - If the course is in progress, return the next week (rawWeek + 1) if it's within bounds.
  * - Otherwise return a skip reason.
+ * - rawWeek (when supplied) overrides the computed start-date week. startDate may be null if rawWeek is provided.
  */
 export function nextLectureWeek(input: {
   startDate: string | null;
   weeks: number | null;
   nowMs: number;
+  rawWeek?: number | null;
 }): { week: number } | { skip: string } {
-  const { startDate, weeks, nowMs } = input;
+  const { startDate, weeks, nowMs, rawWeek: suppliedRawWeek } = input;
 
-  // Branch 1: No start date
-  if (!startDate) {
-    return { skip: "no start date" };
+  // Determine the raw week: use supplied value if provided, else compute from startDate
+  let rawWeek: number | null;
+  if (suppliedRawWeek !== undefined) {
+    rawWeek = suppliedRawWeek;
+  } else {
+    // Branch 1: No start date
+    if (!startDate) {
+      return { skip: "no start date" };
+    }
+
+    // Get the raw week
+    rawWeek = currentCourseWeek(startDate, nowMs);
+
+    // If currentCourseWeek returns null, the date is invalid
+    if (rawWeek === null) {
+      return { skip: "no start date" };
+    }
   }
 
-  // Get the raw week
-  const rawWeek = currentCourseWeek(startDate, nowMs);
-
-  // If currentCourseWeek returns null, the date is invalid
+  // If rawWeek is null at this point, no start date was provided and none was supplied
   if (rawWeek === null) {
     return { skip: "no start date" };
   }
@@ -149,6 +162,10 @@ export function nextLectureWeek(input: {
   // Branches 2 & 3: Not-started
   if (status === "not-started") {
     // rawWeek === 0: course hasn't started yet
+    // If no startDate is available, can't check the 7-day window
+    if (!startDate) {
+      return { skip: "starts later than next week" };
+    }
     // Check if the start date is within the next 7 days
     const start = Date.parse(startDate);
     const msUntilStart = start - nowMs;

@@ -945,7 +945,7 @@ export default function Home() {
           <RecordingTab active={activeTab === "manual" && manualView === "recording"} />
         </div>
 
-        {activeTab === "files" && <FilesTab />}
+        {activeTab === "files" && <FilesTab onOpenWorkflow={openWorkflow} />}
 
         {activeTab === "drafts" && (
           <>

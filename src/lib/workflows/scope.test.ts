@@ -1,6 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("@/app/actions", () => ({
+  listCourseHubAction: vi.fn(),
+  listCoursesAction: vi.fn(),
+  listMyOrgsAction: vi.fn(),
+}));
+
 import { isScopeableListType, expandScopedValue, ALL_SCOPE } from "./scope";
 import { outputFeedsInput } from "./types";
+import { listCourseHubAction } from "@/app/actions";
 
 describe("isScopeableListType", () => {
   it("recognizes the scopeable list types", () => {
@@ -43,6 +51,58 @@ describe("expandScopedValue", () => {
   it("expands lmsCourseList '*' to empty when no institution is active (no network)", async () => {
     expect(await expandScopedValue("lmsCourseList", ALL_SCOPE, { activeInstitution: "" })).toBe("");
     expect(await expandScopedValue("lmsCourseList", ALL_SCOPE, { activeInstitution: null })).toBe("");
+  });
+});
+
+describe("expandScopedValue hubCourseList institution scoping", () => {
+  // Tiles across two institutions plus one with no institution assigned.
+  const tiles = [
+    { id: "t-mcc", institution: "MCC" },
+    { id: "t-mu", institution: "MU" },
+    { id: "t-none", institution: null },
+  ];
+
+  beforeEach(() => {
+    vi.mocked(listCourseHubAction).mockReset();
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: tiles } as never);
+  });
+
+  it("expands '*' to only the run institution's tiles (a per-institution run must not process another institution's courses)", async () => {
+    expect(await expandScopedValue("hubCourseList", ALL_SCOPE, { activeInstitution: "MCC" })).toBe("t-mcc");
+    expect(await expandScopedValue("hubCourseList", ALL_SCOPE, { activeInstitution: "MU" })).toBe("t-mu");
+  });
+
+  it("matches the institution acronym case-insensitively", async () => {
+    expect(await expandScopedValue("hubCourseList", ALL_SCOPE, { activeInstitution: "mcc" })).toBe("t-mcc");
+    expect(await expandScopedValue("hubCourseList", ALL_SCOPE, { activeInstitution: " mu " })).toBe("t-mu");
+  });
+
+  it("expands '*' to every tile (including unassigned) when no institution is in effect", async () => {
+    expect(await expandScopedValue("hubCourseList", ALL_SCOPE, { activeInstitution: null })).toBe(
+      "t-mcc\nt-mu\nt-none"
+    );
+    expect(await expandScopedValue("hubCourseList", ALL_SCOPE, { activeInstitution: "" })).toBe(
+      "t-mcc\nt-mu\nt-none"
+    );
+  });
+
+  it("excludes tiles with no institution from an institution-pinned run", async () => {
+    const expanded = await expandScopedValue("hubCourseList", ALL_SCOPE, { activeInstitution: "MCC" });
+    expect(expanded.split("\n")).not.toContain("t-none");
+  });
+
+  it("filters identically with the vestigial filterHubByInstitution flag set", async () => {
+    expect(
+      await expandScopedValue("hubCourseList", ALL_SCOPE, {
+        activeInstitution: "mcc",
+        filterHubByInstitution: true,
+      })
+    ).toBe("t-mcc");
+  });
+
+  it("returns empty on enumeration error rather than mis-treating '*' as an id", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({ error: "boom" } as never);
+    expect(await expandScopedValue("hubCourseList", ALL_SCOPE, { activeInstitution: "MCC" })).toBe("");
   });
 });
 

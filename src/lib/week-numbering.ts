@@ -108,6 +108,64 @@ export interface CartridgeModulePlan {
 }
 
 /**
+ * Parse the first /(?:week|module)[\s_-]*(\d+)/i match from a label.
+ * Returns the captured week/module number, or null if no match.
+ * Handles zero-padded numbers (e.g., "Week 06" -> 6), spaces/underscores/dashes
+ * as separators, and case-insensitive keywords.
+ */
+export function parseWeekToken(label: string): number | null {
+  const match = label.match(/(?:week|module)[\s_-]*(\d+)/i);
+  if (!match || !match[1]) return null;
+  return Number(match[1]);
+}
+
+/**
+ * Determine the current week based on assignment due dates.
+ * - Ignores entries with no parseable week token or missing/unparseable dueAt.
+ * - Per week, keeps the LATEST due date (a module stays current until its last deadline passes).
+ * - Current week = the SMALLEST week whose latest due date is >= nowMs (inclusive).
+ * - When every deadline has passed: { week: maxWeek + 1, pastLastDeadline: true }.
+ * - No usable entries: null.
+ */
+export function currentWeekFromDeadlines(
+  entries: Array<{ name: string; dueAt: string | null }>,
+  nowMs: number
+): { week: number; pastLastDeadline: boolean } | null {
+  // Extract parseable week tokens and due dates
+  const weekMap = new Map<number, number>(); // week -> latest dueAt timestamp
+
+  for (const entry of entries) {
+    const week = parseWeekToken(entry.name);
+    if (week === null || week <= 0) continue;
+
+    const dueAtMs = entry.dueAt ? Date.parse(entry.dueAt) : NaN;
+    if (Number.isNaN(dueAtMs)) continue;
+
+    // Keep the latest due date for each week
+    const existing = weekMap.get(week);
+    if (existing === undefined || dueAtMs > existing) {
+      weekMap.set(week, dueAtMs);
+    }
+  }
+
+  // If no usable entries, return null
+  if (weekMap.size === 0) return null;
+
+  // Find the smallest week whose latest due date is >= nowMs
+  const sortedWeeks = Array.from(weekMap.keys()).sort((a, b) => a - b);
+  for (const week of sortedWeeks) {
+    const dueAtMs = weekMap.get(week)!;
+    if (dueAtMs >= nowMs) {
+      return { week, pastLastDeadline: false };
+    }
+  }
+
+  // All deadlines have passed - return past-the-end value
+  const maxWeek = Math.max(...sortedWeeks);
+  return { week: maxWeek + 1, pastLastDeadline: true };
+}
+
+/**
  * Generate module plans for a Common Cartridge export.
  * - Modules cover the union of (schedule week values that are integers >= 1) and
  *   (fileWeeks values that are integers >= 1).

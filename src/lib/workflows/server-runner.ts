@@ -449,8 +449,9 @@ export function buildServerStepRunHelpers(opts: {
   author: string;
   workflowId?: string;
   workflowName?: string;
+  workflowRunId?: string;
 }): StepRunHelpers {
-  const { supabase, userId, institution, provider, author, workflowId, workflowName } = opts;
+  const { supabase, userId, institution, provider, author, workflowId, workflowName, workflowRunId } = opts;
 
   return {
     activeInstitution: institution,
@@ -465,6 +466,8 @@ export function buildServerStepRunHelpers(opts: {
         source: "workflow",
         origin: "unattended",
         workflowName: workflowName ?? null,
+        workflowId: workflowId ?? null,
+        workflowRunId: workflowRunId ?? null,
       });
     },
     saveRunReport: async (name, markdown) => {
@@ -478,6 +481,8 @@ export function buildServerStepRunHelpers(opts: {
         source: "workflow",
         origin: "unattended",
         workflowName: workflowName ?? null,
+        workflowId: workflowId ?? null,
+        workflowRunId: workflowRunId ?? null,
       });
     },
     saveCourseMaterialFile: async (courseId, blob, fileName) => {
@@ -522,5 +527,6 @@ export function buildServerStepRunHelpers(opts: {
     },
     workflowId,
     workflowName,
+    workflowRunId,
   };
 }

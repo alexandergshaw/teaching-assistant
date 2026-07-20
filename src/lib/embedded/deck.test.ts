@@ -4,14 +4,15 @@ import { scaffoldLessonPlan, scaffoldExamples } from "./deck";
 describe("scaffoldLessonPlan", () => {
   it("builds a title slide, a slide per objective, and a summary for topics with no knowledge matches", async () => {
     const deck = await scaffoldLessonPlan("- Watercolor blending\n- Brush care\n- Paper selection");
-    // title (1) + 3 concepts + summary (1) + 3 placeholder practice pairs (6 slides) + Documentation: Key Concepts (1) + Documentation & References (1) = 13
-    expect(deck.slides.length).toBe(13);
+    // title (1) + 3 concepts + summary (1) + Post-Lecture Practice intro (1) + 3 concepts * 2 practice/answer pairs (12 slides) + Documentation: Key Concepts (1) + Documentation & References (1) = 20
+    expect(deck.slides.length).toBe(20);
     expect(deck.slides[0].title).toBe(deck.presentationTitle);
     expect(deck.slides.some((s) => s.title === "Summary")).toBe(true);
     expect(deck.slides.some((s) => s.title === "Documentation: Key Concepts")).toBe(true);
     expect(deck.slides[deck.slides.length - 1].title).toBe("Documentation & References");
     expect(deck.slides.some((s) => s.title.startsWith("Case Study:"))).toBe(false);
-    expect(deck.slides.some((s) => s.title.startsWith("Additional Practice:"))).toBe(true);
+    expect(deck.slides.some((s) => s.title === "Post-Lecture Practice")).toBe(true);
+    expect(deck.slides.some((s) => s.title.startsWith("Post-Lecture Practice:"))).toBe(true);
     for (const slide of deck.slides) {
       expect(slide.bullets.length).toBeGreaterThan(0);
     }
@@ -45,8 +46,8 @@ describe("scaffoldLessonPlan", () => {
   it("caps concept slides at eight", async () => {
     const objectives = Array.from({ length: 15 }, (_, i) => `- Objective ${i + 1}`).join("\n");
     const deck = await scaffoldLessonPlan(objectives);
-    // title (1) + 8 concepts + summary (1) + 8 placeholder practice pairs (16 slides) + 2 documentation slides = 28
-    expect(deck.slides.length).toBe(28);
+    // title (1) + 8 concepts + summary (1) + Post-Lecture Practice intro (1) + 8 concepts * 2 practice/answer pairs (32 slides) + 2 documentation slides = 45
+    expect(deck.slides.length).toBe(45);
   });
 
   it("keeps producing a deck when objectives are empty", async () => {
@@ -119,5 +120,24 @@ describe("scaffoldExamples", () => {
     expect(r.examples[0].content).toContain("def ");
     // The second slot falls back to a clearly-marked stub.
     expect(r.examples[1].content).toContain("Replace this stub");
+  });
+
+  it("emits exactly 2 post-lecture practice/answer pairs per concept when curated problems exist", async () => {
+    const deck = await scaffoldLessonPlan("- Loops");
+    const titles = deck.slides.map((s) => s.title);
+    const postLecturePracticeTitles = titles.filter((t) => t.startsWith("Post-Lecture Practice:"));
+    // For the single "Loops" concept, expect exactly 2 practice problem slides (plus their answers).
+    expect(postLecturePracticeTitles.length).toBe(2);
+    // Verify the difficulty labels are present.
+    const slides = deck.slides.filter((s) => s.title.startsWith("Post-Lecture Practice:"));
+    const hasModerateDifficulty = slides.some((s) => s.bullets.some((b) => b.includes("(moderate)")));
+    const hasChallengingDifficulty = slides.some((s) => s.bullets.some((b) => b.includes("(challenging)")));
+    expect(hasModerateDifficulty).toBe(true);
+    expect(hasChallengingDifficulty).toBe(true);
+    // Verify both problems are numbered as "1 of 2" and "2 of 2".
+    const firstProblem = slides[0]?.bullets.some((b) => b.includes("problem 1 of 2"));
+    const secondProblem = slides[1]?.bullets.some((b) => b.includes("problem 2 of 2"));
+    expect(firstProblem).toBe(true);
+    expect(secondProblem).toBe(true);
   });
 });

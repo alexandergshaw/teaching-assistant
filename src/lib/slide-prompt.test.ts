@@ -23,8 +23,8 @@ describe("slide-prompt shared pedagogical contract", () => {
       expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("Answer:");
     });
 
-    it("contains the Additional Practice marker", () => {
-      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("Additional Practice:");
+    it("contains the Post-Lecture Practice marker", () => {
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("Post-Lecture Practice:");
     });
 
     it("contains Documentation & References marker", () => {
@@ -41,6 +41,28 @@ describe("slide-prompt shared pedagogical contract", () => {
 
     it("contains bullet limit requirement", () => {
       expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("Maximum 4 bullets");
+    });
+
+    it("contains breadth requirement", () => {
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("BREADTH");
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("maximum breadth");
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("Enumerate every subtopic");
+    });
+
+    it("contains minimum-difficulty in-lecture practice requirement", () => {
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("introductory and gently scaffolded");
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("single skill, no tricks");
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("mirrors the worked example closely");
+    });
+
+    it("contains POST-LECTURE PRACTICE section", () => {
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("POST-LECTURE PRACTICE");
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("Post-Lecture Practice");
+    });
+
+    it("specifies exactly 2 post-lecture problems per concept", () => {
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("exactly 2 additional practice problems");
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).toContain("increasing difficulty");
     });
   });
 

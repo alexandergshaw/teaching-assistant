@@ -1451,6 +1451,7 @@ export default function WorkflowsTab() {
       }));
     setRunState(fanoutInstitutions.map((institution) => ({ institution, steps: makePendingSteps() })));
 
+    const workflowRunId = crypto.randomUUID();
     const helpers: StepRunHelpers = {
       activeInstitution: activeInstitution || null,
       provider: getStoredProvider(),
@@ -1463,6 +1464,11 @@ export default function WorkflowsTab() {
                 kind: "bundle",
                 mimeType: "application/zip",
                 durationSec: null,
+                source: "workflow",
+                origin: "manual",
+                workflowName: selectedDef.name,
+                workflowId: selectedDef.id,
+                workflowRunId,
               });
             }
           : null,
@@ -1537,6 +1543,7 @@ export default function WorkflowsTab() {
       loadCourseExport: user && supabase ? loadCourseExportData : null,
       workflowId: selectedDef.id,
       workflowName: selectedDef.name,
+      workflowRunId,
     };
 
     // Expanded steps carry bindings already translated into expanded
@@ -1887,6 +1894,7 @@ export default function WorkflowsTab() {
         workflowName: selectedDef.name,
         status: genuineFailure ? "error" : "ok",
         triggerSource: "manual",
+        id: workflowRunId,
       }).catch((err) => console.error("Failed to record workflow run:", err));
     }
 
@@ -4435,6 +4443,7 @@ export default function WorkflowsTab() {
                       return (
                         <TextField key={field.key} select size="small" label={field.label} value={val} onChange={(e) => setVal(e.target.value)} helperText={field.help} sx={{ minWidth: 240 }}>
                           <MenuItem value="">Select a workflow</MenuItem>
+                          <MenuItem value="*">Any workflow</MenuItem>
                           {workflows.filter((w) => w.id !== selectedWorkflowId).map((w) => (
                             <MenuItem key={w.id} value={w.id}>{w.name}</MenuItem>
                           ))}

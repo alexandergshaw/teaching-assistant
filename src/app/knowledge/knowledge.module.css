@@ -166,3 +166,78 @@
   font-weight: 600;
   cursor: pointer;
 }
+
+.button {
+  padding: 7px 16px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.secondaryButton {
+  padding: 7px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.secondaryButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.deleteButton {
+  padding: 7px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--field-border);
+  background: var(--danger-surface);
+  color: var(--danger);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.deleteButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.badgeOutline {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--field-border);
+  color: var(--text-secondary);
+  background: var(--field-background);
+  text-transform: capitalize;
+  cursor: pointer;
+}
+
+.badgeResolved {
+  color: #22c55e;
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.badgeOpen {
+  color: #f97316;
+  border-color: #fdba74;
+  background: #fffbeb;
+}

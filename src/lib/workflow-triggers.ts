@@ -32,6 +32,7 @@ import {
   listOutlookMessagesAction,
   listInstitutionFeedUrlsAction,
   fetchIcsFeedAction,
+  listNewCartridgeDropIdsAction,
 } from "@/app/actions";
 import { parseIcsEvents } from "./ics";
 
@@ -54,7 +55,8 @@ export type TriggerEventType =
   | "app-open"
   | "app-focused"
   | "deadline-passed"
-  | "lms-email-received";
+  | "lms-email-received"
+  | "cartridge-uploaded";
 
 export type TriggerEventCategory =
   | "lms"
@@ -111,6 +113,20 @@ export interface TriggerEvalContext {
     workflowId: string,
     sinceIso: string
   ) => Promise<Array<{ createdAt: string; status: string }>>;
+  /** The workflow id of the trigger itself (used to exclude from "any workflow"
+   * queries to prevent infinite loops). */
+  excludeWorkflowId?: string;
+  /** Most recent run of any workflow, excluding a given id (for "any workflow"
+   * triggers). Returns null when no runs exist. */
+  latestRunAny?: (
+    excludeWorkflowId: string
+  ) => Promise<{ createdAt: string; status: string; workflowName: string } | null>;
+  /** All runs of any workflow strictly newer than sinceIso, excluding a given id,
+   * oldest first (for "any workflow" triggers). */
+  runsSinceAny?: (
+    sinceIso: string,
+    excludeWorkflowId: string
+  ) => Promise<Array<{ createdAt: string; status: string; workflowName: string }>>;
 }
 
 export interface EventSourceDef {
@@ -210,7 +226,7 @@ function readStringMap(cursor: Json | null, key: string): Record<string, string>
 // genuine one-time future event we DO want to catch the first time).
 // ---------------------------------------------------------------------------
 
-type Decision = { fired: boolean; cursor: Json; detail: string };
+type Decision = { fired: boolean; cursor: Json; detail: string; fireValues?: Record<string, string> };
 
 /** Fire when a new message lands in a conversation thread or a new conversation
  * appears. Returns a Decision with an additional `advanced` field containing
@@ -464,7 +480,7 @@ export function decideDeadlinePassed(
  * is not re-examined forever. */
 export function decideWorkflowCompleted(
   cursor: Json | null,
-  input: { baselineLatest: string | null; runsSince: Array<{ createdAt: string; status: string }> },
+  input: { baselineLatest: string | null; baselineLatestName?: string | null; runsSince: Array<{ createdAt: string; status: string; workflowName?: string }> },
   requireSuccess: boolean
 ): Decision {
   const lastAt = readStr(cursor, "lastAt");
@@ -481,10 +497,33 @@ export function decideWorkflowCompleted(
   }
   const maxAt = input.runsSince.reduce((m, r) => (r.createdAt > m ? r.createdAt : m), lastAt);
   const qualifying = input.runsSince.filter((r) => !requireSuccess || r.status === "ok");
-  return {
+  const decision: Decision = {
     fired: qualifying.length > 0,
     cursor: { lastAt: maxAt },
     detail: qualifying.length ? `${qualifying.length} completion(s).` : "Only ignored runs.",
+  };
+  if (qualifying.length > 0 && qualifying[0]?.workflowName) {
+    decision.fireValues = { completedWorkflow: qualifying[0].workflowName };
+  }
+  return decision;
+}
+
+/** Fire when new cartridge drops are detected. Unlike most deciders, this one
+ * DOES fire on its first true observation - cartridge drops are explicit work
+ * items (user uploads), not pre-existing backlogs, so we always fire when the
+ * user uploads one, even if it is the very first time we evaluate this trigger. */
+export function decideCartridgeDrops(cursor: Json | null, newDropIds: string[]): Decision {
+  const sig = [...newDropIds].sort().join("\n");
+  const count = newDropIds.length;
+
+  // Fire if there are any new drops, regardless of whether this is the first
+  // evaluation or not. Pre-existing new drops SHOULD trigger grading.
+  const fired = count > 0;
+
+  return {
+    fired,
+    cursor: { ids: sig, count },
+    detail: fired ? `${count} new drop(s) to grade.` : "No new drops.",
   };
 }
 
@@ -957,22 +996,44 @@ export const EVENT_SOURCES: EventSourceDef[] = [
     description: "Fires when a run of the chosen source workflow finishes - the basis for chaining workflows together.",
     category: "workflow",
     configFields: [
-      { key: "sourceWorkflowId", label: "Source workflow", type: "workflow", required: true, help: "Run this trigger's workflow after that one completes." },
+      { key: "workflow", label: "Source workflow", type: "workflow", required: false, help: "Run this trigger's workflow after that one completes. Leave blank for any workflow." },
       { key: "requireSuccess", label: "Only on success", type: "boolean", required: false, help: "Ignore runs that ended in an error." },
     ],
     minPollMinutes: 5,
     serverEvaluable: true,
     evaluate: async (config, cursor, ctx) => {
-      const sourceId = (config.sourceWorkflowId ?? "").trim();
-      if (!sourceId) return { fired: false, cursor: cursor ?? {}, detail: "No source workflow configured." };
+      const workflow = (config.workflow ?? "").trim();
+      const sourceId = (config.sourceWorkflowId ?? "").trim() || workflow;
+      if (!sourceId && sourceId !== "*") return { fired: false, cursor: cursor ?? {}, detail: "No source workflow configured." };
       const requireSuccess = config.requireSuccess === "1" || config.requireSuccess === "true";
       const lastAt = readStr(cursor, "lastAt");
-      if (lastAt === null) {
-        const latest = ctx.latestRun ? await ctx.latestRun(sourceId) : null;
-        return decideWorkflowCompleted(cursor, { baselineLatest: latest?.createdAt ?? null, runsSince: [] }, requireSuccess);
+
+      if (sourceId === "*") {
+        // Any workflow: use exclusion pattern to avoid self-triggering
+        const excludeId = ctx.excludeWorkflowId ?? "";
+        if (lastAt === null) {
+          const latest = ctx.latestRunAny ? await ctx.latestRunAny(excludeId) : null;
+          return decideWorkflowCompleted(
+            cursor,
+            { baselineLatest: latest?.createdAt ?? null, baselineLatestName: latest?.workflowName ?? null, runsSince: [] },
+            requireSuccess
+          );
+        }
+        const runs = ctx.runsSinceAny ? await ctx.runsSinceAny(lastAt, excludeId) : [];
+        return decideWorkflowCompleted(cursor, { baselineLatest: null, runsSince: runs }, requireSuccess);
+      } else {
+        // Specific workflow
+        if (lastAt === null) {
+          const latest = ctx.latestRun ? await ctx.latestRun(sourceId) : null;
+          return decideWorkflowCompleted(
+            cursor,
+            { baselineLatest: latest?.createdAt ?? null, runsSince: [] },
+            requireSuccess
+          );
+        }
+        const runs = ctx.runsSince ? await ctx.runsSince(sourceId, lastAt) : [];
+        return decideWorkflowCompleted(cursor, { baselineLatest: null, runsSince: runs }, requireSuccess);
       }
-      const runs = ctx.runsSince ? await ctx.runsSince(sourceId, lastAt) : [];
-      return decideWorkflowCompleted(cursor, { baselineLatest: null, runsSince: runs }, requireSuccess);
     },
   },
   {
@@ -1007,6 +1068,23 @@ export const EVENT_SOURCES: EventSourceDef[] = [
     minPollMinutes: Infinity,
     serverEvaluable: false,
     // No evaluate: fired directly by the client watcher on window focus.
+  },
+  {
+    type: "cartridge-uploaded",
+    label: "Cartridge uploaded",
+    description: "Fires when new cartridge drops (submission archives for closed courses) are uploaded and ready for grading.",
+    category: "course",
+    configFields: [],
+    minPollMinutes: 15,
+    serverEvaluable: true,
+    evaluate: async (config, cursor) => {
+      const r = await listNewCartridgeDropIdsAction();
+      if ("error" in r) {
+        return { fired: false, cursor: cursor ?? {}, detail: r.error };
+      }
+      const d = decideCartridgeDrops(cursor, r.ids);
+      return { ...d, fireValues: { cartridgeCount: String(r.count) } };
+    },
   },
 ];
 

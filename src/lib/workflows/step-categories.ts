@@ -69,6 +69,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
   ],
   content: [
     "lecture-zip",
+    "generate-class-openers",
     "prepare-lecture",
     "lecture-qa",
     "tech-report",
@@ -122,6 +123,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "collect-offline-submissions",
     "grade-submissions",
     "grade-to-draft",
+    "grade-cartridge-submissions",
     "draft-missing-zeros",
     "review-grading-draft",
     "discard-grading-draft",
@@ -220,6 +222,9 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "measure-knowledge-gap",
     "list-unverified-knowledge",
     "extract-glossary-terms",
+    "ensure-visualizer-pages",
+    "list-open-problems",
+    "propose-problem-solutions",
   ],
 };
 

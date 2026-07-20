@@ -12,6 +12,65 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      cartridge_drops: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          course_label: string;
+          assignment_label: string;
+          points_possible: number | null;
+          rubric_text: string | null;
+          lms: "canvas" | "brightspace" | "blackboard" | "moodle";
+          status: "new" | "processing" | "graded" | "error";
+          error: string | null;
+          storage_path: string;
+          csv_storage_path: string | null;
+          csv_name: string | null;
+          size_bytes: number;
+          graded_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          course_label?: string;
+          assignment_label?: string;
+          points_possible?: number | null;
+          rubric_text?: string | null;
+          lms?: "canvas" | "brightspace" | "blackboard" | "moodle";
+          status?: "new" | "processing" | "graded" | "error";
+          error?: string | null;
+          storage_path: string;
+          csv_storage_path?: string | null;
+          csv_name?: string | null;
+          size_bytes?: number;
+          graded_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          course_label?: string;
+          assignment_label?: string;
+          points_possible?: number | null;
+          rubric_text?: string | null;
+          lms?: "canvas" | "brightspace" | "blackboard" | "moodle";
+          status?: "new" | "processing" | "graded" | "error";
+          error?: string | null;
+          storage_path?: string;
+          csv_storage_path?: string | null;
+          csv_name?: string | null;
+          size_bytes?: number;
+          graded_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       grading_dismissals: {
         Row: {
           user_id: string;
@@ -470,6 +529,8 @@ export interface Database {
           source: string | null;
           origin: string | null;
           workflow_name: string | null;
+          workflow_id: string | null;
+          workflow_run_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -485,6 +546,8 @@ export interface Database {
           source?: string | null;
           origin?: string | null;
           workflow_name?: string | null;
+          workflow_id?: string | null;
+          workflow_run_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -500,6 +563,8 @@ export interface Database {
           source?: string | null;
           origin?: string | null;
           workflow_name?: string | null;
+          workflow_id?: string | null;
+          workflow_run_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -919,6 +984,61 @@ export interface Database {
           voice_sample_name?: string | null;
           writing_sample?: string | null;
           updated_at?: string;
+        };
+      };
+      problems: {
+        Row: {
+          id: string;
+          user_id: string;
+          title: string;
+          detail: string;
+          status: "open" | "resolved";
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          title: string;
+          detail?: string;
+          status?: "open" | "resolved";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          title?: string;
+          detail?: string;
+          status?: "open" | "resolved";
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      problem_solutions: {
+        Row: {
+          id: string;
+          user_id: string;
+          problem_id: string;
+          title: string;
+          approach: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          problem_id: string;
+          title: string;
+          approach: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          problem_id?: string;
+          title?: string;
+          approach?: string;
+          created_at?: string;
         };
       };
     };

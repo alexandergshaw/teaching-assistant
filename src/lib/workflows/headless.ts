@@ -28,6 +28,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "repo-from-template",
   "fill-readmes",
   "lecture-zip",
+  "generate-class-openers",
   "lms-modules",
   "lms-populate",
   "agent-edit-repo",
@@ -58,6 +59,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // happens through the app-open review-grading-draft -> post-grades pair,
   // which is why "review-grading-draft" is deliberately NOT in this set.
   "grade-to-draft",
+  "grade-cartridge-submissions",
   "draft-missing-zeros",
   "grade-one-submission",
   "read-inbox",
@@ -75,6 +77,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "detect-syllabus-fields",
   "regenerate-syllabus-field",
   "list-syllabus-templates",
+  "ensure-visualizer-pages",
   "extract-topics-from-repo",
   "generate-module-intro",
   "generate-lesson-plan",
@@ -152,6 +155,8 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "configure-institution-feeds",
   "check-mailbox-connection",
   "read-email-inboxes",
+  "list-open-problems",
+  "propose-problem-solutions",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

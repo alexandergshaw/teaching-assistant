@@ -91,6 +91,7 @@ import {
   generateLessonPlanAction,
   generateExamplesAction,
   generateDocumentTextAction,
+  generateClassOpenerAction,
   findCaseStudyMaterialAction,
   findPracticeProblemsAction,
   researchTopicAction,
@@ -162,6 +163,11 @@ import {
   saveInstitutionFieldsAction,
   getOutlookStatusAction,
   listOutlookMessagesAction,
+  findVisualizerConceptAction,
+  createVisualizerConceptAction,
+  listNewCartridgeDropsAction,
+  takeCartridgeDropAction,
+  finishCartridgeDropAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import { extractGithubHandle } from "@/lib/github-usernames";
@@ -201,7 +207,7 @@ import { scheduleToCsv, csvToSchedule } from "@/lib/workflows/types";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
 import type { RubricCriterionInput, DueDateUpdate } from "@/lib/canvas-modules";
 import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
-import { planCartridgeModules, currentCourseWeek, courseProgressStatus } from "@/lib/week-numbering";
+import { planCartridgeModules, currentCourseWeek, courseProgressStatus, currentWeekFromDeadlines } from "@/lib/week-numbering";
 import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
 import { buildGradingReviewRows, countPostableResults, stripGradingRunEntriesForDraft } from "@/lib/workflows/grading-review-rows";
@@ -413,6 +419,9 @@ export interface StepRunHelpers {
    * tag its durable output (e.g. drafts) with the producing workflow. */
   workflowId?: string;
   workflowName?: string;
+  /** UUID identifying this run of the workflow, generated per unattended run
+   * so files from the same run can be grouped. */
+  workflowRunId?: string;
 }
 
 export type StepRunSummary =
@@ -698,6 +707,58 @@ async function loadTileWeekTopic(
   return resolveWeekTopic({ modules, csvData: tile.csvData ?? null, topics: tile.topics ?? null, week });
 }
 
+// Resolve the current week from deadline data if available, with fallback to start-date arithmetic.
+// - If start-date arithmetic says the course has not started (currentCourseWeek returns 0),
+//   return the start-date result (deadline data must not mark a future course in-progress).
+// - Else if tile.canvasUrl is set: call listAssignmentDueDatesByUrlAction; on success feed
+//   currentWeekFromDeadlines, which returns rawWeek with source "deadlines".
+// - Any action error, no canvas URL, or null result: fall back to currentCourseWeek with source "start-date".
+// - Returns skip only when start date is missing/invalid.
+async function resolveTileCurrentWeek(
+  tile: Course,
+  helpers: StepRunHelpers
+): Promise<{ rawWeek: number; source: "deadlines" | "start-date" } | { skip: string }> {
+  // Check start-date arithmetic first
+  const startDateWeek = currentCourseWeek(tile.startDate, Date.now());
+  if (startDateWeek === null) {
+    return { skip: "no start date" };
+  }
+
+  // If course hasn't started according to start-date arithmetic, use that result
+  if (startDateWeek === 0) {
+    return { rawWeek: 0, source: "start-date" };
+  }
+
+  // Course has started; try deadline-based approach if canvasUrl is available
+  if (tile.canvasUrl) {
+    try {
+      const result = await listAssignmentDueDatesByUrlAction(
+        tile.canvasUrl,
+        tile.institution ?? helpers.activeInstitution ?? undefined
+      );
+      if ("error" in result) {
+        // Silent fallback on error
+        return { rawWeek: startDateWeek, source: "start-date" };
+      }
+
+      const deadlineResult = currentWeekFromDeadlines(result.assignments, Date.now());
+      if (deadlineResult !== null) {
+        // Success - use deadline-based week (pastLastDeadline flag is ignored here; caller handles it)
+        return { rawWeek: deadlineResult.week, source: "deadlines" };
+      }
+
+      // No usable deadline entries - fall back to start-date
+      return { rawWeek: startDateWeek, source: "start-date" };
+    } catch {
+      // Silent fallback on exception
+      return { rawWeek: startDateWeek, source: "start-date" };
+    }
+  }
+
+  // No canvasUrl - use start-date result
+  return { rawWeek: startDateWeek, source: "start-date" };
+}
+
 // Loads the workflow-scoped course tile and returns its CURRENT module/week
 // topic + learning-outcomes summary, or null when there is nothing to derive
 // from (no hubCourse, missing tile, no/invalid start date, not-started/complete,
@@ -712,8 +773,9 @@ async function deriveCurrentModule(
   if ("error" in list) return null;
   const tile = list.courses.find((c) => c.id === hubCourseId);
   if (!tile) return null;
-  const rawWeek = currentCourseWeek(tile.startDate, Date.now());
-  if (rawWeek === null) return null;
+  const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+  if ("skip" in weekResolution) return null;
+  const rawWeek = weekResolution.rawWeek;
   const status = courseProgressStatus(rawWeek, tile.weeks);
   if (status === "not-started" || status === "complete") return null;
   const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
@@ -1229,6 +1291,168 @@ export const STEP_REGISTRY: StepDefinition[] = [
           label: downloadSkipped
             ? `Generated ${files.length} files (zip saved to your library - the ${tileLms} tile downloads a Common Cartridge instead)`
             : `Generated ${files.length} files (zip downloaded)`,
+          items: files.map((f) => f.name),
+        },
+      };
+    },
+  },
+
+  {
+    type: "generate-class-openers",
+    name: "Generate class openers",
+    description: "Generate ~30-minute class openers (case study + warm-up coding exercise) for each week as docx files packaged in a zip.",
+    inputs: [
+      {
+        key: "schedule",
+        label: "Course schedule",
+        type: "schedule",
+        required: true,
+        help: "The weekly topics for which openers are generated.",
+      },
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: false,
+        help: "Optional - when bound, names the zip after this course tile.",
+      },
+      {
+        key: "minutes",
+        label: "Target opener length (minutes)",
+        type: "number",
+        required: false,
+        help: "Target opener length in minutes. Default 30.",
+      },
+    ],
+    outputs: [
+      { key: "report", label: "Generation report", type: "longtext" },
+      { key: "count", label: "Openers generated", type: "number" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
+      if (!schedule.length) {
+        return {
+          outputs: { report: "No schedule provided.", count: 0 },
+          summary: { kind: "text", text: "Skipped - no schedule was provided." },
+        };
+      }
+
+      const targetMinutes = Math.max(5, Math.min(Number(values.minutes ?? 30), 120));
+      const reportLines: string[] = [];
+      const files: GeneratedCourseFile[] = [];
+
+      onProgress("Generating class openers...");
+
+      for (const week of schedule) {
+        if (!week.topic || !week.topic.trim()) {
+          reportLines.push(`Week ${week.week}: Skipped (no topic).`);
+          continue;
+        }
+
+        try {
+          const topicText = week.topic.trim();
+          onProgress(`Generating opener for week ${week.week}: ${topicText}`);
+
+          const caseStudyResult = await findCaseStudyMaterialAction(topicText);
+          const caseStudyMaterial = "material" in caseStudyResult ? caseStudyResult.material : null;
+
+          const practiceResult = await findPracticeProblemsAction(topicText, 2);
+          const practiceProblems = "problems" in practiceResult ? practiceResult.problems : [];
+
+          const openerResult = await generateClassOpenerAction(
+            topicText,
+            week.summary,
+            targetMinutes,
+            caseStudyMaterial,
+            practiceProblems,
+            helpers.provider
+          );
+
+          if ("error" in openerResult) {
+            reportLines.push(`Week ${week.week} (${topicText}): Error - ${openerResult.error}`);
+            continue;
+          }
+
+          const docxData = await buildDocxFromPlainText(openerResult.text, [], helpers.author);
+
+          files.push({
+            name: `Week ${week.week} Opener - ${topicText}.docx`,
+            blob: new Blob([docxData], {
+              type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            }),
+            mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            weekNumber: week.week,
+            sortOrder: 0,
+            role: "instructions",
+            pageText: openerResult.text,
+          });
+
+          reportLines.push(`Week ${week.week} (${topicText}): OK`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          reportLines.push(`Week ${week.week}: Error - ${msg}`);
+        }
+      }
+
+      if (files.length === 0) {
+        throw new Error("Failed to generate any class openers: every week failed or was skipped.");
+      }
+
+      onProgress("Assembling zip...");
+      const { default: JSZip } = await import("jszip");
+      const zip = new JSZip();
+
+      for (const file of files) {
+        zip.file(file.name, file.blob);
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      let baseName = "class_openers";
+      if (hubCourseId) {
+        const list = await listCourseHubAction();
+        if (!("error" in list)) {
+          const tile = list.courses.find((c) => c.id === hubCourseId);
+          if (tile?.name?.trim()) {
+            baseName = tile.name.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_") || baseName;
+          }
+        }
+      }
+
+      if (typeof document !== "undefined") {
+        onProgress("Downloading zip...");
+        const url = URL.createObjectURL(zipBlob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${baseName}_openers.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+
+      if (helpers.saveBundle) {
+        try {
+          await helpers.saveBundle(zipBlob, `${baseName} Class Openers`);
+        } catch (err) {
+          console.error("Library save failed:", err);
+        }
+      }
+
+      if (helpers.saveCourseMaterialFile && hubCourseId) {
+        try {
+          await helpers.saveCourseMaterialFile(hubCourseId, zipBlob, `${baseName} Class Openers.zip`);
+        } catch (err) {
+          console.error("Course tile save failed:", err);
+        }
+      }
+
+      return {
+        outputs: { report: reportLines.join("\n"), count: files.length },
+        summary: {
+          kind: "list",
+          label: `Generated ${files.length} class openers`,
           items: files.map((f) => f.name),
         },
       };
@@ -4017,10 +4241,12 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const tile = list.courses.find((c) => c.id === hubCourseId);
       if (!tile) throw new Error("Course tile not found.");
 
-      const rawWeek = currentCourseWeek(tile.startDate, Date.now());
-      if (rawWeek === null) {
+      const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+      if ("skip" in weekResolution) {
         throw new Error(`"${tile.name}" has no start date set - add one on the course tile first.`);
       }
+      const rawWeek = weekResolution.rawWeek;
+      const weekSource = weekResolution.source;
       const status = courseProgressStatus(rawWeek, tile.weeks);
       // Clamp for display so a finished course never reports past its last week.
       const displayWeek =
@@ -4033,6 +4259,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         topic = weekTopic.topic;
       }
       const totalLabel = tile.weeks && tile.weeks > 0 ? ` of ${tile.weeks}` : "";
+      const sourceNote = weekSource === "deadlines" ? " (week from module deadlines)" : " (week from start date)";
 
       let moduleName: string;
       let summaryText: string;
@@ -4044,7 +4271,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summaryText = `${tile.name} has finished${tile.weeks ? ` (${tile.weeks} week(s))` : ""}.`;
       } else {
         moduleName = `Module ${String(displayWeek).padStart(2, "0")}${topic ? `: ${topic}` : ""}`;
-        summaryText = `${tile.name} is in week ${displayWeek}${totalLabel}${topic ? ` - ${topic}` : ""}.`;
+        summaryText = `${tile.name} is in week ${displayWeek}${totalLabel}${topic ? ` - ${topic}` : ""}${sourceNote}.`;
       }
 
       return {
@@ -4116,8 +4343,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
       if (Number.isFinite(weekInput) && weekInput >= 1) {
         targetWeek = Math.trunc(weekInput);
       } else {
-        const rawWeek = currentCourseWeek(tile.startDate, Date.now());
-        if (rawWeek === null) {
+        const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+        if ("skip" in weekResolution) {
           // Not-started/no start date - return status reason
           return {
             outputs: {
@@ -4133,6 +4360,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
             },
           };
         }
+        const rawWeek = weekResolution.rawWeek;
         const status = courseProgressStatus(rawWeek, tile.weeks);
         const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
         if (status === "not-started" || status === "complete") {
@@ -4322,6 +4550,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
               fileExt: "pptx",
               workflowId: helpers.workflowId,
               workflowName: helpers.workflowName,
+              workflowRunId: helpers.workflowRunId,
             });
             if ("error" in lib) {
               notes.push(`library save skipped: ${lib.error}`);
@@ -4714,6 +4943,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
             fileExt: "docx",
             workflowId: helpers.workflowId,
             workflowName: helpers.workflowName,
+            workflowRunId: helpers.workflowRunId,
           });
           if ("error" in lib) {
             notes.push(`library save skipped: ${lib.error}`);
@@ -6584,10 +6814,12 @@ export const STEP_REGISTRY: StepDefinition[] = [
         try {
           onProgress(`Drafting announcements for ${tile.name}...`);
 
+          const weekResolution = await resolveTileCurrentWeek(tile, helpers);
           const nw = nextLectureWeek({
             startDate: tile.startDate,
             weeks: tile.weeks,
             nowMs: Date.now(),
+            rawWeek: "skip" in weekResolution ? undefined : weekResolution.rawWeek,
           });
 
           if ("skip" in nw) {
@@ -6596,7 +6828,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           }
 
           const startWeek = nw.week;
-          let sourceNote = "";
+          let sourceNote = "skip" in weekResolution ? "" : (weekResolution.source === "deadlines" ? " (from module deadlines)" : "");
           let tileSuccessCount = 0;
           let tileEndWeek = startWeek + weeksAhead - 1;
 
@@ -6779,10 +7011,12 @@ export const STEP_REGISTRY: StepDefinition[] = [
         }
 
         try {
+          const weekResolution = await resolveTileCurrentWeek(tile, helpers);
           const nw = nextLectureWeek({
             startDate: tile.startDate,
             weeks: tile.weeks,
             nowMs: Date.now(),
+            rawWeek: "skip" in weekResolution ? undefined : weekResolution.rawWeek,
           });
 
           if ("skip" in nw) {
@@ -6791,7 +7025,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           }
 
           const startWeek = nw.week;
-          let sourceNote = "";
+          let sourceNote = "skip" in weekResolution ? "" : (weekResolution.source === "deadlines" ? " (from module deadlines)" : "");
           let tileSuccessCount = 0;
           let tileEndWeek = startWeek + weeksAhead - 1;
 
@@ -6896,6 +7130,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
                     fileExt: "docx",
                     workflowId: helpers.workflowId,
                     workflowName: helpers.workflowName,
+                    workflowRunId: helpers.workflowRunId,
                   });
                   if ("error" in lib) {
                     reportLines.push(`${tile.name}: library save skipped - ${lib.error}`);
@@ -7323,6 +7558,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
           theme: template.theme,
           author: helpers.author,
           workflowName: helpers.workflowName ?? null,
+          workflowId: helpers.workflowId,
+          workflowRunId: helpers.workflowRunId,
         });
         if ("error" in fileRes) {
           onProgress(`Saved the draft; could not save the .pptx to Files (${fileRes.error}).`);
@@ -9359,13 +9596,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const tile = list.courses.find((c) => c.id === hubCourseId);
       if (!tile) throw new Error("Course tile not found.");
 
-      // Current module/week from the tile (mirrors course-progress). Guard for a
-      // tile with no/invalid start date (rawWeek null) so we never feed null into
-      // Math.min / padStart.
-      const rawWeek = currentCourseWeek(tile.startDate, Date.now());
+      // Current module/week from the tile (mirrors course-progress). Route through
+      // resolveTileCurrentWeek for deadline-aware resolution, guard for no/invalid start date.
+      const weekResolution = await resolveTileCurrentWeek(tile, helpers);
       let moduleLabel = "the current module";
       let topic = "";
-      if (rawWeek !== null) {
+      if (!("skip" in weekResolution)) {
+        const rawWeek = weekResolution.rawWeek;
         const status = courseProgressStatus(rawWeek, tile.weeks);
         const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
         if (status === "not-started") {
@@ -9667,11 +9904,17 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       // Step 2: Resolve the week.
       const boundWeek = Number(values.week);
-      const rawWeek = Number.isFinite(boundWeek) && boundWeek > 0 ? boundWeek : currentCourseWeek(tile.startDate, Date.now());
-      if (rawWeek === null) {
-        throw new Error(
-          `"${tile.name}" has no start date set - add one on the course tile, or bind a week.`
-        );
+      let rawWeek: number;
+      if (Number.isFinite(boundWeek) && boundWeek > 0) {
+        rawWeek = boundWeek;
+      } else {
+        const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+        if ("skip" in weekResolution) {
+          throw new Error(
+            `"${tile.name}" has no start date set - add one on the course tile, or bind a week.`
+          );
+        }
+        rawWeek = weekResolution.rawWeek;
       }
       const status = courseProgressStatus(rawWeek, tile.weeks);
       const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
@@ -10061,11 +10304,17 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       // Step 3: Resolve the week and module name.
       const boundWeek = Number(values.week);
-      const rawWeek = Number.isFinite(boundWeek) && boundWeek > 0 ? boundWeek : currentCourseWeek(tile.startDate, Date.now());
-      if (rawWeek === null) {
-        throw new Error(
-          `"${tile.name}" has no start date set - add one on the course tile, or bind a week.`
-        );
+      let rawWeek: number;
+      if (Number.isFinite(boundWeek) && boundWeek > 0) {
+        rawWeek = boundWeek;
+      } else {
+        const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+        if ("skip" in weekResolution) {
+          throw new Error(
+            `"${tile.name}" has no start date set - add one on the course tile, or bind a week.`
+          );
+        }
+        rawWeek = weekResolution.rawWeek;
       }
       const status = courseProgressStatus(rawWeek, tile.weeks);
       const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
@@ -12099,10 +12348,12 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
         try {
           onProgress(`Drafting week for ${tile.name}...`);
+          const weekResolution = await resolveTileCurrentWeek(tile, helpers);
           const nw = nextLectureWeek({
             startDate: tile.startDate,
             weeks: tile.weeks,
             nowMs: Date.now(),
+            rawWeek: "skip" in weekResolution ? undefined : weekResolution.rawWeek,
           });
 
           if ("skip" in nw) {
@@ -12111,7 +12362,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           }
 
           const startWeek = nw.week;
-          let sourceNote = "";
+          let sourceNote = "skip" in weekResolution ? "" : (weekResolution.source === "deadlines" ? " (from module deadlines)" : "");
           let tileSuccessCount = 0;
           let tileEndWeek = startWeek;
           const sanitize = (s: string) =>
@@ -12186,6 +12437,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
                       fileExt: "docx",
                       workflowId: helpers.workflowId,
                       workflowName: helpers.workflowName,
+                      workflowRunId: helpers.workflowRunId,
                     });
                     if ("error" in scriptLib) {
                       reportLines.push(`${tile.name}: library save skipped - ${scriptLib.error}`);
@@ -12255,6 +12507,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
                       fileExt: "docx",
                       workflowId: helpers.workflowId,
                       workflowName: helpers.workflowName,
+                      workflowRunId: helpers.workflowRunId,
                     });
                     if ("error" in planLib) {
                       reportLines.push(`${tile.name}: library save skipped - ${planLib.error}`);
@@ -12309,6 +12562,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
                       fileExt: "pptx",
                       workflowId: helpers.workflowId,
                       workflowName: helpers.workflowName,
+                      workflowRunId: helpers.workflowRunId,
                     });
                     if ("error" in slideLib) {
                       reportLines.push(`${tile.name}: library save skipped - ${slideLib.error}`);
@@ -12350,6 +12604,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
                           fileExt: "mp3",
                           workflowId: helpers.workflowId,
                           workflowName: helpers.workflowName,
+                          workflowRunId: helpers.workflowRunId,
                         });
                         if ("error" in narLib) {
                           reportLines.push(`${tile.name}: library save skipped - ${narLib.error}`);
@@ -13538,10 +13793,12 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
         try {
           onProgress(`Generating animations for ${tile.name}...`);
+          const weekResolution = await resolveTileCurrentWeek(tile, helpers);
           const nw = nextLectureWeek({
             startDate: tile.startDate,
             weeks: tile.weeks,
             nowMs: Date.now(),
+            rawWeek: "skip" in weekResolution ? undefined : weekResolution.rawWeek,
           });
 
           if ("skip" in nw) {
@@ -13550,7 +13807,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           }
 
           const startWeek = nw.week;
-          let sourceNote = "";
+          let sourceNote = "skip" in weekResolution ? "" : (weekResolution.source === "deadlines" ? " (from module deadlines)" : "");
 
           for (let w = 0; w < weeksAhead; w++) {
             const targetWeek = startWeek + w;
@@ -13631,6 +13888,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
                       fileExt: "html",
                       workflowId: helpers.workflowId,
                       workflowName: helpers.workflowName,
+                      workflowRunId: helpers.workflowRunId,
                     });
                     if ("error" in animLib) {
                       pageNotes.push(`${concept}: library save skipped - ${animLib.error}`);
@@ -13702,6 +13960,215 @@ export const STEP_REGISTRY: StepDefinition[] = [
           hasGenerated: generated > 0 ? "1" : "",
         },
         summary: { kind: "text", text: report },
+      };
+    },
+  },
+
+  {
+    type: "ensure-visualizer-pages",
+    name: "Ensure concept visualizer pages",
+    description:
+      "For each upcoming concept, check the external site https://programming-concept-visualizer.vercel.app/ for an existing page; if it exists, record the link; if not, an agent creates the page (LLM-generates the component, commits it to GitHub) and records the link.",
+    inputs: [
+      {
+        key: "courses",
+        label: "Course tiles",
+        type: "hubCourseList",
+        required: true,
+        help: "One, several, or all course tiles.",
+      },
+      {
+        key: "lookahead",
+        label: "How far ahead",
+        type: "lookahead",
+        required: false,
+        help: "How far ahead to check. Default 7 days (the coming week).",
+      },
+      {
+        key: "concepts",
+        label: "Concepts (optional)",
+        type: "longtext",
+        required: false,
+        help: "One concept per line. When set, skips deriving concepts from courses.",
+      },
+      {
+        key: "maxConcepts",
+        label: "Concepts per course",
+        type: "number",
+        required: false,
+        help: "How many concepts per course when deriving from courses. Default 3, max 6.",
+      },
+    ],
+    outputs: [
+      { key: "report", label: "Report", type: "longtext" },
+      { key: "links", label: "Concept links", type: "longtext" },
+      { key: "hasCreated", label: "Any created?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const ids = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      if (ids.length === 0) {
+        throw new Error("Select at least one course tile.");
+      }
+
+      let maxConceptsVal = Number(values.maxConcepts ?? 3);
+      if (Number.isNaN(maxConceptsVal) || maxConceptsVal < 1 || maxConceptsVal > 6) {
+        maxConceptsVal = 3;
+      } else {
+        maxConceptsVal = Math.round(maxConceptsVal);
+      }
+
+      const lookaheadRaw = String(values.lookahead ?? "").trim();
+      const daysAhead = Number.isFinite(Number(lookaheadRaw)) && Number(lookaheadRaw) >= 1
+        ? Math.floor(Number(lookaheadRaw))
+        : 7;
+      const weeksAhead = Math.max(1, Math.min(4, Math.ceil(daysAhead / 7)));
+
+      const conceptsInput = String(values.concepts ?? "").trim();
+      const providedConcepts = conceptsInput
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const reportLines: string[] = [];
+      const linkLines: string[] = [];
+      let hasCreated = false;
+
+      // Collect all concepts to check
+      const conceptsToCheck: Array<{ concept: string; source: string }> = [];
+
+      if (providedConcepts.length > 0) {
+        // Use provided concepts
+        for (const concept of providedConcepts) {
+          conceptsToCheck.push({ concept, source: "provided" });
+        }
+      } else {
+        // Derive concepts from courses
+        for (const id of ids) {
+          const tile = hub.courses.find((c) => c.id === id);
+          if (!tile) continue;
+
+          try {
+            onProgress(`Deriving concepts for ${tile.name}...`);
+            const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+            const nw = nextLectureWeek({
+              startDate: tile.startDate,
+              weeks: tile.weeks,
+              nowMs: Date.now(),
+              rawWeek: "skip" in weekResolution ? undefined : weekResolution.rawWeek,
+            });
+
+            if ("skip" in nw) {
+              continue;
+            }
+
+            const startWeek = nw.week;
+
+            for (let w = 0; w < weeksAhead; w++) {
+              const targetWeek = startWeek + w;
+
+              if (tile.weeks && tile.weeks > 0 && targetWeek > tile.weeks) {
+                break;
+              }
+
+              try {
+                const weekTopic = await loadTileWeekTopic(tile, targetWeek, helpers);
+                if ("skip" in weekTopic) {
+                  break;
+                }
+
+                const topic = weekTopic.topic;
+                const summary = weekTopic.summary;
+
+                const planResult = await generateConceptPlanAction(topic, summary, maxConceptsVal, helpers.provider);
+                if ("error" in planResult) {
+                  continue;
+                }
+
+                for (const { concept } of planResult.concepts) {
+                  conceptsToCheck.push({ concept, source: `${tile.name} Week ${targetWeek}` });
+                }
+              } catch {
+                // Skip this week
+              }
+            }
+          } catch {
+            // Skip this course
+          }
+        }
+      }
+
+      if (conceptsToCheck.length === 0) {
+        throw new Error("No concepts to check. Provide concepts or ensure courses have upcoming weeks.");
+      }
+
+      // Check/create each concept
+      for (const { concept, source } of conceptsToCheck) {
+        try {
+          onProgress(`Checking "${concept}"...`);
+
+          const findResult = await findVisualizerConceptAction(concept);
+          if ("error" in findResult) {
+            reportLines.push(`${concept} (${source}): ${findResult.error}`);
+            continue;
+          }
+
+          if (findResult.found) {
+            linkLines.push(`[${concept}](${findResult.url})`);
+            reportLines.push(`${concept} (${source}): found at ${findResult.url}`);
+          } else {
+            // Create the concept
+            onProgress(`Creating "${concept}"...`);
+            const createResult = await createVisualizerConceptAction(concept, source, helpers.provider);
+            if ("error" in createResult) {
+              reportLines.push(`${concept} (${source}): creation failed - ${createResult.error}`);
+            } else {
+              hasCreated = true;
+              linkLines.push(`[${concept}](${createResult.url}) (new)`);
+              reportLines.push(`${concept} (${source}): created at ${createResult.url}`);
+            }
+          }
+        } catch (err) {
+          reportLines.push(
+            `${concept}: ${err instanceof Error ? err.message : "failed"}`
+          );
+        }
+      }
+
+      const report = reportLines.join("\n");
+      const links = linkLines.join("\n");
+
+      // Save artifact
+      if (helpers.saveCourseMaterialFile) {
+        const markdown = `# Visualizer Concept Links\n\n${links}\n`;
+        const blob = new Blob([markdown], { type: "text/markdown" });
+        const base64 = await blobToBase64(blob);
+        await saveLibraryFileAction({
+          name: "Visualizer Concept Links.md",
+          base64,
+          mimeType: "text/markdown",
+          fileExt: "md",
+          workflowId: helpers.workflowId,
+          workflowName: helpers.workflowName,
+          workflowRunId: helpers.workflowRunId,
+        });
+      }
+
+      return {
+        outputs: {
+          report,
+          links,
+          hasCreated: hasCreated ? "1" : "",
+        },
+        summary: { kind: "list", label: "Concept links", items: linkLines },
       };
     },
   },
@@ -13798,6 +14265,368 @@ export const STEP_REGISTRY: StepDefinition[] = [
         summary: {
           kind: "text",
           text: digest || "(No messages)",
+        },
+      };
+    },
+  },
+  {
+    type: "grade-cartridge-submissions",
+    name: "Grade dropped cartridges",
+    description: "Grades submission archives (.zip files) uploaded to the Cartridge drop panel, builds upload-ready gradebook CSVs, and produces grading drafts for review.",
+    inputs: [
+      {
+        key: "maxDrops",
+        label: "Drops per run",
+        type: "number",
+        required: false,
+        help: "Maximum cartridge drops to grade in one run. Default 3.",
+      },
+    ],
+    outputs: [
+      { key: "report", label: "Report", type: "longtext" },
+      { key: "graded", label: "Graded", type: "number" },
+      { key: "hasGraded", label: "Any graded?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const maxDrops = Math.max(Math.min(Number(values.maxDrops ?? 3) || 3, 100), 1);
+      const lines: string[] = [];
+      let gradedCount = 0;
+      const runs: GradingRunEntry[] = [];
+      const csvFiles: Array<{ name: string; base64: string }> = [];
+
+      // Load new drops
+      onProgress("Loading cartridge drops...");
+      const dropsResult = await listNewCartridgeDropsAction(maxDrops);
+      if ("error" in dropsResult) {
+        throw new Error(dropsResult.error);
+      }
+
+      const drops = dropsResult;
+      if (drops.length === 0) {
+        lines.push("No new cartridge drops to grade.");
+        return {
+          outputs: {
+            report: lines.join("\n"),
+            graded: 0,
+            hasGraded: "",
+          },
+          summary: { kind: "text", text: "Nothing to grade." },
+        };
+      }
+
+      lines.push(`Found ${drops.length} drop(s) to grade.`);
+
+      // Grade each drop
+      for (const drop of drops) {
+        try {
+          onProgress(`Grading ${drop.name}...`);
+
+          // Take the drop (CAS new -> processing)
+          const takeResult = await takeCartridgeDropAction(drop.id);
+          if ("error" in takeResult) {
+            lines.push(`${drop.name}: ${takeResult.error}`);
+            await finishCartridgeDropAction(drop.id, {
+              status: "error",
+              error: takeResult.error,
+            });
+            continue;
+          }
+
+          // Create FormData for gradeAction with the zip
+          const formData = new FormData();
+          const zipBlob = new Blob([Buffer.from(takeResult.zipBase64, "base64")], {
+            type: "application/zip",
+          });
+          const zipFile = new File([zipBlob], `${drop.name}`, {
+            type: "application/zip",
+          });
+          formData.append("studentSubmissions", zipFile);
+          formData.append("assignmentInstructions", `${drop.courseLabel} - ${drop.assignmentLabel}`);
+          if (takeResult.rubricText) {
+            formData.append("rubric", takeResult.rubricText);
+          }
+          formData.append("provider", helpers.provider);
+
+          // Grade the zip
+          const gradeResult = await gradeAction({ run: null, error: null }, formData);
+          if (!gradeResult.run) {
+            const errorMsg = gradeResult.error || "Grading failed.";
+            lines.push(`${drop.name}: ${errorMsg}`);
+            await finishCartridgeDropAction(drop.id, {
+              status: "error",
+              error: errorMsg,
+            });
+            continue;
+          }
+
+          // Extract student names from grading results
+          const allResults = gradeResult.run.results;
+
+          // For Moodle: filter to only students with '@' in their identity
+          let students: Array<{ name?: string; externalId?: string; email?: string }>;
+          const scores = new Map<string, string>();
+
+          if (takeResult.lms === "moodle") {
+            const moodleStudents: Array<{ email: string }> = [];
+            for (const result of allResults) {
+              const scoreMatch = result.totalScore.match(/(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/) ?? result.totalScore.match(/-?\d+(?:\.\d+)?/);
+              const score = scoreMatch ? scoreMatch[1] ?? scoreMatch[0] : result.totalScore;
+              if (result.student.includes("@")) {
+                moodleStudents.push({ email: result.student });
+                scores.set(result.student, score);
+              } else {
+                lines.push(`${drop.name}: Skipped student "${result.student}" (not a valid email address for Moodle)`);
+              }
+            }
+            students = moodleStudents;
+          } else {
+            // canvas, brightspace, blackboard all use the same format
+            students = allResults.map((r) => ({
+              name: r.student,
+              externalId: r.student.replace(/\s+/g, "_"),
+            }));
+            for (const result of allResults) {
+              const scoreMatch = result.totalScore.match(/(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/) ?? result.totalScore.match(/-?\d+(?:\.\d+)?/);
+              const score = scoreMatch ? scoreMatch[1] ?? scoreMatch[0] : result.totalScore;
+              scores.set(result.student.replace(/\s+/g, "_"), score);
+            }
+          }
+
+          // Infer pointsPossible from grading results if not set on the drop
+          let pointsPossible = takeResult.pointsPossible;
+          if (!pointsPossible && allResults.length > 0) {
+            const firstScore = allResults[0].totalScore;
+            const match = firstScore.match(/\/(\d+(?:\.\d+)?)/);
+            if (match) {
+              pointsPossible = Math.round(Number(match[1]) * 100) / 100;
+            }
+          }
+          if (!pointsPossible) {
+            pointsPossible = 100;
+          }
+
+          // Build gradebook CSV based on LMS type
+          let csvContent = "";
+          if (takeResult.lms === "moodle") {
+            csvContent = buildMoodleGradebookCsv(
+              students as Array<{ email: string }>,
+              drop.assignmentLabel,
+              scores
+            );
+          } else {
+            // canvas, brightspace, blackboard all use the same format
+            csvContent = buildCanvasGradebookCsv(
+              students as Array<{ name: string; externalId: string }>,
+              { name: drop.assignmentLabel, pointsPossible },
+              scores
+            );
+          }
+
+          // Convert CSV to base64
+          const csvBase64 = Buffer.from(csvContent).toString("base64");
+          csvFiles.push({
+            name: `${drop.id}-grades.csv`,
+            base64: csvBase64,
+          });
+
+          // Finish the cartridge drop (upload CSV, mark as graded)
+          const finishResult = await finishCartridgeDropAction(drop.id, {
+            status: "graded",
+            csvName: `${drop.assignmentLabel}_grades.csv`,
+            csvBase64,
+          });
+
+          if ("error" in finishResult) {
+            lines.push(`${drop.name}: Could not save grades - ${finishResult.error}`);
+            continue;
+          }
+
+          // Create GradingRunEntry for draft (offline-style)
+          const entry: GradingRunEntry = {
+            courseName: drop.courseLabel,
+            assignmentName: drop.assignmentLabel,
+            canvasUrl: "",
+            run: gradeResult.run,
+            offline: true,
+            pointsPossible: takeResult.pointsPossible,
+          };
+          runs.push(entry);
+          gradedCount++;
+          lines.push(`${drop.name}: graded (${gradeResult.run.results.length} students)`);
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : "Unknown error";
+          lines.push(`${drop.name}: ${errorMsg}`);
+          try {
+            await finishCartridgeDropAction(drop.id, {
+              status: "error",
+              error: errorMsg,
+            });
+          } catch {
+            // Best effort
+          }
+        }
+      }
+
+      // Save CSV files to library
+      for (const csvFile of csvFiles) {
+        try {
+          onProgress(`Saving ${csvFile.name}...`);
+          await saveLibraryFileAction({
+            name: csvFile.name,
+            base64: csvFile.base64,
+            mimeType: "text/csv",
+            fileExt: "csv",
+            workflowId: helpers.workflowId,
+            workflowName: helpers.workflowName,
+            workflowRunId: helpers.workflowRunId,
+          });
+        } catch (err) {
+          lines.push(`Could not save CSV file: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // Save grading draft if any were graded
+      if (runs.length > 0) {
+        try {
+          const strippedRuns = stripGradingRunEntriesForDraft(runs);
+          const summary = `${gradedCount} cartridge drop(s) graded`;
+          const draftResult = await saveGradingDraftAction(
+            summary,
+            { runs: strippedRuns },
+            helpers.workflowId,
+            helpers.workflowName
+          );
+          if ("error" in draftResult) {
+            lines.push(`Could not save grading draft: ${draftResult.error}`);
+          } else {
+            lines.push(`Grading draft saved.`);
+          }
+        } catch (err) {
+          lines.push(`Could not save grading draft: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      lines.push(`Completed: ${gradedCount} graded.`);
+
+      // Fail the step if we attempted at least one drop but none succeeded
+      if (drops.length > 0 && gradedCount === 0) {
+        throw new Error("All cartridge drop grading attempts failed.");
+      }
+
+      return {
+        outputs: {
+          report: lines.join("\n"),
+          graded: gradedCount,
+          hasGraded: gradedCount > 0 ? "1" : "",
+        },
+        summary: {
+          kind: "text",
+          text: lines.join("\n"),
+        },
+      };
+    },
+  },
+
+  {
+    type: "list-open-problems",
+    name: "List open problems",
+    description: "Retrieve the user's currently open problems and their count",
+    inputs: [],
+    outputs: [
+      { key: "problems", label: "Problems", type: "longtext" },
+      { key: "count", label: "Problem count", type: "number" },
+      { key: "hasProblems", label: "Has problems?", type: "boolean" },
+    ],
+    run: async () => {
+      const { listOpenProblemsAction } = await import("@/app/actions");
+      const result = await listOpenProblemsAction();
+
+      if ("error" in result) {
+        throw new Error(result.error);
+      }
+
+      const problemsJson = JSON.stringify(
+        result.problems.map((p) => ({
+          id: p.id,
+          title: p.title,
+          detail: p.detail,
+        }))
+      );
+
+      return {
+        outputs: {
+          problems: problemsJson,
+          count: result.count,
+          hasProblems: result.count > 0 ? "1" : "",
+        },
+        summary: {
+          kind: "text",
+          text: `Found ${result.count} open problem(s).`,
+        },
+      };
+    },
+  },
+
+  {
+    type: "propose-problem-solutions",
+    name: "Propose solutions to problems",
+    description:
+      "For each open problem, generate 2-3 fresh solution proposals using an LLM. New proposals are always materially different from every prior suggestion.",
+    inputs: [
+      {
+        key: "problems",
+        label: "Problems",
+        type: "longtext",
+        required: true,
+        help: "JSON from List open problems",
+      },
+    ],
+    outputs: [
+      { key: "report", label: "Report", type: "longtext" },
+      { key: "proposed", label: "Proposed count", type: "number" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const problemsJson = String(values.problems ?? "").trim();
+      if (!problemsJson) {
+        throw new Error("Provide the problems JSON from List open problems.");
+      }
+
+      onProgress("Generating solutions for open problems...");
+      const { processProblemSolutionsAction } = await import("@/app/actions");
+      const result = await processProblemSolutionsAction(problemsJson, helpers.provider);
+
+      if ("error" in result) {
+        throw new Error(result.error);
+      }
+
+      onProgress("Saving solutions artifact...");
+      const { saveLibraryFileAction } = await import("@/app/actions");
+      const markdownContent = result.report;
+      const base64 = Buffer.from(markdownContent, "utf-8").toString("base64");
+      const fileResult = await saveLibraryFileAction({
+        name: "Problem Solutions.md",
+        base64,
+        mimeType: "text/markdown",
+        fileExt: "md",
+        workflowId: helpers.workflowId,
+        workflowName: helpers.workflowName,
+      });
+
+      if ("error" in fileResult) {
+        throw new Error(`Failed to save artifact: ${fileResult.error}`);
+      }
+
+      const items = result.report.split("\n").filter(line => line.trim().length > 0);
+
+      return {
+        outputs: {
+          report: result.report,
+          proposed: result.proposedCount,
+        },
+        summary: {
+          kind: "list",
+          label: `Proposed ${result.proposedCount} solution(s)`,
+          items,
         },
       };
     },

@@ -201,6 +201,71 @@ describe("nextLectureWeek", () => {
       });
     });
   });
+
+  describe("rawWeek override parameter", () => {
+    it("uses supplied rawWeek instead of computing from startDate", () => {
+      // Supply rawWeek = 2 directly (course is in week 2)
+      expect(nextLectureWeek({ startDate: null, weeks: 5, nowMs, rawWeek: 2 })).toEqual({
+        week: 3,
+      });
+    });
+
+    it("returns next week when supplied rawWeek is in-progress", () => {
+      // Supplied rawWeek = 1, should return week 2
+      expect(nextLectureWeek({ startDate: null, weeks: 10, nowMs, rawWeek: 1 })).toEqual({
+        week: 2,
+      });
+    });
+
+    it("returns skip when supplied rawWeek indicates complete course", () => {
+      // rawWeek = 5 but weeks = 4 -> complete
+      expect(nextLectureWeek({ startDate: null, weeks: 4, nowMs, rawWeek: 5 })).toEqual({
+        skip: "course is complete",
+      });
+    });
+
+    it("returns skip when supplied rawWeek indicates final week underway", () => {
+      // rawWeek = 4, weeks = 4, next = 5 > 4
+      expect(nextLectureWeek({ startDate: null, weeks: 4, nowMs, rawWeek: 4 })).toEqual({
+        skip: "final week is underway",
+      });
+    });
+
+    it("returns skip when rawWeek is null and no startDate", () => {
+      expect(nextLectureWeek({ startDate: null, weeks: 5, nowMs, rawWeek: null })).toEqual({
+        skip: "no start date",
+      });
+    });
+
+    it("ignores startDate when rawWeek is supplied", () => {
+      // Even though course starts on 2024-07-26 (8 days away), supplying rawWeek should override
+      const startDate = "2024-07-26";
+      expect(nextLectureWeek({ startDate, weeks: 5, nowMs, rawWeek: 2 })).toEqual({
+        week: 3,
+      });
+    });
+
+    it("still enforces week bounds when rawWeek is supplied", () => {
+      // rawWeek = 10, weeks = 5 -> complete
+      expect(nextLectureWeek({ startDate: null, weeks: 5, nowMs, rawWeek: 10 })).toEqual({
+        skip: "course is complete",
+      });
+    });
+
+    it("uses supplied rawWeek when no startDate available (e.g., from deadlines)", () => {
+      // Simulate: deadline-based resolver found week 3, no startDate on tile
+      expect(nextLectureWeek({ startDate: null, weeks: 8, nowMs, rawWeek: 3 })).toEqual({
+        week: 4,
+      });
+    });
+
+    it("returns skip when rawWeek is 0 (not-started) with no startDate", () => {
+      // Can't determine if course starts within 7 days without startDate
+      expect(nextLectureWeek({ startDate: null, weeks: 10, nowMs, rawWeek: 0 })).toEqual({
+        skip: "starts later than next week",
+      });
+    });
+  });
 });
 
 describe("resolveWeekTopic", () => {

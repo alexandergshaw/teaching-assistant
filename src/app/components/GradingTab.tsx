@@ -17,6 +17,7 @@ import { submitOnEnter } from "./ui/submitOnEnter";
 import LiveFeedPanel from "./LiveFeedPanel";
 import GradingResults from "./GradingResults";
 import GithubGradingPanel from "./GithubGradingPanel";
+import CartridgeDropPanel from "./CartridgeDropPanel";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -428,6 +429,8 @@ export default function GradingTab({
           }
         />
       )}
+
+      <CartridgeDropPanel />
     </div>
   );
 }

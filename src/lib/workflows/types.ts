@@ -14,6 +14,7 @@ import { parseCsvRows } from "@/lib/csv";
  * - uploads: runtime-only file uploads; never persisted to storage
  * - lmsModule: a module id within the course chosen by the form's hubCourse field
  * - courseList: an opaque JSON payload passed between workflow steps
+ * - lookahead: a days-ahead scope value (string representation of number)
  */
 export type WorkflowValueType =
   | "text"
@@ -35,7 +36,8 @@ export type WorkflowValueType =
   | "lmsModule"
   | "courseList"
   | "orgList"
-  | "deckTemplate";
+  | "deckTemplate"
+  | "lookahead";
 
 // Value types that can carry a fixed ("preset") value in the builder, so a
 // workflow can hard-set the input and run unmonitored without prompting. Beyond
@@ -57,6 +59,7 @@ export const LITERAL_CAPABLE_TYPES: ReadonlySet<string> = new Set([
   "orgList",
   "institution",
   "deckTemplate",
+  "lookahead",
 ]);
 
 // A single-item value type -> its scopeable list type. Lets a single-item
@@ -162,18 +165,21 @@ export interface WorkflowStepConfig {
 
 /**
  * Workflow-level targets: what institution / course tiles / Canvas courses /
- * GitHub orgs the WHOLE workflow is for. Set once (before the steps), it fills
- * every matching entity input the workflow's steps ask for - so the run form
- * stops asking for them and a scheduled/triggered/webhook run has its targets
- * without any prompt. Each value is in the standard entity format: a single
+ * GitHub orgs the WHOLE workflow is for, and how far ahead steps should look.
+ * Set once (before the steps), scope fills every matching entity input and
+ * lookahead inputs the workflow's steps ask for - so the run form stops asking
+ * for them and a scheduled/triggered/webhook run has its targets without any
+ * prompt. Each entity value is in the standard entity format: a single
  * id/url/acronym, a newline-joined list, or "*" for all (list-capable families
- * only). An unset family (empty/absent) leaves those inputs asking as before.
+ * only). The lookahead value is a scalar days count (never "*" or a list).
+ * An unset family (empty/absent) leaves those inputs asking as before.
  */
 export interface WorkflowScope {
   institution?: string;
   hubCourse?: string;
   lmsCourse?: string;
   org?: string;
+  lookahead?: string;
 }
 
 export interface WorkflowDef {
@@ -187,7 +193,8 @@ export interface WorkflowDef {
 }
 
 /** The workflow-scope family a value type belongs to, or null when the type is
- * not a scopeable entity. The single and list variants share a family. */
+ * not a scopeable entity or scalar. The single and list variants of entities
+ * share a family. "lookahead" is a scalar family. */
 export function scopeFamilyForType(type: string): keyof WorkflowScope | null {
   switch (type) {
     case "institution":
@@ -201,6 +208,8 @@ export function scopeFamilyForType(type: string): keyof WorkflowScope | null {
     case "org":
     case "orgList":
       return "org";
+    case "lookahead":
+      return "lookahead";
     default:
       return null;
   }
@@ -236,6 +245,7 @@ export function scopeCoversType(scope: WorkflowScope | undefined, type: string):
  * otherwise the scope value is coerced to the input's arity: a list input takes
  * the scope value as-is (the engine later expands "*"); a single input takes
  * the first concrete item, and never "*" (which a single input cannot express).
+ * A lookahead scalar is returned as-is from scope, with "*" rejected.
  */
 export function applyWorkflowScope(
   type: string,
@@ -247,6 +257,9 @@ export function applyWorkflowScope(
   if (!family || !scope) return runtimeValue;
   const scopeVal = (scope[family] ?? "").trim();
   if (!scopeVal) return runtimeValue;
+  if (family === "lookahead") {
+    return scopeVal === "*" ? runtimeValue : scopeVal;
+  }
   if (isSingleEntityType(type)) {
     if (scopeVal === "*") return runtimeValue;
     return scopeVal.split("\n").map((s) => s.trim()).filter(Boolean)[0] ?? "";
@@ -272,25 +285,33 @@ export function describeWorkflowScope(scope: WorkflowScope | undefined): string 
   if (scope.org?.trim()) {
     parts.push(scope.org.trim() === "*" ? "all organizations" : `${count(scope.org)} organization(s)`);
   }
+  if (scope.lookahead?.trim()) {
+    const days = parseInt(scope.lookahead.trim(), 10);
+    if (!isNaN(days)) {
+      parts.push(`looking ${days} day(s) ahead`);
+    }
+  }
   return parts.join(", ");
 }
 
 /** A short human summary of what the workflow scope fills a given input TYPE
  * with, or "" when the scope does not cover this input. Mirrors the arity rules
  * of applyWorkflowScope: a single input covered by a concrete value shows that
- * value; a list input shows "all ..." for "*" or a count otherwise. */
+ * value; a list input shows "all ..." for "*" or a count otherwise; a lookahead
+ * scalar shows the day count. */
 export function describeScopeForType(scope: WorkflowScope | undefined, type: string): string {
   const effective = applyWorkflowScope(type, "", scope).trim();
   if (!effective) return "";
   const family = scopeFamilyForType(type);
   if (!family) return "";
+  if (family === "lookahead") return `${effective} day(s) ahead`;
   if (isSingleEntityType(type)) return effective;
-  const labels: Record<Exclude<keyof WorkflowScope, "institution">, [string, string]> = {
+  const labels: Record<Exclude<keyof WorkflowScope, "institution" | "lookahead">, [string, string]> = {
     hubCourse: ["all course tiles", "course tile(s)"],
     lmsCourse: ["all Canvas courses", "Canvas course(s)"],
     org: ["all organizations", "organization(s)"],
   };
-  const pair = labels[family as Exclude<keyof WorkflowScope, "institution">];
+  const pair = labels[family as Exclude<keyof WorkflowScope, "institution" | "lookahead">];
   if (!pair) return effective;
   if (effective === "*") return pair[0];
   const count = effective.split("\n").map((s) => s.trim()).filter(Boolean).length;

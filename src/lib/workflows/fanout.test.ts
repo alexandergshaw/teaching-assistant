@@ -26,6 +26,18 @@ describe("scopeForInstitution", () => {
       org: "x",
     });
   });
+
+  it("preserves the lookahead value through institution fan-out", () => {
+    expect(scopeForInstitution({ institution: "*", lookahead: "14" }, "UT")).toEqual({
+      institution: "UT",
+      lookahead: "14",
+    });
+    expect(scopeForInstitution({ institution: "*", hubCourse: "a", lookahead: "7" }, "OSU")).toEqual({
+      institution: "OSU",
+      hubCourse: "a",
+      lookahead: "7",
+    });
+  });
 });
 
 describe("resolveFanoutInstitutions", () => {

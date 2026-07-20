@@ -20,7 +20,10 @@ describe("scopeFamilyForType", () => {
     expect(scopeFamilyForType("org")).toBe("org");
     expect(scopeFamilyForType("orgList")).toBe("org");
   });
-  it("returns null for non-entity types", () => {
+  it("maps lookahead to its own family", () => {
+    expect(scopeFamilyForType("lookahead")).toBe("lookahead");
+  });
+  it("returns null for non-entity, non-scalar types", () => {
     expect(scopeFamilyForType("text")).toBeNull();
     expect(scopeFamilyForType("number")).toBeNull();
     expect(scopeFamilyForType("repo")).toBeNull();
@@ -51,6 +54,14 @@ describe("scopeCoversType", () => {
     expect(scopeCoversType({ institution: "MCC" }, "institution")).toBe(true);
     expect(scopeCoversType({}, "institution")).toBe(false);
     expect(scopeCoversType(undefined, "institution")).toBe(false);
+  });
+
+  it("covers a lookahead input when the scope sets lookahead", () => {
+    expect(scopeCoversType({ lookahead: "14" }, "lookahead")).toBe(true);
+    expect(scopeCoversType({ lookahead: "7" }, "lookahead")).toBe(true);
+    expect(scopeCoversType({ lookahead: "" }, "lookahead")).toBe(false);
+    expect(scopeCoversType({}, "lookahead")).toBe(false);
+    expect(scopeCoversType(undefined, "lookahead")).toBe(false);
   });
 });
 
@@ -305,5 +316,88 @@ describe("collectRuntimeFields - courseDerived input under a scoped course", () 
   it("still asks for the objectives when no course is scoped", () => {
     const fields = collectRuntimeFields(def, lookup);
     expect(fields.map((f) => f.fieldKey).sort()).toEqual(["context", "hubCourse", "objectives"]);
+  });
+});
+
+describe("collectRuntimeFields with lookahead scope", () => {
+  const inputs: Record<string, StepInputSpec[]> = {
+    checkDeadlines: [
+      { key: "lookahead", label: "How far ahead", type: "lookahead", required: false },
+      { key: "topic", label: "Topic", type: "text", required: true },
+    ],
+  };
+  const lookup = (type: string) => inputs[type];
+  const def: WorkflowDef = {
+    id: "w",
+    name: "W",
+    description: "",
+    steps: [
+      {
+        type: "checkDeadlines",
+        bindings: {
+          lookahead: { source: "runtime", fieldKey: "lookahead" },
+          topic: { source: "runtime", fieldKey: "topic" },
+        },
+      },
+    ],
+  };
+
+  it("hides the lookahead field when the scope sets it", () => {
+    const scoped: WorkflowDef = { ...def, scope: { lookahead: "14" } };
+    const fields = collectRuntimeFields(scoped, lookup);
+    expect(fields.map((f) => f.fieldKey)).toEqual(["topic"]);
+  });
+
+  it("asks for the lookahead field when the scope does not set it", () => {
+    const fields = collectRuntimeFields(def, lookup);
+    expect(fields.map((f) => f.fieldKey).sort()).toEqual(["lookahead", "topic"]);
+  });
+});
+
+describe("applyWorkflowScope with lookahead", () => {
+  it("returns the scope lookahead value when run form is empty", () => {
+    expect(applyWorkflowScope("lookahead", "", { lookahead: "14" })).toBe("14");
+    expect(applyWorkflowScope("lookahead", "", { lookahead: "7" })).toBe("7");
+  });
+
+  it("returns the run-form value when non-empty (a per-run override)", () => {
+    expect(applyWorkflowScope("lookahead", "30", { lookahead: "14" })).toBe("30");
+  });
+
+  it("rejects '*' in lookahead scope (not a valid days value) and falls back to run value", () => {
+    expect(applyWorkflowScope("lookahead", "", { lookahead: "*" })).toBe("");
+    expect(applyWorkflowScope("lookahead", "7", { lookahead: "*" })).toBe("7");
+  });
+});
+
+describe("describeWorkflowScope with lookahead", () => {
+  it("includes a lookahead summary in the scope description", () => {
+    expect(describeWorkflowScope({ lookahead: "14" })).toBe("looking 14 day(s) ahead");
+    expect(describeWorkflowScope({ lookahead: "7" })).toBe("looking 7 day(s) ahead");
+    expect(describeWorkflowScope({ institution: "MCC", lookahead: "14" })).toBe(
+      "institution MCC, looking 14 day(s) ahead"
+    );
+  });
+
+  it("ignores invalid lookahead values", () => {
+    expect(describeWorkflowScope({ lookahead: "not-a-number" })).toBe("");
+    expect(describeWorkflowScope({ lookahead: "  " })).toBe("");
+  });
+});
+
+describe("describeScopeForType with lookahead", () => {
+  it("returns the days ahead for a lookahead type", () => {
+    expect(describeScopeForType({ lookahead: "14" }, "lookahead")).toBe("14 day(s) ahead");
+    expect(describeScopeForType({ lookahead: "7" }, "lookahead")).toBe("7 day(s) ahead");
+  });
+
+  it("returns empty when lookahead scope is not set", () => {
+    expect(describeScopeForType(undefined, "lookahead")).toBe("");
+    expect(describeScopeForType({}, "lookahead")).toBe("");
+  });
+
+  it("still handles entity types correctly", () => {
+    expect(describeScopeForType({ hubCourse: "a\nb" }, "hubCourseList")).toBe("2 course tile(s)");
+    expect(describeScopeForType({ org: "*" }, "orgList")).toBe("all organizations");
   });
 });

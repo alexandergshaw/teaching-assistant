@@ -4085,6 +4085,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Added when Week is blank: 0 = this week (default), 1 = next week.",
       },
+      {
+        key: "lookahead",
+        label: "How far ahead",
+        type: "lookahead",
+        required: false,
+        help: "Used when Week and Week offset are blank: whole weeks ahead = days / 7 rounded up.",
+      },
     ],
     outputs: [
       { key: "topic", label: "Topic", type: "text" },
@@ -4103,7 +4110,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const tile = list.courses.find((c) => c.id === hubCourseId);
       if (!tile) throw new Error("Course tile not found.");
 
-      // Determine the target week: explicit week input when >= 1; otherwise current week + offset
+      // Determine the target week: explicit week > offset > lookahead-derived offset > default current week
       let targetWeek: number;
       const weekInput = Number(values.week ?? "");
       if (Number.isFinite(weekInput) && weekInput >= 1) {
@@ -4145,7 +4152,19 @@ export const STEP_REGISTRY: StepDefinition[] = [
             },
           };
         }
-        const offsetVal = Math.trunc(Number(values.offset ?? 0) || 0);
+        const offsetRaw = String(values.offset ?? "").trim();
+        let offsetVal: number;
+        if (offsetRaw !== "") {
+          offsetVal = Math.trunc(Number(offsetRaw) || 0);
+        } else {
+          const lookaheadRaw = String(values.lookahead ?? "").trim();
+          if (lookaheadRaw !== "" && Number.isFinite(Number(lookaheadRaw))) {
+            const daysAhead = Math.floor(Number(lookaheadRaw));
+            offsetVal = Math.max(1, Math.ceil(daysAhead / 7));
+          } else {
+            offsetVal = 0;
+          }
+        }
         targetWeek = displayWeek + offsetVal;
       }
 
@@ -6501,7 +6520,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   {
     type: "draft-weekly-announcements",
     name: "Draft weekly announcements",
-    description: "For every selected course tile, draft the week-ahead kickoff announcement - what the coming week covers and what is due - into Drafts > Messages, one per course. Nothing posts until you review. The week's topic comes from the course's LMS export first, then the schedule CSV, then the topics list. All announcements are saved to the course tile and the Files tab.",
+    description: "For every selected course tile, draft kickoff announcements for the coming weeks - what each week covers and what is due - into Drafts > Messages, one per course per week. Nothing posts until you review. The week's topic comes from the course's LMS export first, then the schedule CSV, then the topics list. All announcements are saved to the course tile and the Files tab.",
     inputs: [
       {
         key: "courses",
@@ -6511,11 +6530,11 @@ export const STEP_REGISTRY: StepDefinition[] = [
         help: "One, several, or all course tiles.",
       },
       {
-        key: "weekOffset",
-        label: "Week offset",
-        type: "number",
+        key: "lookahead",
+        label: "How far ahead",
+        type: "lookahead",
         required: false,
-        help: "0 drafts for the current week; 1 (default) for the coming week.",
+        help: "How far ahead to prepare. Default 7 days (the coming week); 14 days prepares the next two weeks.",
       },
       {
         key: "extraNotes",
@@ -6540,11 +6559,11 @@ export const STEP_REGISTRY: StepDefinition[] = [
         throw new Error("Select at least one course tile.");
       }
 
-      const raw = String(values.weekOffset ?? "").trim();
-      let offsetVal = raw === "" ? 1 : Math.trunc(Number(raw));
-      if (Number.isNaN(offsetVal) || offsetVal < 0) {
-        offsetVal = 1;
-      }
+      const lookaheadRaw = String(values.lookahead ?? "").trim();
+      const daysAhead = Number.isFinite(Number(lookaheadRaw)) && Number(lookaheadRaw) >= 1
+        ? Math.floor(Number(lookaheadRaw))
+        : 7;
+      const weeksAhead = Math.max(1, Math.min(4, Math.ceil(daysAhead / 7)));
 
       const extraNotes = String(values.extraNotes ?? "").trim();
       const reportLines: string[] = [];
@@ -6563,87 +6582,93 @@ export const STEP_REGISTRY: StepDefinition[] = [
         }
 
         try {
-          onProgress(`Drafting announcement for ${tile.name}...`);
+          onProgress(`Drafting announcements for ${tile.name}...`);
 
-          let targetWeek: number;
-          let sourceNote = "";
+          const nw = nextLectureWeek({
+            startDate: tile.startDate,
+            weeks: tile.weeks,
+            nowMs: Date.now(),
+          });
 
-          if (offsetVal === 1) {
-            const nw = nextLectureWeek({
-              startDate: tile.startDate,
-              weeks: tile.weeks,
-              nowMs: Date.now(),
-            });
-            if ("skip" in nw) {
-              reportLines.push(`${tile.name}: skipped - ${nw.skip}.`);
-              continue;
-            }
-            targetWeek = nw.week;
-          } else if (offsetVal === 0) {
-            const cw = currentCourseWeek(tile.startDate, Date.now());
-            if (cw === null) {
-              reportLines.push(`${tile.name}: skipped - course not yet started or finished.`);
-              continue;
-            }
-            const status = courseProgressStatus(cw, tile.weeks);
-            if (status === "not-started" || status === "complete") {
-              reportLines.push(`${tile.name}: skipped - course ${status === "not-started" ? "not yet started" : "finished"}.`);
-              continue;
-            }
-            targetWeek = tile.weeks && tile.weeks > 0 ? Math.min(cw, tile.weeks) : cw;
-          } else {
-            const cw = currentCourseWeek(tile.startDate, Date.now());
-            if (cw === null) {
-              reportLines.push(`${tile.name}: skipped - course not yet started or finished.`);
-              continue;
-            }
-            targetWeek = Math.max(1, cw + offsetVal);
-            if (tile.weeks && tile.weeks > 0 && targetWeek > tile.weeks) {
-              reportLines.push(`${tile.name}: skipped - target week ${targetWeek} is past course end.`);
-              continue;
-            }
-          }
-
-          const weekTopic = await loadTileWeekTopic(tile, targetWeek, helpers);
-          if ("skip" in weekTopic) {
-            reportLines.push(`${tile.name}: skipped - ${weekTopic.skip}.`);
+          if ("skip" in nw) {
+            reportLines.push(`${tile.name}: skipped - ${nw.skip}.`);
             continue;
           }
 
-          const topic = weekTopic.topic;
-          const summary = weekTopic.summary;
-          sourceNote = weekTopic.source !== "schedule"
-            ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
-            : "";
+          const startWeek = nw.week;
+          let sourceNote = "";
+          let tileSuccessCount = 0;
+          let tileEndWeek = startWeek + weeksAhead - 1;
 
-          const instruction = `Draft a week-ahead kickoff announcement for ${tile.name}. Week ${targetWeek} covers: ${topic}. ${summary}${extraNotes ? ` ${extraNotes}` : ""}`;
+          for (let w = 0; w < weeksAhead; w++) {
+            const targetWeek = startWeek + w;
 
-          const r = await draftAnnouncementAction(instruction, helpers.provider);
-          if ("error" in r) {
-            throw new Error(r.error);
+            if (tile.weeks && tile.weeks > 0 && targetWeek > tile.weeks) {
+              if (w === 0) {
+                reportLines.push(`${tile.name}: skipped - target week ${targetWeek} is past course end.`);
+              }
+              tileEndWeek = targetWeek - 1;
+              break;
+            }
+
+            try {
+              const weekTopic = await loadTileWeekTopic(tile, targetWeek, helpers);
+              if ("skip" in weekTopic) {
+                if (w === 0) {
+                  reportLines.push(`${tile.name}: skipped - ${weekTopic.skip}.`);
+                }
+                tileEndWeek = targetWeek - 1;
+                break;
+              }
+
+              const topic = weekTopic.topic;
+              const summary = weekTopic.summary;
+              if (w === 0) {
+                sourceNote = weekTopic.source !== "schedule"
+                  ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
+                  : "";
+              }
+
+              const instruction = `Draft a week-ahead kickoff announcement for ${tile.name}. Week ${targetWeek} covers: ${topic}. ${summary}${extraNotes ? ` ${extraNotes}` : ""}`;
+
+              const r = await draftAnnouncementAction(instruction, helpers.provider);
+              if ("error" in r) {
+                throw new Error(r.error);
+              }
+
+              const payload: MessageDraftPayload = {
+                kind: "announcement",
+                body: r.message,
+                title: r.title,
+                courseUrl: tile.canvasUrl ?? undefined,
+                hubCourseId: tile.id,
+                institution: tile.institution ?? undefined,
+              };
+
+              const res = await saveMessageDraftAction(
+                `Weekly announcement - ${tile.name} week ${targetWeek}`,
+                payload,
+                helpers.workflowId,
+                helpers.workflowName
+              );
+              if ("error" in res) {
+                throw new Error(res.error);
+              }
+
+              tileSuccessCount++;
+              drafted++;
+            } catch (err) {
+              reportLines.push(
+                `${tile.name}, week ${targetWeek}: ${err instanceof Error ? err.message : "failed"}`
+              );
+            }
           }
 
-          const payload: MessageDraftPayload = {
-            kind: "announcement",
-            body: r.message,
-            title: r.title,
-            courseUrl: tile.canvasUrl ?? undefined,
-            hubCourseId: tile.id,
-            institution: tile.institution ?? undefined,
-          };
-
-          const res = await saveMessageDraftAction(
-            `Weekly announcement - ${tile.name} week ${targetWeek}`,
-            payload,
-            helpers.workflowId,
-            helpers.workflowName
-          );
-          if ("error" in res) {
-            throw new Error(res.error);
+          if (tileSuccessCount > 0) {
+            reportLines.push(
+              `${tile.name}: drafted announcement${weeksAhead > 1 ? `s for weeks ${startWeek}-${tileEndWeek}` : ` for week ${startWeek}`}${sourceNote}`
+            );
           }
-
-          reportLines.push(`${tile.name}: drafted announcement for week ${targetWeek}${sourceNote}`);
-          drafted++;
         } catch (err) {
           reportLines.push(
             `${tile.name}: ${err instanceof Error ? err.message : "failed"}`
@@ -6657,6 +6682,277 @@ export const STEP_REGISTRY: StepDefinition[] = [
           drafted: String(drafted),
           hasDrafted: drafted > 0 ? "1" : "",
           report,
+        },
+        summary: { kind: "text", text: report },
+      };
+    },
+  },
+
+  {
+    type: "draft-weekly-study-guides",
+    name: "Draft weekly study guides",
+    description: "For every selected course tile, build study guides for the coming weeks - overview, key concepts, cited readings from the research library, and self-check questions - saved to the course tile and the Files tab as Word documents. Optionally also create each guide as an UNPUBLISHED Canvas page. The week's topic comes from the course's LMS export first, then the tile's schedule CSV, then its topics list.",
+    inputs: [
+      {
+        key: "courses",
+        label: "Course tiles",
+        type: "hubCourseList",
+        required: true,
+        help: "One, several, or all course tiles.",
+      },
+      {
+        key: "lookahead",
+        label: "How far ahead",
+        type: "lookahead",
+        required: false,
+        help: "How far ahead to prepare. Default 7 days (the coming week); 14 days prepares the next two weeks.",
+      },
+      {
+        key: "citations",
+        label: "Cited sources",
+        type: "number",
+        required: false,
+        help: "How many cited readings to pull from research. Default 4.",
+      },
+      {
+        key: "extraNotes",
+        label: "Extra notes (optional)",
+        type: "longtext",
+        required: false,
+        help: "Folded into every guide (e.g. emphasize exam-relevant material).",
+      },
+      {
+        key: "publish",
+        label: "Create Canvas pages?",
+        type: "boolean",
+        required: false,
+        help: "Also create each guide as an UNPUBLISHED page in the tile's Canvas course.",
+      },
+    ],
+    outputs: [
+      { key: "report", label: "Report", type: "longtext" },
+      { key: "generated", label: "Guides generated", type: "number" },
+      { key: "hasGenerated", label: "Any generated?", type: "boolean" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const ids = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      if (ids.length === 0) {
+        throw new Error("Select at least one course tile.");
+      }
+
+      const lookaheadRaw = String(values.lookahead ?? "").trim();
+      const daysAhead = Number.isFinite(Number(lookaheadRaw)) && Number(lookaheadRaw) >= 1
+        ? Math.floor(Number(lookaheadRaw))
+        : 7;
+      const weeksAhead = Math.max(1, Math.min(4, Math.ceil(daysAhead / 7)));
+
+      let citationsVal = Number(values.citations ?? 4);
+      if (Number.isNaN(citationsVal) || citationsVal < 1 || citationsVal > 8) {
+        citationsVal = 4;
+      } else {
+        citationsVal = Math.round(citationsVal);
+      }
+
+      const extraNotes = String(values.extraNotes ?? "").trim();
+      const publish = String(values.publish ?? "").trim() === "1";
+
+      const hub = await listCourseHubAction();
+      if ("error" in hub) {
+        throw new Error(hub.error);
+      }
+
+      const reportLines: string[] = [];
+      let generated = 0;
+
+      const sanitize = (s: string) =>
+        s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+
+      for (const id of ids) {
+        const tile = hub.courses.find((c) => c.id === id);
+        if (!tile) {
+          reportLines.push(`${id}: course tile not found - skipped`);
+          continue;
+        }
+
+        try {
+          const nw = nextLectureWeek({
+            startDate: tile.startDate,
+            weeks: tile.weeks,
+            nowMs: Date.now(),
+          });
+
+          if ("skip" in nw) {
+            reportLines.push(`${tile.name}: skipped - ${nw.skip}.`);
+            continue;
+          }
+
+          const startWeek = nw.week;
+          let sourceNote = "";
+          let tileSuccessCount = 0;
+          let tileEndWeek = startWeek + weeksAhead - 1;
+
+          for (let w = 0; w < weeksAhead; w++) {
+            const targetWeek = startWeek + w;
+
+            if (tile.weeks && tile.weeks > 0 && targetWeek > tile.weeks) {
+              if (w === 0) {
+                reportLines.push(`${tile.name}: skipped - target week ${targetWeek} is past course end.`);
+              }
+              tileEndWeek = targetWeek - 1;
+              break;
+            }
+
+            try {
+              onProgress(`Generating study guide for ${tile.name}, week ${targetWeek}...`);
+
+              const weekTopic = await loadTileWeekTopic(tile, targetWeek, helpers);
+              if ("skip" in weekTopic) {
+                if (w === 0) {
+                  reportLines.push(`${tile.name}: skipped - ${weekTopic.skip}.`);
+                }
+                tileEndWeek = targetWeek - 1;
+                break;
+              }
+
+              const topic = weekTopic.topic;
+              const summary = weekTopic.summary;
+              if (w === 0) {
+                sourceNote = weekTopic.source !== "schedule"
+                  ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
+                  : "";
+              }
+
+              let researchText = "";
+              try {
+                onProgress(`Researching for ${tile.name}, week ${targetWeek}...`);
+                const researchResult = await researchTopicAction(topic, citationsVal);
+                if ("error" in researchResult) {
+                  reportLines.push(`${tile.name}, week ${targetWeek}: research skipped - ${researchResult.error}`);
+                } else {
+                  const items: string[] = [];
+                  for (const result of researchResult.results) {
+                    items.push(result.title);
+                    items.push(`Source: ${result.source}`);
+                    if (result.url) {
+                      items.push(`URL: ${result.url}`);
+                    }
+                    items.push("");
+                    items.push(result.summary);
+                    items.push("");
+                  }
+                  if (items.length > 0) {
+                    researchText = items.join("\n").trim();
+                  }
+                }
+              } catch (err) {
+                // Research fail-forward: continue with empty citations section
+                reportLines.push(`${tile.name}, week ${targetWeek}: research skipped - ${err instanceof Error ? err.message : "unknown error"}`);
+              }
+
+              const prompt = [
+                `# ${tile.name} - Week ${targetWeek} Study Guide`,
+                "",
+                "## Overview",
+                `${topic}`,
+                "",
+                summary,
+                extraNotes ? `\n${extraNotes}` : "",
+                "",
+                "## Key Concepts",
+                topic.split(/[,;]/).map((c) => `- ${c.trim()}`).filter((c) => c.length > 2).slice(0, 5).join("\n"),
+                "",
+                "## Readings and Sources",
+                researchText || "(No research results found)",
+                "",
+                "## Check Yourself",
+                "1. What is the main concept of this week?",
+                "2. How does this week build on previous topics?",
+                "3. What are the key takeaways?",
+                "4. How might this apply to real-world scenarios?",
+                "5. What questions do you still have?",
+              ].filter(Boolean).join("\n");
+
+              const gen = await generateDocumentTextAction(prompt, helpers.provider);
+              const text = ("text" in gen) ? gen.text : prompt;
+
+              const docx = await buildDocxFromPlainText(text, [], helpers.author);
+              const blob = new Blob([new Uint8Array(docx)], {
+                type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              });
+              const fileName = `${sanitize(tile.name)}_Week${targetWeek}_StudyGuide.docx`;
+
+              if (helpers.saveCourseMaterialFile) {
+                try {
+                  await helpers.saveCourseMaterialFile(tile.id, blob, fileName);
+                  const base64 = await blobToBase64(blob);
+                  const lib = await saveLibraryFileAction({
+                    name: fileName,
+                    base64,
+                    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    fileExt: "docx",
+                    workflowId: helpers.workflowId,
+                    workflowName: helpers.workflowName,
+                  });
+                  if ("error" in lib) {
+                    reportLines.push(`${tile.name}: library save skipped - ${lib.error}`);
+                  }
+                } catch (err) {
+                  reportLines.push(
+                    `${tile.name}: saving to course tile failed - ${err instanceof Error ? err.message : String(err)}`
+                  );
+                }
+              }
+
+              if (publish && tile.canvasUrl) {
+                try {
+                  await createPageAction(
+                    tile.canvasUrl,
+                    {
+                      title: `Week ${targetWeek}: Study Guide`,
+                      body: markdownLiteToHtml(text),
+                      published: false,
+                    },
+                    tile.institution ?? undefined
+                  );
+                } catch {
+                  // Canvas page creation fail-forward: note only
+                  reportLines.push(
+                    `${tile.name}, week ${targetWeek}: Canvas page creation skipped`
+                  );
+                }
+              }
+
+              tileSuccessCount++;
+              generated++;
+            } catch (err) {
+              reportLines.push(
+                `${tile.name}, week ${targetWeek}: ${err instanceof Error ? err.message : "failed"}`
+              );
+            }
+          }
+
+          if (tileSuccessCount > 0) {
+            reportLines.push(
+              `${tile.name}: generated guide${weeksAhead > 1 ? `s for weeks ${startWeek}-${tileEndWeek}` : ` for week ${startWeek}`}${sourceNote}`
+            );
+          }
+        } catch (err) {
+          reportLines.push(
+            `${tile.name}: ${err instanceof Error ? err.message : "failed"}`
+          );
+        }
+      }
+
+      const report = reportLines.join("\n");
+      return {
+        outputs: {
+          report,
+          generated: String(generated),
+          hasGenerated: generated > 0 ? "1" : "",
         },
         summary: { kind: "text", text: report },
       };
@@ -11286,7 +11582,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       "List every published assignment with a due date inside the next N days across the chosen Canvas courses, or read calendar feeds at institutions with no API access. Feed the list to an announcement draft or a briefing.",
     inputs: [
       { key: "courses", label: "LMS courses", type: "lmsCourseList", required: false, help: "One, several, or all courses. Leave blank to scan every course at every configured institution." },
-      { key: "daysAhead", label: "Days ahead", type: "number", required: false, help: "How many days ahead to look. Default 7." },
+      { key: "daysAhead", label: "How far ahead", type: "lookahead", required: false, help: "How far ahead to look. Default 7 days." },
       { key: "institution", label: "Institution", type: "institution", required: false, help: "Fallback for relative /courses/<id> URLs; each full course URL resolves its own institution automatically." },
     ],
     outputs: [
@@ -11726,6 +12022,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         help: "Target lecture script length in minutes (1-30). Default 20.",
       },
       {
+        key: "lookahead",
+        label: "How far ahead",
+        type: "lookahead",
+        required: false,
+        help: "How far ahead to prepare. Default 7 days (the coming week); 14 days prepares the next two weeks.",
+      },
+      {
         key: "extraNotes",
         label: "Extra notes (optional)",
         type: "longtext",
@@ -11769,6 +12072,12 @@ export const STEP_REGISTRY: StepDefinition[] = [
         minutesVal = Math.round(minutesVal);
       }
 
+      const lookaheadRaw = String(values.lookahead ?? "").trim();
+      const daysAhead = Number.isFinite(Number(lookaheadRaw)) && Number(lookaheadRaw) >= 1
+        ? Math.floor(Number(lookaheadRaw))
+        : 7;
+      const weeksAhead = Math.max(1, Math.min(4, Math.ceil(daysAhead / 7)));
+
       const hub = await listCourseHubAction();
       if ("error" in hub) {
         throw new Error(hub.error);
@@ -11801,253 +12110,286 @@ export const STEP_REGISTRY: StepDefinition[] = [
             continue;
           }
 
-          const weekTopic = await loadTileWeekTopic(tile, nw.week, helpers);
-          if ("skip" in weekTopic) {
-            reportLines.push(`${tile.name}: skipped - ${weekTopic.skip}.`);
-            continue;
-          }
-
-          const topic = weekTopic.topic;
-          const summary = weekTopic.summary;
-          const sourceNote = weekTopic.source !== "schedule"
-            ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
-            : "";
-          const objectives = extraNotes
-            ? `Topic: ${topic}\n${summary}\n${extraNotes}`
-            : `Topic: ${topic}\n${summary}`;
-
+          const startWeek = nw.week;
+          let sourceNote = "";
+          let tileSuccessCount = 0;
+          let tileEndWeek = startWeek;
           const sanitize = (s: string) =>
             s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
 
-          let tilePrepared = false;
-          let scriptResult: { script: string } | undefined;
+          for (let w = 0; w < weeksAhead; w++) {
+            const targetWeek = startWeek + w;
 
-          try {
-            onProgress(`Generating lecture script for ${tile.name}...`);
-            const result = await generateLectureScriptAction(
-              topic,
-              objectives,
-              minutesVal,
-              helpers.provider
-            );
-            if ("error" in result) {
-              throw new Error(result.error);
-            }
-            scriptResult = result;
-
-            const scriptText = [
-              `# ${tile.name} - Week ${nw.week} Lecture Script`,
-              `## ${topic}`,
-              scriptResult.script,
-            ].join("\n");
-            const scriptDocx = await buildDocxFromPlainText(scriptText, [], helpers.author);
-            const scriptBlob = new Blob([new Uint8Array(scriptDocx)], {
-              type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            });
-            const scriptFileName = `${sanitize(tile.name)}_Week${nw.week}_LectureScript.docx`;
-
-            if (helpers.saveCourseMaterialFile) {
-              try {
-                await helpers.saveCourseMaterialFile(tile.id, scriptBlob, scriptFileName);
-                tilePrepared = true;
-                const scriptBase64 = await blobToBase64(scriptBlob);
-                const scriptLib = await saveLibraryFileAction({
-                  name: scriptFileName,
-                  base64: scriptBase64,
-                  mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                  fileExt: "docx",
-                  workflowId: helpers.workflowId,
-                  workflowName: helpers.workflowName,
-                });
-                if ("error" in scriptLib) {
-                  reportLines.push(`${tile.name}: library save skipped - ${scriptLib.error}`);
-                }
-              } catch (err) {
-                reportLines.push(
-                  `${tile.name}: failed to save lecture script - ${
-                    err instanceof Error ? err.message : String(err)
-                  }`
-                );
+            if (tile.weeks && tile.weeks > 0 && targetWeek > tile.weeks) {
+              if (w === 0) {
+                reportLines.push(`${tile.name}: skipped - target week ${targetWeek} is past course end.`);
               }
-            } else {
-              reportLines.push(`${tile.name}: sign in to save files`);
-            }
-          } catch (err) {
-            reportLines.push(
-              `${tile.name}: lecture script generation failed - ${
-                err instanceof Error ? err.message : String(err)
-              }`
-            );
-          }
-
-          try {
-            onProgress(`Generating lesson plan for ${tile.name}...`);
-            const planResult = await generateLessonPlanAction(
-              objectives,
-              String(extraNotes ?? ""),
-              [],
-              undefined,
-              undefined,
-              helpers.provider
-            );
-            if ("error" in planResult) {
-              throw new Error(planResult.error);
+              break;
             }
 
-            const planLines: string[] = [
-              `# ${tile.name} - Week ${nw.week} Lesson Plan`,
-            ];
-            for (const slide of planResult.slides) {
-              planLines.push(slide.title);
-              for (const bullet of slide.bullets) {
-                planLines.push(`- ${bullet}`);
-              }
-              if (slide.code) {
-                planLines.push(
-                  `\n(Code: ${slide.codeLanguage || "code"})\n${slide.code}\n`
-                );
-              }
-              planLines.push("");
-            }
-            const planDocx = await buildDocxFromPlainText(planLines.join("\n"), [], helpers.author);
-            const planBlob = new Blob([new Uint8Array(planDocx)], {
-              type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            });
-            const planFileName = `${sanitize(tile.name)}_Week${nw.week}_LessonPlan.docx`;
-
-            if (helpers.saveCourseMaterialFile) {
-              try {
-                await helpers.saveCourseMaterialFile(tile.id, planBlob, planFileName);
-                tilePrepared = true;
-                const planBase64 = await blobToBase64(planBlob);
-                const planLib = await saveLibraryFileAction({
-                  name: planFileName,
-                  base64: planBase64,
-                  mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                  fileExt: "docx",
-                  workflowId: helpers.workflowId,
-                  workflowName: helpers.workflowName,
-                });
-                if ("error" in planLib) {
-                  reportLines.push(`${tile.name}: library save skipped - ${planLib.error}`);
-                }
-              } catch (err) {
-                reportLines.push(
-                  `${tile.name}: failed to save lesson plan - ${
-                    err instanceof Error ? err.message : String(err)
-                  }`
-                );
-              }
-            }
-          } catch (err) {
-            reportLines.push(
-              `${tile.name}: lesson plan generation failed - ${
-                err instanceof Error ? err.message : String(err)
-              }`
-            );
-          }
-
-          try {
-            onProgress(`Generating slides for ${tile.name}...`);
-            const slidePrompt = `Create a lecture slide deck for week ${nw.week} of ${tile.name} on "${topic}". ${
-              summary
-            }${extraNotes ? ` ${extraNotes}` : ""}`;
-            const slideResult = await generateSlidesAction(slidePrompt, helpers.provider);
-            if ("error" in slideResult) {
-              throw new Error(slideResult.error);
-            }
-
-            const pptxData = await buildSlidesPptx({
-              presentationTitle: slideResult.presentationTitle,
-              slides: slideResult.slides,
-              subtitle: `Week ${nw.week} - ${topic}`,
-              author: helpers.author,
-              theme: deck.theme,
-            });
-            const slideBlob = new Blob([pptxData], {
-              type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            });
-            const slideFileName = `${sanitize(tile.name)}_Week${nw.week}_Slides.pptx`;
-
-            if (helpers.saveCourseMaterialFile) {
-              try {
-                await helpers.saveCourseMaterialFile(tile.id, slideBlob, slideFileName);
-                tilePrepared = true;
-                const slideBase64 = await blobToBase64(slideBlob);
-                const slideLib = await saveLibraryFileAction({
-                  name: slideFileName,
-                  base64: slideBase64,
-                  mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                  fileExt: "pptx",
-                  workflowId: helpers.workflowId,
-                  workflowName: helpers.workflowName,
-                });
-                if ("error" in slideLib) {
-                  reportLines.push(`${tile.name}: library save skipped - ${slideLib.error}`);
-                }
-              } catch (err) {
-                reportLines.push(
-                  `${tile.name}: failed to save slides - ${
-                    err instanceof Error ? err.message : String(err)
-                  }`
-                );
-              }
-            }
-          } catch (err) {
-            reportLines.push(
-              `${tile.name}: slide generation failed - ${
-                err instanceof Error ? err.message : String(err)
-              }`
-            );
-          }
-
-          if (tilePrepared && String(values.includeNarration ?? "") === "1" && scriptResult) {
             try {
-              onProgress(`Synthesizing narration for ${tile.name}...`);
-              const narResult = await synthesizeLongNarrationAction(scriptResult.script, undefined);
-              if ("error" in narResult) {
-                reportLines.push(
-                  `${tile.name}: narration synthesis failed - ${narResult.error}`
+              const weekTopic = await loadTileWeekTopic(tile, targetWeek, helpers);
+              if ("skip" in weekTopic) {
+                if (w === 0) {
+                  reportLines.push(`${tile.name}: skipped - ${weekTopic.skip}.`);
+                }
+                break;
+              }
+
+              const topic = weekTopic.topic;
+              const summary = weekTopic.summary;
+              if (w === 0) {
+                sourceNote = weekTopic.source !== "schedule"
+                  ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
+                  : "";
+              }
+              const objectives = extraNotes
+                ? `Topic: ${topic}\n${summary}\n${extraNotes}`
+                : `Topic: ${topic}\n${summary}`;
+
+              let tilePrepared = false;
+              let scriptResult: { script: string } | undefined;
+
+              try {
+                onProgress(`Generating lecture script for ${tile.name}, week ${targetWeek}...`);
+                const result = await generateLectureScriptAction(
+                  topic,
+                  objectives,
+                  minutesVal,
+                  helpers.provider
                 );
-              } else {
-                const narFileName = `${sanitize(tile.name)}_Week${nw.week}_Narration.mp3`;
+                if ("error" in result) {
+                  throw new Error(result.error);
+                }
+                scriptResult = result;
+
+                const scriptText = [
+                  `# ${tile.name} - Week ${targetWeek} Lecture Script`,
+                  `## ${topic}`,
+                  scriptResult.script,
+                ].join("\n");
+                const scriptDocx = await buildDocxFromPlainText(scriptText, [], helpers.author);
+                const scriptBlob = new Blob([new Uint8Array(scriptDocx)], {
+                  type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                });
+                const scriptFileName = `${sanitize(tile.name)}_Week${targetWeek}_LectureScript.docx`;
+
                 if (helpers.saveCourseMaterialFile) {
                   try {
-                    const narBlob = base64ToBlob(narResult.base64, narResult.mimeType);
-                    await helpers.saveCourseMaterialFile(tile.id, narBlob, narFileName);
-                    const narLib = await saveLibraryFileAction({
-                      name: narFileName,
-                      base64: narResult.base64,
-                      mimeType: narResult.mimeType,
-                      fileExt: "mp3",
+                    await helpers.saveCourseMaterialFile(tile.id, scriptBlob, scriptFileName);
+                    tilePrepared = true;
+                    const scriptBase64 = await blobToBase64(scriptBlob);
+                    const scriptLib = await saveLibraryFileAction({
+                      name: scriptFileName,
+                      base64: scriptBase64,
+                      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                      fileExt: "docx",
                       workflowId: helpers.workflowId,
                       workflowName: helpers.workflowName,
                     });
-                    if ("error" in narLib) {
-                      reportLines.push(`${tile.name}: library save skipped - ${narLib.error}`);
+                    if ("error" in scriptLib) {
+                      reportLines.push(`${tile.name}: library save skipped - ${scriptLib.error}`);
                     }
                   } catch (err) {
                     reportLines.push(
-                      `${tile.name}: failed to save narration - ${
+                      `${tile.name}: failed to save lecture script - ${
+                        err instanceof Error ? err.message : String(err)
+                      }`
+                    );
+                  }
+                } else {
+                  reportLines.push(`${tile.name}: sign in to save files`);
+                }
+              } catch (err) {
+                reportLines.push(
+                  `${tile.name}, week ${targetWeek}: lecture script generation failed - ${
+                    err instanceof Error ? err.message : String(err)
+                  }`
+                );
+              }
+
+              try {
+                onProgress(`Generating lesson plan for ${tile.name}, week ${targetWeek}...`);
+                const planResult = await generateLessonPlanAction(
+                  objectives,
+                  String(extraNotes ?? ""),
+                  [],
+                  undefined,
+                  undefined,
+                  helpers.provider
+                );
+                if ("error" in planResult) {
+                  throw new Error(planResult.error);
+                }
+
+                const planLines: string[] = [
+                  `# ${tile.name} - Week ${targetWeek} Lesson Plan`,
+                ];
+                for (const slide of planResult.slides) {
+                  planLines.push(slide.title);
+                  for (const bullet of slide.bullets) {
+                    planLines.push(`- ${bullet}`);
+                  }
+                  if (slide.code) {
+                    planLines.push(
+                      `\n(Code: ${slide.codeLanguage || "code"})\n${slide.code}\n`
+                    );
+                  }
+                  planLines.push("");
+                }
+                const planDocx = await buildDocxFromPlainText(planLines.join("\n"), [], helpers.author);
+                const planBlob = new Blob([new Uint8Array(planDocx)], {
+                  type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                });
+                const planFileName = `${sanitize(tile.name)}_Week${targetWeek}_LessonPlan.docx`;
+
+                if (helpers.saveCourseMaterialFile) {
+                  try {
+                    await helpers.saveCourseMaterialFile(tile.id, planBlob, planFileName);
+                    tilePrepared = true;
+                    const planBase64 = await blobToBase64(planBlob);
+                    const planLib = await saveLibraryFileAction({
+                      name: planFileName,
+                      base64: planBase64,
+                      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                      fileExt: "docx",
+                      workflowId: helpers.workflowId,
+                      workflowName: helpers.workflowName,
+                    });
+                    if ("error" in planLib) {
+                      reportLines.push(`${tile.name}: library save skipped - ${planLib.error}`);
+                    }
+                  } catch (err) {
+                    reportLines.push(
+                      `${tile.name}: failed to save lesson plan - ${
                         err instanceof Error ? err.message : String(err)
                       }`
                     );
                   }
                 }
+              } catch (err) {
+                reportLines.push(
+                  `${tile.name}, week ${targetWeek}: lesson plan generation failed - ${
+                    err instanceof Error ? err.message : String(err)
+                  }`
+                );
+              }
+
+              try {
+                onProgress(`Generating slides for ${tile.name}, week ${targetWeek}...`);
+                const slidePrompt = `Create a lecture slide deck for week ${targetWeek} of ${tile.name} on "${topic}". ${
+                  summary
+                }${extraNotes ? ` ${extraNotes}` : ""}`;
+                const slideResult = await generateSlidesAction(slidePrompt, helpers.provider);
+                if ("error" in slideResult) {
+                  throw new Error(slideResult.error);
+                }
+
+                const pptxData = await buildSlidesPptx({
+                  presentationTitle: slideResult.presentationTitle,
+                  slides: slideResult.slides,
+                  subtitle: `Week ${targetWeek} - ${topic}`,
+                  author: helpers.author,
+                  theme: deck.theme,
+                });
+                const slideBlob = new Blob([pptxData], {
+                  type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                });
+                const slideFileName = `${sanitize(tile.name)}_Week${targetWeek}_Slides.pptx`;
+
+                if (helpers.saveCourseMaterialFile) {
+                  try {
+                    await helpers.saveCourseMaterialFile(tile.id, slideBlob, slideFileName);
+                    tilePrepared = true;
+                    const slideBase64 = await blobToBase64(slideBlob);
+                    const slideLib = await saveLibraryFileAction({
+                      name: slideFileName,
+                      base64: slideBase64,
+                      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                      fileExt: "pptx",
+                      workflowId: helpers.workflowId,
+                      workflowName: helpers.workflowName,
+                    });
+                    if ("error" in slideLib) {
+                      reportLines.push(`${tile.name}: library save skipped - ${slideLib.error}`);
+                    }
+                  } catch (err) {
+                    reportLines.push(
+                      `${tile.name}: failed to save slides - ${
+                        err instanceof Error ? err.message : String(err)
+                      }`
+                    );
+                  }
+                }
+              } catch (err) {
+                reportLines.push(
+                  `${tile.name}, week ${targetWeek}: slide generation failed - ${
+                    err instanceof Error ? err.message : String(err)
+                  }`
+                );
+              }
+
+              if (tilePrepared && String(values.includeNarration ?? "") === "1" && scriptResult) {
+                try {
+                  onProgress(`Synthesizing narration for ${tile.name}, week ${targetWeek}...`);
+                  const narResult = await synthesizeLongNarrationAction(scriptResult.script, undefined);
+                  if ("error" in narResult) {
+                    reportLines.push(
+                      `${tile.name}, week ${targetWeek}: narration synthesis failed - ${narResult.error}`
+                    );
+                  } else {
+                    const narFileName = `${sanitize(tile.name)}_Week${targetWeek}_Narration.mp3`;
+                    if (helpers.saveCourseMaterialFile) {
+                      try {
+                        const narBlob = base64ToBlob(narResult.base64, narResult.mimeType);
+                        await helpers.saveCourseMaterialFile(tile.id, narBlob, narFileName);
+                        const narLib = await saveLibraryFileAction({
+                          name: narFileName,
+                          base64: narResult.base64,
+                          mimeType: narResult.mimeType,
+                          fileExt: "mp3",
+                          workflowId: helpers.workflowId,
+                          workflowName: helpers.workflowName,
+                        });
+                        if ("error" in narLib) {
+                          reportLines.push(`${tile.name}: library save skipped - ${narLib.error}`);
+                        }
+                      } catch (err) {
+                        reportLines.push(
+                          `${tile.name}: failed to save narration - ${
+                            err instanceof Error ? err.message : String(err)
+                          }`
+                        );
+                      }
+                    }
+                  }
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  if (msg.includes("ELEVENLABS_API_KEY")) {
+                    reportLines.push(`${tile.name}, week ${targetWeek}: narration unavailable (missing ElevenLabs API key)`);
+                  } else {
+                    reportLines.push(`${tile.name}, week ${targetWeek}: narration synthesis failed - ${msg}`);
+                  }
+                }
+              }
+
+              if (tilePrepared) {
+                prepared++;
+                tileSuccessCount++;
+                tileEndWeek = targetWeek;
               }
             } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err);
-              if (msg.includes("ELEVENLABS_API_KEY")) {
-                reportLines.push(`${tile.name}: narration unavailable (missing ElevenLabs API key)`);
-              } else {
-                reportLines.push(`${tile.name}: narration synthesis failed - ${msg}`);
-              }
+              reportLines.push(
+                `${tile.name}, week ${targetWeek}: ${err instanceof Error ? err.message : "failed"}`
+              );
             }
           }
 
-          if (tilePrepared) {
-            reportLines.push(`${tile.name}: prepared week ${nw.week}${sourceNote}`);
-            prepared++;
+          // Mirror the sibling weekly generators: only claim success when at
+          // least one week actually produced artifacts, and report the real
+          // last-prepared week (the loop may stop early at course end).
+          if (tileSuccessCount > 0) {
+            reportLines.push(`${tile.name}: prepared ${tileEndWeek > startWeek ? `weeks ${startWeek}-${tileEndWeek}` : `week ${startWeek}`}${sourceNote}`);
           }
         } catch (err) {
           reportLines.push(
@@ -12413,7 +12755,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
     description: "Read upcoming events from an institution's calendar feed (ICS) and list those due in the next N days.",
     inputs: [
       { key: "institution", label: "Institution", type: "institution", required: true },
-      { key: "daysAhead", label: "Days ahead", type: "number", required: false, help: "How many days ahead to look. Default 7." },
+      { key: "daysAhead", label: "How far ahead", type: "lookahead", required: false, help: "How far ahead to look. Default 7 days." },
     ],
     outputs: [
       { key: "deadlines", label: "Upcoming deadlines", type: "longtext" },
@@ -13127,6 +13469,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         help: "How many animations per course. Default 3 (max 6).",
       },
       {
+        key: "lookahead",
+        label: "How far ahead",
+        type: "lookahead",
+        required: false,
+        help: "How far ahead to prepare. Default 7 days (the coming week); 14 days prepares the next two weeks.",
+      },
+      {
         key: "extraNotes",
         label: "Extra notes (optional)",
         type: "longtext",
@@ -13163,6 +13512,12 @@ export const STEP_REGISTRY: StepDefinition[] = [
         maxConceptsVal = Math.round(maxConceptsVal);
       }
 
+      const lookaheadRaw = String(values.lookahead ?? "").trim();
+      const daysAhead = Number.isFinite(Number(lookaheadRaw)) && Number(lookaheadRaw) >= 1
+        ? Math.floor(Number(lookaheadRaw))
+        : 7;
+      const weeksAhead = Math.max(1, Math.min(4, Math.ceil(daysAhead / 7)));
+
       const extraNotes = String(values.extraNotes ?? "").trim();
       const publish = String(values.publish ?? "") === "1";
 
@@ -13194,20 +13549,38 @@ export const STEP_REGISTRY: StepDefinition[] = [
             continue;
           }
 
-          const weekTopic = await loadTileWeekTopic(tile, nw.week, helpers);
-          if ("skip" in weekTopic) {
-            reportLines.push(`${tile.name}: skipped - ${weekTopic.skip}.`);
-            continue;
-          }
+          const startWeek = nw.week;
+          let sourceNote = "";
 
-          const topic = weekTopic.topic;
-          const summary = weekTopic.summary;
-          const sourceNote = weekTopic.source !== "schedule"
-            ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
-            : "";
-          const context = extraNotes
-            ? `${tile.name} week ${nw.week}: ${topic}. ${summary}. ${extraNotes}`
-            : `${tile.name} week ${nw.week}: ${topic}. ${summary}`;
+          for (let w = 0; w < weeksAhead; w++) {
+            const targetWeek = startWeek + w;
+
+            if (tile.weeks && tile.weeks > 0 && targetWeek > tile.weeks) {
+              if (w === 0) {
+                reportLines.push(`${tile.name}: skipped - target week ${targetWeek} is past course end.`);
+              }
+              break;
+            }
+
+            try {
+              const weekTopic = await loadTileWeekTopic(tile, targetWeek, helpers);
+              if ("skip" in weekTopic) {
+                if (w === 0) {
+                  reportLines.push(`${tile.name}: skipped - ${weekTopic.skip}.`);
+                }
+                break;
+              }
+
+              const topic = weekTopic.topic;
+              const summary = weekTopic.summary;
+              if (w === 0) {
+                sourceNote = weekTopic.source !== "schedule"
+                  ? ` (topic from the ${weekTopic.source === "export" ? "LMS export" : "tile's topics list"})`
+                  : "";
+              }
+              const context = extraNotes
+                ? `${tile.name} week ${targetWeek}: ${topic}. ${summary}. ${extraNotes}`
+                : `${tile.name} week ${targetWeek}: ${topic}. ${summary}`;
 
           const sanitize = (s: string) =>
             s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
@@ -13241,8 +13614,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
                   throw new Error(animResult.error);
                 }
 
-                const fileName = `${sanitize(tile.name)}_Week${nw.week}_${sanitize(concept)}_Animation.html`;
-                const wrapped = wrapAnimationDocument(`${concept} - Week ${nw.week}`, animResult.html);
+                const fileName = `${sanitize(tile.name)}_Week${targetWeek}_${sanitize(concept)}_Animation.html`;
+                const wrapped = wrapAnimationDocument(`${concept} - Week ${targetWeek}`, animResult.html);
                 const blob = new Blob([wrapped], { type: "text/html" });
 
                 if (helpers.saveCourseMaterialFile) {
@@ -13276,7 +13649,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
                     await createPageAction(
                       tile.canvasUrl,
                       {
-                        title: `Week ${nw.week}: ${concept} (animation)`,
+                        title: `Week ${targetWeek}: ${concept} (animation)`,
                         body: animResult.html,
                         published: false,
                       },
@@ -13302,12 +13675,17 @@ export const STEP_REGISTRY: StepDefinition[] = [
             }
 
             const notesSuffix = pageNotes.length > 0 ? ` (${pageNotes.join("; ")})` : "";
-            reportLines.push(`${tile.name}: week ${nw.week} (${topic}) - ${tileSaved} animation(s) saved${sourceNote}${notesSuffix}`);
+            reportLines.push(`${tile.name}: week ${targetWeek} (${topic}) - ${tileSaved} animation(s) saved${sourceNote}${notesSuffix}`);
           } catch (err) {
             reportLines.push(
               `${tile.name}: planning failed - ${err instanceof Error ? err.message : "failed"}`
             );
-            continue;
+          }
+            } catch (err) {
+              reportLines.push(
+                `${tile.name}, week ${targetWeek}: ${err instanceof Error ? err.message : "failed"}`
+              );
+            }
           }
         } catch (err) {
           reportLines.push(

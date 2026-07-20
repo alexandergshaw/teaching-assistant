@@ -412,6 +412,9 @@ import {
 import { humanizeAssignmentName, stripAssignmentSlugPrefix, looksLikeAssignmentSlug } from "@/lib/assignment-name";
 import { assignWeekNumbers, renumberWeekLabel } from "@/lib/week-numbering";
 import { splitNarrationText } from "@/lib/narration-chunks";
+import { getUserStyle, saveUserStyle, clearVoiceClone } from "@/lib/user-style";
+import { getRecordingFileUrl } from "@/lib/recording-files";
+import { PROMPT_PREFIX, RESPONSE_PREFIX } from "@/lib/writing-style-prompts";
 import type JSZip from "jszip";
 
 // Standard submission guidance appended to every repo-generated assignment instruction
@@ -1625,13 +1628,15 @@ export async function draftStudentNudgesAction(
         })
         .join("\n");
 
+      const styleBlock = await getWritingStyleBlock(user.id);
+
       const prompt = `You are an instructor sending personalized reminder messages to students with missing work.
 
 STUDENTS AND THEIR MISSING ASSIGNMENTS:
 ${studentLines}
 
 EXTRA CONTEXT FOR ALL MESSAGES:
-${extraNotes.trim() || "(none)"}
+${extraNotes.trim() || "(none)"}${styleBlock}
 
 Draft one short, warm reminder message for EACH student. Messages should be plain text, no emojis, no threats. Mention each missing assignment by name. Fold in the extra context when relevant. Sign off "Your instructor".
 
@@ -4036,7 +4041,7 @@ export async function generateDocumentTextAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ text: string } | { error: string }> {
   try {
-    await requireOwner();
+    const user = await requireOwner();
     if (!prompt.trim()) {
       return { error: "Describe the document to generate first." };
     }
@@ -4046,6 +4051,8 @@ export async function generateDocumentTextAction(
     if (provider === "embedded") {
       return { text: scaffoldDocument(prompt) };
     }
+
+    const styleBlock = await getWritingStyleBlock(user.id);
 
     const llmPrompt = `You are writing a polished course handout/document for students.
 
@@ -4061,7 +4068,7 @@ Write the document as clean plain text using this lightweight markdown:
 Requirements:
 - Return ONLY the document text. No code fences, no commentary, no HTML.
 - Be clear, well-organized, and professional.
-- Do not invent specific facts, dates, names, or links that were not provided.`;
+- Do not invent specific facts, dates, names, or links that were not provided.${styleBlock}`;
 
     const result = await callLlm(
       {
@@ -4421,17 +4428,18 @@ export async function generateLectureScriptAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ script: string } | { error: string }> {
   try {
-    await requireOwner();
+    const user = await requireOwner();
     if (!topic.trim()) return { error: "Enter a lecture topic." };
     const minutes = Number.isFinite(targetMinutes) && targetMinutes >= 1 && targetMinutes <= 30 ? Math.round(targetMinutes) : 5;
     const words = minutes * 140;
+    const styleBlock = await getWritingStyleBlock(user.id);
     const parts: LlmPart[] = [
       {
         text: [
           `Write a spoken-word lecture script for a college instructor to read aloud on camera about: ${topic.trim()}.`,
           objectives.trim() ? `Cover these objectives/notes:\n${objectives.trim()}` : "",
           `Target length: about ${words} words (${minutes} minutes at a natural speaking pace).`,
-          "Rules: conversational but precise; short sentences; first person; open with a one-sentence hook and end with a brief recap plus what students should do next. Insert [PAUSE] on its own line between major sections. Return ONLY the script as plain text - no headings, no markdown, no stage directions other than [PAUSE].",
+          "Rules: conversational but precise; short sentences; first person; open with a one-sentence hook and end with a brief recap plus what students should do next. Insert [PAUSE] on its own line between major sections. Return ONLY the script as plain text - no headings, no markdown, no stage directions other than [PAUSE]." + styleBlock,
         ].filter(Boolean).join("\n\n"),
       },
     ];
@@ -4550,6 +4558,251 @@ export async function listElevenVoicesAction(): Promise<
   }
 }
 
+/** Get the user's voice and writing style settings. */
+export async function getUserStyleAction(): Promise<
+  { style: { voiceId: string | null; voiceSampleName: string | null; hasVoiceSample: boolean; writingSample: string | null } } | { error: string }
+> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const style = await getUserStyle(supabase, user.id);
+    return {
+      style: {
+        voiceId: style?.voiceId ?? null,
+        voiceSampleName: style?.voiceSampleName ?? null,
+        hasVoiceSample: !!style?.voiceSamplePath,
+        writingSample: style?.writingSample ?? null,
+      },
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load your voice and writing settings." };
+  }
+}
+
+/** Save or update the writing sample (capped at 20k chars; empty clears it). */
+export async function saveWritingSampleAction(text: string): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const trimmed = text.trim();
+    if (trimmed.length > 20_000) {
+      return { error: "Keep the writing sample under 20,000 characters." };
+    }
+    await saveUserStyle(supabase, user.id, {
+      writingSample: trimmed || null,
+    });
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save your writing sample." };
+  }
+}
+
+/**
+ * Create or replace the user's cloned voice from audio samples.
+ * Uploads the first sample file and stores voice_id and sample metadata.
+ * Best-effort deletes the old ElevenLabs voice if a different one exists.
+ */
+export async function setVoiceCloneAction(
+  name: string,
+  files: Array<{ base64: string; mimeType: string; fileName: string }>
+): Promise<{ voiceId: string } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+
+    // Use the existing createVoiceCloneAction flow
+    const cloneResult = await createVoiceCloneAction(name, files);
+    if ("error" in cloneResult) {
+      return cloneResult;
+    }
+
+    const newVoiceId = cloneResult.voiceId;
+
+    // Upload the first sample file
+    if (!files.length) {
+      return { error: "No audio samples provided." };
+    }
+
+    const firstFile = files[0];
+    const bytes = Buffer.from(firstFile.base64, "base64");
+    const blob = new Blob([new Uint8Array(bytes)], { type: firstFile.mimeType || "audio/mpeg" });
+
+    const recordingFile = await saveRecordingFile(supabase, user.id, blob, {
+      name: `Voice sample - ${name}`,
+      kind: "file",
+      mimeType: firstFile.mimeType || "audio/mpeg",
+      durationSec: null,
+      source: "voice-sample",
+    });
+
+    // Get the old voice ID to delete later
+    const oldStyle = await getUserStyle(supabase, user.id);
+    const oldVoiceId = oldStyle?.voiceId;
+
+    // Save the new voice settings
+    await saveUserStyle(supabase, user.id, {
+      voiceId: newVoiceId,
+      voiceSamplePath: recordingFile.storagePath,
+      voiceSampleName: recordingFile.name,
+    });
+
+    // Best-effort delete old ElevenLabs voice
+    if (oldVoiceId && oldVoiceId !== newVoiceId) {
+      const key = process.env.ELEVENLABS_API_KEY?.trim();
+      if (key) {
+        try {
+          await fetch(`https://api.elevenlabs.io/v1/voices/${oldVoiceId}`, {
+            method: "DELETE",
+            headers: { "xi-api-key": key },
+          });
+        } catch {
+          // Ignore deletion failures
+        }
+      }
+    }
+
+    return { voiceId: newVoiceId };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not set up your cloned voice." };
+  }
+}
+
+/** Remove the cloned voice and clear the sample. */
+export async function removeVoiceCloneAction(): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+
+    const style = await getUserStyle(supabase, user.id);
+    if (!style) {
+      return { ok: true };
+    }
+
+    const voiceId = style.voiceId;
+
+    // Best-effort delete ElevenLabs voice
+    if (voiceId) {
+      const key = process.env.ELEVENLABS_API_KEY?.trim();
+      if (key) {
+        try {
+          await fetch(`https://api.elevenlabs.io/v1/voices/${voiceId}`, {
+            method: "DELETE",
+            headers: { "xi-api-key": key },
+          });
+        } catch {
+          // Ignore deletion failures
+        }
+      }
+    }
+
+    // Remove sample file best-effort
+    if (style.voiceSamplePath) {
+      try {
+        await supabase.storage.from("recordings").remove([style.voiceSamplePath]);
+      } catch {
+        // Ignore deletion failures
+      }
+    }
+
+    // Clear all voice settings
+    await clearVoiceClone(supabase, user.id);
+
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not remove your cloned voice." };
+  }
+}
+
+/** Get a signed URL for the stored voice sample (3600s expiration). */
+export async function getVoiceSampleUrlAction(): Promise<{ url: string } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+
+    const style = await getUserStyle(supabase, user.id);
+    if (!style?.voiceSamplePath) {
+      return { error: "No voice sample stored." };
+    }
+
+    const url = await getRecordingFileUrl(
+      supabase,
+      {
+        id: "",
+        name: "",
+        kind: "file",
+        mimeType: "",
+        sizeBytes: 0,
+        durationSec: null,
+        storagePath: style.voiceSamplePath,
+        source: null,
+        origin: null,
+        workflowName: null,
+        createdAt: "",
+      },
+      3600
+    );
+    return { url };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not get the voice sample URL." };
+  }
+}
+
+/**
+ * Resolve the narration voice ID for the given user.
+ * Resolution order: voiceIdOverride -> user_style.voice_id -> env ELEVENLABS_VOICE_ID -> stock.
+ */
+async function resolveNarrationVoiceId(userId: string, voiceIdOverride?: string): Promise<string> {
+  if (voiceIdOverride?.trim()) {
+    return voiceIdOverride.trim();
+  }
+
+  const supabase = createServiceClient();
+  const style = await getUserStyle(supabase, userId);
+  if (style?.voiceId) {
+    return style.voiceId;
+  }
+
+  return process.env.ELEVENLABS_VOICE_ID?.trim() || "21m00Tcm4TlvDq8ikWAM";
+}
+
+/**
+ * Get the writing style block to inject into LLM prompts.
+ * Returns "" if no sample, else a block with truncated sample.
+ */
+async function getWritingStyleBlock(userId: string): Promise<string> {
+  try {
+    const supabase = createServiceClient();
+    const style = await getUserStyle(supabase, userId);
+    if (!style?.writingSample) {
+      return "";
+    }
+
+    let sample = style.writingSample;
+
+    // Strip the prompt scaffolding: PROMPT lines are dropped entirely and
+    // the RESPONSE label is removed from response lines, so only the
+    // instructor's own prose feeds the style sample.
+    const lines = sample.split("\n");
+    const filtered = lines
+      .filter((line) => !line.startsWith(PROMPT_PREFIX))
+      .map((line) => (line.startsWith(RESPONSE_PREFIX) ? line.slice(RESPONSE_PREFIX.length).trimStart() : line));
+    sample = filtered.join("\n").trim();
+
+    if (!sample) {
+      return "";
+    }
+
+    // Truncate to 1500 chars
+    if (sample.length > 1500) {
+      sample = sample.slice(0, 1500) + "...";
+    }
+
+    return `\n\nMATCH THE INSTRUCTOR'S PERSONAL WRITING STYLE (tone, rhythm, vocabulary) shown in this sample:\n${sample}`;
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Internal helper: make one ElevenLabs text-to-speech call and return the audio buffer.
  * Throws on !res.ok with the formatted error text.
@@ -4582,13 +4835,13 @@ export async function synthesizeNarrationAction(
   voiceIdOverride?: string
 ): Promise<{ base64: string; mimeType: string } | { error: string }> {
   try {
-    await requireOwner();
+    const user = await requireOwner();
     const key = process.env.ELEVENLABS_API_KEY?.trim();
     if (!key) return { error: "Voice generation is not configured. Set ELEVENLABS_API_KEY (and ELEVENLABS_VOICE_ID for your cloned voice)." };
     const t = text.trim();
     if (!t) return { error: "Nothing to synthesize." };
     if (t.length > 4000) return { error: "That segment is too long for one synthesis call." };
-    const voiceId = voiceIdOverride?.trim() || process.env.ELEVENLABS_VOICE_ID?.trim() || "21m00Tcm4TlvDq8ikWAM";
+    const voiceId = await resolveNarrationVoiceId(user.id, voiceIdOverride);
     const buf = await synthesizeSegment(key, voiceId, t);
     return { base64: buf.toString("base64"), mimeType: "audio/mpeg" };
   } catch (err) {
@@ -4607,14 +4860,14 @@ export async function synthesizeLongNarrationAction(
   voiceIdOverride?: string
 ): Promise<{ base64: string; mimeType: string; segments: number } | { error: string }> {
   try {
-    await requireOwner();
+    const user = await requireOwner();
     const key = process.env.ELEVENLABS_API_KEY?.trim();
     if (!key) return { error: "Voice generation is not configured. Set ELEVENLABS_API_KEY (and ELEVENLABS_VOICE_ID for your cloned voice)." };
     const t = text.trim();
     if (!t) return { error: "Nothing to synthesize." };
     // 10-chunk ceiling keeps the call inside the platform's 60s function cap.
     if (t.length > 38_000) return { error: "The script is too long to narrate (about 25 minutes of speech). Reduce the script minutes." };
-    const voiceId = voiceIdOverride?.trim() || process.env.ELEVENLABS_VOICE_ID?.trim() || "21m00Tcm4TlvDq8ikWAM";
+    const voiceId = await resolveNarrationVoiceId(user.id, voiceIdOverride);
     const chunks = splitNarrationText(t);
     if (chunks.length > 10) return { error: "The script is too long to narrate (about 25 minutes of speech). Reduce the script minutes." };
     const buffers: Buffer[] = [];
@@ -6496,7 +6749,7 @@ export async function draftAnnouncementAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ title: string; message: string } | { error: string }> {
   try {
-    await requireOwner();
+    const user = await requireOwner();
     if (!instruction.trim()) {
       return { error: "Describe what the announcement should say first." };
     }
@@ -6507,10 +6760,12 @@ export async function draftAnnouncementAction(
       return scaffoldAnnouncement(instruction);
     }
 
+    const styleBlock = await getWritingStyleBlock(user.id);
+
     const prompt = `You are an instructor writing a course announcement for students.
 
 WHAT TO ANNOUNCE:
-${instruction.trim()}
+${instruction.trim()}${styleBlock}
 
 Write a clear, warm, professional announcement. Return ONLY valid JSON:
 {
@@ -6562,7 +6817,7 @@ export async function draftMessageReplyAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ body: string } | { error: string }> {
   try {
-    await requireOwner();
+    const user = await requireOwner();
     if (!threadText.trim()) {
       return { error: "Open a conversation before drafting a reply." };
     }
@@ -6573,6 +6828,8 @@ export async function draftMessageReplyAction(
       return scaffoldMessageReply(threadText, instructions);
     }
 
+    const styleBlock = await getWritingStyleBlock(user.id);
+
     const steer = instructions.trim()
       ? `\n\nHOW TO REPLY:\n${instructions.trim()}`
       : "";
@@ -6580,7 +6837,7 @@ export async function draftMessageReplyAction(
     const prompt = `You are an instructor replying to a student's message in the Canvas inbox.
 
 CONVERSATION SO FAR (oldest message first):
-${threadText.trim()}${steer}
+${threadText.trim()}${steer}${styleBlock}
 
 Write the instructor's reply. Respond directly to the most recent message, in a warm, helpful, professional tone. Output ONLY the reply text itself: plain text, no subject line, no salutation placeholder like "[Name]", no markdown. Do not invent facts, dates, grades, or links that are not present in the thread. Never use em dashes or en dashes (the long dashes); use commas or hyphens instead.`;
 

@@ -1281,6 +1281,64 @@ function LiteralEditor({
       </TextField>
     );
   }
+  if (type === "lookahead") {
+    const numDays = parseInt(value, 10);
+    const decomposed =
+      isNaN(numDays) || numDays <= 0
+        ? { value: "", unit: "days" as const }
+        : numDays % 30 === 0
+          ? { value: String(numDays / 30), unit: "months" as const }
+          : numDays % 7 === 0
+            ? { value: String(numDays / 7), unit: "weeks" as const }
+            : { value: String(numDays), unit: "days" as const };
+
+    const handleNumberChange = (newNum: string) => {
+      if (!newNum || parseInt(newNum, 10) <= 0) {
+        onChange("");
+      } else {
+        const unitFactor =
+          decomposed.unit === "months" ? 30 : decomposed.unit === "weeks" ? 7 : 1;
+        onChange(String(parseInt(newNum, 10) * unitFactor));
+      }
+    };
+
+    const handleUnitChange = (newUnit: "days" | "weeks" | "months") => {
+      if (!decomposed.value) {
+        onChange("");
+      } else {
+        const numVal = parseInt(decomposed.value, 10);
+        const unitFactor = newUnit === "months" ? 30 : newUnit === "weeks" ? 7 : 1;
+        onChange(String(numVal * unitFactor));
+      }
+    };
+
+    return (
+      <div style={{ flex: 1, minWidth: 200, display: "flex", gap: 8 }}>
+        <TextField
+          type="number"
+          size="small"
+          placeholder="0"
+          value={decomposed.value}
+          onChange={(e) => handleNumberChange(e.target.value)}
+          slotProps={{ htmlInput: { min: 1 } }}
+          sx={{ flex: 1, minWidth: 80 }}
+        />
+        <TextField
+          select
+          size="small"
+          value={decomposed.unit}
+          onChange={(e) =>
+            handleUnitChange(e.target.value as "days" | "weeks" | "months")
+          }
+          sx={{ flex: 1, minWidth: 100 }}
+        >
+          <MenuItem value="days">days</MenuItem>
+          <MenuItem value="weeks">weeks</MenuItem>
+          <MenuItem value="months">months</MenuItem>
+        </TextField>
+      </div>
+    );
+  }
   // lmsCourse / lmsCourseList / text / longtext / number: the builder has no
   // live-course list (that needs an institution + fetch), so a field is used.
   // Only the SCOPEABLE list type accepts "*" (all); a singular lmsCourse does

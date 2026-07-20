@@ -168,6 +168,31 @@ describe("deep-check presets", () => {
   }
 });
 
+describe("weekly-everything-prep scope coverage", () => {
+  const all = allWorkflows([]);
+  const byId = new Map(all.map((w) => [w.id, w]));
+
+  it("hides lookahead fields when scope.lookahead is set", () => {
+    const wf = byId.get("weekly-everything-prep");
+    expect(wf, "preset weekly-everything-prep is registered").toBeTruthy();
+    expect(wf!.scope?.lookahead, "scope.lookahead is set").toBe("14");
+
+    const fields = collectRuntimeFields(wf!, (t) => getStepDefinition(t)?.inputs);
+    const lookaheadFields = fields.filter((f) => f.fieldKey === "lookahead");
+    expect(lookaheadFields, "no runtime lookahead fields when scope covers them").toEqual([]);
+  });
+
+  it("surfaces exactly one shared lookahead field when scope is empty", () => {
+    const wf = byId.get("weekly-everything-prep");
+    expect(wf, "preset weekly-everything-prep is registered").toBeTruthy();
+
+    const withoutScope = { ...wf!, scope: {} };
+    const fields = collectRuntimeFields(withoutScope, (t) => getStepDefinition(t)?.inputs);
+    const lookaheadFields = fields.filter((f) => f.fieldKey === "lookahead");
+    expect(lookaheadFields.length, "exactly one shared lookahead field surfaces").toBe(1);
+  });
+});
+
 describe("deck-template presets ask for the template", () => {
   const all = allWorkflows([]);
   const byId = new Map(all.map((w) => [w.id, w]));

@@ -2625,6 +2625,78 @@ export default function WorkflowsTab() {
                     />
                   </div>
                 );
+              } else if (field.type === "lookahead") {
+                const numDays = parseInt(value, 10);
+                const decomposed =
+                  isNaN(numDays) || numDays <= 0
+                    ? { value: "", unit: "days" as const }
+                    : numDays % 30 === 0
+                      ? { value: String(numDays / 30), unit: "months" as const }
+                      : numDays % 7 === 0
+                        ? { value: String(numDays / 7), unit: "weeks" as const }
+                        : { value: String(numDays), unit: "days" as const };
+
+                const handleNumberChange = (newNum: string) => {
+                  if (!newNum || parseInt(newNum, 10) <= 0) {
+                    handleValueChange(field.fieldKey, "");
+                  } else {
+                    const unitFactor =
+                      decomposed.unit === "months" ? 30 : decomposed.unit === "weeks" ? 7 : 1;
+                    handleValueChange(
+                      field.fieldKey,
+                      String(parseInt(newNum, 10) * unitFactor)
+                    );
+                  }
+                };
+
+                const handleUnitChange = (newUnit: "days" | "weeks" | "months") => {
+                  if (!decomposed.value) {
+                    handleValueChange(field.fieldKey, "");
+                  } else {
+                    const numVal = parseInt(decomposed.value, 10);
+                    const unitFactor =
+                      newUnit === "months" ? 30 : newUnit === "weeks" ? 7 : 1;
+                    handleValueChange(
+                      field.fieldKey,
+                      String(numVal * unitFactor)
+                    );
+                  }
+                };
+
+                return (
+                  <div key={field.fieldKey} className={styles.field}>
+                    <label>{field.label}</label>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <TextField
+                        type="number"
+                        placeholder="0"
+                        value={decomposed.value}
+                        onChange={(e) => handleNumberChange(e.target.value)}
+                        size="small"
+                        slotProps={{ htmlInput: { min: 1 } }}
+                        sx={{ flex: 1, minWidth: 80 }}
+                      />
+                      <TextField
+                        select
+                        size="small"
+                        value={decomposed.unit}
+                        onChange={(e) =>
+                          handleUnitChange(e.target.value as "days" | "weeks" | "months")
+                        }
+                        sx={{ flex: 1, minWidth: 100 }}
+                      >
+                        <MenuItem value="days">days</MenuItem>
+                        <MenuItem value="weeks">weeks</MenuItem>
+                        <MenuItem value="months">months</MenuItem>
+                      </TextField>
+                    </div>
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {field.help}
+                      </p>
+                    )}
+                  </div>
+                );
               } else if (field.type === "date") {
                 return (
                   <div key={field.fieldKey} className={styles.field}>

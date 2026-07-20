@@ -80,6 +80,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "revise-generated-document",
     "find-practice-problems",
     "draft-upcoming-lectures",
+    "draft-weekly-study-guides",
   ],
   media: [
     "generate-slides-standalone",

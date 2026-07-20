@@ -1398,13 +1398,15 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
   preset: true,
   name: "Weekly Everything Prep (all courses)",
   description:
-    "The Sunday-night button: for every course at every institution, prepare the coming week for in-person, synchronous online, and asynchronous online students - lecture deck, script, and lesson plan (optionally narrated for async), concept animations, a week-ahead announcement draft per course, the deadline list, a gradebook at-risk report, and a draft-grading pass when anything is waiting - finished with a briefing report. Every artifact lands on the course tile AND in the Files tab; announcements wait in Drafts. Fully headless - schedule it weekly.",
+    "The Sunday-night button: for every course at every institution, prepare the coming two weeks by default (the workflow's Looking ahead setting) for in-person, synchronous online, and asynchronous online students - lecture decks, scripts, and lesson plans (optionally narrated for async), concept animations, week-ahead announcement drafts per course, the deadline list, a gradebook at-risk report, and a draft-grading pass when anything is waiting - finished with a briefing report. Every artifact lands on the course tile AND in the Files tab; announcements wait in Drafts. Fully headless - schedule it weekly.",
+  scope: { lookahead: "14" },
   steps: [
     {
       type: "draft-upcoming-lectures",
       bindings: {
         courses: { source: "literal", value: "*" },
         minutes: { source: "literal", value: "20" },
+        lookahead: { source: "runtime", fieldKey: "lookahead" },
         template: { source: "runtime", fieldKey: "deckTemplate" },
         includeNarration: { source: "runtime", fieldKey: "includeNarration" },
         extraNotes: { source: "runtime", fieldKey: "extraNotes" },
@@ -1415,6 +1417,7 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
       bindings: {
         courses: { source: "literal", value: "*" },
         maxConcepts: { source: "literal", value: "3" },
+        lookahead: { source: "runtime", fieldKey: "lookahead" },
         extraNotes: { source: "runtime", fieldKey: "extraNotes" },
         publish: { source: "runtime", fieldKey: "publish" },
       },
@@ -1423,14 +1426,14 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
       type: "draft-weekly-announcements",
       bindings: {
         courses: { source: "literal", value: "*" },
-        weekOffset: { source: "literal", value: "1" },
+        lookahead: { source: "runtime", fieldKey: "lookahead" },
         extraNotes: { source: "runtime", fieldKey: "extraNotes" },
       },
     },
     {
       type: "list-upcoming-deadlines",
       bindings: {
-        daysAhead: { source: "literal", value: "7" },
+        daysAhead: { source: "runtime", fieldKey: "lookahead" },
       },
     },
     {
@@ -1450,6 +1453,16 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
       runIf: {
         binding: { source: "step", stepIndex: 5, outputKey: "hasWork" },
         expected: true,
+      },
+    },
+    {
+      type: "draft-weekly-study-guides",
+      bindings: {
+        courses: { source: "literal", value: "*" },
+        lookahead: { source: "runtime", fieldKey: "lookahead" },
+        citations: { source: "literal", value: "4" },
+        extraNotes: { source: "runtime", fieldKey: "extraNotes" },
+        publish: { source: "runtime", fieldKey: "publish" },
       },
     },
     {

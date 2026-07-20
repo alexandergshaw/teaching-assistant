@@ -318,6 +318,14 @@ function SettingsMenu() {
           >
             Security
           </Link>
+          <Link
+            href="/account/voice-style"
+            className={styles.menuItem}
+            role="menuitem"
+            onClick={() => setOpen(false)}
+          >
+            Voice & Style
+          </Link>
         </div>
       )}
     </div>

@@ -143,6 +143,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "gradebook-health-report",
   "draft-upcoming-lectures",
   "draft-weekly-announcements",
+  "draft-weekly-study-guides",
   "sync-course-tiles-from-lms",
   "import-gradebook-csv",
   "import-roster-from-csv",

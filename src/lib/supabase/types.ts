@@ -895,6 +895,32 @@ export interface Database {
           updated_at?: string;
         };
       };
+      user_style: {
+        Row: {
+          user_id: string;
+          voice_id: string | null;
+          voice_sample_path: string | null;
+          voice_sample_name: string | null;
+          writing_sample: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          voice_id?: string | null;
+          voice_sample_path?: string | null;
+          voice_sample_name?: string | null;
+          writing_sample?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          voice_id?: string | null;
+          voice_sample_path?: string | null;
+          voice_sample_name?: string | null;
+          writing_sample?: string | null;
+          updated_at?: string;
+        };
+      };
     };
     Views: Record<string, { Row: Record<string, unknown> }>;
     Functions: Record<string, { Args: Record<string, unknown>; Returns: unknown }>;

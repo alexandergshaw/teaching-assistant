@@ -1,9 +1,19 @@
 "use client";
 
-import { Autocomplete, Checkbox, FormControlLabel, TextField } from "@mui/material";
+import { Autocomplete, Checkbox, FormControlLabel, TextField, MenuItem } from "@mui/material";
 import Typeahead from "./ui/Typeahead";
 import { ALL_SCOPE } from "@/lib/workflows/scope";
 import type { WorkflowScope } from "@/lib/workflows/types";
+
+// Decompose canonical days to the largest clean unit for display.
+// 14 -> { value: "2", unit: "weeks" }; 30 -> { value: "1", unit: "months" }; 10 -> { value: "10", unit: "days" }
+function decomposeCanonicalDays(days: string): { value: string; unit: "days" | "weeks" | "months" } {
+  const n = parseInt(days, 10);
+  if (isNaN(n) || n <= 0) return { value: "", unit: "days" };
+  if (n % 30 === 0) return { value: String(n / 30), unit: "months" };
+  if (n % 7 === 0) return { value: String(n / 7), unit: "weeks" };
+  return { value: String(n), unit: "days" };
+}
 
 // The "This workflow is for" control shown before a workflow's steps: set the
 // institution / course tiles / Canvas courses / GitHub orgs the whole workflow
@@ -153,6 +163,64 @@ export default function WorkflowScopeControl({
             "All organizations",
             orgs === null
           )}
+        </div>
+        <div style={cell}>
+          <span style={labelStyle}>Looking ahead</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {(() => {
+              const { value: displayValue, unit: displayUnit } = decomposeCanonicalDays(
+                scope.lookahead ?? ""
+              );
+              const handleNumberChange = (newNum: string) => {
+                if (!newNum || parseInt(newNum, 10) <= 0) {
+                  set({ lookahead: "" });
+                } else {
+                  const unitFactor =
+                    displayUnit === "months" ? 30 : displayUnit === "weeks" ? 7 : 1;
+                  set({ lookahead: String(parseInt(newNum, 10) * unitFactor) });
+                }
+              };
+              const handleUnitChange = (newUnit: "days" | "weeks" | "months") => {
+                if (!displayValue) {
+                  set({ lookahead: "" });
+                } else {
+                  const numVal = parseInt(displayValue, 10);
+                  const unitFactor =
+                    newUnit === "months" ? 30 : newUnit === "weeks" ? 7 : 1;
+                  set({ lookahead: String(numVal * unitFactor) });
+                }
+              };
+              return (
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <TextField
+                    type="number"
+                    size="small"
+                    placeholder="0"
+                    value={displayValue}
+                    onChange={(e) => handleNumberChange(e.target.value)}
+                    slotProps={{ htmlInput: { min: 1 } }}
+                    sx={{ width: 80 }}
+                  />
+                  <TextField
+                    select
+                    size="small"
+                    value={displayUnit}
+                    onChange={(e) =>
+                      handleUnitChange(e.target.value as "days" | "weeks" | "months")
+                    }
+                    sx={{ width: 100 }}
+                  >
+                    <MenuItem value="days">days</MenuItem>
+                    <MenuItem value="weeks">weeks</MenuItem>
+                    <MenuItem value="months">months</MenuItem>
+                  </TextField>
+                </div>
+              );
+            })()}
+            <p className="fieldHint" style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+              Fills every step that looks ahead (deadlines, weekly generators).
+            </p>
+          </div>
         </div>
       </div>
     </div>

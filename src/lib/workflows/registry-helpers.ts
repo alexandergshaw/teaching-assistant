@@ -1,0 +1,953 @@
+// Shared helpers for step definitions: module caching, materials gathering,
+// module context resolution, and utility functions used across multiple steps.
+
+import type { LlmProvider } from "@/lib/llm";
+import type { ScheduleWeekPlan, AssignmentPlan } from "@/app/actions";
+import {
+  listCourseContentAction,
+  getPageAction,
+  previewFileAction,
+  fetchCanvasMetaAction,
+  listCourseHubAction,
+  listAssignmentDueDatesByUrlAction,
+  getDeckTemplateAction,
+} from "@/app/actions";
+import type { Course, CourseInput } from "@/lib/supabase/courses";
+import { resolveWeekTopic, mapLiveModulesForTopic, type WeekTopicSource } from "@/lib/workflows/next-week";
+import type { GeneratedCourseFile } from "@/lib/workflows/types";
+import { csvToSchedule } from "@/lib/workflows/types";
+import type { PptxTheme } from "@/lib/pptx";
+import { buildSlidesPptx } from "@/lib/pptx";
+import { buildDocxFromPlainText } from "@/lib/docx";
+import { detectCanvasUrlKind, moduleItemContentUrl } from "@/lib/canvas-url";
+import { currentCourseWeek, courseProgressStatus, currentWeekFromDeadlines } from "@/lib/week-numbering";
+import { parseLmsModuleValue } from "@/lib/workflows/module-value";
+import type { CartridgeCourseData } from "@/lib/cartridge-import";
+import type { CommonResourceItem } from "@/lib/common-resources";
+import type { InstitutionField } from "@/lib/institution-fields";
+import type { StepInputSpec, StepOutputSpec } from "@/lib/workflows/types";
+
+export type { StepInputSpec, StepOutputSpec } from "@/lib/workflows/types";
+
+export interface TermCoursePreviewRow {
+  lmsId: string;
+  name: string;
+  courseCode: string | null;
+  termName: string | null;
+  canvasUrl: string;
+  note: string;
+  institution?: string;
+  startAt?: string | null;
+}
+
+export interface StepRunHelpers {
+  activeInstitution: string | null;
+  provider: LlmProvider;
+  author: string;
+  saveBundle: ((blob: Blob, name: string) => Promise<void>) | null;
+  saveRunReport?: ((name: string, markdown: string) => Promise<void>) | null;
+  saveCourseMaterialFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
+  saveCourseExportFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
+  loadCommonResources: (() => Promise<CommonResourceItem[]>) | null;
+  getLibraryFile: ((fileId: string) => Promise<{ blob: Blob; name: string; mimeType: string } | null>) | null;
+  getInstitutionFields: ((acronym: string) => Promise<InstitutionField[]>) | null;
+  loadCourseExport: ((courseId: string) => Promise<CartridgeCourseData | null>) | null;
+  workflowId?: string;
+  workflowName?: string;
+  workflowRunId?: string;
+}
+
+export type StepRunSummary =
+  | {
+      kind: "schedule";
+      courseTitle: string;
+      schedule: ScheduleWeekPlan[];
+      csv: string;
+    }
+  | { kind: "link"; label: string; url: string }
+  | { kind: "list"; label: string; items: string[] }
+  | { kind: "text"; text: string };
+
+export interface TableRowDetail {
+  text: string;
+  files?: Array<{ name: string; base64: string; mimeType: string }>;
+}
+
+export interface StepRunResult {
+  outputs: Record<string, unknown>;
+  summary: StepRunSummary;
+  requireConfirmation?: string;
+  requireInput?: {
+    message: string;
+    key: string;
+    kind: "text" | "choice" | "upload" | "workflow" | "table";
+    options?: Array<{ value: string; label: string }>;
+    optional?: boolean;
+    handoffPrefill?: Record<string, string>;
+    initialValue?: string;
+    submitLabel?: string;
+    regenerate?: () => Promise<string>;
+    columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean; link?: boolean; width?: number }>;
+    rows?: Array<Record<string, string>>;
+    selectable?: boolean;
+    rowDetail?: (row: Record<string, string>) => Promise<TableRowDetail>;
+    transform?: (value: string | File[] | Array<Record<string, string>>) => unknown;
+  };
+}
+
+export interface StepDefinition {
+  type: string;
+  name: string;
+  description: string;
+  inputs: StepInputSpec[];
+  outputs: StepOutputSpec[];
+  run: (
+    values: Record<string, unknown>,
+    helpers: StepRunHelpers,
+    onProgress: (text: string) => void
+  ) => Promise<StepRunResult>;
+}
+
+// Base64-encode UTF-8 text in the browser (btoa alone rejects non-latin1).
+export function encodeTextBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// "Student" or "Student | github-username" (pipe-separated so commas in
+// names like "Last, First" never masquerade as usernames).
+export function parseRosterLines(text: string): Array<{ student: string; username: string }> {
+  return text
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((row) => {
+      const idx = row.lastIndexOf("|");
+      if (idx === -1) return { student: row, username: "" };
+      return { student: row.slice(0, idx).trim(), username: row.slice(idx + 1).trim().replace(/^@/, "") };
+    });
+}
+
+// Client-side equivalent of CoursesTab's courseToInput: course tiles are
+// updated by full-input round-trips, so EVERY editable field must ride
+// along or the update would blank it.
+export function courseToInputPayload(c: Course): CourseInput {
+  return {
+    name: c.name,
+    courseCode: c.courseCode,
+    term: c.term,
+    canvasUrl: c.canvasUrl,
+    repos: c.repos,
+    githubOrg: c.githubOrg,
+    textbook: c.textbook,
+    syllabusId: c.syllabusId,
+    institution: c.institution,
+    integrations: c.integrations,
+    roster: c.roster,
+    notes: c.notes,
+    topics: c.topics,
+    csvName: c.csvName,
+    csvData: c.csvData,
+    rubricName: c.rubricName,
+    rubricData: c.rubricData,
+    startDate: c.startDate,
+    description: c.description,
+    weeks: c.weeks,
+    tests: c.tests,
+    lms: c.lms,
+    dayTime: c.dayTime,
+    customTiles: c.customTiles,
+    studentRepos: c.studentRepos,
+  };
+}
+
+// Steps run in the browser, so atob decodes stored base64 docx payloads
+// straight into Blobs.
+export function base64ToBlob(base64: string, mimeType: string): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mimeType });
+}
+
+// Isomorphic helper: converts Blob to base64 string.
+// Works in both browser (via btoa) and Node.js (via Buffer).
+// Feature-detects the environment; does not assume DOM APIs.
+export async function blobToBase64(blob: Blob): Promise<string> {
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+
+  if (typeof Buffer !== 'undefined') {
+    // Node.js environment
+    return Buffer.from(bytes).toString('base64');
+  } else if (typeof btoa !== 'undefined') {
+    // Browser environment: chunk the byte array to avoid stack overflow
+    // with very large files (btoa has a limit on string length)
+    const chunkSize = 8192;
+    let binaryStr = '';
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+      binaryStr += String.fromCharCode(...chunk);
+    }
+    return btoa(binaryStr);
+  } else {
+    throw new Error('Neither Buffer nor btoa available for base64 encoding');
+  }
+}
+
+// Parse a tile's Day/Time (e.g. "MW 10:00-11:15", "TTh 2:00 PM") into
+// weekday numbers plus the FIRST start time. Day tokens only scan the text
+// before the first digit so the M in "PM" never reads as Monday; tokens are
+// case-insensitive, ordered longest-first (SU, SA, TH, TU before single
+// letters M, T, W, R, F), and "R" is the registrar shorthand for Thursday.
+// A time with no AM/PM and an hour of 7 or less is assumed PM - typical class times.
+export function parseDayTime(
+  text: string
+): { days: Set<number>; hour: number; minute: number } | null {
+  const firstDigit = text.search(/\d/);
+  const dayPart = firstDigit === -1 ? text : text.slice(0, firstDigit);
+  const dayPartUpper = dayPart.toUpperCase();
+
+  // Longest-first token matching: SU, SA, TH, TU before single letters
+  const tokenMap: Record<string, number> = {
+    SU: 0,
+    SA: 6,
+    TH: 4,
+    TU: 2,
+    M: 1,
+    T: 2,
+    W: 3,
+    R: 4,
+    F: 5,
+  };
+
+  const days = new Set<number>();
+  const tokens = dayPartUpper.split(/[^A-Z]+/).filter(Boolean);
+  for (const token of tokens) {
+    // Try longest match first within this token
+    if (token.length >= 2) {
+      const twoChar = token.slice(0, 2);
+      if (twoChar in tokenMap) {
+        days.add(tokenMap[twoChar]);
+        continue;
+      }
+    }
+    // Fall back to single character
+    if (token.length >= 1) {
+      const oneChar = token[0];
+      if (oneChar in tokenMap) {
+        days.add(tokenMap[oneChar]);
+      }
+    }
+  }
+
+  if (days.size === 0) return null;
+
+  const timeMatch = text.match(/(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])?/);
+  if (!timeMatch) return null;
+
+  let hour = Number(timeMatch[1]);
+  const minute = timeMatch[2] ? Number(timeMatch[2]) : 0;
+  const meridiem = timeMatch[3]?.toLowerCase() ?? "";
+  if (meridiem === "pm" && hour < 12) {
+    hour += 12;
+  } else if (meridiem === "am" && hour === 12) {
+    hour = 0;
+  } else if (!meridiem && hour <= 7) {
+    hour += 12;
+  }
+  if (hour > 23 || minute > 59) return null;
+
+  return { days, hour, minute };
+}
+
+// Calculate the deadline for a given week, anchored on the Monday of the start date's week.
+// Deadlines land on the Sunday ending week N (23:59:00.000 local time), matching Assign Due Dates.
+export function weekDeadline(start: Date, week: number): Date {
+  const monday0 = new Date(start);
+  const day = monday0.getDay();
+  monday0.setDate(monday0.getDate() + (day === 0 ? -6 : 1 - day));
+  const due = new Date(monday0);
+  due.setDate(monday0.getDate() + week * 7 - 1);
+  due.setHours(23, 59, 0, 0);
+  return due;
+}
+
+// Gather the text a lecture-shaped step feeds the model, trying sources in
+// order: the live LMS module (page bodies + file previews + assignment/quiz/discussion
+// descriptions when available + item titles), then on live failure or an export-sourced
+// module pick the course's LMS export tile (item titles + syllabus text), then the tile's
+// own topics/description. Assignment/discussion descriptions are fetched for up to 6 items
+// per module; beyond that, only titles are included. Content gathering never hard-fails
+// the step.
+export async function gatherModuleMaterials(
+  tile: Course,
+  moduleIdRaw: string,
+  helpers: StepRunHelpers,
+  onProgress: (text: string) => void
+): Promise<{ moduleName: string; materialsText: string; notes: string[]; materialsSource: string }> {
+  // Materials cap at ~20000 chars so the deck prompt stays inside the
+  // action's own truncation budget; going over surfaces as a note.
+  const MATERIALS_CAP = 20000;
+  const DESCRIPTION_FETCH_LIMIT = 6;
+  const chunks: string[] = [];
+  const notes: string[] = [];
+  let total = 0;
+  let truncated = false;
+  const push = (text: string) => {
+    if (!text) return;
+    if (total >= MATERIALS_CAP) {
+      truncated = true;
+      return;
+    }
+    const slice = text.slice(0, MATERIALS_CAP - total);
+    if (slice.length < text.length) truncated = true;
+    chunks.push(slice);
+    total += slice.length;
+  };
+
+  const canvasUrl = (tile.canvasUrl ?? "").trim();
+  const inst = helpers.activeInstitution || undefined;
+  const picked = parseLmsModuleValue(moduleIdRaw);
+
+  let moduleName = "Upcoming module";
+  let materialsSource = "";
+  let gathered = false;
+
+  // Pull item titles + syllabus text from the course's newest LMS export.
+  const gatherFromExport = async (matchName: string | null): Promise<boolean> => {
+    if (!helpers.loadCourseExport || !matchName) return false;
+    onProgress("Reading the course export...");
+    let data: CartridgeCourseData | null = null;
+    try {
+      data = await helpers.loadCourseExport(tile.id);
+    } catch (err) {
+      notes.push(`course export: ${err instanceof Error ? err.message : "could not read"}`);
+      return false;
+    }
+    if (!data || data.modules.length === 0) return false;
+    const target =
+      data.modules.find((m) => m.name === matchName) ??
+      data.modules.find((m) => m.name.toLowerCase() === matchName.toLowerCase());
+    if (!target) return false;
+    moduleName = target.name;
+    for (const item of target.items) {
+      push(`${item.type}: ${item.title}\n`);
+    }
+    if (data.syllabusHtml) {
+      const syllabusText = data.syllabusHtml
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (syllabusText) push(`\n# Course syllabus (context)\n${syllabusText}\n`);
+    }
+    materialsSource = `Materials from the course export module "${target.name}" (item titles + syllabus)`;
+    return true;
+  };
+
+  if (picked.fromExport) {
+    gathered = await gatherFromExport(picked.name);
+    if (!gathered) {
+      notes.push(`module "${picked.name ?? ""}" not found in the course export`);
+    }
+  } else if (canvasUrl && picked.liveId) {
+    onProgress("Loading module materials...");
+    try {
+      const content = await listCourseContentAction(canvasUrl, inst);
+      if ("error" in content) {
+        throw new Error(content.error);
+      }
+      const courseModule = content.modules.find((m) => String(m.id) === picked.liveId);
+      if (!courseModule) {
+        throw new Error("the chosen module was not found in the LMS course");
+      }
+      moduleName = courseModule.name;
+      materialsSource = `Materials read from LMS module "${courseModule.name}"`;
+
+      // Collect Assignment/Discussion items that support description fetching
+      let descriptionsFetched = 0;
+      const assignmentLikeItems = courseModule.items.filter(
+        (item) =>
+          (item.type === "Assignment" || item.type === "Discussion") &&
+          item.htmlUrl
+      );
+      const hasMoreDescriptions = assignmentLikeItems.length > DESCRIPTION_FETCH_LIMIT;
+
+      for (const item of courseModule.items) {
+        // Fail-forward per item: unreadable materials become notes.
+        try {
+          if (item.type === "Page" && item.pageUrl) {
+            const p = await getPageAction(canvasUrl, item.pageUrl, inst);
+            if ("error" in p) {
+              throw new Error(p.error);
+            }
+            const bodyText = p.page.body
+              .replace(/<[^>]+>/g, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+            push(`# ${p.page.title}\n${bodyText}\n\n`);
+          } else if (item.type === "File" && item.contentId !== null) {
+            const f = await previewFileAction(canvasUrl, item.contentId, inst);
+            if ("error" in f) {
+              throw new Error(f.error);
+            }
+            if (f.preview.text.trim()) {
+              push(`# ${item.title}\n${f.preview.text}\n\n`);
+            }
+          } else if (
+            (item.type === "Assignment" || item.type === "Discussion") &&
+            moduleItemContentUrl(canvasUrl, item.type, item.contentId, item.htmlUrl) &&
+            descriptionsFetched < DESCRIPTION_FETCH_LIMIT
+          ) {
+            // Fetch description for Assignment/Discussion items (up to 6).
+            // The item's html_url is the /modules/items/ wrapper link, so the
+            // direct content URL is built from the item's content id.
+            descriptionsFetched++;
+            const meta = await fetchCanvasMetaAction(
+              moduleItemContentUrl(canvasUrl, item.type, item.contentId, item.htmlUrl)!
+            );
+            if ("error" in meta) {
+              throw new Error(meta.error);
+            }
+            const description = meta.description.trim();
+
+            // Format the header with points and due date when available
+            let headerLine = `${item.type}: ${item.title}`;
+            const suffixes: string[] = [];
+            if (typeof item.pointsPossible === "number" && item.pointsPossible > 0) {
+              suffixes.push(`${item.pointsPossible} point${item.pointsPossible === 1 ? "" : "s"}`);
+            }
+            if (item.dueAt) {
+              const dueDate = new Date(item.dueAt);
+              const dateStr = dueDate.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+              });
+              suffixes.push(`due ${dateStr}`);
+            }
+            if (suffixes.length > 0) {
+              headerLine += ` (${suffixes.join(", ")})`;
+            }
+            push(`${headerLine}\n`);
+
+            if (description) {
+              push(`${description}\n\n`);
+            }
+          } else if (item.type === "Assignment" || item.type === "Quiz" || item.type === "Discussion") {
+            // Title-only line for Quiz items (fetchCanvasMetaAction doesn't support them)
+            // or Assignment/Discussion items beyond the fetch limit
+            let headerLine = `${item.type}: ${item.title}`;
+            const suffixes: string[] = [];
+            if (typeof item.pointsPossible === "number" && item.pointsPossible > 0) {
+              suffixes.push(`${item.pointsPossible} point${item.pointsPossible === 1 ? "" : "s"}`);
+            }
+            if (item.dueAt) {
+              const dueDate = new Date(item.dueAt);
+              const dateStr = dueDate.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+              });
+              suffixes.push(`due ${dateStr}`);
+            }
+            if (suffixes.length > 0) {
+              headerLine += ` (${suffixes.join(", ")})`;
+            }
+            push(`${headerLine}\n`);
+          }
+        } catch (err) {
+          notes.push(
+            `${item.title}: ${
+              err instanceof Error ? err.message : "could not read"
+            }`
+          );
+        }
+      }
+
+      if (hasMoreDescriptions) {
+        notes.push(
+          `further assignment descriptions omitted (${assignmentLikeItems.length - DESCRIPTION_FETCH_LIMIT} more)`
+        );
+      }
+      gathered = true;
+    } catch (err) {
+      // Live LMS failed: fall back to the course export tile by module name.
+      const message = err instanceof Error ? err.message : "could not read the LMS course";
+      gathered = await gatherFromExport(picked.name);
+      if (gathered) {
+        notes.push(`live LMS failed (${message}) - used the course export instead`);
+      } else {
+        notes.push(`live LMS failed (${message}) and the course export had no matching module`);
+      }
+    }
+  }
+
+  if (!gathered) {
+    // Reset any partial content so the terminal fallback stands alone.
+    chunks.length = 0;
+    total = 0;
+    push(
+      [tile.topics ?? "", tile.description ?? ""]
+        .filter(Boolean)
+        .join("\n\n")
+    );
+    notes.push("no live LMS module or export module - using tile topics/description");
+    materialsSource = "Materials from the tile's topics/description";
+  }
+
+  if (truncated) {
+    notes.push("materials truncated to ~20000 characters");
+  }
+
+  return { moduleName, materialsText: chunks.join(""), notes, materialsSource };
+}
+
+// Module-level cache for live course modules, keyed by canvasUrl.
+// TTL is ~120 seconds to avoid redundant fetches during multi-week/multi-tile runs.
+interface CachedLiveModules {
+  at: number;
+  modules: Array<{ id: number; title: string; position: number; items: Array<{ title: string }> }>;
+}
+
+const liveModulesCache = new Map<string, CachedLiveModules>();
+const LIVE_MODULES_CACHE_TTL_MS = 120_000;
+
+export function getCachedLiveModules(
+  canvasUrl: string
+): Array<{ id: number; title: string; position: number; items: Array<{ title: string }> }> | null {
+  const cached = liveModulesCache.get(canvasUrl);
+  const now = Date.now();
+  if (cached && now - cached.at < LIVE_MODULES_CACHE_TTL_MS) {
+    return cached.modules;
+  }
+  liveModulesCache.delete(canvasUrl);
+  return null;
+}
+
+export function setCachedLiveModules(
+  canvasUrl: string,
+  modules: Array<{ id: number; title: string; position: number; items: Array<{ title: string }> }>
+): void {
+  liveModulesCache.set(canvasUrl, { at: Date.now(), modules });
+}
+
+// Loads the week's topic using live-first fallback: live LMS modules first,
+// then the course's LMS export, then the tile's schedule CSV, then its topics list.
+// Returns the resolved topic/summary and source, or a skip with a diagnostic message.
+export async function loadTileWeekTopic(
+  tile: Course,
+  week: number,
+  helpers: StepRunHelpers
+): Promise<WeekTopicSource | { skip: string }> {
+  // Priority 1: Fetch live LMS modules if canvasUrl is set
+  let liveModules: Array<{ id: number; title: string; position: number; items: Array<{ title: string }> }> | null = null;
+  if (tile.canvasUrl) {
+    try {
+      // Check cache first
+      const cached = getCachedLiveModules(tile.canvasUrl);
+      if (cached !== null) {
+        liveModules = cached;
+      } else {
+        // Fetch live modules using the server action
+        const institution = tile.institution ?? helpers.activeInstitution ?? undefined;
+        const result = await listCourseContentAction(tile.canvasUrl, institution);
+        if (!("error" in result) && result.modules && result.modules.length > 0) {
+          // Map Canvas modules to resolveWeekTopic shape
+          liveModules = mapLiveModulesForTopic(result.modules);
+        } else {
+          // Cache negative outcome (error or empty modules) to prevent re-fetching
+          liveModules = [];
+        }
+        setCachedLiveModules(tile.canvasUrl, liveModules);
+      }
+    } catch {
+      // Cache negative outcome (exception) to prevent re-fetching
+      setCachedLiveModules(tile.canvasUrl, []);
+      // Silently fall through to export/CSV/topics on live fetch failure
+    }
+  }
+
+  // Priority 2: Load export modules
+  let modules: Array<{ title: string; position: number; items: Array<{ title: string }> }> | null = null;
+  if (helpers.loadCourseExport) {
+    try {
+      const exported = await helpers.loadCourseExport(tile.id);
+      if (exported && typeof exported === "object" && "modules" in exported) {
+        const exportedModules = (exported as { modules: unknown[] }).modules;
+        modules = exportedModules.map((m: unknown) => {
+          const mod = m as { name: string; position: number; items: unknown[] };
+          return {
+            title: mod.name,
+            position: mod.position,
+            items: (mod.items || []).map((item: unknown) => ({
+              title: (item as { title: string }).title || "",
+            })),
+          };
+        });
+      }
+    } catch {
+      // Silently fall through to CSV/topics on export load failure
+    }
+  }
+  return resolveWeekTopic({
+    liveModules,
+    modules,
+    csvData: tile.csvData ?? null,
+    topics: tile.topics ?? null,
+    week,
+  });
+}
+
+// Resolve the current week from deadline data if available, with fallback to start-date arithmetic.
+// - If start-date arithmetic says the course has not started (currentCourseWeek returns 0),
+//   return the start-date result (deadline data must not mark a future course in-progress).
+// - Else if tile.canvasUrl is set: call listAssignmentDueDatesByUrlAction; on success feed
+//   currentWeekFromDeadlines, which returns rawWeek with source "deadlines".
+// - Any action error, no canvas URL, or null result: fall back to currentCourseWeek with source "start-date".
+// - Returns skip only when start date is missing/invalid.
+export async function resolveTileCurrentWeek(
+  tile: Course,
+  helpers: StepRunHelpers
+): Promise<{ rawWeek: number; source: "deadlines" | "start-date" } | { skip: string }> {
+  // Check start-date arithmetic first
+  const startDateWeek = currentCourseWeek(tile.startDate, Date.now());
+  if (startDateWeek === null) {
+    return { skip: "no start date" };
+  }
+
+  // If course hasn't started according to start-date arithmetic, use that result
+  if (startDateWeek === 0) {
+    return { rawWeek: 0, source: "start-date" };
+  }
+
+  // Course has started; try deadline-based approach if canvasUrl is available
+  if (tile.canvasUrl) {
+    try {
+      const result = await listAssignmentDueDatesByUrlAction(
+        tile.canvasUrl,
+        tile.institution ?? helpers.activeInstitution ?? undefined
+      );
+      if ("error" in result) {
+        // Silent fallback on error
+        return { rawWeek: startDateWeek, source: "start-date" };
+      }
+
+      const deadlineResult = currentWeekFromDeadlines(result.assignments, Date.now());
+      if (deadlineResult !== null) {
+        // Success - use deadline-based week (pastLastDeadline flag is ignored here; caller handles it)
+        return { rawWeek: deadlineResult.week, source: "deadlines" };
+      }
+
+      // No usable deadline entries - fall back to start-date
+      return { rawWeek: startDateWeek, source: "start-date" };
+    } catch {
+      // Silent fallback on exception
+      return { rawWeek: startDateWeek, source: "start-date" };
+    }
+  }
+
+  // No canvasUrl - use start-date result
+  return { rawWeek: startDateWeek, source: "start-date" };
+}
+
+// Loads the workflow-scoped course tile and returns its CURRENT module/week
+// topic + learning-outcomes summary, or null when there is nothing to derive
+// from (no hubCourse, missing tile, no/invalid start date, not-started/complete,
+// or no topic can be resolved for the current week (export, schedule CSV, or topics list)). Uses export-first fallback for topic lookup.
+export async function deriveCurrentModule(
+  values: Record<string, unknown>,
+  helpers: StepRunHelpers
+): Promise<{ topic: string; summary: string; clamped?: boolean } | null> {
+  const hubCourseId = String(values.hubCourse ?? "").trim();
+  if (!hubCourseId) return null;
+  const list = await listCourseHubAction();
+  if ("error" in list) return null;
+  const tile = list.courses.find((c) => c.id === hubCourseId);
+  if (!tile) return null;
+  const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+  if ("skip" in weekResolution) return null;
+  const rawWeek = weekResolution.rawWeek;
+  const status = courseProgressStatus(rawWeek, tile.weeks);
+  if (status === "not-started" || status === "complete") return null;
+
+  // Apply modulesAhead offset
+  const modulesAhead = resolveModulesAhead(values);
+  let effectiveWeek = rawWeek + modulesAhead;
+  let clamped = false;
+  if (tile.weeks && tile.weeks > 0) {
+    if (effectiveWeek > tile.weeks) {
+      effectiveWeek = tile.weeks;
+      clamped = true;
+    }
+  }
+
+  const weekTopic = await loadTileWeekTopic(tile, effectiveWeek, helpers);
+  if ("skip" in weekTopic) {
+    // Legacy passthrough, confined to this helper: a schedule row with a bare
+    // summary and no topic still supplies objectives text (the shared
+    // resolver treats a blank topic as unresolved and falls through).
+    const e = csvToSchedule(tile.csvData ?? "").find((x) => x.week === effectiveWeek);
+    if (e && e.summary.trim()) {
+      const result: { topic: string; summary: string; clamped?: boolean } = { topic: "", summary: e.summary.trim() };
+      if (clamped) result.clamped = true;
+      return result;
+    }
+    return null;
+  }
+  const result: { topic: string; summary: string; clamped?: boolean } = { topic: weekTopic.topic, summary: weekTopic.summary };
+  if (clamped) result.clamped = true;
+  return result;
+}
+
+// The Module objectives for a content step: the explicitly provided text, or -
+// when empty and a course tile is given (typically from workflow scope) -
+// derived from that tile's CURRENT module (topic + the week's learning-outcomes
+// summary). Returns "" when nothing can be derived.
+export async function resolveModuleObjectives(
+  values: Record<string, unknown>,
+  helpers: StepRunHelpers
+): Promise<string> {
+  const explicit = String(values.objectives ?? "").trim();
+  if (explicit) return explicit;
+  const mod = await deriveCurrentModule(values, helpers);
+  if (!mod) return "";
+  const parts: string[] = [];
+  if (mod.topic) parts.push(`Topic: ${mod.topic}`);
+  if (mod.summary) parts.push(mod.summary);
+  return parts.join("\n");
+}
+
+// Both the topic and objectives for a content step that needs each separately
+// (e.g. Generate a lecture script): explicit values win per field; whatever is
+// empty is derived from the scoped course's current module.
+export async function resolveModuleContext(
+  values: Record<string, unknown>,
+  helpers: StepRunHelpers
+): Promise<{ topic: string; objectives: string }> {
+  const explicitTopic = String(values.topic ?? "").trim();
+  const explicitObjectives = String(values.objectives ?? "").trim();
+  if (explicitTopic && explicitObjectives) return { topic: explicitTopic, objectives: explicitObjectives };
+  const mod = await deriveCurrentModule(values, helpers);
+  const parts: string[] = [];
+  if (mod?.topic) parts.push(`Topic: ${mod.topic}`);
+  if (mod?.summary) parts.push(mod.summary);
+  return {
+    topic: explicitTopic || (mod?.topic ?? ""),
+    objectives: explicitObjectives || parts.join("\n"),
+  };
+}
+
+// Resolve a template input to its theme for buildSlidesPptx. Defaults to
+// Classic Lecture; fails forward with a note if the template is not found.
+export async function resolveDeckTheme(
+  templateValue: unknown
+): Promise<{ theme: PptxTheme | undefined; templateName: string; note: string | null }> {
+  const idOrName = String(templateValue ?? "").trim() || "preset-classic-lecture";
+  const r = await getDeckTemplateAction(idOrName);
+  if ("error" in r) {
+    return {
+      theme: undefined,
+      templateName: "Classic Lecture",
+      note: `Template "${idOrName}" not found - used Classic Lecture.`,
+    };
+  }
+  const theme: PptxTheme = {
+    backgroundKind: r.template.theme.backgroundKind,
+    backgroundColor: r.template.theme.backgroundColor,
+    backgroundColor2: r.template.theme.backgroundColor2,
+    fontColor: r.template.theme.fontColor,
+    // Note: backgroundImageData server/client-side falls back to solid exactly
+    // like savePresentationFileAction; gradients without the precomputed PNG
+    // render as solid fills.
+  };
+  return { theme, templateName: r.template.name, note: null };
+}
+
+// Assemble lecture materials from assignment plans into files and zip,
+// handling deck theming, file creation, download/save logic.
+// Shared by lecture-zip and lecture-materials-from-schedule steps.
+export async function assembleLectureFiles(
+  plans: AssignmentPlan[],
+  values: Record<string, unknown>,
+  helpers: StepRunHelpers,
+  onProgress: (msg: string) => void,
+  baseNameFallback: string
+): Promise<{
+  files: GeneratedCourseFile[];
+  summary: StepRunSummary;
+}> {
+  const includeInstructions =
+    values.includeInstructions === undefined
+      ? true
+      : String(values.includeInstructions) === "1";
+
+  const deck = await resolveDeckTheme(values.template);
+  const files: GeneratedCourseFile[] = [];
+
+  if (deck.note) onProgress(deck.note);
+  onProgress(`Processing ${plans.length} assignments...`);
+  for (const plan of plans) {
+    const pptxData = await buildSlidesPptx({
+      presentationTitle: plan.presentationTitle,
+      slides: plan.slides,
+      subtitle: plan.label,
+      author: helpers.author,
+      theme: deck.theme,
+    });
+
+    files.push({
+      name: `${plan.label} Slides.pptx`,
+      blob: new Blob([pptxData], {
+        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      }),
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      weekNumber: plan.weekNumber,
+      sortOrder: 1,
+      role: "slides",
+    });
+
+    if (plan.moduleIntroduction) {
+      const docxData = await buildDocxFromPlainText(
+        plan.moduleIntroduction,
+        plan.introTemplateHeadings,
+        helpers.author
+      );
+      files.push({
+        name: `${plan.label} Introduction.docx`,
+        blob: new Blob([docxData], {
+          type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }),
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        weekNumber: plan.weekNumber,
+        sortOrder: 0,
+        role: "introduction",
+        pageText: plan.moduleIntroduction,
+      });
+    }
+
+    if (includeInstructions && plan.assignmentInstructions) {
+      const docxData = await buildDocxFromPlainText(
+        plan.assignmentInstructions,
+        plan.instructionsTemplateHeadings,
+        helpers.author
+      );
+      files.push({
+        name: `${plan.label} Instructions.docx`,
+        blob: new Blob([docxData], {
+          type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }),
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        weekNumber: plan.weekNumber,
+        sortOrder: 2,
+        role: "instructions",
+        pageText: plan.assignmentInstructions,
+      });
+    }
+  }
+
+  onProgress("Assembling zip...");
+  const { default: JSZip } = await import("jszip");
+  const zip = new JSZip();
+
+  for (const file of files) {
+    zip.file(file.name, file.blob);
+  }
+
+  const zipBlob = await zip.generateAsync({ type: "blob" });
+
+  // Determine base name from hubCourse or use fallback
+  const hubCourseId = String(values.hubCourse ?? "").trim();
+  let baseName = baseNameFallback;
+  let tileLms = "";
+  if (hubCourseId) {
+    const list = await listCourseHubAction();
+    if (!("error" in list)) {
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (tile?.name?.trim()) {
+        baseName =
+          tile.name.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_") ||
+          baseName;
+      }
+      tileLms = (tile?.lms ?? "").trim().toLowerCase();
+
+      // The course tile's LMS inherits from the institution's LMS field
+      // when unset, matching the Courses tab display.
+      if (!tileLms && tile?.institution && helpers.getInstitutionFields) {
+        const fields = await helpers
+          .getInstitutionFields(tile.institution)
+          .catch(() => []);
+        tileLms = (fields.find((f) => f.id === "lmsUrl")?.lms ?? "")
+          .trim()
+          .toLowerCase();
+      }
+    }
+  }
+
+  // Tile's LMS routes which format the browser downloads; files output
+  // and library save are unaffected. Headless (server) runs have no
+  // `document` to build a download link with, so they always skip the
+  // download itself and rely on the library/tile save below.
+  let downloadSkipped = false;
+  if (typeof document !== "undefined" && tileLms !== "blackboard" && tileLms !== "canvas") {
+    onProgress("Downloading zip...");
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${baseName}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } else {
+    downloadSkipped = true;
+  }
+
+  if (helpers.saveBundle) {
+    try {
+      await helpers.saveBundle(zipBlob, baseName);
+    } catch (err) {
+      console.error("Library save failed:", err);
+    }
+  }
+
+  return {
+    files,
+    summary: {
+      kind: "list",
+      label: downloadSkipped
+        ? `Generated ${files.length} files (zip saved to your library - the ${tileLms} tile downloads a Common Cartridge instead)`
+        : `Generated ${files.length} files (zip downloaded)`,
+      items: files.map((f) => f.name),
+    },
+  };
+}
+
+// Classify a resolve-rubric source line: a Canvas assignment/discussion URL is
+// an LMS rubric probe; an owner/name or github.com URL is a repo probe; a bare
+// topic goes to the rubric bank; a URL matching neither handler (e.g. a bare
+// Canvas course URL) is skipped rather than mis-probed against the bank.
+export function classifyRubricSource(line: string): "lms" | "repo" | "topic" | "skip" {
+  if (detectCanvasUrlKind(line)) return "lms";
+  if (/github\.com/i.test(line) || /^[^/\s]+\/[^/\s]+$/.test(line)) return "repo";
+  if (/^https?:\/\//i.test(line)) return "skip";
+  return "topic";
+}
+
+// Parse and validate a modules-ahead offset value: clamps to [0, 12], defaults to 0.
+// Fail-soft on unparseable values: treat as 0.
+export function resolveModulesAhead(values: Record<string, unknown> | undefined): number {
+  const raw = String(values?.modulesAhead ?? "").trim();
+  if (!raw) return 0;
+  const parsed = parseInt(raw, 10);
+  if (isNaN(parsed)) return 0;
+  return Math.max(0, Math.min(12, parsed));
+}

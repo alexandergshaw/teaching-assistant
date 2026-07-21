@@ -1,0 +1,9 @@
+
+ RUN  v4.1.9 C:/Users/alexa/OneDrive/Documents/Projects/teaching-assistant
+
+
+ Test Files  100 passed (100)
+      Tests  1563 passed (1563)
+   Start at  17:57:14
+   Duration  6.08s (transform 14.85s, setup 0ms, import 47.23s, tests 2.04s, environment 18ms)
+

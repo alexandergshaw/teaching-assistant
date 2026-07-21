@@ -10790,10 +10790,15 @@ export const STEP_REGISTRY: StepDefinition[] = [
             if ("error" in content) {
               throw new Error(content.error);
             }
-            const foundModule = content.modules.find((m) => String(m.id) === picked.liveId);
-            if (!foundModule) {
+            const pickedIdx = content.modules.findIndex((m) => String(m.id) === picked.liveId);
+            if (pickedIdx < 0) {
               throw new Error("the chosen module was not found in the LMS course");
             }
+            // A modules-ahead offset applies relative to the picked module's
+            // position (mirroring prepare-lecture), clamped to the last module.
+            const modulesAhead = resolveModulesAhead(values);
+            const targetIdx = Math.min(pickedIdx + modulesAhead, content.modules.length - 1);
+            const foundModule = content.modules[targetIdx];
             targetModule = foundModule;
             moduleName = foundModule.name;
           } catch {

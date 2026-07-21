@@ -262,12 +262,26 @@ export async function updateWorkflowSchedule(
   supabase: SupabaseClient<Database>,
   userId: string,
   id: string,
-  fields: { enabled?: boolean; nextRunAt?: string; repeat?: ScheduleRepeat }
+  fields: {
+    enabled?: boolean;
+    nextRunAt?: string;
+    repeat?: ScheduleRepeat;
+    intervalMinutes?: number | null;
+    unattended?: boolean;
+    courseId?: string | null;
+    institution?: string | null;
+    fieldValues?: Record<string, unknown>;
+  }
 ): Promise<void> {
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (fields.enabled !== undefined) patch.enabled = fields.enabled;
   if (fields.nextRunAt !== undefined) patch.next_run_at = fields.nextRunAt;
   if (fields.repeat !== undefined) patch.repeat = fields.repeat;
+  if (fields.intervalMinutes !== undefined) patch.interval_minutes = fields.intervalMinutes;
+  if (fields.unattended !== undefined) patch.unattended = fields.unattended;
+  if (fields.courseId !== undefined) patch.course_id = fields.courseId;
+  if (fields.institution !== undefined) patch.institution = fields.institution;
+  if (fields.fieldValues !== undefined) patch.field_values = fields.fieldValues;
   const { error } = await table(supabase).update(patch).eq("user_id", userId).eq("id", id);
   if (error) {
     throw new Error(error.message);

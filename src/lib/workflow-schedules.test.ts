@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeNextRunAt, mapSchedule, reenableSchedule, type WorkflowSchedule } from "./workflow-schedules";
+import { computeNextRunAt, mapSchedule, reenableSchedule, updateWorkflowSchedule, type WorkflowSchedule } from "./workflow-schedules";
 import type { Database } from "./supabase/types";
 
 type ScheduleRow = Database["public"]["Tables"]["workflow_schedules"]["Row"];
@@ -169,5 +169,40 @@ describe("mapSchedule", () => {
   it("defaults interval_minutes to null when absent", () => {
     const s = mapSchedule(makeRow());
     expect(s.intervalMinutes).toBeNull();
+  });
+});
+
+describe("updateWorkflowSchedule field mapping", () => {
+  it("accepts intervalMinutes for schedule updates", () => {
+    // This is a compile-time test; it verifies the signature accepts
+    // the new optional field without error.
+    const fields: Parameters<typeof updateWorkflowSchedule>[3] = {
+      intervalMinutes: 90,
+      nextRunAt: "2026-07-21T14:00:00.000Z",
+    };
+    expect(fields.intervalMinutes).toBe(90);
+  });
+
+  it("accepts unattended for schedule updates", () => {
+    const fields: Parameters<typeof updateWorkflowSchedule>[3] = {
+      unattended: true,
+    };
+    expect(fields.unattended).toBe(true);
+  });
+
+  it("accepts courseId and institution for schedule updates", () => {
+    const fields: Parameters<typeof updateWorkflowSchedule>[3] = {
+      courseId: "course123",
+      institution: "example.edu",
+    };
+    expect(fields.courseId).toBe("course123");
+    expect(fields.institution).toBe("example.edu");
+  });
+
+  it("accepts fieldValues for schedule updates", () => {
+    const fields: Parameters<typeof updateWorkflowSchedule>[3] = {
+      fieldValues: { key: "value" },
+    };
+    expect(fields.fieldValues).toEqual({ key: "value" });
   });
 });

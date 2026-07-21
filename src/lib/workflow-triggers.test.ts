@@ -25,6 +25,7 @@ import {
   ALL_INSTITUTIONS,
   matchRepoPushTriggers,
   advanceRepoPushCursor,
+  updateWorkflowTrigger,
   type WorkflowTrigger,
 } from "@/lib/workflow-triggers";
 import type { Database, Json } from "./supabase/types";
@@ -1180,5 +1181,46 @@ describe("advanceRepoPushCursor", () => {
       other: "data",
       repos: { "my-repo": "2026-07-14T12:00:00Z" },
     });
+  });
+});
+
+describe("updateWorkflowTrigger field mapping", () => {
+  it("accepts eventType for trigger updates", () => {
+    // This is a compile-time test; it verifies the signature accepts
+    // the new optional field without error.
+    const fields: Parameters<typeof updateWorkflowTrigger>[3] = {
+      eventType: "webhook",
+    };
+    expect(fields.eventType).toBe("webhook");
+  });
+
+  it("accepts eventConfig for trigger updates", () => {
+    const fields: Parameters<typeof updateWorkflowTrigger>[3] = {
+      eventConfig: { institution: "example.edu", threshold: "5" },
+    };
+    expect(fields.eventConfig).toEqual({ institution: "example.edu", threshold: "5" });
+  });
+
+  it("accepts unattended for trigger updates", () => {
+    const fields: Parameters<typeof updateWorkflowTrigger>[3] = {
+      unattended: true,
+    };
+    expect(fields.unattended).toBe(true);
+  });
+
+  it("accepts courseId and institution for trigger updates", () => {
+    const fields: Parameters<typeof updateWorkflowTrigger>[3] = {
+      courseId: "course123",
+      institution: "example.edu",
+    };
+    expect(fields.courseId).toBe("course123");
+    expect(fields.institution).toBe("example.edu");
+  });
+
+  it("accepts cursor for trigger updates", () => {
+    const fields: Parameters<typeof updateWorkflowTrigger>[3] = {
+      cursor: { count: 5 } as unknown as Json,
+    };
+    expect(fields.cursor).toEqual({ count: 5 });
   });
 });

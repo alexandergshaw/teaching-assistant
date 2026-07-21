@@ -27,6 +27,7 @@ import {
   type WorkflowSchedule,
   type ScheduleRepeat,
 } from "@/lib/workflow-schedules";
+import { scheduleToForm, triggerToForm } from "@/lib/workflow-form-helpers";
 import { peekScheduledRun, takeScheduledRun, SCHEDULED_RUN_EVENT } from "@/lib/workflow-schedule-handoff";
 import {
   listWorkflowTriggers,
@@ -599,6 +600,7 @@ export default function WorkflowsTab() {
   const [scheduleForm, setScheduleForm] = useState<{ runAt: string; repeat: ScheduleRepeat; intervalValue: string; intervalUnit: "minutes" | "hours"; courseId: string; institution: string; unattended: boolean } | null>(null);
   const [scheduleBusy, setScheduleBusy] = useState(false);
   const [scheduleRemoveConfirm, setScheduleRemoveConfirm] = useState<string | null>(null);
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
 
   // Event triggers for the signed-in user (null = not loaded yet).
   const [triggers, setTriggers] = useState<WorkflowTrigger[] | null>(null);
@@ -612,6 +614,7 @@ export default function WorkflowsTab() {
   } | null>(null);
   const [triggerBusy, setTriggerBusy] = useState(false);
   const [triggerRemoveConfirm, setTriggerRemoveConfirm] = useState<string | null>(null);
+  const [editingTriggerId, setEditingTriggerId] = useState<string | null>(null);
   const [webhookSetup, setWebhookSetup] = useState<
     | null
     | { ok: true; org: string; url: string; alreadyExisted: boolean }
@@ -1936,31 +1939,43 @@ export default function WorkflowsTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingHandoff, running, selectedWorkflowId, values]);
 
+  // Validate schedule form: returns { ok, intervalMinutes, error }.
+  // Used by both create and edit paths.
+  const validateScheduleForm = (
+    form: typeof scheduleForm
+  ): { ok: true; intervalMinutes: number | null } | { ok: false; error: string } => {
+    if (!form) return { ok: false, error: "No form data" };
+    const runAt = new Date(form.runAt);
+    if (Number.isNaN(runAt.getTime())) {
+      return { ok: false, error: "Pick a valid first run time." };
+    }
+    if (runAt.getTime() <= Date.now()) {
+      return { ok: false, error: "Pick a time in the future." };
+    }
+    let intervalMinutes: number | null = null;
+    if (form.repeat === "interval") {
+      const raw = Number(form.intervalValue);
+      if (!Number.isFinite(raw) || raw <= 0) {
+        return { ok: false, error: "Enter how often it should repeat." };
+      }
+      intervalMinutes = form.intervalUnit === "hours" ? Math.round(raw * 60) : Math.round(raw);
+      if (intervalMinutes < MIN_INTERVAL_MINUTES) {
+        return { ok: false, error: `The shortest interval is ${MIN_INTERVAL_MINUTES} minutes.` };
+      }
+    }
+    return { ok: true, intervalMinutes };
+  };
+
   // Create a schedule for the selected workflow from the current form values.
   const handleCreateSchedule = async () => {
     if (!user || !selectedDef || !scheduleForm) return;
+    const validation = validateScheduleForm(scheduleForm);
+    if (!validation.ok) {
+      setScheduleError(validation.error);
+      return;
+    }
+    const { intervalMinutes } = validation;
     const runAt = new Date(scheduleForm.runAt);
-    if (Number.isNaN(runAt.getTime())) {
-      setScheduleError("Pick a valid first run time.");
-      return;
-    }
-    if (runAt.getTime() <= Date.now()) {
-      setScheduleError("Pick a time in the future.");
-      return;
-    }
-    let intervalMinutes: number | null = null;
-    if (scheduleForm.repeat === "interval") {
-      const raw = Number(scheduleForm.intervalValue);
-      if (!Number.isFinite(raw) || raw <= 0) {
-        setScheduleError("Enter how often it should repeat.");
-        return;
-      }
-      intervalMinutes = scheduleForm.intervalUnit === "hours" ? Math.round(raw * 60) : Math.round(raw);
-      if (intervalMinutes < MIN_INTERVAL_MINUTES) {
-        setScheduleError(`The shortest interval is ${MIN_INTERVAL_MINUTES} minutes.`);
-        return;
-      }
-    }
     setScheduleBusy(true);
     setScheduleError(null);
     try {
@@ -1985,6 +2000,59 @@ export default function WorkflowsTab() {
         [...(prev ?? []), created].sort((a, b) => a.nextRunAt.localeCompare(b.nextRunAt))
       );
       setScheduleForm(null);
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : "Could not save the schedule.");
+    } finally {
+      setScheduleBusy(false);
+    }
+  };
+
+  // Save changes to an existing schedule.
+  const handleSaveEditSchedule = async (scheduleId: string) => {
+    if (!user || !scheduleForm) return;
+    const editingSchedule = schedules?.find((s) => s.id === scheduleId);
+    if (!editingSchedule) return;
+    const editingWorkflow = workflows.find((w) => w.id === editingSchedule.workflowId);
+    const editingIsHeadlessSafe = editingWorkflow
+      ? isHeadlessSafeWorkflow(editingWorkflow, (id) => workflows.find((w) => w.id === id))
+      : false;
+    const validation = validateScheduleForm(scheduleForm);
+    if (!validation.ok) {
+      setScheduleError(validation.error);
+      return;
+    }
+    const { intervalMinutes } = validation;
+    const runAt = new Date(scheduleForm.runAt);
+    setScheduleBusy(true);
+    setScheduleError(null);
+    try {
+      await updateWorkflowSchedule(supabase, user.id, scheduleId, {
+        nextRunAt: runAt.toISOString(),
+        repeat: scheduleForm.repeat,
+        intervalMinutes: scheduleForm.repeat === "interval" ? intervalMinutes : null,
+        courseId: scheduleForm.courseId || null,
+        institution: scheduleForm.institution || null,
+        unattended: editingIsHeadlessSafe && scheduleForm.unattended,
+      });
+      setSchedules((prev) =>
+        (prev ?? [])
+          .map((s) =>
+            s.id === scheduleId
+              ? {
+                  ...s,
+                  nextRunAt: runAt.toISOString(),
+                  repeat: scheduleForm.repeat,
+                  intervalMinutes: scheduleForm.repeat === "interval" ? intervalMinutes : null,
+                  courseId: scheduleForm.courseId || null,
+                  institution: scheduleForm.institution || null,
+                  unattended: editingIsHeadlessSafe && scheduleForm.unattended,
+                }
+              : s
+          )
+          .sort((a, b) => a.nextRunAt.localeCompare(b.nextRunAt))
+      );
+      setScheduleForm(null);
+      setEditingScheduleId(null);
     } catch (err) {
       setScheduleError(err instanceof Error ? err.message : "Could not save the schedule.");
     } finally {
@@ -2033,21 +2101,21 @@ export default function WorkflowsTab() {
     }
   };
 
-  // Create an event trigger for the selected workflow from the current form
-  // values. Mirrors handleCreateSchedule's snapshot of values/provider/
-  // disabledSteps; the event source and its config decide when it fires.
-  const handleCreateTrigger = async () => {
-    if (!user || !selectedDef || !triggerForm) return;
-    const source = getEventSource(triggerForm.eventType);
+  // Validate trigger form: returns { ok, eventConfig, error }.
+  // Used by both create and edit paths. Computes eventConfig with scope inheritance.
+  const validateTriggerForm = (
+    form: typeof triggerForm,
+    workflowDef: typeof selectedDef
+  ): { ok: true; eventConfig: Record<string, string> } | { ok: false; error: string } => {
+    if (!form) return { ok: false, error: "No form data" };
+    const source = getEventSource(form.eventType);
     if (!source) {
-      setTriggerError("Pick an event.");
-      return;
+      return { ok: false, error: "Pick an event." };
     }
     // Every required config field for this event source must be filled.
     for (const field of source.configFields) {
-      if (field.required && !(triggerForm.config[field.key] ?? "").trim()) {
-        setTriggerError(`${field.label} is required for this event.`);
-        return;
+      if (field.required && !(form.config[field.key] ?? "").trim()) {
+        return { ok: false, error: `${field.label} is required for this event.` };
       }
     }
     // An lmsCourse value must contain a Canvas course id, or the server-side
@@ -2055,36 +2123,54 @@ export default function WorkflowsTab() {
     // trigger will save but never fire.
     for (const field of source.configFields) {
       if (field.type !== "lmsCourse") continue;
-      const fieldValue = (triggerForm.config[field.key] ?? "").trim();
+      const fieldValue = (form.config[field.key] ?? "").trim();
       if (fieldValue && !/courses\/\d+/.test(fieldValue)) {
-        setTriggerError("Enter the Canvas course URL (it must contain /courses/<id>).");
-        return;
+        return { ok: false, error: "Enter the Canvas course URL (it must contain /courses/<id>)." };
       }
     }
     // The deadline trigger inherits the course/institution the workflow is
     // already set for ("This workflow is for") when its own fields are blank, so
     // they are not entered twice. Snapshotted here (like the run values) so the
     // client and server evaluate the trigger identically.
-    let eventConfig = triggerForm.config;
-    if (triggerForm.eventType === "deadline-passed") {
-      const scope = selectedDef.scope ?? {};
+    let eventConfig = form.config;
+    if (form.eventType === "deadline-passed") {
+      const scope = workflowDef?.scope ?? {};
       const scopeCourse = (scope.lmsCourse ?? "").trim();
       const singleCourse =
         scopeCourse && scopeCourse !== "*" && !scopeCourse.includes("\n") ? scopeCourse : "";
       const scopeInst = (scope.institution ?? "").trim();
       const singleInst = scopeInst && scopeInst !== "*" ? scopeInst : "";
       eventConfig = {
-        ...triggerForm.config,
-        course: (triggerForm.config.course ?? "").trim() || singleCourse,
+        ...form.config,
+        course: (form.config.course ?? "").trim() || singleCourse,
         institution:
-          (triggerForm.config.institution ?? "").trim() || singleInst || (triggerForm.institution ?? ""),
+          (form.config.institution ?? "").trim() || singleInst || (form.institution ?? ""),
       };
       if (!eventConfig.course.trim()) {
-        setTriggerError(
-          "Set the course here, or set what this workflow is for (a single Canvas course) under Build."
-        );
-        return;
+        return {
+          ok: false,
+          error: "Set the course here, or set what this workflow is for (a single Canvas course) under Build.",
+        };
       }
+    }
+    return { ok: true, eventConfig };
+  };
+
+  // Create an event trigger for the selected workflow from the current form
+  // values. Mirrors handleCreateSchedule's snapshot of values/provider/
+  // disabledSteps; the event source and its config decide when it fires.
+  const handleCreateTrigger = async () => {
+    if (!user || !selectedDef || !triggerForm) return;
+    const validation = validateTriggerForm(triggerForm, selectedDef);
+    if (!validation.ok) {
+      setTriggerError(validation.error);
+      return;
+    }
+    const { eventConfig } = validation;
+    const source = getEventSource(triggerForm.eventType);
+    if (!source) {
+      setTriggerError("Pick an event.");
+      return;
     }
     setTriggerBusy(true);
     setTriggerError(null);
@@ -2107,6 +2193,73 @@ export default function WorkflowsTab() {
       });
       setTriggers((prev) => [created, ...(prev ?? [])]);
       setTriggerForm(null);
+      if (triggerForm.eventType === "repo-push") {
+        const hookOrg = (triggerForm.config.org ?? "").trim();
+        if (hookOrg) {
+          void registerOrgPushWebhookAction(hookOrg)
+            .then((res) => {
+              setWebhookSetup(
+                res.ok
+                  ? { ok: true, org: hookOrg, url: res.url, alreadyExisted: res.alreadyExisted }
+                  : { ok: false, org: hookOrg, url: res.url, error: res.error }
+              );
+            })
+            .catch(() => {
+              /* best-effort: the ~15-min poller still fires the trigger */
+            });
+        }
+      }
+    } catch (err) {
+      setTriggerError(err instanceof Error ? err.message : "Could not save the trigger.");
+    } finally {
+      setTriggerBusy(false);
+    }
+  };
+
+  // Save changes to an existing trigger.
+  const handleSaveEditTrigger = async (triggerId: string) => {
+    if (!user || !triggerForm) return;
+    const editingTrigger = triggers?.find((t) => t.id === triggerId);
+    if (!editingTrigger) return;
+    const validation = validateTriggerForm(triggerForm, selectedDef);
+    if (!validation.ok) {
+      setTriggerError(validation.error);
+      return;
+    }
+    const { eventConfig } = validation;
+    const source = getEventSource(triggerForm.eventType);
+    if (!source) {
+      setTriggerError("Pick an event.");
+      return;
+    }
+    setTriggerBusy(true);
+    setTriggerError(null);
+    try {
+      await updateWorkflowTrigger(supabase, user.id, triggerId, {
+        eventType: triggerForm.eventType,
+        eventConfig,
+        courseId: triggerForm.courseId || null,
+        institution: triggerForm.institution || null,
+        unattended: selectedHeadlessSafe && source.serverEvaluable && triggerForm.unattended,
+        cursor: null,
+      });
+      setTriggers((prev) =>
+        (prev ?? []).map((t) =>
+          t.id === triggerId
+            ? {
+                ...t,
+                eventType: triggerForm.eventType,
+                eventConfig,
+                courseId: triggerForm.courseId || null,
+                institution: triggerForm.institution || null,
+                unattended: selectedHeadlessSafe && source.serverEvaluable && triggerForm.unattended,
+                cursor: null,
+              }
+            : t
+        )
+      );
+      setTriggerForm(null);
+      setEditingTriggerId(null);
       if (triggerForm.eventType === "repo-push") {
         const hookOrg = (triggerForm.config.org ?? "").trim();
         if (hookOrg) {
@@ -4129,7 +4282,14 @@ export default function WorkflowsTab() {
                       const wfTriggers = (triggers ?? []).filter((t) => t.workflowId === w.id && t.enabled);
                       return (
                         <div key={w.id} style={{ borderLeft: "2px solid var(--field-border)", paddingLeft: 10 }}>
-                          <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{w.name}</div>
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            onClick={() => setSelectedWorkflowId(w.id)}
+                            style={{ fontWeight: 600, fontSize: "0.9rem", textAlign: "left", cursor: "pointer" }}
+                          >
+                            {w.name}
+                          </button>
                           {wfSchedules.map((s) => (
                             <div key={s.id} className={styles.fieldHint} style={{ margin: 0 }}>
                               Scheduled {describeScheduleCadence(s)}{s.unattended ? " (unattended)" : ""}
@@ -4168,21 +4328,62 @@ export default function WorkflowsTab() {
 
             {scheduleForm && (
               <div style={{ marginTop: 16, border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-                <span style={{ fontWeight: 600, fontSize: "0.9em" }}>Schedule {selectedDef?.name}</span>
-                <p className={styles.fieldHint} style={{ margin: 0 }}>
-                  Uses the run form values as they are right now. Runs start while the app is open; an overdue schedule runs on your next visit.
-                </p>
-                {runtimeFields.some((f) => f.type === "uploads" && f.required) && (
-                  <p className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)" }}>
-                    This workflow requires a file upload at run time, which cannot be saved with a schedule - the scheduled run will stop at the form.
-                  </p>
+                {editingScheduleId ? (
+                  <>
+                    <span style={{ fontWeight: 600, fontSize: "0.9em" }}>
+                      Editing {schedules?.find((s) => s.id === editingScheduleId)?.workflowName}&apos;s schedule
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontWeight: 600, fontSize: "0.9em" }}>Schedule {selectedDef?.name}</span>
+                    <p className={styles.fieldHint} style={{ margin: 0 }}>
+                      Uses the run form values as they are right now. Runs start while the app is open; an overdue schedule runs on your next visit.
+                    </p>
+                    {runtimeFields.some((f) => f.type === "uploads" && f.required) && (
+                      <p className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)" }}>
+                        This workflow requires a file upload at run time, which cannot be saved with a schedule - the scheduled run will stop at the form.
+                      </p>
+                    )}
+                  </>
                 )}
                 {scheduleForm.repeat === "interval" && (
                   <p className={styles.fieldHint} style={{ margin: 0 }}>
                     Set any interval from {MIN_INTERVAL_MINUTES} minutes up. Unattended runs are checked about every {MIN_INTERVAL_MINUTES} minutes, so that is the shortest that fires reliably.
                   </p>
                 )}
-                {selectedHeadlessSafe ? (
+                {editingScheduleId
+                  ? (() => {
+                      const editingSchedule = schedules?.find((s) => s.id === editingScheduleId);
+                      const editingWorkflow = editingSchedule ? workflows.find((w) => w.id === editingSchedule.workflowId) : null;
+                      const editingIsHeadlessSafe = editingWorkflow
+                        ? isHeadlessSafeWorkflow(editingWorkflow, (id) => workflows.find((w) => w.id === id))
+                        : false;
+                      return editingIsHeadlessSafe ? (
+                        <div>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                size="small"
+                                checked={scheduleForm.unattended}
+                                onChange={(e) =>
+                                  setScheduleForm((p) => (p ? { ...p, unattended: e.target.checked } : p))
+                                }
+                              />
+                            }
+                            label="Run unattended in the cloud (even when the app is closed)"
+                          />
+                          <p className={styles.fieldHint} style={{ margin: 0 }}>
+                            Unattended runs use the current run-form values and provider snapshot; interactive workflows are not eligible.
+                          </p>
+                        </div>
+                      ) : (
+                        <p className={styles.fieldHint} style={{ margin: 0 }}>
+                          This workflow pauses for input, so it can only run while the app is open.
+                        </p>
+                      );
+                    })()
+                  : selectedHeadlessSafe ? (
                   <div>
                     <FormControlLabel
                       control={
@@ -4281,10 +4482,28 @@ export default function WorkflowsTab() {
                     variant="contained"
                     size="small"
                     disabled={scheduleBusy || !scheduleForm.runAt}
-                    onClick={() => void handleCreateSchedule()}
+                    onClick={() =>
+                      editingScheduleId
+                        ? void handleSaveEditSchedule(editingScheduleId)
+                        : void handleCreateSchedule()
+                    }
                   >
-                    {scheduleBusy ? "Saving..." : "Save schedule"}
+                    {scheduleBusy ? "Saving..." : editingScheduleId ? "Save changes" : "Save schedule"}
                   </Button>
+                  {editingScheduleId && (
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled={scheduleBusy}
+                      onClick={() => {
+                        setScheduleForm(null);
+                        setEditingScheduleId(null);
+                        setScheduleError(null);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
@@ -4312,6 +4531,18 @@ export default function WorkflowsTab() {
                         {attachment ? ` - ${attachment}` : ""}
                       </span>
                       <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                        {workflows.find((w) => w.id === s.workflowId) ? (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            onClick={() => {
+                              setScheduleForm(scheduleToForm(s));
+                              setEditingScheduleId(s.id);
+                            }}
+                          >
+                            Edit
+                          </button>
+                        ) : null}
                         <button type="button" className={styles.linkButton} onClick={() => void handleToggleSchedule(s)}>
                           {s.enabled ? "Disable" : "Enable"}
                         </button>
@@ -4361,18 +4592,39 @@ export default function WorkflowsTab() {
 
             {triggerForm && (() => {
               const source = getEventSource(triggerForm.eventType);
-              const canUnattended = selectedHeadlessSafe && !!source?.serverEvaluable;
+              const editingTrigger = editingTriggerId ? triggers?.find((t) => t.id === editingTriggerId) : null;
+              const editingWorkflow = editingTrigger ? workflows.find((w) => w.id === editingTrigger.workflowId) : null;
+              const editingIsHeadlessSafe = editingWorkflow
+                ? isHeadlessSafeWorkflow(editingWorkflow, (id) => workflows.find((w) => w.id === id))
+                : false;
+              const canUnattended = editingTriggerId
+                ? editingIsHeadlessSafe && !!source?.serverEvaluable
+                : selectedHeadlessSafe && !!source?.serverEvaluable;
               return (
                 <div style={{ marginTop: 16, border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-                  <span style={{ fontWeight: 600, fontSize: "0.9em" }}>Trigger {selectedDef?.name} on an event</span>
-                  <p className={styles.fieldHint} style={{ margin: 0 }}>
-                    Uses the run form values as they are right now. Events are checked about every {MIN_INTERVAL_MINUTES} minutes while the app is open; unattended triggers are also checked in the cloud.
-                  </p>
+                  {editingTriggerId ? (
+                    <span style={{ fontWeight: 600, fontSize: "0.9em" }}>
+                      Editing {editingTrigger?.workflowName}&apos;s trigger
+                    </span>
+                  ) : (
+                    <>
+                      <span style={{ fontWeight: 600, fontSize: "0.9em" }}>Trigger {selectedDef?.name} on an event</span>
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        Uses the run form values as they are right now. Events are checked about every {MIN_INTERVAL_MINUTES} minutes while the app is open; unattended triggers are also checked in the cloud.
+                      </p>
+                    </>
+                  )}
                   <TextField
                     select
                     size="small"
                     label="Event"
                     value={triggerForm.eventType}
+                    disabled={editingTrigger?.eventType === "webhook"}
+                    title={
+                      editingTrigger?.eventType === "webhook"
+                        ? "Delete and recreate to change an inbound webhook trigger."
+                        : undefined
+                    }
                     onChange={(e) =>
                       setTriggerForm((p) =>
                         p ? { ...p, eventType: e.target.value as TriggerEventType, config: {} } : p
@@ -4380,9 +4632,17 @@ export default function WorkflowsTab() {
                     }
                     sx={{ maxWidth: 380 }}
                   >
-                    {EVENT_SOURCES.map((s) => (
-                      <MenuItem key={s.type} value={s.type}>{s.label}</MenuItem>
-                    ))}
+                    {editingTrigger?.eventType === "webhook"
+                      ? EVENT_SOURCES.filter((s) => s.type === "webhook").map((s) => (
+                          <MenuItem key={s.type} value={s.type}>{s.label}</MenuItem>
+                        ))
+                      : editingTrigger !== null
+                      ? EVENT_SOURCES.filter((s) => s.type !== "webhook").map((s) => (
+                          <MenuItem key={s.type} value={s.type}>{s.label}</MenuItem>
+                        ))
+                      : EVENT_SOURCES.map((s) => (
+                          <MenuItem key={s.type} value={s.type}>{s.label}</MenuItem>
+                        ))}
                   </TextField>
                   {source && (
                     <p className={styles.fieldHint} style={{ margin: 0 }}>{source.description}</p>
@@ -4584,9 +4844,32 @@ export default function WorkflowsTab() {
                         <MenuItem key={i} value={i}>{i}</MenuItem>
                       ))}
                     </TextField>
-                    <Button variant="contained" size="small" disabled={triggerBusy} onClick={() => void handleCreateTrigger()}>
-                      {triggerBusy ? "Saving..." : "Save trigger"}
+                    <Button
+                      variant="contained"
+                      size="small"
+                      disabled={triggerBusy}
+                      onClick={() =>
+                        editingTriggerId
+                          ? void handleSaveEditTrigger(editingTriggerId)
+                          : void handleCreateTrigger()
+                      }
+                    >
+                      {triggerBusy ? "Saving..." : editingTriggerId ? "Save changes" : "Save trigger"}
                     </Button>
+                    {editingTriggerId && (
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        disabled={triggerBusy}
+                        onClick={() => {
+                          setTriggerForm(null);
+                          setEditingTriggerId(null);
+                          setTriggerError(null);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    )}
                   </div>
                 </div>
               );
@@ -4655,6 +4938,16 @@ export default function WorkflowsTab() {
                         <code style={{ flexBasis: "100%", fontSize: "0.8em", color: "var(--text-secondary)", wordBreak: "break-all" }}>{webhookUrl}</code>
                       )}
                       <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={() => {
+                            setTriggerForm(triggerToForm(t));
+                            setEditingTriggerId(t.id);
+                          }}
+                        >
+                          Edit
+                        </button>
                         {webhookUrl && (
                           <button type="button" className={styles.linkButton} onClick={() => void navigator.clipboard?.writeText(webhookUrl)}>
                             Copy URL

@@ -1283,10 +1283,24 @@ export async function updateWorkflowTrigger(
   supabase: SupabaseClient<Database>,
   userId: string,
   id: string,
-  fields: { enabled?: boolean }
+  fields: {
+    enabled?: boolean;
+    eventType?: TriggerEventType;
+    eventConfig?: Record<string, string>;
+    unattended?: boolean;
+    courseId?: string | null;
+    institution?: string | null;
+    cursor?: Json | null;
+  }
 ): Promise<void> {
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (fields.enabled !== undefined) patch.enabled = fields.enabled;
+  if (fields.eventType !== undefined) patch.event_type = fields.eventType;
+  if (fields.eventConfig !== undefined) patch.event_config = fields.eventConfig;
+  if (fields.unattended !== undefined) patch.unattended = fields.unattended;
+  if (fields.courseId !== undefined) patch.course_id = fields.courseId;
+  if (fields.institution !== undefined) patch.institution = fields.institution;
+  if (fields.cursor !== undefined) patch.cursor = fields.cursor;
   const { error } = await table(supabase).update(patch).eq("user_id", userId).eq("id", id);
   if (error) throw new Error(error.message);
 }

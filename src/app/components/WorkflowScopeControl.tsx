@@ -222,6 +222,30 @@ export default function WorkflowScopeControl({
             </p>
           </div>
         </div>
+        <div style={cell}>
+          <span style={labelStyle}>Modules ahead</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <TextField
+              type="number"
+              size="small"
+              placeholder="0"
+              value={scope.moduleOffset ?? ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (!val || parseInt(val, 10) <= 0) {
+                  set({ moduleOffset: "" });
+                } else {
+                  set({ moduleOffset: String(parseInt(val, 10)) });
+                }
+              }}
+              slotProps={{ htmlInput: { min: 0 } }}
+              sx={{ width: 80 }}
+            />
+            <p className="fieldHint" style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+              Fills every step that targets a module offset.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );

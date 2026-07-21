@@ -902,7 +902,7 @@ async function resolveTileCurrentWeek(
 async function deriveCurrentModule(
   values: Record<string, unknown>,
   helpers: StepRunHelpers
-): Promise<{ topic: string; summary: string } | null> {
+): Promise<{ topic: string; summary: string; clamped?: boolean } | null> {
   const hubCourseId = String(values.hubCourse ?? "").trim();
   if (!hubCourseId) return null;
   const list = await listCourseHubAction();
@@ -914,17 +914,34 @@ async function deriveCurrentModule(
   const rawWeek = weekResolution.rawWeek;
   const status = courseProgressStatus(rawWeek, tile.weeks);
   if (status === "not-started" || status === "complete") return null;
-  const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
-  const weekTopic = await loadTileWeekTopic(tile, displayWeek, helpers);
+
+  // Apply modulesAhead offset
+  const modulesAhead = resolveModulesAhead(values);
+  let effectiveWeek = rawWeek + modulesAhead;
+  let clamped = false;
+  if (tile.weeks && tile.weeks > 0) {
+    if (effectiveWeek > tile.weeks) {
+      effectiveWeek = tile.weeks;
+      clamped = true;
+    }
+  }
+
+  const weekTopic = await loadTileWeekTopic(tile, effectiveWeek, helpers);
   if ("skip" in weekTopic) {
     // Legacy passthrough, confined to this helper: a schedule row with a bare
     // summary and no topic still supplies objectives text (the shared
     // resolver treats a blank topic as unresolved and falls through).
-    const e = csvToSchedule(tile.csvData ?? "").find((x) => x.week === displayWeek);
-    if (e && e.summary.trim()) return { topic: "", summary: e.summary.trim() };
+    const e = csvToSchedule(tile.csvData ?? "").find((x) => x.week === effectiveWeek);
+    if (e && e.summary.trim()) {
+      const result: { topic: string; summary: string; clamped?: boolean } = { topic: "", summary: e.summary.trim() };
+      if (clamped) result.clamped = true;
+      return result;
+    }
     return null;
   }
-  return { topic: weekTopic.topic, summary: weekTopic.summary };
+  const result: { topic: string; summary: string; clamped?: boolean } = { topic: weekTopic.topic, summary: weekTopic.summary };
+  if (clamped) result.clamped = true;
+  return result;
 }
 
 // The Module objectives for a content step: the explicitly provided text, or -
@@ -1164,6 +1181,16 @@ export function classifyRubricSource(line: string): "lms" | "repo" | "topic" | "
   if (/github\.com/i.test(line) || /^[^/\s]+\/[^/\s]+$/.test(line)) return "repo";
   if (/^https?:\/\//i.test(line)) return "skip";
   return "topic";
+}
+
+// Parse and validate a modules-ahead offset value: clamps to [0, 12], defaults to 0.
+// Fail-soft on unparseable values: treat as 0.
+export function resolveModulesAhead(values: Record<string, unknown> | undefined): number {
+  const raw = String(values?.modulesAhead ?? "").trim();
+  if (!raw) return 0;
+  const parsed = parseInt(raw, 10);
+  if (isNaN(parsed)) return 0;
+  return Math.max(0, Math.min(12, parsed));
 }
 
 export const STEP_REGISTRY: StepDefinition[] = [
@@ -4495,6 +4522,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
       "Work out which week a course is currently in from its start date, and the matching module/topic from the course schedule. Outputs feed later steps (e.g. draft an announcement for the current module).",
     inputs: [
       { key: "hubCourse", label: "Course tile", type: "hubCourse", required: true },
+      {
+        key: "modulesAhead",
+        label: "Modules ahead",
+        type: "moduleOffset",
+        required: false,
+        help: "How many modules past the current one to target. 0 or blank = the current module.",
+      },
     ],
     outputs: [
       { key: "week", label: "Current week", type: "number" },
@@ -4520,13 +4554,21 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const rawWeek = weekResolution.rawWeek;
       const weekSource = weekResolution.source;
       const status = courseProgressStatus(rawWeek, tile.weeks);
-      // Clamp for display so a finished course never reports past its last week.
-      const displayWeek =
-        tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
 
-      // Topic for the current week - export-first fallback to CSV then topics list.
+      // Apply modulesAhead offset
+      const modulesAhead = resolveModulesAhead(values);
+      let effectiveWeek = rawWeek + modulesAhead;
+      let clamped = false;
+      if (tile.weeks && tile.weeks > 0) {
+        if (effectiveWeek > tile.weeks) {
+          effectiveWeek = tile.weeks;
+          clamped = true;
+        }
+      }
+
+      // Topic for the target week - export-first fallback to CSV then topics list.
       let topic = "";
-      const weekTopic = await loadTileWeekTopic(tile, displayWeek, helpers);
+      const weekTopic = await loadTileWeekTopic(tile, effectiveWeek, helpers);
       if (!("skip" in weekTopic)) {
         topic = weekTopic.topic;
       }
@@ -4542,13 +4584,17 @@ export const STEP_REGISTRY: StepDefinition[] = [
         moduleName = "Complete";
         summaryText = `${tile.name} has finished${tile.weeks ? ` (${tile.weeks} week(s))` : ""}.`;
       } else {
-        moduleName = `Module ${String(displayWeek).padStart(2, "0")}${topic ? `: ${topic}` : ""}`;
-        summaryText = `${tile.name} is in week ${displayWeek}${totalLabel}${topic ? ` - ${topic}` : ""}${sourceNote}.`;
+        moduleName = `Module ${String(effectiveWeek).padStart(2, "0")}${topic ? `: ${topic}` : ""}`;
+        let targetingNote = "";
+        if (modulesAhead > 0) {
+          targetingNote = clamped ? ` (targeting ${modulesAhead} module(s) ahead - clamped to the final module)` : ` (targeting ${modulesAhead} module(s) ahead)`;
+        }
+        summaryText = `${tile.name} is in week ${effectiveWeek}${totalLabel}${topic ? ` - ${topic}` : ""}${sourceNote}${targetingNote}.`;
       }
 
       return {
         outputs: {
-          week: status === "not-started" ? 0 : displayWeek,
+          week: status === "not-started" ? 0 : effectiveWeek,
           moduleName,
           topic,
           status,
@@ -4580,7 +4626,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       {
         key: "offset",
         label: "Week offset",
-        type: "number",
+        type: "moduleOffset",
         required: false,
         help: "Added when Week is blank: 0 = this week (default), 1 = next week.",
       },
@@ -4734,6 +4780,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "A PPT Design template that styles the generated slides. Blank uses Classic Lecture (the app's standard look). Slide content still comes from this step's own generator.",
       },
+      {
+        key: "modulesAhead",
+        label: "Modules ahead",
+        type: "moduleOffset",
+        required: false,
+        help: "How many modules past the current one to target. 0 or blank = the current module.",
+      },
     ],
     outputs: [
       { key: "announcement", label: "Announcement", type: "longtext" },
@@ -4743,6 +4796,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const autonomous = String(values.autonomous ?? "") === "1";
       const hubCourseId = String(values.hubCourse ?? "").trim();
       const moduleIdRaw = String(values.moduleId ?? "").trim();
+      const modulesAhead = resolveModulesAhead(values);
 
       const list = await listCourseHubAction();
       if ("error" in list) {
@@ -4767,8 +4821,53 @@ export const STEP_REGISTRY: StepDefinition[] = [
         materialsSource: string;
         notes: string[];
       }> => {
+        // Apply module offset: when no module is picked, derive from current+N;
+        // when a module is picked, apply offset relative to that module's position.
+        let effectiveModuleIdRaw = moduleIdRaw;
+        if (modulesAhead > 0) {
+          const canvasUrl = (tile.canvasUrl ?? "").trim();
+          if (canvasUrl) {
+            try {
+              const content = await listCourseContentAction(
+                canvasUrl,
+                helpers.activeInstitution || undefined
+              );
+              if (!("error" in content)) {
+                let targetIdx: number | null = null;
+                if (moduleIdRaw) {
+                  // Explicit module picked: find its index and offset from there
+                  const pickedModuleId = moduleIdRaw.split("|")[0];
+                  const pickedIdx = content.modules.findIndex(
+                    (m) => String(m.id) === pickedModuleId
+                  );
+                  if (pickedIdx >= 0) {
+                    targetIdx = pickedIdx + modulesAhead;
+                  }
+                } else {
+                  // No module picked: derive from current + offset
+                  const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+                  if (!("skip" in weekResolution)) {
+                    const rawWeek = weekResolution.rawWeek;
+                    targetIdx = rawWeek - 1 + modulesAhead;
+                  }
+                }
+                if (
+                  targetIdx !== null &&
+                  targetIdx >= 0 &&
+                  targetIdx < content.modules.length
+                ) {
+                  const mod = content.modules[targetIdx];
+                  effectiveModuleIdRaw = liveModuleValue(String(mod.id), mod.name);
+                }
+              }
+            } catch {
+              // Fall back to using original moduleIdRaw or empty (will use tile.topics)
+            }
+          }
+        }
+
         const { moduleName, materialsText, notes, materialsSource } =
-          await gatherModuleMaterials(tile, moduleIdRaw, helpers, onProgress);
+          await gatherModuleMaterials(tile, effectiveModuleIdRaw, helpers, onProgress);
 
         onProgress(`Generating lecture for ${tile.name}...`);
         const r = await generateLectureFromMaterialsAction(
@@ -5091,6 +5190,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Bind a deck generated earlier in this workflow (Generate slides -> Deck or Slides JSON, or Extract slides -> Slides). Its text grounds the questions the same way an uploaded deck does.",
       },
+      {
+        key: "modulesAhead",
+        label: "Modules ahead",
+        type: "moduleOffset",
+        required: false,
+        help: "How many modules past the current one to target. 0 or blank = the current module.",
+      },
     ],
     outputs: [
       { key: "qaText", label: "Q&A", type: "longtext" },
@@ -5108,8 +5214,55 @@ export const STEP_REGISTRY: StepDefinition[] = [
       }
 
       const moduleIdRaw = String(values.moduleId ?? "").trim();
+      const modulesAhead = resolveModulesAhead(values);
+
+      // Apply module offset: when no module is picked, derive from current+N;
+      // when a module is picked, apply offset relative to that module's position.
+      let effectiveModuleIdRaw = moduleIdRaw;
+      if (modulesAhead > 0) {
+        const canvasUrl = (tile.canvasUrl ?? "").trim();
+        if (canvasUrl) {
+          try {
+            const content = await listCourseContentAction(
+              canvasUrl,
+              helpers.activeInstitution || undefined
+            );
+            if (!("error" in content)) {
+              let targetIdx: number | null = null;
+              if (moduleIdRaw) {
+                // Explicit module picked: find its index and offset from there
+                const pickedModuleId = moduleIdRaw.split("|")[0];
+                const pickedIdx = content.modules.findIndex(
+                  (m) => String(m.id) === pickedModuleId
+                );
+                if (pickedIdx >= 0) {
+                  targetIdx = pickedIdx + modulesAhead;
+                }
+              } else {
+                // No module picked: derive from current + offset
+                const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+                if (!("skip" in weekResolution)) {
+                  const rawWeek = weekResolution.rawWeek;
+                  targetIdx = rawWeek - 1 + modulesAhead;
+                }
+              }
+              if (
+                targetIdx !== null &&
+                targetIdx >= 0 &&
+                targetIdx < content.modules.length
+              ) {
+                const mod = content.modules[targetIdx];
+                effectiveModuleIdRaw = liveModuleValue(String(mod.id), mod.name);
+              }
+            }
+          } catch {
+            // Fall back to using original moduleIdRaw or empty (will use tile.topics)
+          }
+        }
+      }
+
       const { moduleName, materialsText, notes, materialsSource } =
-        await gatherModuleMaterials(tile, moduleIdRaw, helpers, onProgress);
+        await gatherModuleMaterials(tile, effectiveModuleIdRaw, helpers, onProgress);
 
       // Optional slide uploads ride to the server as base64 for text
       // extraction. Server actions cap request bodies at 10 MB, so oversized
@@ -7777,6 +7930,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
       { key: "subject", label: "Subject / topic", type: "text", required: false, help: "Defaults to the picked module or the template name." },
       { key: "concepts", label: "Concepts (one per line)", type: "longtext", required: false, help: "Loop items; defaults to the module's topics when a module is picked." },
       { key: "audience", label: "Audience", type: "text", required: false },
+      {
+        key: "modulesAhead",
+        label: "Modules ahead",
+        type: "moduleOffset",
+        required: false,
+        help: "How many modules past the current one to target. 0 or blank = the current module.",
+      },
     ],
     outputs: [
       { key: "draftId", label: "Draft id", type: "text" },
@@ -7791,6 +7951,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
       const hubCourseId = String(values.hubCourse ?? "").trim();
       const moduleIdRaw = String(values.moduleId ?? "").trim();
+      const modulesAhead = resolveModulesAhead(values);
       let moduleName = "";
       let materials: string | undefined;
       let moduleNotes: string[] = [];
@@ -7799,8 +7960,37 @@ export const STEP_REGISTRY: StepDefinition[] = [
         if ("error" in list) throw new Error(list.error);
         const tile = list.courses.find((c) => c.id === hubCourseId);
         if (tile) {
+          // When no module is explicitly picked and modulesAhead > 0, derive the module
+          let effectiveModuleIdRaw = moduleIdRaw;
+          if (!moduleIdRaw && modulesAhead > 0) {
+            const canvasUrl = (tile.canvasUrl ?? "").trim();
+            if (canvasUrl) {
+              try {
+                const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+                if (!("skip" in weekResolution)) {
+                  const rawWeek = weekResolution.rawWeek;
+                  const effectiveWeek = rawWeek + modulesAhead;
+                  const content = await listCourseContentAction(
+                    canvasUrl,
+                    helpers.activeInstitution || undefined
+                  );
+                  if (!("error" in content)) {
+                    // Try to find module at effectiveWeek position (position is 1-based)
+                    const idx = effectiveWeek - 1;
+                    if (idx >= 0 && idx < content.modules.length) {
+                      const mod = content.modules[idx];
+                      effectiveModuleIdRaw = liveModuleValue(String(mod.id), mod.name);
+                    }
+                  }
+                }
+              } catch {
+                // Fall back to using empty moduleIdRaw (will use tile.topics)
+              }
+            }
+          }
+
           onProgress("Gathering module materials...");
-          const g = await gatherModuleMaterials(tile, moduleIdRaw, helpers, onProgress);
+          const g = await gatherModuleMaterials(tile, effectiveModuleIdRaw, helpers, onProgress);
           moduleName = g.moduleName;
           materials = g.materialsText || undefined;
           moduleNotes = g.notes;
@@ -8604,6 +8794,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Optional source material to draw on.",
       },
+      {
+        key: "modulesAhead",
+        label: "Modules ahead",
+        type: "moduleOffset",
+        required: false,
+        help: "How many modules past the current one to target. 0 or blank = the current module.",
+      },
     ],
     outputs: [
       { key: "intro", label: "Module intro", type: "longtext" },
@@ -8642,6 +8839,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
       },
       { key: "objectives", label: "Module objectives", type: "longtext", required: false, courseDerived: true },
       { key: "context", label: "Context", type: "longtext", required: false, help: "Optional source material." },
+      {
+        key: "modulesAhead",
+        label: "Modules ahead",
+        type: "moduleOffset",
+        required: false,
+        help: "How many modules past the current one to target. 0 or blank = the current module.",
+      },
     ],
     outputs: [
       { key: "lessonPlan", label: "Lesson plan", type: "longtext" },
@@ -8712,6 +8916,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Attach a .pptx deck to ground the examples in your slides.",
         accept: ".pptx",
+      },
+      {
+        key: "modulesAhead",
+        label: "Modules ahead",
+        type: "moduleOffset",
+        required: false,
+        help: "How many modules past the current one to target. 0 or blank = the current module.",
       },
     ],
     outputs: [
@@ -9135,7 +9346,14 @@ export const STEP_REGISTRY: StepDefinition[] = [
       },
       { key: "topic", label: "Topic", type: "text", required: false, courseDerived: true },
       { key: "objectives", label: "Objectives", type: "longtext", required: false, courseDerived: true },
-      { key: "minutes", label: "Target minutes", type: "number", required: false, help: "Default 50." }
+      { key: "minutes", label: "Target minutes", type: "number", required: false, help: "Default 50." },
+      {
+        key: "modulesAhead",
+        label: "Modules ahead",
+        type: "moduleOffset",
+        required: false,
+        help: "How many modules past the current one to target. 0 or blank = the current module.",
+      },
     ],
     outputs: [
       { key: "script", label: "Lecture script", type: "longtext" }
@@ -9442,6 +9660,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
       },
       { key: "objectives", label: "Module objectives", type: "longtext", required: false, courseDerived: true },
       { key: "context", label: "Context", type: "longtext", required: false, help: "Optional source material." },
+      {
+        key: "modulesAhead",
+        label: "Modules ahead",
+        type: "moduleOffset",
+        required: false,
+        help: "How many modules past the current one to target. 0 or blank = the current module.",
+      },
     ],
     outputs: [
       { key: "assignment", label: "Assignment", type: "longtext" },
@@ -10167,6 +10392,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Also pull the week's materials from these repos (owner/name or a github.com URL), one per line.",
       },
+      {
+        key: "modulesAhead",
+        label: "Modules ahead",
+        type: "moduleOffset",
+        required: false,
+        help: "How many modules past the current one to target. 0 or blank = the current module.",
+      },
     ],
     outputs: [
       { key: "materials", label: "Materials", type: "longtext" },
@@ -10187,6 +10419,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
       if (!tile) throw new Error("Course tile not found.");
 
       // Step 2: Resolve the week.
+      // Precedence: explicit week > modulesAhead > current
       const boundWeek = Number(values.week);
       let rawWeek: number;
       if (Number.isFinite(boundWeek) && boundWeek > 0) {
@@ -10199,6 +10432,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
           );
         }
         rawWeek = weekResolution.rawWeek;
+        // Apply modulesAhead only if week is not bound
+        const modulesAhead = resolveModulesAhead(values);
+        rawWeek = rawWeek + modulesAhead;
       }
       const status = courseProgressStatus(rawWeek, tile.weeks);
       const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
@@ -10479,6 +10715,13 @@ export const STEP_REGISTRY: StepDefinition[] = [
         required: false,
         help: "Default 6, max 10.",
       },
+      {
+        key: "modulesAhead",
+        label: "Modules ahead",
+        type: "moduleOffset",
+        required: false,
+        help: "How many modules past the current one to target. 0 or blank = the current module.",
+      },
     ],
     outputs: [
       { key: "answers", label: "Answer key", type: "longtext" },
@@ -10598,8 +10841,8 @@ export const STEP_REGISTRY: StepDefinition[] = [
             };
           }
 
-          const currentWeek = weekResolution.rawWeek;
-          const status = courseProgressStatus(currentWeek, tile.weeks);
+          const rawWeek = weekResolution.rawWeek;
+          const status = courseProgressStatus(rawWeek, tile.weeks);
           if (status === "not-started" || status === "complete") {
             return {
               outputs: { answers: "", report: "", generated: 0, hasGenerated: "" },
@@ -10610,17 +10853,24 @@ export const STEP_REGISTRY: StepDefinition[] = [
             };
           }
 
-          // Fetch modules and find the current one
+          // Apply modulesAhead offset
+          const modulesAhead = resolveModulesAhead(values);
+          let effectiveWeek = rawWeek + modulesAhead;
+          if (tile.weeks && tile.weeks > 0) {
+            effectiveWeek = Math.min(effectiveWeek, tile.weeks);
+          }
+
+          // Fetch modules and find the target module
           onProgress("Loading modules...");
           const content = await listCourseContentAction(canvasUrl, inst);
           if ("error" in content) {
             throw new Error(content.error);
           }
 
-          // Find the module matching the current week by iterating through modules
+          // Find the module matching the target week by iterating through modules
           let foundByWeek: CanvasModule | null = null;
           for (const mod of content.modules) {
-            if (parseWeekToken(mod.name) === currentWeek) {
+            if (parseWeekToken(mod.name) === effectiveWeek) {
               foundByWeek = mod;
               break;
             }

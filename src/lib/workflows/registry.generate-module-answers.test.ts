@@ -22,7 +22,7 @@ describe("generate-module-answers step", () => {
     expect(hubCourseInput!.required).toBe(true);
   });
 
-  it("has optional inputs: moduleId and maxItems", () => {
+  it("has optional inputs: moduleId, maxItems, and modulesAhead", () => {
     const moduleIdInput = def!.inputs.find((i) => i.key === "moduleId");
     expect(moduleIdInput, "moduleId input exists").toBeTruthy();
     expect(moduleIdInput!.type).toBe("lmsModule");
@@ -32,6 +32,11 @@ describe("generate-module-answers step", () => {
     expect(maxItemsInput, "maxItems input exists").toBeTruthy();
     expect(maxItemsInput!.type).toBe("number");
     expect(maxItemsInput!.required).toBe(false);
+
+    const modulesAheadInput = def!.inputs.find((i) => i.key === "modulesAhead");
+    expect(modulesAheadInput, "modulesAhead input exists").toBeTruthy();
+    expect(modulesAheadInput!.type).toBe("moduleOffset");
+    expect(modulesAheadInput!.required).toBe(false);
   });
 
   it("has correct outputs: answers, report, generated, hasGenerated", () => {
@@ -56,7 +61,7 @@ describe("generate-module-answers step", () => {
     expect(def!.outputs.length).toBe(4);
   });
 
-  it("has exactly 3 inputs", () => {
-    expect(def!.inputs.length).toBe(3);
+  it("has exactly 4 inputs", () => {
+    expect(def!.inputs.length).toBe(4);
   });
 });

@@ -2705,6 +2705,27 @@ export default function WorkflowsTab() {
                     )}
                   </div>
                 );
+              } else if (field.type === "moduleOffset") {
+                return (
+                  <div key={field.fieldKey} className={styles.field}>
+                    <label>{field.label}</label>
+                    <TextField
+                      type="number"
+                      placeholder="0"
+                      value={value}
+                      onChange={(e) =>
+                        handleValueChange(field.fieldKey, e.target.value)
+                      }
+                      size="small"
+                      slotProps={{ htmlInput: { min: 0 } }}
+                    />
+                    {field.help && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {field.help}
+                      </p>
+                    )}
+                  </div>
+                );
               } else if (field.type === "date") {
                 return (
                   <div key={field.fieldKey} className={styles.field}>

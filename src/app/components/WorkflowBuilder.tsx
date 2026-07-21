@@ -1463,6 +1463,26 @@ function LiteralEditor({
       </div>
     );
   }
+  if (type === "moduleOffset") {
+    return (
+      <TextField
+        type="number"
+        size="small"
+        placeholder="0"
+        value={value}
+        onChange={(e) => {
+          const val = e.target.value;
+          if (!val || parseInt(val, 10) < 0) {
+            onChange("");
+          } else {
+            onChange(String(parseInt(val, 10)));
+          }
+        }}
+        slotProps={{ htmlInput: { min: 0 } }}
+        sx={sx}
+      />
+    );
+  }
   // lmsCourse / lmsCourseList / text / longtext / number: the builder has no
   // live-course list (that needs an institution + fetch), so a field is used.
   // Only the SCOPEABLE list type accepts "*" (all); a singular lmsCourse does

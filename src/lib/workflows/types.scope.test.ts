@@ -23,6 +23,9 @@ describe("scopeFamilyForType", () => {
   it("maps lookahead to its own family", () => {
     expect(scopeFamilyForType("lookahead")).toBe("lookahead");
   });
+  it("maps moduleOffset to its own family", () => {
+    expect(scopeFamilyForType("moduleOffset")).toBe("moduleOffset");
+  });
   it("returns null for non-entity, non-scalar types", () => {
     expect(scopeFamilyForType("text")).toBeNull();
     expect(scopeFamilyForType("number")).toBeNull();
@@ -62,6 +65,14 @@ describe("scopeCoversType", () => {
     expect(scopeCoversType({ lookahead: "" }, "lookahead")).toBe(false);
     expect(scopeCoversType({}, "lookahead")).toBe(false);
     expect(scopeCoversType(undefined, "lookahead")).toBe(false);
+  });
+
+  it("covers a moduleOffset input when the scope sets moduleOffset", () => {
+    expect(scopeCoversType({ moduleOffset: "1" }, "moduleOffset")).toBe(true);
+    expect(scopeCoversType({ moduleOffset: "3" }, "moduleOffset")).toBe(true);
+    expect(scopeCoversType({ moduleOffset: "" }, "moduleOffset")).toBe(false);
+    expect(scopeCoversType({}, "moduleOffset")).toBe(false);
+    expect(scopeCoversType(undefined, "moduleOffset")).toBe(false);
   });
 });
 
@@ -354,6 +365,41 @@ describe("collectRuntimeFields with lookahead scope", () => {
   });
 });
 
+describe("collectRuntimeFields with moduleOffset scope", () => {
+  const inputs: Record<string, StepInputSpec[]> = {
+    modulesTask: [
+      { key: "modulesAhead", label: "Modules ahead", type: "moduleOffset", required: false },
+      { key: "topic", label: "Topic", type: "text", required: true },
+    ],
+  };
+  const lookup = (type: string) => inputs[type];
+  const def: WorkflowDef = {
+    id: "w",
+    name: "W",
+    description: "",
+    steps: [
+      {
+        type: "modulesTask",
+        bindings: {
+          modulesAhead: { source: "runtime", fieldKey: "modulesAhead" },
+          topic: { source: "runtime", fieldKey: "topic" },
+        },
+      },
+    ],
+  };
+
+  it("hides the moduleOffset field when the scope sets it", () => {
+    const scoped: WorkflowDef = { ...def, scope: { moduleOffset: "2" } };
+    const fields = collectRuntimeFields(scoped, lookup);
+    expect(fields.map((f) => f.fieldKey)).toEqual(["topic"]);
+  });
+
+  it("asks for the moduleOffset field when the scope does not set it", () => {
+    const fields = collectRuntimeFields(def, lookup);
+    expect(fields.map((f) => f.fieldKey).sort()).toEqual(["modulesAhead", "topic"]);
+  });
+});
+
 describe("applyWorkflowScope with lookahead", () => {
   it("returns the scope lookahead value when run form is empty", () => {
     expect(applyWorkflowScope("lookahead", "", { lookahead: "14" })).toBe("14");
@@ -367,6 +413,22 @@ describe("applyWorkflowScope with lookahead", () => {
   it("rejects '*' in lookahead scope (not a valid days value) and falls back to run value", () => {
     expect(applyWorkflowScope("lookahead", "", { lookahead: "*" })).toBe("");
     expect(applyWorkflowScope("lookahead", "7", { lookahead: "*" })).toBe("7");
+  });
+});
+
+describe("applyWorkflowScope with moduleOffset", () => {
+  it("returns the scope moduleOffset value when run form is empty", () => {
+    expect(applyWorkflowScope("moduleOffset", "", { moduleOffset: "2" })).toBe("2");
+    expect(applyWorkflowScope("moduleOffset", "", { moduleOffset: "1" })).toBe("1");
+  });
+
+  it("returns the run-form value when non-empty (a per-run override)", () => {
+    expect(applyWorkflowScope("moduleOffset", "3", { moduleOffset: "2" })).toBe("3");
+  });
+
+  it("rejects '*' in moduleOffset scope (not a valid modules value) and falls back to run value", () => {
+    expect(applyWorkflowScope("moduleOffset", "", { moduleOffset: "*" })).toBe("");
+    expect(applyWorkflowScope("moduleOffset", "1", { moduleOffset: "*" })).toBe("1");
   });
 });
 
@@ -385,6 +447,22 @@ describe("describeWorkflowScope with lookahead", () => {
   });
 });
 
+describe("describeWorkflowScope with moduleOffset", () => {
+  it("includes a moduleOffset summary in the scope description", () => {
+    expect(describeWorkflowScope({ moduleOffset: "2" })).toBe("2 module(s) ahead");
+    expect(describeWorkflowScope({ moduleOffset: "1" })).toBe("1 module(s) ahead");
+    expect(describeWorkflowScope({ institution: "MCC", moduleOffset: "2" })).toBe(
+      "institution MCC, 2 module(s) ahead"
+    );
+  });
+
+  it("ignores zero or invalid moduleOffset values", () => {
+    expect(describeWorkflowScope({ moduleOffset: "0" })).toBe("");
+    expect(describeWorkflowScope({ moduleOffset: "not-a-number" })).toBe("");
+    expect(describeWorkflowScope({ moduleOffset: "  " })).toBe("");
+  });
+});
+
 describe("describeScopeForType with lookahead", () => {
   it("returns the days ahead for a lookahead type", () => {
     expect(describeScopeForType({ lookahead: "14" }, "lookahead")).toBe("14 day(s) ahead");
@@ -394,6 +472,23 @@ describe("describeScopeForType with lookahead", () => {
   it("returns empty when lookahead scope is not set", () => {
     expect(describeScopeForType(undefined, "lookahead")).toBe("");
     expect(describeScopeForType({}, "lookahead")).toBe("");
+  });
+
+  it("still handles entity types correctly", () => {
+    expect(describeScopeForType({ hubCourse: "a\nb" }, "hubCourseList")).toBe("2 course tile(s)");
+    expect(describeScopeForType({ org: "*" }, "orgList")).toBe("all organizations");
+  });
+});
+
+describe("describeScopeForType with moduleOffset", () => {
+  it("returns the modules ahead for a moduleOffset type", () => {
+    expect(describeScopeForType({ moduleOffset: "2" }, "moduleOffset")).toBe("2 module(s) ahead");
+    expect(describeScopeForType({ moduleOffset: "1" }, "moduleOffset")).toBe("1 module(s) ahead");
+  });
+
+  it("returns empty when moduleOffset scope is not set", () => {
+    expect(describeScopeForType(undefined, "moduleOffset")).toBe("");
+    expect(describeScopeForType({}, "moduleOffset")).toBe("");
   });
 
   it("still handles entity types correctly", () => {

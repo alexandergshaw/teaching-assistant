@@ -129,6 +129,51 @@ describe("runWorkflowUnattended", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("fills an UNBOUND input from the workflow scope when the scope covers its family", async () => {
+    // A workflow authored before the step gained the input has no binding for
+    // it; a scope-level target (e.g. Modules ahead) must still reach the step.
+    let captured: Record<string, unknown> = {};
+    const defs: Record<string, StepDefinition> = {
+      moduleStep: {
+        type: "moduleStep",
+        name: "Module step",
+        description: "",
+        inputs: [
+          { key: "topic", label: "Topic", type: "text", required: false },
+          { key: "modulesAhead", label: "Modules ahead", type: "moduleOffset", required: false },
+        ],
+        outputs: [],
+        run: async (values) => {
+          captured = values;
+          return { outputs: {}, summary: { kind: "text", text: "" } };
+        },
+      },
+    };
+    const def: WorkflowDef = {
+      id: "t",
+      name: "t",
+      description: "",
+      // NO binding for modulesAhead (and none for topic either).
+      steps: [{ type: "moduleStep", bindings: {} }],
+      scope: { moduleOffset: "2" },
+    };
+
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+    });
+
+    expect(result.ok).toBe(true);
+    // Scope-covered family fills the unbound input; an uncovered unbound
+    // input (topic - no text family) stays unresolved.
+    expect(captured.modulesAhead).toBe("2");
+    expect(captured.topic).toBeUndefined();
+  });
+
   it("cascade-skips a step that depends on a disabled step, but still runs an independent later step", async () => {
     const defs: Record<string, StepDefinition> = {
       a: {

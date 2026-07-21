@@ -344,6 +344,7 @@ export const PREPARE_LECTURE: WorkflowDef = {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         moduleId: { source: "runtime", fieldKey: "lmsModule" },
         template: { source: "runtime", fieldKey: "deckTemplate" },
+        modulesAhead: { source: "runtime", fieldKey: "modulesAhead" },
       },
     },
     {
@@ -370,6 +371,7 @@ export const LECTURE_QA: WorkflowDef = {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         moduleId: { source: "runtime", fieldKey: "lmsModule" },
         slides: { source: "runtime", fieldKey: "slides" },
+        modulesAhead: { source: "runtime", fieldKey: "modulesAhead" },
       },
     },
   ],
@@ -865,7 +867,12 @@ export const WEEKLY_LECTURE_DECK: WorkflowDef = {
   steps: [
     {
       type: "course-progress",
-      bindings: { hubCourse: { source: "runtime", fieldKey: "hubCourse" } },
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        // Shares one Modules ahead field with the deck step so the detected
+        // module name (the deck's subject) and the deck content shift together.
+        modulesAhead: { source: "runtime", fieldKey: "modulesAhead" },
+      },
     },
     {
       type: "generate-presentation-from-template",
@@ -880,6 +887,7 @@ export const WEEKLY_LECTURE_DECK: WorkflowDef = {
         moduleId: { source: "runtime", fieldKey: "moduleId" },
         concepts: { source: "runtime", fieldKey: "concepts" },
         audience: { source: "runtime", fieldKey: "audience" },
+        modulesAhead: { source: "runtime", fieldKey: "modulesAhead" },
       },
     },
   ],
@@ -1603,6 +1611,7 @@ export const MODULE_HOMEWORK_ANSWERS: WorkflowDef = {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         moduleId: { source: "runtime", fieldKey: "lmsModule" },
         maxItems: { source: "literal", value: "6" },
+        modulesAhead: { source: "runtime", fieldKey: "modulesAhead" },
       },
     },
   ],

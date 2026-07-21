@@ -163,7 +163,16 @@ async function runExpandedBodyOnce(opts: {
       const resolvedInputs: Record<string, unknown> = {};
       for (const spec of stepDef.inputs) {
         const binding = step.bindings[spec.key];
-        if (!binding) continue;
+        if (!binding) {
+          // An input with NO binding (a workflow authored before the step
+          // gained this input) is still filled by the workflow scope when the
+          // scope covers its family - otherwise a scope-level target (e.g.
+          // "Modules ahead") silently never reaches preset steps.
+          if (scopeCoversType(def.scope, spec.type)) {
+            resolvedInputs[spec.key] = applyWorkflowScope(spec.type, "", def.scope);
+          }
+          continue;
+        }
 
         if (binding.source === "runtime") {
           // Uploads are never snapshotted into a schedule (see

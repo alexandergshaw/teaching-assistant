@@ -1668,7 +1668,15 @@ export default function WorkflowsTab() {
         const resolvedInputs: Record<string, unknown> = {};
         for (const spec of def.inputs) {
           const binding = step.bindings[spec.key];
-          if (!binding) continue;
+          if (!binding) {
+            // An input with NO binding (a workflow authored before the step
+            // gained this input) is still filled by the workflow scope when
+            // the scope covers its family - mirroring the server runner.
+            if (scopeCoversType(groupScope, spec.type)) {
+              resolvedInputs[spec.key] = applyWorkflowScope(spec.type, "", groupScope);
+            }
+            continue;
+          }
 
           if (binding.source === "runtime") {
             const field = runtimeFields.find((f) => f.fieldKey === binding.fieldKey);

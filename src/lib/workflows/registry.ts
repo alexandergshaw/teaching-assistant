@@ -4824,40 +4824,57 @@ export const STEP_REGISTRY: StepDefinition[] = [
         // Apply module offset: when no module is picked, derive from current+N;
         // when a module is picked, apply offset relative to that module's position.
         let effectiveModuleIdRaw = moduleIdRaw;
+        const offsetNotes: string[] = [];
         if (modulesAhead > 0) {
           const canvasUrl = (tile.canvasUrl ?? "").trim();
           if (canvasUrl) {
             try {
-              const content = await listCourseContentAction(
-                canvasUrl,
-                helpers.activeInstitution || undefined
-              );
-              if (!("error" in content)) {
-                let targetIdx: number | null = null;
-                if (moduleIdRaw) {
-                  // Explicit module picked: find its index and offset from there
-                  const pickedModuleId = moduleIdRaw.split("|")[0];
+              const picked = parseLmsModuleValue(moduleIdRaw);
+              if (picked.fromExport) {
+                // Export modules: offset not supported
+                offsetNotes.push("modules-ahead is not supported for export-sourced modules");
+              } else if (moduleIdRaw) {
+                // Explicit live module picked: find its index and offset from there
+                const content = await listCourseContentAction(
+                  canvasUrl,
+                  helpers.activeInstitution || undefined
+                );
+                if (!("error" in content)) {
+                  let targetIdx: number | null = null;
                   const pickedIdx = content.modules.findIndex(
-                    (m) => String(m.id) === pickedModuleId
+                    (m) => String(m.id) === picked.liveId
                   );
                   if (pickedIdx >= 0) {
-                    targetIdx = pickedIdx + modulesAhead;
+                    targetIdx = Math.min(
+                      pickedIdx + modulesAhead,
+                      content.modules.length - 1
+                    );
                   }
-                } else {
-                  // No module picked: derive from current + offset
+                  if (targetIdx !== null && targetIdx >= 0) {
+                    const mod = content.modules[targetIdx];
+                    effectiveModuleIdRaw = liveModuleValue(String(mod.id), mod.name);
+                  }
+                }
+              } else {
+                // No module picked: derive from current + offset
+                const content = await listCourseContentAction(
+                  canvasUrl,
+                  helpers.activeInstitution || undefined
+                );
+                if (!("error" in content)) {
+                  let targetIdx: number | null = null;
                   const weekResolution = await resolveTileCurrentWeek(tile, helpers);
                   if (!("skip" in weekResolution)) {
                     const rawWeek = weekResolution.rawWeek;
-                    targetIdx = rawWeek - 1 + modulesAhead;
+                    targetIdx = Math.min(
+                      rawWeek - 1 + modulesAhead,
+                      content.modules.length - 1
+                    );
                   }
-                }
-                if (
-                  targetIdx !== null &&
-                  targetIdx >= 0 &&
-                  targetIdx < content.modules.length
-                ) {
-                  const mod = content.modules[targetIdx];
-                  effectiveModuleIdRaw = liveModuleValue(String(mod.id), mod.name);
+                  if (targetIdx !== null && targetIdx >= 0) {
+                    const mod = content.modules[targetIdx];
+                    effectiveModuleIdRaw = liveModuleValue(String(mod.id), mod.name);
+                  }
                 }
               }
             } catch {
@@ -4868,6 +4885,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
 
         const { moduleName, materialsText, notes, materialsSource } =
           await gatherModuleMaterials(tile, effectiveModuleIdRaw, helpers, onProgress);
+
+        // Combine offset notes with materials gathering notes
+        const allNotes = [...offsetNotes, ...notes];
 
         onProgress(`Generating lecture for ${tile.name}...`);
         const r = await generateLectureFromMaterialsAction(
@@ -4924,10 +4944,10 @@ export const STEP_REGISTRY: StepDefinition[] = [
               workflowRunId: helpers.workflowRunId,
             });
             if ("error" in lib) {
-              notes.push(`library save skipped: ${lib.error}`);
+              allNotes.push(`library save skipped: ${lib.error}`);
             }
           } catch (err) {
-            notes.push(
+            allNotes.push(
               `saving to the course tile failed: ${
                 err instanceof Error ? err.message : String(err)
               }`
@@ -4942,7 +4962,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           fileName,
           materialsText,
           materialsSource,
-          notes,
+          notes: allNotes,
         };
       };
 
@@ -5219,40 +5239,57 @@ export const STEP_REGISTRY: StepDefinition[] = [
       // Apply module offset: when no module is picked, derive from current+N;
       // when a module is picked, apply offset relative to that module's position.
       let effectiveModuleIdRaw = moduleIdRaw;
+      const offsetNotes: string[] = [];
       if (modulesAhead > 0) {
         const canvasUrl = (tile.canvasUrl ?? "").trim();
         if (canvasUrl) {
           try {
-            const content = await listCourseContentAction(
-              canvasUrl,
-              helpers.activeInstitution || undefined
-            );
-            if (!("error" in content)) {
-              let targetIdx: number | null = null;
-              if (moduleIdRaw) {
-                // Explicit module picked: find its index and offset from there
-                const pickedModuleId = moduleIdRaw.split("|")[0];
+            const picked = parseLmsModuleValue(moduleIdRaw);
+            if (picked.fromExport) {
+              // Export modules: offset not supported
+              offsetNotes.push("modules-ahead is not supported for export-sourced modules");
+            } else if (moduleIdRaw) {
+              // Explicit live module picked: find its index and offset from there
+              const content = await listCourseContentAction(
+                canvasUrl,
+                helpers.activeInstitution || undefined
+              );
+              if (!("error" in content)) {
+                let targetIdx: number | null = null;
                 const pickedIdx = content.modules.findIndex(
-                  (m) => String(m.id) === pickedModuleId
+                  (m) => String(m.id) === picked.liveId
                 );
                 if (pickedIdx >= 0) {
-                  targetIdx = pickedIdx + modulesAhead;
+                  targetIdx = Math.min(
+                    pickedIdx + modulesAhead,
+                    content.modules.length - 1
+                  );
                 }
-              } else {
-                // No module picked: derive from current + offset
+                if (targetIdx !== null && targetIdx >= 0) {
+                  const mod = content.modules[targetIdx];
+                  effectiveModuleIdRaw = liveModuleValue(String(mod.id), mod.name);
+                }
+              }
+            } else {
+              // No module picked: derive from current + offset
+              const content = await listCourseContentAction(
+                canvasUrl,
+                helpers.activeInstitution || undefined
+              );
+              if (!("error" in content)) {
+                let targetIdx: number | null = null;
                 const weekResolution = await resolveTileCurrentWeek(tile, helpers);
                 if (!("skip" in weekResolution)) {
                   const rawWeek = weekResolution.rawWeek;
-                  targetIdx = rawWeek - 1 + modulesAhead;
+                  targetIdx = Math.min(
+                    rawWeek - 1 + modulesAhead,
+                    content.modules.length - 1
+                  );
                 }
-              }
-              if (
-                targetIdx !== null &&
-                targetIdx >= 0 &&
-                targetIdx < content.modules.length
-              ) {
-                const mod = content.modules[targetIdx];
-                effectiveModuleIdRaw = liveModuleValue(String(mod.id), mod.name);
+                if (targetIdx !== null && targetIdx >= 0) {
+                  const mod = content.modules[targetIdx];
+                  effectiveModuleIdRaw = liveModuleValue(String(mod.id), mod.name);
+                }
               }
             }
           } catch {
@@ -5264,6 +5301,9 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const { moduleName, materialsText, notes, materialsSource } =
         await gatherModuleMaterials(tile, effectiveModuleIdRaw, helpers, onProgress);
 
+      // Combine offset notes with materials gathering notes
+      const allNotes = [...offsetNotes, ...notes];
+
       // Optional slide uploads ride to the server as base64 for text
       // extraction. Server actions cap request bodies at 10 MB, so oversized
       // or extra files are skipped with a note instead of failing the run.
@@ -5271,14 +5311,14 @@ export const STEP_REGISTRY: StepDefinition[] = [
       const MAX_SLIDE_FILES = 3;
       const MAX_SLIDE_BYTES = 6 * 1024 * 1024;
       if (uploads.length > MAX_SLIDE_FILES) {
-        notes.push(
+        allNotes.push(
           `only the first ${MAX_SLIDE_FILES} slide files are used (${uploads.length} attached)`
         );
       }
       const slideFiles: Array<{ name: string; base64: string }> = [];
       for (const file of uploads.slice(0, MAX_SLIDE_FILES)) {
         if (file.size > MAX_SLIDE_BYTES) {
-          notes.push(`${file.name}: too large (max ~6 MB) - skipped`);
+          allNotes.push(`${file.name}: too large (max ~6 MB) - skipped`);
           continue;
         }
         try {
@@ -5291,7 +5331,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           }
           slideFiles.push({ name: file.name, base64: btoa(binary) });
         } catch (err) {
-          notes.push(
+          allNotes.push(
             `${file.name}: ${err instanceof Error ? err.message : "could not read"}`
           );
         }
@@ -5371,10 +5411,10 @@ export const STEP_REGISTRY: StepDefinition[] = [
             workflowRunId: helpers.workflowRunId,
           });
           if ("error" in lib) {
-            notes.push(`library save skipped: ${lib.error}`);
+            allNotes.push(`library save skipped: ${lib.error}`);
           }
         } catch (err) {
-          notes.push(
+          allNotes.push(
             `saving to the course tile failed: ${
               err instanceof Error ? err.message : String(err)
             }`
@@ -5393,7 +5433,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
             ...(slideFiles.length > 0
               ? [`slides included: ${slideFiles.map((f) => f.name).join(", ")}`]
               : []),
-            ...notes,
+            ...allNotes,
           ],
         },
       };
@@ -7955,36 +7995,69 @@ export const STEP_REGISTRY: StepDefinition[] = [
       let moduleName = "";
       let materials: string | undefined;
       let moduleNotes: string[] = [];
+      const offsetNotes: string[] = [];
       if (hubCourseId) {
         const list = await listCourseHubAction();
         if ("error" in list) throw new Error(list.error);
         const tile = list.courses.find((c) => c.id === hubCourseId);
         if (tile) {
-          // When no module is explicitly picked and modulesAhead > 0, derive the module
+          // Apply module offset: when a module is picked, apply offset relative to that
+          // module's position; when no module is picked, derive from current+N.
           let effectiveModuleIdRaw = moduleIdRaw;
-          if (!moduleIdRaw && modulesAhead > 0) {
+          if (modulesAhead > 0) {
             const canvasUrl = (tile.canvasUrl ?? "").trim();
             if (canvasUrl) {
               try {
-                const weekResolution = await resolveTileCurrentWeek(tile, helpers);
-                if (!("skip" in weekResolution)) {
-                  const rawWeek = weekResolution.rawWeek;
-                  const effectiveWeek = rawWeek + modulesAhead;
+                const picked = parseLmsModuleValue(moduleIdRaw);
+                if (picked.fromExport) {
+                  // Export modules: offset not supported
+                  offsetNotes.push("modules-ahead is not supported for export-sourced modules");
+                } else if (moduleIdRaw) {
+                  // Explicit live module picked: find its index and offset from there
                   const content = await listCourseContentAction(
                     canvasUrl,
                     helpers.activeInstitution || undefined
                   );
                   if (!("error" in content)) {
-                    // Try to find module at effectiveWeek position (position is 1-based)
-                    const idx = effectiveWeek - 1;
-                    if (idx >= 0 && idx < content.modules.length) {
-                      const mod = content.modules[idx];
+                    let targetIdx: number | null = null;
+                    const pickedIdx = content.modules.findIndex(
+                      (m) => String(m.id) === picked.liveId
+                    );
+                    if (pickedIdx >= 0) {
+                      targetIdx = Math.min(
+                        pickedIdx + modulesAhead,
+                        content.modules.length - 1
+                      );
+                    }
+                    if (targetIdx !== null && targetIdx >= 0) {
+                      const mod = content.modules[targetIdx];
+                      effectiveModuleIdRaw = liveModuleValue(String(mod.id), mod.name);
+                    }
+                  }
+                } else {
+                  // No module picked: derive from current + offset
+                  const content = await listCourseContentAction(
+                    canvasUrl,
+                    helpers.activeInstitution || undefined
+                  );
+                  if (!("error" in content)) {
+                    let targetIdx: number | null = null;
+                    const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+                    if (!("skip" in weekResolution)) {
+                      const rawWeek = weekResolution.rawWeek;
+                      targetIdx = Math.min(
+                        rawWeek - 1 + modulesAhead,
+                        content.modules.length - 1
+                      );
+                    }
+                    if (targetIdx !== null && targetIdx >= 0) {
+                      const mod = content.modules[targetIdx];
                       effectiveModuleIdRaw = liveModuleValue(String(mod.id), mod.name);
                     }
                   }
                 }
               } catch {
-                // Fall back to using empty moduleIdRaw (will use tile.topics)
+                // Fall back to using original moduleIdRaw or empty (will use tile.topics)
               }
             }
           }
@@ -7993,7 +8066,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
           const g = await gatherModuleMaterials(tile, effectiveModuleIdRaw, helpers, onProgress);
           moduleName = g.moduleName;
           materials = g.materialsText || undefined;
-          moduleNotes = g.notes;
+          moduleNotes = [...moduleNotes, ...g.notes];
         }
       }
       const subject = String(values.subject ?? "").trim() || moduleName || template.name;
@@ -8043,9 +8116,12 @@ export const STEP_REGISTRY: StepDefinition[] = [
       } catch (err) {
         onProgress(`Saved the draft; could not save the .pptx to Files (${err instanceof Error ? err.message : "unknown"}).`);
       }
+      const summaryText = `Generated a ${deck.slides.length}-slide deck from "${template.name}"${moduleName ? ` for ${moduleName}` : ""} and saved it to Drafts > Presentations${savedToFiles ? " and the Files library" : ""}.`;
       return {
         outputs: { draftId: res.id, slideCount: String(deck.slides.length) },
-        summary: { kind: "text", text: `Generated a ${deck.slides.length}-slide deck from "${template.name}"${moduleName ? ` for ${moduleName}` : ""} and saved it to Drafts > Presentations${savedToFiles ? " and the Files library" : ""}.` },
+        summary: offsetNotes.length > 0
+          ? { kind: "list", label: summaryText, items: offsetNotes }
+          : { kind: "text", text: summaryText },
       };
     },
   },

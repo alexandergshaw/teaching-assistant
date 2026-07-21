@@ -23,6 +23,17 @@ export function mapLiveModulesForTopic(
   }));
 }
 
+// Helper to parse week/module number and topic text from a module title.
+// Matches /(?:week|module)\s*(\d+)/i and returns the captured number plus
+// the title text after the match, stripped of leading separators.
+function parseWeekModuleTitle(title: string): { number: number; remainder: string } | null {
+  const m = title.match(/(?:week|module)\s*(\d+)/i);
+  if (!m) return null;
+  const number = Number(m[1]);
+  const remainder = title.slice(m.index! + m[0].length).replace(/^[:|\s\-]+/, "").trim();
+  return { number, remainder };
+}
+
 /**
  * Resolve a week's topic using a four-tier fallback: live LMS modules first,
  * then LMS export modules, then schedule CSV, then topics list. Returns the
@@ -42,16 +53,14 @@ export function resolveWeekTopic(input: {
   let liveMatchedEmptyRemainder = false;
   if (liveModules) {
     for (const mod of liveModules) {
-      const m = mod.title.match(/(?:week|module)\s*(\d+)/i);
-      if (m) {
-        const moduleNum = Number(m[1]);
-        if (moduleNum === week) {
-          // Found matching module - strip prefix and separator
-          const remainder = mod.title.slice(m.index! + m[0].length).replace(/^[:|\s\-]+/, "").trim();
-          if (remainder) {
+      const parsed = parseWeekModuleTitle(mod.title);
+      if (parsed) {
+        if (parsed.number === week) {
+          // Found matching module
+          if (parsed.remainder) {
             // Non-empty remainder - resolve it
             const summary = mod.items.slice(0, 6).map((item) => item.title).join("; ");
-            return { topic: remainder, summary, source: "live" };
+            return { topic: parsed.remainder, summary, source: "live" };
           }
           // Empty remainder - fall through to export
           liveMatchedEmptyRemainder = true;
@@ -65,16 +74,14 @@ export function resolveWeekTopic(input: {
   let matchedEmptyRemainder = false;
   if (modules) {
     for (const mod of modules) {
-      const m = mod.title.match(/(?:week|module)\s*(\d+)/i);
-      if (m) {
-        const moduleNum = Number(m[1]);
-        if (moduleNum === week) {
-          // Found matching module - strip prefix and separator
-          const remainder = mod.title.slice(m.index! + m[0].length).replace(/^[:|\s\-]+/, "").trim();
-          if (remainder) {
+      const parsed = parseWeekModuleTitle(mod.title);
+      if (parsed) {
+        if (parsed.number === week) {
+          // Found matching module
+          if (parsed.remainder) {
             // Non-empty remainder - resolve it
             const summary = mod.items.slice(0, 6).map((item) => item.title).join("; ");
-            return { topic: remainder, summary, source: "export" };
+            return { topic: parsed.remainder, summary, source: "export" };
           }
           // Empty remainder - fall through to CSV
           matchedEmptyRemainder = true;
@@ -110,10 +117,7 @@ export function resolveWeekTopic(input: {
       fragments.push(`module ${week}'s live title has no topic text`);
     } else {
       const foundNumbers = liveModules
-        .map((mod) => {
-          const m = mod.title.match(/(?:week|module)\s*(\d+)/i);
-          return m ? Number(m[1]) : null;
-        })
+        .map((mod) => parseWeekModuleTitle(mod.title)?.number ?? null)
         .filter((n): n is number => n !== null);
       if (foundNumbers.length === 0) {
         fragments.push("live LMS has modules none numbered");
@@ -133,10 +137,7 @@ export function resolveWeekTopic(input: {
       fragments.push(`module ${week}'s title has no topic text`);
     } else {
       const foundNumbers = modules
-        .map((mod) => {
-          const m = mod.title.match(/(?:week|module)\s*(\d+)/i);
-          return m ? Number(m[1]) : null;
-        })
+        .map((mod) => parseWeekModuleTitle(mod.title)?.number ?? null)
         .filter((n): n is number => n !== null);
       if (foundNumbers.length === 0) {
         fragments.push("LMS export has modules none numbered");

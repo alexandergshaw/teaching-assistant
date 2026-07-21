@@ -35,6 +35,7 @@ import {
   listNewCartridgeDropIdsAction,
 } from "@/app/actions";
 import { parseIcsEvents } from "./ics";
+import { parseCanvasCourseId } from "./canvas-url";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -585,11 +586,6 @@ function parseThreshold(raw: string | undefined, fallback: number): number {
 }
 
 /** Canvas course id out of a course URL (".../courses/12345"). */
-function parseCanvasCourseId(url: string): string | null {
-  const m = /courses\/(\d+)/.exec(url);
-  return m ? m[1] : null;
-}
-
 // ---------------------------------------------------------------------------
 // Event source registry
 // ---------------------------------------------------------------------------

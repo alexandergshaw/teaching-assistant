@@ -21,8 +21,8 @@ import {
   createWorkflowSchedule,
   updateWorkflowSchedule,
   deleteWorkflowSchedule,
-  computeNextRunAt,
   describeScheduleCadence,
+  reenableSchedule,
   MIN_INTERVAL_MINUTES,
   type WorkflowSchedule,
   type ScheduleRepeat,
@@ -663,6 +663,16 @@ export default function WorkflowsTab() {
         ? isHeadlessSafeWorkflow(selectedDef, (id) => workflows.find((w) => w.id === id))
         : false,
     [selectedDef, workflows]
+  );
+
+  // Check if a workflow (by id) is headless-safe, for use in conditionally
+  // showing unattended execution checkboxes across multiple render sites.
+  const isWorkflowHeadlessSafeById = useCallback(
+    (id: string) => {
+      const w = workflows.find((wf) => wf.id === id);
+      return w ? isHeadlessSafeWorkflow(w, (depId) => workflows.find((wf) => wf.id === depId)) : false;
+    },
+    [workflows]
   );
 
   // Per-workflow map of enabled automation (schedules and triggers) for use in
@@ -2012,10 +2022,7 @@ export default function WorkflowsTab() {
     if (!user || !scheduleForm) return;
     const editingSchedule = schedules?.find((s) => s.id === scheduleId);
     if (!editingSchedule) return;
-    const editingWorkflow = workflows.find((w) => w.id === editingSchedule.workflowId);
-    const editingIsHeadlessSafe = editingWorkflow
-      ? isHeadlessSafeWorkflow(editingWorkflow, (id) => workflows.find((w) => w.id === id))
-      : false;
+    const editingIsHeadlessSafe = isWorkflowHeadlessSafeById(editingSchedule.workflowId);
     const validation = validateScheduleForm(scheduleForm);
     if (!validation.ok) {
       setScheduleError(validation.error);
@@ -2062,16 +2069,15 @@ export default function WorkflowsTab() {
 
   const handleToggleSchedule = async (s: WorkflowSchedule) => {
     if (!user) return;
-    // Re-enabling a schedule whose time already passed: repeating ones move to
-    // their next future occurrence instead of firing immediately; a one-time
-    // schedule in the past cannot be re-armed.
+    // Re-enabling: use the tested reenableSchedule helper for consistent logic
     let nextRunAt: string | undefined;
-    if (!s.enabled && new Date(s.nextRunAt).getTime() <= Date.now()) {
-      if (s.repeat === "none") {
+    if (!s.enabled) {
+      const rearm = reenableSchedule(s);
+      if (!rearm.ok) {
         setScheduleError("That one-time schedule is in the past - create a new one instead.");
         return;
       }
-      nextRunAt = computeNextRunAt(s.nextRunAt, s.repeat, new Date(), s.intervalMinutes) ?? undefined;
+      nextRunAt = rearm.nextRunAt;
     }
     try {
       await updateWorkflowSchedule(supabase, user.id, s.id, {
@@ -2159,6 +2165,24 @@ export default function WorkflowsTab() {
   // Create an event trigger for the selected workflow from the current form
   // values. Mirrors handleCreateSchedule's snapshot of values/provider/
   // disabledSteps; the event source and its config decide when it fires.
+  // Attempt to register a webhook for repo-push triggers if org is configured.
+  const maybeRegisterRepoPushWebhook = (form: typeof triggerForm) => {
+    if (!form || form.eventType !== "repo-push") return;
+    const hookOrg = (form.config.org ?? "").trim();
+    if (!hookOrg) return;
+    void registerOrgPushWebhookAction(hookOrg)
+      .then((res) => {
+        setWebhookSetup(
+          res.ok
+            ? { ok: true, org: hookOrg, url: res.url, alreadyExisted: res.alreadyExisted }
+            : { ok: false, org: hookOrg, url: res.url, error: res.error }
+        );
+      })
+      .catch(() => {
+        /* best-effort: the ~15-min poller still fires the trigger */
+      });
+  };
+
   const handleCreateTrigger = async () => {
     if (!user || !selectedDef || !triggerForm) return;
     const validation = validateTriggerForm(triggerForm, selectedDef);
@@ -2192,23 +2216,8 @@ export default function WorkflowsTab() {
         webhookToken: triggerForm.eventType === "webhook" ? generateWebhookToken() : null,
       });
       setTriggers((prev) => [created, ...(prev ?? [])]);
+      maybeRegisterRepoPushWebhook(triggerForm);
       setTriggerForm(null);
-      if (triggerForm.eventType === "repo-push") {
-        const hookOrg = (triggerForm.config.org ?? "").trim();
-        if (hookOrg) {
-          void registerOrgPushWebhookAction(hookOrg)
-            .then((res) => {
-              setWebhookSetup(
-                res.ok
-                  ? { ok: true, org: hookOrg, url: res.url, alreadyExisted: res.alreadyExisted }
-                  : { ok: false, org: hookOrg, url: res.url, error: res.error }
-              );
-            })
-            .catch(() => {
-              /* best-effort: the ~15-min poller still fires the trigger */
-            });
-        }
-      }
     } catch (err) {
       setTriggerError(err instanceof Error ? err.message : "Could not save the trigger.");
     } finally {
@@ -2258,24 +2267,9 @@ export default function WorkflowsTab() {
             : t
         )
       );
+      maybeRegisterRepoPushWebhook(triggerForm);
       setTriggerForm(null);
       setEditingTriggerId(null);
-      if (triggerForm.eventType === "repo-push") {
-        const hookOrg = (triggerForm.config.org ?? "").trim();
-        if (hookOrg) {
-          void registerOrgPushWebhookAction(hookOrg)
-            .then((res) => {
-              setWebhookSetup(
-                res.ok
-                  ? { ok: true, org: hookOrg, url: res.url, alreadyExisted: res.alreadyExisted }
-                  : { ok: false, org: hookOrg, url: res.url, error: res.error }
-              );
-            })
-            .catch(() => {
-              /* best-effort: the ~15-min poller still fires the trigger */
-            });
-        }
-      }
     } catch (err) {
       setTriggerError(err instanceof Error ? err.message : "Could not save the trigger.");
     } finally {
@@ -4355,10 +4349,7 @@ export default function WorkflowsTab() {
                 {editingScheduleId
                   ? (() => {
                       const editingSchedule = schedules?.find((s) => s.id === editingScheduleId);
-                      const editingWorkflow = editingSchedule ? workflows.find((w) => w.id === editingSchedule.workflowId) : null;
-                      const editingIsHeadlessSafe = editingWorkflow
-                        ? isHeadlessSafeWorkflow(editingWorkflow, (id) => workflows.find((w) => w.id === id))
-                        : false;
+                      const editingIsHeadlessSafe = editingSchedule ? isWorkflowHeadlessSafeById(editingSchedule.workflowId) : false;
                       return editingIsHeadlessSafe ? (
                         <div>
                           <FormControlLabel
@@ -4593,10 +4584,7 @@ export default function WorkflowsTab() {
             {triggerForm && (() => {
               const source = getEventSource(triggerForm.eventType);
               const editingTrigger = editingTriggerId ? triggers?.find((t) => t.id === editingTriggerId) : null;
-              const editingWorkflow = editingTrigger ? workflows.find((w) => w.id === editingTrigger.workflowId) : null;
-              const editingIsHeadlessSafe = editingWorkflow
-                ? isHeadlessSafeWorkflow(editingWorkflow, (id) => workflows.find((w) => w.id === id))
-                : false;
+              const editingIsHeadlessSafe = editingTrigger ? isWorkflowHeadlessSafeById(editingTrigger.workflowId) : false;
               const canUnattended = editingTriggerId
                 ? editingIsHeadlessSafe && !!source?.serverEvaluable
                 : selectedHeadlessSafe && !!source?.serverEvaluable;

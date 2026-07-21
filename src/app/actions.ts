@@ -1,5 +1,53 @@
 "use server";
 
+export type {
+  SlideData,
+  GenerateLessonPlanResult,
+  AssignmentData,
+  ModuleIntroData,
+  ExampleItem,
+  ExamplesData,
+  TestGeminiState,
+  GradeActionState,
+  MissingAssignmentReport,
+  SyllabusInputField,
+  SyllabusCourseInfo,
+  SlideNarration,
+  ScreenCaption,
+  SelectionChatMessage,
+  CourseScheduleRow,
+  CourseScheduleResult,
+  AssignmentPlan,
+  ClassroomRowResult,
+  RepoQueueItem,
+  TestSummary,
+  ScheduleWeekPlan,
+} from "./actions-types";
+
+import type {
+  SlideData,
+  GenerateLessonPlanResult,
+  AssignmentData,
+  ModuleIntroData,
+  ExampleItem,
+  ExamplesData,
+  TestGeminiState,
+  GradeActionState,
+  MissingAssignmentReport,
+  SyllabusInputField,
+  SyllabusCourseInfo,
+  SlideNarration,
+  ScreenCaption,
+  SelectionChatMessage,
+  CourseScheduleRow,
+  CourseScheduleResult,
+  AssignmentPlan,
+  ClassroomRowResult,
+  RepoQueueItem,
+  TestSummary,
+  ScheduleWeekPlan,
+} from "./actions-types";
+
 import {
   gradeSubmissions,
   gradeCanvasUrl,
@@ -34,7 +82,7 @@ import { scaffoldLessonPlan, scaffoldExamples } from "@/lib/embedded/deck";
 import { scaffoldAnnouncement, scaffoldMessageReply, scaffoldStudentNudge } from "@/lib/embedded/communication";
 import { scaffoldDocument, scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
 import { deriveAltTextFromHtml, deriveLinkTextFromHtml } from "@/lib/embedded/accessibility";
-import { scaffoldCourseProjectRubric, scaffoldCourseOutline, scaffoldCopilotPrompt } from "@/lib/embedded/course";
+import { scaffoldCopilotPrompt } from "@/lib/embedded/course";
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { scaffoldConceptAnimation } from "@/lib/embedded/animation";
@@ -218,7 +266,6 @@ import {
   putFile,
   getFileText,
   getRepo,
-  getLatestWorkflowRun,
   listWorkflows,
   dispatchWorkflow,
   findWorkflowRunSince,
@@ -232,7 +279,6 @@ import {
   setRepoCollaborator,
   createPullRequest,
   setBranchProtection,
-  listPersonalRepos,
   updateRepo,
   deleteRepo,
   forkRepo,
@@ -267,7 +313,6 @@ import {
   type RepoPermission,
   type BranchProtectionOptions,
   type UpdateRepoPatch,
-  type CommitInfo,
   type PullRequestInfo,
   type PullRequestReviewInfo,
   type PullRequestFileInfo,
@@ -326,16 +371,12 @@ import {
   createMessageDraft,
   markMessageDraftReviewed,
   updateMessageDraft,
-  deleteMessageDraft,
   type MessageDraftPayload,
 } from "@/lib/message-drafts";
 import {
-  getPresentationDraft,
   createPresentationDraft,
   markPresentationDraftReviewed,
   updatePresentationDraft,
-  deletePresentationDraft,
-  listPendingPresentationDrafts,
   type PresentationDraftPayload,
 } from "@/lib/presentation-drafts";
 import {
@@ -439,16 +480,6 @@ Open the README.md file at the root of your repository first - it explains the p
 2. Push your commits to your GitHub repository.
 3. Copy your repository link (it looks like https://github.com/your-username/your-repo) and paste it into the Canvas assignment as your submission.`;
 
-export interface SlideData {
-  title: string;
-  bullets: string[];
-  // Optional example code snippet, rendered as a formatted monospace code block
-  // in the generated deck. Populated on the example slide that immediately
-  // follows a coding-concept slide (loops, conditionals, functions, etc.).
-  code?: string;
-  // Language label for the code block (e.g. "python", "javascript").
-  codeLanguage?: string;
-}
 
 // Normalize a parsed slide from the model into SlideData, carrying through an
 // optional example code block when present. Shared by every Gemini slide path
@@ -502,28 +533,8 @@ function propagateExampleCodeToFollowups(slides: SlideData[]): SlideData[] {
   return slides;
 }
 
-export interface GenerateLessonPlanResult {
-  presentationTitle: string;
-  slides: SlideData[];
-}
 
-export interface AssignmentStep {
-  stepTitle: string;
-  description: string;
-}
 
-export interface AssignmentData {
-  title: string;
-  overview: string;
-  steps: AssignmentStep[];
-  tools: string[];
-  deliverables: string[];
-}
-
-export interface ModuleIntroData {
-  overview: string;
-  keyTerms: string;
-}
 
 export async function generateModuleIntroAction(
   moduleObjectives: string,
@@ -841,18 +852,6 @@ export async function generateAssignmentRubricAction(
   }
 }
 
-export interface ExampleItem {
-  concept: string;
-  title: string;
-  content: string;
-  explanation: string;
-  language?: string;
-}
-
-export interface ExamplesData {
-  lessonType: "math" | "programming" | "general";
-  examples: ExampleItem[];
-}
 
 export async function generateExamplesAction(
   moduleObjectives: string,
@@ -962,10 +961,6 @@ Requirements:
   }
 }
 
-export interface TestGeminiState {
-  result: string | null;
-  error: string | null;
-}
 
 export async function testGeminiAction(
   _prev: TestGeminiState,
@@ -1018,12 +1013,6 @@ export async function testGeminiAction(
   }
 }
 
-export interface GradeActionState {
-  run: GradingRun | null;
-  error: string | null;
-  generatedRubric?: string;
-  warnings?: string[];
-}
 
 // Map the deterministic Grading API response onto the app's GradingRun so the
 // existing results matrix in GradingTab renders it unchanged. The grader returns
@@ -1360,13 +1349,6 @@ export async function finishCartridgeDropAction(
   }
 }
 
-export type MissingAssignmentReport = {
-  assignmentId: string;
-  assignmentName: string;
-  dueAt: string | null;
-  pointsPossible: number | null;
-  students: Array<{ userId?: number; name: string; email?: string }>;
-};
 
 /**
  * List every student who has not submitted a past-due assignment in a Canvas
@@ -1994,66 +1976,6 @@ export async function saveMessageDraftAction(
 }
 
 /** One draft's full payload. */
-export async function getMessageDraftAction(
-  id: string
-): Promise<
-  | {
-      draft: {
-        id: string;
-        status: "pending" | "reviewed";
-        summary: string;
-        payload: MessageDraftPayload;
-      };
-    }
-  | { error: string }
-> {
-  try {
-    const user = await requireOwner();
-    const supabase = createServiceClient();
-    const draft = await getMessageDraft(supabase, user.id, id);
-    if (!draft) {
-      return { error: "That message draft was not found." };
-    }
-    return {
-      draft: {
-        id: draft.id,
-        status: draft.status,
-        summary: draft.summary,
-        payload: draft.payload,
-      },
-    };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not load the message draft." };
-  }
-}
-
-/** Mark a draft reviewed. Idempotent. */
-export async function markMessageDraftReviewedAction(
-  id: string
-): Promise<{ ok: true } | { error: string }> {
-  try {
-    const user = await requireOwner();
-    const supabase = createServiceClient();
-    await markMessageDraftReviewed(supabase, user.id, id);
-    return { ok: true };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not update the message draft." };
-  }
-}
-
-/** Delete a draft outright. */
-export async function deleteMessageDraftAction(
-  id: string
-): Promise<{ ok: true } | { error: string }> {
-  try {
-    const user = await requireOwner();
-    const supabase = createServiceClient();
-    await deleteMessageDraft(supabase, user.id, id);
-    return { ok: true };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not delete the message draft." };
-  }
-}
 
 /** Update a draft's payload. */
 export async function updateMessageDraftPayloadAction(
@@ -2089,7 +2011,7 @@ export async function countPendingMessageDrafts(): Promise<{ count: number }> {
 /**
  * Send a new direct Canvas conversation message to a single student.
  */
-export async function sendCanvasMessageAction(
+async function sendCanvasMessageAction(
   courseUrl: string,
   recipientUserId: string,
   body: string,
@@ -2184,66 +2106,6 @@ export async function savePresentationDraftAction(
 }
 
 /** List pending presentation drafts for the owner. */
-export async function listPendingPresentationDraftsAction(): Promise<
-  { drafts: Array<{ id: string; status: string; summary: string; payload: PresentationDraftPayload; createdAt: string; workflowId?: string; workflowName?: string }> } | { error: string }
-> {
-  try {
-    const user = await requireOwner();
-    const supabase = createServiceClient();
-    const drafts = await listPendingPresentationDrafts(supabase, user.id);
-    return {
-      drafts: drafts.map((d) => ({
-        id: d.id,
-        status: d.status,
-        summary: d.summary,
-        payload: d.payload,
-        createdAt: d.createdAt,
-        workflowId: d.workflowId,
-        workflowName: d.workflowName,
-      })),
-    };
-  } catch (err) {
-    return {
-      error: err instanceof Error ? err.message : "Could not load presentation drafts.",
-    };
-  }
-}
-
-/** One draft's full payload. */
-export async function getPresentationDraftAction(
-  id: string
-): Promise<
-  | {
-      draft: {
-        id: string;
-        status: "pending" | "reviewed";
-        summary: string;
-        payload: PresentationDraftPayload;
-      };
-    }
-  | { error: string }
-> {
-  try {
-    const user = await requireOwner();
-    const supabase = createServiceClient();
-    const draft = await getPresentationDraft(supabase, user.id, id);
-    if (!draft) {
-      return { error: "That presentation draft was not found." };
-    }
-    return {
-      draft: {
-        id: draft.id,
-        status: draft.status,
-        summary: draft.summary,
-        payload: draft.payload,
-      },
-    };
-  } catch (err) {
-    return {
-      error: err instanceof Error ? err.message : "Could not load the presentation draft.",
-    };
-  }
-}
 
 /** Mark a draft reviewed. Idempotent. */
 export async function markPresentationDraftReviewedAction(
@@ -2257,22 +2119,6 @@ export async function markPresentationDraftReviewedAction(
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Could not update the presentation draft.",
-    };
-  }
-}
-
-/** Delete a draft outright. */
-export async function deletePresentationDraftAction(
-  id: string
-): Promise<{ ok: true } | { error: string }> {
-  try {
-    const user = await requireOwner();
-    const supabase = createServiceClient();
-    await deletePresentationDraft(supabase, user.id, id);
-    return { ok: true };
-  } catch (err) {
-    return {
-      error: err instanceof Error ? err.message : "Could not delete the presentation draft.",
     };
   }
 }
@@ -4425,40 +4271,6 @@ Requirements:
 // ── Adapt an existing syllabus from a codebase ──────────────────────────────
 
 /** One class-specific paragraph of a syllabus the instructor should fill in. */
-export interface SyllabusInputField {
-  /** The paragraph id (matches parseOfficeParagraphs) to rewrite. */
-  paragraphId: string;
-  /** Short human label for the input. */
-  label: string;
-  /** The paragraph's current text in the uploaded syllabus. */
-  currentText: string;
-  /** AI-suggested replacement text for this offering. */
-  suggestedText: string;
-}
-
-/** Instructor-provided facts the codebase can't supply; not assumed across syllabi. */
-export interface SyllabusCourseInfo {
-  /** Course name/title, e.g. "Database Management". */
-  courseName?: string;
-  /** Course code/number, e.g. "BIT270". */
-  courseCode?: string;
-  /** Instructor name. */
-  instructorName?: string;
-  /** Instructor email. */
-  instructorEmail?: string;
-  /** Official course description (use verbatim for the description section). */
-  courseDescription?: string;
-  /** Course start date including the year, e.g. "2026-08-25". */
-  startDate?: string;
-  /** Meeting days, e.g. "Mon/Wed/Fri". */
-  meetingDays?: string;
-  /** Meeting times, e.g. "9:00–10:15am". */
-  meetingTimes?: string;
-  /** Meeting location, e.g. "Room 204, Science Hall". */
-  location?: string;
-  /** Required textbooks / materials (e.g. extracted from an uploaded screenshot). */
-  textbookInfo?: string;
-}
 
 /** Render the instructor's course facts as a prompt block (empty when none given). */
 function courseInfoBlock(info: SyllabusCourseInfo): string {
@@ -4697,12 +4509,6 @@ export async function generateLectureScriptAction(
 }
 
 /** One slide's extracted text plus its AI narration. */
-export interface SlideNarration {
-  slide: number;
-  title: string;
-  text: string;
-  narration: string;
-}
 
 export async function extractPptxSlidesAction(
   base64: string
@@ -5245,11 +5051,6 @@ export async function getAvatarVideoStatusAction(
 }
 
 /** A timed caption for an uploaded screen recording. */
-export interface ScreenCaption {
-  start: number;
-  end: number;
-  text: string;
-}
 
 /**
  * Describe an uploaded screen recording from sampled keyframes: returns timed
@@ -5979,7 +5780,7 @@ export async function listAllOutlookMessagesAction(
 }
 
 /** E6: Send an email via Outlook. */
-export async function sendOutlookMailAction(
+async function sendOutlookMailAction(
   institution: string,
   to: string[],
   subject: string,
@@ -7558,10 +7359,6 @@ export async function gradeAction(
   }
 }
 
-export interface SelectionChatMessage {
-  role: "user" | "model";
-  text: string;
-}
 
 export async function selectionChatAction(
   selectedText: string,
@@ -7651,17 +7448,6 @@ ${selectedText}
   }
 }
 
-export interface CourseScheduleRow {
-  week: number;
-  dates: string;
-  topics: string;
-  assignment: string;
-}
-
-export interface CourseScheduleResult {
-  rows: CourseScheduleRow[];
-  topics?: string[];
-}
 
 // Format the Monday–Friday range for week N (1-based) starting from an ISO
 // date (YYYY-MM-DD), e.g. "Aug 25 – Aug 29". Used when the Course Engine
@@ -7947,152 +7733,9 @@ Return ONLY the prompt text — no preamble, no explanation, no markdown code fe
   }
 }
 
-export async function generateCourseProjectRubricAction(
-  fileContent: string,
-  fileName: string,
-  provider: LlmProvider = "gemini"
-): Promise<{ rubric: string } | { error: string }> {
-  try {
-    // Embedded Deterministic Engine: a fixed, broadly-applicable rubric, no model.
-    if (provider === "embedded") {
-      return { rubric: scaffoldCourseProjectRubric() };
-    }
-
-    const prompt = `You are an expert educator. A teacher has provided a course schedule and wants a single universal grading rubric that can be applied consistently to every assignment in the course.
-
-FILE NAME: ${fileName}
-
-SCHEDULE CONTENT:
-${fileContent}
-
-Based on the course schedule above, identify the overall learning goals and skills students are expected to develop across all assignments. Then create a single, course-wide grading rubric that applies fairly to every assignment regardless of topic.
-
-The rubric must have exactly:
-- 3 criteria (rows), each tied to a skill or quality that every assignment can be assessed against
-- 3 performance levels (columns): Excellent, Satisfactory, Needs Improvement
-- A total of exactly 100 points distributed across the 3 criteria (you may choose any reasonable point weights that sum to 100, e.g. 40/30/30 or 35/35/30)
-
-Return ONLY valid JSON in this exact shape:
-{
-  "rubric": {
-    "criteria": [
-      {
-        "name": "...",
-        "points": <number>,
-        "levels": {
-          "excellent": { "score": <number>, "description": "..." },
-          "satisfactory": { "score": <number>, "description": "..." },
-          "needsImprovement": { "score": <number>, "description": "..." }
-        }
-      }
-    ]
-  }
-}
-
-Rules:
-- Each criterion's "points" is the maximum points for that criterion; the three "points" values must sum to exactly 100.
-- For each criterion: excellent.score == points, satisfactory.score == roughly 75% of points (round to nearest whole number), needsImprovement.score == roughly 50% of points (round to nearest whole number).
-- Criteria must be broadly applicable to every assignment (e.g. "Technical Correctness", "Code Quality / Clarity", "Completeness & Requirements"). Adapt the names to match the course domain.
-- Descriptions must be specific enough to be actionable but general enough to apply to any assignment in the course.
-- IMPORTANT: Every criterion must evaluate only the presence or absence of things in the submitted code itself (e.g. specific functions, classes, variables, logic, structure, or required features). Do NOT include criteria that require running tests, checking commits, verifying deployments, or evaluating anything outside the code files themselves.
-- Do not include any text outside the JSON object.`;
-
-    const result = await callLlm(
-      {
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 1500 },
-      },
-      provider
-    );
-
-    if (!result.ok) {
-      return { error: `Rubric generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
-    }
-
-    const raw = result.text;
-
-    if (!raw.trim()) {
-      return { error: "The model did not return a rubric. Please try again." };
-    }
-
-    // Extract JSON
-    const jsonText = jsonObjectSlice(raw);
-    if (!jsonText) {
-      return { error: "Could not parse rubric from the model response." };
-    }
-
-    const parsed = JSON.parse(jsonText) as {
-      rubric?: {
-        criteria?: Array<{
-          name?: string;
-          points?: number;
-          levels?: {
-            excellent?: { score?: number; description?: string };
-            satisfactory?: { score?: number; description?: string };
-            needsImprovement?: { score?: number; description?: string };
-          };
-        }>;
-      };
-    };
-
-    const criteria = parsed.rubric?.criteria;
-    if (!Array.isArray(criteria) || criteria.length === 0) {
-      return { error: "Could not parse rubric criteria from the model response." };
-    }
-
-    // Format as readable text
-    const lines: string[] = ["COURSE-WIDE GRADING RUBRIC (100 points)\n"];
-    lines.push(
-      ["Criterion", "Excellent", "Satisfactory", "Needs Improvement"]
-        .map((h) => h.padEnd(28))
-        .join(" | ")
-    );
-    lines.push("-".repeat(110));
-    for (const c of criteria) {
-      const name = `${c.name ?? "Criterion"} (${c.points ?? "?"}pts)`;
-      const ex = `${c.levels?.excellent?.score ?? "?"} pts — ${c.levels?.excellent?.description ?? ""}`;
-      const sat = `${c.levels?.satisfactory?.score ?? "?"} pts — ${c.levels?.satisfactory?.description ?? ""}`;
-      const ni = `${c.levels?.needsImprovement?.score ?? "?"} pts — ${c.levels?.needsImprovement?.description ?? ""}`;
-      lines.push(`\n${name}`);
-      lines.push(`  Excellent:         ${ex}`);
-      lines.push(`  Satisfactory:      ${sat}`);
-      lines.push(`  Needs Improvement: ${ni}`);
-    }
-
-    return { rubric: lines.join("\n") };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
-  }
-}
 
 // ── Lecture Planning ─────────────────────────────────────────────────────────
 
-export interface AssignmentPlan {
-  assignmentName: string;
-  // Human-readable, unique label derived from the folder slug (e.g. "Review 1",
-  // "Assignment 3"). Used for file names and the editor header so two folders
-  // with the same number (assignment1 / review1 / exam1) never collide.
-  label: string;
-  presentationTitle: string;
-  slides: SlideData[];
-  // True when slide generation failed for this assignment after retries, so the
-  // deck above is an empty placeholder. The UI surfaces this so the instructor
-  // can regenerate rather than silently shipping a blank deck.
-  slidesFailed?: boolean;
-  moduleIntroduction: string;
-  assignmentInstructions: string;
-  // Normalized week number (1-based) aligned with the course schedule. Zero-based
-  // folder sets (week-00, week-01, ...) are shifted up by one; 1-based sets keep
-  // their numbers exactly (gaps preserved, no compaction). A folder without digits
-  // falls back to its own position in the sorted list.
-  weekNumber: number;
-  // The exact heading lines found in the supplied templates (paragraphs styled
-  // as headings/titles in the .docx). When a template is provided, only these
-  // lines may receive heading formatting in the generated document — body text
-  // must never be promoted to a heading. Empty when no template was supplied.
-  introTemplateHeadings: string[];
-  instructionsTemplateHeadings: string[];
-}
 
 // Extract plain text from a base64-encoded .docx template (best effort).
 // Paragraphs that use Word's native list/bullet formatting (a <w:numPr>
@@ -9329,19 +8972,6 @@ export async function listGithubReposAction(): Promise<{ repos: GithubRepo[] } |
 }
 
 /** Result of generating one student's repo from a template. */
-export interface StudentRepoResult {
-  student: string;
-  name: string;
-  htmlUrl?: string;
-  error?: string;
-}
-
-/** One row's outcome when inviting students to their own repos. */
-export interface StudentInviteResult {
-  repo: string;
-  username: string;
-  error?: string;
-}
 
 const repoSlug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
@@ -9379,91 +9009,8 @@ export async function deleteOrgReposAction(
  * result so the UI can show successes and failures (e.g. a name that already exists).
  * templateRepo may be a bare repo name ("my-template", lives in org) or a full name ("owner/my-template").
  */
-export async function generateStudentReposAction(
-  org: string,
-  templateRepo: string,
-  prefix: string,
-  students: string[],
-  isPrivate: boolean
-): Promise<{ results: StudentRepoResult[] } | { error: string }> {
-  try {
-    await requireOwner();
-    if (!org.trim()) return { error: "Choose an organization." };
-    if (!templateRepo.trim()) return { error: "Choose a template repository." };
-    const list = students.map((s) => s.trim()).filter(Boolean);
-    if (list.length === 0) return { error: "Add at least one student." };
-    const base = prefix.trim() ? repoSlug(prefix) : "";
-    const t = templateRepo.trim();
-    const [templateOwner, templateName] = t.includes("/") ? [t.split("/")[0], t.split("/").slice(1).join("/")] : [org.trim(), t];
-    const results: StudentRepoResult[] = [];
-    for (const student of list) {
-      const suffix = repoSlug(student) || "student";
-      const name = (base ? `${base}-${suffix}` : suffix).slice(0, 95);
-      try {
-        const repo = await generateFromTemplate(templateOwner, templateName, org.trim(), name, isPrivate);
-        results.push({ student, name, htmlUrl: repo.htmlUrl });
-      } catch (err) {
-        results.push({ student, name, error: err instanceof Error ? err.message : "Failed" });
-      }
-    }
-    return { results };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not generate the repositories." };
-  }
-}
-
-/**
- * Invite students as OUTSIDE COLLABORATORS on their own generated repos - they
- * are never added to the org, so they can only see the repo they are invited
- * to. Each line is "github-username" (repo derived from the username) or
- * "student, github-username" (repo derived from the student text, matching
- * how the repos were generated).
- */
-export async function inviteStudentCollaboratorsAction(
-  org: string,
-  prefix: string,
-  lines: string[],
-  permission: RepoPermission
-): Promise<{ results: StudentInviteResult[] } | { error: string }> {
-  try {
-    await requireOwner();
-    if (!org.trim()) return { error: "Choose an organization." };
-    const rows = lines.map((l) => l.trim()).filter(Boolean);
-    if (rows.length === 0) return { error: "Add at least one student line." };
-    const base = prefix.trim() ? repoSlug(prefix) : "";
-    const results: StudentInviteResult[] = [];
-    for (const row of rows) {
-      const idx = row.lastIndexOf(",");
-      const left = idx === -1 ? row : row.slice(0, idx).trim();
-      const right = idx === -1 ? "" : row.slice(idx + 1).trim();
-      const username = (right || left).replace(/^@/, "");
-      const suffix = repoSlug(right ? left : username) || "student";
-      const repo = (base ? `${base}-${suffix}` : suffix).slice(0, 95);
-      if (!username) {
-        results.push({ repo, username: "", error: "Missing username" });
-        continue;
-      }
-      try {
-        await setRepoCollaborator(org.trim(), repo, username, permission);
-        results.push({ repo, username });
-      } catch (err) {
-        results.push({ repo, username, error: err instanceof Error ? err.message : "Failed" });
-      }
-    }
-    return { results };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not send the invitations." };
-  }
-}
 
 /** Outcome of one student's classroom setup (repo creation + invite). */
-export interface ClassroomRowResult {
-  repo: string;
-  created: "created" | "existed" | "failed";
-  createError?: string;
-  invited: boolean;
-  inviteError?: string;
-}
 
 /**
  * Set up ONE student: create their repo from the template (an existing repo
@@ -9866,12 +9413,6 @@ export async function generateRubricFromRepoAction(
 }
 
 /** One queued student repo to grade/test. */
-export interface RepoQueueItem {
-  repoRef: string;
-  branch?: string;
-  /** Friendly student label; falls back to the repo's full name. */
-  label?: string;
-}
 
 /**
  * Turn a repo digest into a gradable entry for the embedded engine. The digest's
@@ -10015,13 +9556,6 @@ export async function dispatchTestsAction(
 }
 
 /** Aggregate pass/fail counts parsed from a run's JUnit report. */
-export interface TestSummary {
-  tests: number;
-  failures: number;
-  errors: number;
-  skipped: number;
-  passed: number;
-}
 
 // Sum the suite counters out of one JUnit XML document (prefers a top-level
 // <testsuites> aggregate to avoid double-counting nested suites).
@@ -10280,14 +9814,6 @@ export async function setBranchProtectionAction(
   }
 }
 
-export async function listPersonalReposAction(): Promise<{ repos: GithubRepo[] } | { error: string }> {
-  try {
-    await requireOwner();
-    return { repos: await listPersonalRepos() };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not list personal repositories." };
-  }
-}
 
 export async function updateRepoAction(
   repoRef: string,
@@ -10384,37 +9910,10 @@ export async function getRepoZipAction(
 }
 
 /** Read a repo's latest GitHub Actions run (CI signal for the grading view). */
-export async function getRepoCiAction(
-  repoRef: string,
-  branch?: string
-): Promise<{ run: WorkflowRunInfo | null } | { error: string }> {
-  try {
-    await requireOwner();
-    const parsed = parseRepoRef(repoRef);
-    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
-    return { run: await getLatestWorkflowRun(parsed.owner, parsed.repo, branch) };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not read CI status." };
-  }
-}
 
 // ── Course schedule generation ──────────────────────────────────────────────────
 
 /** Represents a single week in a course schedule with topic, assignments, and tests. */
-export interface ScheduleWeekPlan {
-  /** The week number (1-based). */
-  week: number;
-  /** Short topic name for the week. */
-  topic: string;
-  /** 1-2 sentence description of the week's learning outcomes. */
-  summary: string;
-  /** Title of the assignment for this week, or null if this week has a test instead. */
-  assignmentTitle: string | null;
-  /** Kebab-case unique slug for the assignment folder (e.g., "week-01-variables"), or null. */
-  assignmentSlug: string | null;
-  /** Name of the test for this week (e.g., "Test 1"), or null if no test this week. */
-  testName: string | null;
-}
 
 /**
  * Generate a course schedule from a high-level description, distributing assignments and tests evenly.
@@ -11193,46 +10692,6 @@ export async function syncAssignmentFromRepoAction(
 }
 
 /** Generate a teachable course outline (weekly schedule + assignments) from a repo. */
-export async function generateCourseFromRepoAction(
-  repoRef: string,
-  provider: LlmProvider = "gemini"
-): Promise<{ outline: string; fullName: string; fileCount: number; truncated: boolean } | { error: string }> {
-  try {
-    await requireOwner();
-    const parsed = parseRepoRef(repoRef);
-    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
-    const digest = await ingestRepo(parsed.owner, parsed.repo);
-
-    // Embedded Deterministic Engine: template the outline from the repo's
-    // structure with no model call.
-    if (provider === "embedded") {
-      const outline = scaffoldCourseOutline(digest.fullName, digest.files.map((f) => f.path), digest.truncated);
-      return { outline, fullName: digest.fullName, fileCount: digest.fileCount, truncated: digest.truncated };
-    }
-
-    const prompt = `You are an instructional designer building a course that teaches the concepts, technologies, and skills demonstrated in the codebase below.
-
-Produce a course outline as clean Markdown with:
-- A one-paragraph course summary naming the main technologies and what students will learn.
-- A weekly schedule of 8-14 weeks. For each week: "## Week N — <topic>", a short description, the key concepts/files from this codebase it draws on, and 1-2 assignments ("**Assignment:** ...") grounded in the actual code.
-- A final "## Capstone" tied to extending or rebuilding part of this project.
-
-Base everything on what the code actually contains — do not invent technologies that are not present. Keep it practical and specific.
-
-CODEBASE (${digest.fullName}${digest.truncated ? ", truncated" : ""}):
-${digest.text}`;
-    const result = await callLlm(
-      { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.5, maxOutputTokens: 2600 } },
-      provider
-    );
-    if (!result.ok) return { error: `Generation failed: HTTP ${result.status}` };
-    const outline = result.text.trim();
-    if (!outline) return { error: "The model returned an empty outline." };
-    return { outline, fullName: digest.fullName, fileCount: digest.fileCount, truncated: digest.truncated };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not generate the course." };
-  }
-}
 
 // ── Repository operations (fork, branches, commits, PRs, Actions) ───────────
 
@@ -11336,17 +10795,6 @@ export async function deleteBranchAction(repoRef: string, branch: string): Promi
   }
 }
 
-export async function listCommitsAction(repoRef: string, ref?: string): Promise<{ commits: CommitInfo[] } | { error: string }> {
-  try {
-    await requireOwner();
-    const parsed = parseRepoRef(repoRef);
-    if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
-    const commits = await listCommits(parsed.owner, parsed.repo, ref?.trim());
-    return { commits };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not list commits." };
-  }
-}
 
 export async function listPullRequestsAction(repoRef: string, state: "open" | "closed" | "all" = "open"): Promise<{ pulls: PullRequestInfo[] } | { error: string }> {
   try {
@@ -12026,22 +11474,6 @@ export async function countPendingGradingDrafts(): Promise<{ count: number }> {
 /** Count of the owner's PENDING grading drafts created since the given ISO
  * timestamp - powers the Grade Drafts nav-tab badge. Defensive: any failure
  * returns 0 so the badge never breaks the nav. */
-export async function countGradingDraftsSince(sinceIso: string): Promise<{ count: number }> {
-  try {
-    const user = await requireOwner();
-    const supabase = createServiceClient();
-    const { count } = await supabase
-      .from("grading_drafts")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .eq("status", "pending")
-      .gt("created_at", sinceIso);
-
-    return { count: count ?? 0 };
-  } catch {
-    return { count: 0 };
-  }
-}
 
 /**
  * Generate a plan of visualizable concepts from a course topic and summary.
@@ -12496,7 +11928,7 @@ export async function listOpenProblemsAction(): Promise<
 /**
  * List all solutions for a specific problem.
  */
-export async function listProblemSolutionsAction(
+async function listProblemSolutionsAction(
   problemId: string
 ): Promise<{ solutions: Array<{ title: string; approach: string }> } | { error: string }> {
   try {
@@ -12583,7 +12015,7 @@ export async function processProblemSolutionsAction(
  * prior solutions. Inserts solutions via insertSolutions with the service client.
  * Returns solutions or error.
  */
-export async function proposeProblemSolutionsAction(
+async function proposeProblemSolutionsAction(
   problem: { id: string; title: string; detail: string },
   priorSolutions: Array<{ title: string; approach: string }>,
   provider: LlmProvider

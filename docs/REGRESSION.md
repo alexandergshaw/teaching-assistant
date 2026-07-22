@@ -6,8 +6,13 @@ Living regression document for the AC -> code -> verify -> regression delivery l
   durable behavioral checks (an entry per feature, newest at the bottom).
 - After every feature (before push), an Opus regression agent runs this ENTIRE
   document - the standing gates plus every feature entry, not just the newest one -
-  and reports a per-check pass/fail verdict. Failures go back through the
-  bug-report/fix loop; nothing is pushed until the full document passes.
+  and reports a per-check pass/fail verdict.
+- On any failure: the orchestrator writes detailed root cause analysis notes
+  (failing check, observed vs required, the causal chain through the code with
+  file:line evidence, prescribed fix), hands the RCA to a fix subagent, then re-runs
+  this entire document. That loop repeats until the document passes 100 percent -
+  no partial passes, no failures waived beyond what a check itself explicitly
+  allows. Nothing is pushed until then.
 - Checks must be written so a fresh agent can execute them without session context:
   name the files, the behavior, and how to observe it (test, grep, code trace, or
   browser).

@@ -5,7 +5,8 @@ import { resolveDocumentAuthor } from "@/lib/author";
 import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFile } from "@/lib/recording-files";
 import { uploadCourseZip, uploadCourseZipChunked, removeCourseZip, removeCourseZipObjects } from "@/lib/course-files";
 import { isScopeableListType, expandScopedValue, resolveClassRepoRef, resolveClassTileRef } from "@/lib/workflows/scope";
-import { isInstitutionFanout, resolveFanoutInstitutions, scopeForInstitution } from "@/lib/workflows/fanout";
+import { isInstitutionFanout, isCourseFanout, resolveFanoutInstitutions, resolveFanoutCourses, scopeForInstitution, scopeForCourse } from "@/lib/workflows/fanout";
+import { applyStopAfterCourse, buildCourseFanoutDetail, type RunStateGroup, type CourseOutcome } from "./attended-fanout";
 import { loadInstitutionFields } from "@/lib/institution-fields";
 import { appendCourseMaterialFileAction, appendCourseExportFileAction } from "@/app/actions";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
@@ -15,7 +16,6 @@ import { loadCommonResources } from "@/lib/common-resources";
 import { applyWorkflowScope, scopeCoversType } from "@/lib/workflows/types";
 import {
   getStepDefinition,
-  type StepRunSummary,
   type StepRunHelpers,
   type TableRowDetail,
 } from "@/lib/workflows/registry";
@@ -25,10 +25,17 @@ import type { User } from "@supabase/supabase-js";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
 
 export interface UseWorkflowRunReturn {
-  runState: Array<{ institution: string | null; steps: Array<{ status: "pending" | "running" | "done" | "error" | "disabled" | "skipped"; progress: string | null; summary: StepRunSummary | null; error: string | null }> }>;
+  runState: RunStateGroup[];
   running: boolean;
   validationError: string | null;
   setValidationError: (error: string | null) => void;
+  /** True once the user has clicked "Stop after this course" during an active
+   * course fan-out; the current course still finishes, remaining courses are
+   * then marked skipped. Reset at the start of every new run. */
+  stopRequested: boolean;
+  /** Requests that a course fan-out stop BETWEEN courses (never mid-course).
+   * A no-op outside an active course fan-out. */
+  stopAfterCurrentCourse: () => void;
   runPause: { groupIndex: number; stepIndex: number; message: string } | null;
   pauseResolverRef: React.MutableRefObject<{ resolve: (go: boolean) => void } | null>;
   runInput: { groupIndex: number; stepIndex: number; message: string; kind: "text" | "choice" | "upload" | "workflow" | "table"; options: Array<{ value: string; label: string }>; optional: boolean; initialValue?: string; submitLabel?: string; regenerate?: () => Promise<string>; columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean; link?: boolean; width?: number }>; selectable?: boolean; rowDetail?: (row: Record<string, string>) => Promise<TableRowDetail>; transform?: (value: string | File[] | Array<Record<string, string>>) => unknown } | null;
@@ -76,12 +83,16 @@ export function useWorkflowRun(
   onRunStart: (workflowId: string) => void,
   pendingHandoff: { workflowId: string; prefill: Record<string, string>; scheduleId?: string | null; triggerId?: string | null } | null = null
 ): UseWorkflowRunReturn {
-  const [runState, setRunState] = useState<
-    Array<{ institution: string | null; steps: Array<{ status: "pending" | "running" | "done" | "error" | "disabled" | "skipped"; progress: string | null; summary: StepRunSummary | null; error: string | null }> }>
-  >([]);
+  const [runState, setRunState] = useState<RunStateGroup[]>([]);
 
   const [running, setRunning] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [stopRequested, setStopRequested] = useState(false);
+  const stopAfterCourseRef = useRef(false);
+  const stopAfterCurrentCourse = () => {
+    stopAfterCourseRef.current = true;
+    setStopRequested(true);
+  };
   const [runPause, setRunPause] = useState<{ groupIndex: number; stepIndex: number; message: string } | null>(null);
   const pauseResolverRef = useRef<{ resolve: (go: boolean) => void } | null>(null);
 
@@ -269,8 +280,21 @@ export function useWorkflowRun(
     setRunInputBusy(false);
     setRunInputError(null);
     inputResolverRef.current = null;
+    stopAfterCourseRef.current = false;
+    setStopRequested(false);
 
-    let fanoutInstitutions: Array<string | null>;
+    const instFanout = isInstitutionFanout(selectedDef.scope);
+    const hubCourse = (selectedDef.scope?.hubCourse ?? "").trim();
+    const courseFanout = hubCourse === "*" || (hubCourse.split("\n").map((s) => s.trim()).filter(Boolean).length >= 2);
+    if (instFanout && courseFanout) {
+      setValidationError("Scope cannot target all institutions and multiple course tiles at once - pick one fan-out dimension.");
+      setRunning(false);
+      return;
+    }
+
+    const isCourseRun = isCourseFanout(selectedDef.scope);
+
+    let fanoutEntities: Array<{ institution: string | null; courseId?: string; courseName?: string }>;
     if (isInstitutionFanout(selectedDef.scope)) {
       const resolved = await resolveFanoutInstitutions();
       if ("error" in resolved) {
@@ -283,9 +307,22 @@ export function useWorkflowRun(
         setRunning(false);
         return;
       }
-      fanoutInstitutions = resolved.list;
+      fanoutEntities = resolved.list.map((acronym) => ({ institution: acronym }));
+    } else if (isCourseRun) {
+      const resolved = await resolveFanoutCourses(selectedDef.scope, activeInstitution);
+      if ("error" in resolved) {
+        setValidationError(`Could not list course tiles: ${resolved.error}`);
+        setRunning(false);
+        return;
+      }
+      if (resolved.list.length === 0) {
+        setValidationError("The scope matched no course tiles.");
+        setRunning(false);
+        return;
+      }
+      fanoutEntities = resolved.list.map((course) => ({ institution: null, courseId: course.id, courseName: course.name }));
     } else {
-      fanoutInstitutions = [null];
+      fanoutEntities = [{ institution: null }];
     }
     const makePendingSteps = () =>
       expanded.steps.map(() => ({
@@ -294,7 +331,7 @@ export function useWorkflowRun(
         summary: null,
         error: null,
       }));
-    setRunState(fanoutInstitutions.map((institution) => ({ institution, steps: makePendingSteps() })));
+    setRunState(fanoutEntities.map((entity) => ({ institution: entity.institution, courseId: entity.courseId, courseName: entity.courseName, steps: makePendingSteps() })));
 
     const workflowRunId = crypto.randomUUID();
     const helpers: StepRunHelpers = {
@@ -391,14 +428,41 @@ export function useWorkflowRun(
 
     let anyGenuineFailure = false;
     let aborted = false;
+    // Loop-local accumulators for the once-per-run write-back below: reading
+    // `runState` there would read a STALE closure (this async function's
+    // `runState` binding never updates across the re-renders that setRunState
+    // triggers mid-run), so the detail text is built from these instead.
+    const allErrors: string[] = [];
+    const courseOutcomes: CourseOutcome[] = [];
+    let currentGroupIndex = 0;
 
-    for (let g = 0; g < fanoutInstitutions.length && !aborted; g++) {
-      const institution = fanoutInstitutions[g];
-      const groupScope = institution
-        ? scopeForInstitution(selectedDef.scope!, institution)
-        : selectedDef.scope;
-      const groupHelpers: StepRunHelpers = institution
-        ? { ...helpers, activeInstitution: institution }
+    for (let g = 0; g < fanoutEntities.length && !aborted; g++) {
+      currentGroupIndex = g;
+      if (isCourseRun && stopAfterCourseRef.current) {
+        // "Stop after this course": the current course already finished (this
+        // check runs BETWEEN courses, never mid-course). Mark every remaining
+        // course skipped in runState (via the functional updater, which reads
+        // the fresh `prev` - never the stale `runState` closure) and in the
+        // loop's own courseOutcomes accumulator (built from `fanoutEntities`,
+        // a plain local array, for the same reason), then stop entirely.
+        setRunState((prev) => applyStopAfterCourse(prev, g).groups);
+        for (let r = g; r < fanoutEntities.length; r++) {
+          const rest = fanoutEntities[r];
+          courseOutcomes.push({ courseId: rest.courseId ?? "", courseName: rest.courseName ?? "", status: "skipped" });
+        }
+        break;
+      }
+
+      const entity = fanoutEntities[g];
+      let groupScope = selectedDef.scope;
+      if (entity.institution) {
+        groupScope = scopeForInstitution(groupScope!, entity.institution);
+      }
+      if (entity.courseId) {
+        groupScope = scopeForCourse(groupScope!, entity.courseId);
+      }
+      const groupHelpers: StepRunHelpers = entity.institution
+        ? { ...helpers, activeInstitution: entity.institution }
         : helpers;
 
       const stepOutputs: Array<Record<string, unknown>> = [];
@@ -696,9 +760,33 @@ export function useWorkflowRun(
           return next;
         });
         failedSteps.add(i);
+        allErrors.push(errorMsg);
       }
     }
-      anyGenuineFailure = anyGenuineFailure || failedSteps.size > disabledRunIndices.size + skippedRunIndices.size;
+      const groupGenuineFailure = failedSteps.size > disabledRunIndices.size + skippedRunIndices.size;
+      anyGenuineFailure = anyGenuineFailure || groupGenuineFailure;
+      if (isCourseRun) {
+        courseOutcomes.push({
+          courseId: entity.courseId!,
+          courseName: entity.courseName!,
+          status: groupGenuineFailure ? "failed" : "ok",
+        });
+        setRunState((prev) => {
+          const next = [...prev];
+          next[g] = { ...next[g], courseStatus: groupGenuineFailure ? "failed" : "ok" };
+          return next;
+        });
+      }
+    }
+
+    // Hard-cancel mid-course (e.g. cancelled pause or failed required input): mark
+    // remaining courses skipped in both the UI state and the outcome accumulator.
+    if (aborted && isCourseRun) {
+      for (let r = currentGroupIndex + 1; r < fanoutEntities.length; r++) {
+        const rest = fanoutEntities[r];
+        courseOutcomes.push({ courseId: rest.courseId ?? "", courseName: rest.courseName ?? "", status: "skipped" });
+      }
+      setRunState((prev) => applyStopAfterCourse(prev, currentGroupIndex + 1).groups);
     }
 
     if (anyGenuineFailure) {
@@ -707,11 +795,16 @@ export function useWorkflowRun(
 
     if (user && supabase && selectedDef) {
       const genuineFailure = anyGenuineFailure;
-      const detail = genuineFailure ? runState
-        .flatMap((g) => g.steps)
-        .filter((s) => s.status === "error")
-        .map((s, i) => `step ${i + 1}: ${s.error ?? "unknown error"}`)
-        .join("; ") : "";
+      // Built from the loop's own accumulators, NOT the `runState` variable -
+      // this closure's `runState` binding is frozen at the render that started
+      // the run and never updates across the many setRunState calls above.
+      let detail = genuineFailure
+        ? allErrors.map((msg, i) => `step ${i + 1}: ${msg}`).join("; ")
+        : "";
+      if (isCourseRun && courseOutcomes.length > 0) {
+        const courseSummary = buildCourseFanoutDetail(courseOutcomes);
+        detail = detail ? `${courseSummary} - ${detail}` : courseSummary;
+      }
       void recordWorkflowRun(supabase, user.id, {
         workflowId: selectedDef.id,
         workflowName: selectedDef.name,
@@ -736,6 +829,8 @@ export function useWorkflowRun(
   return {
     runState,
     running,
+    stopRequested,
+    stopAfterCurrentCourse,
     validationError,
     setValidationError,
     runPause,

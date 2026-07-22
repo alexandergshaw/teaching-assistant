@@ -7,20 +7,15 @@ import MenuItem from "@mui/material/MenuItem";
 import Autocomplete from "@mui/material/Autocomplete";
 import CircularProgress from "@mui/material/CircularProgress";
 import {
-  listCourseHubAction,
   createCourseHubAction,
   updateCourseHubAction,
   deleteCourseHubAction,
-  listFinalizedSyllabiAction,
   getFinalizedSyllabusAction,
   previewFinalizedSyllabusAction,
   createFinalizedSyllabusAction,
   extractTextbookInfoAction,
-  listMyOrgsAction,
-  getCourseNotificationsAction,
   listCourseRosterAction,
   extractTopicsFromRepoAction,
-  listGithubReposAction,
   setCourseMaterialsAction,
   removeCourseMaterialFileAction,
   appendCourseExportFileAction,
@@ -38,7 +33,6 @@ import {
   type ScheduleWeekPlan,
 } from "../actions";
 import type { Course, CourseCustomTile, CourseInput, CourseMaterialFile } from "@/lib/supabase/courses";
-import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import { loadCommonResources, saveCommonResources, type CommonResourceItem } from "@/lib/common-resources";
 import { DEFAULT_CARD_LAYOUT, loadCardLayout, saveCardLayout, type CardLayoutGroup } from "@/lib/card-layout";
 import { DEFAULT_INSTITUTION_FIELDS, loadInstitutionFields, saveInstitutionFields, type InstitutionField } from "@/lib/institution-fields";
@@ -74,211 +68,29 @@ import {
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import Typeahead from "./ui/Typeahead";
 import styles from "../page.module.css";
-
-// The editable form state (all strings; "" means "not set").
-interface CourseForm {
-  id: string | null;
-  name: string;
-  courseCode: string;
-  term: string;
-  institution: string;
-  canvasUrl: string;
-  repos: Array<{ repo: string; branch: string }>;
-  githubOrg: string;
-  textbook: string;
-  syllabusId: string;
-  integrations: Array<{ name: string; url: string }>;
-  roster: string;
-  notes: string;
-  topics: string;
-  startDate: string;
-  description: string;
-  weeks: string;
-  tests: string;
-  lms: string;
-  dayTime: string;
-}
-
-// Fields that can be edited inline on tiles.
-type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos";
-
-const EMPTY_FORM: CourseForm = {
-  id: null,
-  name: "",
-  courseCode: "",
-  term: "",
-  institution: "",
-  canvasUrl: "",
-  repos: [],
-  githubOrg: "",
-  textbook: "",
-  syllabusId: "",
-  integrations: [],
-  roster: "",
-  notes: "",
-  topics: "",
-  startDate: "",
-  description: "",
-  weeks: "",
-  tests: "",
-  lms: "",
-  dayTime: "",
-};
-
-function formFromCourse(c: Course): CourseForm {
-  return {
-    id: c.id,
-    name: c.name,
-    courseCode: c.courseCode ?? "",
-    term: c.term ?? "",
-    institution: c.institution ?? "",
-    canvasUrl: c.canvasUrl ?? "",
-    repos: c.repos.map((r) => ({ repo: r.repo, branch: r.branch ?? "" })),
-    githubOrg: c.githubOrg ?? "",
-    textbook: c.textbook ?? "",
-    syllabusId: c.syllabusId ?? "",
-    integrations: c.integrations.map((i) => ({ name: i.name, url: i.url ?? "" })),
-    roster: c.roster ?? "",
-    notes: c.notes ?? "",
-    topics: c.topics ?? "",
-    startDate: c.startDate ?? "",
-    description: c.description ?? "",
-    weeks: c.weeks !== null ? String(c.weeks) : "",
-    tests: c.tests !== null ? String(c.tests) : "",
-    lms: c.lms ?? "",
-    dayTime: c.dayTime ?? "",
-  };
-}
-
-// Map a Course row to the update-action input (used by inline tile saves).
-function courseToInput(c: Course) {
-  return {
-    name: c.name,
-    courseCode: c.courseCode ?? "",
-    term: c.term ?? "",
-    institution: c.institution ?? "",
-    canvasUrl: c.canvasUrl ?? "",
-    repos: c.repos.map((r) => ({ repo: r.repo, branch: r.branch })),
-    githubOrg: c.githubOrg ?? "",
-    textbook: c.textbook ?? "",
-    syllabusId: c.syllabusId ?? "",
-    integrations: c.integrations.map((i) => ({ name: i.name, url: i.url })),
-    roster: c.roster ?? "",
-    notes: c.notes ?? "",
-    topics: c.topics ?? "",
-    csvName: c.csvName ?? "",
-    csvData: c.csvData ?? "",
-    rubricName: c.rubricName ?? "",
-    rubricData: c.rubricData ?? "",
-    startDate: c.startDate ?? "",
-    description: c.description ?? "",
-    weeks: c.weeks,
-    tests: c.tests,
-    lms: c.lms ?? "",
-    dayTime: c.dayTime ?? "",
-    customTiles: c.customTiles,
-    hiddenTiles: c.hiddenTiles,
-    studentRepos: c.studentRepos,
-  };
-}
-
-// Serialization helpers for complex fields.
-const reposToText = (c: Course) => c.repos.map((r) => (r.branch ? `${r.repo}#${r.branch}` : r.repo)).join("\n");
-const integrationsToText = (c: Course) => c.integrations.map((i) => (i.url ? `${i.name} | ${i.url}` : i.name)).join("\n");
-const parseRepoLines = (text: string) =>
-  text.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
-    const [repo, branch] = l.split("#").map((p) => p.trim());
-    return { repo, branch: branch || null };
-  }).filter((r) => r.repo);
-const parseIntegrationLines = (text: string) =>
-  text.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
-    const [name, url] = l.split("|").map((p) => p.trim());
-    return { name: name ?? "", url: url || null };
-  }).filter((i) => i.name || i.url);
-
-// Count roster lines and how many carry a "| github-username" suffix.
-function rosterStats(roster: string): { students: number; withUsernames: number } {
-  const lines = roster.split("\n").map((l) => l.trim()).filter(Boolean);
-  return { students: lines.length, withUsernames: lines.filter((l) => l.includes("|") && l.split("|").pop()!.trim()).length };
-}
-
-// Parse roster text into explicit rows (pipe convention; see rosterStats).
-function rosterToRows(text: string): Array<{ student: string; username: string }> {
-  return text.split("\n").map((l) => l.trim()).filter(Boolean).map((row) => {
-    const idx = row.lastIndexOf("|");
-    if (idx === -1) return { student: row, username: "" };
-    return { student: row.slice(0, idx).trim(), username: row.slice(idx + 1).trim() };
-  });
-}
-
-function rowsToRoster(rows: Array<{ student: string; username: string }>): string {
-  return rows
-    .filter((r) => r.student.trim() || r.username.trim())
-    .map((r) => (r.username.trim() ? `${r.student.trim()} | ${r.username.trim()}` : r.student.trim()))
-    .join("\n");
-}
-
-// Serialize/parse the student-repo rows to/from the tileEdit text value.
-function studentReposToRows(text: string): Array<{ student: string; canvasUserId: string; repo: string }> {
-  return text.split("\n").map((line) => {
-    const parts = line.split("|");
-    return {
-      student: (parts[0] ?? "").trim(),
-      canvasUserId: (parts[1] ?? "").trim(),
-      repo: (parts[2] ?? "").trim(),
-    };
-  }).filter((r) => r.student || r.canvasUserId || r.repo);
-}
-
-function rowsToStudentReposText(rows: Array<{ student: string; canvasUserId: string; repo: string }>): string {
-  return rows.map((r) => `${r.student} | ${r.canvasUserId} | ${r.repo}`).join("\n");
-}
-
-// Read a File as a bare base64 string (no data: prefix).
-function readFileBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result.includes(",") ? result.split(",")[1] : result);
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("Could not read the file."));
-    reader.readAsDataURL(file);
-  });
-}
-
-// Read a File as text.
-function readFileText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      resolve(reader.result as string);
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("Could not read the file."));
-    reader.readAsText(file);
-  });
-}
-
-// Download a finalized syllabus (base64 .docx) fetched from the server.
-function downloadDocx(base64: string, fileName: string): void {
-  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  const blob = new Blob([bytes], {
-    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-// Module-level cache of the tab's data, so switching away and back does not
-// refetch or flash a spinner. Survives unmount/remount within the session; a
-// silent background revalidate keeps it fresh, and mutations update it in place.
-let hubCache: { courses: Course[]; syllabi: FinalizedSyllabusMeta[]; orgs: string[] } | null = null;
+import {
+  EMPTY_FORM,
+  type CourseForm,
+  type InlineField,
+  formFromCourse,
+  courseToInput,
+  rosterStats,
+  rosterToRows,
+  rowsToRoster,
+  studentReposToRows,
+  rowsToStudentReposText,
+  readFileBase64,
+  readFileText,
+  downloadDocx,
+  mergeCardLayout,
+  mergeInstitutionFields,
+  reposToText,
+  integrationsToText,
+  parseRepoLines,
+  parseIntegrationLines,
+} from "@/lib/courses-tab-helpers";
+import { PencilIcon, CrossIcon, GrabDotsIcon } from "./courses/icons";
+import { useCoursesData } from "./courses/useCoursesData";
 
 // Which institution groups are collapsed, keyed by institution ("__none__" for
 // courses without one). Persisted so the layout is stable across visits.
@@ -315,87 +127,29 @@ const TILE_LABELS: Record<string, string> = {
   scheduledWorkflows: "Scheduled workflows",
 };
 
-function PencilIcon() {
-  return (
-    <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor" aria-hidden="true" focusable="false">
-      <path d="m5.433 13.917 1.262-3.155A4 4 0 0 1 7.58 9.42l6.92-6.918a2.121 2.121 0 0 1 3 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 0 1-.65-.65Z" />
-      <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0 0 10 3H4.75A2.75 2.75 0 0 0 2 5.75v9.5A2.75 2.75 0 0 0 4.75 18h9.5A2.75 2.75 0 0 0 17 15.25V10a.75.75 0 0 0-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5Z" />
-    </svg>
-  );
-}
-
-// Small cross glyph for the per-course tile remove buttons.
-function CrossIcon() {
-  return (
-    <svg viewBox="0 0 20 20" width="11" height="11" fill="currentColor" aria-hidden="true" focusable="false">
-      <path d="M4.22 4.22a.75.75 0 0 1 1.06 0L10 8.94l4.72-4.72a.75.75 0 1 1 1.06 1.06L11.06 10l4.72 4.72a.75.75 0 1 1-1.06 1.06L10 11.06l-4.72 4.72a.75.75 0 0 1-1.06-1.06L8.94 10 4.22 5.28a.75.75 0 0 1 0-1.06Z" />
-    </svg>
-  );
-}
-
-// Six-dot grab glyph for the tile drag handles.
-function GrabDotsIcon() {
-  return (
-    <svg viewBox="0 0 10 16" width="8" height="12" fill="currentColor" aria-hidden="true" focusable="false">
-      <circle cx="3" cy="3" r="1.4" />
-      <circle cx="7" cy="3" r="1.4" />
-      <circle cx="3" cy="8" r="1.4" />
-      <circle cx="7" cy="8" r="1.4" />
-      <circle cx="3" cy="13" r="1.4" />
-      <circle cx="7" cy="13" r="1.4" />
-    </svg>
-  );
-}
-
 // Every built-in tile key; unknown keys in a saved layout are ignored at render.
 const BUILT_IN_TILE_KEYS = new Set(DEFAULT_CARD_LAYOUT.flatMap((g) => g.tiles));
-
-// Merge a saved card layout with the defaults: built-in tile keys missing from
-// the saved layout are appended to the group DEFAULT_CARD_LAYOUT places them in
-// (so future built-ins appear); a deleted default group is recreated when one of
-// its tiles has no other home. Unknown keys are left in place (ignored at render).
-function mergeCardLayout(saved: CardLayoutGroup[]): CardLayoutGroup[] {
-  if (saved.length === 0) return DEFAULT_CARD_LAYOUT.map((g) => ({ ...g, tiles: [...g.tiles] }));
-  const present = new Set(saved.flatMap((g) => g.tiles));
-  const groups = saved.map((g) => ({ ...g, tiles: [...g.tiles] }));
-  for (const def of DEFAULT_CARD_LAYOUT) {
-    for (const key of def.tiles) {
-      if (present.has(key)) continue;
-      const home = groups.find((g) => g.id === def.id);
-      if (home) home.tiles.push(key);
-      else groups.push({ id: def.id, label: def.label, tiles: [key] });
-    }
-  }
-  return groups;
-}
-
-// Merge saved institution fields with the defaults by id: defaults first (the
-// default's label/type win so built-in chips can be relabeled centrally; only the
-// saved value and lms carry over), extra saved fields after - so new defaults
-// appear for existing users.
-function mergeInstitutionFields(saved: InstitutionField[]): InstitutionField[] {
-  const byId = new Map(saved.map((f) => [f.id, f]));
-  const merged = DEFAULT_INSTITUTION_FIELDS.map((d) => {
-    const saved_ = byId.get(d.id);
-    return saved_ ? { ...d, value: saved_.value, lms: saved_.lms ?? d.lms } : { ...d };
-  });
-  const extras = saved.filter((f) => !DEFAULT_INSTITUTION_FIELDS.some((d) => d.id === f.id));
-  return [...merged, ...extras];
-}
 
 export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-planning" | "version-control" | "workflows") => void }) {
   const { institutions, active: activeInstitution } = useInstitutionSelection();
   const { supabase, user } = useSupabase();
-  const [courses, setCourses] = useState<Course[]>(() => hubCache?.courses ?? []);
-  const [syllabi, setSyllabi] = useState<FinalizedSyllabusMeta[]>(() => hubCache?.syllabi ?? []);
-  const [orgs, setOrgs] = useState<string[]>(() => hubCache?.orgs ?? []);
-  const [state, setState] = useState<"loading" | "idle" | "error">(hubCache ? "idle" : "loading");
-  const [refreshing, setRefreshing] = useState(false);
+  const {
+    courses,
+    setCourses,
+    syllabi,
+    orgs,
+    state,
+    refreshing,
+    error,
+    setError,
+    load,
+    reloadSyllabi,
+    notifByCourse,
+    ownedRepos,
+  } = useCoursesData();
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  // Per-course LMS notification counts, keyed by course id.
-  const [notifByCourse, setNotifByCourse] = useState<Record<string, { needsGrading: number; unread: number }>>({});
-  const [error, setError] = useState<string | null>(null);
+  // Per-course LMS notification counts, keyed by course id (part of useCoursesData).
   const [form, setForm] = useState<CourseForm | null>(null);
   const [formNote, setFormNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -416,7 +170,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [rubricPreview, setRubricPreview] = useState<{ name: string; rubric: string } | null>(null);
   const [rubricRemoveConfirm, setRubricRemoveConfirm] = useState<string | null>(null);
   const [uploadingRubric, setUploadingRubric] = useState(false);
-  const [ownedRepos, setOwnedRepos] = useState<string[] | null>(null);
   const [repoAddSel, setRepoAddSel] = useState("");
   const [repoAddBranch, setRepoAddBranch] = useState("");
   const [uploadingMaterials, setUploadingMaterials] = useState(false);
@@ -468,40 +221,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const csvUploadRef = useRef<HTMLInputElement>(null);
   const materialsUploadRef = useRef<HTMLInputElement>(null);
 
-  // Fetch everything and refresh the cache. `silent` skips the blocking spinner
-  // (used for background revalidation and post-mutation refreshes).
-  const load = async (opts?: { silent?: boolean }) => {
-    if (opts?.silent) setRefreshing(true);
-    else setState("loading");
-    const [c, s, o] = await Promise.all([listCourseHubAction(), listFinalizedSyllabiAction(), listMyOrgsAction()]);
-    if ("error" in c) {
-      setRefreshing(false);
-      if (!opts?.silent) {
-        setState("error");
-        setError(c.error);
-      }
-      return;
-    }
-    const next = {
-      courses: c.courses,
-      syllabi: "error" in s ? [] : s.syllabi,
-      orgs: "error" in o ? [] : o.orgs,
-    };
-    hubCache = next;
-    setCourses(next.courses);
-    setSyllabi(next.syllabi);
-    setOrgs(next.orgs);
-    setState("idle");
-    setRefreshing(false);
-  };
-
-  useEffect(() => {
-    // On first ever mount, load with a spinner. On later mounts (cache present),
-    // show cached data instantly and revalidate silently in the background.
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */
-    void load({ silent: hubCache != null });
-  }, []);
-
   useEffect(() => {
     // Restore collapsed institution groups (client-only to avoid SSR mismatch).
     try {
@@ -512,42 +231,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       /* ignore malformed state */
     }
   }, []);
-
-  // Load the user's GitHub repos once on mount for the repo picker dropdown.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const r = await listGithubReposAction();
-      if (cancelled) return;
-      if (!("error" in r)) {
-        const sorted = r.repos.map((repo) => repo.fullName).sort();
-        setOwnedRepos(sorted);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Load per-course LMS notification counts for courses that have a Canvas URL
-  // and an institution. One targeted fetch per such course, in parallel.
-  useEffect(() => {
-    const targets = courses.filter((c) => c.canvasUrl && c.institution);
-    if (targets.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      const entries = await Promise.all(
-        targets.map(async (c) => [c.id, await getCourseNotificationsAction(c.canvasUrl as string, c.institution as string)] as const)
-      );
-      if (cancelled) return;
-      const map: Record<string, { needsGrading: number; unread: number }> = {};
-      for (const [id, r] of entries) if (!("error" in r)) map[id] = r;
-      setNotifByCourse(map);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [courses]);
 
   // Load the institution's connected LMS courses while the LMS tile editor is
   // open (await-first so no synchronous setState). Resets live in startTileEdit.
@@ -764,16 +447,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       return next;
     });
 
-  const reloadSyllabi = async () => {
-    const s = await listFinalizedSyllabiAction();
-    if (!("error" in s)) {
-      setSyllabi(() => {
-        if (hubCache) hubCache = { ...hubCache, syllabi: s.syllabi };
-        return s.syllabi;
-      });
-    }
-  };
-
   const syllabusName = (id: string | null): string | null =>
     id ? syllabi.find((s) => s.id === id)?.name ?? "Linked syllabus" : null;
 
@@ -812,11 +485,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       setError(result.error);
       return;
     }
-    setCourses((prev) => {
-      const next = prev.map((course) => (course.id === result.course.id ? result.course : course));
-      if (hubCache) hubCache = { ...hubCache, courses: next };
-      return next;
-    });
+    setCourses((prev) => prev.map((course) => (course.id === result.course.id ? result.course : course)));
   };
 
   const handleImportStartDateFromTile = async (c: Course) => {
@@ -1036,11 +705,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         setError(result.error);
         return;
       }
-      setCourses((prev) => {
-        const next = prev.map((course) => (course.id === result.course.id ? result.course : course));
-        if (hubCache) hubCache = { ...hubCache, courses: next };
-        return next;
-      });
+      setCourses((prev) => prev.map((course) => (course.id === result.course.id ? result.course : course)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not fetch start date from LMS.");
     } finally {
@@ -1067,11 +732,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         setError(result.error);
         return;
       }
-      setCourses((prev) => {
-        const next = prev.map((course) => (course.id === result.course.id ? result.course : course));
-        if (hubCache) hubCache = { ...hubCache, courses: next };
-        return next;
-      });
+      setCourses((prev) => prev.map((course) => (course.id === result.course.id ? result.course : course)));
       await reloadSyllabi();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not import syllabus from LMS.");
@@ -1121,11 +782,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         setError(result.error);
         return;
       }
-      setCourses((prev) => {
-        const next = prev.map((course) => (course.id === result.course.id ? result.course : course));
-        if (hubCache) hubCache = { ...hubCache, courses: next };
-        return next;
-      });
+      setCourses((prev) => prev.map((course) => (course.id === result.course.id ? result.course : course)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not fetch course content from LMS.");
     } finally {
@@ -1163,11 +820,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         setError(result.error);
         return;
       }
-      setCourses((prev) => {
-        const next = prev.map((course) => (course.id === result.course.id ? result.course : course));
-        if (hubCache) hubCache = { ...hubCache, courses: next };
-        return next;
-      });
+      setCourses((prev) => prev.map((course) => (course.id === result.course.id ? result.course : course)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not fetch course content from LMS.");
     } finally {
@@ -1221,11 +874,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         setError(result.error);
         return;
       }
-      setCourses((prev) => {
-        const next = prev.map((course) => (course.id === result.course.id ? result.course : course));
-        if (hubCache) hubCache = { ...hubCache, courses: next };
-        return next;
-      });
+      setCourses((prev) => prev.map((course) => (course.id === result.course.id ? result.course : course)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not fetch rubric from LMS.");
     } finally {
@@ -1286,7 +935,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
           }
           return course;
         });
-        if (hubCache) hubCache = { ...hubCache, courses: updated };
         return updated;
       });
       await removeCourseZipObjects(supabase, appendResult.replacedPaths);
@@ -1450,7 +1098,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       }
       setCourses((prev) => {
         const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
-        if (hubCache) hubCache = { ...hubCache, courses: next };
         return next;
       });
     } catch (err) {
@@ -1476,7 +1123,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       }
       setCourses((prev) => {
         const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
-        if (hubCache) hubCache = { ...hubCache, courses: next };
         return next;
       });
     } catch (err) {
@@ -1532,7 +1178,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
           }
           return course;
         });
-        if (hubCache) hubCache = { ...hubCache, courses: updated };
         return updated;
       });
     } catch (err) {
@@ -1563,7 +1208,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
             }
             return course;
           });
-          if (hubCache) hubCache = { ...hubCache, courses: updated };
           return updated;
         });
       } else {
@@ -1620,7 +1264,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
           }
           return course;
         });
-        if (hubCache) hubCache = { ...hubCache, courses: updated };
         return updated;
       });
       await removeCourseZipObjects(supabase, r.replacedPaths);
@@ -1657,7 +1300,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
             }
             return course;
           });
-          if (hubCache) hubCache = { ...hubCache, courses: updated };
           return updated;
         });
         setExportRemoveConfirm(null);
@@ -1829,7 +1471,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     const savedCourse = r.course;
     setCourses((prev) => {
       const next = prev.map((c) => (c.id === savedCourse.id ? savedCourse : c));
-      if (hubCache) hubCache = { ...hubCache, courses: next };
       return next;
     });
     setTileEdit(null);
@@ -1868,7 +1509,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
           // Update courses state with the new topics
           setCourses((prev) => {
             const next = prev.map((c) => (c.id === updateResult.course.id ? updateResult.course : c));
-            if (hubCache) hubCache = { ...hubCache, courses: next };
             return next;
           });
           setError(`Topics extracted from ${extractRepo}.`);
@@ -2303,7 +1943,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     }
     setCourses((prev) => {
       const next = prev.map((x) => (x.id === r.course.id ? r.course : x));
-      if (hubCache) hubCache = { ...hubCache, courses: next };
       return next;
     });
   };
@@ -2341,7 +1980,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     const optimistic = { ...current, hiddenTiles: next };
     setCourses((prev) => {
       const updated = prev.map((course) => (course.id === courseId ? optimistic : course));
-      if (hubCache) hubCache = { ...hubCache, courses: updated };
       return updated;
     });
     const result = await updateCourseHubAction(courseId, { ...courseToInput(optimistic), hiddenTiles: next });
@@ -2350,14 +1988,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       // Roll the optimistic change back.
       setCourses((prev) => {
         const updated = prev.map((course) => (course.id === courseId ? current : course));
-        if (hubCache) hubCache = { ...hubCache, courses: updated };
         return updated;
       });
       return;
     }
     setCourses((prev) => {
       const updated = prev.map((course) => (course.id === result.course.id ? result.course : course));
-      if (hubCache) hubCache = { ...hubCache, courses: updated };
       return updated;
     });
   };
@@ -3360,7 +2996,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                             if (!("error" in r)) {
                               setCourses((prev) => {
                                 const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
-                                if (hubCache) hubCache = { ...hubCache, courses: next };
                                 return next;
                               });
                               setCsvRemoveConfirm(null);
@@ -3381,7 +3016,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                             if (!("error" in r)) {
                               setCourses((prev) => {
                                 const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
-                                if (hubCache) hubCache = { ...hubCache, courses: next };
                                 return next;
                               });
                               setCsvRemoveConfirm(null);
@@ -3533,7 +3167,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                             if (!("error" in r)) {
                               setCourses((prev) => {
                                 const next = prev.map((course) => (course.id === r.course.id ? r.course : course));
-                                if (hubCache) hubCache = { ...hubCache, courses: next };
                                 return next;
                               });
                               setRubricRemoveConfirm(null);
@@ -3801,7 +3434,6 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
                                   materialsZipPath: null,
                                   materialsZipSize: null,
                                 } : course));
-                                if (hubCache) hubCache = { ...hubCache, courses: next };
                                 return next;
                               });
                               setMaterialsRemoveConfirm(null);

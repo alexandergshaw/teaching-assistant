@@ -123,6 +123,104 @@ exists for this surface). These behaviors must survive any restructuring:
    persist; the Run button starts the run and mid-run pause/input prompts
    render inline at the paused step.
 
+### 2026-07-22 - Files library interaction layer
+
+Baseline taken before the preview-button feature (code-traced; no component test
+suite). These behaviors must keep working:
+
+1. Row actions (files/FileRow.tsx): Play toggles the inline player (the play URL
+   auto-loads while expanded), Download fetches the blob, Strip audio appears
+   only for video kinds, Add to module and Delete (with confirm) and Rename all
+   work per row; the extension chip shows the mime-derived ext with the full
+   mimeType as its title.
+2. Library controls (FilesTab): search, kind filter, sort, grouped/flat view
+   (FilterToolbar), upload drop zone, and bulk selection with add-to-module /
+   delete (BulkSelectionBar) all function; the Library/Submissions subtab bar
+   persists via ta-files-view.
+3. Data flows through src/lib/recording-files.ts (listRecordingFiles,
+   getRecordingFileUrl, downloadRecordingFile, renameRecordingFile,
+   deleteRecordingFile) - typed mappers, no any-casts.
+
+### 2026-07-22 - Course kickoff / planning / repo-fill subsystem
+
+Baseline taken before the kickoff-context feature. Evidence: 87 tests across
+registry.structure.test.ts, presets.test.ts, include-mirror.test.ts,
+github.copyrepo.test.ts, workflow-form-helpers.test.ts, all passing. These
+behaviors must keep working:
+
+1. Preset compositions: COURSE_KICKOFF (load-course-tile, generate-schedule,
+   repo-from-template, fill-readmes, include-workflow) and NO_CODE_KICKOFF
+   (load-course-tile, generate-schedule, lecture-materials-from-schedule,
+   include-workflow) keep their step order and binding compatibility
+   (presets.test.ts outputFeedsInput checks).
+2. Include expansion: include-workflow steps expand the source workflow with
+   remapped step references and bindOverrides keyed
+   "<sourceTopIndex>.<inputKey>" (types.ts expansion + include-mirror tests).
+3. generate-schedule (steps.planning.ts) takes description/weeks/tests/
+   schedule/courseTitle and produces its schedule outputs via
+   generateSchedulePlanAction; fill-readmes (steps.github.ts) takes
+   repo/schedule/description and fills per-assignment READMEs via
+   fillAssignmentReadmesAction; lecture-materials-from-schedule
+   (steps.content-lectures.ts) generates weekly materials from the schedule.
+4. Run form: only bound inputs are asked (collectRuntimeFields ignores unbound
+   inputs; presets bind what should be asked - the unbound-inputs rule).
+
+### 2026-07-22 - Drafted grades review surface
+
+Baseline taken before the comment preview/edit feature (code-traced; no
+component test suite). These behaviors must keep working:
+
+1. Each grading draft card renders its per-student results with rubric-area
+   rows (area name, score, comment text - DraftedGradesTab.tsx ~:541), the
+   source badge / class label / From-workflow link (per the source-marking
+   entry), and the summary title.
+2. Draft actions work: mark reviewed, delete, and post-to-LMS flows (the
+   grading actions listPendingGradingDraftsAction / markGradingDraftReviewedAction
+   / deleteGradingDraftAction / postGradingDraftAction), plus
+   updateGradingDraftPayloadAction persists payload changes.
+3. The overall per-student comment is carried as a rubric-area entry whose
+   comment holds the overall text (grade.ts ~:869-878); posting reads comments
+   from the payload, so payload edits flow into what posts.
+
+### 2026-07-22 - Courses tab management surface
+
+Baseline taken before the table-view redesign (code-traced; no component test
+suite). Whatever the presentation becomes, these CAPABILITIES must survive:
+
+1. Course CRUD: add a course (form with name/institution/dates/etc.), edit
+   every field, delete with confirmation; changes persist via the course-hub
+   actions and reload correctly.
+2. Inline-editable per-course fields (the InlineField set in CoursesTab):
+   githubOrg, textbook, roster, repos, syllabusId, integrations, csv,
+   startDate, description, weeks, tests, lms, dayTime, studentRepos - each
+   editable and saving via the update action (courseToInput mapping).
+3. Roster and student-repos parsing: rosterStats/rosterToRows/rowsToRoster and
+   studentReposToRows/rowsToStudentReposText round-trip the text formats; CSV
+   upload populates the roster; export-package upload populates course fields
+   (with the no-course-settings message when absent).
+4. Navigation: per-course actions reach course planning, version control, and
+   workflows via the onNavigate contract with page.tsx.
+5. Institution fields (mergeInstitutionFields) and any saved layout state load
+   without crashing even when stale keys/unknown entries are present.
+6. Docx download helpers (downloadDocx/readFileBase64/readFileText) keep
+   working for the flows that produce/consume files.
+
+### 2026-07-22 - Manual tab navigation shell
+
+Baseline taken before the Manual UX overhaul (code-traced). Beyond the
+nav-restructure entry's subtab/migration checks, these must keep working:
+
+1. The LMS subtab's inner views (modules, pages, files, grading, announcements,
+   and any others ContentTab renders) each render their content and persist the
+   active view under VIEW_KEY (content-tab/constants); the Canvas URL persists
+   under its CONTENT_URL_KEY.
+2. Build Courses' third level (new | prebuilt) persists under ta-build-view
+   with the legacy lesson-planning migration (page.tsx BuildView initializer).
+3. Recording stays MOUNTED across subtab/tab switches (display:none, not
+   unmount) so an in-progress recording survives navigation.
+4. The version-control VIEW_KEY migration (old Integrations VC view lands on
+   the standalone subtab and resets the LMS view to modules) keeps working.
+
 ## Feature entries
 
 ### 2026-07-22 - Workflow components split under 1000 lines
@@ -348,6 +446,154 @@ most likely to break again when these files are edited.
    collectRuntimeFields drops both fields from the run form and the step
    receives the scope values at run time (covered by the concepts suite in
    types.scope.test.ts).
+
+### 2026-07-22 - Course-tile fan-out (deck workflows run from scope)
+
+1. fanout.ts: isCourseFanout is true for scope.hubCourse "*" or 2+ newline ids
+   (false for one id; institution "*" takes precedence); scopeForCourse pins a
+   tile; resolveFanoutCourses enumerates institution-filtered tiles for "*" and
+   resolves concrete lists skipping unresolvable ids with notes.
+2. Coverage: a SINGLE hubCourse input is covered (dropped from the run form)
+   under course fan-out; single-id behavior is the unchanged applyWorkflowScope
+   path (types.scope tests pin both).
+3. Attended: useWorkflowRun loops the whole run per course with per-course
+   runState groups (courseId/courseName/courseStatus); RunPanel renders
+   "Course i of N: name" headers, a dual-dimension progress line (courses count
+   via countOkCourses - only courseStatus "ok"), a per-course results block
+   with the summary "Generated ok of N courses' runs; failed...; skipped...",
+   and a "Stop after this course" button that finishes the current course and
+   marks the rest skipped (attended-fanout.ts pure helpers, tested). Hard-
+   cancel mid-fan-out marks remaining courses skipped in BOTH runState and the
+   persisted detail (courseOutcomes pushed synchronously, never inside a state
+   updater). Once-per-run: recents, recordWorkflowRun, and last-run write-back
+   fire once, with course counts in the detail.
+4. Unattended: the cron claim branch covers isCourseFanout; per-course groups
+   with scopeForCourse pinning, deadline cutoff, FanoutProgress.doneCourses
+   checkpointing (additive Json; old blobs parse); zero-tiles/enumeration
+   errors return clean error outcomes and NEVER throw even with saveRunReport
+   set (guarded courseNames map; server-runner tests pin it); reports group per
+   course.
+5. Guardrails: institution "*" + course fan-out rejected in both paths with the
+   pick-one-dimension message; institution fan-out behavior byte-identical.
+
+### 2026-07-22 - Automations subtab (monitoring hub)
+
+1. The Workflows top tab has three subtabs - Workflows | Automations | Drafts -
+   persisted via ta-workflows-view (stored "automations" restores).
+2. AutomationsPanel lists every workflow with at least one schedule or trigger
+   (enabled or disabled - fully-disabled ones render dimmed via the
+   every-automation-disabled rule) showing per-automation cadence/describeTrigger,
+   unattended chips, last-run chips + detail via the SHARED
+   lastRunChip/isStaleStarted helpers (single 10-minute threshold definition,
+   correct anchors: schedules lastRunAt, triggers lastFiredAt), and
+   enable/disable toggles that update optimistically with rollback + a
+   user-visible one-line error on failure (no full-panel loading flash).
+3. Attention-first ordering: error / stale-started workflows sort first under a
+   "Needs attention" flag (automation-inventory-logic tests pin ordering,
+   filtering, and the needs-attention predicate incl. boundary).
+4. Clicking a workflow name deep-links to its Automate panel (openWorkflow with
+   panel targeting via ta-workflows-panel); the per-workflow Automate panel
+   contains ONLY the selected workflow's sections (the old cross-workflow
+   overview block is gone; AutomateOverview.tsx deleted).
+
+### 2026-07-22 - Files tab file preview
+
+1. Every Files library row has a Preview button: playable media delegates to
+   the existing inline player (routed BEFORE any download via
+   getPreviewStrategy); pdf/images open in FilesTab's own FilePreviewModal
+   instance via object URLs (revoked on close AND on switching files);
+   text-like files render as text capped at 200 KB with a truncation note;
+   docx/pptx preview via server-side extraction (extractDocxTextAction /
+   extractPptxSlidesAction); zip bundles list entries with (dir) markers (the
+   jszip public API exposes no sync uncompressed size - documented in code);
+   unknown types get an explicit no-preview note.
+2. The strategy resolution is pure and tested (file-preview.test.ts);
+   FilePreviewModal itself is unmodified and its other consumer sites
+   unaffected.
+
+### 2026-07-22 - Submission archive sniffing (Submissions panel prefill)
+
+1. Selecting an archive sniffs it BEFORE upload and the same drop receives the
+   effective values (mergeSniffedValues: user-typed values always win, sniff
+   fills only blanks, lms gated on the chosen flag - pure and tested); a
+   throwing sniff (malformed cartridge) degrades to no prefill and the upload
+   proceeds; the detected-from-archive hint line shows and clears.
+2. Fingerprints: cartridge (imsmanifest/course_settings - reuses
+   parseCartridgeBlob for title/rubric/points) wins first; otherwise the
+   MAJORITY pattern wins by matching-entry count with fixed-order tie-break
+   (moodle/canvas/brightspace/blackboard; Canvas needs >50 percent); Blackboard
+   filenames yield course/assignment labels and companion txt points.
+3. Explicit LMS choices are never clobbered: ta-cartridge-lms-chosen set on any
+   user selection, with the migration that a persisted non-default lms counts
+   as chosen. Upload flow, CARTRIDGE_DROP_UPLOADED_EVENT, ta-cartridge-*
+   persistence, and the auto-grading control are unchanged.
+
+### 2026-07-22 - Grading-comment preview/edit modal
+
+1. Every rubric-area comment row in a draft (including the synthetic Overall
+   area) has a "Preview / edit" affordance opening CommentEditModal: preview
+   renders the comment as it will post (pre-wrap), the textarea edits it, Save
+   persists via updateGradingDraftPayloadAction and updates local state only on
+   ok, errors render inline, and dirty close paths (cancel, backdrop, X) gate
+   on an inline "Discard changes?" confirm.
+2. replaceAreaComment(payload, runIndex, resultIndex, areaName, newComment) is
+   pure, run-isolated (editing runs[k] never touches other runs - the
+   multi-run isolation test pins it; drafts hold one run per assignment), and
+   no-ops on a missing target.
+
+### 2026-07-22 - Courses tab Phase 1 (structure guard)
+
+1. The pure helpers live in src/lib/courses-tab-helpers.ts (CourseForm,
+   formFromCourse/courseToInput, roster and student-repo parsers, file
+   readers, downloadDocx, mergeCardLayout/mergeInstitutionFields) with the
+   42-test suite; icons in courses/icons.tsx.
+2. useCoursesData owns the data layer AND the module-level caches: the setters
+   it returns (setCourses/setSyllabi/setOrgs) update the cache inside the
+   setState updater (the module-cache idiom), CoursesTab holds ZERO direct
+   cache assignments, and remounting the tab hits the cache instead of
+   refetching.
+3. CoursesTab renders identically to pre-extraction (the redesign is Phase 2);
+   every file the extraction produced is under 1000 lines.
+
+### 2026-07-22 - Syllabus direct upload (backend + control)
+
+1. uploadSyllabusAction accepts .docx/.pdf/.txt/.md up to ~6 MB (extension-only
+   gating, documented; validation pure + tested), extracts text (docx via
+   parseOfficeParagraphs, pdf via officeparser's PDF path, txt/md decoded),
+   creates the syllabus record via the SAME createSyllabus store
+   import-lms-syllabus lands on (course_syllabi), THEN sets the course's
+   syllabus_id via updateCourse (record-first ordering documented; toRow omits
+   materials columns so no data loss).
+2. SyllabusUploadControl exists (theme-token styled, light/dark correct),
+   unmounted pending the Courses table Phase 2 which mounts it in the syllabus
+   editor.
+
+### 2026-07-22 - Manual tab flattened rail
+
+1. One grouped, sticky, single-row (nowrap + horizontal scroll) rail owns ALL
+   Manual destinations - Build [New build, Pre built], LMS [modules, pages,
+   files, grading, announcements, inbox], Version Control, Recording,
+   PowerPoint Design - any destination is one click from anywhere in Manual;
+   exactly one active chip; single-destination groups render without label
+   clutter; a destination header (name + description) renders above content.
+2. All persistence and migrations hold (ta-manual-view, ta-build-view,
+   VIEW_KEY + legacy mappings per the Manual-shell baseline); page.tsx owns
+   contentView as ContentTab's REQUIRED controlled prop (no uncontrolled
+   fallback; ContentTab's inner tab bar is gone); Recording keeps its
+   keep-mounted treatment; CoursesTab deep-links land correctly.
+3. The LMS destination list is compile-time exhaustive over ContentView
+   (LMS_VIEW_PRESENCE Record - a new ContentView member fails tsc until added
+   to the rail); manual-rail.test.ts pins active-resolution, transitions, and
+   completeness. One canonical definition per persistence key.
+
+### 2026-07-22 - Files name/extension normalization
+
+1. Stored file names are canonical extension-less: saveRecordingFile strips ONE
+   matching trailing ".ext" (case-insensitive) via stripMatchingExt (pure,
+   tested incl. multi-layer collapse and .tar.gz outer-only); downloads append
+   the extension only when the name does not already end with it. Extension
+   accumulation ("x.docx.docx") can no longer occur through save/download/
+   re-upload cycles; the ext chip display is unchanged.
 
 ### 2026-07-22 - Workflows tab UX overhaul (grouped sidebar, fewer-click run)
 

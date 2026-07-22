@@ -16,16 +16,19 @@ const VALID_RUN_STATUSES = new Set<string>(["started", "ok", "error", "skipped"]
 // actually fire more often. Enforced in the UI and treated as the floor here.
 export const MIN_INTERVAL_MINUTES = 15;
 
-/** Checkpoint for an in-flight institution fan-out (unattended runs only). Lets a
- * truncated fan-out resume on the next cron tick without re-running (and re-posting
- * for) institutions already completed this occurrence. */
+/** Checkpoint for an in-flight fan-out (institution or course; unattended runs only).
+ * Lets a truncated fan-out resume on the next cron tick without re-running (and
+ * re-posting for) entities already completed this occurrence. */
 export interface FanoutProgress {
   runToken: string;
   occurrenceRunAt: string;
   resumeNextRunAt: string | null;
   doneInstitutions: string[];
+  /** Tile ids completed for a course fan-out (additive to the Json blob - old
+   * blobs without it parse fine). */
+  doneCourses?: string[];
   attempts: number;
-  /** True once any institution errored this occurrence (across ticks), so a
+  /** True once any entity errored this occurrence (across ticks), so a
    * completed fan-out is not reported ok just because the final batch succeeded. */
   anyError: boolean;
 }
@@ -41,6 +44,9 @@ export function parseFanoutProgress(raw: unknown): FanoutProgress | null {
     doneInstitutions: Array.isArray(o.doneInstitutions)
       ? o.doneInstitutions.filter((x): x is string => typeof x === "string")
       : [],
+    doneCourses: Array.isArray(o.doneCourses)
+      ? o.doneCourses.filter((x): x is string => typeof x === "string")
+      : undefined,
     attempts: typeof o.attempts === "number" ? o.attempts : 0,
     anyError: typeof o.anyError === "boolean" ? o.anyError : false,
   };

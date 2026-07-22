@@ -47,9 +47,10 @@ describe("scopeCoversType", () => {
     expect(scopeCoversType({ hubCourse: "abc" }, "text")).toBe(false);
   });
 
-  it("a '*' (all) scope covers a LIST input but not a SINGLE input", () => {
-    // A single input cannot express "all", so it stays in the run form.
-    expect(scopeCoversType({ hubCourse: "*" }, "hubCourse")).toBe(false);
+  it("a '*' (all) scope covers both LIST and SINGLE hubCourse inputs (fan-out)", () => {
+    // Unlike other entity families, hubCourse "*" IS covered when it fans out:
+    // the fan-out runs once per course, pinning a concrete id each iteration.
+    expect(scopeCoversType({ hubCourse: "*" }, "hubCourse")).toBe(true);
     expect(scopeCoversType({ hubCourse: "*" }, "hubCourseList")).toBe(true);
   });
 
@@ -60,6 +61,17 @@ describe("scopeCoversType", () => {
     expect(scopeCoversType({ institution: "MCC" }, "institution")).toBe(true);
     expect(scopeCoversType({}, "institution")).toBe(false);
     expect(scopeCoversType(undefined, "institution")).toBe(false);
+  });
+
+  it("treats a course fan-out as covering a single hubCourse input", () => {
+    // Course "*" fan-out covers a single hubCourse input: fan-out runs once per
+    // course, so the input is never asked.
+    expect(scopeCoversType({ hubCourse: "*" }, "hubCourse")).toBe(true);
+    // Course multi-id fan-out also covers it.
+    expect(scopeCoversType({ hubCourse: "a\nb" }, "hubCourse")).toBe(true);
+    expect(scopeCoversType({ hubCourse: "a\nb\nc" }, "hubCourse")).toBe(true);
+    // A single course id still covers it via applyWorkflowScope (existing behavior).
+    expect(scopeCoversType({ hubCourse: "single" }, "hubCourse")).toBe(true);
   });
 
   it("covers a lookahead input when the scope sets lookahead", () => {
@@ -123,6 +135,54 @@ describe("collectRuntimeFields under institution fan-out", () => {
   it("still asks for the institution when no institution scope is set", () => {
     const fields = collectRuntimeFields(def, lookup);
     expect(fields.map((f) => f.fieldKey).sort()).toEqual(["institution", "topic"]);
+  });
+});
+
+describe("collectRuntimeFields under course fan-out", () => {
+  const inputs: Record<string, StepInputSpec[]> = {
+    stepB: [
+      { key: "hubCourse", label: "Course tile", type: "hubCourse", required: true },
+      { key: "topic", label: "Topic", type: "text", required: true },
+    ],
+  };
+  const lookup = (type: string) => inputs[type];
+  const def: WorkflowDef = {
+    id: "w",
+    name: "W",
+    description: "",
+    steps: [
+      {
+        type: "stepB",
+        bindings: {
+          hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+          topic: { source: "runtime", fieldKey: "topic" },
+        },
+      },
+    ],
+  };
+
+  it("does not ask for the hubCourse when the scope targets all courses", () => {
+    const scoped: WorkflowDef = { ...def, scope: { hubCourse: "*" } };
+    const fields = collectRuntimeFields(scoped, lookup);
+    expect(fields.map((f) => f.fieldKey)).toEqual(["topic"]);
+  });
+
+  it("does not ask for the hubCourse when the scope targets 2+ courses", () => {
+    const scoped: WorkflowDef = { ...def, scope: { hubCourse: "a\nb" } };
+    const fields = collectRuntimeFields(scoped, lookup);
+    expect(fields.map((f) => f.fieldKey)).toEqual(["topic"]);
+  });
+
+  it("does not ask for the hubCourse when the scope targets a single course (existing behavior)", () => {
+    const scoped: WorkflowDef = { ...def, scope: { hubCourse: "single" } };
+    const fields = collectRuntimeFields(scoped, lookup);
+    // A single concrete course is covered via applyWorkflowScope (existing behavior).
+    expect(fields.map((f) => f.fieldKey)).toEqual(["topic"]);
+  });
+
+  it("still asks for the hubCourse when no course scope is set", () => {
+    const fields = collectRuntimeFields(def, lookup);
+    expect(fields.map((f) => f.fieldKey).sort()).toEqual(["hubCourse", "topic"]);
   });
 });
 
@@ -228,10 +288,12 @@ describe("collectRuntimeFields with a workflow scope", () => {
     expect(fields.map((f) => f.fieldKey)).toEqual(["topic"]);
   });
 
-  it("keeps a SINGLE entity field when the scope is '*' (all) - it cannot fill one", () => {
+  it("drops a SINGLE entity field when the scope is '*' (all) and fans out", () => {
+    // With course fan-out ("*"), the single hubCourse input is covered: fan-out
+    // pins a concrete id per iteration.
     const scoped: WorkflowDef = { ...def, scope: { hubCourse: "*" } };
     const fields = collectRuntimeFields(scoped, lookup);
-    expect(fields.map((f) => f.fieldKey).sort()).toEqual(["hubCourse", "topic"]);
+    expect(fields.map((f) => f.fieldKey)).toEqual(["topic"]);
   });
 });
 
@@ -271,10 +333,12 @@ describe("collectRuntimeFields - module input under a scoped course", () => {
     expect(fields.map((f) => f.fieldKey)).toEqual(["topic"]);
   });
 
-  it("drops the module when the course scope is '*' (all), but still asks the single course input", () => {
+  it("drops the module and course input when the course scope is '*' (all) and fans out", () => {
+    // With course fan-out ("*"), both the single hubCourse input and the module
+    // are covered: the fan-out pins a concrete course per iteration, so the module is derived.
     const scoped: WorkflowDef = { ...def, scope: { hubCourse: "*" } };
     const fields = collectRuntimeFields(scoped, lookup);
-    expect(fields.map((f) => f.fieldKey).sort()).toEqual(["hubCourse", "topic"]);
+    expect(fields.map((f) => f.fieldKey)).toEqual(["topic"]);
   });
 
   it("does NOT skip an opaque 'modules' payload input (only lmsModule is course-derived)", () => {

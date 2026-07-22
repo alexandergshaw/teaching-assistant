@@ -276,6 +276,20 @@ export async function listCourses(userId: string): Promise<Course[]> {
   return ((data ?? []) as CourseRow[]).map(toCourse);
 }
 
+/** Fetch one course by id, or null if not found. */
+export async function getCourse(userId: string, id: string): Promise<Course | null> {
+  const { data, error } = await table()
+    .select(COLUMNS)
+    .eq("user_id", userId)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    console.error("[courses] Could not read course:", error.message);
+    return null;
+  }
+  return data ? toCourse(data as CourseRow) : null;
+}
+
 /** Create a course. Returns the created row. */
 export async function createCourse(userId: string, input: CourseInput): Promise<Course> {
   const row = { user_id: userId, ...toRow(input) } as CoursesTable["Insert"];

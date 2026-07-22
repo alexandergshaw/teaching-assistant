@@ -3468,6 +3468,71 @@ a.instFieldValue:hover {
   box-shadow: var(--shadow-sm);
 }
 
+.manualRailContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  position: sticky;
+  top: 0;
+  background: var(--card-background);
+  z-index: 1;
+}
+
+.manualRail {
+  display: flex;
+  gap: 20px;
+  flex-wrap: nowrap;
+  align-items: center;
+  overflow-x: auto;
+  padding: 4px;
+  padding-bottom: 8px;
+}
+
+.railGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.railGroupLabel {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  padding: 0 8px;
+}
+
+.railDestinations {
+  display: flex;
+  gap: 4px;
+}
+
+.destinationHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--field-border) 72%, transparent 28%);
+}
+
+.destinationHeader h2 {
+  margin: 0;
+  font-size: 1.75rem;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.destinationHeader p {
+  margin: 0;
+  max-width: 58rem;
+  font-size: 1rem;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
 .assignmentContent {
   flex: 1;
   overflow-y: auto;

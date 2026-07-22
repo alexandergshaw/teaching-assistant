@@ -54,6 +54,17 @@ export function extForFile(file: RecordingFile): string {
   return extForMime(file.mimeType);
 }
 
+export function stripMatchingExt(name: string, ext: string): string {
+  if (!ext || !name) {
+    return name;
+  }
+  const suffix = `.${ext.toLowerCase()}`;
+  if (name.toLowerCase().endsWith(suffix)) {
+    return name.slice(0, -suffix.length);
+  }
+  return name;
+}
+
 export async function saveRecordingFile(
   supabase: SupabaseClient<Database>,
   userId: string,
@@ -77,13 +88,15 @@ export async function saveRecordingFile(
     throw new Error(uploadError.message);
   }
 
+  const normalizedName = stripMatchingExt(meta.name, ext);
+
   const { data: row, error: insertError } = await (supabase
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .from("recording_files") as any)
     .insert({
       id,
       user_id: userId,
-      name: meta.name,
+      name: normalizedName,
       kind: meta.kind,
       mime_type: meta.mimeType,
       size_bytes: blob.size,

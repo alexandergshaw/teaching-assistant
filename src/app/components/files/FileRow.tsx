@@ -23,6 +23,8 @@ interface FileRowProps {
   expandedPlay: string | null;
   playUrls: Record<string, string>;
   onPlayToggle: (fileId: string | null) => void;
+  onPreview: (file: RecordingFile) => void;
+  previewLoading: boolean;
   addTarget: string | null;
   onAddTargetToggle: (fileId: string | null) => void;
   courseUrl: string;
@@ -54,6 +56,8 @@ export function FileRow({
   expandedPlay,
   playUrls,
   onPlayToggle,
+  onPreview,
+  previewLoading,
   addTarget,
   onAddTargetToggle,
   courseUrl,
@@ -129,6 +133,14 @@ export function FileRow({
               {expandedPlay === file.id ? "Close" : "Play"}
             </Button>
           )}
+          <Button
+            size="small"
+            variant="outlined"
+            disabled={previewLoading}
+            onClick={() => void onPreview(file)}
+          >
+            {previewLoading ? "Loading..." : "Preview"}
+          </Button>
           <Button
             size="small"
             variant="outlined"

@@ -10,7 +10,15 @@ import { useDraftedGradesInbox } from "./DraftedGradesInbox";
 import { updateGradingDraftPayloadAction, postGradingDraftAction, pullSubmissionAction } from "../actions";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import type { CanvasSubmissionDetail } from "@/lib/canvas";
+import CommentEditModal from "./drafted-grades/CommentEditModal";
 import styles from "../page.module.css";
+
+type CommentEditState = {
+  draftId: string;
+  runIdx: number;
+  resultIdx: number;
+  areaName: string;
+} | null;
 
 export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: (id: string) => void }) {
   const { supabase, user } = useSupabase();
@@ -31,6 +39,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
   const [submissions, setSubmissions] = useState<
     Record<string, { status: "loading" | "ready" | "error"; data?: CanvasSubmissionDetail; error?: string }>
   >({});
+  const [commentEditState, setCommentEditState] = useState<CommentEditState>(null);
 
   // Toolbar state (persisted)
   const [search, setSearch] = useState<string>(() => {
@@ -537,9 +546,19 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                       <div key={idx} className={styles.draftRubricArea}>
                                         <span className={styles.draftRubricAreaName}>{area.area}</span>
                                         <span className={styles.draftRubricAreaScore}>{area.score}</span>
-                                        <span className={styles.fieldHint} style={{ margin: 0 }}>
-                                          {area.comment}
-                                        </span>
+                                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flex: 1 }}>
+                                          <span className={styles.fieldHint} style={{ margin: 0, flex: 1 }}>
+                                            {area.comment}
+                                          </span>
+                                          <Button
+                                            size="small"
+                                            variant="text"
+                                            onClick={() => setCommentEditState({ draftId: draft.id, runIdx, resultIdx, areaName: area.area })}
+                                            style={{ whiteSpace: "nowrap", flexShrink: 0 }}
+                                          >
+                                            Preview / edit
+                                          </Button>
+                                        </div>
                                       </div>
                                     ))}
                                   </>
@@ -601,6 +620,37 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
               ))}
             </div>
           )}
+
+          {commentEditState && (() => {
+            const draft = drafts.find((d) => d.id === commentEditState.draftId);
+            const entry = draft?.payload.runs[commentEditState.runIdx];
+            const result = entry?.run.results[commentEditState.resultIdx];
+            const area = result?.rubricAreas.find((a) => a.area === commentEditState.areaName);
+
+            if (!draft || !entry || !result || !area) {
+              setCommentEditState(null);
+              return null;
+            }
+
+            return (
+              <CommentEditModal
+                studentName={result.student}
+                areaName={area.area}
+                draftSummary={draft.summary}
+                initialComment={area.comment}
+                payload={draft.payload}
+                runIndex={commentEditState.runIdx}
+                resultIndex={commentEditState.resultIdx}
+                draftId={draft.id}
+                onSave={(newPayload) => {
+                  setDrafts((prev) =>
+                    prev ? prev.map((d) => (d.id === draft.id ? { ...d, payload: newPayload } : d)) : null
+                  );
+                }}
+                onClose={() => setCommentEditState(null)}
+              />
+            );
+          })()}
         </>
       )}
     </section>

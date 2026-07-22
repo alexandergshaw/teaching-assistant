@@ -6,6 +6,7 @@
 
 import type { ScheduleWeekPlan } from "@/app/actions";
 import { parseCsvRows } from "@/lib/csv";
+import { isCourseFanout } from "@/lib/workflows/fanout";
 
 /**
  * Value types supported in workflows:
@@ -254,6 +255,10 @@ export function scopeCoversType(scope: WorkflowScope | undefined, type: string):
   // Institution "*" (all) is filled per-iteration by institution fan-out, so it
   // covers an institution input (which is therefore not asked at run time).
   if (type === "institution" && (scope?.institution ?? "").trim() === "*") return true;
+  // A single hubCourse input is covered when the scope fans out over course tiles
+  // (via "*" or 2+ newline-separated ids), because fan-out pins a concrete tile
+  // per iteration. Single concrete course ids still cover it via applyWorkflowScope.
+  if (type === "hubCourse" && isCourseFanout(scope)) return true;
   return applyWorkflowScope(type, "", scope).trim().length > 0;
 }
 

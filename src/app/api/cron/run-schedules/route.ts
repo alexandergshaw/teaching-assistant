@@ -11,7 +11,7 @@ import { listWorkflowDefs } from "@/lib/workflow-defs";
 import { allWorkflows } from "@/lib/workflows/presets";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
 import { runWorkflowUnattended, buildServerStepRunHelpers } from "@/lib/workflows/server-runner";
-import { isInstitutionFanout } from "@/lib/workflows/fanout";
+import { isInstitutionFanout, isCourseFanout } from "@/lib/workflows/fanout";
 import { runDueUnattendedTriggers } from "@/lib/workflow-trigger-runner";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
 import { resolveDocumentAuthor } from "@/lib/author";
@@ -114,7 +114,7 @@ export async function GET(req: NextRequest) {
           ? schedule.provider
           : "gemini";
 
-      if (runnable && isInstitutionFanout(def!.scope)) {
+      if (runnable && (isInstitutionFanout(def!.scope) || isCourseFanout(def!.scope))) {
         const claim = await claimFanoutSchedule(supabase, schedule.userId, schedule, now);
         if (!claim) {
           await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", "already claimed").catch(() => {});
@@ -151,6 +151,7 @@ export async function GET(req: NextRequest) {
           continue;
         }
         const progress = claim.progress;
+        const isCourse = isCourseFanout(def!.scope);
 
         const workflowRunId = crypto.randomUUID();
         const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
@@ -165,18 +166,35 @@ export async function GET(req: NextRequest) {
               workflowRunId,
             }),
             deadlineMs: runDeadlineMs,
-            skipInstitutions: new Set(progress.doneInstitutions),
-            onInstitutionDone: async (acronym, ok) => {
-              if (!progress.doneInstitutions.includes(acronym)) progress.doneInstitutions.push(acronym);
-              if (!ok) progress.anyError = true;
-              return await checkpointFanoutInstitution(supabase, schedule.userId, schedule.id, progress, new Date());
-            },
+            ...(isCourse
+              ? {
+                  skipCourses: new Set(progress.doneCourses ?? []),
+                  onCourseDone: async (tileId: string, ok: boolean) => {
+                    if (!(progress.doneCourses ?? []).includes(tileId)) {
+                      if (!progress.doneCourses) progress.doneCourses = [];
+                      progress.doneCourses.push(tileId);
+                    }
+                    if (!ok) progress.anyError = true;
+                    return await checkpointFanoutInstitution(supabase, schedule.userId, schedule.id, progress, new Date());
+                  },
+                }
+              : {
+                  skipInstitutions: new Set(progress.doneInstitutions),
+                  onInstitutionDone: async (acronym: string, ok: boolean) => {
+                    if (!progress.doneInstitutions.includes(acronym)) progress.doneInstitutions.push(acronym);
+                    if (!ok) progress.anyError = true;
+                    return await checkpointFanoutInstitution(supabase, schedule.userId, schedule.id, progress, new Date());
+                  },
+                }),
           })
         );
 
         if (outcome.fanout?.truncated) {
           await deferFanoutResume(supabase, schedule.userId, schedule.id, progress.runToken, new Date());
-          const partialDetail = `fan-out partial: ${progress.doneInstitutions.length}/${outcome.fanout.total} done`;
+          const completedCount = isCourse
+            ? (progress.doneCourses ?? []).length
+            : progress.doneInstitutions.length;
+          const partialDetail = `fan-out partial: ${completedCount}/${outcome.fanout.total} done`;
           await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "started", partialDetail).catch(() => {});
           results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "ok", detail: partialDetail });
         } else {

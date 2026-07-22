@@ -34,7 +34,7 @@ import { parseCartridgeBlob } from "@/lib/cartridge-import";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
 import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction } from "@/app/actions";
-import { isInstitutionFanout, scopeForInstitution, resolveFanoutInstitutions } from "@/lib/workflows/fanout";
+import { isInstitutionFanout, isCourseFanout, scopeForInstitution, scopeForCourse, resolveFanoutInstitutions, resolveFanoutCourses } from "@/lib/workflows/fanout";
 
 export interface StepRunOutcome {
   index: number;
@@ -43,10 +43,18 @@ export interface StepRunOutcome {
   error: string | null;
   summary: StepRunSummary | null;
   institution?: string;
+  courseId?: string;
 }
 
 export interface InstitutionGroupOutcome {
   institution: string;
+  steps: StepRunOutcome[];
+  ok: boolean;
+}
+
+export interface CourseGroupOutcome {
+  courseId: string;
+  courseName: string;
   steps: StepRunOutcome[];
   ok: boolean;
 }
@@ -59,9 +67,9 @@ export interface WorkflowRunSummary {
    * disabled step with no enabled dependents leaves `ok: true` (mirrors
    * handleRun's disabledRunIndices distinction). */
   steps: StepRunOutcome[];
-  groups?: InstitutionGroupOutcome[];
+  groups?: InstitutionGroupOutcome[] | CourseGroupOutcome[];
   /** Fan-out progress for the caller (cron route) to decide resume vs finish.
-   * Present only for a checkpointed institution fan-out run. */
+   * Present only for a checkpointed fan-out (institution or course) run. */
   fanout?: { total: number; ranThisTick: string[]; remaining: string[]; truncated: boolean };
 }
 
@@ -310,20 +318,32 @@ export async function runWorkflowUnattended(opts: {
    * Absent -> current behavior (no checkpoint; the deadline marks the rest errored). */
   skipInstitutions?: Set<string>;
   onInstitutionDone?: (acronym: string, ok: boolean) => Promise<boolean>;
+  /** Course fan-out checkpointing (unattended schedule runs only). */
+  skipCourses?: Set<string>;
+  onCourseDone?: (tileId: string, ok: boolean) => Promise<boolean>;
 }): Promise<WorkflowRunSummary> {
   const { def, helpers } = opts;
   const stepLookup = opts.stepLookup ?? getStepDefinition;
 
   let ok: boolean;
   let steps: StepRunOutcome[];
-  let groups: InstitutionGroupOutcome[] | undefined;
+  let groups: InstitutionGroupOutcome[] | CourseGroupOutcome[] | undefined;
   let fanoutInfo: WorkflowRunSummary["fanout"];
 
-  if (!isInstitutionFanout(def.scope)) {
+  const instFanout = isInstitutionFanout(def.scope);
+  const hubCourse = (def.scope?.hubCourse ?? "").trim();
+  const courseFanout = hubCourse === "*" || (hubCourse.split("\n").map((s) => s.trim()).filter(Boolean).length >= 2);
+  if (instFanout && courseFanout) {
+    ok = false;
+    steps = [{ index: -1, type: def.id, status: "error", error: "Scope cannot target all institutions and multiple course tiles at once - pick one fan-out dimension.", summary: null }];
+    return { ok, steps };
+  }
+
+  if (!isInstitutionFanout(def.scope) && !isCourseFanout(def.scope)) {
     const out = await runExpandedBodyOnce({ ...opts, stepLookup, filterHubByInstitution: false });
     ok = out.ok;
     steps = out.steps;
-  } else {
+  } else if (isInstitutionFanout(def.scope)) {
     const resolved = await resolveFanoutInstitutions();
     if ("error" in resolved) {
       ok = false;
@@ -341,7 +361,7 @@ export async function runWorkflowUnattended(opts: {
 
         if (opts.deadlineMs !== undefined && Date.now() > opts.deadlineMs) {
           if (checkpointing) continue; // resume path: leave the remainder for the next tick, no error row
-          groups.push({
+          (groups as InstitutionGroupOutcome[]).push({
             institution: acronym,
             ok: false,
             steps: [{ index: -1, type: def.id, status: "error", error: "Skipped - run time budget reached this tick.", summary: null, institution: acronym }],
@@ -358,7 +378,7 @@ export async function runWorkflowUnattended(opts: {
           stepLookup,
           filterHubByInstitution: true,
         });
-        groups.push({ institution: acronym, steps: out.steps, ok: out.ok });
+        (groups as InstitutionGroupOutcome[]).push({ institution: acronym, steps: out.steps, ok: out.ok });
         ranThisTick.push(acronym);
 
         if (checkpointing) {
@@ -370,19 +390,74 @@ export async function runWorkflowUnattended(opts: {
         }
       }
       ok = groups.every((g) => g.ok);
-      steps = groups.flatMap((g) => g.steps.map((s) => ({ ...s, institution: s.institution ?? g.institution })));
+      steps = (groups as InstitutionGroupOutcome[]).flatMap((g) => g.steps.map((s) => ({ ...s, institution: s.institution ?? g.institution })));
       if (checkpointing) {
         const done = new Set([...skip, ...ranThisTick]);
         const remaining = resolved.list.filter((a) => !done.has(a));
         fanoutInfo = { total: resolved.list.length, ranThisTick, remaining, truncated: remaining.length > 0 };
       }
     }
+  } else {
+    const resolved = await resolveFanoutCourses(def.scope, helpers.activeInstitution);
+    if ("error" in resolved) {
+      ok = false;
+      steps = [{ index: -1, type: def.id, status: "error", error: `Could not list course tiles: ${resolved.error}`, summary: null }];
+    } else if (resolved.list.length === 0) {
+      ok = false;
+      steps = [{ index: -1, type: def.id, status: "error", error: "The scope matched no course tiles.", summary: null }];
+    } else {
+      const checkpointing = opts.onCourseDone !== undefined;
+      const skip = opts.skipCourses ?? new Set<string>();
+      const courseGroups: CourseGroupOutcome[] = [];
+      const ranThisTick: string[] = [];
+      for (const course of resolved.list) {
+        if (skip.has(course.id)) continue;
+
+        if (opts.deadlineMs !== undefined && Date.now() > opts.deadlineMs) {
+          if (checkpointing) continue;
+          courseGroups.push({
+            courseId: course.id,
+            courseName: course.name,
+            ok: false,
+            steps: [{ index: -1, type: def.id, status: "error", error: "Skipped - run time budget reached this tick.", summary: null, courseId: course.id }],
+          });
+          continue;
+        }
+
+        const scopedDef: WorkflowDef = { ...def, scope: scopeForCourse(def.scope!, course.id) };
+        const out = await runExpandedBodyOnce({
+          ...opts,
+          def: scopedDef,
+          helpers,
+          stepLookup,
+          filterHubByInstitution: false,
+        });
+        courseGroups.push({ courseId: course.id, courseName: course.name, steps: out.steps, ok: out.ok });
+        ranThisTick.push(course.id);
+
+        if (checkpointing) {
+          const kept = await opts.onCourseDone!(course.id, out.ok);
+          if (!kept) break;
+        }
+      }
+      ok = courseGroups.every((g) => g.ok);
+      steps = courseGroups.flatMap((g) => g.steps.map((s) => ({ ...s, courseId: s.courseId ?? g.courseId })));
+      groups = courseGroups;
+      if (checkpointing) {
+        const done = new Set([...skip, ...ranThisTick]);
+        const remaining = resolved.list.filter((c) => !done.has(c.id));
+        fanoutInfo = { total: resolved.list.length, ranThisTick, remaining: remaining.map((c) => c.id), truncated: remaining.length > 0 };
+      }
+    }
   }
 
   // Persist the run's text deliverables to the Files tab (best-effort). For a
-  // fan-out this is one combined report across every institution.
+  // fan-out this is one combined report across every group.
   if (helpers.saveRunReport && !(fanoutInfo && fanoutInfo.truncated)) {
-    const markdown = buildRunReportMarkdown(def.name, new Date().toISOString(), steps, (t) => stepLookup(t)?.name ?? t);
+    const courseNames = (isCourseFanout(def.scope) && groups)
+      ? new Map((groups as CourseGroupOutcome[]).map((g) => [g.courseId, g.courseName]))
+      : undefined;
+    const markdown = buildRunReportMarkdown(def.name, new Date().toISOString(), steps, (t) => stepLookup(t)?.name ?? t, courseNames);
     if (markdown) {
       try {
         await helpers.saveRunReport(`${def.name} report`, markdown);
@@ -400,13 +475,15 @@ export async function runWorkflowUnattended(opts: {
  * there is nothing substantive to save. Pure (no I/O, no Date) so it is unit
  * testable; the caller supplies `generatedAt` and a step-name lookup. Only
  * `done` steps with a text/list/link summary contribute; schedule summaries and
- * errored/empty steps are skipped.
+ * errored/empty steps are skipped. Institution/course grouping is preserved via
+ * optional fields; the report will show the group label when available.
  */
 export function buildRunReportMarkdown(
   workflowName: string,
   generatedAt: string,
   outcomes: StepRunOutcome[],
-  stepName: (type: string) => string
+  stepName: (type: string) => string,
+  courseNames?: Map<string, string>
 ): string | null {
   if (outcomes.length === 0) return null;
   const sections: string[] = [];
@@ -425,7 +502,13 @@ export function buildRunReportMarkdown(
       continue;
     }
     if (!body.trim()) continue;
-    const heading = o.institution ? `${o.index + 1}. ${stepName(o.type)} (${o.institution})` : `${o.index + 1}. ${stepName(o.type)}`;
+    let groupLabel = "";
+    if (o.courseId && courseNames) {
+      groupLabel = courseNames.get(o.courseId) || o.courseId;
+    } else if (o.institution) {
+      groupLabel = o.institution;
+    }
+    const heading = groupLabel ? `${o.index + 1}. ${stepName(o.type)} (${groupLabel})` : `${o.index + 1}. ${stepName(o.type)}`;
     sections.push(`## ${heading}\n\n${body}`);
   }
   for (const o of outcomes) {

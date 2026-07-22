@@ -2,13 +2,14 @@ import { describe, it, expect, vi } from "vitest";
 import { runWorkflowUnattended, buildRunReportMarkdown, type StepRunOutcome } from "./server-runner";
 import type { StepDefinition, StepRunHelpers } from "./registry";
 import type { WorkflowDef } from "./types";
-import { resolveFanoutInstitutions } from "./fanout";
+import { resolveFanoutInstitutions, resolveFanoutCourses } from "./fanout";
 
-// Keep isInstitutionFanout / scopeForInstitution real; only stub the network
-// enumerator so fan-out can be exercised without env-configured institutions.
+// Keep isInstitutionFanout / isCourseFanout / scopeForInstitution / scopeForCourse real;
+// only stub the network enumerators so fan-out can be exercised without env-configured
+// institutions or course tiles.
 vi.mock("./fanout", async (importOriginal) => {
   const actual = (await importOriginal()) as typeof import("./fanout");
-  return { ...actual, resolveFanoutInstitutions: vi.fn() };
+  return { ...actual, resolveFanoutInstitutions: vi.fn(), resolveFanoutCourses: vi.fn() };
 });
 
 // A tiny fake step catalog + fake helpers, injected via runWorkflowUnattended's
@@ -653,7 +654,8 @@ describe("runWorkflowUnattended institution fan-out", () => {
       { active: "AAA", inst: "AAA" },
       { active: "BBB", inst: "BBB" },
     ]);
-    expect(result.groups?.map((g) => g.institution)).toEqual(["AAA", "BBB"]);
+    type InstGroup = { institution: string };
+    expect(result.groups?.map((g) => (g as InstGroup).institution)).toEqual(["AAA", "BBB"]);
     expect(result.steps.map((s) => s.institution)).toEqual(["AAA", "BBB"]);
   });
 
@@ -800,5 +802,176 @@ describe("runWorkflowUnattended fan-out checkpointing", () => {
     expect(onInstitutionDone).toHaveBeenCalledTimes(1);
     expect(result.fanout?.remaining).toEqual(["BBB", "CCC"]);
     expect(result.fanout?.truncated).toBe(true);
+  });
+});
+
+describe("runWorkflowUnattended course fan-out", () => {
+  const probeDefs: Record<string, StepDefinition> = {
+    probe: {
+      type: "probe",
+      name: "Probe",
+      description: "",
+      inputs: [{ key: "course", label: "Course", type: "hubCourse", required: false }],
+      outputs: [],
+      run: async () => ({ outputs: {}, summary: { kind: "text", text: "ran" } }),
+    },
+  };
+  const fanoutDef: WorkflowDef = {
+    id: "co",
+    name: "Course FO",
+    description: "",
+    scope: { hubCourse: "*" },
+    steps: [{ type: "probe", bindings: { course: { source: "runtime", fieldKey: "course" } } }],
+  };
+
+  it("runs the body once per resolved course, pinning the scope", async () => {
+    vi.mocked(resolveFanoutCourses).mockResolvedValue({
+      list: [
+        { id: "t1", name: "Course A" },
+        { id: "t2", name: "Course B" },
+      ],
+    });
+    const seen: Array<{ course: unknown }> = [];
+    const defs: Record<string, StepDefinition> = {
+      probe: {
+        ...probeDefs.probe,
+        run: async (values) => {
+          seen.push({ course: values.course });
+          return { outputs: {}, summary: { kind: "text", text: "ran" } };
+        },
+      },
+    };
+    const result = await runWorkflowUnattended({
+      def: fanoutDef,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+    });
+    expect(result.ok).toBe(true);
+    expect(seen).toEqual([{ course: "t1" }, { course: "t2" }]);
+    type CourseGroup = { courseId: string };
+    expect((result.groups ?? []).map((g) => (g as CourseGroup).courseId)).toEqual(["t1", "t2"]);
+    expect(result.steps.map((s) => s.courseId)).toEqual(["t1", "t2"]);
+  });
+
+  it("errors when no course tiles are resolved", async () => {
+    vi.mocked(resolveFanoutCourses).mockResolvedValue({ list: [] });
+    const result = await runWorkflowUnattended({
+      def: fanoutDef,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(probeDefs),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.steps[0].error).toContain("no course tiles");
+  });
+
+  it("surfaces a resolution error", async () => {
+    vi.mocked(resolveFanoutCourses).mockResolvedValue({ error: "crash" });
+    const result = await runWorkflowUnattended({
+      def: fanoutDef,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(probeDefs),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.steps[0].error).toContain("Could not list course tiles: crash");
+  });
+
+  it("skips courses past the deadline and reports the remainder", async () => {
+    vi.mocked(resolveFanoutCourses).mockResolvedValue({
+      list: [
+        { id: "t1", name: "A" },
+        { id: "t2", name: "B" },
+      ],
+    });
+    const ran: string[] = [];
+    const onCourseDone = vi.fn(async () => true);
+    const result = await runWorkflowUnattended({
+      def: fanoutDef,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf({
+        probe: {
+          ...probeDefs.probe,
+          run: async () => {
+            ran.push("x");
+            return { outputs: {}, summary: { kind: "text", text: "" } };
+          },
+        },
+      }),
+      deadlineMs: 0,
+      onCourseDone,
+    });
+    expect(ran).toEqual([]);
+    expect(onCourseDone).not.toHaveBeenCalled();
+    expect(result.fanout?.truncated).toBe(true);
+    expect(result.fanout?.remaining).toEqual(["t1", "t2"]);
+  });
+
+  it("does not fan out when the course scope is concrete", async () => {
+    vi.mocked(resolveFanoutCourses).mockClear();
+    const result = await runWorkflowUnattended({
+      def: { ...fanoutDef, scope: { hubCourse: "single" } },
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(probeDefs),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.groups).toBeUndefined();
+    expect(resolveFanoutCourses).not.toHaveBeenCalled();
+  });
+
+  it("returns ok:false (never throws) when zero course tiles resolve AND saveRunReport is set", async () => {
+    vi.mocked(resolveFanoutCourses).mockResolvedValue({ list: [] });
+    const saveRunReport = vi.fn(async () => {});
+    const result = await runWorkflowUnattended({
+      def: fanoutDef,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: { ...fakeHelpers(), saveRunReport },
+      stepLookup: lookupOf(probeDefs),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.steps[0].error).toContain("no course tiles");
+  });
+
+  it("returns ok:false (never throws) when course enumeration errors AND saveRunReport is set", async () => {
+    vi.mocked(resolveFanoutCourses).mockResolvedValue({ error: "crash" });
+    const saveRunReport = vi.fn(async () => {});
+    const result = await runWorkflowUnattended({
+      def: fanoutDef,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: { ...fakeHelpers(), saveRunReport },
+      stepLookup: lookupOf(probeDefs),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.steps[0].error).toContain("Could not list course tiles: crash");
+  });
+
+  it("rejects both institution and course fan-out together", async () => {
+    const result = await runWorkflowUnattended({
+      def: { ...fanoutDef, scope: { institution: "*", hubCourse: "*" } },
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(probeDefs),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.steps[0].error).toContain("pick one fan-out dimension");
   });
 });

@@ -17,6 +17,7 @@ import {
   type WorkflowTrigger,
 } from "@/lib/workflow-triggers";
 import { readActiveInstitution } from "@/lib/institutions";
+import { sniffSubmissionArchive, mergeSniffedValues, type SniffResult } from "@/lib/submission-archive-sniff";
 import { formatRelative } from "@/app/utils/time";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
@@ -52,7 +53,14 @@ export default function CartridgeDropPanel() {
     return saved === "brightspace" || saved === "blackboard" || saved === "moodle" ? saved : "canvas";
   });
   const [rubricText, setRubricText] = useState("");
+  const [sniffHint, setSniffHint] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [lmsChosen, setLmsChosen] = useState(() => {
+    if (typeof window === "undefined") return false;
+    if (localStorage.getItem("ta-cartridge-lms-chosen") === "1") return true;
+    const saved = localStorage.getItem("ta-cartridge-lms");
+    return saved === "brightspace" || saved === "blackboard" || saved === "moodle";
+  });
 
   // Persist form fields
   useEffect(() => {
@@ -78,6 +86,14 @@ export default function CartridgeDropPanel() {
       localStorage.setItem("ta-cartridge-lms", lms);
     }
   }, [lms]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      if (lmsChosen) {
+        localStorage.setItem("ta-cartridge-lms-chosen", "1");
+      }
+    }
+  }, [lmsChosen]);
 
   const loadDrops = async (uid: string) => {
     try {
@@ -142,29 +158,75 @@ export default function CartridgeDropPanel() {
     };
   }, [user, supabase]);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.currentTarget.files?.[0];
-    if (!file || !user) return;
+    if (!file || !user) {
+      setSniffHint(null);
+      return;
+    }
 
     try {
       setLoading(true);
       setError(null);
+
+      // Run sniff to prefill fields (best-effort)
+      let sniffResult: SniffResult = { notes: [] };
+      try {
+        sniffResult = await sniffSubmissionArchive(file);
+      } catch (e) {
+        console.error("sniff failed:", e);
+      }
+
+      // Compute effective values using empty-only rule
+      const effective = mergeSniffedValues(
+        {
+          courseLabel,
+          assignmentLabel,
+          pointsPossible,
+          rubricText,
+          lms,
+          lmsChosen,
+        },
+        sniffResult
+      );
+
+      // Update UI state with effective values
+      setCourseLabel(effective.courseLabel);
+      setAssignmentLabel(effective.assignmentLabel);
+      setPointsPossible(effective.pointsPossible ? String(effective.pointsPossible) : "");
+      setRubricText(effective.rubricText || "");
+      if (!lmsChosen && sniffResult.lms) {
+        setLms(effective.lms);
+      }
+
+      // Show hint with detected metadata
+      if (sniffResult.notes.length > 0) {
+        setSniffHint(`Detected from the archive: ${sniffResult.notes.join("; ")}`);
+      } else {
+        setSniffHint(null);
+      }
+
+      // Upload with effective values (passed directly, not relying on state which hasn't updated yet)
       const drop = await saveCartridgeDrop(supabase, user.id, file, {
-        courseLabel,
-        assignmentLabel,
-        pointsPossible: pointsPossible ? Number(pointsPossible) : null,
-        rubricText: rubricText || null,
-        lms,
+        courseLabel: effective.courseLabel,
+        assignmentLabel: effective.assignmentLabel,
+        pointsPossible: effective.pointsPossible,
+        rubricText: effective.rubricText,
+        lms: effective.lms,
       });
       setDrops((prev) => [drop, ...prev]);
+
       // Reset form
       setRubricText("");
+      setSniffHint(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
       window.dispatchEvent(new CustomEvent(CARTRIDGE_DROP_UPLOADED_EVENT));
     } catch (err) {
+      console.error("Archive sniffing error:", err);
       setError(err instanceof Error ? err.message : "Could not upload cartridge.");
+      setSniffHint(null);
     } finally {
       setLoading(false);
     }
@@ -273,11 +335,12 @@ export default function CartridgeDropPanel() {
               id="cartridge-file"
               type="file"
               accept=".zip,.imscc,application/zip"
-              onChange={handleUpload}
+              onChange={handleFileSelect}
               disabled={loading}
             />
             <p>Upload a .zip or .imscc archive of student submissions.</p>
           </div>
+          {sniffHint && <p className={styles.fieldHint}>{sniffHint}</p>}
         </div>
 
         <div className={styles.field}>
@@ -326,7 +389,10 @@ export default function CartridgeDropPanel() {
             size="small"
             id="cartridge-lms"
             value={lms}
-            onChange={(e) => setLms(e.target.value as "canvas" | "brightspace" | "blackboard" | "moodle")}
+            onChange={(e) => {
+              setLms(e.target.value as "canvas" | "brightspace" | "blackboard" | "moodle");
+              setLmsChosen(true);
+            }}
             disabled={loading}
           >
             <MenuItem value="canvas">Canvas</MenuItem>

@@ -8,9 +8,9 @@ import { RunInputPrompt } from "./RunInputPrompt";
 import { SummaryView, compareTableValues, csvCell, tableGradeIssue, GradeBadge, DetailSectionsView, type GradeBand } from "./run-results";
 import { describeWorkflowScope } from "@/lib/workflows/types";
 import { getStepDefinition } from "@/lib/workflows/registry";
-import type { StepRunSummary } from "@/lib/workflows/registry";
 import type { WorkflowDef, RuntimeField, WorkflowStepConfig } from "@/lib/workflows/types";
 import type { UseWorkflowRunReturn } from "./useWorkflowRun";
+import { buildCourseFanoutSummary, countOkCourses, type RunStateGroup } from "./attended-fanout";
 import styles from "../../page.module.css";
 
 interface WorkflowOptions {
@@ -36,15 +36,9 @@ interface RunPanelProps {
   onValueChange: (fieldKey: string, value: string) => void;
   workflowRunning: boolean;
   validationError: string | null;
-  runState: Array<{
-    institution: string | null;
-    steps: Array<{
-      status: "pending" | "running" | "done" | "error" | "disabled" | "skipped";
-      progress: string | null;
-      summary: StepRunSummary | null;
-      error: string | null;
-    }>;
-  }>;
+  runState: RunStateGroup[];
+  stopRequested: boolean;
+  onStopAfterCourse: () => void;
   runPause: {
     groupIndex: number;
     stepIndex: number;
@@ -75,6 +69,8 @@ export function RunPanel({
   workflowRunning,
   validationError,
   runState,
+  stopRequested,
+  onStopAfterCourse,
   runPause,
   runInput,
   pauseResolverRef,
@@ -109,6 +105,7 @@ export function RunPanel({
   const requiredFields = runtimeFields.filter((f) => f.required);
   const optionalFields = runtimeFields.filter((f) => !f.required);
   const showOptionalDisclosure = optionalFields.length >= 3;
+  const isCourseFanoutRun = runState.some((grp) => !!grp.courseId);
 
   // Auto-expand disclosure on validation errors targeting hidden fields
   if (validationError && !optionalFieldsOpen && showOptionalDisclosure) {
@@ -287,16 +284,28 @@ export function RunPanel({
       {runState.length > 0 && (
         <div style={{ marginTop: 28 }}>
           <h2 style={{ fontSize: "1rem", marginBottom: 16 }}>Run Progress</h2>
-          {runState.some((grp) => grp.institution !== null) && (
+          {(runState.some((grp) => grp.institution !== null) || isCourseFanoutRun) && (
             <p className={styles.fieldHint} style={{ margin: "0 0 12px 0" }}>
-              {runState.filter((grp) => grp.steps.every((s) => s.status !== "error")).length}/{runState.length} institutions ok
+              {isCourseFanoutRun ? countOkCourses(runState) : runState.filter((grp) => grp.steps.every((s) => s.status !== "error")).length}/{runState.length} {isCourseFanoutRun ? "courses" : "institutions"} ok
             </p>
           )}
+          {workflowRunning && isCourseFanoutRun && (
+            <div style={{ marginBottom: 12 }}>
+              <Button size="small" variant="outlined" onClick={onStopAfterCourse} disabled={stopRequested}>
+                {stopRequested ? "Stopping after this course..." : "Stop after this course"}
+              </Button>
+            </div>
+          )}
           {runState.map((group, g) => (
-            <Fragment key={group.institution ?? g}>
+            <Fragment key={group.courseId ?? group.institution ?? g}>
               {group.institution && (
                 <h3 style={{ fontSize: "0.85rem", fontWeight: 600, margin: g === 0 ? "0 0 4px 0" : "20px 0 4px 0", color: "var(--hint-text)" }}>
                   {group.institution}
+                </h3>
+              )}
+              {group.courseId && (
+                <h3 style={{ fontSize: "0.85rem", fontWeight: 600, margin: g === 0 ? "0 0 4px 0" : "20px 0 4px 0", color: "var(--hint-text)" }}>
+                  Course {g + 1} of {runState.length}: {group.courseName}
                 </h3>
               )}
               {group.steps.map((state, i) => {
@@ -360,6 +369,45 @@ export function RunPanel({
               })}
             </Fragment>
           ))}
+
+          {!workflowRunning && isCourseFanoutRun && (
+            <div style={{ marginTop: 20 }}>
+              {runState.map((group, g) => {
+                const status = group.courseStatus ?? "skipped";
+                const badgeClass =
+                  status === "ok"
+                    ? styles.ghBadgeSuccess
+                    : status === "failed"
+                    ? styles.ghBadgeDanger
+                    : styles.ghBadgeNeutral;
+                const label = status === "ok" ? "OK" : status === "failed" ? "Failed" : "Skipped";
+                return (
+                  <div
+                    key={group.courseId ?? g}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "6px 0",
+                      borderBottom: "1px solid var(--field-border)",
+                    }}
+                  >
+                    <span>{group.courseName}</span>
+                    <span className={`${styles.ghBadge} ${badgeClass}`}>{label}</span>
+                  </div>
+                );
+              })}
+              <p className={styles.fieldHint} style={{ marginTop: 12, fontWeight: 600 }}>
+                {buildCourseFanoutSummary(
+                  runState.map((group) => ({
+                    courseId: group.courseId ?? "",
+                    courseName: group.courseName ?? "",
+                    status: group.courseStatus ?? "skipped",
+                  }))
+                )}
+              </p>
+            </div>
+          )}
         </div>
       )}
     </>

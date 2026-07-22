@@ -16,13 +16,10 @@ import type {
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
-import { useInstitutionCounts } from "./InstitutionCounts";
-import { useVcCounts } from "./VcCounts";
-import TabHeader from "./TabHeader";
 import styles from "../page.module.css";
 import {
   CONTENT_URL_KEY,
-  VIEW_KEY,
+  type ContentView,
 } from "./content-tab/constants";
 import type { LoadState } from "./content-tab/types";
 import {
@@ -35,26 +32,20 @@ import { ModulesView } from "./content-tab/ModulesView";
 
 
 
-
-
-
-
-type ContentView = "modules" | "pages" | "files" | "grading" | "announcements" | "inbox" | "version-control";
-
 export default function ContentTab({
+  view,
   grading,
   announcements,
   inbox,
   versionControl,
 }: {
+  view: ContentView;
   grading?: ReactNode;
   announcements?: ReactNode;
   inbox?: ReactNode;
   versionControl?: ReactNode;
 }) {
   const { active: activeInstitution } = useInstitutionSelection();
-  const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
-  const { total: vcAttention } = useVcCounts();
   const [provider] = useLlmProvider();
 
   const [courseUrl, setCourseUrl] = useState<string>(() =>
@@ -82,22 +73,10 @@ export default function ContentTab({
   const [note, setNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const [view, setViewState] = useState<ContentView>(() => {
-    if (typeof window === "undefined") return "modules";
-    const saved = localStorage.getItem(VIEW_KEY);
-    return saved === "pages" || saved === "files" || saved === "grading" || saved === "announcements" || saved === "inbox" || saved === "version-control"
-      ? (saved as ContentView)
-      : "modules";
-  });
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorPageUrl, setEditorPageUrl] = useState<string | null>(null);
   // Course copy/import tool: "export" copies this course out, "import" pulls in.
   const [copyMode, setCopyMode] = useState<"export" | "import" | null>(null);
-
-  const setView = (next: ContentView) => {
-    setViewState(next);
-    if (typeof window !== "undefined") localStorage.setItem(VIEW_KEY, next);
-  };
 
   // Reset to a clean slate during render when the institution changes — the
   // loaded content belonged to the previous school.
@@ -207,84 +186,6 @@ export default function ContentTab({
 
   return (
     <div className={styles.card}>
-      <TabHeader
-        eyebrow={versionControl ? "Integrations" : "LMS"}
-        title={versionControl ? "LMS & version control" : "LMS content"}
-        subtitle={
-          versionControl
-            ? "Manage a Canvas course's modules, pages, files, grading, and communications, or work with the GitHub side of your courses under Version Control. Changes are written to Canvas when you save."
-            : "Manage a Canvas course's modules, pages, files, grading, and communications. Changes are written to Canvas when you save."
-        }
-      />
-
-      <div className={styles.lessonInnerTabs}>
-            <button
-              type="button"
-              className={`${styles.lessonInnerTab} ${view === "modules" ? styles.lessonInnerTabActive : ""}`}
-              onClick={() => setView("modules")}
-            >
-              Modules
-            </button>
-            <button
-              type="button"
-              className={`${styles.lessonInnerTab} ${view === "pages" ? styles.lessonInnerTabActive : ""}`}
-              onClick={() => setView("pages")}
-            >
-              Pages
-            </button>
-            <button
-              type="button"
-              className={`${styles.lessonInnerTab} ${view === "files" ? styles.lessonInnerTabActive : ""}`}
-              onClick={() => setView("files")}
-            >
-              Files
-            </button>
-            {grading && (
-              <button
-                type="button"
-                className={`${styles.lessonInnerTab} ${view === "grading" ? styles.lessonInnerTabActive : ""}`}
-                onClick={() => setView("grading")}
-              >
-                <span className={styles.tabLabelWrap}>
-                  Grading
-                  {totalNeedsGrading > 0 && <span className={styles.navBadge}>{totalNeedsGrading}</span>}
-                </span>
-              </button>
-            )}
-            {announcements && (
-              <button
-                type="button"
-                className={`${styles.lessonInnerTab} ${view === "announcements" ? styles.lessonInnerTabActive : ""}`}
-                onClick={() => setView("announcements")}
-              >
-                Announcements
-              </button>
-            )}
-            {inbox && (
-              <button
-                type="button"
-                className={`${styles.lessonInnerTab} ${view === "inbox" ? styles.lessonInnerTabActive : ""}`}
-                onClick={() => setView("inbox")}
-              >
-                <span className={styles.tabLabelWrap}>
-                  Inbox
-                  {totalUnread > 0 && <span className={styles.navBadge}>{totalUnread}</span>}
-                </span>
-              </button>
-            )}
-            {versionControl && (
-              <button
-                type="button"
-                className={`${styles.lessonInnerTab} ${view === "version-control" ? styles.lessonInnerTabActive : ""}`}
-                onClick={() => setView("version-control")}
-              >
-                <span className={styles.tabLabelWrap}>
-                  Version Control
-                  {vcAttention > 0 && <span className={styles.navBadge}>{vcAttention}</span>}
-                </span>
-              </button>
-            )}
-          </div>
 
       {view !== "version-control" && (
         <div className={styles.field}>

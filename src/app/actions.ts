@@ -33,4 +33,5 @@ export * from "./actions/llm-tools";
 export * from "./actions/media";
 export * from "./actions/messaging";
 export * from "./actions/research";
+export * from "./actions/syllabus-upload";
 export * from "./actions/workflow-support";

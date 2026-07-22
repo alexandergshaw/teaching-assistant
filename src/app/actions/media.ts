@@ -279,6 +279,21 @@ export async function extractPptxSlidesAction(
   }
 }
 
+export async function extractDocxTextAction(
+  base64: string
+): Promise<{ text: string } | { error: string }> {
+  try {
+    await requireOwner();
+    if (!base64) return { error: "Upload a .docx file." };
+    const paragraphs = await parseOfficeParagraphs("docx", Buffer.from(base64, "base64"));
+    const text = paragraphs.map((p) => p.text).join("\n");
+    if (!text.trim()) return { error: "No text found in that file." };
+    return { text };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not read the Word document." };
+  }
+}
+
 export async function generateSlideNarrationAction(
   slides: Array<{ slide: number; title: string; text: string }>,
   provider: LlmProvider = "gemini"

@@ -17,6 +17,7 @@ import DraftedGradesTab from "./components/DraftedGradesTab";
 import MessageDraftsTab from "./components/MessageDraftsTab";
 import PresentationDraftsTab from "./components/PresentationDraftsTab";
 import WorkflowsTab from "./components/WorkflowsTab";
+import AutomationsTabView from "./components/AutomationsTabView";
 import PowerPointDesignTab from "./components/PowerPointDesignTab";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
 import WorkflowTriggerWatcher from "./components/WorkflowTriggerWatcher";
@@ -37,7 +38,9 @@ import { uploadCourseZip, removeCourseZip } from "@/lib/course-files";
 import { saveRecordingFile } from "@/lib/recording-files";
 import styles from "./page.module.css";
 import { parseGeneratedRubric } from "./utils/rubric";
-import { VIEW_KEY } from "./components/content-tab/constants";
+import { VIEW_KEY, type ContentView } from "./components/content-tab/constants";
+import { ManualRail } from "./components/manual/ManualRail";
+import { resolveStateFromDestinationId } from "./components/manual/manual-rail";
 
 
 
@@ -51,8 +54,8 @@ const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 type BuildView = "new" | "prebuilt";
 const BUILD_VIEW_KEY = "ta-build-view";
-// The Workflows tab groups Workflows and Drafts as subtabs.
-type WorkflowsView = "workflows" | "drafts";
+// The Workflows tab groups Workflows, Automations, and Drafts as subtabs.
+type WorkflowsView = "workflows" | "automations" | "drafts";
 const WORKFLOWS_VIEW_KEY = "ta-workflows-view";
 // The Drafts tab groups Grades, Messages, and Presentations as subtabs.
 type DraftsView = "grades" | "messages" | "presentations";
@@ -118,13 +121,24 @@ export default function Home() {
     setBuildViewState(v);
     if (typeof window !== "undefined") localStorage.setItem(BUILD_VIEW_KEY, v);
   };
+  const [contentView, setContentViewState] = useState<ContentView>(() => {
+    if (typeof window === "undefined") return "modules";
+    const saved = localStorage.getItem(VIEW_KEY);
+    return saved === "pages" || saved === "files" || saved === "grading" || saved === "announcements" || saved === "inbox" || saved === "version-control"
+      ? (saved as ContentView)
+      : "modules";
+  });
+  const setContentView = (v: ContentView) => {
+    setContentViewState(v);
+    if (typeof window !== "undefined") localStorage.setItem(VIEW_KEY, v);
+  };
   const [workflowsView, setWorkflowsView] = useState<WorkflowsView>(() => {
     if (typeof window === "undefined") return "workflows";
     // Migrate legacy "grade-drafts" or stored "drafts" to "drafts" view.
     const saved = localStorage.getItem("ta-active-tab");
     if (saved === "grade-drafts" || saved === "drafts") return "drafts";
     const savedWorkflows = localStorage.getItem(WORKFLOWS_VIEW_KEY);
-    return savedWorkflows === "workflows" || savedWorkflows === "drafts" ? savedWorkflows : "workflows";
+    return savedWorkflows === "workflows" || savedWorkflows === "automations" || savedWorkflows === "drafts" ? savedWorkflows : "workflows";
   });
   const [draftsView, setDraftsView] = useState<DraftsView>(() => {
     if (typeof window === "undefined") return "grades";
@@ -669,8 +683,9 @@ export default function Home() {
     }, 1600);
   };
 
-  const openWorkflow = (id: string) => {
+  const openWorkflow = (id: string, panel?: "automate") => {
     if (typeof window !== "undefined") localStorage.setItem("ta-workflows-selected", id);
+    if (panel === "automate" && typeof window !== "undefined") localStorage.setItem("ta-workflows-panel", "automate");
     setWorkflowsView("workflows");
     setActiveTab("workflows");
   };
@@ -740,123 +755,75 @@ export default function Home() {
 
         {activeTab === "manual" && (
           <>
-            <div className={styles.manualSubnav}>
-              <div className={styles.lessonInnerTabs} role="tablist" aria-label="Manual tools">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={manualView === "course-planning"}
-                  className={`${styles.lessonInnerTab}${manualView === "course-planning" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                  onClick={() => setManualView("course-planning")}
-                >
-                  Build Courses
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={manualView === "content"}
-                  className={`${styles.lessonInnerTab}${manualView === "content" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                  onClick={() => setManualView("content")}
-                >
-                  LMS
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={manualView === "version-control"}
-                  className={`${styles.lessonInnerTab}${manualView === "version-control" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                  onClick={() => setManualView("version-control")}
-                >
-                  Version Control
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={manualView === "recording"}
-                  className={`${styles.lessonInnerTab}${manualView === "recording" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                  onClick={() => setManualView("recording")}
-                >
-                  Recording
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={manualView === "ppt-design"}
-                  className={`${styles.lessonInnerTab}${manualView === "ppt-design" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                  onClick={() => setManualView("ppt-design")}
-                >
-                  PowerPoint Design
-                </button>
-              </div>
-            </div>
+            <ManualRail
+              manualView={manualView}
+              buildView={buildView}
+              contentView={contentView}
+              onDestinationClick={(destId) => {
+                const resolved = resolveStateFromDestinationId(destId, manualView, buildView, contentView);
+                if (resolved.manualView !== manualView) setManualView(resolved.manualView);
+                if (resolved.buildView !== buildView) setBuildView(resolved.buildView);
+                if (resolved.contentView !== contentView) setContentView(resolved.contentView);
+              }}
+            />
 
-            {manualView === "course-planning" && (() => {
-              const buildSwitcher = (
-                <div className={styles.lessonInnerTabs} role="tablist" aria-label="Course build modes">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={buildView === "new"}
-                    className={`${styles.lessonInnerTab}${buildView === "new" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                    onClick={() => setBuildView("new")}
-                  >
-                    New Build
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={buildView === "prebuilt"}
-                    className={`${styles.lessonInnerTab}${buildView === "prebuilt" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                    onClick={() => setBuildView("prebuilt")}
-                  >
-                    Pre Built
-                  </button>
-                </div>
-              );
-              return buildView === "new" ? (
-                <CoursePlanningTab innerTabs={buildSwitcher} />
-              ) : (
-                <LessonPlanningForm
-                  innerTabs={buildSwitcher}
-                  moduleObjectives={moduleObjectives}
-                  onModuleObjectivesChange={setModuleObjectives}
-                  moduleTitle={moduleTitle}
-                  onModuleTitleChange={setModuleTitle}
-                  isCourseEngine={provider === "other"}
-                  lessonContext={lessonContext}
-                  onLessonContextChange={setLessonContext}
-                  contextFileRef={lessonContextFileRef}
-                  homeworkText={homeworkText}
-                  onHomeworkTextChange={setHomeworkText}
-                  homeworkFileRef={homeworkFileRef}
-                  lessonError={lessonError}
-                  isGeneratingLesson={isGeneratingLesson}
-                  onGenerate={handleGenerateLesson}
-                />
-              );
-            })()}
-
-            {manualView === "content" && (
-              <ContentTab
-                grading={
-                  <GradingTab
-                    formAction={formAction}
-                    pending={pending}
-                    state={state}
-                    testState={testState}
-                    copiedKey={copiedKey}
-                    onCopy={handleCopy}
-                    onOpenPreview={handleOpenPreview}
+            {manualView === "course-planning" && (
+              <div className={styles.card}>
+                {buildView === "new" ? (
+                  <CoursePlanningTab />
+                ) : (
+                  <LessonPlanningForm
+                    moduleObjectives={moduleObjectives}
+                    onModuleObjectivesChange={setModuleObjectives}
+                    moduleTitle={moduleTitle}
+                    onModuleTitleChange={setModuleTitle}
+                    isCourseEngine={provider === "other"}
+                    lessonContext={lessonContext}
+                    onLessonContextChange={setLessonContext}
+                    contextFileRef={lessonContextFileRef}
+                    homeworkText={homeworkText}
+                    onHomeworkTextChange={setHomeworkText}
+                    homeworkFileRef={homeworkFileRef}
+                    lessonError={lessonError}
+                    isGeneratingLesson={isGeneratingLesson}
+                    onGenerate={handleGenerateLesson}
                   />
-                }
-                announcements={<CanvasTab view="announcements" />}
-                inbox={<CanvasTab view="inbox" />}
-              />
+                )}
+              </div>
             )}
 
-            {manualView === "version-control" && <VersionControlTab />}
+            {manualView === "content" && (
+              <div className={styles.card}>
+                <ContentTab
+                  view={contentView}
+                  grading={
+                    <GradingTab
+                      formAction={formAction}
+                      pending={pending}
+                      state={state}
+                      testState={testState}
+                      copiedKey={copiedKey}
+                      onCopy={handleCopy}
+                      onOpenPreview={handleOpenPreview}
+                    />
+                  }
+                  announcements={<CanvasTab view="announcements" />}
+                  inbox={<CanvasTab view="inbox" />}
+                />
+              </div>
+            )}
 
-            {manualView === "ppt-design" && <PowerPointDesignTab />}
+            {manualView === "version-control" && (
+              <div className={styles.card}>
+                <VersionControlTab />
+              </div>
+            )}
+
+            {manualView === "ppt-design" && (
+              <div className={styles.card}>
+                <PowerPointDesignTab />
+              </div>
+            )}
           </>
         )}
 
@@ -884,6 +851,15 @@ export default function Home() {
                 <button
                   type="button"
                   role="tab"
+                  aria-selected={workflowsView === "automations"}
+                  className={`${styles.lessonInnerTab}${workflowsView === "automations" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                  onClick={() => setWorkflowsView("automations")}
+                >
+                  Automations
+                </button>
+                <button
+                  type="button"
+                  role="tab"
                   aria-selected={workflowsView === "drafts"}
                   className={`${styles.lessonInnerTab}${workflowsView === "drafts" ? ` ${styles.lessonInnerTabActive}` : ""}`}
                   onClick={() => setWorkflowsView("drafts")}
@@ -897,6 +873,9 @@ export default function Home() {
             </div>
 
             {workflowsView === "workflows" && <WorkflowsTab />}
+            {workflowsView === "automations" && (
+              <AutomationsTabView onOpenWorkflow={openWorkflow} />
+            )}
             {workflowsView === "drafts" && (
               <>
                 <div className={styles.manualSubnav}>

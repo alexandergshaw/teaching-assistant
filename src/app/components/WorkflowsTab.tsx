@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { Tabs, Tab } from "@mui/material";
 import TabHeader from "./TabHeader";
-import { AutomateOverview } from "./workflows/AutomateOverview";
 import { ScheduleSection } from "./workflows/ScheduleSection";
 import { TriggerSection } from "./workflows/TriggerSection";
 import { tableGradeBand } from "./workflows/run-results";
@@ -729,6 +728,8 @@ export default function WorkflowsTab() {
                   workflowRunning={workflowRun.running}
                   validationError={workflowRun.validationError}
                   runState={workflowRun.runState}
+                  stopRequested={workflowRun.stopRequested}
+                  onStopAfterCourse={workflowRun.stopAfterCurrentCourse}
                   runPause={workflowRun.runPause}
                   runInput={workflowRun.runInput}
                   pauseResolverRef={workflowRun.pauseResolverRef}
@@ -764,16 +765,6 @@ export default function WorkflowsTab() {
 
               {panel === "automate" && (
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--field-border)" }}>
-            <div style={{ marginBottom: 20 }}>
-              <h3 style={{ margin: "0 0 8px 0", fontSize: "0.95rem" }}>Scheduled & triggered workflows</h3>
-              <AutomateOverview
-                workflows={workflows}
-                automationByWorkflow={automation.automationByWorkflow}
-                schedules={automation.schedules}
-                triggers={automation.triggers}
-                onSelectWorkflow={setSelectedWorkflowId}
-              />
-            </div>
             <ScheduleSection
               scheduleForm={automation.scheduleForm}
               setScheduleForm={automation.setScheduleForm}

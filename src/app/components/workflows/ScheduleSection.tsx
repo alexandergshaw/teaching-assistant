@@ -4,14 +4,8 @@ import { Button, MenuItem, TextField, Checkbox, FormControlLabel } from "@mui/ma
 import { describeScheduleCadence, MIN_INTERVAL_MINUTES, type WorkflowSchedule, type ScheduleRepeat } from "@/lib/workflow-schedules";
 import { scheduleToForm } from "@/lib/workflow-form-helpers";
 import type { WorkflowDef, RuntimeField } from "@/lib/workflows/types";
+import { lastRunChip } from "./automation-inventory-logic";
 import styles from "../../page.module.css";
-
-function isStaleStarted(runAtIso: string | null): boolean {
-  if (!runAtIso) return false;
-  const runAtMs = new Date(runAtIso).getTime();
-  const tenMinutesAgoMs = Date.now() - 10 * 60 * 1000;
-  return runAtMs < tenMinutesAgoMs;
-}
 
 type ScheduleFormData = {
   runAt: string;
@@ -286,18 +280,7 @@ export function ScheduleSection({
               ? hubCourses?.find((c) => c.id === s.courseId)?.name ?? "course"
               : null;
             const attachment = [courseName, s.institution].filter(Boolean).join(", ");
-            const lastRunStatusClass = !s.lastRunStatus ? "" :
-              s.lastRunStatus === "ok" ? styles.ghBadgeSuccess :
-              s.lastRunStatus === "error" ? styles.ghBadgeDanger :
-              s.lastRunStatus === "skipped" ? styles.ghBadgeNeutral :
-              s.lastRunStatus === "started" && isStaleStarted(s.lastRunAt) ? styles.ghBadgeDanger :
-              styles.ghBadgeAccent;
-            const lastRunStatusText = !s.lastRunStatus ? "" :
-              s.lastRunStatus === "ok" ? "Last run OK" :
-              s.lastRunStatus === "error" ? "Last run failed" :
-              s.lastRunStatus === "skipped" ? "Last run skipped" :
-              s.lastRunStatus === "started" && isStaleStarted(s.lastRunAt) ? "Did not finish" :
-              "Running";
+            const chip = lastRunChip(s.lastRunStatus, s.lastRunAt);
             return (
               <div key={s.id} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 0", borderTop: "1px solid var(--field-border)", fontSize: "0.85em" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -305,8 +288,8 @@ export function ScheduleSection({
                   {s.unattended && (
                     <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>Unattended</span>
                   )}
-                  {s.lastRunStatus && (
-                    <span className={`${styles.ghBadge} ${lastRunStatusClass}`}>{lastRunStatusText}</span>
+                  {chip.text && (
+                    <span className={`${styles.ghBadge} ${chip.class}`}>{chip.text}</span>
                   )}
                   <span style={{ color: "var(--text-secondary)" }}>
                     {s.enabled

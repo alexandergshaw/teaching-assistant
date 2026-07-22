@@ -16,11 +16,13 @@ import {
   downloadRecordingFile,
   saveRecordingFile,
   extForFile,
+  stripMatchingExt,
   type RecordingFile,
 } from "@/lib/recording-files";
 import { ensureFiniteDuration } from "@/lib/caption-burn";
 import { stripAudio } from "@/lib/strip-audio";
 import { groupRecordingFiles } from "@/lib/recording-file-groups";
+import { getPreviewStrategy } from "@/lib/file-preview";
 import { formatRelative } from "@/app/utils/time";
 import {
   listCourseContentAction,
@@ -33,6 +35,8 @@ import { FileRow } from "./files/FileRow";
 import { FilterToolbar } from "./files/FilterToolbar";
 import { UploadDropZone } from "./files/UploadDropZone";
 import { BulkSelectionBar } from "./files/BulkSelectionBar";
+import { useFilePreview } from "./files/useFilePreview";
+import FilePreviewModal from "./FilePreviewModal";
 
 export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflowId: string) => void } = {}) {
   const { supabase, user } = useSupabase();
@@ -95,6 +99,9 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
 
   // Play URLs state
   const [playUrls, setPlayUrls] = useState<Record<string, string>>({});
+
+  // File preview state
+  const filePreview = useFilePreview();
 
   // Upload state
   const [uploads, setUploads] = useState<Array<{ name: string; status: "uploading" | "done" | "error"; error?: string }>>([]);
@@ -235,7 +242,10 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${file.name}.${extForFile(file)}`;
+      const ext = extForFile(file);
+      const nameWithoutExt = stripMatchingExt(file.name, ext);
+      const downloadName = nameWithoutExt === file.name ? `${file.name}.${ext}` : file.name;
+      a.download = downloadName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -268,6 +278,15 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
     } finally {
       setStripping(null);
     }
+  };
+
+  const handleFilePreview = (file: RecordingFile) => {
+    const strategy = getPreviewStrategy(file.mimeType, extForFile(file));
+    if (strategy === "media-play") {
+      setExpandedPlay(file.id);
+      return;
+    }
+    void filePreview.openPreview(file, supabase);
   };
 
   const handleDelete = async (file: RecordingFile) => {
@@ -799,6 +818,8 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
                                 expandedPlay={expandedPlay}
                                 playUrls={playUrls}
                                 onPlayToggle={setExpandedPlay}
+                                onPreview={handleFilePreview}
+                                previewLoading={filePreview.loading}
                                 addTarget={addTarget}
                                 onAddTargetToggle={setAddTarget}
                                 courseUrl={courseUrl}
@@ -852,6 +873,8 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
                                 expandedPlay={expandedPlay}
                                 playUrls={playUrls}
                                 onPlayToggle={setExpandedPlay}
+                                onPreview={handleFilePreview}
+                                previewLoading={filePreview.loading}
                                 addTarget={addTarget}
                                 onAddTargetToggle={setAddTarget}
                                 courseUrl={courseUrl}
@@ -900,6 +923,8 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
                     expandedPlay={expandedPlay}
                     playUrls={playUrls}
                     onPlayToggle={setExpandedPlay}
+                    onPreview={handleFilePreview}
+                    previewLoading={filePreview.loading}
                     addTarget={addTarget}
                     onAddTargetToggle={setAddTarget}
                     courseUrl={courseUrl}
@@ -943,6 +968,14 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
       )}
 
       {filesView === "submissions" && <CartridgeDropPanel />}
+
+      {filePreview.file && (
+        <FilePreviewModal
+          selectedPreview={filePreview.file}
+          previewBlobUrl={filePreview.blobUrl}
+          onClose={filePreview.closePreview}
+        />
+      )}
     </section>
   );
 }

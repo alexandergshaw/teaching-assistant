@@ -31,8 +31,10 @@ Living regression document for the AC -> code -> verify -> regression delivery l
 - G2: `npx tsc --noEmit` is clean.
 - G3: `npm run build` reaches a successful compile line ("Compiled successfully").
   Env-dependent prerender failures after compile are acceptable; compile or type
-  errors are not. The known acceptable failure is /_not-found prerendering failing
-  with a missing Supabase URL/API key (@supabase/ssr) when env vars are absent.
+  errors are not. The acceptable failure class is any page's prerender failing on
+  the missing Supabase URL/API key (@supabase/ssr) when env vars are absent; the
+  first page to fail varies between runs (/_not-found and /account/integrations
+  have both been observed - the build exits on whichever errors first).
 - G4: `npm test` (vitest) passes fully.
 - G5: No emojis anywhere in source files. Scope: git-tracked source files (exclude
   node_modules/ and .next/). Emoji means true emoji codepoints (pictographs,

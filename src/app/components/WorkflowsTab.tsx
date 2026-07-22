@@ -1,18 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useRef, Fragment } from "react";
-import { Button, TextField, MenuItem, Autocomplete, FormControlLabel, Checkbox, Tabs, Tab } from "@mui/material";
+import { Button, TextField, Tabs, Tab } from "@mui/material";
 import TabHeader from "./TabHeader";
 import WorkflowBuilder from "./WorkflowBuilder";
 import WorkflowScopeControl from "./WorkflowScopeControl";
-import GithubRepoPicker from "./GithubRepoPicker";
-import CoursePicker from "./CoursePicker";
-import Typeahead from "./ui/Typeahead";
 import { AutomateOverview } from "./workflows/AutomateOverview";
 import { ScheduleSection } from "./workflows/ScheduleSection";
 import { TriggerSection } from "./workflows/TriggerSection";
 import { RuntimeFieldInput } from "./workflows/RuntimeFieldInput";
-import { RunStepCard, stepStatusBadgeClass } from "./workflows/RunStepCard";
+import { RunStepCard } from "./workflows/RunStepCard";
 import { StepOverviewRow } from "./workflows/StepOverviewRow";
 import { RunInputPrompt } from "./workflows/RunInputPrompt";
 import { useSupabase } from "@/context/SupabaseProvider";
@@ -28,13 +25,11 @@ import {
   createWorkflowSchedule,
   updateWorkflowSchedule,
   deleteWorkflowSchedule,
-  describeScheduleCadence,
   reenableSchedule,
   MIN_INTERVAL_MINUTES,
   type WorkflowSchedule,
   type ScheduleRepeat,
 } from "@/lib/workflow-schedules";
-import { scheduleToForm, triggerToForm } from "@/lib/workflow-form-helpers";
 import { peekScheduledRun, takeScheduledRun, SCHEDULED_RUN_EVENT } from "@/lib/workflow-schedule-handoff";
 import {
   listWorkflowTriggers,
@@ -43,13 +38,11 @@ import {
   deleteWorkflowTrigger,
   generateWebhookToken,
   getEventSource,
-  describeTrigger,
-  EVENT_SOURCES,
   type WorkflowTrigger,
   type TriggerEventType,
 } from "@/lib/workflow-triggers";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
-import { isScopeableListType, expandScopedValue, ALL_SCOPE, resolveClassRepoRef, resolveClassTileRef } from "@/lib/workflows/scope";
+import { isScopeableListType, expandScopedValue, resolveClassRepoRef, resolveClassTileRef } from "@/lib/workflows/scope";
 import { isInstitutionFanout, resolveFanoutInstitutions, scopeForInstitution } from "@/lib/workflows/fanout";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
@@ -467,14 +460,14 @@ export default function WorkflowsTab() {
     transform?: (value: string | File[] | Array<Record<string, string>>) => unknown;
   } | null>(null);
   const inputResolverRef = useRef<{ resolve: (value: string | File[] | Array<Record<string, string>> | null) => void } | null>(null);
-  const [runInputText, setRunInputText] = useState("");
-  const [runInputChoice, setRunInputChoice] = useState("");
-  const [runInputFiles, setRunInputFiles] = useState<File[]>([]);
+  const [, setRunInputText] = useState("");
+  const [, setRunInputChoice] = useState("");
+  const [, setRunInputFiles] = useState<File[]>([]);
   const [runInputRows, setRunInputRows] = useState<Array<Record<string, string>>>([]);
-  const [runInputChecked, setRunInputChecked] = useState<boolean[]>([]);
-  const [runInputBusy, setRunInputBusy] = useState(false);
-  const [runInputError, setRunInputError] = useState<string | null>(null);
-  const [runInputDetails, setRunInputDetails] = useState<Record<number, { open: boolean; status: "loading" | "done" | "error"; detail: TableRowDetail | null; error: string; run?: { status: "running" | "done"; result: CodeRunResult | null; error?: string } }>>({});
+  const [, setRunInputChecked] = useState<boolean[]>([]);
+  const [, setRunInputBusy] = useState(false);
+  const [, setRunInputError] = useState<string | null>(null);
+  const [, setRunInputDetails] = useState<Record<number, { open: boolean; status: "loading" | "done" | "error"; detail: TableRowDetail | null; error: string; run?: { status: "running" | "done"; result: CodeRunResult | null; error?: string } }>>({});
   // Review-table QoL state: search filter, column sort, and the pristine rows
   // snapshot for dirty-tracking/reset. All die with the pause, so none persist.
   const [runInputSearch, setRunInputSearch] = useState("");
@@ -493,7 +486,7 @@ export default function WorkflowsTab() {
 
   // The display list: original indices ride along so selection, details, and
   // edits stay keyed to the underlying rows while the view filters/sorts.
-  const tableDisplay = useMemo(() => {
+  useMemo(() => {
     if (!runInput || runInput.kind !== "table") return [];
     if (tableFrozenOrder) {
       return tableFrozenOrder
@@ -515,7 +508,7 @@ export default function WorkflowsTab() {
     return list;
   }, [runInput, runInputRows, runInputSearch, runInputSort, tableFrozenOrder]);
 
-  const tableGradeStats = useMemo(() => {
+  useMemo(() => {
     if (!tableHasGrade) return null;
     const values: number[] = [];
     let invalid = 0;
@@ -539,7 +532,7 @@ export default function WorkflowsTab() {
   // recomputed as grades are edited. Rows that cannot be percentage-banded
   // (no grade, invalid, or no outOf) are excluded from the bar entirely -
   // null when there is nothing bandable yet, so the bar can hide itself.
-  const tableGradeDist = useMemo(() => {
+  useMemo(() => {
     if (!tableHasGrade) return null;
     const counts: Record<Exclude<GradeBand, "neutral">, number> = {
       success: 0,
@@ -566,11 +559,6 @@ export default function WorkflowsTab() {
     };
   }, [tableHasGrade, runInputRows]);
 
-  // Selected rows with invalid grades block approval (a typo would otherwise
-  // surface only as a silent per-student skip after posting).
-  const tableCheckedInvalid = tableHasGrade
-    ? runInputRows.filter((row, i) => (runInputChecked[i] ?? true) && tableGradeIssue(row)).length
-    : 0;
   const [pendingHandoff, setPendingHandoff] = useState<{ workflowId: string; prefill: Record<string, string> } | null>(null);
 
   const [uploadFiles, setUploadFiles] = useState<Record<string, File[]>>({});

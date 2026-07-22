@@ -386,6 +386,30 @@ describe("resolveWeekTopic", () => {
       const result = resolveWeekTopic({ liveModules: null, modules, csvData: null, topics: null, week: 1 });
       expect(result).toEqual({ topic: "From Export", summary: "", source: "export" });
     });
+
+    it("resolves week from live module with underscore separator 'Week_N' format", () => {
+      const liveModules = [
+        { title: "Week_3: Recursion", position: 1, items: [{ title: "Lesson" }, { title: "Practice" }] },
+      ];
+      const result = resolveWeekTopic({ liveModules, modules: null, csvData: null, topics: null, week: 3 });
+      expect(result).toEqual({
+        topic: "Recursion",
+        summary: "Lesson; Practice",
+        source: "live",
+      });
+    });
+
+    it("resolves week from live module with dash separator 'Module-N' format", () => {
+      const liveModules = [
+        { title: "Module-2: Data Structures", position: 1, items: [{ title: "Video" }] },
+      ];
+      const result = resolveWeekTopic({ liveModules, modules: null, csvData: null, topics: null, week: 2 });
+      expect(result).toEqual({
+        topic: "Data Structures",
+        summary: "Video",
+        source: "live",
+      });
+    });
   });
 
   describe("Priority 2: Export modules", () => {
@@ -495,6 +519,30 @@ describe("resolveWeekTopic", () => {
       ];
       const result = resolveWeekTopic({ modules, csvData: null, topics: null, week: 1 });
       expect((result as { topic: string }).topic).toBe("First");
+    });
+
+    it("resolves week from export module with underscore separator 'Week_N' format", () => {
+      const modules = [
+        { title: "Week_3: Recursion", position: 1, items: [{ title: "Lesson" }, { title: "Practice" }] },
+      ];
+      const result = resolveWeekTopic({ modules, csvData: null, topics: null, week: 3 });
+      expect(result).toEqual({
+        topic: "Recursion",
+        summary: "Lesson; Practice",
+        source: "export",
+      });
+    });
+
+    it("resolves week from export module with dash separator 'Module-N' format", () => {
+      const modules = [
+        { title: "Module-4 Sorting", position: 1, items: [{ title: "Algorithm" }, { title: "Examples" }] },
+      ];
+      const result = resolveWeekTopic({ modules, csvData: null, topics: null, week: 4 });
+      expect(result).toEqual({
+        topic: "Sorting",
+        summary: "Algorithm; Examples",
+        source: "export",
+      });
     });
   });
 

@@ -546,6 +546,7 @@ describe("runWorkflowUnattended report capture", () => {
       description: "",
       steps: [{ type: "writeup", bindings: {} }],
     };
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const saveRunReport = vi.fn(async (_name: string, _markdown: string) => {});
     const result = await runWorkflowUnattended({
       def,

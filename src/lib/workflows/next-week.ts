@@ -24,13 +24,14 @@ export function mapLiveModulesForTopic(
 }
 
 // Helper to parse week/module number and topic text from a module title.
-// Matches /(?:week|module)\s*(\d+)/i and returns the captured number plus
-// the title text after the match, stripped of leading separators.
+// Matches /(?:week|module)[\s_-]*(\d+)/i (matches the same separators as parseWeekToken
+// so the two chains agree) and returns the captured number plus the title text after
+// the match, stripped of leading separators.
 function parseWeekModuleTitle(title: string): { number: number; remainder: string } | null {
-  const m = title.match(/(?:week|module)\s*(\d+)/i);
+  const m = title.match(/(?:week|module)[\s_-]*(\d+)/i);
   if (!m) return null;
   const number = Number(m[1]);
-  const remainder = title.slice(m.index! + m[0].length).replace(/^[:|\s\-]+/, "").trim();
+  const remainder = title.slice(m.index! + m[0].length).replace(/^[:|\s_-]+/, "").trim();
   return { number, remainder };
 }
 
@@ -49,7 +50,7 @@ export function resolveWeekTopic(input: {
 }): WeekTopicSource | { skip: string } {
   const { liveModules, modules, csvData, topics, week } = input;
 
-  // Priority 1: LIVE MODULES - find module matching /(?:week|module)\s*(\d+)/i with captured number === week
+  // Priority 1: LIVE MODULES - find module matching /(?:week|module)[\s_-]*(\d+)/i with captured number === week
   let liveMatchedEmptyRemainder = false;
   if (liveModules) {
     for (const mod of liveModules) {
@@ -70,7 +71,7 @@ export function resolveWeekTopic(input: {
     }
   }
 
-  // Priority 2: EXPORT MODULES - find module matching /(?:week|module)\s*(\d+)/i with captured number === week
+  // Priority 2: EXPORT MODULES - find module matching /(?:week|module)[\s_-]*(\d+)/i with captured number === week
   let matchedEmptyRemainder = false;
   if (modules) {
     for (const mod of modules) {

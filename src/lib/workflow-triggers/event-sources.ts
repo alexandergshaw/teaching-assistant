@@ -4,6 +4,7 @@
 // logic) and server actions (to fetch fresh data on each poll tick).
 
 import type { Json } from "../supabase/types";
+import type { WorkflowRunStatus } from "../workflow-run-status";
 import {
   getInstitutionCountsAction,
   getUnreadCountsAction,
@@ -80,6 +81,8 @@ export interface WorkflowTrigger {
   webhookToken: string | null;
   lastCheckedAt: string | null;
   lastFiredAt: string | null;
+  lastRunStatus: WorkflowRunStatus | null;
+  lastRunDetail: string | null;
 }
 
 export type TriggerEventCategory =
@@ -711,8 +714,8 @@ export const EVENT_SOURCES: EventSourceDef[] = [
   },
   {
     type: "cartridge-uploaded",
-    label: "Cartridge uploaded",
-    description: "Fires when new cartridge drops (submission archives for closed courses) are uploaded and ready for grading.",
+    label: "Submissions uploaded",
+    description: "Fires when new student-submission zips are uploaded (Files > Submissions or the Grading panel) and are ready for grading.",
     category: "course",
     configFields: [],
     minPollMinutes: 15,

@@ -420,7 +420,19 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                 <div key={draft.id} className={styles.draftSection}>
                   <div className={styles.draftSectionHead}>
                     <div>
-                      <div className={styles.draftSectionTitle}>{draft.summary || "Grading draft"}</div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
+                        <div className={styles.draftSectionTitle}>{draft.summary || "Grading draft"}</div>
+                        {draft.source && (
+                          <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>
+                            {draft.source === "repos" ? "Repo grade" : draft.source === "lms" ? "LMS grade" : "Submissions zip grade"}
+                          </span>
+                        )}
+                      </div>
+                      {draft.payload.runs.length > 0 && (
+                        <div className={styles.draftSectionMeta} style={{ marginBottom: 4 }}>
+                          Class: {[...new Set(draft.payload.runs.map((r) => r.courseName))].sort().join(", ")}
+                        </div>
+                      )}
                       <div className={styles.draftSectionMeta}>
                         {formatDateTime(draft.createdAt)} · {groups.reduce((total, g) => total + g.results.length, 0)} grade{groups.reduce((total, g) => total + g.results.length, 0) === 1 ? "" : "s"}
                       </div>

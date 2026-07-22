@@ -25,6 +25,8 @@ import type {
 
 export type GradingDraftStatus = "pending" | "reviewed";
 
+export type GradingDraftSource = "repos" | "lms" | "cartridge";
+
 export interface GradingDraftPayload {
   runs: GradingRunEntry[];
 }
@@ -39,6 +41,7 @@ export interface GradingDraft {
   updatedAt: string;
   workflowId?: string;
   workflowName?: string;
+  source?: GradingDraftSource;
 }
 
 /** Lightweight listing shape for pickers - avoids shipping every draft's
@@ -176,6 +179,7 @@ export function mapDraft(row: DraftRow): GradingDraft {
     updatedAt: row.updated_at,
     workflowId: row.workflow_id ?? undefined,
     workflowName: row.workflow_name ?? undefined,
+    source: row.source && ["repos", "lms", "cartridge"].includes(row.source) ? (row.source as GradingDraftSource) : undefined,
   };
 }
 
@@ -222,7 +226,7 @@ export async function getGradingDraft(
 export async function createGradingDraft(
   supabase: SupabaseClient<Database>,
   userId: string,
-  input: { summary: string; payload: GradingDraftPayload; workflowId?: string; workflowName?: string }
+  input: { summary: string; payload: GradingDraftPayload; workflowId?: string; workflowName?: string; source?: GradingDraftSource }
 ): Promise<GradingDraft> {
   const { data, error } = await table(supabase)
     .insert({
@@ -232,6 +236,7 @@ export async function createGradingDraft(
       payload: input.payload as unknown as Json,
       workflow_id: input.workflowId ?? null,
       workflow_name: input.workflowName ?? null,
+      source: input.source ?? null,
     })
     .select("*")
     .single();

@@ -488,7 +488,7 @@ describe("buildRunReportMarkdown", () => {
   };
   const name = (t: string) => names[t] ?? t;
 
-  it("renders text, list, and link summaries and skips schedules, errors, and empties", () => {
+  it("renders text, list, and link summaries, error sections, and skips schedules and empties", () => {
     const outcomes: StepRunOutcome[] = [
       { index: 0, type: "greet", status: "done", error: null, summary: { kind: "text", text: "Hello world" } },
       { index: 1, type: "list", status: "done", error: null, summary: { kind: "list", label: "Items", items: ["a", "b"] } },
@@ -504,17 +504,19 @@ describe("buildRunReportMarkdown", () => {
     expect(md).toContain("## 1. Greet\n\nHello world");
     expect(md).toContain("## 2. List step\n\n**Items**\n\n- a\n- b");
     expect(md).toContain("## 3. Link step\n\n[Open](https://x.test)");
+    expect(md).toContain("## 5. Greet - ERROR\n\nboom");
     expect(md).not.toContain("Schedule step");
-    expect(md).not.toContain("## 5");
     expect(md).not.toContain("## 6");
   });
 
-  it("returns null when there is no substantive text deliverable", () => {
+  it("returns null only for empty outcomes, fallback body for outcomes with no text deliverables", () => {
     expect(buildRunReportMarkdown("W", "t", [], (t) => t)).toBeNull();
     const onlySchedule: StepRunOutcome[] = [
       { index: 0, type: "sched", status: "done", error: null, summary: { kind: "schedule", courseTitle: "C", schedule: [], csv: "" } },
     ];
-    expect(buildRunReportMarkdown("W", "t", onlySchedule, (t) => t)).toBeNull();
+    const md = buildRunReportMarkdown("W", "t", onlySchedule, (t) => t);
+    expect(md).not.toBeNull();
+    expect(md).toContain("Run produced no output.");
   });
 
   it("labels the institution in section headers for a fan-out report", () => {
@@ -525,6 +527,16 @@ describe("buildRunReportMarkdown", () => {
     const md = buildRunReportMarkdown("W", "t", outcomes, () => "Greet");
     expect(md).toContain("## 1. Greet (AAA)\n\nhi A");
     expect(md).toContain("## 1. Greet (BBB)\n\nhi B");
+  });
+
+  it("renders explicit one-liners for skipped and disabled steps", () => {
+    const outcomes: StepRunOutcome[] = [
+      { index: 0, type: "step1", status: "skipped", error: null, summary: null },
+      { index: 1, type: "step2", status: "disabled", error: null, summary: null },
+    ];
+    const md = buildRunReportMarkdown("W", "t", outcomes, (t) => t);
+    expect(md).toContain("## 1. step1\n\nSkipped: dependency failed");
+    expect(md).toContain("## 2. step2\n\nDisabled by user");
   });
 });
 
@@ -589,7 +601,9 @@ describe("runWorkflowUnattended report capture", () => {
       helpers: { ...fakeHelpers(), saveRunReport },
       stepLookup: lookupOf(defs),
     });
-    expect(saveRunReport).not.toHaveBeenCalled();
+    expect(saveRunReport).toHaveBeenCalledOnce();
+    const call = saveRunReport.mock.calls[0] as unknown as [string, string];
+    expect(call[1]).toContain("Run produced no output.");
   });
 });
 

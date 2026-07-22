@@ -12,6 +12,8 @@ import {
   saveLibraryFileAction,
   findVisualizerConceptAction,
   createVisualizerConceptAction,
+  researchCurrentEventsAction,
+  extractPptxSlidesAction,
 } from "@/app/actions";
 import {
   type StepDefinition,
@@ -19,6 +21,7 @@ import {
   resolveTileCurrentWeek,
   loadTileWeekTopic,
 } from "@/lib/workflows/registry-helpers";
+import { buildDocxFromPlainText } from "@/lib/docx";
 import { nextLectureWeek } from "@/lib/workflows/next-week";
 import { extractDefinitions } from "@/lib/embedded/scaffold";
 
@@ -514,6 +517,180 @@ export const knowledgeSteps: StepDefinition[] = [
           kind: "list",
           label: `Proposed ${result.proposedCount} solution(s)`,
           items,
+        },
+      };
+    },
+  },
+
+  {
+    type: "current-events-report",
+    name: "Current events for a slide deck",
+    description:
+      "Search the web for current events and recent developments related to a lecture deck's topics, within a user-specified recency window. The report is saved as a text document.",
+    inputs: [
+      {
+        key: "slides",
+        label: "Slide deck (.pptx)",
+        type: "uploads",
+        required: false,
+        accept: ".pptx",
+      },
+      {
+        key: "slidesText",
+        label: "Deck from a previous step (optional)",
+        type: "longtext",
+        required: false,
+        help: "Bind a deck generated earlier in this workflow (Generate a presentation from a template -> Deck, Generate slides -> Deck, or Extract slides -> Slides).",
+      },
+      {
+        key: "recentWindow",
+        label: "What counts as recent",
+        type: "text",
+        required: false,
+        help: 'e.g. "the past 2 weeks" or "the last 3 months". Blank = the past 30 days.',
+      },
+      {
+        key: "hubCourse",
+        label: "Course tile (optional)",
+        type: "hubCourse",
+        required: false,
+      },
+    ],
+    outputs: [
+      { key: "reportText", label: "Report", type: "longtext" },
+      { key: "fileName", label: "File name", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const uploads = Array.isArray(values.slides) ? (values.slides as File[]) : [];
+      const priorSlidesText = String(values.slidesText ?? "").trim();
+      const recentWindow = String(values.recentWindow ?? "").trim();
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+
+      let deckText = priorSlidesText;
+
+      if (uploads.length > 0) {
+        const file = uploads[0];
+        onProgress("Extracting slides from file...");
+
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let binary = "";
+        const CHUNK = 0x8000;
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+        }
+        const base64 = btoa(binary);
+
+        const r = await extractPptxSlidesAction(base64);
+        if ("error" in r) throw new Error(r.error);
+
+        const slidesLines: string[] = [];
+        for (const s of r.slides) {
+          slidesLines.push(`Slide ${s.slide}: ${s.title}`);
+          if (s.text) {
+            slidesLines.push(s.text);
+          }
+          slidesLines.push("");
+        }
+        deckText = slidesLines.join("\n");
+      }
+
+      if (!deckText) {
+        throw new Error("Provide a slide deck - upload a .pptx or bind a deck from an earlier step.");
+      }
+
+      const window = recentWindow || "the past 30 days";
+
+      onProgress("Researching current events...");
+      const r = await researchCurrentEventsAction(deckText, window, helpers.provider);
+      if ("error" in r) throw new Error(r.error);
+
+      const reportText = r.report;
+      const sourceCount = r.sourceCount;
+
+      const docText = reportText;
+      const docxBuffer = await buildDocxFromPlainText(docText, [], helpers.author);
+      const blob = new Blob([new Uint8Array(docxBuffer)], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      });
+
+      const sanitize = (s: string) =>
+        s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+
+      let courseTitle = "";
+      if (hubCourseId) {
+        const list = await listCourseHubAction();
+        if (!("error" in list)) {
+          courseTitle =
+            list.courses
+              .find((c) => c.id === hubCourseId)
+              ?.name?.substring(0, 20) || "";
+        }
+      }
+
+      const baseTitle = courseTitle || "Current_Events";
+      const fileName = `${sanitize(baseTitle)}_${Date.now()}.docx`;
+
+      const notes: string[] = [];
+
+      if (typeof document !== "undefined") {
+        onProgress(`Downloading ${fileName}...`);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+
+      try {
+        const base64 = await blobToBase64(blob);
+        const lib = await saveLibraryFileAction({
+          name: fileName,
+          base64,
+          mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          fileExt: "docx",
+          workflowId: helpers.workflowId,
+          workflowName: helpers.workflowName,
+          workflowRunId: helpers.workflowRunId,
+        });
+        if ("error" in lib) {
+          notes.push(`library save skipped: ${lib.error}`);
+        }
+      } catch (err) {
+        notes.push(`saving to library failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      if (hubCourseId && helpers.saveCourseMaterialFile) {
+        try {
+          const list = await listCourseHubAction();
+          if ("error" in list) {
+            notes.push(`course tile save skipped: ${list.error}`);
+          } else {
+            const tile = list.courses.find((c) => c.id === hubCourseId);
+            if (tile) {
+              await helpers.saveCourseMaterialFile(tile.id, blob, fileName);
+            }
+          }
+        } catch (err) {
+          notes.push(`saving to the course tile failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      const reportLines = reportText
+        .split("\n")
+        .filter((l) => l.trim().startsWith("##"))
+        .map((l) => l.replace(/^##\s*/, ""));
+
+      const sourceLine = `${sourceCount} source(s) cited`;
+
+      return {
+        outputs: { reportText, fileName },
+        summary: {
+          kind: "list",
+          label: `Current events report (${window}) -> ${fileName}`,
+          items: [sourceLine, ...reportLines, ...notes],
         },
       };
     },

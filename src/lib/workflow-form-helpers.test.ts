@@ -22,6 +22,8 @@ describe("scheduleToForm", () => {
       provider: null,
       disabledSteps: [],
       fanoutProgress: null,
+      lastRunStatus: null,
+      lastRunDetail: null,
     };
     const form = scheduleToForm(schedule);
     expect(form.intervalValue).toBe("2");
@@ -46,6 +48,8 @@ describe("scheduleToForm", () => {
       provider: null,
       disabledSteps: [],
       fanoutProgress: null,
+      lastRunStatus: null,
+      lastRunDetail: null,
     };
     const form = scheduleToForm(schedule);
     expect(form.intervalValue).toBe("90");
@@ -70,6 +74,8 @@ describe("scheduleToForm", () => {
       provider: null,
       disabledSteps: [],
       fanoutProgress: null,
+      lastRunStatus: null,
+      lastRunDetail: null,
     };
     const form = scheduleToForm(schedule);
     expect(form.intervalValue).toBe("45");
@@ -94,6 +100,8 @@ describe("scheduleToForm", () => {
       provider: null,
       disabledSteps: [],
       fanoutProgress: null,
+      lastRunStatus: null,
+      lastRunDetail: null,
     };
     const form = scheduleToForm(schedule);
     expect(form.intervalValue).toBe("");
@@ -122,6 +130,8 @@ describe("scheduleToForm", () => {
       provider: null,
       disabledSteps: [],
       fanoutProgress: null,
+      lastRunStatus: null,
+      lastRunDetail: null,
     };
     const form = scheduleToForm(schedule);
     // The runAt should be YYYY-MM-DDTHH:mm in local time
@@ -148,6 +158,8 @@ describe("scheduleToForm", () => {
       provider: null,
       disabledSteps: [],
       fanoutProgress: null,
+      lastRunStatus: null,
+      lastRunDetail: null,
     };
     const form = scheduleToForm(schedule);
     expect(form.courseId).toBe("course123");
@@ -173,6 +185,8 @@ describe("scheduleToForm", () => {
       provider: null,
       disabledSteps: [],
       fanoutProgress: null,
+      lastRunStatus: null,
+      lastRunDetail: null,
     };
     const form = scheduleToForm(schedule);
     expect(form.courseId).toBe("");
@@ -201,6 +215,8 @@ describe("triggerToForm", () => {
       webhookToken: null,
       lastCheckedAt: null,
       lastFiredAt: null,
+      lastRunStatus: null,
+      lastRunDetail: null,
     };
     const form = triggerToForm(trigger);
     expect(form.eventType).toBe("submission-received");
@@ -230,6 +246,8 @@ describe("triggerToForm", () => {
       webhookToken: "token123",
       lastCheckedAt: null,
       lastFiredAt: null,
+      lastRunStatus: null,
+      lastRunDetail: null,
     };
     const form = triggerToForm(trigger);
     expect(form.courseId).toBe("course123");

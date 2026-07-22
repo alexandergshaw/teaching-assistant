@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapDraft, coerceGradingDraftPayload } from "./grading-drafts";
+import { mapDraft, coerceGradingDraftPayload, createGradingDraft } from "./grading-drafts";
 import type { Database } from "./supabase/types";
 
 type DraftRow = Database["public"]["Tables"]["grading_drafts"]["Row"];
@@ -15,6 +15,7 @@ function makeRow(overrides: Partial<DraftRow> = {}): DraftRow {
     updated_at: "2026-07-13T00:00:00.000Z",
     workflow_id: null,
     workflow_name: null,
+    source: null,
     ...overrides,
   };
 }
@@ -76,6 +77,23 @@ describe("mapDraft", () => {
     expect(draft.payload.runs[0].courseName).toBe("Course A");
     expect(draft.payload.runs[0].run.results[0].student).toBe("Jane Doe");
     expect(draft.payload.runs[0].run.results[0].userId).toBe(42);
+  });
+
+  it("rounds-trips source when set to repos, lms, or cartridge", () => {
+    const row = makeRow({ source: "repos" });
+    expect(mapDraft(row).source).toBe("repos");
+    expect(mapDraft(makeRow({ source: "lms" })).source).toBe("lms");
+    expect(mapDraft(makeRow({ source: "cartridge" })).source).toBe("cartridge");
+  });
+
+  it("maps null source to undefined", () => {
+    const row = makeRow({ source: null });
+    expect(mapDraft(row).source).toBeUndefined();
+  });
+
+  it("drops an invalid source value and maps to undefined", () => {
+    const row = makeRow({ source: "invalid" });
+    expect(mapDraft(row).source).toBeUndefined();
   });
 });
 
@@ -153,5 +171,72 @@ describe("coerceGradingDraftPayload", () => {
   it("coerces the offline flag to a boolean", () => {
     const payload = coerceGradingDraftPayload({ runs: [{ ...validRunEntry, offline: "yes" }] });
     expect(payload.runs[0].offline).toBe(true);
+  });
+});
+
+describe("createGradingDraft", () => {
+  it("persists the source column when provided as repos", async () => {
+    let insertedData: Record<string, unknown> | null = null;
+
+    const mockSupabase = {
+      from: () => ({
+        insert: (data: Record<string, unknown>) => {
+          insertedData = data;
+          return {
+            select: () => ({
+              single: () => Promise.resolve({
+                data: makeRow({ source: "repos" as const }),
+                error: null,
+              }),
+            }),
+          };
+        },
+      }),
+    };
+
+    const draft = await createGradingDraft(
+      mockSupabase as unknown as Parameters<typeof createGradingDraft>[0],
+      "u1",
+      {
+        summary: "test",
+        payload: { runs: [] },
+        source: "repos",
+      }
+    );
+
+    expect(insertedData).toHaveProperty("source", "repos");
+    expect(draft.source).toBe("repos");
+  });
+
+  it("persists null source when omitted", async () => {
+    let insertedData: Record<string, unknown> | null = null;
+
+    const mockSupabase = {
+      from: () => ({
+        insert: (data: Record<string, unknown>) => {
+          insertedData = data;
+          return {
+            select: () => ({
+              single: () => Promise.resolve({
+                data: makeRow({ source: null }),
+                error: null,
+              }),
+            }),
+          };
+        },
+      }),
+    };
+
+    const draft = await createGradingDraft(
+      mockSupabase as unknown as Parameters<typeof createGradingDraft>[0],
+      "u1",
+      {
+        summary: "test",
+        payload: { runs: [] },
+      }
+    );
+
+    expect(insertedData).toHaveProperty("source", null);
+    expect(draft.source).toBeUndefined();
   });
 });

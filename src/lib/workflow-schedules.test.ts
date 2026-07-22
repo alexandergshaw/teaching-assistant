@@ -24,6 +24,8 @@ function makeRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
     disabled_steps: [],
     interval_minutes: null,
     fanout_progress: null,
+    last_run_status: null,
+    last_run_detail: null,
     ...overrides,
   };
 }
@@ -118,6 +120,20 @@ describe("computeNextRunAt interval", () => {
 });
 
 describe("mapSchedule", () => {
+  it("round-trips lastRunStatus and lastRunDetail when set", () => {
+    const row = makeRow({ last_run_status: "error", last_run_detail: "step 1 failed: timeout" });
+    const s = mapSchedule(row);
+    expect(s.lastRunStatus).toBe("error");
+    expect(s.lastRunDetail).toBe("step 1 failed: timeout");
+  });
+
+  it("maps lastRunStatus and lastRunDetail as null when not set", () => {
+    const row = makeRow({ last_run_status: null, last_run_detail: null });
+    const s = mapSchedule(row);
+    expect(s.lastRunStatus).toBeNull();
+    expect(s.lastRunDetail).toBeNull();
+  });
+
   it("maps the unattended/provider/disabledSteps columns and carries userId", () => {
     const row = makeRow({ unattended: true, provider: "gemini", disabled_steps: [1, 3] });
     const s = mapSchedule(row);

@@ -5,6 +5,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "../supabase/types";
+import type { WorkflowRunStatus } from "../workflow-run-status";
 import { EVENT_SOURCES, type TriggerEventType, type WorkflowTrigger, type TriggerEvalResult } from "./event-sources";
 
 export type { WorkflowTrigger };
@@ -37,6 +38,7 @@ function stringRecord(value: Json | null): Record<string, string> {
 }
 
 const EVENT_TYPES = new Set<string>(EVENT_SOURCES.map((s) => s.type));
+const VALID_RUN_STATUSES = new Set<string>(["started", "ok", "error", "skipped"]);
 
 /** Row -> domain object. Exported so the row-shape coercion is unit-testable
  * without a live Supabase client (mirrors mapSchedule). */
@@ -64,6 +66,8 @@ export function mapTrigger(row: TriggerRow): WorkflowTrigger {
     webhookToken: row.webhook_token,
     lastCheckedAt: row.last_checked_at,
     lastFiredAt: row.last_fired_at,
+    lastRunStatus: (row.last_run_status && VALID_RUN_STATUSES.has(row.last_run_status) ? row.last_run_status : null) as WorkflowRunStatus | null,
+    lastRunDetail: row.last_run_detail ?? null,
   };
 }
 
@@ -178,7 +182,11 @@ export async function claimAndAdvanceTrigger(
     last_checked_at: now.toISOString(),
     updated_at: now.toISOString(),
   };
-  if (result.fired) patch.last_fired_at = now.toISOString();
+  if (result.fired) {
+    patch.last_fired_at = now.toISOString();
+    patch.last_run_status = "started";
+    patch.last_run_detail = null;
+  }
   const { data, error } = await table(supabase)
     .update(patch)
     .eq("id", trigger.id)

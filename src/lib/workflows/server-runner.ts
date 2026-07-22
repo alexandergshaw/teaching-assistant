@@ -408,6 +408,7 @@ export function buildRunReportMarkdown(
   outcomes: StepRunOutcome[],
   stepName: (type: string) => string
 ): string | null {
+  if (outcomes.length === 0) return null;
   const sections: string[] = [];
   for (const o of outcomes) {
     if (o.status !== "done" || !o.summary) continue;
@@ -421,13 +422,35 @@ export function buildRunReportMarkdown(
     } else if (s.kind === "link") {
       body = `[${s.label}](${s.url})`;
     } else {
-      continue; // schedule summaries are structured data, not a text deliverable
+      continue;
     }
     if (!body.trim()) continue;
     const heading = o.institution ? `${o.index + 1}. ${stepName(o.type)} (${o.institution})` : `${o.index + 1}. ${stepName(o.type)}`;
     sections.push(`## ${heading}\n\n${body}`);
   }
-  if (sections.length === 0) return null;
+  for (const o of outcomes) {
+    if (o.status === "error") {
+      const heading = o.institution ? `${o.index + 1}. ${stepName(o.type)} - ERROR (${o.institution})` : `${o.index + 1}. ${stepName(o.type)} - ERROR`;
+      const body = o.error ?? "(no error message)";
+      sections.push(`## ${heading}\n\n${body}`);
+    }
+  }
+  for (const o of outcomes) {
+    if (o.status === "needs-interaction") {
+      const heading = o.institution ? `${o.index + 1}. ${stepName(o.type)} (${o.institution})` : `${o.index + 1}. ${stepName(o.type)}`;
+      sections.push(`## ${heading}\n\nSkipped: requires user interaction`);
+    } else if (o.status === "skipped") {
+      const heading = o.institution ? `${o.index + 1}. ${stepName(o.type)} (${o.institution})` : `${o.index + 1}. ${stepName(o.type)}`;
+      sections.push(`## ${heading}\n\nSkipped: dependency failed`);
+    } else if (o.status === "disabled") {
+      const heading = o.institution ? `${o.index + 1}. ${stepName(o.type)} (${o.institution})` : `${o.index + 1}. ${stepName(o.type)}`;
+      sections.push(`## ${heading}\n\nDisabled by user`);
+    }
+  }
+  if (sections.length === 0) {
+    const fallback = outcomes.length === 1 ? "Run produced no output." : `Run completed: ${outcomes.length} step(s); no text deliverables.`;
+    return `# ${workflowName}\n\n_Generated ${generatedAt}_\n\n${fallback}\n`;
+  }
   return `# ${workflowName}\n\n_Generated ${generatedAt}_\n\n${sections.join("\n\n")}\n`;
 }
 

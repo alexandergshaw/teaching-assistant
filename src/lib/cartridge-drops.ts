@@ -4,6 +4,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabase/types";
 
+export const CARTRIDGE_DROP_UPLOADED_EVENT = "ta-cartridge-drop-uploaded";
+
 export interface CartridgeDrop {
   id: string;
   name: string;

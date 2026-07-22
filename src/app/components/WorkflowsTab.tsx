@@ -114,7 +114,7 @@ export default function WorkflowsTab() {
   );
 
 
-  const [pendingHandoff, setPendingHandoff] = useState<{ workflowId: string; prefill: Record<string, string> } | null>(null);
+  const [pendingHandoff, setPendingHandoff] = useState<{ workflowId: string; prefill: Record<string, string>; scheduleId?: string | null; triggerId?: string | null } | null>(null);
 
   const [uploadFiles, setUploadFiles] = useState<Record<string, File[]>>({});
 
@@ -239,7 +239,7 @@ export default function WorkflowsTab() {
   const onSetPendingHandoff = setPendingHandoff;
   const onSetHubCourses = workflowOptions.setHubCourses;
 
-  const workflowRun = useWorkflowRun(expanded, enabledExpandedSteps, disabledSteps, selectedDef, selectedWorkflowId, workflows, values, uploadFiles, runtimeFields, activeInstitution, user, supabase, loadCourseExportData, onSetPanel, onSetPendingHandoff, onSetHubCourses);
+  const workflowRun = useWorkflowRun(expanded, enabledExpandedSteps, disabledSteps, selectedDef, selectedWorkflowId, workflows, values, uploadFiles, runtimeFields, activeInstitution, user, supabase, loadCourseExportData, onSetPanel, onSetPendingHandoff, onSetHubCourses, pendingHandoff);
 
   // Run requires at least one enabled step - a workflow with every step
   // toggled off would run the loop and finish having done nothing.
@@ -465,7 +465,7 @@ export default function WorkflowsTab() {
         return;
       }
       takeScheduledRun();
-      setPendingHandoff({ workflowId: next.workflowId, prefill: next.fieldValues });
+      setPendingHandoff({ workflowId: next.workflowId, prefill: next.fieldValues, scheduleId: next.scheduleId, triggerId: next.triggerId });
     };
     consume();
     window.addEventListener(SCHEDULED_RUN_EVENT, consume);

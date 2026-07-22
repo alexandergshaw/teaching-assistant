@@ -8,7 +8,15 @@ import {
   listCartridgeDrops,
   deleteCartridgeDrop,
   getCartridgeDropCsvUrl,
+  CARTRIDGE_DROP_UPLOADED_EVENT,
 } from "@/lib/cartridge-drops";
+import {
+  createWorkflowTrigger,
+  updateWorkflowTrigger,
+  listWorkflowTriggers,
+  type WorkflowTrigger,
+} from "@/lib/workflow-triggers";
+import { readActiveInstitution } from "@/lib/institutions";
 import { formatRelative } from "@/app/utils/time";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
@@ -20,6 +28,9 @@ export default function CartridgeDropPanel() {
   const [drops, setDrops] = useState<CartridgeDrop[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [triggers, setTriggers] = useState<WorkflowTrigger[]>([]);
+  const [triggersLoading, setTriggersLoading] = useState(true);
+  const [triggersError, setTriggersError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form state - persisted
@@ -107,6 +118,30 @@ export default function CartridgeDropPanel() {
     };
   }, [user, supabase]);
 
+  // Load workflow triggers on mount to check for existing auto-grade trigger.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await listWorkflowTriggers(supabase, user.id);
+        if (!cancelled) {
+          setTriggers(result);
+          setTriggersError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setTriggersError(err instanceof Error ? err.message : "Could not load triggers.");
+        }
+      } finally {
+        if (!cancelled) setTriggersLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, supabase]);
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.currentTarget.files?.[0];
     if (!file || !user) return;
@@ -127,6 +162,7 @@ export default function CartridgeDropPanel() {
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+      window.dispatchEvent(new CustomEvent(CARTRIDGE_DROP_UPLOADED_EVENT));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not upload cartridge.");
     } finally {
@@ -163,6 +199,43 @@ export default function CartridgeDropPanel() {
     }
   };
 
+  const findAutoGradeTrigger = (): WorkflowTrigger | undefined => {
+    return triggers.find(
+      (t) => t.eventType === "cartridge-uploaded" && t.workflowId === "cartridge-grading"
+    );
+  };
+
+  const handleToggleAutoGrade = async () => {
+    if (!user) return;
+    try {
+      const existing = findAutoGradeTrigger();
+      if (existing) {
+        if (existing.enabled) {
+          await updateWorkflowTrigger(supabase, user.id, existing.id, { enabled: false });
+        } else {
+          await updateWorkflowTrigger(supabase, user.id, existing.id, { enabled: true });
+        }
+      } else {
+        const activeInstitution = readActiveInstitution();
+        await createWorkflowTrigger(supabase, user.id, {
+          workflowId: "cartridge-grading",
+          workflowName: "Grade Uploaded Submissions",
+          fieldValues: {},
+          eventType: "cartridge-uploaded",
+          eventConfig: {},
+          unattended: true,
+          courseId: null,
+          institution: activeInstitution || null,
+        });
+      }
+      const updated = await listWorkflowTriggers(supabase, user.id);
+      setTriggers(updated);
+      setTriggersError(null);
+    } catch (err) {
+      setTriggersError(err instanceof Error ? err.message : "Could not update auto-grading.");
+    }
+  };
+
   const getStatusBadgeClass = (status: string): string => {
     switch (status) {
       case "new":
@@ -180,9 +253,9 @@ export default function CartridgeDropPanel() {
 
   return (
     <div className={styles.card}>
-      <h2>Cartridge drop</h2>
+      <h2>Student submissions</h2>
       <p className={styles.fieldHint}>
-        Upload submission archives (.zip or .imscc files) for closed courses. A trigger-linked workflow grades new drops and produces upload-ready CSVs.
+        Upload zips of student submissions for an assignment. Supported LMS export archives (.zip or .imscc files) for closed courses. A trigger-linked workflow grades submissions and produces upload-ready CSVs.
       </p>
 
       {error && (
@@ -276,6 +349,44 @@ export default function CartridgeDropPanel() {
             disabled={loading}
           />
         </div>
+      </div>
+
+      {/* Automatic grading control */}
+      <div style={{ marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid var(--color-border, #e5e5e5)" }}>
+        {triggersError && (
+          <p role="alert" className={styles.error}>
+            {triggersError}
+          </p>
+        )}
+        {!triggersLoading && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem" }}>
+            <div style={{ flex: 1 }}>
+              {findAutoGradeTrigger()?.enabled ? (
+                <>
+                  <p style={{ margin: "0 0 0.25rem 0", fontWeight: 500 }}>Auto-grading is on</p>
+                  <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--color-text-secondary, #666)" }}>
+                    New uploads are graded automatically; grades land in Drafts and gradebook CSVs in this panel.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p style={{ margin: "0 0 0.25rem 0", fontWeight: 500 }}>Automatic grading</p>
+                  <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--color-text-secondary, #666)" }}>
+                    New uploads are graded automatically; grades land in Drafts and gradebook CSVs in this panel.
+                  </p>
+                </>
+              )}
+            </div>
+            <Button
+              size="small"
+              variant={findAutoGradeTrigger()?.enabled ? "outlined" : "contained"}
+              onClick={() => void handleToggleAutoGrade()}
+              disabled={loading || triggersLoading}
+            >
+              {findAutoGradeTrigger()?.enabled ? "Turn off" : "Turn on auto-grading"}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Drops table */}

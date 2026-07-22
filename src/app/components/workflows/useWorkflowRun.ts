@@ -9,6 +9,7 @@ import { isInstitutionFanout, resolveFanoutInstitutions, scopeForInstitution } f
 import { loadInstitutionFields } from "@/lib/institution-fields";
 import { appendCourseMaterialFileAction, appendCourseExportFileAction } from "@/app/actions";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
+import { updateScheduleRunOutcome, updateTriggerRunOutcome } from "@/lib/workflow-run-status";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { loadCommonResources } from "@/lib/common-resources";
 import { applyWorkflowScope, scopeCoversType } from "@/lib/workflows/types";
@@ -71,7 +72,8 @@ export function useWorkflowRun(
   loadCourseExportData: (courseId: string) => Promise<CartridgeCourseData | null>,
   onSetPanel: (panel: "build" | "run" | "automate") => void,
   onSetPendingHandoff: (handoff: { workflowId: string; prefill: Record<string, string> } | null) => void,
-  onSetHubCourses: (courses: Array<{ id: string; name: string; canvasUrl: string | null; repos: string[] }> | null) => void
+  onSetHubCourses: (courses: Array<{ id: string; name: string; canvasUrl: string | null; repos: string[] }> | null) => void,
+  pendingHandoff: { workflowId: string; prefill: Record<string, string>; scheduleId?: string | null; triggerId?: string | null } | null = null
 ): UseWorkflowRunReturn {
   const [runState, setRunState] = useState<
     Array<{ institution: string | null; steps: Array<{ status: "pending" | "running" | "done" | "error" | "disabled" | "skipped"; progress: string | null; summary: StepRunSummary | null; error: string | null }> }>
@@ -703,6 +705,11 @@ export function useWorkflowRun(
 
     if (user && supabase && selectedDef) {
       const genuineFailure = anyGenuineFailure;
+      const detail = genuineFailure ? runState
+        .flatMap((g) => g.steps)
+        .filter((s) => s.status === "error")
+        .map((s, i) => `step ${i + 1}: ${s.error ?? "unknown error"}`)
+        .join("; ") : "";
       void recordWorkflowRun(supabase, user.id, {
         workflowId: selectedDef.id,
         workflowName: selectedDef.name,
@@ -710,6 +717,14 @@ export function useWorkflowRun(
         triggerSource: "manual",
         id: workflowRunId,
       }).catch((err) => console.error("Failed to record workflow run:", err));
+      if (pendingHandoff?.scheduleId) {
+        void updateScheduleRunOutcome(supabase, user.id, pendingHandoff.scheduleId, genuineFailure ? "error" : "ok", detail)
+          .catch(() => {});
+      }
+      if (pendingHandoff?.triggerId) {
+        void updateTriggerRunOutcome(supabase, user.id, pendingHandoff.triggerId, genuineFailure ? "error" : "ok", detail)
+          .catch(() => {});
+      }
     }
 
     onSetHubCourses(null);

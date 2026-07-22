@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Button, TextField, MenuItem, Checkbox } from "@mui/material";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Button, Checkbox } from "@mui/material";
 import TabHeader from "./TabHeader";
-import CoursePicker from "./CoursePicker";
 import { CourseCopyModal } from "./content-tab/CourseCopyModal";
+import CartridgeDropPanel from "./CartridgeDropPanel";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { useInstitutionSelection } from "@/lib/institutions";
@@ -29,50 +29,10 @@ import {
 } from "../actions";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import styles from "../page.module.css";
-
-const fmt = (s: number | null) => {
-  if (s === null) return "";
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${String(sec).padStart(2, "0")}`;
-};
-
-const formatBytes = (bytes: number) => (bytes / 1048576).toFixed(1);
-
-const kindLabels: Record<string, string> = {
-  recording: "Recording",
-  captioned: "Captioned",
-  narrated: "Narrated",
-};
-
-const getDisplayKind = (file: RecordingFile): { label: string; badgeClass: string } => {
-  if (file.mimeType.includes("zip") || file.kind === "bundle") {
-    return { label: "Bundle", badgeClass: styles.ghBadgeNeutral };
-  }
-  if (file.mimeType.startsWith("audio/")) {
-    return { label: "Audio", badgeClass: styles.ghBadgeNeutral };
-  }
-  if (file.kind === "file") {
-    if (file.mimeType.includes("pdf")) {
-      return { label: "PDF", badgeClass: styles.ghBadgeNeutral };
-    }
-    if (file.mimeType.startsWith("image/")) {
-      return { label: "Image", badgeClass: styles.ghBadgeNeutral };
-    }
-    if (file.mimeType.includes("wordprocessingml") || file.mimeType.includes("presentationml") || file.mimeType.includes("spreadsheetml") || file.mimeType.includes("msword")) {
-      return { label: "Document", badgeClass: styles.ghBadgeNeutral };
-    }
-    return { label: "File", badgeClass: styles.ghBadgeNeutral };
-  }
-  const baseLabel = kindLabels[file.kind] || file.kind;
-  if (file.kind === "captioned") {
-    return { label: baseLabel, badgeClass: styles.ghBadgeSuccess };
-  }
-  if (file.kind === "narrated") {
-    return { label: baseLabel, badgeClass: styles.ghBadgeAccent };
-  }
-  return { label: baseLabel, badgeClass: styles.ghBadgeNeutral };
-};
+import { FileRow } from "./files/FileRow";
+import { FilterToolbar } from "./files/FilterToolbar";
+import { UploadDropZone } from "./files/UploadDropZone";
+import { BulkSelectionBar } from "./files/BulkSelectionBar";
 
 export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflowId: string) => void } = {}) {
   const { supabase, user } = useSupabase();
@@ -109,6 +69,16 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
     const stored = localStorage.getItem("ta-files-group");
     return (stored as "flat" | "grouped" | null) ?? "grouped";
   });
+
+  // Files view (Library or Submissions) - persisted
+  const [filesView, setFilesViewState] = useState<"library" | "submissions">(() => {
+    if (typeof window === "undefined") return "library";
+    return localStorage.getItem("ta-files-view") === "submissions" ? "submissions" : "library";
+  });
+  const setFilesView = (v: "library" | "submissions") => {
+    setFilesViewState(v);
+    if (typeof window !== "undefined") localStorage.setItem("ta-files-view", v);
+  };
 
   // Delete confirmation state
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -589,6 +559,26 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
     pendingModuleRef.current = String(moduleId);
   }, [moduleId]);
 
+  const handlePlayUrlLoad = useCallback(async (file: RecordingFile) => {
+    try {
+      const url = await getRecordingFileUrl(supabase, file);
+      setPlayUrls((prev) => ({ ...prev, [file.id]: url }));
+    } catch (err) {
+      setNote({
+        kind: "error",
+        text: err instanceof Error ? err.message : "Failed to load file",
+      });
+    }
+  }, [supabase]);
+
+  // Load play URL when a file is expanded
+  useEffect(() => {
+    if (!expandedPlay || playUrls[expandedPlay]) return;
+    const file = files?.find((f) => f.id === expandedPlay);
+    if (!file) return;
+    void handlePlayUrlLoad(file);
+  }, [expandedPlay, playUrls, files, handlePlayUrlLoad]);
+
   // Derived list: filter and sort files
   const shown = (files || [])
     .filter((f) => {
@@ -631,235 +621,6 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
   const toggleSelectAll = () =>
     setSelected(allShownSelected ? new Set() : new Set(shown.map((f) => f.id)));
 
-  const renderFileRow = (file: RecordingFile) => {
-    const displayKind = getDisplayKind(file);
-    const isAudio = file.mimeType.startsWith("audio/");
-    return (
-      <div key={file.id}>
-        <div className={styles.libRow}>
-          <div>
-            <Checkbox
-              size="small"
-              checked={selected.has(file.id)}
-              onChange={() => setSelected((prev) => {
-                const next = new Set(prev);
-                if (next.has(file.id)) next.delete(file.id);
-                else next.add(file.id);
-                return next;
-              })}
-              aria-label={`Select ${file.name}`}
-            />
-          </div>
-          <div className={styles.libKindCell}>
-            <span className={`${styles.ghBadge} ${displayKind.badgeClass}`}>
-              {displayKind.label}
-            </span>
-          </div>
-          <div className={styles.libNum} style={{ textTransform: "uppercase" }} title={file.mimeType}>{extForFile(file)}</div>
-          <div>
-            <TextField
-              size="small"
-              type="text"
-              title={file.name}
-              value={nameDrafts[file.id] ?? file.name}
-              onChange={(e) => setNameDrafts((prev) => ({ ...prev, [file.id]: e.target.value }))}
-              onBlur={() => void saveRename(file)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              }}
-              sx={{ width: "100%" }}
-            />
-            {file.source === "workflow" && (
-              <div className={styles.fieldHint} style={{ margin: "4px 0 0 0", fontSize: "0.85em" }}>
-                Generated by {file.workflowName || "a workflow"}
-              </div>
-            )}
-          </div>
-          <div className={styles.libNum}>{fmt(file.durationSec)}</div>
-          <div className={styles.libNum}>{formatBytes(file.sizeBytes)} MB</div>
-          <div className={styles.libNum}>
-            {new Date(file.createdAt).toLocaleDateString()} {new Date(file.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-          </div>
-          <div className={styles.libActions}>
-            {(isAudio || ((file.mimeType.startsWith("video/") || ["recording", "captioned", "narrated"].includes(file.kind)) && displayKind.label !== "Bundle")) && (
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={() => {
-                  const opening = expandedPlay !== file.id;
-                  setExpandedPlay(opening ? file.id : null);
-                  if (opening && !playUrls[file.id]) {
-                    void (async () => {
-                      try {
-                        const url = await getRecordingFileUrl(supabase, file);
-                        setPlayUrls((prev) => ({ ...prev, [file.id]: url }));
-                      } catch (err) {
-                        setNote({
-                          kind: "error",
-                          text: err instanceof Error ? err.message : "Failed to load file",
-                        });
-                      }
-                    })();
-                  }
-                }}
-              >
-                {expandedPlay === file.id ? "Close" : "Play"}
-              </Button>
-            )}
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => void handleDownload(file)}
-            >
-              Download
-            </Button>
-            {file.mimeType.startsWith("video/") && !isAudio && displayKind.label !== "Bundle" && (
-              <Button
-                size="small"
-                variant="outlined"
-                disabled={stripping !== null}
-                onClick={() => void handleStripAudio(file)}
-                title="Create a copy of this video without its audio track"
-              >
-                {stripping?.id === file.id ? `Stripping... ${stripping.pct}%` : "Strip audio"}
-              </Button>
-            )}
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => {
-                const opening = addTarget !== file.id;
-                setAddTarget(opening ? file.id : null);
-                if (opening && courseUrl && modulesStatus === "idle") {
-                  void handleSelectCourse(courseUrl);
-                }
-              }}
-            >
-              Add to module
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              color="error"
-              onClick={() => void handleDelete(file)}
-            >
-              {confirmDelete === file.id ? "Confirm" : "Delete"}
-            </Button>
-          </div>
-        </div>
-
-        {expandedPlay === file.id && (
-          <div className={styles.libExpand}>
-            {!playUrls[file.id] ? (
-              <span className={styles.ccHint}>Loading...</span>
-            ) : isAudio ? (
-              <audio
-                controls
-                src={playUrls[file.id]}
-                style={{
-                  width: "100%",
-                  maxWidth: "400px",
-                }}
-              />
-            ) : (
-              <video
-                controls
-                src={playUrls[file.id]}
-                style={{
-                  maxWidth: "100%",
-                  borderRadius: 8,
-                  background: "#0f172a",
-                }}
-              />
-            )}
-          </div>
-        )}
-
-        {addTarget === file.id && (
-          <div className={styles.libExpand}>
-            {!activeInstitution ? (
-              <div className={styles.fieldHint}>
-                Pick an institution in the top bar first.
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <CoursePicker
-                  activeInstitution={activeInstitution}
-                  courseUrl={courseUrl}
-                  onSelect={handleSelectCourse}
-                  courseName={courseName}
-                />
-
-                {courseUrl && (
-                  <>
-                    <TextField
-                      select
-                      value={moduleId}
-                      onChange={(e) => setModuleId(e.target.value === "" ? "" : Number(e.target.value))}
-                      placeholder="Choose a module..."
-                      size="small"
-                      sx={{ minWidth: 220 }}
-                      disabled={modulesStatus !== "ready"}
-                    >
-                      {modulesStatus === "ready" && modules.length === 0 ? (
-                        <MenuItem value="">No modules found</MenuItem>
-                      ) : (
-                        [
-                          <MenuItem key="none" value="">
-                            Choose a module...
-                          </MenuItem>,
-                          ...modules.map((m) => (
-                            <MenuItem key={m.id} value={m.id}>
-                              {m.name}
-                            </MenuItem>
-                          )),
-                        ]
-                      )}
-                    </TextField>
-
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <Button
-                        variant="contained"
-                        size="small"
-                        onClick={() => void handleAddToModule(file)}
-                        disabled={adding || moduleId === ""}
-                      >
-                        {adding ? "Adding..." : "Add"}
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={() => {
-                          setAddTarget(null);
-                          setAddNote(null);
-                        }}
-                        disabled={adding}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </>
-                )}
-
-                {addNote && (
-                  <div
-                    className={
-                      addNote.kind === "error"
-                        ? styles.error
-                        : styles.fieldHint
-                    }
-                  >
-                    {addNote.text}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
   return (
     <section className={styles.card}>
       <TabHeader
@@ -868,237 +629,95 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
         subtitle="Recordings, audio, bundles, and any other files you save are kept here. Play or download them, or add them to an LMS module."
       />
 
+      <div className={styles.manualSubnav}>
+        <div className={styles.lessonInnerTabs} role="tablist" aria-label="Files">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={filesView === "library"}
+            className={`${styles.lessonInnerTab}${filesView === "library" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+            onClick={() => setFilesView("library")}
+          >
+            Library
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={filesView === "submissions"}
+            className={`${styles.lessonInnerTab}${filesView === "submissions" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+            onClick={() => setFilesView("submissions")}
+          >
+            Submissions
+          </button>
+        </div>
+      </div>
+
       {note && (
         <div className={note.kind === "error" ? styles.error : styles.fieldHint}>
           {note.text}
         </div>
       )}
 
-      {status === "loading" && (
-        <div className={styles.loadingState}>
-          <div className={styles.spinner} />
-          <div className={styles.loadingTitle}>Loading files...</div>
-        </div>
-      )}
-
-      {status === "error" && (
-        <div className={styles.error}>{error || "Failed to load files"}</div>
-      )}
-
-      {status === "ready" && files !== null && (
+      {filesView === "library" && (
         <>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-            <label className={styles.downloadButton} style={{ cursor: "pointer" }}>
-              Upload files
-              <input type="file" multiple style={{ display: "none" }} onChange={(e) => { void handleUploadFiles(e.target.files); e.target.value = ""; }} />
-            </label>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => setCopyOpen(true)}
-              disabled={!courseId}
-              title="Copy a page or file from another Canvas course into this course"
-            >
-              Copy from another course
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => void reload()}
-              disabled={adding}
-            >
-              Refresh
-            </Button>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <TextField
-                size="small"
-                type="search"
-                placeholder="Search files by name..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                sx={{ flex: "1 1 200px", maxWidth: 300 }}
+          {status === "loading" && (
+            <div className={styles.loadingState}>
+              <div className={styles.spinner} />
+              <div className={styles.loadingTitle}>Loading files...</div>
+            </div>
+          )}
+
+          {status === "error" && (
+            <div className={styles.error}>{error || "Failed to load files"}</div>
+          )}
+
+          {status === "ready" && files !== null && (
+            <>
+              <FilterToolbar
+                search={search}
+                onSearchChange={setSearch}
+                sortBy={sortBy}
+                onSortChange={setSortBy}
+                filterKind={filterKind}
+                onFilterKindChange={setFilterKind}
+                filterWorkflow={filterWorkflow}
+                onFilterWorkflowChange={setFilterWorkflow}
+                groupBy={groupBy}
+                onGroupByChange={setGroupBy}
+                onUploadChange={(files) => void handleUploadFiles(files)}
+                onCopyClick={() => setCopyOpen(true)}
+                onRefresh={() => void reload()}
+                canCopy={!!courseId}
+                isRefreshing={adding}
               />
-              <TextField
-                select
-                size="small"
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as "newest" | "oldest" | "name" | "largest")}
-                sx={{ minWidth: 140 }}
-              >
-                <MenuItem value="newest">Newest</MenuItem>
-                <MenuItem value="oldest">Oldest</MenuItem>
-                <MenuItem value="name">Name</MenuItem>
-                <MenuItem value="largest">Largest</MenuItem>
-              </TextField>
-              <TextField
-                select
-                size="small"
-                value={filterKind}
-                onChange={(e) => setFilterKind(e.target.value as "all" | "recording" | "captioned" | "narrated" | "audio" | "bundle" | "file")}
-                sx={{ minWidth: 140 }}
-              >
-                <MenuItem value="all">All kinds</MenuItem>
-                <MenuItem value="recording">Recordings</MenuItem>
-                <MenuItem value="captioned">Captioned</MenuItem>
-                <MenuItem value="narrated">Narrated</MenuItem>
-                <MenuItem value="audio">Audio</MenuItem>
-                <MenuItem value="bundle">Bundles</MenuItem>
-                <MenuItem value="file">Documents & other</MenuItem>
-              </TextField>
-              <TextField
-                select
-                size="small"
-                value={filterWorkflow}
-                onChange={(e) => setFilterWorkflow(e.target.value as "all" | "workflow")}
-                sx={{ minWidth: 140 }}
-              >
-                <MenuItem value="all">All files</MenuItem>
-                <MenuItem value="workflow">From workflows</MenuItem>
-              </TextField>
-              <TextField
-                select
-                size="small"
-                value={groupBy}
-                onChange={(e) => setGroupBy(e.target.value as "flat" | "grouped")}
-                sx={{ minWidth: 140 }}
-              >
-                <MenuItem value="flat">Flat view</MenuItem>
-                <MenuItem value="grouped">Group by workflow</MenuItem>
-              </TextField>
-            </div>
-          </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-            <span className={styles.fieldHint} style={{ margin: 0, whiteSpace: "nowrap" }}>
-              {shown.length} of {files.length} file{files.length === 1 ? "" : "s"}
-            </span>
-          </div>
+              <UploadDropZone
+                uploads={uploads}
+                onDrop={(fileList) => void handleUploadFiles(fileList)}
+                fileCount={shown.length}
+              />
 
-          <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void handleUploadFiles(e.dataTransfer.files); }} className={styles.ccDrop}>
-            <span className={styles.ccHint}>Drop files here to add them to your library.</span>
-          </div>
-
-          {uploads.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              {uploads.map((row, idx) => (
-                <span key={idx} className={styles.ccHint} style={{ color: row.status === "error" ? "var(--danger)" : undefined }}>
-                  {row.name}: {row.status === "uploading" ? "uploading..." : row.status === "done" ? "uploaded" : `failed (${row.error})`}
-                </span>
-              ))}
-            </div>
-          )}
-
-          {selected.size > 0 && (
-            <div className={styles.bulkBar}>
-              <div className={styles.bulkBarHead}>
-                <span className={styles.bulkCount}>
-                  {selected.size} file{selected.size === 1 ? "" : "s"} selected
-                </span>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  onClick={() => setSelected(new Set())}
-                  sx={{ color: "#fff", borderColor: "rgba(255,255,255,0.4)" }}
-                >
-                  Clear
-                </Button>
-              </div>
-              {!bulkAdd && (
-                <div className={styles.bulkRow}>
-                  <span className={styles.bulkLabel}>Files</span>
-                  <span className={styles.bulkField}>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      onClick={() => {
-                        setBulkAdd(true);
-                        if (courseUrl && modulesStatus === "idle") {
-                          void handleSelectCourse(courseUrl);
-                        }
-                      }}
-                    >
-                      Add to module...
-                    </Button>
-                  </span>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    color="error"
-                    onClick={() => void handleBulkDelete()}
-                  >
-                    {confirmBulkDelete ? "Confirm delete" : "Delete"}
-                  </Button>
-                </div>
+              {selected.size > 0 && (
+                <BulkSelectionBar
+                  selectedCount={selected.size}
+                  onClearSelection={() => setSelected(new Set())}
+                  bulkAdd={bulkAdd}
+                  onToggleBulkAdd={setBulkAdd}
+                  bulkModuleId={bulkModuleId}
+                  onBulkModuleSelect={setBulkModuleId}
+                  modules={modules}
+                  modulesStatus={modulesStatus}
+                  courseUrl={courseUrl}
+                  courseName={courseName}
+                  activeInstitution={activeInstitution}
+                  onSelectCourse={handleSelectCourse}
+                  onAddToModule={() => void handleBulkAddToModule()}
+                  adding={adding}
+                  bulkAddStatus={bulkAddStatus}
+                  confirmBulkDelete={confirmBulkDelete}
+                  onDelete={() => void handleBulkDelete()}
+                />
               )}
-              {bulkAdd && (
-                <div className={styles.bulkRow} style={{ flexDirection: "column", alignItems: "flex-start" }}>
-                  {!activeInstitution ? (
-                    <div className={styles.fieldHint}>
-                      Pick an institution in the top bar first.
-                    </div>
-                  ) : (
-                    <>
-                      <CoursePicker
-                        activeInstitution={activeInstitution}
-                        courseUrl={courseUrl}
-                        onSelect={handleSelectCourse}
-                        courseName={courseName}
-                      />
-                      {courseUrl && (
-                        <>
-                          <TextField
-                            select
-                            value={bulkModuleId}
-                            onChange={(e) => setBulkModuleId(e.target.value === "" ? "" : Number(e.target.value))}
-                            placeholder="Choose a module..."
-                            size="small"
-                            sx={{ minWidth: 220, marginTop: 1 }}
-                            disabled={modulesStatus !== "ready"}
-                          >
-                            {modulesStatus === "ready" && modules.length === 0 ? (
-                              <MenuItem value="">No modules found</MenuItem>
-                            ) : (
-                              [
-                                <MenuItem key="none" value="">
-                                  Choose a module...
-                                </MenuItem>,
-                                ...modules.map((m) => (
-                                  <MenuItem key={m.id} value={m.id}>
-                                    {m.name}
-                                  </MenuItem>
-                                )),
-                              ]
-                            )}
-                          </TextField>
-                          <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-                            <Button
-                              variant="contained"
-                              size="small"
-                              onClick={() => void handleBulkAddToModule()}
-                              disabled={adding || bulkModuleId === ""}
-                            >
-                              {adding ? `${bulkAddStatus || "Adding..."}` : "Add"}
-                            </Button>
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              onClick={() => {
-                                setBulkAdd(false);
-                                setBulkModuleId("");
-                              }}
-                              disabled={adding}
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
 
           {files.length === 0 ? (
             <div className={styles.emptyState}>
@@ -1158,7 +777,47 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
                                 </Button>
                               )}
                             </div>
-                            {group.files.map((file) => renderFileRow(file))}
+                            {group.files.map((file) => (
+                              <FileRow
+                                key={file.id}
+                                file={file}
+                                selected={selected}
+                                onSelectToggle={(fileId) => setSelected((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(fileId)) next.delete(fileId);
+                                  else next.add(fileId);
+                                  return next;
+                                })}
+                                onDelete={handleDelete}
+                                confirmDelete={confirmDelete}
+                                onDownload={handleDownload}
+                                onStripAudio={handleStripAudio}
+                                stripping={stripping}
+                                nameDrafts={nameDrafts}
+                                onNameChange={(fileId, name) => setNameDrafts((prev) => ({ ...prev, [fileId]: name }))}
+                                onSaveRename={saveRename}
+                                expandedPlay={expandedPlay}
+                                playUrls={playUrls}
+                                onPlayToggle={setExpandedPlay}
+                                addTarget={addTarget}
+                                onAddTargetToggle={setAddTarget}
+                                courseUrl={courseUrl}
+                                courseName={courseName}
+                                moduleId={moduleId}
+                                modules={modules}
+                                modulesStatus={modulesStatus}
+                                onModuleSelect={setModuleId}
+                                onAddToModule={handleAddToModule}
+                                adding={adding}
+                                addNote={addNote}
+                                onAddToModuleCancel={() => {
+                                  setAddTarget(null);
+                                  setAddNote(null);
+                                }}
+                                activeInstitution={activeInstitution}
+                                onSelectCourse={handleSelectCourse}
+                              />
+                            ))}
                           </div>
                         ))}
                         {grouped.ungrouped.length > 0 && (
@@ -1171,7 +830,47 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
                             }}>
                               Other files
                             </div>
-                            {grouped.ungrouped.map((file) => renderFileRow(file))}
+                            {grouped.ungrouped.map((file) => (
+                              <FileRow
+                                key={file.id}
+                                file={file}
+                                selected={selected}
+                                onSelectToggle={(fileId) => setSelected((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(fileId)) next.delete(fileId);
+                                  else next.add(fileId);
+                                  return next;
+                                })}
+                                onDelete={handleDelete}
+                                confirmDelete={confirmDelete}
+                                onDownload={handleDownload}
+                                onStripAudio={handleStripAudio}
+                                stripping={stripping}
+                                nameDrafts={nameDrafts}
+                                onNameChange={(fileId, name) => setNameDrafts((prev) => ({ ...prev, [fileId]: name }))}
+                                onSaveRename={saveRename}
+                                expandedPlay={expandedPlay}
+                                playUrls={playUrls}
+                                onPlayToggle={setExpandedPlay}
+                                addTarget={addTarget}
+                                onAddTargetToggle={setAddTarget}
+                                courseUrl={courseUrl}
+                                courseName={courseName}
+                                moduleId={moduleId}
+                                modules={modules}
+                                modulesStatus={modulesStatus}
+                                onModuleSelect={setModuleId}
+                                onAddToModule={handleAddToModule}
+                                adding={adding}
+                                addNote={addNote}
+                                onAddToModuleCancel={() => {
+                                  setAddTarget(null);
+                                  setAddNote(null);
+                                }}
+                                activeInstitution={activeInstitution}
+                                onSelectCourse={handleSelectCourse}
+                              />
+                            ))}
                           </div>
                         )}
                       </>
@@ -1179,27 +878,71 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
                   })()}
                 </>
               ) : (
-                shown.map((file) => renderFileRow(file))
+                shown.map((file) => (
+                  <FileRow
+                    key={file.id}
+                    file={file}
+                    selected={selected}
+                    onSelectToggle={(fileId) => setSelected((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(fileId)) next.delete(fileId);
+                      else next.add(fileId);
+                      return next;
+                    })}
+                    onDelete={handleDelete}
+                    confirmDelete={confirmDelete}
+                    onDownload={handleDownload}
+                    onStripAudio={handleStripAudio}
+                    stripping={stripping}
+                    nameDrafts={nameDrafts}
+                    onNameChange={(fileId, name) => setNameDrafts((prev) => ({ ...prev, [fileId]: name }))}
+                    onSaveRename={saveRename}
+                    expandedPlay={expandedPlay}
+                    playUrls={playUrls}
+                    onPlayToggle={setExpandedPlay}
+                    addTarget={addTarget}
+                    onAddTargetToggle={setAddTarget}
+                    courseUrl={courseUrl}
+                    courseName={courseName}
+                    moduleId={moduleId}
+                    modules={modules}
+                    modulesStatus={modulesStatus}
+                    onModuleSelect={setModuleId}
+                    onAddToModule={handleAddToModule}
+                    adding={adding}
+                    addNote={addNote}
+                    onAddToModuleCancel={() => {
+                      setAddTarget(null);
+                      setAddNote(null);
+                    }}
+                    activeInstitution={activeInstitution}
+                    onSelectCourse={handleSelectCourse}
+                  />
+                ))
               )}
             </div>
+          )}
+            </>
+          )}
+
+          {copyOpen && courseId && (
+            <CourseCopyModal
+              mode="import"
+              focus="pages-files"
+              courseUrl={courseUrl}
+              currentCourseId={courseId}
+              acronym={activeInstitution || undefined}
+              onClose={() => setCopyOpen(false)}
+              onDone={() => {
+                setCopyOpen(false);
+                void reload();
+              }}
+            />
           )}
         </>
       )}
 
-      {copyOpen && courseId && (
-        <CourseCopyModal
-          mode="import"
-          focus="pages-files"
-          courseUrl={courseUrl}
-          currentCourseId={courseId}
-          acronym={activeInstitution || undefined}
-          onClose={() => setCopyOpen(false)}
-          onDone={() => {
-            setCopyOpen(false);
-            void reload();
-          }}
-        />
-      )}
+      {filesView === "submissions" && <CartridgeDropPanel />}
     </section>
   );
 }

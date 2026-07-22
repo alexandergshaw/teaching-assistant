@@ -54,6 +54,8 @@ function makeRow(overrides: Partial<TriggerRow> = {}): TriggerRow {
     last_fired_at: null,
     created_at: "2026-07-13T00:00:00.000Z",
     updated_at: "2026-07-13T00:00:00.000Z",
+    last_run_status: null,
+    last_run_detail: null,
     ...overrides,
   };
 }
@@ -78,6 +80,8 @@ function makeTrigger(overrides: Partial<WorkflowTrigger> = {}): WorkflowTrigger 
     webhookToken: null,
     lastCheckedAt: null,
     lastFiredAt: null,
+    lastRunStatus: null,
+    lastRunDetail: null,
     ...overrides,
   };
 }
@@ -710,6 +714,28 @@ describe("decideWorkflowCompleted", () => {
     expect(d.fired).toBe(false);
     expect(d.cursor).toEqual(base.cursor);
   });
+
+  it("does not fire on a skipped run regardless of requireSuccess", () => {
+    const base = decideWorkflowCompleted(null, { baselineLatest: "2026-07-10T00:00:00.000Z", runsSince: [] }, false);
+    const skippedRun = { createdAt: "2026-07-11T00:00:00.000Z", status: "skipped" };
+    const d1 = decideWorkflowCompleted(base.cursor, { baselineLatest: null, runsSince: [skippedRun] }, false);
+    expect(d1.fired).toBe(false);
+    expect(d1.cursor).toEqual({ lastAt: "2026-07-11T00:00:00.000Z" });
+    const d2 = decideWorkflowCompleted(base.cursor, { baselineLatest: null, runsSince: [skippedRun] }, true);
+    expect(d2.fired).toBe(false);
+    expect(d2.cursor).toEqual({ lastAt: "2026-07-11T00:00:00.000Z" });
+  });
+
+  it("fires on an ok run after skipping a skipped run in the same interval", () => {
+    const base = decideWorkflowCompleted(null, { baselineLatest: "2026-07-10T00:00:00.000Z", runsSince: [] }, false);
+    const runs = [
+      { createdAt: "2026-07-11T00:00:00.000Z", status: "skipped" },
+      { createdAt: "2026-07-12T00:00:00.000Z", status: "ok" },
+    ];
+    const d = decideWorkflowCompleted(base.cursor, { baselineLatest: null, runsSince: runs }, false);
+    expect(d.fired).toBe(true);
+    expect(d.cursor).toEqual({ lastAt: "2026-07-12T00:00:00.000Z" });
+  });
 });
 
 describe("isTriggerDueForCheck", () => {
@@ -739,6 +765,20 @@ describe("isTriggerDueForCheck", () => {
 });
 
 describe("mapTrigger", () => {
+  it("round-trips lastRunStatus and lastRunDetail when set", () => {
+    const row = makeRow({ last_run_status: "ok", last_run_detail: "completed successfully" });
+    const t = mapTrigger(row);
+    expect(t.lastRunStatus).toBe("ok");
+    expect(t.lastRunDetail).toBe("completed successfully");
+  });
+
+  it("maps lastRunStatus and lastRunDetail as null when not set", () => {
+    const row = makeRow({ last_run_status: null, last_run_detail: null });
+    const t = mapTrigger(row);
+    expect(t.lastRunStatus).toBeNull();
+    expect(t.lastRunDetail).toBeNull();
+  });
+
   it("maps a DB row to its camelCase domain object", () => {
     const row = makeRow({
       id: "t1",

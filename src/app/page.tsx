@@ -2,6 +2,8 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
+import { readUploadFile, downloadBase64File, getCommentPrefix } from "./home-helpers";
+import { CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon, NavTabLabel } from "./components/home/HomeIcons";
 import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, generateLectureDeckAction, listCourseHubAction, setCourseMaterialsAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData } from "./actions";
 import CoursePlanningTab from "./components/CoursePlanningTab";
 import CoursesTab from "./components/CoursesTab";
@@ -16,7 +18,6 @@ import MessageDraftsTab from "./components/MessageDraftsTab";
 import PresentationDraftsTab from "./components/PresentationDraftsTab";
 import WorkflowsTab from "./components/WorkflowsTab";
 import PowerPointDesignTab from "./components/PowerPointDesignTab";
-import MailTab from "./components/MailTab";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
 import WorkflowTriggerWatcher from "./components/WorkflowTriggerWatcher";
 import LessonPlanPreview from "./components/LessonPlanPreview";
@@ -27,7 +28,6 @@ import { useInstitutionCounts } from "./components/InstitutionCounts";
 import { useVcCounts } from "./components/VcCounts";
 import { useFilesInbox } from "./components/FilesInbox";
 import { useDraftedGradesInbox } from "./components/DraftedGradesInbox";
-import { useMailInbox } from "./components/MailInbox";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { stampDocxAppProperties } from "@/lib/docx";
@@ -44,13 +44,16 @@ import { VIEW_KEY } from "./components/content-tab/constants";
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "courses" | "manual" | "workflows" | "files" | "drafts" | "ppt-design" | "mail";
+type ActiveTab = "courses" | "manual" | "workflows" | "files";
 // The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
-type ManualView = "course-planning" | "content" | "version-control" | "recording";
+type ManualView = "course-planning" | "content" | "version-control" | "recording" | "ppt-design";
 const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 type BuildView = "new" | "prebuilt";
 const BUILD_VIEW_KEY = "ta-build-view";
+// The Workflows tab groups Workflows and Drafts as subtabs.
+type WorkflowsView = "workflows" | "drafts";
+const WORKFLOWS_VIEW_KEY = "ta-workflows-view";
 // The Drafts tab groups Grades, Messages, and Presentations as subtabs.
 type DraftsView = "grades" | "messages" | "presentations";
 const DRAFTS_VIEW_KEY = "ta-drafts-view";
@@ -60,95 +63,6 @@ const DRAFTS_VIEW_KEY = "ta-drafts-view";
 // letting the platform fail the request opaquely.
 const COURSE_ENGINE_MAX_UPLOAD_BYTES = 4.5 * 1024 * 1024;
 
-// Read a browser File into the app's standard upload shape (base64, no data: prefix).
-async function readUploadFile(
-  file: File
-): Promise<{ name: string; base64: string; mimeType: string }> {
-  const base64 = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result.split(",")[1] ?? "");
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-  return { name: file.name, base64, mimeType: file.type || "application/octet-stream" };
-}
-
-// Decode a base64 payload (e.g. a file returned by the Course Engine API) and
-// trigger a browser download.
-function downloadBase64File(base64: string, fileName: string, mimeType: string) {
-  const byteChars = atob(base64);
-  const byteArray = new Uint8Array(byteChars.length);
-  for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
-  const blob = new Blob([byteArray], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function getCommentPrefix(language?: string): string {
-  const lang = (language ?? "").toLowerCase();
-  if (["sql", "haskell", "lua"].includes(lang)) return "--";
-  if (["python", "ruby", "bash", "shell", "r", "perl", "elixir", "coffeescript"].includes(lang)) return "#";
-  if (["html", "xml"].includes(lang)) return "<!--";
-  if (["css"].includes(lang)) return "/*";
-  if (lang) return "//";
-  return "#";
-}
-
-function CopyIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-      <path d="M7 3.5A2.5 2.5 0 0 1 9.5 1h6A2.5 2.5 0 0 1 18 3.5v8A2.5 2.5 0 0 1 15.5 14h-6A2.5 2.5 0 0 1 7 11.5v-8Zm2.5-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-6Z" />
-      <path d="M2 7.5A2.5 2.5 0 0 1 4.5 5h.75a.75.75 0 0 1 0 1.5H4.5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-.75a.75.75 0 0 1 1.5 0v.75A2.5 2.5 0 0 1 10.5 18h-6A2.5 2.5 0 0 1 2 15.5v-8Z" />
-    </svg>
-  );
-}
-
-// DownloadIcon and EyeIcon moved to GradingTab component
-
-function LockClosedIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-      <path fillRule="evenodd" d="M5.75 8V6a4.25 4.25 0 1 1 8.5 0v2h.25A2.75 2.75 0 0 1 17.25 10.75v5.5A2.75 2.75 0 0 1 14.5 19h-9A2.75 2.75 0 0 1 2.75 16.25v-5.5A2.75 2.75 0 0 1 5.5 8h.25Zm7 0V6a2.75 2.75 0 1 0-5.5 0v2h5.5Zm-4.25 3a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-.75 1.298v1.452a.75.75 0 0 1-1.5 0v-1.452A1.5 1.5 0 0 1 8.5 11Z" clipRule="evenodd" />
-    </svg>
-  );
-}
-
-function LockOpenIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-      <path fillRule="evenodd" d="M7.25 8V6a2.75 2.75 0 0 1 5.164-1.31.75.75 0 0 0 1.323-.706A4.25 4.25 0 0 0 5.75 6v2H5.5a2.75 2.75 0 0 0-2.75 2.75v5.5A2.75 2.75 0 0 0 5.5 19h9a2.75 2.75 0 0 0 2.75-2.75v-5.5A2.75 2.75 0 0 0 14.5 8h-7.25Zm2.75 3a1.5 1.5 0 0 0-.75 2.798v1.452a.75.75 0 0 0 1.5 0v-1.452A1.5 1.5 0 0 0 10 11Z" clipRule="evenodd" />
-    </svg>
-  );
-}
-
-function PencilIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-      <path d="m5.433 13.917 1.262-3.155A4 4 0 0 1 7.58 9.42l6.92-6.918a2.121 2.121 0 0 1 3 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 0 1-.65-.65Z" />
-      <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0 0 10 3H4.75A2.75 2.75 0 0 0 2 5.75v9.5A2.75 2.75 0 0 0 4.75 18h9.5A2.75 2.75 0 0 0 17 15.25V10a.75.75 0 0 0-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5Z" />
-    </svg>
-  );
-}
-
-// Tab label with an optional red notification bubble.
-function NavTabLabel({ text, count }: { text: string; count: number }) {
-  return (
-    <span className={styles.tabLabelWrap}>
-      {text}
-      {count > 0 && <span className={styles.navBadge}>{count}</span>}
-    </span>
-  );
-}
-
 export default function Home() {
   const [state, formAction, pending] = useActionState(gradeAction, initialState);
   const { user } = useSupabase();
@@ -156,14 +70,15 @@ export default function Home() {
   const { total: vcAttention } = useVcCounts();
   const { count: filesInbox, markSeen: markFilesSeen } = useFilesInbox();
   const { count: draftsInbox, gradesCount: draftsGradesCount, messagesCount: draftsMessagesCount, presentationsCount: draftsPresentationsCount, refresh: refreshDrafts } = useDraftedGradesInbox();
-  const { unreadMail, refresh: refreshMail } = useMailInbox();
   const [testState] = useActionState(testGeminiAction, initialTestState);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "manual";
     const saved = localStorage.getItem("ta-active-tab");
-    // Migrate legacy "grade-drafts" to "drafts".
-    if (saved === "grade-drafts") return "drafts";
-    return saved === "courses" || saved === "workflows" || saved === "files" || saved === "drafts" || saved === "ppt-design" || saved === "mail"
+    // Migrate legacy "grade-drafts" or "drafts" to "workflows".
+    if (saved === "grade-drafts" || saved === "drafts") return "workflows";
+    // Migrate legacy "ppt-design" to "manual".
+    if (saved === "ppt-design") return "manual";
+    return saved === "courses" || saved === "workflows" || saved === "files"
       ? saved
       : "manual";
   });
@@ -181,13 +96,15 @@ export default function Home() {
       savedManual === "course-planning" ||
       savedManual === "content" ||
       savedManual === "version-control" ||
-      savedManual === "recording"
+      savedManual === "recording" ||
+      savedManual === "ppt-design"
     ) {
       return savedManual;
     }
     const saved = localStorage.getItem("ta-active-tab");
     if (saved === "recording") return "recording";
     if (saved === "version-control") return "version-control";
+    if (saved === "ppt-design") return "ppt-design";
     if (saved === "content" || saved === "grading" || saved === "canvas") return "content";
     return "course-planning";
   });
@@ -201,6 +118,14 @@ export default function Home() {
     setBuildViewState(v);
     if (typeof window !== "undefined") localStorage.setItem(BUILD_VIEW_KEY, v);
   };
+  const [workflowsView, setWorkflowsView] = useState<WorkflowsView>(() => {
+    if (typeof window === "undefined") return "workflows";
+    // Migrate legacy "grade-drafts" or stored "drafts" to "drafts" view.
+    const saved = localStorage.getItem("ta-active-tab");
+    if (saved === "grade-drafts" || saved === "drafts") return "drafts";
+    const savedWorkflows = localStorage.getItem(WORKFLOWS_VIEW_KEY);
+    return savedWorkflows === "workflows" || savedWorkflows === "drafts" ? savedWorkflows : "workflows";
+  });
   const [draftsView, setDraftsView] = useState<DraftsView>(() => {
     if (typeof window === "undefined") return "grades";
     const saved = localStorage.getItem(DRAFTS_VIEW_KEY);
@@ -239,6 +164,10 @@ export default function Home() {
   }, [manualView]);
 
   useEffect(() => {
+    localStorage.setItem(WORKFLOWS_VIEW_KEY, workflowsView);
+  }, [workflowsView]);
+
+  useEffect(() => {
     localStorage.setItem(DRAFTS_VIEW_KEY, draftsView);
   }, [draftsView]);
 
@@ -249,22 +178,16 @@ export default function Home() {
   }, [activeTab, markFilesSeen]);
 
   useEffect(() => {
-    if (activeTab === "drafts") {
+    if (activeTab === "workflows" && workflowsView === "drafts") {
       refreshDrafts();
     }
-  }, [activeTab, refreshDrafts]);
-
-  useEffect(() => {
-    if (activeTab === "mail") {
-      refreshMail();
-    }
-  }, [activeTab, refreshMail]);
+  }, [activeTab, workflowsView, refreshDrafts]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-    const total = totalNeedsGrading + totalUnread + vcAttention + filesInbox + draftsInbox + unreadMail;
+    const total = totalNeedsGrading + totalUnread + vcAttention + filesInbox + draftsInbox;
     document.title = total > 0 ? `(${total}) Teaching Assistant` : "Teaching Assistant";
-  }, [totalNeedsGrading, totalUnread, vcAttention, filesInbox, draftsInbox, unreadMail]);
+  }, [totalNeedsGrading, totalUnread, vcAttention, filesInbox, draftsInbox]);
 
   useEffect(() => {
     return () => {
@@ -748,14 +671,20 @@ export default function Home() {
 
   const openWorkflow = (id: string) => {
     if (typeof window !== "undefined") localStorage.setItem("ta-workflows-selected", id);
+    setWorkflowsView("workflows");
+    setActiveTab("workflows");
+  };
+
+  const handleWorkflowScheduled = () => {
+    setWorkflowsView("workflows");
     setActiveTab("workflows");
   };
 
   return (
     <>
       <TopBar />
-      <WorkflowScheduleWatcher onRunScheduled={() => setActiveTab("workflows")} />
-      <WorkflowTriggerWatcher onRunScheduled={() => setActiveTab("workflows")} />
+      <WorkflowScheduleWatcher onRunScheduled={handleWorkflowScheduled} />
+      <WorkflowTriggerWatcher onRunScheduled={handleWorkflowScheduled} />
       <main className={styles.page}>
       <div className={styles.tabContainer}>
         <Tabs
@@ -785,21 +714,10 @@ export default function Home() {
             minHeight: 44,
           }}
         >
-          <Tab
-            label={<NavTabLabel text="Courses" count={totalNeedsGrading + totalUnread} />}
-            value="courses"
-            disableRipple
-          />
-          <Tab
-            label={<NavTabLabel text="Manual" count={totalNeedsGrading + totalUnread + vcAttention} />}
-            value="manual"
-            disableRipple
-          />
-          <Tab label="Workflows" value="workflows" disableRipple />
-          <Tab label="PowerPoint Design" value="ppt-design" disableRipple />
+          <Tab label="Courses" value="courses" disableRipple />
+          <Tab label="Manual" value="manual" disableRipple />
+          <Tab label={<NavTabLabel text="Workflows" count={draftsInbox} />} value="workflows" disableRipple />
           <Tab label={<NavTabLabel text="Files" count={filesInbox} />} value="files" disableRipple />
-          <Tab label={<NavTabLabel text="Drafts" count={draftsInbox} />} value="drafts" disableRipple />
-          <Tab label={<NavTabLabel text="Mail" count={unreadMail} />} value="mail" disableRipple />
         </Tabs>
 
         {activeTab === "courses" && (
@@ -840,12 +758,7 @@ export default function Home() {
                   className={`${styles.lessonInnerTab}${manualView === "content" ? ` ${styles.lessonInnerTabActive}` : ""}`}
                   onClick={() => setManualView("content")}
                 >
-                  <span className={styles.tabLabelWrap}>
-                    LMS
-                    {totalNeedsGrading + totalUnread > 0 && (
-                      <span className={styles.navBadge}>{totalNeedsGrading + totalUnread}</span>
-                    )}
-                  </span>
+                  LMS
                 </button>
                 <button
                   type="button"
@@ -854,10 +767,7 @@ export default function Home() {
                   className={`${styles.lessonInnerTab}${manualView === "version-control" ? ` ${styles.lessonInnerTabActive}` : ""}`}
                   onClick={() => setManualView("version-control")}
                 >
-                  <span className={styles.tabLabelWrap}>
-                    Version Control
-                    {vcAttention > 0 && <span className={styles.navBadge}>{vcAttention}</span>}
-                  </span>
+                  Version Control
                 </button>
                 <button
                   type="button"
@@ -867,6 +777,15 @@ export default function Home() {
                   onClick={() => setManualView("recording")}
                 >
                   Recording
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={manualView === "ppt-design"}
+                  className={`${styles.lessonInnerTab}${manualView === "ppt-design" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                  onClick={() => setManualView("ppt-design")}
+                >
+                  PowerPoint Design
                 </button>
               </div>
             </div>
@@ -936,6 +855,8 @@ export default function Home() {
             )}
 
             {manualView === "version-control" && <VersionControlTab />}
+
+            {manualView === "ppt-design" && <PowerPointDesignTab />}
           </>
         )}
 
@@ -947,60 +868,85 @@ export default function Home() {
 
         {activeTab === "files" && <FilesTab onOpenWorkflow={openWorkflow} />}
 
-        {activeTab === "drafts" && (
+        {activeTab === "workflows" && (
           <>
             <div className={styles.manualSubnav}>
-              <div className={styles.lessonInnerTabs} role="tablist" aria-label="Drafts">
+              <div className={styles.lessonInnerTabs} role="tablist" aria-label="Workflows">
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={draftsView === "grades"}
-                  className={`${styles.lessonInnerTab}${draftsView === "grades" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                  onClick={() => setDraftsView("grades")}
+                  aria-selected={workflowsView === "workflows"}
+                  className={`${styles.lessonInnerTab}${workflowsView === "workflows" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                  onClick={() => setWorkflowsView("workflows")}
                 >
-                  <span className={styles.tabLabelWrap}>
-                    Grades
-                    {draftsGradesCount > 0 && <span className={styles.navBadge}>{draftsGradesCount}</span>}
-                  </span>
+                  Workflows
                 </button>
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={draftsView === "messages"}
-                  className={`${styles.lessonInnerTab}${draftsView === "messages" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                  onClick={() => setDraftsView("messages")}
+                  aria-selected={workflowsView === "drafts"}
+                  className={`${styles.lessonInnerTab}${workflowsView === "drafts" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                  onClick={() => setWorkflowsView("drafts")}
                 >
                   <span className={styles.tabLabelWrap}>
-                    Messages
-                    {draftsMessagesCount > 0 && <span className={styles.navBadge}>{draftsMessagesCount}</span>}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={draftsView === "presentations"}
-                  className={`${styles.lessonInnerTab}${draftsView === "presentations" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                  onClick={() => setDraftsView("presentations")}
-                >
-                  <span className={styles.tabLabelWrap}>
-                    Presentations
-                    {draftsPresentationsCount > 0 && <span className={styles.navBadge}>{draftsPresentationsCount}</span>}
+                    Drafts
+                    {draftsInbox > 0 && <span className={styles.navBadge}>{draftsInbox}</span>}
                   </span>
                 </button>
               </div>
             </div>
 
-            {draftsView === "grades" && <DraftedGradesTab onOpenWorkflow={openWorkflow} />}
-            {draftsView === "messages" && <MessageDraftsTab onOpenWorkflow={openWorkflow} />}
-            {draftsView === "presentations" && <PresentationDraftsTab onOpenWorkflow={openWorkflow} />}
+            {workflowsView === "workflows" && <WorkflowsTab />}
+            {workflowsView === "drafts" && (
+              <>
+                <div className={styles.manualSubnav}>
+                  <div className={styles.lessonInnerTabs} role="tablist" aria-label="Drafts">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={draftsView === "grades"}
+                      className={`${styles.lessonInnerTab}${draftsView === "grades" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                      onClick={() => setDraftsView("grades")}
+                    >
+                      <span className={styles.tabLabelWrap}>
+                        Grades
+                        {draftsGradesCount > 0 && <span className={styles.navBadge}>{draftsGradesCount}</span>}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={draftsView === "messages"}
+                      className={`${styles.lessonInnerTab}${draftsView === "messages" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                      onClick={() => setDraftsView("messages")}
+                    >
+                      <span className={styles.tabLabelWrap}>
+                        Messages
+                        {draftsMessagesCount > 0 && <span className={styles.navBadge}>{draftsMessagesCount}</span>}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={draftsView === "presentations"}
+                      className={`${styles.lessonInnerTab}${draftsView === "presentations" ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                      onClick={() => setDraftsView("presentations")}
+                    >
+                      <span className={styles.tabLabelWrap}>
+                        Presentations
+                        {draftsPresentationsCount > 0 && <span className={styles.navBadge}>{draftsPresentationsCount}</span>}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {draftsView === "grades" && <DraftedGradesTab onOpenWorkflow={openWorkflow} />}
+                {draftsView === "messages" && <MessageDraftsTab onOpenWorkflow={openWorkflow} />}
+                {draftsView === "presentations" && <PresentationDraftsTab onOpenWorkflow={openWorkflow} />}
+              </>
+            )}
           </>
         )}
-
-        {activeTab === "workflows" && <WorkflowsTab />}
-
-        {activeTab === "ppt-design" && <PowerPointDesignTab />}
-
-        {activeTab === "mail" && <MailTab />}
 
       </div>
 

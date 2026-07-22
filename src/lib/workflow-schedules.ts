@@ -5,8 +5,11 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "./supabase/types";
+import type { WorkflowRunStatus } from "./workflow-run-status";
 
 export type ScheduleRepeat = "none" | "interval" | "daily" | "weekly";
+
+const VALID_RUN_STATUSES = new Set<string>(["started", "ok", "error", "skipped"]);
 
 // The shortest interval the app offers: unattended runs are polled about every
 // 15 minutes (the GitHub Action cadence), so a finer interval would not
@@ -84,6 +87,11 @@ export interface WorkflowSchedule {
   /** In-flight institution fan-out checkpoint; null unless a prior unattended
    * tick truncated a fan-out and left institutions to resume. */
   fanoutProgress: FanoutProgress | null;
+  /** Status of the last run: "started", "ok", "error", or "skipped", or null
+   * if never run. */
+  lastRunStatus: WorkflowRunStatus | null;
+  /** Human-readable detail of the last run outcome, or null if never run. */
+  lastRunDetail: string | null;
 }
 
 /**
@@ -193,6 +201,8 @@ export function mapSchedule(row: ScheduleRow): WorkflowSchedule {
     provider: row.provider,
     disabledSteps,
     fanoutProgress: parseFanoutProgress(row.fanout_progress),
+    lastRunStatus: (row.last_run_status && VALID_RUN_STATUSES.has(row.last_run_status) ? row.last_run_status : null) as WorkflowRunStatus | null,
+    lastRunDetail: row.last_run_detail ?? null,
   };
 }
 
@@ -358,6 +368,8 @@ export async function claimWorkflowSchedule(
   const next = computeNextRunAt(schedule.nextRunAt, schedule.repeat, now, schedule.intervalMinutes);
   const patch: Record<string, unknown> = {
     last_run_at: now.toISOString(),
+    last_run_status: "started",
+    last_run_detail: null,
     updated_at: now.toISOString(),
   };
   if (next) {
@@ -433,6 +445,8 @@ export async function claimFanoutSchedule(
     .update({
       next_run_at: leaseIso,
       last_run_at: now.toISOString(),
+      last_run_status: "started",
+      last_run_detail: null,
       updated_at: now.toISOString(),
       fanout_progress: progress as unknown as Json,
       enabled: true,

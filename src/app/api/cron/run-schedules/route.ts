@@ -6,6 +6,7 @@ import {
   listDueUnattendedWorkflowSchedules, claimWorkflowSchedule,
   claimFanoutSchedule, checkpointFanoutInstitution, deferFanoutResume, finishFanoutSchedule,
 } from "@/lib/workflow-schedules";
+import { updateScheduleRunOutcome } from "@/lib/workflow-run-status";
 import { listWorkflowDefs } from "@/lib/workflow-defs";
 import { allWorkflows } from "@/lib/workflows/presets";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
@@ -14,6 +15,7 @@ import { isInstitutionFanout } from "@/lib/workflows/fanout";
 import { runDueUnattendedTriggers } from "@/lib/workflow-trigger-runner";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
 import { resolveDocumentAuthor } from "@/lib/author";
+import { saveRecordingFile } from "@/lib/recording-files";
 import type { LlmProvider } from "@/lib/llm";
 
 // Vercel Cron entry point for UNATTENDED (headless) scheduled workflow runs -
@@ -93,6 +95,7 @@ export async function GET(req: NextRequest) {
       }
       const ownerEmail = userRes.user.email;
       if (!ownerEmail) {
+        await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", "owner has no email on file").catch(() => {});
         results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "owner has no email on file" });
         continue;
       }
@@ -114,10 +117,36 @@ export async function GET(req: NextRequest) {
       if (runnable && isInstitutionFanout(def!.scope)) {
         const claim = await claimFanoutSchedule(supabase, schedule.userId, schedule, now);
         if (!claim) {
+          await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", "already claimed").catch(() => {});
           results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "already claimed" });
           continue;
         }
         if (claim.kind === "abandon") {
+          const workflowRunId = crypto.randomUUID();
+          const reason = "fan-out abandoned: no forward progress";
+          await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", reason).catch(() => {});
+          try {
+            const markdown = `# ${def!.name} - run skipped\n\n${reason}\n`;
+            await saveRecordingFile(supabase, schedule.userId, new Blob([markdown], { type: "text/markdown" }), {
+              name: `${def!.name} - skipped`,
+              kind: "file",
+              mimeType: "text/markdown",
+              durationSec: null,
+              fileExt: "md",
+              source: "workflow",
+              origin: "unattended",
+              workflowName: def!.name,
+              workflowId: schedule.workflowId,
+              workflowRunId,
+            });
+            await recordWorkflowRun(supabase, schedule.userId, {
+              workflowId: schedule.workflowId,
+              workflowName: def!.name,
+              status: "skipped",
+              triggerSource: "schedule",
+              id: workflowRunId,
+            });
+          } catch { /* ignore */ }
           results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "fan-out abandoned (no forward progress)" });
           continue;
         }
@@ -147,14 +176,21 @@ export async function GET(req: NextRequest) {
 
         if (outcome.fanout?.truncated) {
           await deferFanoutResume(supabase, schedule.userId, schedule.id, progress.runToken, new Date());
-          results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "ok", detail: `fan-out partial: ${progress.doneInstitutions.length}/${outcome.fanout.total} done` });
+          const partialDetail = `fan-out partial: ${progress.doneInstitutions.length}/${outcome.fanout.total} done`;
+          await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "started", partialDetail).catch(() => {});
+          results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "ok", detail: partialDetail });
         } else {
           await finishFanoutSchedule(supabase, schedule.userId, schedule.id, progress, new Date());
           const runOk = outcome.ok && !progress.anyError;
+          const detail = runOk ? "" : outcome.steps
+            .filter((s) => s.status === "error" || s.status === "needs-interaction")
+            .map((s) => `step ${s.index + 1} ${s.type}: ${s.error ?? s.status}`)
+            .join("; ");
+          await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, runOk ? "ok" : "error", detail).catch(() => {});
           results.push({
             scheduleId: schedule.id, workflowId: schedule.workflowId,
             status: runOk ? "ok" : "error",
-            detail: runOk ? undefined : JSON.stringify(outcome.steps.filter((s) => s.status === "error" || s.status === "needs-interaction")),
+            detail: runOk ? undefined : detail,
           });
           try {
             await recordWorkflowRun(supabase, schedule.userId, {
@@ -170,14 +206,65 @@ export async function GET(req: NextRequest) {
       // (advances next_run_at). Unchanged behavior.
       const claimed = await claimWorkflowSchedule(supabase, schedule.userId, schedule, now);
       if (!claimed) {
+        await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", "already claimed").catch(() => {});
         results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "already claimed" });
         continue;
       }
       if (!def) {
+        const workflowRunId = crypto.randomUUID();
+        const reason = "workflow not found";
+        await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", reason).catch(() => {});
+        try {
+          const markdown = `# ${schedule.workflowName} - run skipped\n\n${reason}\n`;
+          await saveRecordingFile(supabase, schedule.userId, new Blob([markdown], { type: "text/markdown" }), {
+            name: `${schedule.workflowName} - skipped`,
+            kind: "file",
+            mimeType: "text/markdown",
+            durationSec: null,
+            fileExt: "md",
+            source: "workflow",
+            origin: "unattended",
+            workflowName: schedule.workflowName,
+            workflowId: schedule.workflowId,
+            workflowRunId,
+          });
+          await recordWorkflowRun(supabase, schedule.userId, {
+            workflowId: schedule.workflowId,
+            workflowName: schedule.workflowName,
+            status: "skipped",
+            triggerSource: "schedule",
+            id: workflowRunId,
+          });
+        } catch { /* ignore */ }
         results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "workflow not found" });
         continue;
       }
       if (!isHeadlessSafeWorkflow(def, lookup)) {
+        const workflowRunId = crypto.randomUUID();
+        const reason = "workflow is not headless-safe";
+        await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", reason).catch(() => {});
+        try {
+          const markdown = `# ${def.name} - run skipped\n\n${reason}\n`;
+          await saveRecordingFile(supabase, schedule.userId, new Blob([markdown], { type: "text/markdown" }), {
+            name: `${def.name} - skipped`,
+            kind: "file",
+            mimeType: "text/markdown",
+            durationSec: null,
+            fileExt: "md",
+            source: "workflow",
+            origin: "unattended",
+            workflowName: def.name,
+            workflowId: schedule.workflowId,
+            workflowRunId,
+          });
+          await recordWorkflowRun(supabase, schedule.userId, {
+            workflowId: schedule.workflowId,
+            workflowName: def.name,
+            status: "skipped",
+            triggerSource: "schedule",
+            id: workflowRunId,
+          });
+        } catch { /* ignore */ }
         results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "workflow is not headless-safe" });
         continue;
       }
@@ -198,10 +285,15 @@ export async function GET(req: NextRequest) {
         })
       );
 
+      const runDetail = outcome.ok ? "" : outcome.steps
+        .filter((s) => s.status === "error" || s.status === "needs-interaction")
+        .map((s) => `step ${s.index + 1} ${s.type}: ${s.error ?? s.status}`)
+        .join("; ");
+      await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, outcome.ok ? "ok" : "error", runDetail).catch(() => {});
       results.push({
         scheduleId: schedule.id, workflowId: schedule.workflowId,
         status: outcome.ok ? "ok" : "error",
-        detail: outcome.ok ? undefined : JSON.stringify(outcome.steps.filter((s) => s.status === "error" || s.status === "needs-interaction")),
+        detail: outcome.ok ? undefined : runDetail,
       });
 
       try {

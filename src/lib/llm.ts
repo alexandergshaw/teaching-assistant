@@ -41,6 +41,54 @@ export interface LlmRequest {
   generationConfig?: LlmGenerationConfig;
   /** Optional system instruction prepended to steer the model (e.g. tone, format). */
   systemInstruction?: string;
+  /** Enable web search tool for the model (Gemini only). */
+  webSearch?: boolean;
+}
+
+export interface Source {
+  title: string;
+  uri: string;
+}
+
+/**
+ * Parse grounding metadata from an LLM response into an array of sources.
+ * Extracts web.uri and web.title from groundingChunks, skipping chunks without
+ * a uri. Returns undefined if metadata is missing or malformed.
+ */
+export function parseGroundingSources(
+  data: unknown
+): Array<{ title: string; uri: string }> | undefined {
+  try {
+    if (!data || typeof data !== "object") {
+      return undefined;
+    }
+
+    const obj = data as {
+      candidates?: Array<{
+        groundingMetadata?: {
+          groundingChunks?: Array<{ web?: { uri?: string; title?: string } }>;
+        };
+      }>;
+    };
+
+    const chunks = obj.candidates?.[0]?.groundingMetadata?.groundingChunks;
+    if (!Array.isArray(chunks)) {
+      return undefined;
+    }
+
+    const sources: Source[] = [];
+    for (const chunk of chunks) {
+      const uri = chunk.web?.uri;
+      if (uri) {
+        const title = chunk.web?.title || uri;
+        sources.push({ uri, title });
+      }
+    }
+
+    return sources.length > 0 ? sources : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -50,7 +98,7 @@ export interface LlmRequest {
  * than formatting here).
  */
 export type LlmResult =
-  | { ok: true; text: string }
+  | { ok: true; text: string; sources?: Source[] }
   | { ok: false; status: number; body: string };
 
 export async function callLlm(
@@ -108,6 +156,9 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
     ...(req.systemInstruction
       ? { system_instruction: { parts: [{ text: req.systemInstruction }] } }
       : {}),
+    ...(req.webSearch
+      ? { tools: [{ google_search: {} }] }
+      : {}),
   });
 
   let lastResult: LlmResult = { ok: false, status: 0, body: "Request was never attempted." };
@@ -141,13 +192,24 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
     }
 
     const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string }> };
+        groundingMetadata?: {
+          groundingChunks?: Array<{ web?: { uri?: string; title?: string } }>;
+        };
+      }>;
     };
 
     const text =
       data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
 
-    return { ok: true, text };
+    const sources = parseGroundingSources(data);
+
+    return {
+      ok: true,
+      text,
+      ...(sources ? { sources } : {}),
+    };
   }
 
   return lastResult;

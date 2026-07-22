@@ -227,6 +227,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "ensure-visualizer-pages",
     "list-open-problems",
     "propose-problem-solutions",
+    "current-events-report",
   ],
 };
 

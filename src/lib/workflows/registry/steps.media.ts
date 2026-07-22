@@ -61,6 +61,9 @@ export const mediaSteps: StepDefinition[] = [
     outputs: [
       { key: "draftId", label: "Draft id", type: "text" },
       { key: "slideCount", label: "Slide count", type: "text" },
+      { key: "presentationTitle", label: "Presentation title", type: "text" },
+      { key: "deck", label: "Deck (readable)", type: "longtext" },
+      { key: "slidesJson", label: "Slides (JSON)", type: "longtext" }
     ],
     run: async (values, helpers, onProgress) => {
       const key = String(values.template ?? "").trim();
@@ -197,8 +200,31 @@ export const mediaSteps: StepDefinition[] = [
         onProgress(`Saved the draft; could not save the .pptx to Files (${err instanceof Error ? err.message : "unknown"}).`);
       }
       const summaryText = `Generated a ${deck.slides.length}-slide deck from "${template.name}"${moduleName ? ` for ${moduleName}` : ""} and saved it to Drafts > Presentations${savedToFiles ? " and the Files library" : ""}.`;
+
+      const deckLines: string[] = [deck.presentationTitle];
+      for (const slide of deck.slides) {
+        deckLines.push(`\n## ${slide.title}`);
+        for (const bullet of slide.bullets) {
+          deckLines.push(`- ${bullet}`);
+        }
+        if (slide.code) {
+          const codeLanguage = slide.codeLanguage || "";
+          deckLines.push(`\`\`\`${codeLanguage}`);
+          deckLines.push(slide.code);
+          deckLines.push("```");
+        }
+      }
+      const readableDeck = deckLines.join("\n");
+      const slidesJson = JSON.stringify(deck.slides);
+
       return {
-        outputs: { draftId: res.id, slideCount: String(deck.slides.length) },
+        outputs: {
+          draftId: res.id,
+          slideCount: String(deck.slides.length),
+          presentationTitle: deck.presentationTitle,
+          deck: readableDeck,
+          slidesJson
+        },
         summary: offsetNotes.length > 0
           ? { kind: "list", label: summaryText, items: offsetNotes }
           : { kind: "text", text: summaryText },

@@ -13,6 +13,7 @@ import {
 import { latestWorkflowRun, runsSinceForWorkflow, latestRunAnyWorkflow, runsSinceAnyWorkflow } from "@/lib/workflow-runs";
 import { enqueueScheduledRun } from "@/lib/workflow-schedule-handoff";
 import { readActiveInstitution } from "@/lib/institutions";
+import { CARTRIDGE_DROP_UPLOADED_EVENT } from "@/lib/cartridge-drops";
 
 // How often to look for due triggers while the app is open.
 const CHECK_INTERVAL_MS = 60 * 1000;
@@ -84,6 +85,39 @@ export default function WorkflowTriggerWatcher({
       void fireLifecycle("app-focused");
     };
 
+    const onCartridgeDropped = async () => {
+      try {
+        const triggers = await listWorkflowTriggers(supabase, user.id);
+        const now = new Date();
+        const matches = triggers.filter((t) => t.enabled && t.eventType === "cartridge-uploaded");
+        for (const trigger of matches) {
+          if (cancelled) return;
+          const activeInstitution = readActiveInstitution() || null;
+          const result = await evaluateTrigger(trigger, {
+            activeInstitution,
+            latestRun: (workflowId) => latestWorkflowRun(supabase, user.id, workflowId),
+            runsSince: (workflowId, sinceIso) => runsSinceForWorkflow(supabase, user.id, workflowId, sinceIso),
+            excludeWorkflowId: trigger.workflowId,
+            latestRunAny: (excludeId) => latestRunAnyWorkflow(supabase, user.id, excludeId),
+            runsSinceAny: (sinceIso, excludeId) => runsSinceAnyWorkflow(supabase, user.id, sinceIso, excludeId),
+          });
+          const claimed = await claimAndAdvanceTrigger(supabase, trigger, result, now);
+          if (!claimed || cancelled) continue;
+          if (!result.fired) continue;
+          enqueueScheduledRun({
+            scheduleId: null,
+            triggerId: trigger.id,
+            workflowId: trigger.workflowId,
+            workflowName: trigger.workflowName,
+            fieldValues: { ...trigger.fieldValues, ...(result.fireValues ?? {}) },
+          });
+          onRunScheduled();
+        }
+      } catch (err) {
+        console.error("[workflow-triggers] cartridge-drop fire failed:", err);
+      }
+    };
+
     const check = async () => {
       if (checkingRef.current) return;
       checkingRef.current = true;
@@ -128,10 +162,12 @@ export default function WorkflowTriggerWatcher({
     void fireLifecycle("app-open");
     const id = window.setInterval(() => void check(), CHECK_INTERVAL_MS);
     window.addEventListener("focus", onFocus);
+    window.addEventListener(CARTRIDGE_DROP_UPLOADED_EVENT, onCartridgeDropped);
     return () => {
       cancelled = true;
       window.clearInterval(id);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener(CARTRIDGE_DROP_UPLOADED_EVENT, onCartridgeDropped);
     };
     // onRunScheduled is a stable page-level callback; re-subscribing on its
     // identity would tear down the interval every render.

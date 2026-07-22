@@ -334,7 +334,7 @@ export function decideWorkflowCompleted(
     return { fired: false, cursor: { lastAt }, detail: "No new runs." };
   }
   const maxAt = input.runsSince.reduce((m, r) => (r.createdAt > m ? r.createdAt : m), lastAt);
-  const qualifying = input.runsSince.filter((r) => !requireSuccess || r.status === "ok");
+  const qualifying = input.runsSince.filter((r) => r.status !== "skipped" && (!requireSuccess || r.status === "ok"));
   const decision: Decision = {
     fired: qualifying.length > 0,
     cursor: { lastAt: maxAt },

@@ -9,6 +9,13 @@ import Typeahead from "../ui/Typeahead";
 import type { WorkflowDef } from "@/lib/workflows/types";
 import styles from "../../page.module.css";
 
+function isStaleStarted(firedAtIso: string | null): boolean {
+  if (!firedAtIso) return false;
+  const firedAtMs = new Date(firedAtIso).getTime();
+  const tenMinutesAgoMs = Date.now() - 10 * 60 * 1000;
+  return firedAtMs < tenMinutesAgoMs;
+}
+
 type TriggerFormData = {
   eventType: TriggerEventType;
   config: Record<string, string>;
@@ -433,53 +440,75 @@ export function TriggerSection({
               t.eventType === "webhook" && t.webhookToken
                 ? `${webhookBaseUrl}/api/triggers/${t.webhookToken}`
                 : null;
+            const lastRunStatusClass = !t.lastRunStatus ? "" :
+              t.lastRunStatus === "ok" ? styles.ghBadgeSuccess :
+              t.lastRunStatus === "error" ? styles.ghBadgeDanger :
+              t.lastRunStatus === "skipped" ? styles.ghBadgeNeutral :
+              t.lastRunStatus === "started" && isStaleStarted(t.lastFiredAt) ? styles.ghBadgeDanger :
+              styles.ghBadgeAccent;
+            const lastRunStatusText = !t.lastRunStatus ? "" :
+              t.lastRunStatus === "ok" ? "Last run OK" :
+              t.lastRunStatus === "error" ? "Last run failed" :
+              t.lastRunStatus === "skipped" ? "Last run skipped" :
+              t.lastRunStatus === "started" && isStaleStarted(t.lastFiredAt) ? "Did not finish" :
+              "Running";
             return (
-              <div key={t.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--field-border)", fontSize: "0.85em" }}>
-                <span style={{ fontWeight: 600 }}>{t.workflowName}</span>
-                {t.unattended && (
-                  <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>Unattended</span>
-                )}
-                <span style={{ color: "var(--text-secondary)" }}>
-                  {describeTrigger(t)}
-                  {t.enabled ? "" : " - disabled"}
-                  {attachment ? ` - ${attachment}` : ""}
-                  {t.lastFiredAt ? ` - last fired ${new Date(t.lastFiredAt).toLocaleString()}` : ""}
-                </span>
+              <div key={t.id} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 0", borderTop: "1px solid var(--field-border)", fontSize: "0.85em" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 600 }}>{t.workflowName}</span>
+                  {t.unattended && (
+                    <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>Unattended</span>
+                  )}
+                  {t.lastRunStatus && (
+                    <span className={`${styles.ghBadge} ${lastRunStatusClass}`}>{lastRunStatusText}</span>
+                  )}
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    {describeTrigger(t)}
+                    {t.enabled ? "" : " - disabled"}
+                    {attachment ? ` - ${attachment}` : ""}
+                    {t.lastFiredAt ? ` - last fired ${new Date(t.lastFiredAt).toLocaleString()}` : ""}
+                  </span>
+                  <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      onClick={() => {
+                        setTriggerForm(triggerToForm(t));
+                        setEditingTriggerId(t.id);
+                      }}
+                    >
+                      Edit
+                    </button>
+                    {webhookUrl && (
+                      <button type="button" className={styles.linkButton} onClick={() => void navigator.clipboard?.writeText(webhookUrl)}>
+                        Copy URL
+                      </button>
+                    )}
+                    <button type="button" className={styles.linkButton} onClick={() => void onToggle(t)}>
+                      {t.enabled ? "Disable" : "Enable"}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      style={{ color: "var(--danger)" }}
+                      onClick={() =>
+                        triggerRemoveConfirm === t.id
+                          ? void onDelete(t.id)
+                          : setTriggerRemoveConfirm(t.id)
+                      }
+                    >
+                      {triggerRemoveConfirm === t.id ? "Confirm" : "Remove"}
+                    </button>
+                  </span>
+                </div>
                 {webhookUrl && (
                   <code style={{ flexBasis: "100%", fontSize: "0.8em", color: "var(--text-secondary)", wordBreak: "break-all" }}>{webhookUrl}</code>
                 )}
-                <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    onClick={() => {
-                      setTriggerForm(triggerToForm(t));
-                      setEditingTriggerId(t.id);
-                    }}
-                  >
-                    Edit
-                  </button>
-                  {webhookUrl && (
-                    <button type="button" className={styles.linkButton} onClick={() => void navigator.clipboard?.writeText(webhookUrl)}>
-                      Copy URL
-                    </button>
-                  )}
-                  <button type="button" className={styles.linkButton} onClick={() => void onToggle(t)}>
-                    {t.enabled ? "Disable" : "Enable"}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    style={{ color: "var(--danger)" }}
-                    onClick={() =>
-                      triggerRemoveConfirm === t.id
-                        ? void onDelete(t.id)
-                        : setTriggerRemoveConfirm(t.id)
-                    }
-                  >
-                    {triggerRemoveConfirm === t.id ? "Confirm" : "Remove"}
-                  </button>
-                </span>
+                {t.lastRunDetail && (
+                  <span className={styles.fieldHint} style={{ margin: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.lastRunDetail}>
+                    {t.lastRunDetail}
+                  </span>
+                )}
               </div>
             );
           })}

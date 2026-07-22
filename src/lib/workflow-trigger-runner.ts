@@ -19,6 +19,7 @@ import {
   claimAndAdvanceTrigger,
   touchTriggerChecked,
 } from "@/lib/workflow-triggers";
+import { updateTriggerRunOutcome } from "@/lib/workflow-run-status";
 import { recordWorkflowRun, latestWorkflowRun, runsSinceForWorkflow, latestRunAnyWorkflow, runsSinceAnyWorkflow } from "@/lib/workflow-runs";
 import { runWorkflowUnattended, buildServerStepRunHelpers } from "@/lib/workflows/server-runner";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
@@ -60,11 +61,13 @@ export async function runDueUnattendedTriggers(
       const { data: userRes, error } = await supabase.auth.admin.getUserById(trigger.userId);
       if (error || !userRes?.user || !isOwnerEmail(userRes.user.email)) {
         await touchTriggerChecked(supabase, trigger, now).catch(() => {});
+        await updateTriggerRunOutcome(supabase, trigger.userId, trigger.id, "skipped", "owner is not allowlisted").catch(() => {});
         results.push({ triggerId: trigger.id, workflowId: trigger.workflowId, status: "skipped", detail: "owner is not allowlisted" });
         continue;
       }
       const ownerEmail = userRes.user.email;
       if (!ownerEmail) {
+        await updateTriggerRunOutcome(supabase, trigger.userId, trigger.id, "skipped", "owner has no email on file").catch(() => {});
         results.push({ triggerId: trigger.id, workflowId: trigger.workflowId, status: "skipped", detail: "owner has no email on file" });
         continue;
       }
@@ -76,11 +79,13 @@ export async function runDueUnattendedTriggers(
 
       if (!def) {
         await touchTriggerChecked(supabase, trigger, now).catch(() => {});
+        await updateTriggerRunOutcome(supabase, trigger.userId, trigger.id, "skipped", "workflow not found").catch(() => {});
         results.push({ triggerId: trigger.id, workflowId: trigger.workflowId, status: "skipped", detail: "workflow not found" });
         continue;
       }
       if (!isHeadlessSafeWorkflow(def, lookup)) {
         await touchTriggerChecked(supabase, trigger, now).catch(() => {});
+        await updateTriggerRunOutcome(supabase, trigger.userId, trigger.id, "skipped", "workflow is not headless-safe").catch(() => {});
         results.push({ triggerId: trigger.id, workflowId: trigger.workflowId, status: "skipped", detail: "workflow is not headless-safe" });
         continue;
       }
@@ -106,6 +111,7 @@ export async function runDueUnattendedTriggers(
       // last_fired_at when fired), regardless of what happens next.
       const claimed = await claimAndAdvanceTrigger(supabase, trigger, evalResult, now);
       if (!claimed) {
+        await updateTriggerRunOutcome(supabase, trigger.userId, trigger.id, "skipped", "already claimed").catch(() => {});
         results.push({ triggerId: trigger.id, workflowId: trigger.workflowId, status: "skipped", detail: "already claimed" });
         continue;
       }
@@ -141,6 +147,12 @@ export async function runDueUnattendedTriggers(
         })
       );
 
+      const triggerDetail = outcome.ok ? "" : outcome.steps
+        .filter((s) => s.status === "error" || s.status === "needs-interaction")
+        .map((s) => `step ${s.index + 1} ${s.type}: ${s.error ?? s.status}`)
+        .join("; ");
+      await updateTriggerRunOutcome(supabase, trigger.userId, trigger.id, outcome.ok ? "ok" : "error", triggerDetail).catch(() => {});
+
       // Best-effort run log so the 'workflow-completed' event source can see
       // this run; a logging failure must never fail the trigger itself.
       try {
@@ -159,7 +171,7 @@ export async function runDueUnattendedTriggers(
         triggerId: trigger.id,
         workflowId: trigger.workflowId,
         status: "fired",
-        detail: outcome.ok ? undefined : "run had errors",
+        detail: outcome.ok ? undefined : triggerDetail,
       });
     } catch (err) {
       results.push({

@@ -22,7 +22,7 @@ export async function recordWorkflowRun(
   input: {
     workflowId: string;
     workflowName: string;
-    status: "ok" | "error";
+    status: "ok" | "error" | "skipped";
     triggerSource: TriggerSource;
     id?: string;
   }

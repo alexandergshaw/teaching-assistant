@@ -6,6 +6,13 @@ import { scheduleToForm } from "@/lib/workflow-form-helpers";
 import type { WorkflowDef, RuntimeField } from "@/lib/workflows/types";
 import styles from "../../page.module.css";
 
+function isStaleStarted(runAtIso: string | null): boolean {
+  if (!runAtIso) return false;
+  const runAtMs = new Date(runAtIso).getTime();
+  const tenMinutesAgoMs = Date.now() - 10 * 60 * 1000;
+  return runAtMs < tenMinutesAgoMs;
+}
+
 type ScheduleFormData = {
   runAt: string;
   repeat: ScheduleRepeat;
@@ -279,47 +286,69 @@ export function ScheduleSection({
               ? hubCourses?.find((c) => c.id === s.courseId)?.name ?? "course"
               : null;
             const attachment = [courseName, s.institution].filter(Boolean).join(", ");
+            const lastRunStatusClass = !s.lastRunStatus ? "" :
+              s.lastRunStatus === "ok" ? styles.ghBadgeSuccess :
+              s.lastRunStatus === "error" ? styles.ghBadgeDanger :
+              s.lastRunStatus === "skipped" ? styles.ghBadgeNeutral :
+              s.lastRunStatus === "started" && isStaleStarted(s.lastRunAt) ? styles.ghBadgeDanger :
+              styles.ghBadgeAccent;
+            const lastRunStatusText = !s.lastRunStatus ? "" :
+              s.lastRunStatus === "ok" ? "Last run OK" :
+              s.lastRunStatus === "error" ? "Last run failed" :
+              s.lastRunStatus === "skipped" ? "Last run skipped" :
+              s.lastRunStatus === "started" && isStaleStarted(s.lastRunAt) ? "Did not finish" :
+              "Running";
             return (
-              <div key={s.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--field-border)", fontSize: "0.85em" }}>
-                <span style={{ fontWeight: 600 }}>{s.workflowName}</span>
-                {s.unattended && (
-                  <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>Unattended</span>
-                )}
-                <span style={{ color: "var(--text-secondary)" }}>
-                  {s.enabled
-                    ? `next run ${new Date(s.nextRunAt).toLocaleString()} (${describeScheduleCadence(s)})`
-                    : "disabled"}
-                  {attachment ? ` - ${attachment}` : ""}
-                </span>
-                <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                  {workflows.find((w) => w.id === s.workflowId) ? (
+              <div key={s.id} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 0", borderTop: "1px solid var(--field-border)", fontSize: "0.85em" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 600 }}>{s.workflowName}</span>
+                  {s.unattended && (
+                    <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>Unattended</span>
+                  )}
+                  {s.lastRunStatus && (
+                    <span className={`${styles.ghBadge} ${lastRunStatusClass}`}>{lastRunStatusText}</span>
+                  )}
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    {s.enabled
+                      ? `next run ${new Date(s.nextRunAt).toLocaleString()} (${describeScheduleCadence(s)})`
+                      : "disabled"}
+                    {attachment ? ` - ${attachment}` : ""}
+                  </span>
+                  <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                    {workflows.find((w) => w.id === s.workflowId) ? (
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        onClick={() => {
+                          setScheduleForm(scheduleToForm(s));
+                          setEditingScheduleId(s.id);
+                        }}
+                      >
+                        Edit
+                      </button>
+                    ) : null}
+                    <button type="button" className={styles.linkButton} onClick={() => void onToggle(s)}>
+                      {s.enabled ? "Disable" : "Enable"}
+                    </button>
                     <button
                       type="button"
                       className={styles.linkButton}
-                      onClick={() => {
-                        setScheduleForm(scheduleToForm(s));
-                        setEditingScheduleId(s.id);
-                      }}
+                      style={{ color: "var(--danger)" }}
+                      onClick={() =>
+                        scheduleRemoveConfirm === s.id
+                          ? void onDelete(s.id)
+                          : setScheduleRemoveConfirm(s.id)
+                      }
                     >
-                      Edit
+                      {scheduleRemoveConfirm === s.id ? "Confirm" : "Remove"}
                     </button>
-                  ) : null}
-                  <button type="button" className={styles.linkButton} onClick={() => void onToggle(s)}>
-                    {s.enabled ? "Disable" : "Enable"}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    style={{ color: "var(--danger)" }}
-                    onClick={() =>
-                      scheduleRemoveConfirm === s.id
-                        ? void onDelete(s.id)
-                        : setScheduleRemoveConfirm(s.id)
-                    }
-                  >
-                    {scheduleRemoveConfirm === s.id ? "Confirm" : "Remove"}
-                  </button>
-                </span>
+                  </span>
+                </div>
+                {s.lastRunDetail && (
+                  <span className={styles.fieldHint} style={{ margin: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.lastRunDetail}>
+                    {s.lastRunDetail}
+                  </span>
+                )}
               </div>
             );
           })}

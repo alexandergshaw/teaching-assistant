@@ -17,7 +17,11 @@ name: Run scheduled workflows
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    # Offset minutes (not */15): on-the-interval crons are load-shed by GitHub,
+    # and this file was re-touched on 2026-07-22 to force schedule re-registration
+    # after the original cron never fired once (0 schedule-event runs repo-wide
+    # in 9 days despite state: active - the known silent-registration failure).
+    - cron: "4,19,34,49 * * * *"
   workflow_dispatch: {}
 
 # Never run two overlapping ticks.

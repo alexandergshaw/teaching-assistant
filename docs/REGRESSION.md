@@ -5,11 +5,13 @@ Living regression document for the AC -> code -> verify -> regression delivery l
 - After a feature passes verification, its acceptance criteria are appended here as
   durable behavioral checks (an entry per feature, newest at the bottom).
 - BEFORE a feature is implemented - once its acceptance criteria and reuse survey
-  have fixed which files/subsystem it will change - the orchestrator characterizes
-  that area's existing functionality (running its tests, tracing its live
-  behaviors) and records it here as an "Area baseline" entry, so pre-existing
-  behavior in the touched area is guarded by the very next regression run, not
-  just the new feature's own checks.
+  have fixed which files/subsystem it will change - the orchestrator checks
+  whether this document already covers that code area. Only if it does not, the
+  orchestrator characterizes the area's existing functionality (running its
+  tests, tracing its live behaviors) and records it here as an "Area baseline"
+  entry, so pre-existing behavior in the touched area is guarded by the very next
+  regression run, not just the new feature's own checks. Areas already documented
+  here are not re-baselined or duplicated.
 - After every feature (before push), an Opus regression agent runs this ENTIRE
   document - the standing gates plus every feature entry, not just the newest one -
   and reports a per-check pass/fail verdict.

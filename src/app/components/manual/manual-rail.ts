@@ -75,6 +75,36 @@ export function getDestinationById(id: string): Destination | undefined {
   return undefined;
 }
 
+// Row 1 of the Manual subnav: one chip per top-level subtab, in display order.
+export const MANUAL_VIEW_ORDER: ManualViewType[] = [
+  "course-planning",
+  "content",
+  "version-control",
+  "recording",
+  "ppt-design",
+];
+
+export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
+  "course-planning": "Build Courses",
+  content: "LMS",
+  "version-control": "Version Control",
+  recording: "Recording",
+  "ppt-design": "PowerPoint Design",
+};
+
+// Row 2 of the Manual subnav: the active subtab's inner destinations, or null
+// when that subtab has no inner views (Version Control, Recording, and
+// PowerPoint Design are each a single destination with nothing to switch between).
+export function getInnerDestinations(manualView: ManualViewType): Destination[] | null {
+  if (manualView === "course-planning") {
+    return destinations.find((g) => g.name === "Build")?.destinations ?? null;
+  }
+  if (manualView === "content") {
+    return destinations.find((g) => g.name === "LMS")?.destinations ?? null;
+  }
+  return null;
+}
+
 export function getActiveDestinationId(
   manualView: ManualViewType,
   buildView: BuildViewType,

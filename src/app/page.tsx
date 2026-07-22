@@ -759,6 +759,7 @@ export default function Home() {
               manualView={manualView}
               buildView={buildView}
               contentView={contentView}
+              onManualViewClick={setManualView}
               onDestinationClick={(destId) => {
                 const resolved = resolveStateFromDestinationId(destId, manualView, buildView, contentView);
                 if (resolved.manualView !== manualView) setManualView(resolved.manualView);

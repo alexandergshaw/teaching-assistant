@@ -6,6 +6,9 @@ import {
   validateLmsViewsCompleteness,
   destinations,
   LMS_VIEWS,
+  MANUAL_VIEW_ORDER,
+  MANUAL_VIEW_LABELS,
+  getInnerDestinations,
 } from "./manual-rail";
 
 describe("manual-rail", () => {
@@ -160,6 +163,54 @@ describe("manual-rail", () => {
           expect(dest.label).toBeTruthy();
         }
       }
+    });
+  });
+
+  describe("MANUAL_VIEW_ORDER / MANUAL_VIEW_LABELS (row 1)", () => {
+    it("should list the five subtabs in display order", () => {
+      expect(MANUAL_VIEW_ORDER).toEqual([
+        "course-planning",
+        "content",
+        "version-control",
+        "recording",
+        "ppt-design",
+      ]);
+    });
+
+    it("should have a label for every entry in the order", () => {
+      for (const view of MANUAL_VIEW_ORDER) {
+        expect(MANUAL_VIEW_LABELS[view]).toBeTruthy();
+      }
+    });
+
+    it("should label course-planning as Build Courses and content as LMS", () => {
+      expect(MANUAL_VIEW_LABELS["course-planning"]).toBe("Build Courses");
+      expect(MANUAL_VIEW_LABELS["content"]).toBe("LMS");
+    });
+  });
+
+  describe("getInnerDestinations (row 2)", () => {
+    it("should return the Build destinations for course-planning", () => {
+      const inner = getInnerDestinations("course-planning");
+      expect(inner?.map((d) => d.id)).toEqual(["build-new", "build-prebuilt"]);
+    });
+
+    it("should return the LMS destinations for content", () => {
+      const inner = getInnerDestinations("content");
+      expect(inner?.map((d) => d.id)).toEqual([
+        "lms-modules",
+        "lms-pages",
+        "lms-files",
+        "lms-grading",
+        "lms-announcements",
+        "lms-inbox",
+      ]);
+    });
+
+    it("should return null for single-view subtabs", () => {
+      expect(getInnerDestinations("version-control")).toBeNull();
+      expect(getInnerDestinations("recording")).toBeNull();
+      expect(getInnerDestinations("ppt-design")).toBeNull();
     });
   });
 });

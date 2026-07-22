@@ -570,12 +570,18 @@ most likely to break again when these files are edited.
 
 ### 2026-07-22 - Manual tab flattened rail
 
-1. One grouped, sticky, single-row (nowrap + horizontal scroll) rail owns ALL
-   Manual destinations - Build [New build, Pre built], LMS [modules, pages,
-   files, grading, announcements, inbox], Version Control, Recording,
-   PowerPoint Design - any destination is one click from anywhere in Manual;
-   exactly one active chip; single-destination groups render without label
-   clutter; a destination header (name + description) renders above content.
+1. Two quiet subnav rows use the pre-existing chip idiom EXACTLY (styles.
+   manualSubnav wrapping styles.lessonInnerTabs/lessonInnerTab/
+   lessonInnerTabActive - the same markup as the Workflows subtab bar): no
+   group labels, no separators, not sticky. Row 1 is the five Manual subtabs -
+   Build Courses, LMS, Version Control, Recording, PowerPoint Design - always
+   visible, one click from anywhere in Manual. Row 2 renders ONLY when the
+   active subtab has inner views - Build's [New Build, Pre Built], LMS's
+   [Modules, Pages, Files, Grading, Announcements, Inbox] - so within the
+   active subtab, any of its destinations is one click away; Version Control,
+   Recording, and PowerPoint Design (single-view subtabs) render no row 2.
+   Exactly one active chip per row. No destination header (name + description)
+   renders above content - content areas own their own headings.
 2. All persistence and migrations hold (ta-manual-view, ta-build-view,
    VIEW_KEY + legacy mappings per the Manual-shell baseline); page.tsx owns
    contentView as ContentTab's REQUIRED controlled prop (no uncontrolled

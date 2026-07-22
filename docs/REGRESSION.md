@@ -221,6 +221,74 @@ nav-restructure entry's subtab/migration checks, these must keep working:
 4. The version-control VIEW_KEY migration (old Integrations VC view lands on
    the standalone subtab and resets the LMS view to modules) keeps working.
 
+### 2026-07-22 - Recording surface (record / caption / narrate)
+
+Baseline taken before the RecordingTab under-1000 split + TabShell convergence
+(code-traced from RecordingTab.tsx at commit 9455385; the lib layer under it is
+covered by backup-dir.test.ts, caption-burn.test.ts, recording-files.test.ts -
+36 tests, all passing at baseline time). These behaviors must keep working:
+
+1. Keep-mounted contract: page.tsx renders RecordingTab inside an always-mounted
+   display:none wrapper (visible only on Manual > Recording), and inside the tab
+   the three inner views (Record, Caption a video, Narrate a deck) persist the
+   selection under ta-rec-view and ALL stay mounted behind display:none wrappers
+   - a live preview, the takes list, and an in-progress caption burn survive any
+   navigation. The `active` prop gates only the R/P/M keyboard shortcuts (which
+   also ignore keys typed into inputs/textareas/contenteditables).
+2. Preview gating: persisted device choices never auto-start a stream on mount;
+   a preview starts only after an explicit user pick or the Start preview button
+   (userPickedRef), and while idle a change to source/camera/mic/resolution/
+   noise/echo/gain restarts the preview via the appliedCfgRef config-signature
+   comparison - never during a recording. Device lists filter out the empty
+   deviceIds browsers return pre-permission, re-enumerate on devicechange, and
+   the Grant access button runs a throwaway getUserMedia probe (video+audio,
+   falling back to audio-only) purely to unlock device labels.
+3. Recording pipeline: video sources record through the hidden canvas pipeline
+   (canvas.captureStream(30) plus the stream's audio tracks) so mirror (camera
+   only), background blur/image (MediaPipe ImageSegmenter, lazily dynamic-
+   imported, disabled gracefully with a note when the model fails), the webcam
+   PiP bubble (screen source only, 4 corner presets), annotation strokes
+   (pen/highlighter/eraser, undo/clear), and title/closing cards are burned into
+   the take. Audio-only records the raw stream with the audio mime fallback
+   chain; video uses the mp4-then-webm fallback chain.
+4. Record lifecycle: optional 3-2-1 countdown before start; pause/resume;
+   auto-stop timer (5/10/15/30 min) enforced from the elapsed-seconds interval;
+   REC/PAUSED badge with elapsed time and MB counter; mic mute toggles
+   track.enabled without stopping the stream; title card records first with mic
+   muted and an on-preview countdown notice, and the closing card is appended
+   after Stop while the transport shows a disabled "Finishing..." state.
+5. Takes: finished takes are in-memory object URLs named `Take N` where N is
+   the takes count captured when recording STARTED (stale-closure semantics -
+   deliberate); rows support rename drafts (renaming does not rename the copy
+   already saved to the library), Download (extension derived from mime),
+   Delete (revokes the URL), inline playback, and "Audio only" extraction via
+   extractAudioOnly that appends a derived take. Every finished take is saved
+   automatically to the chosen backup folder (File System Access handle
+   persisted in IndexedDB via backup-dir) and to the Supabase library via
+   saveRecordingFile, each with independent pending/done/failed badges.
+6. Script and teleprompter: topic/objectives/length draft a script through
+   generateLectureScriptAction with the stored LLM provider; the script is
+   editable, shows a word count and pace estimate, copies to clipboard, and
+   renders as a teleprompter overlay (sm/md/lg) above the stage while recording.
+7. localStorage contract: every Recording control persists under its exact
+   ta-rec-* key. These names are a cross-component API: CaptionStudio's
+   gatherRecordingContext() reads ta-rec-script-topic, ta-rec-script-objectives,
+   ta-rec-script, ta-rec-card-title, ta-rec-card-subtitle, ta-rec-card-closing,
+   ta-rec-cards, and ta-rec-card-secs directly to give the caption LLM context.
+8. Caption flow (CaptionStudio, props takes + backupDir, `Take` type imported
+   from ./RecordingTab): pick a session take, backup-folder video, or library
+   file; keyframes are sampled client-side and a vision LLM writes timed
+   captions; captions are editable, preview as native subtitles, export as
+   .vtt, and can be burned into the video (caption-burn lib) with optional
+   narration.
+9. Narrate flow (SlideStudio, no props): extract pptx slides, generate
+   per-slide narration, ElevenLabs voice clone/synthesis and HeyGen avatar via
+   server actions only (in-house constraint), render the narrated video, save
+   through saveRecordingFile.
+10. Cleanup: unmounting stops the recorder/streams/meter/pipeline, revokes all
+    take object URLs, and closes the MediaPipe segmenter (unmount-only effect
+    reading latest values through refs).
+
 ## Feature entries
 
 ### 2026-07-22 - Workflow components split under 1000 lines
@@ -640,3 +708,53 @@ most likely to break again when these files are edited.
    casts or new eslint-disable comments were introduced by this feature (the
    props RunPanel forwards to RunStepCard/RunInputPrompt/SummaryView/GradeBadge
    use those components' real exported signatures).
+
+### 2026-07-22 - Recording tab split under 1000 lines + TabShell
+
+Context: RecordingTab.tsx (2313) was split pure-move into hooks/components
+under src/app/components/recording/ plus a new shared TabShell.tsx root
+container, per the WorkflowsTab/CoursesTab split precedents. The Recording
+surface area baseline above guards the behavior; these checks guard the seams
+this split created.
+
+1. Size limit holds: src/app/components/RecordingTab.tsx,
+   src/app/components/TabShell.tsx, and every .ts/.tsx under
+   src/app/components/recording/ are each at or under 1000 lines (wc -l; also
+   enforced at test time by recording-split.structure.test.ts).
+2. Export surface: RecordingTab remains the default export of
+   src/app/components/RecordingTab.tsx with the { active?: boolean } prop;
+   `Take` remains importable via `import type { Take } from "./RecordingTab"`
+   (re-exported from recording/types.ts). CaptionStudio.tsx and page.tsx
+   needed no changes for the split and must keep compiling against these
+   exact surfaces.
+3. TabShell parity: TabShell.tsx renders exactly section.card + TabHeader
+   (eyebrow/title/subtitle) so a converged tab's root DOM is identical to the
+   hand-rolled idiom. RecordingTab uses it with eyebrow "Recording", title
+   "Record from a camera", and the pre-split subtitle. Other tab surfaces may
+   converge later; they are not required to by this entry.
+4. Keep-mounted seams: the three inner views (record / captions / slides) stay
+   mounted behind display:none wrappers keyed on recView (persisted under
+   ta-rec-view); the record view is hidden, never unmounted, and CaptionStudio
+   receives takes + backupDir from useTakes.
+5. Immutability seam: every `.current =` assignment in RecordingTab.tsx and
+   src/app/components/recording/ targets a directly-bound ref (local ref,
+   direct hook arg, or destructured prop) - never through an object member
+   (settings.*, bg.*, pip.*, cards.*, pipeline.*). That discipline is what
+   keeps react-hooks/immutability at 0 errors; new mutation sites must get
+   the ref as a direct arg/prop.
+6. Deps seam: no whole hook-return object (settings/cards/pip/pipeline/bg)
+   appears in any dependency array in these files - member expressions only.
+   loadDevices in useDevices.ts stays a useCallback (its stability keeps
+   startPreview and the restart-preview effect from re-firing every render).
+7. Quirk guards: the keyboard-shortcuts effect in useRecorder.ts keeps NO
+   dependency array (re-subscribes every render by design, gated on `active`);
+   take numbering stays `Take ${takesLength + 1}` from the render-captured arg
+   (stale-closure semantics, deliberate); the appliedCfgRef signature string
+   and restart-effect condition are byte-identical between startPreview and
+   the restart effect.
+8. localStorage canary: the full ta-rec-* key set is pinned by
+   recording-split.structure.test.ts (scan of recording/ + RecordingTab.tsx,
+   *.test.ts excluded); adding or removing a key must bump that test in the
+   same commit. CaptionStudio reads several of these keys directly.
+9. Hygiene: no eslint-disable comments and no emojis anywhere in
+   RecordingTab.tsx, TabShell.tsx, or src/app/components/recording/.

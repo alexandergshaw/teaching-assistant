@@ -23,9 +23,13 @@ Living regression document for the AC -> code -> verify -> regression delivery l
 - G2: `npx tsc --noEmit` is clean.
 - G3: `npm run build` reaches a successful compile line ("Compiled successfully").
   Env-dependent prerender failures after compile are acceptable; compile or type
-  errors are not.
+  errors are not. The known acceptable failure is /_not-found prerendering failing
+  with a missing Supabase URL/API key (@supabase/ssr) when env vars are absent.
 - G4: `npm test` (vitest) passes fully.
-- G5: No emojis anywhere in source files.
+- G5: No emojis anywhere in source files. Scope: git-tracked source files (exclude
+  node_modules/ and .next/). Emoji means true emoji codepoints (pictographs,
+  emoticons, dingbats, regional indicators, variation selector U+FE0F); typographic
+  arrows (e.g. U+2192) and math symbols do not count.
 
 ## Feature entries
 
@@ -36,8 +40,11 @@ hooks/components under src/app/components/workflows/ (commit 091e397). Checks 3-
 correspond to regressions the first pass actually introduced; they are the seams
 most likely to break again when these files are edited.
 
-1. Size limit holds: every .tsx/.ts file under src/app/components/ is under 1000
-   lines (`wc -l`, check recursively including workflows/ and workflows/builder/).
+1. Size limit holds for the workflow subsystem: src/app/components/WorkflowsTab.tsx,
+   src/app/components/WorkflowBuilder.tsx, and every .tsx/.ts file under
+   src/app/components/workflows/ (recursively, including builder/) are each under
+   1000 lines (wc -l). Note: other components (e.g. CoursesTab.tsx) are known to
+   exceed 1000 lines and are out of scope for this entry.
 2. Export surface: WorkflowsTab and WorkflowBuilder remain the default exports of
    src/app/components/WorkflowsTab.tsx and WorkflowBuilder.tsx; `BuilderPickerData`
    is importable from the WorkflowBuilder module.

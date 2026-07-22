@@ -73,6 +73,7 @@ export function useWorkflowRun(
   onSetPanel: (panel: "build" | "run" | "automate") => void,
   onSetPendingHandoff: (handoff: { workflowId: string; prefill: Record<string, string> } | null) => void,
   onSetHubCourses: (courses: Array<{ id: string; name: string; canvasUrl: string | null; repos: string[] }> | null) => void,
+  onRunStart: (workflowId: string) => void,
   pendingHandoff: { workflowId: string; prefill: Record<string, string>; scheduleId?: string | null; triggerId?: string | null } | null = null
 ): UseWorkflowRunReturn {
   const [runState, setRunState] = useState<
@@ -215,7 +216,7 @@ export function useWorkflowRun(
     for (const field of runtimeFields) {
       if (!field.required) continue;
 
-      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "lmsCourseList", "hubCourse", "org", "orgList", "institution", "hubCourseList", "uploads", "deckTemplate"];
+      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "lmsCourseList", "hubCourse", "org", "orgList", "institution", "hubCourseList", "uploads", "deckTemplate", "concepts"];
       if (!fieldTypes.includes(field.type)) continue;
 
       if (field.type === "uploads") {
@@ -261,6 +262,7 @@ export function useWorkflowRun(
     if (allStepsDisabled) return;
     if (!validateForm()) return;
 
+    onRunStart(selectedWorkflowId);
     setRunning(true);
     setValidationError(null);
     setRunInput(null);

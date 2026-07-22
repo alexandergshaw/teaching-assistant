@@ -74,6 +74,55 @@ These behaviors must keep working:
    unattended scheduling is gated on workflow headless-safety; cadence and
    next-run render per schedule (ScheduleSection/TriggerSection).
 
+### 2026-07-22 - Workflow scope subsystem
+
+Baseline taken before the concepts-scope feature. Evidence: 129 tests across
+types.scope.test.ts, scope.test.ts, scope.classrepo.test.ts, types.expand.test.ts,
+presets.test.ts, all passing. These behaviors must keep working:
+
+1. Families: scopeFamilyForType maps institution, hubCourse(+List),
+   lmsCourse(+List), org(+List) to their WorkflowScope families and the scalar
+   families lookahead / moduleOffset to theirs; unknown types map to null.
+2. Coverage semantics (applyWorkflowScope): a non-empty run-form value always
+   wins; a list input takes the scope value as-is ("*" expanded later by the
+   engine); a single-entity input takes the first concrete item and never "*";
+   scalar families return the scope value with "*" rejected. scopeCoversType is
+   true for institution when scope.institution is "*" (fan-out fills it).
+3. Run form: collectRuntimeFields drops inputs whose type the workflow scope
+   covers (types.ts ~:367-375), and the builder shows "From workflow scope"
+   instead of asking per step (InputBindingRow scopeFamily logic).
+4. Scope expansion: expandScopedValue turns "*" into concrete newline lists per
+   type (hubCourseList filtered by active institution, lmsCourseList requires an
+   institution, orgList enumerates orgs); non-"*" values pass through untouched.
+5. Tile references: "@class-repo[:id]" resolves to a tile's first linked repo and
+   "@class-tile[:id]" to the tile's canvasUrl/startDate/institution by consuming
+   input type, defaulting to the workflow-scoped hub-course tile when no id.
+6. The WorkflowScopeControl UI exposes Institution (with All), Course tiles,
+   Canvas courses, and Organizations pickers and writes the scope object on the
+   workflow def (persisted for custom workflows).
+
+### 2026-07-22 - Workflows tab interaction layer
+
+Baseline taken before the UX overhaul (code-traced; no component test suite
+exists for this surface). These behaviors must survive any restructuring:
+
+1. Search: the sidebar filter (persisted under ta-workflows-search) narrows the
+   workflow list by name match; an empty result shows a hint, never an empty
+   crash.
+2. Selection: the selected workflow persists (ta-workflows-selected) and
+   restores on reload; a missing/deleted id falls back to the first workflow.
+3. Per-workflow run values persist under ta-workflow-values-<workflowId> and
+   rehydrate when switching workflows (handleWorkflowChange).
+4. Automation at a glance: rows show the scheduled (accent) and has-triggers
+   (success) dots derived from automationByWorkflow.
+5. The Build / Run / Automate panel switcher works for every workflow; Build
+   renders WorkflowBuilder for custom workflows and the read-only overview for
+   presets; a scheduled/triggered handoff auto-selects the workflow and lands on
+   the Run panel with the run visible.
+6. Run flow: validation errors render in the Run panel; disabled-step toggles
+   persist; the Run button starts the run and mid-run pause/input prompts
+   render inline at the paused step.
+
 ## Feature entries
 
 ### 2026-07-22 - Workflow components split under 1000 lines
@@ -119,11 +168,12 @@ most likely to break again when these files are edited.
    `automation.setTriggers` updates marking it enabled:false locally; that effect has
    NO dependency array (runs every render, matching pre-split behavior).
 9. Pure-move seams stay quiet: no new eslint-disable comments in WorkflowsTab.tsx,
-   WorkflowBuilder.tsx, or src/app/components/workflows/ beyond the 9 inventoried
-   ones (6x no-explicit-any on Supabase generics/run-result typing, 1x
-   exhaustive-deps on the handoff effect that predates the split, plus the 2 in
-   useWorkflowRun's runInputDetails typing). A new disable in these files is a smell
-   that plumbing broke.
+   WorkflowBuilder.tsx, or src/app/components/workflows/ beyond the 8 inventoried
+   ones (6x no-explicit-any in useWorkflowRun's typing plus 1 each in BuildPanel.tsx and useAutomation.ts). A new disable in these files is a smell
+   that plumbing broke. (The handoff effect's exhaustive-deps disable, present
+   through the 2026-07-22 split, was removed by the UX-overhaul feature below: its
+   deps array now depends on the whole workflowRun object, which makes the rule's
+   dependency list genuinely exhaustive without suppression.)
 
 ### 2026-07-22 - PPT deck outputs feed later steps
 
@@ -273,3 +323,68 @@ most likely to break again when these files are edited.
    (ok/error/skipped/started via the ghBadge classes); a "started" older than 10
    minutes (schedules anchored on lastRunAt, triggers on lastFiredAt) renders as
    "Did not finish" with a timeout hint.
+
+### 2026-07-22 - Concepts + course-tile workflow scoping
+
+1. "concepts" is a first-class input value type: in the WorkflowValueType union,
+   LITERAL_CAPABLE_TYPES, scopeFamilyForType (family "concepts"), and
+   WorkflowScope.concepts (src/lib/workflows/types.ts). applyWorkflowScope
+   treats it as a scalar family: fills an empty run value from scope, never
+   overrides a non-empty one, rejects "*". describeWorkflowScope and the
+   per-input fill description include a concepts part.
+2. generate-presentation-from-template's concepts input has type "concepts"
+   (steps.media.ts:51); its run logic still splits the value on newlines.
+3. Every longtext special case treats "concepts" identically:
+   RuntimeFieldInput's multiline textarea branch, builder LiteralEditor
+   multiline, the "Fixed value" label lists in InputBindingRow and
+   DanglingOutputs, and useWorkflowRun's fieldTypes array.
+4. outputFeedsInput allows longtext OUTPUTS to feed concepts INPUTS (types.ts
+   ~:90); the reverse direction is not added.
+5. WorkflowScopeControl has a Concepts multiline textarea (one per line, no
+   "All" option) writing scope.concepts; typing Enter at the end of a line
+   WORKS - the onChange stores the raw value and clears only when
+   whitespace-only (never trims per keystroke; WorkflowScopeControl.tsx ~:258).
+6. End-to-end: with scope { hubCourse, concepts } on a deck-workflow copy,
+   collectRuntimeFields drops both fields from the run form and the step
+   receives the scope values at run time (covered by the concepts suite in
+   types.scope.test.ts).
+
+### 2026-07-22 - Workflows tab UX overhaul (grouped sidebar, fewer-click run)
+
+1. src/app/components/workflows/WorkflowListSidebar.tsx owns the sidebar list;
+   src/app/components/workflows/workflow-grouping.ts exports groupWorkflows(),
+   covered by workflow-grouping.test.ts (14 tests: category grouping, custom
+   grouping, recent ordering/dedup/cap-at-5, unresolvable recent ids skipped,
+   flat search results, case-insensitive name/description match).
+2. WorkflowDef.category (src/lib/workflows/types.ts) is
+   "grading" | "course-setup" | "content" | "communication", set on every
+   preset in src/lib/workflows/presets/{grading,course-setup,content,
+   communication}.ts (46 defs total); custom workflows never set it.
+3. Sidebar group order: Recent (only when non-empty) -> Custom (only when
+   custom workflows exist) -> Grading -> Course setup -> Content & lectures ->
+   Communication & briefings. A non-empty search collapses to the flat
+   filtered list (name-or-description match, case-insensitive) with no group
+   headers - same predicate as the pre-overhaul filteredWorkflows.
+4. Persistence: collapsed group ids under "ta-workflows-groups-collapsed"
+   (JSON array, default all-expanded, WorkflowListSidebar.tsx); the last 5
+   distinct workflow ids whose run actually STARTED (validateForm passed)
+   under "ta-workflows-recent" - recorded via the onRunStart callback
+   useWorkflowRun's handleRun invokes right after validateForm succeeds
+   (useWorkflowRun.ts), never on a blocked/invalid Run click; the Build/Run/
+   Automate panel choice under "ta-workflows-panel" (default "run"); the
+   optional-fields disclosure open state under "ta-workflows-optional-open"
+   (default closed, RunPanel.tsx).
+5. Each sidebar row shows a "Run <name>" button (real <button>, aria-label)
+   when the row is selected OR hovered (WorkflowListSidebar hoveredWorkflowId
+   state); clicking it selects the workflow and switches to the Run panel in
+   one call (WorkflowsTab's onRunClick handler).
+6. RunPanel.tsx header shows the workflow name, description, and - only when
+   describeWorkflowScope(selectedDef.scope) is non-empty - a "Scoped: ..."
+   line. Required runtime fields render before optional ones; optional fields
+   collapse under an "Optional inputs (N)" disclosure only when there are 3 or
+   more of them (fewer than 3: all fields render directly, no disclosure).
+7. Size/typing: WorkflowsTab.tsx, WorkflowListSidebar.tsx, RunPanel.tsx, and
+   workflow-grouping.ts are all under 1000 lines; no `as any` / `as unknown`
+   casts or new eslint-disable comments were introduced by this feature (the
+   props RunPanel forwards to RunStepCard/RunInputPrompt/SummaryView/GradeBadge
+   use those components' real exported signatures).

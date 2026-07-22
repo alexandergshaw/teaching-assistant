@@ -138,7 +138,7 @@ export function RuntimeFieldInput({
         {orgsError && <p className={styles.error}>{orgsError}</p>}
       </div>
     );
-  } else if (field.type === "longtext") {
+  } else if (field.type === "longtext" || field.type === "concepts") {
     return (
       <div key={field.fieldKey} className={styles.field}>
         <label>{field.label}</label>

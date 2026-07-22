@@ -3,6 +3,7 @@ import type { WorkflowDef } from "@/lib/workflows/types";
 export const COURSE_KICKOFF: WorkflowDef = {
   id: "course-kickoff",
   preset: true,
+  category: "course-setup",
   name: "Course Kickoff",
   description:
     "Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile, the template repository, and the new repository's name. Generates the schedule, creates the class repo from the template, writes assignment READMEs - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically).",
@@ -60,6 +61,7 @@ export const COURSE_KICKOFF: WorkflowDef = {
 export const NO_CODE_KICKOFF: WorkflowDef = {
   id: "course-kickoff-no-code",
   preset: true,
+  category: "course-setup",
   name: "Course Kickoff (no codebase)",
   description:
     "For courses without a code base (ethical hacking, project management, business, etc.). Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile and the deck template. Generates the schedule and lecture materials from the schedule topics - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps.",
@@ -114,6 +116,7 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
 export const COURSE_REFRESH: WorkflowDef = {
   id: "course-refresh",
   preset: true,
+  category: "course-setup",
   name: "Course Refresh",
   description:
     "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. A tile without a linked repository pauses with an alert and, on continue, the schedule falls back to the tile's saved Schedule of Topics (CSV) or its topics; repo-driven materials steps are skipped in that case. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved to the LMS course, onto the course tile, and as a document in the LMS export's Start Here module. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines; each module's assignment carries its generated instructions. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set. Finally the Starter Materials workflow runs against the tile's LMS course (dynamic - edits to it apply here).",
@@ -245,6 +248,7 @@ export const COURSE_REFRESH: WorkflowDef = {
 export const REPO_AGENT_UPDATE: WorkflowDef = {
   id: "repo-agent-update",
   preset: true,
+  category: "course-setup",
   name: "Repo Agent Update",
   description:
     "Send a GitHub Copilot agent task to update a course repository. Review and merge its pull request, then run Course Refresh.",
@@ -263,6 +267,7 @@ export const REPO_AGENT_UPDATE: WorkflowDef = {
 export const STARTER_MATERIALS: WorkflowDef = {
   id: "starter-materials",
   preset: true,
+  category: "course-setup",
   name: "Starter Materials",
   description:
     "Seed each selected LMS course with a Start Here module: the course tile's syllabus (generated from the institution's syllabus template when the tile has none), a syllabus-acknowledgement quiz due three days after the tile's start date, and optionally a GitHub sign-up assignment.",
@@ -280,6 +285,7 @@ export const STARTER_MATERIALS: WorkflowDef = {
 export const IMPORT_COURSES: WorkflowDef = {
   id: "import-courses",
   preset: true,
+  category: "course-setup",
   name: "Import Courses",
   description:
     "Fetch all of a term's courses from the institution's LMS (optionally enriched by uploaded exports), preview them, then create a course card for each - existing cards are skipped.",
@@ -305,6 +311,7 @@ export const IMPORT_COURSES: WorkflowDef = {
 export const ASSIGN_DUE_DATES: WorkflowDef = {
   id: "assign-due-dates",
   preset: true,
+  category: "course-setup",
   name: "Assign Due Dates",
   description:
     "Set the start date on the selected course tiles, then give every module's assignments, quizzes, and discussions a deadline at the Sunday ending its week (Start Here and Module 1 end week one).",
@@ -329,6 +336,7 @@ export const ASSIGN_DUE_DATES: WorkflowDef = {
 export const UPDATE_COURSE_TECH: WorkflowDef = {
   id: "update-course-tech",
   preset: true,
+  category: "course-setup",
   name: "Update Course with New Tech",
   description:
     "Scan the selected courses' topics, syllabus, textbook, repos, modules, and assignments, and produce a report of emerging-technology opportunities with concrete integration recommendations; after the report, the user lists improvements and a Copilot agent is fired on each course repository; courses without a repository offer a workflow handoff.",
@@ -354,6 +362,7 @@ export const UPDATE_COURSE_TECH: WorkflowDef = {
 export const STUDENT_REPOS: WorkflowDef = {
   id: "student-repo-assignment",
   preset: true,
+  category: "course-setup",
   name: "Student Repo Assignment",
   description:
     "Create one repository per student from a template and invite each student to theirs. Fill the roster by hand or from a course tile.",
@@ -376,6 +385,7 @@ export const STUDENT_REPOS: WorkflowDef = {
 export const CLASS_ROSTER_AND_REPOS: WorkflowDef = {
   id: "class-roster-and-repos",
   preset: true,
+  category: "course-setup",
   name: "Roster and student repos from GitHub usernames",
   description:
     "Read a Canvas assignment where students submitted their GitHub username, write the class roster and link each username to a student on the course tile, then create one template repo per student in a GitHub org and add each student as an outside collaborator.",
@@ -406,6 +416,7 @@ export const CLASS_ROSTER_AND_REPOS: WorkflowDef = {
 export const TERM_KICKOFF_IMPORT: WorkflowDef = {
   id: "term-kickoff-import",
   preset: true,
+  category: "course-setup",
   name: "Term Kickoff Import",
   description:
     "Run once at the start of each term: scans every configured institution's LMS for the term's courses, shows which are already on the hub and which are new, pauses for your approval, creates a card for each new course, then fills every tile with what the LMS knows - Canvas link, course code, term, start date, and student roster. Already-imported courses are never duplicated and existing tile values are never overwritten.",
@@ -441,6 +452,7 @@ export const TERM_KICKOFF_IMPORT: WorkflowDef = {
 export const CLOSED_INSTITUTION_ONBOARDING: WorkflowDef = {
   id: "closed-institution-onboarding",
   preset: true,
+  category: "course-setup",
   name: "Closed Institution Onboarding",
   description:
     "One guided run to wire up an institution whose LMS has no API access: save its calendar feed and verify upcoming deadlines, create the course tile, import the roster (with emails) from a gradebook CSV, and check the Outlook connection for notification triggers and email sending - ending with a report that includes the remaining manual checklist (set LMS notifications to right away, weekly gradebook download, term cartridge import).",
@@ -502,6 +514,7 @@ export const CLOSED_INSTITUTION_ONBOARDING: WorkflowDef = {
 export const COURSE_HEALTH_CHECK: WorkflowDef = {
   id: "course-health-check",
   preset: true,
+  category: "course-setup",
   name: "Course Health Check",
   description:
     "One report card per course: broken links in the LMS, gradebook averages with at-risk students, and stale student repos - composed into a single briefing (saved to Files on unattended runs).",

@@ -199,7 +199,7 @@ function LiteralEditor({
       />
     );
   }
-  // lmsCourse / lmsCourseList / text / longtext / number: the builder has no
+  // lmsCourse / lmsCourseList / text / longtext / number / concepts: the builder has no
   // live-course list (that needs an institution + fetch), so a field is used.
   // Only the SCOPEABLE list type accepts "*" (all); a singular lmsCourse does
   // NOT expand "*" at run time, so its hint must not offer it.
@@ -217,8 +217,8 @@ function LiteralEditor({
       onChange={(e) => onChange(e.target.value)}
       placeholder={type === "lmsCourseList" ? "Canvas course URL(s); * = all" : type === "lmsCourse" ? "Canvas course URL" : undefined}
       helperText={lmsHint}
-      multiline={type === "longtext"}
-      minRows={type === "longtext" ? 3 : undefined}
+      multiline={type === "longtext" || type === "concepts"}
+      minRows={type === "longtext" || type === "concepts" ? 3 : undefined}
       sx={sx}
     />
   );

@@ -133,4 +133,12 @@ describe("outputFeedsInput", () => {
   it("does NOT let number feed lookahead (exact-match only)", () => {
     expect(outputFeedsInput("number", "lookahead")).toBe(false);
   });
+
+  it("allows longtext output to feed a concepts input", () => {
+    expect(outputFeedsInput("longtext", "concepts")).toBe(true);
+  });
+
+  it("does not allow the reverse (concepts output to longtext input)", () => {
+    expect(outputFeedsInput("concepts", "longtext")).toBe(false);
+  });
 });

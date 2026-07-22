@@ -133,7 +133,7 @@ function InputBindingRow({
   if (LITERAL_CAPABLE_TYPES.has(input.type)) {
     options.push({
       value: "literal",
-      label: ["text", "longtext", "number"].includes(input.type) ? "Fixed value" : "Preset value",
+      label: ["text", "longtext", "number", "concepts"].includes(input.type) ? "Fixed value" : "Preset value",
     });
   }
 

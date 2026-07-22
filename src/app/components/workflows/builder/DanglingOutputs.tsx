@@ -120,7 +120,7 @@ function DanglingOutputRow({
   if (LITERAL_CAPABLE_TYPES.has(danglingOutput.outputType)) {
     options.push({
       value: "literal",
-      label: ["text", "longtext", "number"].includes(danglingOutput.outputType) ? "Fixed value" : "Preset value",
+      label: ["text", "longtext", "number", "concepts"].includes(danglingOutput.outputType) ? "Fixed value" : "Preset value",
     });
   } else if (danglingOutput.outputType === "files") {
     options.push({

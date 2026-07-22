@@ -48,7 +48,7 @@ export const mediaSteps: StepDefinition[] = [
       { key: "hubCourse", label: "Course", type: "hubCourse", required: false, help: "Pick the course whose module to build from (optional)." },
       { key: "moduleId", label: "Module", type: "lmsModule", required: false, help: "Pick a module from the course's LMS connection or export; its materials ground the deck." },
       { key: "subject", label: "Subject / topic", type: "text", required: false, help: "Defaults to the picked module or the template name." },
-      { key: "concepts", label: "Concepts (one per line)", type: "longtext", required: false, help: "Loop items; defaults to the module's topics when a module is picked." },
+      { key: "concepts", label: "Concepts (one per line)", type: "concepts", required: false, help: "Loop items; defaults to the module's topics when a module is picked." },
       { key: "audience", label: "Audience", type: "text", required: false },
       {
         key: "modulesAhead",

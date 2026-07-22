@@ -41,7 +41,7 @@ describe("generate-presentation-from-template step", () => {
 
     const conceptsInput = def!.inputs.find((i) => i.key === "concepts");
     expect(conceptsInput, "concepts input exists").toBeTruthy();
-    expect(conceptsInput!.type).toBe("longtext");
+    expect(conceptsInput!.type).toBe("concepts");
     expect(conceptsInput!.required).toBe(false);
 
     const audienceInput = def!.inputs.find((i) => i.key === "audience");

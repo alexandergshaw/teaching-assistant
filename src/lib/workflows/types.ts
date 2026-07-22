@@ -16,6 +16,7 @@ import { parseCsvRows } from "@/lib/csv";
  * - courseList: an opaque JSON payload passed between workflow steps
  * - lookahead: a days-ahead scope value (string representation of number)
  * - moduleOffset: a modules-ahead scope value (string representation of number)
+ * - concepts: newline-joined concept list for loop items; a scopeable scalar family
  */
 export type WorkflowValueType =
   | "text"
@@ -39,7 +40,8 @@ export type WorkflowValueType =
   | "orgList"
   | "deckTemplate"
   | "lookahead"
-  | "moduleOffset";
+  | "moduleOffset"
+  | "concepts";
 
 // Value types that can carry a fixed ("preset") value in the builder, so a
 // workflow can hard-set the input and run unmonitored without prompting. Beyond
@@ -63,6 +65,7 @@ export const LITERAL_CAPABLE_TYPES: ReadonlySet<string> = new Set([
   "deckTemplate",
   "lookahead",
   "moduleOffset",
+  "concepts",
 ]);
 
 // A single-item value type -> its scopeable list type. Lets a single-item
@@ -79,10 +82,12 @@ export const SINGLE_TO_LIST_TYPE: Record<string, string> = {
  * type match, or a single-item output feeding its scopeable list input (e.g. a
  * `hubCourse` output into a `hubCourseList` "all/several" input). The reverse
  * (a list output into a single input) is NOT allowed - a single input cannot
- * hold many values.
+ * hold many values. Longtext outputs may also feed concepts inputs (both carry
+ * newline-joined text).
  */
 export function outputFeedsInput(outputType: string, inputType: string): boolean {
   if (outputType === inputType) return true;
+  if (outputType === "longtext" && inputType === "concepts") return true;
   return SINGLE_TO_LIST_TYPE[outputType] === inputType;
 }
 
@@ -176,6 +181,7 @@ export interface WorkflowStepConfig {
  * id/url/acronym, a newline-joined list, or "*" for all (list-capable families
  * only). The lookahead value is a scalar days count (never "*" or a list).
  * The moduleOffset value is a scalar modules-ahead count (never "*" or a list).
+ * The concepts value is a scalar newline-joined concept list (never "*" or a list).
  * An unset family (empty/absent) leaves those inputs asking as before.
  */
 export interface WorkflowScope {
@@ -185,6 +191,7 @@ export interface WorkflowScope {
   org?: string;
   lookahead?: string;
   moduleOffset?: string;
+  concepts?: string;
 }
 
 export interface WorkflowDef {
@@ -195,11 +202,13 @@ export interface WorkflowDef {
   steps: WorkflowStepConfig[];
   /** Workflow-level entity targets applied to matching step inputs. */
   scope?: WorkflowScope;
+  /** Optional category for preset workflows. */
+  category?: "grading" | "course-setup" | "content" | "communication";
 }
 
 /** The workflow-scope family a value type belongs to, or null when the type is
  * not a scopeable entity or scalar. The single and list variants of entities
- * share a family. "lookahead" and "moduleOffset" are scalar families. */
+ * share a family. "lookahead", "moduleOffset", and "concepts" are scalar families. */
 export function scopeFamilyForType(type: string): keyof WorkflowScope | null {
   switch (type) {
     case "institution":
@@ -217,6 +226,8 @@ export function scopeFamilyForType(type: string): keyof WorkflowScope | null {
       return "lookahead";
     case "moduleOffset":
       return "moduleOffset";
+    case "concepts":
+      return "concepts";
     default:
       return null;
   }
@@ -252,7 +263,7 @@ export function scopeCoversType(scope: WorkflowScope | undefined, type: string):
  * otherwise the scope value is coerced to the input's arity: a list input takes
  * the scope value as-is (the engine later expands "*"); a single input takes
  * the first concrete item, and never "*" (which a single input cannot express).
- * Scalar families (lookahead, moduleOffset) are returned as-is from scope, with "*" rejected.
+ * Scalar families (lookahead, moduleOffset, concepts) are returned as-is from scope, with "*" rejected.
  */
 export function applyWorkflowScope(
   type: string,
@@ -264,7 +275,7 @@ export function applyWorkflowScope(
   if (!family || !scope) return runtimeValue;
   const scopeVal = (scope[family] ?? "").trim();
   if (!scopeVal) return runtimeValue;
-  if (family === "lookahead" || family === "moduleOffset") {
+  if (family === "lookahead" || family === "moduleOffset" || family === "concepts") {
     return scopeVal === "*" ? runtimeValue : scopeVal;
   }
   if (isSingleEntityType(type)) {
@@ -304,6 +315,9 @@ export function describeWorkflowScope(scope: WorkflowScope | undefined): string 
       parts.push(`${modules} module(s) ahead`);
     }
   }
+  if (scope.concepts?.trim()) {
+    parts.push(`${count(scope.concepts)} concept(s) targeted`);
+  }
   return parts.join(", ");
 }
 
@@ -311,7 +325,7 @@ export function describeWorkflowScope(scope: WorkflowScope | undefined): string 
  * with, or "" when the scope does not cover this input. Mirrors the arity rules
  * of applyWorkflowScope: a single input covered by a concrete value shows that
  * value; a list input shows "all ..." for "*" or a count otherwise; scalar
- * families (lookahead, moduleOffset) show their numeric values. */
+ * families (lookahead, moduleOffset, concepts) show their numeric values or counts. */
 export function describeScopeForType(scope: WorkflowScope | undefined, type: string): string {
   const effective = applyWorkflowScope(type, "", scope).trim();
   if (!effective) return "";
@@ -319,13 +333,17 @@ export function describeScopeForType(scope: WorkflowScope | undefined, type: str
   if (!family) return "";
   if (family === "lookahead") return `${effective} day(s) ahead`;
   if (family === "moduleOffset") return `${effective} module(s) ahead`;
+  if (family === "concepts") {
+    const conceptCount = effective.split("\n").map((s) => s.trim()).filter(Boolean).length;
+    return `${conceptCount} concept(s) targeted`;
+  }
   if (isSingleEntityType(type)) return effective;
-  const labels: Record<Exclude<keyof WorkflowScope, "institution" | "lookahead" | "moduleOffset">, [string, string]> = {
+  const labels: Record<Exclude<keyof WorkflowScope, "institution" | "lookahead" | "moduleOffset" | "concepts">, [string, string]> = {
     hubCourse: ["all course tiles", "course tile(s)"],
     lmsCourse: ["all Canvas courses", "Canvas course(s)"],
     org: ["all organizations", "organization(s)"],
   };
-  const pair = labels[family as Exclude<keyof WorkflowScope, "institution" | "lookahead" | "moduleOffset">];
+  const pair = labels[family as Exclude<keyof WorkflowScope, "institution" | "lookahead" | "moduleOffset" | "concepts">];
   if (!pair) return effective;
   if (effective === "*") return pair[0];
   const count = effective.split("\n").map((s) => s.trim()).filter(Boolean).length;

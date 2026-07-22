@@ -3,6 +3,7 @@ import type { WorkflowDef } from "@/lib/workflows/types";
 export const DRAFT_AND_POST_ANNOUNCEMENT: WorkflowDef = {
   id: "draft-and-post-announcement",
   preset: true,
+  category: "communication",
   name: "Draft and Post Announcement",
   description:
     "Draft a warm announcement from a one-line instruction, then post or schedule it to a Canvas course.",
@@ -28,6 +29,7 @@ export const DRAFT_AND_POST_ANNOUNCEMENT: WorkflowDef = {
 export const WEEKLY_KICKOFF_ANNOUNCEMENT: WorkflowDef = {
   id: "weekly-kickoff-announcement",
   preset: true,
+  category: "communication",
   name: "Weekly Kickoff Announcement",
   description:
     "At the start of the week, pull the current module's materials and draft an announcement (what we are learning, what we are doing, upcoming deadlines, and things to be aware of) to review and send.",
@@ -68,6 +70,7 @@ export const WEEKLY_KICKOFF_ANNOUNCEMENT: WorkflowDef = {
 export const MORNING_BRIEFING: WorkflowDef = {
   id: "morning-briefing",
   preset: true,
+  category: "communication",
   name: "Morning Briefing",
   description:
     "One schedulable digest of everything that needs you today: unread Canvas messages per institution, institutional email across your connected accounts, how many submissions need grading, and every deadline in the next 7 days across every configured institution (pick courses to narrow) - composed into a Markdown briefing (saved to Files on unattended runs). Runs fully headless: schedule it for each morning.",
@@ -115,6 +118,7 @@ export const MORNING_BRIEFING: WorkflowDef = {
 export const INBOX_REPLY_DRAFTS: WorkflowDef = {
   id: "inbox-reply-drafts",
   preset: true,
+  category: "communication",
   name: "Inbox Replies to Drafts",
   description:
     "Read every unread Canvas conversation and draft a courteous reply for each thread into Drafts > Messages. Nothing sends until you review. Headless - schedule it and walk into an inbox of ready drafts.",
@@ -152,6 +156,7 @@ export const INBOX_REPLY_DRAFTS: WorkflowDef = {
 export const MEETING_REQUEST_AUTOPILOT: WorkflowDef = {
   id: "meeting-request-autopilot",
   preset: true,
+  category: "communication",
   name: "Meeting Request Autopilot",
   description:
     "Read unread messages; when one asks for a meeting, pull your real open calendar slots and draft a reply offering them - saved to Drafts > Messages for review.",
@@ -206,6 +211,7 @@ export const MEETING_REQUEST_AUTOPILOT: WorkflowDef = {
 export const COPILOT_PR_SHEPHERD: WorkflowDef = {
   id: "copilot-pr-shepherd",
   preset: true,
+  category: "communication",
   name: "Copilot PR Shepherd",
   description:
     "See every Copilot agent task and its pull request on a repo, read a PR's full diff, leave your review verdict, and merge - one guided pass instead of four GitHub tabs. Attended by design.",

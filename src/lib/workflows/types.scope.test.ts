@@ -26,6 +26,9 @@ describe("scopeFamilyForType", () => {
   it("maps moduleOffset to its own family", () => {
     expect(scopeFamilyForType("moduleOffset")).toBe("moduleOffset");
   });
+  it("maps concepts to its own family", () => {
+    expect(scopeFamilyForType("concepts")).toBe("concepts");
+  });
   it("returns null for non-entity, non-scalar types", () => {
     expect(scopeFamilyForType("text")).toBeNull();
     expect(scopeFamilyForType("number")).toBeNull();
@@ -73,6 +76,18 @@ describe("scopeCoversType", () => {
     expect(scopeCoversType({ moduleOffset: "" }, "moduleOffset")).toBe(false);
     expect(scopeCoversType({}, "moduleOffset")).toBe(false);
     expect(scopeCoversType(undefined, "moduleOffset")).toBe(false);
+  });
+
+  it("covers a concepts input when the scope sets concepts", () => {
+    expect(scopeCoversType({ concepts: "A\nB" }, "concepts")).toBe(true);
+    expect(scopeCoversType({ concepts: "single concept" }, "concepts")).toBe(true);
+    expect(scopeCoversType({ concepts: "" }, "concepts")).toBe(false);
+    expect(scopeCoversType({}, "concepts")).toBe(false);
+    expect(scopeCoversType(undefined, "concepts")).toBe(false);
+  });
+
+  it("rejects '*' in concepts scope (not a valid concepts value)", () => {
+    expect(scopeCoversType({ concepts: "*" }, "concepts")).toBe(false);
   });
 });
 
@@ -400,6 +415,41 @@ describe("collectRuntimeFields with moduleOffset scope", () => {
   });
 });
 
+describe("collectRuntimeFields with concepts scope", () => {
+  const inputs: Record<string, StepInputSpec[]> = {
+    deckBuilder: [
+      { key: "concepts", label: "Concepts", type: "concepts", required: false },
+      { key: "topic", label: "Topic", type: "text", required: true },
+    ],
+  };
+  const lookup = (type: string) => inputs[type];
+  const def: WorkflowDef = {
+    id: "w",
+    name: "W",
+    description: "",
+    steps: [
+      {
+        type: "deckBuilder",
+        bindings: {
+          concepts: { source: "runtime", fieldKey: "concepts" },
+          topic: { source: "runtime", fieldKey: "topic" },
+        },
+      },
+    ],
+  };
+
+  it("hides the concepts field when the scope sets it", () => {
+    const scoped: WorkflowDef = { ...def, scope: { concepts: "A\nB" } };
+    const fields = collectRuntimeFields(scoped, lookup);
+    expect(fields.map((f) => f.fieldKey)).toEqual(["topic"]);
+  });
+
+  it("asks for the concepts field when the scope does not set it", () => {
+    const fields = collectRuntimeFields(def, lookup);
+    expect(fields.map((f) => f.fieldKey).sort()).toEqual(["concepts", "topic"]);
+  });
+});
+
 describe("applyWorkflowScope with lookahead", () => {
   it("returns the scope lookahead value when run form is empty", () => {
     expect(applyWorkflowScope("lookahead", "", { lookahead: "14" })).toBe("14");
@@ -429,6 +479,22 @@ describe("applyWorkflowScope with moduleOffset", () => {
   it("rejects '*' in moduleOffset scope (not a valid modules value) and falls back to run value", () => {
     expect(applyWorkflowScope("moduleOffset", "", { moduleOffset: "*" })).toBe("");
     expect(applyWorkflowScope("moduleOffset", "1", { moduleOffset: "*" })).toBe("1");
+  });
+});
+
+describe("applyWorkflowScope with concepts", () => {
+  it("returns the scope concepts value when run form is empty", () => {
+    expect(applyWorkflowScope("concepts", "", { concepts: "A\nB" })).toBe("A\nB");
+    expect(applyWorkflowScope("concepts", "", { concepts: "single" })).toBe("single");
+  });
+
+  it("returns the run-form value when non-empty (a per-run override)", () => {
+    expect(applyWorkflowScope("concepts", "user choice", { concepts: "A\nB" })).toBe("user choice");
+  });
+
+  it("rejects '*' in concepts scope (not a valid concepts value) and falls back to run value", () => {
+    expect(applyWorkflowScope("concepts", "", { concepts: "*" })).toBe("");
+    expect(applyWorkflowScope("concepts", "fallback", { concepts: "*" })).toBe("fallback");
   });
 });
 
@@ -489,6 +555,47 @@ describe("describeScopeForType with moduleOffset", () => {
   it("returns empty when moduleOffset scope is not set", () => {
     expect(describeScopeForType(undefined, "moduleOffset")).toBe("");
     expect(describeScopeForType({}, "moduleOffset")).toBe("");
+  });
+
+  it("still handles entity types correctly", () => {
+    expect(describeScopeForType({ hubCourse: "a\nb" }, "hubCourseList")).toBe("2 course tile(s)");
+    expect(describeScopeForType({ org: "*" }, "orgList")).toBe("all organizations");
+  });
+});
+
+describe("describeWorkflowScope with concepts", () => {
+  it("includes a concepts summary in the scope description", () => {
+    expect(describeWorkflowScope({ concepts: "A\nB\nC" })).toBe("3 concept(s) targeted");
+    expect(describeWorkflowScope({ concepts: "single" })).toBe("1 concept(s) targeted");
+    expect(describeWorkflowScope({ institution: "MCC", concepts: "A\nB" })).toBe(
+      "institution MCC, 2 concept(s) targeted"
+    );
+  });
+
+  it("ignores empty concepts values", () => {
+    expect(describeWorkflowScope({ concepts: "" })).toBe("");
+    expect(describeWorkflowScope({ concepts: "  " })).toBe("");
+  });
+
+  it("still handles entity types correctly", () => {
+    expect(describeWorkflowScope({ hubCourse: "a\nb" })).toBe("2 course tile(s)");
+    expect(describeWorkflowScope({ org: "*" })).toBe("all organizations");
+  });
+});
+
+describe("describeScopeForType with concepts", () => {
+  it("returns the concepts count for a concepts type", () => {
+    expect(describeScopeForType({ concepts: "A\nB\nC" }, "concepts")).toBe("3 concept(s) targeted");
+    expect(describeScopeForType({ concepts: "single" }, "concepts")).toBe("1 concept(s) targeted");
+  });
+
+  it("returns empty when concepts scope is not set", () => {
+    expect(describeScopeForType(undefined, "concepts")).toBe("");
+    expect(describeScopeForType({}, "concepts")).toBe("");
+  });
+
+  it("returns empty for '*' in concepts scope (invalid)", () => {
+    expect(describeScopeForType({ concepts: "*" }, "concepts")).toBe("");
   });
 
   it("still handles entity types correctly", () => {

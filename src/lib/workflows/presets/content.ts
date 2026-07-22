@@ -3,6 +3,7 @@ import type { WorkflowDef } from "@/lib/workflows/types";
 export const PREPARE_LECTURE: WorkflowDef = {
   id: "prepare-lecture",
   preset: true,
+  category: "content",
   name: "Prepare Lecture",
   description:
     "Pick a course and module: builds a lecture deck in the app's slide style from the module's materials, saves it to the course tile, pauses for announcement review where you can edit, regenerate with AI, or approve it - then schedules the approved announcement for two hours after the next class meeting.",
@@ -30,6 +31,7 @@ export const PREPARE_LECTURE: WorkflowDef = {
 export const LECTURE_QA: WorkflowDef = {
   id: "lecture-qa",
   preset: true,
+  category: "content",
   name: "Lecture Q&A",
   description:
     "Pick a course and module, optionally attach the lecture slides: anticipates the questions students are likely to ask during that lecture and drafts instructor-ready answers, saved to the course tile as a Word document.",
@@ -49,6 +51,7 @@ export const LECTURE_QA: WorkflowDef = {
 export const WEEKLY_STUDY_GUIDE_PAGE: WorkflowDef = {
   id: "weekly-study-guide-page",
   preset: true,
+  category: "content",
   name: "Weekly Study Guide Page",
   description:
     "Pick a course tile: finds its current week's topic, pulls cited research, and publishes it as a Canvas page for that course.",
@@ -88,6 +91,7 @@ export const WEEKLY_STUDY_GUIDE_PAGE: WorkflowDef = {
 export const WEEKLY_LECTURE_NARRATION: WorkflowDef = {
   id: "weekly-lecture-narration",
   preset: true,
+  category: "content",
   name: "Weekly Lecture Narration",
   description:
     "For this week's topic, generates a lecture script from the course repo and saves narrated audio to the course tile - fully unattended.",
@@ -126,6 +130,7 @@ export const WEEKLY_LECTURE_NARRATION: WorkflowDef = {
 export const WEEKLY_LECTURE_VIDEO: WorkflowDef = {
   id: "weekly-lecture-video",
   preset: true,
+  category: "content",
   name: "Weekly Lecture Video",
   description:
     "Turns this week's lecture script into an in-house avatar talking-head video. Run again or schedule a follow-up poll if the render is still processing.",
@@ -168,6 +173,7 @@ export const WEEKLY_LECTURE_VIDEO: WorkflowDef = {
 export const QUIZ_FROM_REPO: WorkflowDef = {
   id: "quiz-from-repo",
   preset: true,
+  category: "content",
   name: "Quiz from Repo",
   description:
     "Mines a repo's topics, generates a quiz with answer key, and imports the questions into an existing Canvas quiz.",
@@ -199,6 +205,7 @@ export const QUIZ_FROM_REPO: WorkflowDef = {
 export const ASSIGNMENT_KIT: WorkflowDef = {
   id: "assignment-kit",
   preset: true,
+  category: "content",
   name: "Assignment Kit",
   description:
     "From a repo, generates a full assignment brief, rubric, model answer, and full-credit checklist in one unattended pass.",
@@ -241,6 +248,7 @@ export const ASSIGNMENT_KIT: WorkflowDef = {
 export const GROW_KNOWLEDGE_BASE: WorkflowDef = {
   id: "grow-knowledge-base",
   preset: true,
+  category: "content",
   name: "Grow Knowledge Base",
   description:
     "Measures how well a topic is covered, runs the research loop to fill gaps, then re-measures to show the improvement.",
@@ -269,6 +277,7 @@ export const GROW_KNOWLEDGE_BASE: WorkflowDef = {
 export const MODULE_SLIDES_FROM_TEMPLATE: WorkflowDef = {
   id: "module-slides-from-template",
   preset: true,
+  category: "content",
   name: "Module slides from a template",
   description:
     "Pick a module and a PowerPoint Design template; generate a deck for that module into Drafts > Presentations.",
@@ -293,6 +302,7 @@ export const MODULE_SLIDES_FROM_TEMPLATE: WorkflowDef = {
 export const WEEKLY_LECTURE_DECK: WorkflowDef = {
   id: "weekly-lecture-deck",
   preset: true,
+  category: "content",
   name: "Weekly lecture deck",
   description:
     "Detect the course's current week and module, then generate a slide deck from a PowerPoint Design template for that module into Drafts > Presentations. Pick the course and template once; schedule it to run every week.",
@@ -328,6 +338,7 @@ export const WEEKLY_LECTURE_DECK: WorkflowDef = {
 export const QUIZ_PIPELINE: WorkflowDef = {
   id: "quiz-pipeline",
   preset: true,
+  category: "content",
   name: "Quiz from Repo (end to end)",
   description:
     "Mine a repo's topics, generate questions, create the (unpublished) Canvas quiz shell, and import the questions into it - the whole quiz pipeline in one run. Publish from Canvas when happy.",
@@ -368,6 +379,7 @@ export const QUIZ_PIPELINE: WorkflowDef = {
 export const NEXT_WEEK_LECTURES: WorkflowDef = {
   id: "next-week-lectures",
   preset: true,
+  category: "content",
   name: "Draft Next Week's Lectures (all courses)",
   description:
     "Every course tile across every institution: detect next week's module from the tile's schedule and draft a lesson plan, lecture script, and slide deck into the tile's materials. Fully headless - schedule it for Friday and walk into Monday with every lecture drafted. Finished or not-yet-started courses are skipped automatically.",
@@ -387,6 +399,7 @@ export const NEXT_WEEK_LECTURES: WorkflowDef = {
 export const WEEKLY_CONCEPT_ANIMATIONS: WorkflowDef = {
   id: "weekly-concept-animations",
   preset: true,
+  category: "content",
   name: "Next Week's Concept Animations (all courses)",
   description:
     "Every course tile across every institution: detect next week's module and generate a set of professional animated concept visualizations (SVG/CSS, no JavaScript - they render everywhere, including as Canvas pages) into the tile's materials. Fully headless: schedule it for the start of each week alongside Draft Next Week's Lectures. Canvas pages, when enabled, are created unpublished.",
@@ -406,6 +419,7 @@ export const WEEKLY_CONCEPT_ANIMATIONS: WorkflowDef = {
 export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
   id: "weekly-everything-prep",
   preset: true,
+  category: "content",
   name: "Weekly Everything Prep (all courses)",
   description:
     "The Sunday-night button: for every course at every institution, prepare the coming two weeks by default (the workflow's Looking ahead setting) for in-person, synchronous online, and asynchronous online students - lecture decks, scripts, and lesson plans (optionally narrated for async), concept animations, week-ahead announcement drafts per course, the deadline list, a gradebook at-risk report, and a draft-grading pass when anything is waiting - finished with a briefing report. Every artifact lands on the course tile AND in the Files tab; announcements wait in Drafts. Fully headless - schedule it weekly.",
@@ -499,6 +513,7 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
 export const PROBLEM_SOLVING_COMPANION: WorkflowDef = {
   id: "problem-solving-companion",
   preset: true,
+  category: "content",
   name: "Propose Solutions to Open Problems",
   description:
     "When another workflow completes, read your open problems and propose 2-3 fresh solutions for each one. Solutions accumulate over time and are visible in the Problems panel. Runs fully headless.",
@@ -523,6 +538,7 @@ export const PROBLEM_SOLVING_COMPANION: WorkflowDef = {
 export const MODULE_HOMEWORK_ANSWERS: WorkflowDef = {
   id: "module-homework-answers",
   preset: true,
+  category: "content",
   name: "Module Homework Answers",
   description:
     "Generate a full-credit model answer for every assignment and discussion in the current module as an instructor answer key. Answers are saved privately to the course tile and Files tab and never published to the LMS.",

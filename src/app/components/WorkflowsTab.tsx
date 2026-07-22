@@ -1,19 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useRef, Fragment } from "react";
-import { Button, TextField, Tabs, Tab } from "@mui/material";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { Tabs, Tab } from "@mui/material";
 import TabHeader from "./TabHeader";
 import { AutomateOverview } from "./workflows/AutomateOverview";
 import { ScheduleSection } from "./workflows/ScheduleSection";
 import { TriggerSection } from "./workflows/TriggerSection";
-import { RuntimeFieldInput } from "./workflows/RuntimeFieldInput";
-import { RunStepCard } from "./workflows/RunStepCard";
-import { RunInputPrompt } from "./workflows/RunInputPrompt";
-import { SummaryView, compareTableValues, csvCell, tableGradeIssue, tableGradeBand, GradeBadge, DetailSectionsView } from "./workflows/run-results";
+import { tableGradeBand } from "./workflows/run-results";
 import { useAutomation } from "./workflows/useAutomation";
 import { useWorkflowOptions } from "./workflows/useWorkflowOptions";
 import { useWorkflowRun } from "./workflows/useWorkflowRun";
 import { BuildPanel } from "./workflows/BuildPanel";
+import { WorkflowListSidebar } from "./workflows/WorkflowListSidebar";
+import { RunPanel } from "./workflows/RunPanel";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { downloadCourseZipBlob } from "@/lib/course-files";
@@ -29,7 +28,6 @@ import {
   expandWorkflowDef,
   loadDisabledSteps,
   saveDisabledSteps,
-  describeWorkflowScope,
   type WorkflowScope,
 } from "@/lib/workflows/types";
 import {
@@ -74,14 +72,6 @@ export default function WorkflowsTab() {
       // ignore storage write failures
     }
   }, [workflowSearch]);
-  const workflowQuery = workflowSearch.trim().toLowerCase();
-  const filteredWorkflows = workflowQuery
-    ? workflows.filter(
-        (w) =>
-          w.name.toLowerCase().includes(workflowQuery) ||
-          (w.description ?? "").toLowerCase().includes(workflowQuery)
-      )
-    : workflows;
 
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(() => {
     if (typeof window === "undefined") return COURSE_KICKOFF.id;
@@ -121,7 +111,22 @@ export default function WorkflowsTab() {
   const [editing, setEditing] = useState(false);
   const [deleteArmed, setDeleteArmed] = useState(false);
   // Master-detail layout: which sub-tab of the right panel is showing.
-  const [panel, setPanel] = useState<"build" | "run" | "automate">("run");
+  const [panel, setPanel] = useState<"build" | "run" | "automate">(() => {
+    if (typeof window === "undefined") return "run";
+    return (localStorage.getItem("ta-workflows-panel") as "build" | "run" | "automate") || "run";
+  });
+  const [recentWorkflowIds, setRecentWorkflowIds] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    const saved = localStorage.getItem("ta-workflows-recent");
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
 
   // Mirror `editing` into a ref so the focus refetch handler can skip
   // reloading while the builder is open without re-registering listeners.
@@ -235,11 +240,20 @@ export default function WorkflowsTab() {
 
   const workflowOptions = useWorkflowOptions(panel, runtimeFields, values, activeInstitution, loadCourseExportData, automation.schedules, automation.scheduleForm, automation.triggerForm);
 
-  const onSetPanel = setPanel;
+  const onSetPanel = useCallback((p: "build" | "run" | "automate") => {
+    setPanel(p);
+  }, []);
   const onSetPendingHandoff = setPendingHandoff;
   const onSetHubCourses = workflowOptions.setHubCourses;
 
-  const workflowRun = useWorkflowRun(expanded, enabledExpandedSteps, disabledSteps, selectedDef, selectedWorkflowId, workflows, values, uploadFiles, runtimeFields, activeInstitution, user, supabase, loadCourseExportData, onSetPanel, onSetPendingHandoff, onSetHubCourses, pendingHandoff);
+  // Recent group (AC2): records only workflows whose run actually started
+  // (validation passed) - called from useWorkflowRun's handleRun once
+  // validateForm succeeds, so a failed/blocked Run click never pollutes it.
+  const onRunStart = useCallback((workflowId: string) => {
+    setRecentWorkflowIds((prev) => [workflowId, ...prev.filter((id) => id !== workflowId)].slice(0, 5));
+  }, []);
+
+  const workflowRun = useWorkflowRun(expanded, enabledExpandedSteps, disabledSteps, selectedDef, selectedWorkflowId, workflows, values, uploadFiles, runtimeFields, activeInstitution, user, supabase, loadCourseExportData, onSetPanel, onSetPendingHandoff, onSetHubCourses, onRunStart, pendingHandoff);
 
   // Run requires at least one enabled step - a workflow with every step
   // toggled off would run the loop and finish having done nothing.
@@ -349,6 +363,18 @@ export default function WorkflowsTab() {
   useEffect(() => {
     localStorage.setItem("ta-workflows-selected", selectedWorkflowId);
   }, [selectedWorkflowId]);
+
+  useEffect(() => {
+    localStorage.setItem("ta-workflows-panel", panel);
+  }, [panel]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ta-workflows-recent", JSON.stringify(recentWorkflowIds));
+    } catch {
+      // ignore storage write failures
+    }
+  }, [recentWorkflowIds]);
 
   useEffect(() => {
     if (selectedDef) {
@@ -599,13 +625,13 @@ export default function WorkflowsTab() {
       handoffArmedRef.current = true;
       handleWorkflowChange(pendingHandoff.workflowId);
       setValues(pendingHandoff.prefill);
+      setPanel("run");
       return;
     }
     handoffArmedRef.current = false;
     setPendingHandoff(null);
     void workflowRun.handleRun();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingHandoff, workflowRun.running, selectedWorkflowId, values]);
+  }, [pendingHandoff, workflowRun, selectedWorkflowId, values]);
 
   return (
     <div className={styles.card}>
@@ -616,84 +642,35 @@ export default function WorkflowsTab() {
       />
 
       <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <div style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: 4 }}>Workflows</div>
-          <TextField
-            size="small"
-            value={workflowSearch}
-            onChange={(e) => setWorkflowSearch(e.target.value)}
-            placeholder="Search workflows..."
-            aria-label="Search workflows"
-            sx={{ marginBottom: 1 }}
-          />
-          {filteredWorkflows.map((w) => (
-            <button
-              key={w.id}
-              type="button"
-              disabled={workflowRun.running}
-              onClick={() => handleWorkflowChange(w.id)}
-              style={{
-                textAlign: "left",
-                padding: "6px 8px",
-                borderRadius: 8,
-                border: "none",
-                cursor: workflowRun.running ? "default" : "pointer",
-                background: w.id === selectedWorkflowId ? "var(--field-background)" : "transparent",
-                color: "var(--text-primary)",
-                fontWeight: w.id === selectedWorkflowId ? 600 : 400,
-                fontSize: "0.9em",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {w.name}{w.preset ? " (preset)" : ""}
-              </span>
-              {(() => {
-                const a = automation.automationByWorkflow.get(w.id);
-                if (!a || (!a.scheduled && !a.triggered)) return null;
-                return (
-                  <span className={styles.ghBadges} style={{ flex: "none" }}>
-                    {a.scheduled && (
-                      <span className={styles.ghDot} style={{ color: "var(--accent)" }} title="Scheduled" aria-label="Scheduled" />
-                    )}
-                    {a.triggered && (
-                      <span className={styles.ghDot} style={{ color: "var(--success)" }} title="Has triggers" aria-label="Has triggers" />
-                    )}
-                  </span>
-                );
-              })()}
-            </button>
-          ))}
-          {filteredWorkflows.length === 0 && (
-            <div style={{ fontSize: "0.85em", color: "var(--text-secondary)", padding: "4px 8px" }}>
-              No workflows match your search.
-            </div>
-          )}
-          <Button
-            size="small"
-            variant="outlined"
-            disabled={workflowRun.running}
-            onClick={() => {
-              const newDef: WorkflowDef = {
-                id: crypto.randomUUID(),
-                name: "New workflow",
-                description: "",
-                steps: [],
-              };
-              updateCustom([...custom, newDef]);
-              if (user && supabase) {
-                void upsertWorkflowDef(supabase, user.id, newDef).catch(console.error);
-              }
-              handleWorkflowChange(newDef.id);
-              setEditing(true);
-              setPanel("build");
-            }}
-          >
-            New workflow
-          </Button>
-        </div>
+        <WorkflowListSidebar
+          workflows={workflows}
+          selectedWorkflowId={selectedWorkflowId}
+          onSelectWorkflow={handleWorkflowChange}
+          onRunClick={(id) => {
+            handleWorkflowChange(id);
+            setPanel("run");
+          }}
+          workflowSearch={workflowSearch}
+          onSearchChange={setWorkflowSearch}
+          recentWorkflowIds={recentWorkflowIds}
+          automationByWorkflow={automation.automationByWorkflow}
+          runningWorkflow={workflowRun.running}
+          onNewWorkflow={() => {
+            const newDef: WorkflowDef = {
+              id: crypto.randomUUID(),
+              name: "New workflow",
+              description: "",
+              steps: [],
+            };
+            updateCustom([...custom, newDef]);
+            if (user && supabase) {
+              void upsertWorkflowDef(supabase, user.id, newDef).catch(console.error);
+            }
+            handleWorkflowChange(newDef.id);
+            setEditing(true);
+            setPanel("build");
+          }}
+        />
 
         <div className={styles.form} style={{ flex: 1, minWidth: 320 }}>
           {!selectedDef ? (
@@ -744,144 +721,45 @@ export default function WorkflowsTab() {
               )}
 
               {panel === "run" && (
-                <>
-                  {describeWorkflowScope(selectedDef.scope) && (
-                    <p className={styles.fieldHint} style={{ margin: "0 0 10px 0" }}>
-                      This workflow targets {describeWorkflowScope(selectedDef.scope)} (set under Build).
-                    </p>
-                  )}
-                  {runtimeFields.map((field) => (
-                    <RuntimeFieldInput
-                      key={field.fieldKey}
-                      field={field}
-                      value={values[field.fieldKey] ?? ""}
-                      onChange={(newValue) => handleValueChange(field.fieldKey, newValue)}
-                      options={{
-                        orgs: workflowOptions.orgs,
-                        orgsError: workflowOptions.orgsError,
-                        hubCourses: workflowOptions.hubCourses,
-                        hubCoursesError: workflowOptions.hubCoursesError,
-                        lmsCourseOptions: workflowOptions.lmsCourseOptions,
-                        lmsCourseOptionsError: workflowOptions.lmsCourseOptionsError,
-                        lmsModuleOptions: workflowOptions.lmsModuleOptions,
-                        lmsModuleError: workflowOptions.lmsModuleError,
-                        lmsModuleFromExport: workflowOptions.lmsModuleFromExport,
-                        lmsModuleCanvasUrl: "",
-                        deckTemplates: workflowOptions.deckTemplates,
-                        deckTemplatesError: workflowOptions.deckTemplatesError,
-                        institutions,
-                        activeInstitution,
-                      }}
-                      uploads={{
-                        files: uploadFiles,
-                        setFiles: setUploadFiles,
-                      }}
-                    />
-                  ))}
-
-            {workflowRun.validationError && (
-              <p className={styles.error}>{workflowRun.validationError}</p>
-            )}
-
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <Button
-                variant="contained"
-                onClick={workflowRun.handleRun}
-                disabled={workflowRun.running || !!workflowRun.runPause || !!workflowRun.runInput || !!expanded.error || allStepsDisabled}
-                size="small"
-              >
-                {workflowRun.running ? "Running..." : "Run"}
-              </Button>
-              {allStepsDisabled && (
-                <span className={styles.fieldHint} style={{ color: "var(--danger)" }}>
-                  Enable at least one step.
-                </span>
-              )}
-            </div>
-
-                  {workflowRun.runState.length > 0 && (
-                    <div style={{ marginTop: 28 }}>
-                      <h2 style={{ fontSize: "1rem", marginBottom: 16 }}>Run Progress</h2>
-                      {workflowRun.runState.some((grp) => grp.institution !== null) && (
-                        <p className={styles.fieldHint} style={{ margin: "0 0 12px 0" }}>
-                          {workflowRun.runState.filter((grp) => grp.steps.every((s) => s.status !== "error")).length}
-                          /{workflowRun.runState.length} institutions ok
-                        </p>
-                      )}
-                      {workflowRun.runState.map((group, g) => (
-                        <Fragment key={group.institution ?? g}>
-                          {group.institution && (
-                            <h3 style={{ fontSize: "0.85rem", fontWeight: 600, margin: g === 0 ? "0 0 4px 0" : "20px 0 4px 0", color: "var(--hint-text)" }}>
-                              {group.institution}
-                            </h3>
-                          )}
-                          {group.steps.map((state, i) => {
-                        const stepDef = getStepDefinition(expanded.steps[i]?.type ?? "");
-
-                        return (
-                          <RunStepCard
-                            key={i}
-                            index={i}
-                            stepDef={stepDef}
-                            origin={expanded.origins[i] ?? undefined}
-                            state={state}
-                            summary={state.summary ? <SummaryView summary={state.summary} /> : undefined}
-                          >
-                            {workflowRun.runPause && workflowRun.runPause.groupIndex === g && workflowRun.runPause.stepIndex === i && (
-                              <div style={{ marginTop: 12 }}>
-                                <p className={styles.fieldHint}>{workflowRun.runPause.message}</p>
-                                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                                  <Button
-                                    size="small"
-                                    variant="contained"
-                                    onClick={() => {
-                                      workflowRun.pauseResolverRef.current?.resolve(true);
-                                    }}
-                                  >
-                                    Continue
-                                  </Button>
-                                  <Button
-                                    size="small"
-                                    variant="outlined"
-                                    onClick={() => {
-                                      workflowRun.pauseResolverRef.current?.resolve(false);
-                                    }}
-                                  >
-                                    Cancel run
-                                  </Button>
-                                </div>
-                              </div>
-                            )}
-
-                            {workflowRun.runInput && workflowRun.runInput.groupIndex === g && workflowRun.runInput.stepIndex === i && (
-                              <RunInputPrompt
-                                runInput={workflowRun.runInput}
-                                onSubmit={(value) => {
-                                  workflowRun.inputResolverRef.current?.resolve(
-                                    value as string | File[] | Array<Record<string, string>>
-                                  );
-                                }}
-                                onSkip={() => {
-                                  workflowRun.inputResolverRef.current?.resolve(null);
-                                }}
-                                tableHasGrade={workflowRun.tableHasGrade}
-                                tableGradeIssue={tableGradeIssue}
-                                tableGradeBand={tableGradeBand}
-                                compareTableValues={compareTableValues}
-                                csvCell={csvCell}
-                                initialRows={workflowRun.runInputInitialRows}
-                                GradeBadge={GradeBadge}
-                                DetailSectionsView={DetailSectionsView}
-                              />
-                            )}
-                          </RunStepCard>
-                        );
-                      })}
-                        </Fragment>
-                      ))}
-                    </div>
-                  )}
-                </>
+                <RunPanel
+                  selectedDef={selectedDef}
+                  runtimeFields={runtimeFields}
+                  values={values}
+                  onValueChange={handleValueChange}
+                  workflowRunning={workflowRun.running}
+                  validationError={workflowRun.validationError}
+                  runState={workflowRun.runState}
+                  runPause={workflowRun.runPause}
+                  runInput={workflowRun.runInput}
+                  pauseResolverRef={workflowRun.pauseResolverRef}
+                  inputResolverRef={workflowRun.inputResolverRef}
+                  onRunClick={workflowRun.handleRun}
+                  expandedError={expanded.error}
+                  allStepsDisabled={allStepsDisabled}
+                  uploadFiles={uploadFiles}
+                  onUploadFilesChange={setUploadFiles}
+                  optionsForFields={{
+                    orgs: workflowOptions.orgs,
+                    orgsError: workflowOptions.orgsError,
+                    hubCourses: workflowOptions.hubCourses,
+                    hubCoursesError: workflowOptions.hubCoursesError,
+                    lmsCourseOptions: workflowOptions.lmsCourseOptions,
+                    lmsCourseOptionsError: workflowOptions.lmsCourseOptionsError,
+                    lmsModuleOptions: workflowOptions.lmsModuleOptions,
+                    lmsModuleError: workflowOptions.lmsModuleError,
+                    lmsModuleFromExport: workflowOptions.lmsModuleFromExport,
+                    deckTemplates: workflowOptions.deckTemplates,
+                    deckTemplatesError: workflowOptions.deckTemplatesError,
+                    institutions,
+                    activeInstitution,
+                  }}
+                  tableHasGrade={workflowRun.tableHasGrade}
+                  tableGradeBand={tableGradeBand}
+                  initialRunInputRows={workflowRun.runInputInitialRows}
+                  expandedSteps={expanded.steps}
+                  expandedOrigins={expanded.origins}
+                  getStepDefinition={getStepDefinition}
+                />
               )}
 
               {panel === "automate" && (

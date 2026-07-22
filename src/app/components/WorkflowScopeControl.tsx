@@ -246,6 +246,26 @@ export default function WorkflowScopeControl({
             </p>
           </div>
         </div>
+        <div style={cell}>
+          <span style={labelStyle}>Concepts</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <TextField
+              multiline
+              minRows={3}
+              placeholder="One concept per line"
+              value={scope.concepts ?? ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                set({ concepts: val.trim() ? val : "" });
+              }}
+              size="small"
+              sx={{ flex: 1 }}
+            />
+            <p className="fieldHint" style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+              Fills every step that targets concepts to loop over.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );

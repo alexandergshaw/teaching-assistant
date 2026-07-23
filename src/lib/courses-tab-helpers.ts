@@ -1,4 +1,4 @@
-import type { Course } from "./supabase/courses";
+import type { Course, CourseStudentRepo } from "./supabase/courses";
 import type { CardLayoutGroup } from "@/lib/card-layout";
 import { DEFAULT_CARD_LAYOUT } from "@/lib/card-layout";
 import type { InstitutionField } from "@/lib/institution-fields";
@@ -161,6 +161,28 @@ export function studentReposToRows(text: string): Array<{ student: string; canva
 
 export function rowsToStudentReposText(rows: Array<{ student: string; canvasUserId: string; repo: string }>): string {
   return rows.map((r) => `${r.student} | ${r.canvasUserId} | ${r.repo}`).join("\n");
+}
+
+/**
+ * Merge every org repo not already present (case-insensitive, trimmed match on
+ * the repo field) into existingRows as new unassigned rows (student left blank).
+ * Existing rows are preserved verbatim and never reordered or overwritten; the
+ * incoming org list is also deduped against itself. Pure - no I/O.
+ */
+export function mergeOrgReposIntoStudentRepos(
+  existingRows: CourseStudentRepo[],
+  orgRepoFullNames: string[]
+): CourseStudentRepo[] {
+  const seen = new Set(existingRows.map((r) => r.repo.trim().toLowerCase()).filter(Boolean));
+  const merged = [...existingRows];
+  for (const fullName of orgRepoFullNames) {
+    const trimmed = fullName.trim();
+    const key = trimmed.toLowerCase();
+    if (!trimmed || seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ student: "", canvasUserId: null, repo: trimmed, username: null, email: null });
+  }
+  return merged;
 }
 
 export function readFileBase64(file: File): Promise<string> {

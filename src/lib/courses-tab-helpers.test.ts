@@ -7,6 +7,7 @@ import {
   rowsToRoster,
   studentReposToRows,
   rowsToStudentReposText,
+  mergeOrgReposIntoStudentRepos,
   parseRepoLines,
   parseIntegrationLines,
   readFileBase64,
@@ -396,6 +397,39 @@ describe("mergeInstitutionFields", () => {
     const merged = mergeInstitutionFields(saved);
     const unknown = merged.find((f) => f.id === "unknown");
     expect(unknown?.value).toBe("test");
+  });
+});
+
+describe("mergeOrgReposIntoStudentRepos", () => {
+  it("appends every org repo as an unassigned row when there are no existing rows", () => {
+    const merged = mergeOrgReposIntoStudentRepos([], ["org/repo1", "org/repo2"]);
+    expect(merged).toEqual([
+      { student: "", canvasUserId: null, repo: "org/repo1", username: null, email: null },
+      { student: "", canvasUserId: null, repo: "org/repo2", username: null, email: null },
+    ]);
+  });
+
+  it("leaves an existing assigned row for a repo already listed unchanged and does not duplicate it", () => {
+    const existing = [{ student: "Alice", canvasUserId: "1", repo: "org/repo1", username: "alice-gh", email: "a@x.com" }];
+    const merged = mergeOrgReposIntoStudentRepos(existing, ["org/repo1", "org/repo2"]);
+    expect(merged).toEqual([
+      existing[0],
+      { student: "", canvasUserId: null, repo: "org/repo2", username: null, email: null },
+    ]);
+  });
+
+  it("dedupes case-insensitively against existing rows and within the incoming list", () => {
+    const existing = [{ student: "Alice", canvasUserId: null, repo: "Org/Repo1", username: null, email: null }];
+    const merged = mergeOrgReposIntoStudentRepos(existing, ["org/repo1", "ORG/REPO2", "org/repo2"]);
+    expect(merged).toEqual([
+      existing[0],
+      { student: "", canvasUserId: null, repo: "ORG/REPO2", username: null, email: null },
+    ]);
+  });
+
+  it("returns existing rows unchanged when the org list is empty", () => {
+    const existing = [{ student: "Alice", canvasUserId: "1", repo: "org/repo1", username: null, email: null }];
+    expect(mergeOrgReposIntoStudentRepos(existing, [])).toEqual(existing);
   });
 });
 

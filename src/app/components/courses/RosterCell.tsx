@@ -15,7 +15,9 @@ import {
   rowsToRoster,
   studentReposToRows,
   rowsToStudentReposText,
+  mergeOrgReposIntoStudentRepos,
 } from "@/lib/courses-tab-helpers";
+import { listOrgReposAction } from "@/app/actions";
 import styles from "../../page.module.css";
 
 export interface RosterCellProps {
@@ -156,9 +158,15 @@ export function StudentReposCell({ course, onSave }: StudentReposCellProps) {
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [orgPrefix, setOrgPrefix] = useState("");
+  const [pulling, setPulling] = useState(false);
+  const [pullError, setPullError] = useState<string | null>(null);
+  const [pullNote, setPullNote] = useState<string | null>(null);
 
   const startEdit = () => {
     setDraft(rowsToStudentReposText((course.studentRepos ?? []).map((r) => ({ student: r.student, canvasUserId: r.canvasUserId ?? "", repo: r.repo }))));
+    setPullError(null);
+    setPullNote(null);
     setEditing(true);
   };
 
@@ -173,6 +181,31 @@ export function StudentReposCell({ course, onSave }: StudentReposCellProps) {
   const setRows = (next: Array<{ student: string; canvasUserId: string; repo: string }>) => setDraft(rowsToStudentReposText(next));
   const updateRow = (i: number, patch: Partial<{ student: string; canvasUserId: string; repo: string }>) =>
     setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+
+  const githubOrg = (course.githubOrg ?? "").trim();
+
+  const pullFromOrg = async () => {
+    if (!githubOrg) return;
+    setPulling(true);
+    setPullError(null);
+    setPullNote(null);
+    const result = await listOrgReposAction(githubOrg, orgPrefix.trim() || undefined);
+    setPulling(false);
+    if ("error" in result) {
+      setPullError(result.error);
+      return;
+    }
+    if (result.repos.length === 0) {
+      setPullNote(`No repositories found in ${githubOrg}${orgPrefix.trim() ? ` matching "${orgPrefix.trim()}"` : ""}.`);
+      return;
+    }
+    const existingRows = rows.map((r) => ({ student: r.student, canvasUserId: r.canvasUserId || null, repo: r.repo, username: null, email: null }));
+    const merged = mergeOrgReposIntoStudentRepos(existingRows, result.repos.map((r) => r.fullName));
+    const added = merged.length - existingRows.length;
+    const alreadyPresent = result.repos.length - added;
+    setRows(merged.map((r) => ({ student: r.student, canvasUserId: r.canvasUserId ?? "", repo: r.repo })));
+    setPullNote(`Added ${added} repo${added === 1 ? "" : "s"}${alreadyPresent > 0 ? ` (${alreadyPresent} already listed)` : ""}.`);
+  };
 
   const hasRepos = course.studentRepos && course.studentRepos.length > 0;
 
@@ -212,6 +245,28 @@ export function StudentReposCell({ course, onSave }: StudentReposCellProps) {
               Add student
             </Button>
           </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <TextField
+              size="small"
+              value={orgPrefix}
+              onChange={(e) => setOrgPrefix(e.target.value)}
+              sx={{ flex: 1 }}
+              placeholder="Name filter (optional)"
+              disabled={!githubOrg}
+            />
+            <button
+              type="button"
+              className={styles.linkButton}
+              disabled={pulling || !githubOrg}
+              title={githubOrg ? undefined : "Set the course's Organization first"}
+              onClick={() => void pullFromOrg()}
+            >
+              {pulling ? "Pulling..." : "Pull repos from org"}
+            </button>
+          </div>
+          {!githubOrg && <p className={styles.fieldHint} style={{ margin: 0 }}>Set the course&apos;s Organization first.</p>}
+          {pullError && <p className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)" }}>{pullError}</p>}
+          {pullNote && !pullError && <p className={styles.fieldHint} style={{ margin: 0 }}>{pullNote}</p>}
           <div className={styles.tileEditorActions}>
             <Button variant="contained" size="small" disabled={saving} onClick={() => void commit()}>
               {saving ? "Saving…" : "Save"}

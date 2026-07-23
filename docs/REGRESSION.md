@@ -1560,3 +1560,22 @@ underscore-mashed names, and lowercase-hyphen grade exports.
    steps.media.ts carry their own ad-hoc sanitizers tied to Common
    Cartridge display titles; they were not part of the surveyed offender
    set and were left untouched.
+
+## 52. Pull repos from org (Student repos cell)
+
+Acceptance criteria (a20fd09+):
+1. StudentReposCell shows a "Pull repos from org" button (secondary,
+   matching linkButton idiom) plus an optional "Name filter" text field.
+   On click it calls listOrgReposAction with the tile's githubOrg; if
+   githubOrg is empty the button is disabled with a visible hint.
+2. Merge semantics (mergeOrgReposIntoStudentRepos): existing rows
+   preserved verbatim, new org repos appended as unassigned rows
+   (student blank), case-insensitive dedup (both directions), dedupe
+   within incoming list. Unit-tested.
+3. Pull populates the editor draft only (not auto-saved); user must
+   still click Save. Cancel discards the pull along with any other
+   unsaved edits - consistent with existing cell semantics.
+4. Error handling: action errors surface inline (danger color), busy
+   flag always cleared. Zero-result shows a note (not an error). On
+   success shows "Added N repos (M already listed)." count feedback.
+5. No new server action needed (reuses listOrgReposAction).

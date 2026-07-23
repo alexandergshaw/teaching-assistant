@@ -15,6 +15,7 @@ import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import {
   ALL_COLUMN_IDS,
+  COLUMN_MIN_WIDTHS,
   DEFAULT_SORT,
   parseColumnSet,
   parseSortState,
@@ -28,20 +29,10 @@ import {
 import type { UseCourseImportActionsReturn } from "./useCourseImportActions";
 import CourseRow from "./CourseRow";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 const SORT_KEY = "ta-courses-sort";
 const COLUMNS_KEY = "ta-courses-columns";
-
-// Sticky header offset: pins below the app's fixed top bar + tab strip
-// (matches .courseGroupSticky's offset in page.module.css) so the header row
-// is never hidden behind them while the page scrolls.
-const STICKY_TOP = "calc(var(--topbar-height, 58px) + 45px)";
-const HEADER_CELL_STYLE: React.CSSProperties = {
-  position: "sticky",
-  top: STICKY_TOP,
-  zIndex: 2,
-  background: "color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%)",
-};
 
 const COLUMN_LABELS: Record<ColumnId, string> = {
   institution: "Institution",
@@ -192,33 +183,30 @@ export default function CoursesTable({
       )}
 
       {!loading && courses.length > 0 && (
-        <div style={{ width: "100%", overflowX: "auto", border: "1px solid var(--field-border)", borderRadius: 14 }}>
-          <table className={styles.courseScheduleTable} style={{ minWidth: 960 }}>
+        <div className={tableStyles.scroller}>
+          <table className={tableStyles.table}>
             <thead>
               <tr>
-                <th
-                  onClick={() => applySort("name")}
-                  style={{ ...HEADER_CELL_STYLE, left: 0, zIndex: 3, cursor: "pointer", minWidth: 220 }}
-                >
+                <th onClick={() => applySort("name")} style={{ cursor: "pointer", minWidth: COLUMN_MIN_WIDTHS.name }}>
                   Name{sortIndicator("name")}
                 </th>
-                {visibleColumns.includes("institution") && <th style={HEADER_CELL_STYLE}>Institution</th>}
+                {visibleColumns.includes("institution") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.institution }}>Institution</th>}
                 {visibleColumns.includes("startDate") && (
-                  <th onClick={() => applySort("startDate")} style={{ ...HEADER_CELL_STYLE, cursor: "pointer" }}>
+                  <th onClick={() => applySort("startDate")} style={{ cursor: "pointer", minWidth: COLUMN_MIN_WIDTHS.startDate }}>
                     Start date{sortIndicator("startDate")}
                   </th>
                 )}
-                {visibleColumns.includes("dayTime") && <th style={HEADER_CELL_STYLE}>Day/Time</th>}
-                {visibleColumns.includes("weeks") && <th style={HEADER_CELL_STYLE}>Weeks</th>}
-                {visibleColumns.includes("tests") && <th style={HEADER_CELL_STYLE}>Tests</th>}
-                {visibleColumns.includes("lms") && <th style={HEADER_CELL_STYLE}>LMS</th>}
-                {visibleColumns.includes("githubOrg") && <th style={HEADER_CELL_STYLE}>Organization</th>}
-                {visibleColumns.includes("syllabusId") && <th style={HEADER_CELL_STYLE}>Syllabus</th>}
-                {visibleColumns.includes("textbook") && <th style={HEADER_CELL_STYLE}>Textbook</th>}
-                {visibleColumns.includes("rosterCount") && <th style={HEADER_CELL_STYLE}>Roster</th>}
-                {visibleColumns.includes("studentRepoCount") && <th style={HEADER_CELL_STYLE}>Student repos</th>}
-                {visibleColumns.includes("reposCount") && <th style={HEADER_CELL_STYLE}>Repos</th>}
-                <th style={HEADER_CELL_STYLE}>Actions</th>
+                {visibleColumns.includes("dayTime") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.dayTime }}>Day/Time</th>}
+                {visibleColumns.includes("weeks") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.weeks }}>Weeks</th>}
+                {visibleColumns.includes("tests") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.tests }}>Tests</th>}
+                {visibleColumns.includes("lms") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.lms }}>LMS</th>}
+                {visibleColumns.includes("githubOrg") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.githubOrg }}>Organization</th>}
+                {visibleColumns.includes("syllabusId") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.syllabusId }}>Syllabus</th>}
+                {visibleColumns.includes("textbook") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.textbook }}>Textbook</th>}
+                {visibleColumns.includes("rosterCount") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.rosterCount }}>Roster</th>}
+                {visibleColumns.includes("studentRepoCount") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.studentRepoCount }}>Student repos</th>}
+                {visibleColumns.includes("reposCount") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.reposCount }}>Repos</th>}
+                <th style={{ minWidth: COLUMN_MIN_WIDTHS.actions }}>Actions</th>
               </tr>
             </thead>
             <tbody>

@@ -7,13 +7,14 @@
 import { useState } from "react";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
-import { deriveCourseCounts, type ColumnId, type TableEditableField } from "@/lib/courses-table-helpers";
+import { COLUMN_MIN_WIDTHS, deriveCourseCounts, type ColumnId, type TableEditableField } from "@/lib/courses-table-helpers";
 import type { UseCourseImportActionsReturn } from "./useCourseImportActions";
 import EditableCell from "./EditableCell";
 import LmsCell from "./LmsCell";
 import SyllabusCell from "./SyllabusCell";
 import RowDetail from "./RowDetail";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export interface CourseRowProps {
   course: Course;
@@ -37,14 +38,6 @@ export interface CourseRowProps {
   downloadSyllabusBusy: boolean;
   onSyllabusUploaded: (course: Course, syllabusId: string) => void;
 }
-
-const NAME_CELL_STYLE: React.CSSProperties = {
-  position: "sticky",
-  left: 0,
-  background: "var(--card-background)",
-  zIndex: 1,
-  minWidth: 220,
-};
 
 export default function CourseRow({
   course,
@@ -77,7 +70,7 @@ export default function CourseRow({
   return (
     <>
       <tr>
-        <td style={NAME_CELL_STYLE}>
+        <td className={tableStyles.stickyName} style={{ minWidth: COLUMN_MIN_WIDTHS.name }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <button
               type="button"

@@ -124,6 +124,32 @@ export function serializeColumnSet(columns: ColumnId[]): string {
 }
 
 // ---------------------------------------------------------------------------
+// Column min-widths (table layout)
+
+/** Minimum width (px) applied as each th's inline minWidth style. Header
+ * cells govern their column's width for the whole table, so horizontal
+ * scroll inside the table's scroller wrapper engages exactly when the
+ * visible columns need more room than the viewport gives them - never
+ * before, and never a fixed table-wide minimum regardless of which optional
+ * columns are shown. */
+export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = {
+  name: 240,
+  institution: 150,
+  startDate: 120,
+  dayTime: 140,
+  weeks: 70,
+  tests: 70,
+  lms: 190,
+  githubOrg: 170,
+  syllabusId: 230,
+  textbook: 260,
+  rosterCount: 80,
+  studentRepoCount: 110,
+  reposCount: 80,
+  actions: 240,
+};
+
+// ---------------------------------------------------------------------------
 // Derived (read-only) count columns
 
 export interface DerivedCourseCounts {

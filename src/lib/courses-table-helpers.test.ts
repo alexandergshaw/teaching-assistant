@@ -8,6 +8,7 @@ import {
   DEFAULT_VISIBLE_COLUMNS,
   parseColumnSet,
   serializeColumnSet,
+  COLUMN_MIN_WIDTHS,
   deriveCourseCounts,
   computeFieldPatch,
   canLms,
@@ -138,6 +139,19 @@ describe("parseColumnSet / serializeColumnSet", () => {
   it("round-trips through serializeColumnSet", () => {
     const cols: typeof ALL_COLUMN_IDS[number][] = ["lms", "textbook"];
     expect(parseColumnSet(serializeColumnSet(cols))).toEqual(cols);
+  });
+});
+
+describe("COLUMN_MIN_WIDTHS", () => {
+  it("has a positive-integer entry for every column id plus name/actions, and no extra keys", () => {
+    const expectedKeys = [...ALL_COLUMN_IDS, "name", "actions"].sort();
+    const actualKeys = Object.keys(COLUMN_MIN_WIDTHS).sort();
+    expect(actualKeys).toEqual(expectedKeys);
+    for (const key of actualKeys) {
+      const width = COLUMN_MIN_WIDTHS[key as keyof typeof COLUMN_MIN_WIDTHS];
+      expect(Number.isInteger(width)).toBe(true);
+      expect(width).toBeGreaterThan(0);
+    }
   });
 });
 

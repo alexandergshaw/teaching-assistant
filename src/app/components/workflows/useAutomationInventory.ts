@@ -16,6 +16,7 @@ import {
 import type { WorkflowDef } from "@/lib/workflows/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { User } from "@supabase/supabase-js";
+import type { Database } from "@/lib/supabase/types";
 
 export interface UseAutomationInventoryReturn {
   workflows: WorkflowDef[];
@@ -37,8 +38,7 @@ export interface UseAutomationInventoryReturn {
 
 export function useAutomationInventory(
   user: User | null,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: SupabaseClient<any, "public", any> | null,
+  supabase: SupabaseClient<Database> | null,
   active: boolean
 ): UseAutomationInventoryReturn {
   const [custom, setCustom] = useState<WorkflowDef[]>(() =>

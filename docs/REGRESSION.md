@@ -711,10 +711,11 @@ most likely to break again when these files are edited.
 
 ### 2026-07-22 - Courses tab table view (Phase 2)
 
-1. The Courses tab is a table: one row per course, sticky sortable header
-   (name/startDate, ta-courses-sort), sticky name column, column-visibility
-   menu (ta-courses-columns; name/actions always shown), derived
-   roster/student-repo/repo count columns.
+1. The Courses tab is a table: one row per course, sortable header
+   (name/startDate, ta-courses-sort), sticky header + frozen name column via
+   the container-scroll idiom (see the sticky-header entry below),
+   column-visibility menu (ta-courses-columns; name/actions always shown),
+   derived roster/student-repo/repo count columns.
 2. Scalar fields edit inline in cells through computeFieldPatch + the update
    action with the pre-redesign patch semantics (weeks/tests numeric handling,
    lms null-when-blank, repos topic-extraction side effect); failed saves keep
@@ -751,9 +752,10 @@ most likely to break again when these files are edited.
    ScheduleEditForm/TriggerEditForm components consumed by BOTH the
    per-workflow Automate panel (byte-identical rendering - the only added
    error line is gated behind an error prop the panel passes null) and the
-   hub; the pure validators live in workflow-form-helpers (exported, 53
-   tests: interval minimums, runAt rules, per-event required config, scope
-   fallbacks).
+   hub; the pure validators live in workflow-form-helpers (exported, 26
+   tests covering interval minimums, runAt rules, per-event required config,
+   and scope fallbacks - the 53 recorded at entry time was an implementer
+   overcount, corrected 2026-07-22 after a regression run counted the file).
 2. Every hub row has a Details disclosure showing cadence/runAt/interval or
    event + every configured field (event-source labels, resolved display
    names), course, institution, unattended, full last-run, and a field-values
@@ -873,3 +875,41 @@ this split created.
    same commit. CaptionStudio reads several of these keys directly.
 9. Hygiene: no eslint-disable comments and no emojis anywhere in
    RecordingTab.tsx, TabShell.tsx, or src/app/components/recording/.
+
+### 2026-07-22 - Courses table sticky header + column min-widths
+
+Context: the Phase 2 header carried position: sticky with a page-level offset,
+but its overflow-x wrapper was a scroll container, so sticky never engaged;
+and the table borrowed .courseScheduleTable, whose positional width rules
+(built for the course-planning schedule shape) squeezed Name/Institution/
+Actions. Replaced with a dedicated colocated module using the
+container-scroll idiom.
+
+1. Dedicated styles: the Courses table uses
+   src/app/components/courses/CoursesTable.module.css (.scroller/.table/
+   .stickyName) and does NOT reference .courseScheduleTable;
+   .courseScheduleTable in page.module.css is untouched and still styles the
+   course-planning schedule table exactly as before.
+2. Sticky mechanics (container-scroll): .scroller is the scroll box
+   (max-height calc(100vh - topbar - 160px), overflow auto); thead th sticks
+   to top: 0 (z-index 2, opaque color-mix background); the name header is the
+   sticky corner (left: 0, z-index 3); body name cells use .stickyName
+   (left: 0, z-index 1, opaque background with an even-row zebra override).
+   Verified live: with the container scrolled on both axes, the header row
+   and name column stay pinned to the scroller edges.
+3. Sticky-safe borders: the table uses border-collapse: separate with
+   border-spacing 0 and one-sided cell borders (bottom + right, outer edges
+   suppressed) - required because collapsed borders scroll away from a sticky
+   header. No positional td width rules exist in the module.
+4. Column widths: COLUMN_MIN_WIDTHS (courses-table-helpers.ts) maps every
+   ColumnId plus name/actions to a px minimum applied as each th's inline
+   minWidth; the table has no hard element-level minWidth. A completeness
+   test pins the key set to ALL_COLUMN_IDS + name/actions with positive
+   values (courses-table-helpers.test.ts, 26 tests).
+5. Unchanged behavior: sort clicks/indicators, ta-courses-sort and
+   ta-courses-columns persistence, inline cell editing, row expansion
+   (RowDetail renders inside the scroller), the actions column, and the
+   Phase 2 entry's checks all hold. No new persisted controls were added.
+   Unit-test disposition: COLUMN_MIN_WIDTHS is the only new pure logic and is
+   covered by the completeness test; the CSS module and class swaps have no
+   unit-testable surface.

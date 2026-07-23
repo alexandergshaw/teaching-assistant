@@ -6,6 +6,8 @@ import {
   isDefaultSourcePolicy,
   runSourcePolicy,
   DEFAULT_SOURCE_POLICY,
+  ALL_SOURCE_KINDS,
+  SOURCE_KIND_LABELS,
   type SourcePolicy,
   type SourceGatherOutcome,
   type SourceKind,
@@ -56,6 +58,26 @@ describe("encodeSourcePolicy / decodeSourcePolicy", () => {
       order: ["repo"],
       strategy: "first-success",
     });
+  });
+});
+
+describe("source-url kind", () => {
+  it("ALL_SOURCE_KINDS includes source-url, placed after course-export", () => {
+    expect(ALL_SOURCE_KINDS).toContain("source-url");
+    expect(ALL_SOURCE_KINDS.indexOf("source-url")).toBe(ALL_SOURCE_KINDS.indexOf("course-export") + 1);
+  });
+
+  it("every ALL_SOURCE_KINDS entry has a label, including source-url", () => {
+    for (const kind of ALL_SOURCE_KINDS) {
+      expect(SOURCE_KIND_LABELS[kind], `${kind} has a label`).toBeTruthy();
+    }
+    expect(SOURCE_KIND_LABELS["source-url"]).toBe("Source platform URL");
+  });
+
+  it("round-trips source-url through encode/decode instead of dropping it", () => {
+    const policy: SourcePolicy = { order: ["source-url", "tile-meta"], strategy: "first-success" };
+    const decoded = decodeSourcePolicy(encodeSourcePolicy(policy));
+    expect(decoded).toEqual(policy);
   });
 });
 

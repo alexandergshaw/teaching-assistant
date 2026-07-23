@@ -46,7 +46,8 @@ async function gatherSupplementalMaterials(
   helpers: Parameters<typeof gatherModuleMaterials>[2],
   onProgress: (msg: string) => void,
   sourcesRaw: string,
-  excludeRepo: boolean
+  excludeRepo: boolean,
+  sourceHint?: string
 ): Promise<{ text: string; notes: string[] }> {
   const policy = resolveSourcePolicy(sourcesRaw);
   const effectivePolicy: SourcePolicy = excludeRepo
@@ -63,7 +64,7 @@ async function gatherSupplementalMaterials(
   if ("error" in list) return { text: "", notes };
   const tile = list.courses.find((c) => c.id === hubCourseId);
   if (!tile) return { text: "", notes };
-  const g = await gatherModuleMaterials(tile, "", helpers, onProgress, effectivePolicy);
+  const g = await gatherModuleMaterials(tile, "", helpers, onProgress, effectivePolicy, { sourceHint });
   return { text: g.materialsText, notes: [...notes, ...g.notes] };
 }
 
@@ -96,7 +97,7 @@ async function runLectureZipRepoless(
   const policy = resolveSourcePolicy(String(values.sources ?? ""));
   const gathered = await gatherModuleMaterials(tile, "", helpers, onProgress, policy);
 
-  const scheduleResolution = resolveRepolessSchedule(values.schedule, tile);
+  const scheduleResolution = resolveRepolessSchedule(values.schedule, tile, gathered.moduleNames);
   const schedule = scheduleResolution.schedule;
   const tierDetail = `schedule tiers tried: ${scheduleResolution.tried.join("; ")}`;
 
@@ -371,7 +372,8 @@ export const contentLectureSteps: StepDefinition[] = [
         helpers,
         onProgress,
         String(values.sources ?? ""),
-        false
+        false,
+        sourceMaterial || undefined
       );
 
       onProgress("Generating lecture materials from schedule...");

@@ -31,6 +31,7 @@ import {
   listCourseHubAction,
   generateLectureMaterialsFromScheduleAction,
   getRepoZipAction,
+  listCourseContentAction,
 } from "@/app/actions";
 import { getStepDefinition } from "./registry";
 import { assembleLectureFiles, type StepRunHelpers } from "./registry-helpers";
@@ -301,6 +302,86 @@ describe("lecture-zip step", () => {
     expect(result.summary.kind).toBe("list");
     if (result.summary.kind === "list") {
       expect(result.summary.items.some((i) => i.includes("schedule derived from the tile's topics"))).toBe(true);
+    }
+  });
+
+  // AC6: the user's exact reported scenario - live-lms policy (the default),
+  // a tile with a canvasUrl and modules, a schedule CSV with 10 topic-less
+  // weeks, and a blank topics field. Previously: "No usable content sources"
+  // (the live-lms gatherer silently no-op'd with no module bound). Now: the
+  // step succeeds, sourcing materials from the LMS and weeks from module
+  // names.
+  it("AC6: live-lms + canvasUrl + modules + 10 topic-less CSV weeks + blank topics -> succeeds", async () => {
+    const csvRows = Array.from({ length: 10 }, (_, i) => `${i + 1},,,,`).join("\n");
+    const csvData = ["week,topic,summary,assignment,test", csvRows].join("\n");
+    const tile = baseCourse({
+      id: "course-1",
+      name: "Computer Science Principles",
+      canvasUrl: "https://canvas.example.com/courses/1",
+      csvData,
+      topics: "",
+    });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+    vi.mocked(listCourseContentAction).mockResolvedValue({
+      courseName: "Computer Science Principles",
+      pages: [],
+      modules: [
+        {
+          id: 1,
+          name: "Unit 1: Intro to CS",
+          position: 1,
+          published: true,
+          itemsCount: 1,
+          items: [
+            {
+              id: 1,
+              moduleId: 1,
+              type: "Page",
+              title: "Welcome",
+              position: 1,
+              indent: 0,
+              published: true,
+              contentId: null,
+              htmlUrl: null,
+              pageUrl: null,
+              dueAt: null,
+              pointsPossible: null,
+              externalUrl: null,
+            },
+          ],
+        },
+        {
+          id: 2,
+          name: "Unit 2: Variables",
+          position: 2,
+          published: true,
+          itemsCount: 0,
+          items: [],
+        },
+      ],
+    });
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [{ name: "f.pptx", blob: new Blob([]), mimeType: "x", weekNumber: 1, sortOrder: 1, role: "slides" }],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+
+    const result = await step.run(
+      { repo: "", minutes: 50, hubCourse: "course-1" },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(generateLectureMaterialsFromScheduleAction).toHaveBeenCalledTimes(1);
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    const scheduleArg = JSON.parse(callArgs[0] as string) as Array<{ topic: string }>;
+    expect(scheduleArg.map((w) => w.topic)).toEqual(["Unit 1: Intro to CS", "Unit 2: Variables"]);
+    expect(callArgs[6]).toContain("Welcome");
+
+    expect(result.summary.kind).toBe("list");
+    if (result.summary.kind === "list") {
+      expect(result.summary.items.some((i) => i.includes("schedule derived from"))).toBe(true);
+      expect(result.summary.items.some((i) => i.includes("LMS module"))).toBe(true);
     }
   });
 });

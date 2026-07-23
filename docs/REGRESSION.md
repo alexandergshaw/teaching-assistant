@@ -1176,3 +1176,64 @@ reported cause.)
 4. Repo-present lecture-zip path untouched; registry.lecture-zip.test.ts
    covers the new error message, the bound-JSON-string path, and the
    topics-synthesis path reaching the action with the derived schedule.
+
+### 2026-07-23 - Course-level material sources + source platform URL
+
+Context: a user selected "Live LMS connection" for weekly lecture prep and it
+was silently ignored - the gatherer only acted with a module id, and the
+repoless lecture-zip always passes "" - then the run failed listing ONLY
+schedule tiers, with no source notes at all (the silence was the tell).
+
+1. No silent sources: every gatherer emits at least one note whenever it
+   yields no material, naming the source and the reason (the previously
+   note-less live-LMS fall-through included). A live-lms policy on a tile
+   with no canvasUrl produces a note saying so; the export helper explains
+   an unwired loader and a missing/module-less export. ONE deliberate
+   exception: the standalone course-export entry stays silent when live-lms
+   already ran, because that gatherer tried the export as its own fallback
+   and already reported the outcome - a note here would repeat in every
+   default-policy run (pinned by the default-policy note-list test).
+2. Course-level gathering when no module is selected: live-lms auto-picks
+   the current week's module (reusing resolveTileCurrentWeek +
+   findModuleForWeek - the same pairing steps.content-generators.ts uses)
+   and gathers it with the byte-identical per-item logic; when the week does
+   not resolve it digests every module's name + item titles (no page/file
+   body fetches - noted). course-export digests all export modules the same
+   way. Module-SELECTED behavior is byte-identical to before.
+3. gatherModuleMaterials returns optional moduleNames (the gathered or
+   digested module names); the repoless lecture-zip threads it into the
+   schedule ladder.
+4. Schedule ladder tier order: bound input -> tile CSV (with aliasing per
+   check 5) -> LMS/export module names -> tile topics -> empty. The LMS tier
+   maps ordered module names to weeks, dropping review/exam-style names via
+   isNonContentWeekText unless filtering would empty the list (then all are
+   kept, noted). Notes/`tried` audit name the winning tier and its count.
+5. CSV topic aliasing lives in schedule-resolution.ts (shared csvToSchedule
+   NOT modified, reusing parseCsvRows): when the CSV yields weeks but none
+   has a topic, topics are read from the first present alias header among
+   topics/title/subject/lesson/module/description; an exact non-blank
+   "topic" column always wins; the note names the column used.
+6. End-to-end guard (registry.lecture-zip.test.ts) reproduces the reported
+   scenario: live-lms policy + tile with canvasUrl and modules + a CSV with
+   10 topic-less weeks + blank topics field -> the step SUCCEEDS, materials
+   from the LMS, weeks from module names.
+7. "Source platform URL" material source: SourceKind "source-url" (label
+   "Source platform URL") in ALL_SOURCE_KINDS after "course-export", so it
+   appears in every checklist incl. both kickoff variants (COURSE_KICKOFF
+   surfaces `sources` through its included course-refresh's lecture-zip -
+   runtime bindings pass through expansion unchanged, verified by test; no
+   preset wiring was needed). It resolves a URL from an explicit step hint
+   (lecture-materials-from-schedule passes its sourceMaterial), else the
+   tile's integrations links, else a URL in the tile's textbook, then
+   derives the official outline via the EXISTING deriveTocFromSource -
+   never fetching the login-walled platform page. No URL, or a null
+   derivation, is a note; never throws. DEFAULT_SOURCE_POLICY unchanged
+   (opt-in only). gatherModuleMaterials gained an additive options
+   parameter (sourceHint); all prior call sites byte-identical.
+8. No module cycle: resolveTileCurrentWeek lives in tile-week.ts because
+   registry-helpers.ts re-exports the gatherers that need it;
+   registry-helpers.ts imports it locally and re-exports it (import surface
+   unchanged), and the only edges from tile-week.ts and
+   registry-helpers.sources.ts back to registry-helpers.ts are `import type`
+   (erased - no runtime cycle). A future value import there would
+   reintroduce the cycle; keep them type-only.

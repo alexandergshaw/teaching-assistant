@@ -12,6 +12,7 @@
 export type SourceKind =
   | "live-lms"
   | "course-export"
+  | "source-url"
   | "materials-zip"
   | "repo"
   | "tile-meta";
@@ -27,6 +28,7 @@ export interface SourcePolicy {
 export const ALL_SOURCE_KINDS: readonly SourceKind[] = [
   "live-lms",
   "course-export",
+  "source-url",
   "materials-zip",
   "repo",
   "tile-meta",
@@ -41,6 +43,7 @@ export const ALL_SOURCE_STRATEGIES: readonly SourceStrategy[] = [
 export const SOURCE_KIND_LABELS: Record<SourceKind, string> = {
   "live-lms": "Live LMS connection",
   "course-export": "Course LMS export",
+  "source-url": "Source platform URL",
   "materials-zip": "Uploaded materials zip",
   repo: "Repository digest",
   "tile-meta": "Tile topics/description",

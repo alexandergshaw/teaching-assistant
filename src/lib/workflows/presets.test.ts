@@ -487,6 +487,32 @@ describe("course-kickoff-no-code preset", () => {
     expect(runtimeFields.map((f) => f.fieldKey)).not.toContain("templateRepo");
     expect(runtimeFields.map((f) => f.fieldKey)).not.toContain("newRepoName");
   });
+
+  // Both course kickoff variants must surface the material-sources checklist
+  // (the new "source-url" kind lives there) in their own run form. NO_CODE_KICKOFF
+  // binds it directly on lecture-materials-from-schedule; COURSE_KICKOFF gets it
+  // for free through its included course-refresh's kept lecture-zip step (that
+  // step's own "sources" binding is a runtime binding, not a "step" binding, so
+  // expandWorkflowDef copies it through unchanged - no bindOverrides needed).
+  for (const id of ["course-kickoff", "course-kickoff-no-code"]) {
+    it(`${id} surfaces the shared "sources" material-sources field in its run form`, () => {
+      const all = allWorkflows([]);
+      const byId = new Map(all.map((w) => [w.id, w]));
+      const lookup = (wid: string) => byId.get(wid);
+
+      const wf = byId.get(id);
+      expect(wf, `${id} is registered`).toBeTruthy();
+
+      const expanded = expandWorkflowDef(wf!, lookup);
+      const expandedDef: WorkflowDef = { ...wf!, steps: expanded.steps };
+      const fields = collectRuntimeFields(expandedDef, (t) => getStepDefinition(t)?.inputs);
+
+      const sourcesField = fields.find((f) => f.fieldKey === "sources");
+      expect(sourcesField, `${id}: run form never asks for material sources`).toBeTruthy();
+      expect(sourcesField!.type).toBe("sourcePolicy");
+      expect(sourcesField!.required).toBe(false);
+    });
+  }
 });
 
 describe("deep-check presets", () => {

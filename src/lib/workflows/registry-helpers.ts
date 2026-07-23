@@ -6,7 +6,6 @@ import type { ScheduleWeekPlan, AssignmentPlan } from "@/app/actions";
 import {
   listCourseContentAction,
   listCourseHubAction,
-  listAssignmentDueDatesByUrlAction,
   getDeckTemplateAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
@@ -17,7 +16,8 @@ import type { PptxTheme } from "@/lib/pptx";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
-import { currentCourseWeek, courseProgressStatus, currentWeekFromDeadlines } from "@/lib/week-numbering";
+import { courseProgressStatus } from "@/lib/week-numbering";
+import { resolveTileCurrentWeek } from "@/lib/workflows/tile-week";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
 import type { CommonResourceItem } from "@/lib/common-resources";
 import type { InstitutionField } from "@/lib/institution-fields";
@@ -385,57 +385,11 @@ export async function loadTileWeekTopic(
   });
 }
 
-// Resolve the current week from deadline data if available, with fallback to start-date arithmetic.
-// - If start-date arithmetic says the course has not started (currentCourseWeek returns 0),
-//   return the start-date result (deadline data must not mark a future course in-progress).
-// - Else if tile.canvasUrl is set: call listAssignmentDueDatesByUrlAction; on success feed
-//   currentWeekFromDeadlines, which returns rawWeek with source "deadlines".
-// - Any action error, no canvas URL, or null result: fall back to currentCourseWeek with source "start-date".
-// - Returns skip only when start date is missing/invalid.
-export async function resolveTileCurrentWeek(
-  tile: Course,
-  helpers: StepRunHelpers
-): Promise<{ rawWeek: number; source: "deadlines" | "start-date" } | { skip: string }> {
-  // Check start-date arithmetic first
-  const startDateWeek = currentCourseWeek(tile.startDate, Date.now());
-  if (startDateWeek === null) {
-    return { skip: "no start date" };
-  }
-
-  // If course hasn't started according to start-date arithmetic, use that result
-  if (startDateWeek === 0) {
-    return { rawWeek: 0, source: "start-date" };
-  }
-
-  // Course has started; try deadline-based approach if canvasUrl is available
-  if (tile.canvasUrl) {
-    try {
-      const result = await listAssignmentDueDatesByUrlAction(
-        tile.canvasUrl,
-        tile.institution ?? helpers.activeInstitution ?? undefined
-      );
-      if ("error" in result) {
-        // Silent fallback on error
-        return { rawWeek: startDateWeek, source: "start-date" };
-      }
-
-      const deadlineResult = currentWeekFromDeadlines(result.assignments, Date.now());
-      if (deadlineResult !== null) {
-        // Success - use deadline-based week (pastLastDeadline flag is ignored here; caller handles it)
-        return { rawWeek: deadlineResult.week, source: "deadlines" };
-      }
-
-      // No usable deadline entries - fall back to start-date
-      return { rawWeek: startDateWeek, source: "start-date" };
-    } catch {
-      // Silent fallback on exception
-      return { rawWeek: startDateWeek, source: "start-date" };
-    }
-  }
-
-  // No canvasUrl - use start-date result
-  return { rawWeek: startDateWeek, source: "start-date" };
-}
+// resolveTileCurrentWeek lives in tile-week.ts so registry-helpers.sources.ts
+// can use it without importing this file (which re-exports those gatherers).
+// Re-exported here so this file's import surface is unchanged; the local
+// import below is what this file's own callers bind to.
+export { resolveTileCurrentWeek };
 
 // Loads the workflow-scoped course tile and returns its CURRENT module/week
 // topic + learning-outcomes summary, or null when there is nothing to derive

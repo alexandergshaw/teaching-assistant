@@ -94,7 +94,14 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
         minutes: { source: "literal", value: "50" },
         description: { source: "step", stepIndex: 0, outputKey: "description" },
         context: { source: "runtime", fieldKey: "context" },
-        sourceMaterial: { source: "runtime", fieldKey: "sourceMaterial" },
+        // Bound to generate-schedule's resolvedSourceMaterial output (not the
+        // raw runtime field) so a derived TOC (see shouldDeriveToc /
+        // deriveTocFromSource) grounds this step's aligned prompt branch too,
+        // with no second search call: that output already falls back to the
+        // original sourceMaterial text unchanged for the pasted-TOC and
+        // name-only tiers, so this step's own aligned/name-only branch (the
+        // same parseTocChapters test) behaves exactly as it did before.
+        sourceMaterial: { source: "step", stepIndex: 1, outputKey: "resolvedSourceMaterial" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         includeInstructions: { source: "literal", value: "1" },
         template: { source: "runtime", fieldKey: "deckTemplate" },

@@ -7,11 +7,12 @@ import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { extractTextFromBuffer } from "@/lib/office-extract";
-import { callLlm, type LlmProvider } from "@/lib/llm";
+import { callLlm, type LlmProvider, type Source } from "@/lib/llm";
 import { courseEngineSchedule, courseEngineLecture, courseEngineMaterials, type CourseEngineFile, type CourseEngineUploadFile, type CourseEngineHomework, type ScheduleResponse } from "@/lib/course-engine";
 import { requireOwner } from "@/lib/supabase/auth";
 import { extractJsonObject, jsonObjectSlice, mapWithConcurrency, toSlideData, propagateExampleCodeToFollowups } from "./shared";
-import { parseTocChapters, isNonContentWeekText, describeCoveredChapters } from "@/lib/workflows/source-alignment";
+import { parseTocChapters, isNonContentWeekText, describeCoveredChapters, shouldDeriveToc } from "@/lib/workflows/source-alignment";
+import { deriveTocFromSource } from "./course-planning-grounding";
 
 
 /** Generate a lecture deck with slides and announcement from course materials. */
@@ -542,6 +543,14 @@ export async function generateCourseMaterialsAction(
 
 /** Represents a single week in a course schedule with topic, assignments, and tests. */
 
+// Shared between the pasted-TOC and derived-TOC aligned branches so the
+// balancing policy text is identical either way (see generateSchedulePlanAction).
+const CHAPTER_ALIGNMENT_POLICY = `Align the weekly plan to this source's chapters/modules in order (week N covers chapter(s) X), and name the covered chapter(s) in each week's summary (e.g., "Chapter 3: Functions" or "Chapters 2-4: Foundations"). Apply this balancing policy:
+- Fewer chapters than weeks: allocate the extra weeks to the densest chapters (judged from the subsection counts shown in the source material above), splitting a dense chapter into "Chapter N - Part I" and "Chapter N - Part II", and insert standard non-content weeks (a mid-term review and exam near the midpoint; a project and/or final-review and final week near the end) as needed to fill out the term.
+- More chapters than weeks: group adjacent related chapters into shared weeks (e.g., "Chapters 4-5: ...") - never drop a chapter.
+- Never invent source content: every week's summary names exactly what it covers (e.g., "Chapter 7: ...", "Review - Chapters 1-6", "Final project week").
+- The instructor context below overrides these rules where it speaks (e.g. "no exam weeks" removes the exam week even where this policy would otherwise add one).`;
+
 /**
  * Generate a course schedule from a high-level description, distributing assignments and tests evenly.
  * Returns a courseTitle and the structured week plan used by workflows (assignment slugs + test
@@ -554,7 +563,10 @@ export async function generateSchedulePlanAction(
   provider: LlmProvider = "gemini",
   context?: string,
   sourceMaterial?: string
-): Promise<{ courseTitle: string; schedule: ScheduleWeekPlan[] } | { error: string }> {
+): Promise<
+  | { courseTitle: string; schedule: ScheduleWeekPlan[]; derivedToc?: string; derivedSources?: Source[] }
+  | { error: string }
+> {
   try {
     await requireOwner();
 
@@ -587,30 +599,50 @@ Topics should progress from foundational to advanced.
 Course description:
 ${courseDescription}`;
 
+    let derivedToc: string | undefined;
+    let derivedSources: Source[] | undefined;
+
     if (sourceMaterial?.trim()) {
       // "Aligned" means the source material parses as a real chapter/module
       // list (see parseTocChapters); the same test drives the post-generation
       // balance check in the generate-schedule step. When it does not parse
       // (e.g. a bare textbook citation used as a fallback source), the schedule
-      // still names the source, but weaker: no attempt at chapter alignment.
-      const aligned = parseTocChapters(sourceMaterial).length > 0;
-      if (aligned) {
+      // still names the source, but weaker: no attempt at chapter alignment -
+      // UNLESS the text looks like a course identifier (shouldDeriveToc: a
+      // URL or a short citation), in which case one web-search-grounded call
+      // (deriveTocFromSource) tries to find the source's real published table
+      // of contents first; a miss falls back to the same name-only branch.
+      const pastedChapters = parseTocChapters(sourceMaterial);
+      if (pastedChapters.length > 0) {
         prompt += `
 
 Source material alignment:
 ${sourceMaterial.trim()}
 
-Align the weekly plan to this source's chapters/modules in order (week N covers chapter(s) X), and name the covered chapter(s) in each week's summary (e.g., "Chapter 3: Functions" or "Chapters 2-4: Foundations"). Apply this balancing policy:
-- Fewer chapters than weeks: allocate the extra weeks to the densest chapters (judged from the subsection counts shown in the source material above), splitting a dense chapter into "Chapter N - Part I" and "Chapter N - Part II", and insert standard non-content weeks (a mid-term review and exam near the midpoint; a project and/or final-review and final week near the end) as needed to fill out the term.
-- More chapters than weeks: group adjacent related chapters into shared weeks (e.g., "Chapters 4-5: ...") - never drop a chapter.
-- Never invent source content: every week's summary names exactly what it covers (e.g., "Chapter 7: ...", "Review - Chapters 1-6", "Final project week").
-- The instructor context below overrides these rules where it speaks (e.g. "no exam weeks" removes the exam week even where this policy would otherwise add one).`;
+${CHAPTER_ALIGNMENT_POLICY}`;
       } else {
-        prompt += `
+        const derivation = shouldDeriveToc(sourceMaterial)
+          ? await deriveTocFromSource(sourceMaterial, provider)
+          : null;
+
+        if (derivation) {
+          derivedToc = derivation.toc;
+          derivedSources = derivation.sources;
+          prompt += `
+
+Primary source: ${sourceMaterial.trim()}
+
+Source material alignment (the official table of contents, found via web search):
+${derivation.toc}
+
+${CHAPTER_ALIGNMENT_POLICY}`;
+        } else {
+          prompt += `
 
 Primary source: ${sourceMaterial.trim()}
 
 No table of contents was provided for this source, so mention it by name in weeks where it fits naturally - do not attempt chapter-by-chapter alignment or invent a chapter structure.`;
+        }
       }
     }
 
@@ -680,7 +712,7 @@ ${context.trim()}`;
       courseTitle = firstSentence.slice(0, 80).trim();
     }
 
-    return { courseTitle, schedule };
+    return { courseTitle, schedule, derivedToc, derivedSources };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate the schedule." };
   }

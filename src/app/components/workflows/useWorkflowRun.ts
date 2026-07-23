@@ -5,8 +5,15 @@ import { resolveDocumentAuthor } from "@/lib/author";
 import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFile } from "@/lib/recording-files";
 import { uploadCourseZip, uploadCourseZipChunked, removeCourseZip, removeCourseZipObjects } from "@/lib/course-files";
 import { isScopeableListType, expandScopedValue, resolveClassRepoRef, resolveClassTileRef } from "@/lib/workflows/scope";
-import { isInstitutionFanout, isCourseFanout, resolveFanoutInstitutions, resolveFanoutCourses, scopeForInstitution, scopeForCourse } from "@/lib/workflows/fanout";
-import { applyStopAfterCourse, buildCourseFanoutDetail, type RunStateGroup, type CourseOutcome } from "./attended-fanout";
+import { isInstitutionFanout, isCourseFanout, isComposedFanout, resolveFanoutInstitutions, resolveFanoutCourses, scopeForInstitution, scopeForCourse } from "@/lib/workflows/fanout";
+import {
+  applyStopAfterCourse,
+  buildCourseFanoutDetail,
+  buildComposedFanoutEntities,
+  pinComposedGroupScope,
+  type RunStateGroup,
+  type CourseOutcome,
+} from "./attended-fanout";
 import { loadInstitutionFields } from "@/lib/institution-fields";
 import { appendCourseMaterialFileAction, appendCourseExportFileAction } from "@/app/actions";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
@@ -283,19 +290,32 @@ export function useWorkflowRun(
     stopAfterCourseRef.current = false;
     setStopRequested(false);
 
-    const instFanout = isInstitutionFanout(selectedDef.scope);
-    const hubCourse = (selectedDef.scope?.hubCourse ?? "").trim();
-    const courseFanout = hubCourse === "*" || (hubCourse.split("\n").map((s) => s.trim()).filter(Boolean).length >= 2);
-    if (instFanout && courseFanout) {
-      setValidationError("Scope cannot target all institutions and multiple course tiles at once - pick one fan-out dimension.");
-      setRunning(false);
-      return;
-    }
-
-    const isCourseRun = isCourseFanout(selectedDef.scope);
+    // A composed fan-out (institution "*" AND multiple course tiles) is NOT a
+    // nested (institution x course) product - a course tile belongs to exactly
+    // one institution, so this collapses to a single course-dimension fan-out
+    // with each entity's institution derived from the tile itself (see
+    // fanout.ts's design note and the composed branch below). isCourseRun is
+    // true for a composed run too, so the existing course-fanout UI machinery
+    // (course progress numerator, "Stop after this course", course outcomes
+    // write-back) applies unchanged.
+    const isComposedRun = isComposedFanout(selectedDef.scope);
+    const isCourseRun = isCourseFanout(selectedDef.scope) || isComposedRun;
 
     let fanoutEntities: Array<{ institution: string | null; courseId?: string; courseName?: string }>;
-    if (isInstitutionFanout(selectedDef.scope)) {
+    if (isComposedRun) {
+      const resolved = await resolveFanoutCourses(selectedDef.scope, null);
+      if ("error" in resolved) {
+        setValidationError(`Could not list course tiles: ${resolved.error}`);
+        setRunning(false);
+        return;
+      }
+      if (resolved.list.length === 0) {
+        setValidationError("The scope matched no course tiles.");
+        setRunning(false);
+        return;
+      }
+      fanoutEntities = buildComposedFanoutEntities(resolved.list);
+    } else if (isInstitutionFanout(selectedDef.scope)) {
       const resolved = await resolveFanoutInstitutions();
       if ("error" in resolved) {
         setValidationError(`Could not list institutions: ${resolved.error}`);
@@ -308,7 +328,7 @@ export function useWorkflowRun(
         return;
       }
       fanoutEntities = resolved.list.map((acronym) => ({ institution: acronym }));
-    } else if (isCourseRun) {
+    } else if (isCourseFanout(selectedDef.scope)) {
       const resolved = await resolveFanoutCourses(selectedDef.scope, activeInstitution);
       if ("error" in resolved) {
         setValidationError(`Could not list course tiles: ${resolved.error}`);
@@ -455,15 +475,26 @@ export function useWorkflowRun(
 
       const entity = fanoutEntities[g];
       let groupScope = selectedDef.scope;
-      if (entity.institution) {
-        groupScope = scopeForInstitution(groupScope!, entity.institution);
+      let groupHelpers: StepRunHelpers = helpers;
+      if (isComposedRun) {
+        // Pin BOTH dimensions from the course tile itself (see fanout.ts's
+        // design note) - unlike the single-dimension branch below, this MUST
+        // run even when entity.institution is "" (falsy), so an
+        // institution-less tile still overwrites the original "*" instead of
+        // leaving it in place.
+        groupScope = pinComposedGroupScope(groupScope!, entity.courseId!, entity.institution);
+        groupHelpers = { ...helpers, activeInstitution: entity.institution };
+      } else {
+        if (entity.institution) {
+          groupScope = scopeForInstitution(groupScope!, entity.institution);
+        }
+        if (entity.courseId) {
+          groupScope = scopeForCourse(groupScope!, entity.courseId);
+        }
+        groupHelpers = entity.institution
+          ? { ...helpers, activeInstitution: entity.institution }
+          : helpers;
       }
-      if (entity.courseId) {
-        groupScope = scopeForCourse(groupScope!, entity.courseId);
-      }
-      const groupHelpers: StepRunHelpers = entity.institution
-        ? { ...helpers, activeInstitution: entity.institution }
-        : helpers;
 
       const stepOutputs: Array<Record<string, unknown>> = [];
       const failedSteps = new Set<number>();

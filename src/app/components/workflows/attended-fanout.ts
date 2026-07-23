@@ -9,6 +9,8 @@
 // Type-only import: erased at compile time, so importing this module never
 // pulls registry.ts's client-only step catalog into a test run.
 import type { StepRunSummary } from "@/lib/workflows/registry";
+import { scopeForInstitution, scopeForCourse } from "@/lib/workflows/fanout";
+import type { WorkflowScope } from "@/lib/workflows/types";
 
 export type CourseFanoutStatus = "ok" | "failed" | "skipped";
 
@@ -90,4 +92,37 @@ export function buildCourseFanoutDetail(outcomes: CourseOutcome[]): string {
  */
 export function countOkCourses(groups: RunStateGroup[]): number {
   return groups.filter((grp) => grp.courseStatus === "ok").length;
+}
+
+/**
+ * Build the fan-out entity list for a composed (institution "*" + course
+ * multiplicity) run: one entity per resolved course tile, carrying the
+ * tile's own institution (see fanout.ts's design note - a composed fan-out
+ * collapses to a single course-dimension fan-out with institution derived
+ * per tile, not a nested institution x course product). Pure - no I/O - so
+ * the composed-entity shape is unit-testable without a DOM environment.
+ */
+export function buildComposedFanoutEntities(
+  courses: Array<{ id: string; name: string; institution: string | null }>
+): Array<{ institution: string | null; courseId: string; courseName: string }> {
+  return courses.map((course) => ({
+    institution: course.institution,
+    courseId: course.id,
+    courseName: course.name,
+  }));
+}
+
+/**
+ * Pin a composed fan-out group's scope to one course tile's own id AND
+ * institution: scopeForInstitution(scopeForCourse(scope, tile.id), tile's
+ * institution ?? ""). An institution-less tile pins to "" (unset) rather
+ * than leaving the original "*" in place, so its scoped institution inputs
+ * resolve as unset - same as a single run on such a tile.
+ */
+export function pinComposedGroupScope(
+  scope: WorkflowScope,
+  courseId: string,
+  institution: string | null
+): WorkflowScope {
+  return scopeForInstitution(scopeForCourse(scope, courseId), institution ?? "");
 }

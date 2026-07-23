@@ -92,6 +92,46 @@ export function parseTocChapters(tocText: string): ParsedChapter[] {
   return chapters;
 }
 
+// A URL means the pasted text names a platform/page rather than pasting its
+// contents (e.g. a uCertify course link). Below this length with no
+// parseable chapters, treat the text as a short identifier/citation (a
+// textbook name, a course code) rather than a failed TOC paste - both cases
+// are worth one TOC-derivation search before falling back to name-only.
+const URL_PATTERN = /https?:\/\//i;
+const IDENTIFIER_LENGTH_THRESHOLD = 200;
+
+/**
+ * Whether sourceMaterial should trigger a TOC-derivation search (see
+ * deriveTocFromSource in src/app/actions/course-planning-grounding.ts)
+ * before falling back to the name-only prompt branch: the text has no
+ * parseable chapter list of its own (parseTocChapters finds none), AND it
+ * looks like a course identifier - a URL (the common case: a platform link),
+ * or short prose (an identifier/citation rather than prose describing the
+ * course, which the derivation search would have no better luck with).
+ */
+export function shouldDeriveToc(sourceMaterial: string): boolean {
+  const trimmed = (sourceMaterial ?? "").trim();
+  if (!trimmed) return false;
+  if (parseTocChapters(trimmed).length > 0) return false;
+  return URL_PATTERN.test(trimmed) || trimmed.length < IDENTIFIER_LENGTH_THRESHOLD;
+}
+
+/**
+ * Build the prompt for a web-search-grounded TOC-derivation call: asks for
+ * the official published table of contents / module list of a course or
+ * source identified only by a URL or a short citation, in the same
+ * "Module N: Title" shape parseTocChapters already understands.
+ */
+export function buildTocDerivationPrompt(sourceMaterial: string): string {
+  return `You are a research assistant finding the official table of contents for a course or published source.
+
+SOURCE: ${sourceMaterial.trim()}
+
+Search the web and find this source's official table of contents or module list - the platform's own course outline, a certification body's exam objectives / module list, or a textbook's published table of contents. A public course-outline page, certification blueprint, or textbook TOC is a valid source even when the platform itself requires a login to view the actual course content.
+
+Return ONLY the list, one top-level entry per line in "Module N: Title" form (use "Chapter N: Title" instead if the source is a textbook). Indented subsection lines are allowed. Do not include commentary, markdown fences, a preamble, or a closing remark - just the list.`;
+}
+
 /**
  * Analyze the balance between chapters in source material and weeks in the schedule.
  * Returns counts and summary of any misalignments.

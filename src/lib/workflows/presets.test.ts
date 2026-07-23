@@ -421,6 +421,28 @@ describe("course-kickoff-no-code preset", () => {
     }
   });
 
+  it("course-kickoff-no-code binds lecture-materials-from-schedule's sourceMaterial to generate-schedule's resolvedSourceMaterial output (TOC-derivation thread-through)", () => {
+    const wf = byId.get("course-kickoff-no-code");
+    expect(wf, "course-kickoff-no-code is registered").toBeTruthy();
+
+    const lectureMaterialsStep = wf!.steps[2];
+    expect(lectureMaterialsStep.type).toBe("lecture-materials-from-schedule");
+    const binding = lectureMaterialsStep.bindings.sourceMaterial;
+    expect(binding, "sourceMaterial binding exists").toBeTruthy();
+    expect(binding.source).toBe("step");
+    if (binding.source === "step") {
+      expect(binding.stepIndex).toBe(1);
+      expect(binding.outputKey).toBe("resolvedSourceMaterial");
+    }
+
+    // generate-schedule (step 1) must actually declare this output for the
+    // binding to be valid.
+    const scheduleDef = getStepDefinition(wf!.steps[1].type);
+    expect(scheduleDef!.outputs.some((o) => o.key === "resolvedSourceMaterial" && o.type === "longtext")).toBe(
+      true
+    );
+  });
+
   it("course-kickoff binds generate-schedule's hubCourse to the shared 'hubCourse' fieldKey (textbook fallback)", () => {
     const wf = byId.get("course-kickoff");
     expect(wf, "course-kickoff is registered").toBeTruthy();

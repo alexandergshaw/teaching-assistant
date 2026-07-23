@@ -11,7 +11,7 @@ import { listWorkflowDefs } from "@/lib/workflow-defs";
 import { allWorkflows } from "@/lib/workflows/presets";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
 import { runWorkflowUnattended, buildServerStepRunHelpers } from "@/lib/workflows/server-runner";
-import { isInstitutionFanout, isCourseFanout } from "@/lib/workflows/fanout";
+import { isInstitutionFanout, isCourseFanout, hasCourseMultiplicity } from "@/lib/workflows/fanout";
 import { runDueUnattendedTriggers } from "@/lib/workflow-trigger-runner";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
 import { resolveDocumentAuthor } from "@/lib/author";
@@ -151,7 +151,12 @@ export async function GET(req: NextRequest) {
           continue;
         }
         const progress = claim.progress;
-        const isCourse = isCourseFanout(def!.scope);
+        // A composed fan-out (institution "*" + course multiplicity) iterates
+        // per COURSE too (see runWorkflowUnattended's composed branch), so it
+        // needs the same doneCourses checkpointing as a plain course fan-out -
+        // hasCourseMultiplicity is institution-blind, unlike isCourseFanout
+        // (which returns false once institution wins).
+        const isCourse = hasCourseMultiplicity(def!.scope);
 
         const workflowRunId = crypto.randomUUID();
         const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
@@ -321,11 +326,20 @@ export async function GET(req: NextRequest) {
         });
       } catch { /* ignore */ }
     } catch (err) {
+      // A throw anywhere after this schedule was claimed (claimWorkflowSchedule
+      // / claimFanoutSchedule already flipped its row to "started") would
+      // otherwise leave that row stuck on "started" forever - the JSON result
+      // below is only ever seen by whoever inspects this response, not by the
+      // schedule row the Automate panel reads. Stamp the row too so it always
+      // reflects the true outcome. Best-effort: a DB failure while stamping
+      // must never mask the original error.
+      const message = err instanceof Error ? err.message : String(err);
+      await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "error", message).catch(() => {});
       results.push({
         scheduleId: schedule.id,
         workflowId: schedule.workflowId,
         status: "error",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: message,
       });
     }
   }

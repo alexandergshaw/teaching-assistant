@@ -6,6 +6,8 @@ import {
   planWeekItems,
   isNonContentWeekText,
   describeCoveredChapters,
+  shouldDeriveToc,
+  buildTocDerivationPrompt,
 } from "./source-alignment";
 import type { ScheduleWeekPlan } from "@/app/actions-types";
 
@@ -60,6 +62,63 @@ Unit 2 - Core Concepts`;
     it("returns empty array for empty TOC", () => {
       expect(parseTocChapters("")).toEqual([]);
       expect(parseTocChapters("   ")).toEqual([]);
+    });
+  });
+
+  describe("shouldDeriveToc", () => {
+    it("is true for a bare URL", () => {
+      expect(
+        shouldDeriveToc("https://www.ucertify.com/app/?func=load_course&course=CEH-v12.AE1&desk_copy=1")
+      ).toBe(true);
+    });
+
+    it("is true for a URL embedded in short text", () => {
+      expect(shouldDeriveToc("CEH v12 course: https://www.ucertify.com/app/?func=load_course")).toBe(true);
+    });
+
+    it("is true for a short citation with no URL", () => {
+      expect(shouldDeriveToc("Some Textbook, 3rd Edition")).toBe(true);
+    });
+
+    it("is false for a real multi-line TOC", () => {
+      const toc = `Chapter 1: Introduction
+Chapter 2: Fundamentals
+Chapter 3: Advanced Topics`;
+      expect(shouldDeriveToc(toc)).toBe(false);
+    });
+
+    it("is false for long prose without a URL", () => {
+      const prose =
+        "This course covers a broad survey of the discipline, starting from first principles and building up through increasingly advanced material across the term, with an emphasis on practical, hands-on application of every concept introduced along the way, including several case studies.";
+      expect(prose.length).toBeGreaterThanOrEqual(200);
+      expect(shouldDeriveToc(prose)).toBe(false);
+    });
+
+    it("is false for empty or blank input", () => {
+      expect(shouldDeriveToc("")).toBe(false);
+      expect(shouldDeriveToc("   ")).toBe(false);
+    });
+  });
+
+  describe("buildTocDerivationPrompt", () => {
+    it("embeds the trimmed source and asks for a parseable module list", () => {
+      const prompt = buildTocDerivationPrompt("  https://www.ucertify.com/app/?func=load_course  ");
+      expect(prompt).toContain("SOURCE: https://www.ucertify.com/app/?func=load_course");
+      expect(prompt).toContain("Module N: Title");
+      expect(prompt).not.toContain("SOURCE:   https://");
+    });
+
+    it("round-trips a canned module-list response through parseTocChapters", () => {
+      // What a real deriveTocFromSource call expects back, per the prompt
+      // built above - confirms the requested shape actually parses.
+      const cannedResponse = `Module 1: Introduction to Ethical Hacking
+Module 2: Footprinting and Reconnaissance
+  Passive footprinting
+  Active footprinting
+Module 3: Scanning Networks`;
+      const chapters = parseTocChapters(cannedResponse);
+      expect(chapters).toHaveLength(3);
+      expect(chapters[1]).toMatchObject({ number: "2", title: "Footprinting and Reconnaissance" });
     });
   });
 

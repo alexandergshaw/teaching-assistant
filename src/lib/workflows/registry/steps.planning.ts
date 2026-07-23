@@ -63,7 +63,7 @@ export const planningSteps: StepDefinition[] = [
         label: "Source material (optional)",
         type: "longtext",
         required: false,
-        help: "Name the primary source (textbook, course module, etc.) and paste its table of contents or chapter list. The schedule maps weeks onto it, balancing chapters across weeks automatically, and names covered chapters in each week. Include the platform URL to enable link embedding in the LMS integration step. Instructor context above overrides this policy where it speaks (e.g. \"no exam weeks\").",
+        help: "Name the primary source (textbook, course module, etc.) and paste its table of contents or chapter list. The schedule maps weeks onto it, balancing chapters across weeks automatically, and names covered chapters in each week. Include the platform URL to enable link embedding in the LMS integration step. A bare URL or short citation with no chapter list triggers one web search for the source's official table of contents before falling back to name-only. Instructor context above overrides this policy where it speaks (e.g. \"no exam weeks\").",
       },
       {
         key: "hubCourse",
@@ -77,6 +77,11 @@ export const planningSteps: StepDefinition[] = [
       { key: "schedule", label: "Course schedule", type: "schedule" },
       { key: "courseTitle", label: "Course title", type: "text" },
       { key: "weeks", label: "Number of weeks", type: "number" },
+      {
+        key: "resolvedSourceMaterial",
+        label: "Resolved source material",
+        type: "longtext",
+      },
     ],
     run: async (values, helpers, onProgress) => {
       const description = String(values.description);
@@ -134,18 +139,40 @@ export const planningSteps: StepDefinition[] = [
 
       // Post-generation alignment check (AC1b): parse the source's chapter
       // list and compare it against what the returned schedule actually
-      // covers, so a mismatch is a summary note - never silent. A source with
-      // no parseable chapter list (including the tile.textbook fallback,
-      // which is a bare citation, not a TOC) degrades to a name-only note.
+      // covers, so a mismatch is a summary note - never silent. The tier
+      // reported mirrors how the action grounded the schedule:
+      // - a pasted TOC aligns directly ("aligned (pasted TOC)");
+      // - a URL/short citation with no pasted TOC may have been grounded by
+      //   one web-search-derived TOC instead (r.derivedToc) -
+      //   ("aligned (derived TOC - N chapters, M sources)"), with the
+      //   derived-TOC sources listed for transparency;
+      // - anything else (including a derivation miss, or the tile.textbook
+      //   fallback when it is a bare citation) degrades to a name-only note.
       let notes: string | undefined;
       if (sourceMaterial) {
-        const chapters = parseTocChapters(sourceMaterial);
-        if (chapters.length > 0) {
-          notes = formatBalanceSummary(validateScheduleAlignment(r.schedule, chapters));
+        const pastedChapters = parseTocChapters(sourceMaterial);
+        if (pastedChapters.length > 0) {
+          const balance = formatBalanceSummary(validateScheduleAlignment(r.schedule, pastedChapters));
+          notes = `aligned (pasted TOC) | ${balance}`;
+        } else if (r.derivedToc?.trim()) {
+          const derivedChapters = parseTocChapters(r.derivedToc);
+          const balance = formatBalanceSummary(validateScheduleAlignment(r.schedule, derivedChapters));
+          const sources = r.derivedSources ?? [];
+          notes = `aligned (derived TOC - ${derivedChapters.length} chapters, ${sources.length} sources) | ${balance}`;
+          if (sources.length > 0) {
+            notes += "\nDerived-TOC sources:\n" + sources.map((s) => `- ${s.title}: ${s.uri}`).join("\n");
+          }
         } else {
-          notes = "Source material has no parseable chapter list - schedule generated with name-only grounding (no chapter alignment to verify).";
+          notes = "name-only | Source material has no parseable chapter list - schedule generated with name-only grounding (no chapter alignment to verify).";
         }
       }
+
+      // Fed forward to the lecture-materials-from-schedule step (see
+      // NO_CODE_KICKOFF's binding to this output) so a derived TOC grounds
+      // that step's aligned prompt branch too, without a second search call:
+      // the derived TOC when one was found, otherwise the same sourceMaterial
+      // this step used (a pasted TOC or a name-only citation) unchanged.
+      const resolvedSourceMaterial = r.derivedToc?.trim() ? r.derivedToc : sourceMaterial;
 
       const csv = scheduleToCsv(r.schedule);
       return {
@@ -153,6 +180,7 @@ export const planningSteps: StepDefinition[] = [
           schedule: r.schedule,
           courseTitle: r.courseTitle,
           weeks: r.schedule.length,
+          resolvedSourceMaterial,
         },
         summary: {
           kind: "schedule",

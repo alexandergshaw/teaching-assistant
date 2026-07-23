@@ -1,8 +1,10 @@
 "use client";
 
-// Row-detail "Roster" and "Student repos" editors - ported from the tile
-// system's rosterTableEditor/studentReposTableEditor and their view states
-// (stats, view/hide preview, copy, From LMS for roster).
+// Roster and Student repos column cells - ported verbatim from the
+// row-expansion cards (formerly RowDetailRoster.tsx's RosterSection /
+// StudentReposSection): same table editors and view states (stats,
+// view/hide preview, copy, From LMS for roster). Only the outer wrapper
+// changed, from a card <div> to a table <td>.
 import { useState } from "react";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
@@ -16,7 +18,7 @@ import {
 } from "@/lib/courses-tab-helpers";
 import styles from "../../page.module.css";
 
-export interface RosterSectionProps {
+export interface RosterCellProps {
   course: Course;
   onSave: (rawValue: string) => Promise<boolean | null>;
   canLms: boolean;
@@ -25,7 +27,7 @@ export interface RosterSectionProps {
   fetchLmsRosterDraft: (course: Course) => Promise<string | null>;
 }
 
-export function RosterSection({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraft }: RosterSectionProps) {
+export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraft }: RosterCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
@@ -60,7 +62,7 @@ export function RosterSection({ course, onSave, canLms, lmsBusy, fetchLmsRosterD
   const stats = hasRoster ? rosterStats(course.roster ?? "") : null;
 
   return (
-    <div className={styles.courseResource}>
+    <td style={{ minWidth: 220 }}>
       <div className={styles.courseResourceHead}>
         <span className={styles.courseResourceLabel}>Roster</span>
         {!editing && (
@@ -140,16 +142,16 @@ export function RosterSection({ course, onSave, canLms, lmsBusy, fetchLmsRosterD
           )}
         </>
       )}
-    </div>
+    </td>
   );
 }
 
-export interface StudentReposSectionProps {
+export interface StudentReposCellProps {
   course: Course;
   onSave: (rawValue: string) => Promise<boolean | null>;
 }
 
-export function StudentReposSection({ course, onSave }: StudentReposSectionProps) {
+export function StudentReposCell({ course, onSave }: StudentReposCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
@@ -175,7 +177,7 @@ export function StudentReposSection({ course, onSave }: StudentReposSectionProps
   const hasRepos = course.studentRepos && course.studentRepos.length > 0;
 
   return (
-    <div className={styles.courseResource}>
+    <td style={{ minWidth: 220 }}>
       <div className={styles.courseResourceHead}>
         <span className={styles.courseResourceLabel}>Student repos</span>
         {!editing && (
@@ -247,6 +249,6 @@ export function StudentReposSection({ course, onSave }: StudentReposSectionProps
       ) : (
         <span className={styles.courseResourceEmpty}>No student repos yet</span>
       )}
-    </div>
+    </td>
   );
 }

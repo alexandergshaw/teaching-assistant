@@ -203,4 +203,89 @@ describe("generate-schedule step", () => {
       expect(result.summary.notes).toBeUndefined();
     }
   });
+
+  it("reports the pasted-TOC tier and outputs the pasted TOC as resolvedSourceMaterial", async () => {
+    vi.mocked(generateSchedulePlanAction).mockResolvedValue({
+      courseTitle: "Intro to Testing",
+      schedule: [
+        { week: 1, topic: "Intro", summary: "Chapter 1: Basics", assignmentTitle: "A1", assignmentSlug: "a1", testName: null },
+        { week: 2, topic: "More", summary: "Chapter 2: Advanced", assignmentTitle: "A2", assignmentSlug: "a2", testName: null },
+      ],
+    });
+
+    const result = await step.run(
+      {
+        description: "A course about testing",
+        weeks: 2,
+        tests: 0,
+        sourceMaterial: "Chapter 1: Basics\nChapter 2: Advanced",
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(result.summary.kind).toBe("schedule");
+    if (result.summary.kind === "schedule") {
+      expect(result.summary.notes).toContain("aligned (pasted TOC)");
+    }
+    expect(result.outputs.resolvedSourceMaterial).toBe("Chapter 1: Basics\nChapter 2: Advanced");
+  });
+
+  it("reports the derived-TOC tier, lists sources, and forwards the derived TOC as resolvedSourceMaterial", async () => {
+    const derivedToc = "Module 1: Introduction\nModule 2: Footprinting\nModule 3: Scanning Networks";
+    vi.mocked(generateSchedulePlanAction).mockResolvedValue({
+      courseTitle: "CEH v12",
+      schedule: [
+        { week: 1, topic: "Intro", summary: "Module 1: Introduction", assignmentTitle: "A1", assignmentSlug: "a1", testName: null },
+        { week: 2, topic: "Recon", summary: "Module 2: Footprinting", assignmentTitle: "A2", assignmentSlug: "a2", testName: null },
+        { week: 3, topic: "Scanning", summary: "Module 3: Scanning Networks", assignmentTitle: "A3", assignmentSlug: "a3", testName: null },
+      ],
+      derivedToc,
+      derivedSources: [
+        { title: "uCertify CEH v12 course outline", uri: "https://example.com/toc" },
+        { title: "EC-Council exam blueprint", uri: "https://example.com/blueprint" },
+      ],
+    });
+
+    const result = await step.run(
+      {
+        description: "A CEH prep course",
+        weeks: 3,
+        tests: 0,
+        sourceMaterial: "https://www.ucertify.com/app/?func=load_course&course=CEH-v12.AE1",
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(result.summary.kind).toBe("schedule");
+    if (result.summary.kind === "schedule") {
+      expect(result.summary.notes).toContain("aligned (derived TOC - 3 chapters, 2 sources)");
+      expect(result.summary.notes).toContain("uCertify CEH v12 course outline: https://example.com/toc");
+      expect(result.summary.notes).toContain("EC-Council exam blueprint: https://example.com/blueprint");
+    }
+    expect(result.outputs.resolvedSourceMaterial).toBe(derivedToc);
+  });
+
+  it("outputs the original sourceMaterial as resolvedSourceMaterial when derivation is absent (name-only)", async () => {
+    vi.mocked(generateSchedulePlanAction).mockResolvedValue({
+      courseTitle: "Intro to Testing",
+      schedule: [
+        { week: 1, topic: "Intro", summary: "Overview", assignmentTitle: "A1", assignmentSlug: "a1", testName: null },
+      ],
+    });
+
+    const result = await step.run(
+      {
+        description: "A course about testing",
+        weeks: 1,
+        tests: 0,
+        sourceMaterial: "Some Textbook, 3rd Edition",
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(result.outputs.resolvedSourceMaterial).toBe("Some Textbook, 3rd Edition");
+  });
 });

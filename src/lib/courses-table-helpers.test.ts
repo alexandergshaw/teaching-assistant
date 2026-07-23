@@ -1,15 +1,18 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_SORT,
+  SORT_FIELDS,
   parseSortState,
   compareCourses,
   sortCourses,
+  sortValueFor,
   ALL_COLUMN_IDS,
   DEFAULT_VISIBLE_COLUMNS,
   parseColumnSet,
   serializeColumnSet,
   COLUMN_MIN_WIDTHS,
   deriveCourseCounts,
+  truncateForCell,
   computeFieldPatch,
   canLms,
   canImport,
@@ -76,6 +79,96 @@ describe("parseSortState", () => {
     const state: SortState = { field: "startDate", direction: "desc" };
     expect(parseSortState(JSON.stringify(state))).toEqual(state);
   });
+
+  it("accepts every sortable field (every ALL_COLUMN_IDS member plus name)", () => {
+    for (const field of SORT_FIELDS) {
+      const state: SortState = { field, direction: "asc" };
+      expect(parseSortState(JSON.stringify(state))).toEqual(state);
+    }
+  });
+});
+
+describe("SORT_FIELDS completeness", () => {
+  it("includes every ALL_COLUMN_IDS member plus name, and nothing else", () => {
+    expect(SORT_FIELDS).toContain("name");
+    for (const id of ALL_COLUMN_IDS) expect(SORT_FIELDS).toContain(id);
+    expect(SORT_FIELDS.length).toBe(ALL_COLUMN_IDS.length + 1);
+  });
+
+  it("does not include actions - it is not a data column", () => {
+    expect(SORT_FIELDS).not.toContain("actions");
+  });
+});
+
+describe("sortValueFor", () => {
+  it("returns the derived counts for repos/roster/studentRepos, never marked empty", () => {
+    const c = makeCourse({
+      repos: [{ repo: "org/one", branch: null }],
+      roster: "Alice\nBob",
+      studentRepos: [{ student: "Alice", canvasUserId: null, repo: "a/a" }],
+    });
+    expect(sortValueFor(c, "repos")).toEqual({ kind: "number", value: 1, empty: false });
+    expect(sortValueFor(c, "roster")).toEqual({ kind: "number", value: 2, empty: false });
+    expect(sortValueFor(c, "studentRepos")).toEqual({ kind: "number", value: 1, empty: false });
+
+    const empty = makeCourse({ repos: [], roster: null, studentRepos: [] });
+    expect(sortValueFor(empty, "repos")).toEqual({ kind: "number", value: 0, empty: false });
+    expect(sortValueFor(empty, "roster")).toEqual({ kind: "number", value: 0, empty: false });
+    expect(sortValueFor(empty, "studentRepos")).toEqual({ kind: "number", value: 0, empty: false });
+  });
+
+  it("counts integrations length", () => {
+    const c = makeCourse({ integrations: [{ name: "Cengage", url: null }, { name: "Discord", url: null }] });
+    expect(sortValueFor(c, "integrations")).toEqual({ kind: "number", value: 2, empty: false });
+  });
+
+  it("counts materials files plus the zip (if any), and exportFiles for lmsExports", () => {
+    const c = makeCourse({
+      materialsFiles: [{ name: "a.pdf", path: "p/a", size: 1, addedAt: "2024-01-01T00:00:00.000Z" }],
+      materialsZipPath: "p/zip",
+      exportFiles: [
+        { name: "e1.imscc", path: "p/e1", size: 1, addedAt: "2024-01-01T00:00:00.000Z" },
+        { name: "e2.imscc", path: "p/e2", size: 1, addedAt: "2024-01-02T00:00:00.000Z" },
+      ],
+    });
+    expect(sortValueFor(c, "materials")).toEqual({ kind: "number", value: 2, empty: false });
+    expect(sortValueFor(c, "lmsExports")).toEqual({ kind: "number", value: 2, empty: false });
+
+    const noZip = makeCourse({ materialsFiles: [], materialsZipPath: null, exportFiles: [] });
+    expect(sortValueFor(noZip, "materials")).toEqual({ kind: "number", value: 0, empty: false });
+    expect(sortValueFor(noZip, "lmsExports")).toEqual({ kind: "number", value: 0, empty: false });
+  });
+
+  it("treats weeks/tests as empty-when-null numbers", () => {
+    expect(sortValueFor(makeCourse({ weeks: 15 }), "weeks")).toEqual({ kind: "number", value: 15, empty: false });
+    expect(sortValueFor(makeCourse({ weeks: null }), "weeks")).toEqual({ kind: "number", value: 0, empty: true });
+    expect(sortValueFor(makeCourse({ tests: 0 }), "tests")).toEqual({ kind: "number", value: 0, empty: false });
+    expect(sortValueFor(makeCourse({ tests: null }), "tests")).toEqual({ kind: "number", value: 0, empty: true });
+  });
+
+  it("treats blank string fields as empty text", () => {
+    expect(sortValueFor(makeCourse({ institution: "MCC" }), "institution")).toEqual({ kind: "text", value: "MCC", empty: false });
+    expect(sortValueFor(makeCourse({ institution: null }), "institution")).toEqual({ kind: "text", value: "", empty: true });
+    expect(sortValueFor(makeCourse({ institution: "  " }), "institution")).toEqual({ kind: "text", value: "", empty: true });
+  });
+
+  it("resolves syllabusId to its display name via ctx, falling back to the raw id when unmapped", () => {
+    const c = makeCourse({ syllabusId: "syl-1" });
+    const ctx = { syllabusNameById: new Map([["syl-1", "Intro to CS syllabus"]]) };
+    expect(sortValueFor(c, "syllabusId", ctx)).toEqual({ kind: "text", value: "Intro to CS syllabus", empty: false });
+    expect(sortValueFor(c, "syllabusId")).toEqual({ kind: "text", value: "syl-1", empty: false });
+    expect(sortValueFor(makeCourse({ syllabusId: null }), "syllabusId")).toEqual({ kind: "text", value: "", empty: true });
+  });
+
+  it("uses raw content text for scheduleCsv/rubric, empty when unset", () => {
+    expect(sortValueFor(makeCourse({ csvData: "week,topic\n1,Intro" }), "scheduleCsv")).toEqual({
+      kind: "text",
+      value: "week,topic\n1,Intro",
+      empty: false,
+    });
+    expect(sortValueFor(makeCourse({ csvData: null }), "scheduleCsv")).toEqual({ kind: "text", value: "", empty: true });
+    expect(sortValueFor(makeCourse({ rubricData: null }), "rubric")).toEqual({ kind: "text", value: "", empty: true });
+  });
 });
 
 describe("compareCourses / sortCourses", () => {
@@ -108,15 +201,62 @@ describe("compareCourses / sortCourses", () => {
     sortCourses(list, { field: "name", direction: "asc" });
     expect(list).toEqual(original);
   });
+
+  it("sorts a string column case-insensitively, with empty values always last in both directions", () => {
+    const upper = makeCourse({ id: "u", institution: "ZETA" });
+    const lower = makeCourse({ id: "l", institution: "alpha" });
+    const blank = makeCourse({ id: "b", institution: null });
+    const asc = sortCourses([upper, blank, lower], { field: "institution", direction: "asc" });
+    expect(asc.map((c) => c.id)).toEqual(["l", "u", "b"]);
+    const desc = sortCourses([upper, blank, lower], { field: "institution", direction: "desc" });
+    expect(desc.map((c) => c.id)).toEqual(["u", "l", "b"]);
+  });
+
+  it("sorts weeks numerically with null always last in both directions", () => {
+    const a = makeCourse({ id: "a", name: "A", weeks: 15 });
+    const b = makeCourse({ id: "b", name: "B", weeks: 5 });
+    const noWeeks = makeCourse({ id: "n", name: "N", weeks: null });
+    const asc = sortCourses([a, noWeeks, b], { field: "weeks", direction: "asc" });
+    expect(asc.map((c) => c.id)).toEqual(["b", "a", "n"]);
+    const desc = sortCourses([a, noWeeks, b], { field: "weeks", direction: "desc" });
+    expect(desc.map((c) => c.id)).toEqual(["a", "b", "n"]);
+  });
+
+  it("sorts a derived count column (repos) numerically, zero included in normal order", () => {
+    const zero = makeCourse({ id: "z", name: "Z", repos: [] });
+    const two = makeCourse({ id: "t", name: "T", repos: [{ repo: "a/a", branch: null }, { repo: "a/b", branch: null }] });
+    const one = makeCourse({ id: "o", name: "O", repos: [{ repo: "a/a", branch: null }] });
+    const asc = sortCourses([two, zero, one], { field: "repos", direction: "asc" });
+    expect(asc.map((c) => c.id)).toEqual(["z", "o", "t"]);
+  });
+
+  it("sorts syllabusId by resolved display name via ctx, unset always last", () => {
+    const withName = makeCourse({ id: "w", name: "W", syllabusId: "syl-2" });
+    const unmapped = makeCourse({ id: "u", name: "U", syllabusId: "syl-unknown" });
+    const unset = makeCourse({ id: "n", name: "N", syllabusId: null });
+    const ctx = { syllabusNameById: new Map([["syl-2", "Astronomy syllabus"]]) };
+    const asc = sortCourses([withName, unset, unmapped], { field: "syllabusId", direction: "asc" }, ctx);
+    // "Astronomy syllabus" < "syl-unknown" (unmapped falls back to raw id) < unset (always last).
+    expect(asc.map((c) => c.id)).toEqual(["w", "u", "n"]);
+  });
+
+  it("breaks ties by name ascending, regardless of sort direction", () => {
+    const b = makeCourse({ id: "b", name: "Beta", institution: "Same" });
+    const a = makeCourse({ id: "a", name: "Alpha", institution: "Same" });
+    const asc = sortCourses([b, a], { field: "institution", direction: "asc" });
+    expect(asc.map((c) => c.id)).toEqual(["a", "b"]);
+    const desc = sortCourses([b, a], { field: "institution", direction: "desc" });
+    expect(desc.map((c) => c.id)).toEqual(["a", "b"]);
+  });
 });
 
 describe("parseColumnSet / serializeColumnSet", () => {
-  it("returns every column visible for null/undefined", () => {
+  it("returns the default visible columns for null/undefined", () => {
     expect(parseColumnSet(null)).toEqual(DEFAULT_VISIBLE_COLUMNS);
     expect(parseColumnSet(undefined)).toEqual(DEFAULT_VISIBLE_COLUMNS);
   });
 
-  it("returns every column visible for malformed JSON or a non-array", () => {
+  it("returns the default visible columns for malformed JSON or a non-array", () => {
     expect(parseColumnSet("{not json")).toEqual(DEFAULT_VISIBLE_COLUMNS);
     expect(parseColumnSet(JSON.stringify({ institution: true }))).toEqual(DEFAULT_VISIBLE_COLUMNS);
   });
@@ -136,9 +276,34 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(JSON.stringify(["name", "actions", "lms"]))).toEqual(["lms"]);
   });
 
+  it("migrates legacy count-column ids to the columns that superseded them", () => {
+    expect(parseColumnSet(JSON.stringify(["rosterCount", "studentRepoCount", "reposCount", "lms"]))).toEqual([
+      "roster",
+      "studentRepos",
+      "repos",
+      "lms",
+    ]);
+  });
+
+  it("dedups after migrating a legacy id that collides with a persisted new id", () => {
+    expect(parseColumnSet(JSON.stringify(["roster", "rosterCount", "lms"]))).toEqual(["roster", "lms"]);
+  });
+
   it("round-trips through serializeColumnSet", () => {
     const cols: typeof ALL_COLUMN_IDS[number][] = ["lms", "textbook"];
     expect(parseColumnSet(serializeColumnSet(cols))).toEqual(cols);
+  });
+});
+
+describe("DEFAULT_VISIBLE_COLUMNS", () => {
+  it("excludes the six heavy former row-expansion columns by default", () => {
+    for (const heavy of ["integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports"] as const) {
+      expect(DEFAULT_VISIBLE_COLUMNS).not.toContain(heavy);
+    }
+  });
+
+  it("every default-visible id is a real column id", () => {
+    for (const id of DEFAULT_VISIBLE_COLUMNS) expect(ALL_COLUMN_IDS).toContain(id);
   });
 });
 
@@ -152,6 +317,16 @@ describe("COLUMN_MIN_WIDTHS", () => {
       expect(Number.isInteger(width)).toBe(true);
       expect(width).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("truncateForCell", () => {
+  it("returns short text unchanged", () => {
+    expect(truncateForCell("short", 10)).toBe("short");
+  });
+
+  it("trims and truncates long text with an ellipsis", () => {
+    expect(truncateForCell("  a very long piece of text indeed  ", 10)).toBe("a very lo…");
   });
 });
 

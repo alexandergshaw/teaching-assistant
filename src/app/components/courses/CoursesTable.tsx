@@ -1,8 +1,9 @@
 "use client";
 
 // Phase 2 of the tiles -> table redesign: one row per course. Sticky header,
-// sticky (frozen) name column, sortable name/startDate, a column-visibility
-// dropdown, and per-row inline editing / expansion (CourseRow).
+// sticky (frozen) name column, every column sortable (name plus every
+// optional column - the former row-expansion cards are columns too), a
+// column-visibility dropdown, and per-row inline editing (CourseRow).
 import { useState } from "react";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
@@ -22,6 +23,7 @@ import {
   serializeColumnSet,
   sortCourses,
   type ColumnId,
+  type SortContext,
   type SortField,
   type SortState,
   type TableEditableField,
@@ -44,9 +46,15 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   githubOrg: "Organization",
   syllabusId: "Syllabus",
   textbook: "Textbook",
-  rosterCount: "Roster",
-  studentRepoCount: "Student repos",
-  reposCount: "Repos",
+  repos: "Codebases",
+  roster: "Roster",
+  studentRepos: "Student repos",
+  integrations: "Integrations",
+  description: "Description",
+  scheduleCsv: "Schedule of Topics",
+  rubric: "Rubric",
+  materials: "Materials",
+  lmsExports: "LMS Exports",
 };
 
 export interface CoursesTableProps {
@@ -134,7 +142,8 @@ export default function CoursesTable({
 
   const sortIndicator = (field: SortField) => (sort.field === field ? (sort.direction === "asc" ? " ▲" : " ▼") : "");
 
-  const sorted = sortCourses(courses, sort);
+  const sortCtx: SortContext = { syllabusNameById: new Map(syllabi.map((s) => [s.id, s.name])) };
+  const sorted = sortCourses(courses, sort, sortCtx);
 
   return (
     <>
@@ -190,22 +199,11 @@ export default function CoursesTable({
                 <th onClick={() => applySort("name")} style={{ cursor: "pointer", minWidth: COLUMN_MIN_WIDTHS.name }}>
                   Name{sortIndicator("name")}
                 </th>
-                {visibleColumns.includes("institution") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.institution }}>Institution</th>}
-                {visibleColumns.includes("startDate") && (
-                  <th onClick={() => applySort("startDate")} style={{ cursor: "pointer", minWidth: COLUMN_MIN_WIDTHS.startDate }}>
-                    Start date{sortIndicator("startDate")}
+                {ALL_COLUMN_IDS.filter((id) => visibleColumns.includes(id)).map((id) => (
+                  <th key={id} onClick={() => applySort(id)} style={{ cursor: "pointer", minWidth: COLUMN_MIN_WIDTHS[id] }}>
+                    {COLUMN_LABELS[id]}{sortIndicator(id)}
                   </th>
-                )}
-                {visibleColumns.includes("dayTime") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.dayTime }}>Day/Time</th>}
-                {visibleColumns.includes("weeks") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.weeks }}>Weeks</th>}
-                {visibleColumns.includes("tests") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.tests }}>Tests</th>}
-                {visibleColumns.includes("lms") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.lms }}>LMS</th>}
-                {visibleColumns.includes("githubOrg") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.githubOrg }}>Organization</th>}
-                {visibleColumns.includes("syllabusId") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.syllabusId }}>Syllabus</th>}
-                {visibleColumns.includes("textbook") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.textbook }}>Textbook</th>}
-                {visibleColumns.includes("rosterCount") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.rosterCount }}>Roster</th>}
-                {visibleColumns.includes("studentRepoCount") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.studentRepoCount }}>Student repos</th>}
-                {visibleColumns.includes("reposCount") && <th style={{ minWidth: COLUMN_MIN_WIDTHS.reposCount }}>Repos</th>}
+                ))}
                 <th style={{ minWidth: COLUMN_MIN_WIDTHS.actions }}>Actions</th>
               </tr>
             </thead>

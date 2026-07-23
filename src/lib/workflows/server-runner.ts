@@ -34,7 +34,16 @@ import { parseCartridgeBlob } from "@/lib/cartridge-import";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
 import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction } from "@/app/actions";
-import { isInstitutionFanout, isCourseFanout, scopeForInstitution, scopeForCourse, resolveFanoutInstitutions, resolveFanoutCourses } from "@/lib/workflows/fanout";
+import {
+  isInstitutionFanout,
+  isCourseFanout,
+  isComposedFanout,
+  scopeForInstitution,
+  scopeForCourse,
+  resolveFanoutInstitutions,
+  resolveFanoutCourses,
+  composedGroupLabel,
+} from "@/lib/workflows/fanout";
 
 export interface StepRunOutcome {
   index: number;
@@ -55,6 +64,11 @@ export interface InstitutionGroupOutcome {
 export interface CourseGroupOutcome {
   courseId: string;
   courseName: string;
+  /** The course tile's own institution (composed fan-out only - institution "*"
+   * combined with course multiplicity; see isComposedFanout). Undefined for a
+   * plain course fan-out, where the run's institution isn't fanned out. Empty
+   * string means an institution-less tile, pinned to "" (unset) per tile. */
+  institution?: string;
   steps: StepRunOutcome[];
   ok: boolean;
 }
@@ -294,7 +308,11 @@ async function runExpandedBodyOnce(opts: {
  *
  * When a workflow's scope is `institution: "*"`, runs the workflow body once
  * per configured institution, pinning the scope + active institution each
- * iteration, and aggregates results into labeled groups. Non-fan-out runs
+ * iteration, and aggregates results into labeled groups. When the scope also
+ * targets multiple course tiles (a composed fan-out - see isComposedFanout),
+ * it instead runs once per resolved course tile, pinning each group's
+ * institution from the tile's own institution (scopeForInstitution(
+ * scopeForCourse(...))) - see the composed branch below. Non-fan-out runs
  * execute once as before.
  */
 export async function runWorkflowUnattended(opts: {
@@ -330,16 +348,81 @@ export async function runWorkflowUnattended(opts: {
   let groups: InstitutionGroupOutcome[] | CourseGroupOutcome[] | undefined;
   let fanoutInfo: WorkflowRunSummary["fanout"];
 
-  const instFanout = isInstitutionFanout(def.scope);
-  const hubCourse = (def.scope?.hubCourse ?? "").trim();
-  const courseFanout = hubCourse === "*" || (hubCourse.split("\n").map((s) => s.trim()).filter(Boolean).length >= 2);
-  if (instFanout && courseFanout) {
-    ok = false;
-    steps = [{ index: -1, type: def.id, status: "error", error: "Scope cannot target all institutions and multiple course tiles at once - pick one fan-out dimension.", summary: null }];
-    return { ok, steps };
-  }
+  const composed = isComposedFanout(def.scope);
 
-  if (!isInstitutionFanout(def.scope) && !isCourseFanout(def.scope)) {
+  if (composed) {
+    // A composed fan-out (institution "*" AND multiple course tiles) is NOT a
+    // nested (institution x course) product - a course tile belongs to exactly
+    // one institution, so this collapses to a single course-dimension fan-out
+    // with each group's institution derived from the tile itself. Reuses the
+    // SAME per-course group loop (CourseGroupOutcome shape, doneCourses
+    // checkpointing, countOkCourses progress semantics) as a plain course
+    // fan-out - only the scope/helpers pinning per iteration differs.
+    const resolved = await resolveFanoutCourses(def.scope, null);
+    if ("error" in resolved) {
+      ok = false;
+      steps = [{ index: -1, type: def.id, status: "error", error: `Could not list course tiles: ${resolved.error}`, summary: null }];
+    } else if (resolved.list.length === 0) {
+      ok = false;
+      steps = [{ index: -1, type: def.id, status: "error", error: "The scope matched no course tiles.", summary: null }];
+    } else {
+      const checkpointing = opts.onCourseDone !== undefined;
+      const skip = opts.skipCourses ?? new Set<string>();
+      const courseGroups: CourseGroupOutcome[] = [];
+      const ranThisTick: string[] = [];
+      for (const course of resolved.list) {
+        if (skip.has(course.id)) continue;
+
+        if (opts.deadlineMs !== undefined && Date.now() > opts.deadlineMs) {
+          if (checkpointing) continue;
+          courseGroups.push({
+            courseId: course.id,
+            courseName: course.name,
+            institution: course.institution ?? "",
+            ok: false,
+            steps: [{ index: -1, type: def.id, status: "error", error: "Skipped - run time budget reached this tick.", summary: null, courseId: course.id }],
+          });
+          continue;
+        }
+
+        // Pin BOTH dimensions per AC1's design: scopeForInstitution(
+        // scopeForCourse(scope, tile.id), tile.institution ?? ""). An
+        // institution-less tile pins to "" (unset) rather than staying "*" -
+        // its scoped institution inputs then resolve as unset, same as a
+        // single run on such a tile.
+        const groupInstitution = course.institution ?? "";
+        const scopedDef: WorkflowDef = {
+          ...def,
+          scope: scopeForInstitution(scopeForCourse(def.scope!, course.id), groupInstitution),
+        };
+        const scopedHelpers: StepRunHelpers = { ...helpers, activeInstitution: course.institution ?? null };
+        const out = await runExpandedBodyOnce({
+          ...opts,
+          def: scopedDef,
+          helpers: scopedHelpers,
+          stepLookup,
+          filterHubByInstitution: true,
+        });
+        courseGroups.push({ courseId: course.id, courseName: course.name, institution: groupInstitution, steps: out.steps, ok: out.ok });
+        ranThisTick.push(course.id);
+
+        if (checkpointing) {
+          const kept = await opts.onCourseDone!(course.id, out.ok);
+          if (!kept) break;
+        }
+      }
+      ok = courseGroups.every((g) => g.ok);
+      steps = courseGroups.flatMap((g) =>
+        g.steps.map((s) => ({ ...s, courseId: s.courseId ?? g.courseId, institution: s.institution ?? g.institution }))
+      );
+      groups = courseGroups;
+      if (checkpointing) {
+        const done = new Set([...skip, ...ranThisTick]);
+        const remaining = resolved.list.filter((c) => !done.has(c.id));
+        fanoutInfo = { total: resolved.list.length, ranThisTick, remaining: remaining.map((c) => c.id), truncated: remaining.length > 0 };
+      }
+    }
+  } else if (!isInstitutionFanout(def.scope) && !isCourseFanout(def.scope)) {
     const out = await runExpandedBodyOnce({ ...opts, stepLookup, filterHubByInstitution: false });
     ok = out.ok;
     steps = out.steps;
@@ -454,8 +537,8 @@ export async function runWorkflowUnattended(opts: {
   // Persist the run's text deliverables to the Files tab (best-effort). For a
   // fan-out this is one combined report across every group.
   if (helpers.saveRunReport && !(fanoutInfo && fanoutInfo.truncated)) {
-    const courseNames = (isCourseFanout(def.scope) && groups)
-      ? new Map((groups as CourseGroupOutcome[]).map((g) => [g.courseId, g.courseName]))
+    const courseNames = ((isCourseFanout(def.scope) || composed) && groups)
+      ? new Map((groups as CourseGroupOutcome[]).map((g) => [g.courseId, composedGroupLabel(g.courseName, g.institution)]))
       : undefined;
     const markdown = buildRunReportMarkdown(def.name, new Date().toISOString(), steps, (t) => stepLookup(t)?.name ?? t, courseNames);
     if (markdown) {

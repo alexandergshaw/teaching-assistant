@@ -18,10 +18,12 @@ export interface EditableCellProps {
   display?: React.ReactNode;
   emptyLabel?: string;
   placeholder?: string;
+  /** Optional helper text shown under the editor while editing (e.g. line-format guidance). */
+  hint?: string;
   onSave: (rawValue: string) => Promise<boolean | null>;
 }
 
-export default function EditableCell({ kind, rawValue, display, emptyLabel = "Not set", placeholder, onSave }: EditableCellProps) {
+export default function EditableCell({ kind, rawValue, display, emptyLabel = "Not set", placeholder, hint, onSave }: EditableCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(rawValue);
   const [saving, setSaving] = useState(false);
@@ -61,6 +63,7 @@ export default function EditableCell({ kind, rawValue, display, emptyLabel = "No
               if (e.key === "Escape") cancel();
             }}
           />
+          {hint && <p className={styles.fieldHint} style={{ margin: 0 }}>{hint}</p>}
           <div className={styles.tileEditorActions}>
             <Button variant="contained" size="small" disabled={saving} onClick={() => void commit()}>
               {saving ? "Saving…" : "Save"}

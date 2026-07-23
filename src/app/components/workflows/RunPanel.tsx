@@ -11,6 +11,7 @@ import { getStepDefinition } from "@/lib/workflows/registry";
 import type { WorkflowDef, RuntimeField, WorkflowStepConfig } from "@/lib/workflows/types";
 import type { UseWorkflowRunReturn } from "./useWorkflowRun";
 import { buildCourseFanoutSummary, countOkCourses, type RunStateGroup } from "./attended-fanout";
+import { composedGroupLabel } from "@/lib/workflows/fanout";
 import styles from "../../page.module.css";
 
 interface WorkflowOptions {
@@ -298,14 +299,14 @@ export function RunPanel({
           )}
           {runState.map((group, g) => (
             <Fragment key={group.courseId ?? group.institution ?? g}>
-              {group.institution && (
+              {group.institution && !group.courseId && (
                 <h3 style={{ fontSize: "0.85rem", fontWeight: 600, margin: g === 0 ? "0 0 4px 0" : "20px 0 4px 0", color: "var(--hint-text)" }}>
                   {group.institution}
                 </h3>
               )}
               {group.courseId && (
                 <h3 style={{ fontSize: "0.85rem", fontWeight: 600, margin: g === 0 ? "0 0 4px 0" : "20px 0 4px 0", color: "var(--hint-text)" }}>
-                  Course {g + 1} of {runState.length}: {group.courseName}
+                  Course {g + 1} of {runState.length}: {composedGroupLabel(group.courseName ?? "", group.institution)}
                 </h3>
               )}
               {group.steps.map((state, i) => {

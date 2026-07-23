@@ -174,11 +174,18 @@ export async function runDueUnattendedTriggers(
         detail: outcome.ok ? undefined : triggerDetail,
       });
     } catch (err) {
+      // A throw anywhere after claimAndAdvanceTrigger fires (it already flips
+      // this trigger's row to "started") would otherwise leave the row stuck
+      // there forever - see the same fix in the cron route's per-schedule
+      // catch. Best-effort: a DB failure while stamping must never mask the
+      // original error.
+      const message = err instanceof Error ? err.message : String(err);
+      await updateTriggerRunOutcome(supabase, trigger.userId, trigger.id, "error", message).catch(() => {});
       results.push({
         triggerId: trigger.id,
         workflowId: trigger.workflowId,
         status: "error",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: message,
       });
     }
   }

@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { applyStopAfterCourse, buildCourseFanoutSummary, buildCourseFanoutDetail, countOkCourses, type RunStateGroup } from "./attended-fanout";
+import {
+  applyStopAfterCourse,
+  buildCourseFanoutSummary,
+  buildCourseFanoutDetail,
+  countOkCourses,
+  buildComposedFanoutEntities,
+  pinComposedGroupScope,
+  type RunStateGroup,
+} from "./attended-fanout";
 
 function group(courseId: string, courseName: string, stepStatuses: RunStateGroup["steps"][number]["status"][]): RunStateGroup {
   return {
@@ -163,5 +171,39 @@ describe("countOkCourses", () => {
 
     const count = countOkCourses(groups);
     expect(count).toBe(1);
+  });
+});
+
+describe("buildComposedFanoutEntities", () => {
+  it("maps each resolved course tile to an entity carrying its own institution", () => {
+    const entities = buildComposedFanoutEntities([
+      { id: "t1", name: "Course A", institution: "MCC" },
+      { id: "t2", name: "Course B", institution: "UT" },
+    ]);
+    expect(entities).toEqual([
+      { institution: "MCC", courseId: "t1", courseName: "Course A" },
+      { institution: "UT", courseId: "t2", courseName: "Course B" },
+    ]);
+  });
+
+  it("preserves a null institution for an institution-less tile", () => {
+    const entities = buildComposedFanoutEntities([{ id: "t1", name: "Course A", institution: null }]);
+    expect(entities).toEqual([{ institution: null, courseId: "t1", courseName: "Course A" }]);
+  });
+
+  it("returns an empty array for an empty resolved list", () => {
+    expect(buildComposedFanoutEntities([])).toEqual([]);
+  });
+});
+
+describe("pinComposedGroupScope", () => {
+  it("pins both the course id and the tile's own institution, preserving other scope families", () => {
+    const scope = pinComposedGroupScope({ institution: "*", hubCourse: "*", org: "x" }, "t1", "MCC");
+    expect(scope).toEqual({ institution: "MCC", hubCourse: "t1", org: "x" });
+  });
+
+  it("pins institution to an empty string for an institution-less tile (rather than leaving *)", () => {
+    const scope = pinComposedGroupScope({ institution: "*", hubCourse: "*" }, "t1", null);
+    expect(scope).toEqual({ institution: "", hubCourse: "t1" });
   });
 });

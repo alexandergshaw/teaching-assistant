@@ -711,21 +711,20 @@ most likely to break again when these files are edited.
 
 ### 2026-07-22 - Courses tab table view (Phase 2)
 
-1. The Courses tab is a table: one row per course, sortable header
-   (name/startDate, ta-courses-sort), sticky header + frozen name column via
-   the container-scroll idiom (see the sticky-header entry below),
-   column-visibility menu (ta-courses-columns; name/actions always shown),
-   derived roster/student-repo/repo count columns.
+1. The Courses tab is a table: one row per course, sortable header (EVERY
+   data column since the cards-to-columns entry below; ta-courses-sort),
+   sticky header + frozen name column via the container-scroll idiom (see
+   the sticky-header entry below), column-visibility menu
+   (ta-courses-columns; name/actions always shown).
 2. Scalar fields edit inline in cells through computeFieldPatch + the update
    action with the pre-redesign patch semantics (weeks/tests numeric handling,
    lms null-when-blank, repos topic-extraction side effect); failed saves keep
    the editor open with the draft (result threaded to every commit handler).
-3. Row expansion hosts the ported structural editors (repos, roster with
-   stats/From-LMS/Copy, student repos, integrations, description,
-   schedule-of-topics csv, rubric, materials, export package incl. the
-   no-course-settings message); the SyllabusCell offers select/preview/
-   download/From-LMS/From-import plus the direct-upload control (onUploaded
-   updates the row and reloads the syllabus list).
+3. The former row-expansion structural editors are COLUMNS (superseding
+   entry: "sort any column + expansion cards become columns" below); every
+   ported behavior listed there must hold. The SyllabusCell offers select/
+   preview/download/From-LMS/From-import plus the direct-upload control
+   (onUploaded updates the row and reloads the syllabus list).
 4. The actions column preserves the onNavigate contract; delete uses the
    original single confirm; the add/edit form is the ported AddCourseForm.
 5. Retired by user approval: the tile/card-layout system and its panels
@@ -734,8 +733,12 @@ most likely to break again when these files are edited.
    Common Resources panel (component deleted; the common-resources lib remains
    for the Starter Materials workflow). card-layout.ts remains only as a lib
    consumed by courses-tab-helpers; no layout localStorage keys are read.
-6. Pure logic tested: sort comparators, column-set parsing, derived counts,
-   field patches (courses-table-helpers, 25 tests) on top of Phase 1's 42.
+   Also retired by user direction (cards-to-columns): row expansion, the
+   chevron, RowDetail*.tsx, and the separate count columns (superseded by
+   the repos/roster/studentRepos cells displaying the same counts).
+6. Pure logic tested: sort machinery, column-set parsing incl. legacy-id
+   migration, derived counts, field patches (courses-table-helpers, 47
+   tests) on top of Phase 1's 42.
 
 ### 2026-07-22 - TabShell layout normalization
 
@@ -905,11 +908,156 @@ container-scroll idiom.
    ColumnId plus name/actions to a px minimum applied as each th's inline
    minWidth; the table has no hard element-level minWidth. A completeness
    test pins the key set to ALL_COLUMN_IDS + name/actions with positive
-   values (courses-table-helpers.test.ts, 26 tests).
+   values (the ColumnId set has since widened - see the cards-to-columns
+   entry; the completeness test tracks it by construction).
 5. Unchanged behavior: sort clicks/indicators, ta-courses-sort and
-   ta-courses-columns persistence, inline cell editing, row expansion
-   (RowDetail renders inside the scroller), the actions column, and the
-   Phase 2 entry's checks all hold. No new persisted controls were added.
-   Unit-test disposition: COLUMN_MIN_WIDTHS is the only new pure logic and is
-   covered by the completeness test; the CSS module and class swaps have no
-   unit-testable surface.
+   ta-courses-columns persistence, inline cell editing, the actions column,
+   and the Phase 2 entry's checks all hold. No new persisted controls were
+   added. (Row expansion, mentioned here originally, was later retired by
+   the cards-to-columns entry.) Unit-test disposition: COLUMN_MIN_WIDTHS is
+   the only new pure logic and is covered by the completeness test; the CSS
+   module and class swaps have no unit-testable surface.
+
+### 2026-07-22 - Courses table: sort any column + expansion cards become columns
+
+Context: user-directed replacement - every row-expansion card is now a
+column, and every data column sorts. Row expansion, the chevron, the five
+RowDetail* files, and the three separate count columns are retired (counts
+now display inside the repos/roster/studentRepos cells).
+
+1. Column model: ALL_COLUMN_IDS = the nine scalar columns + repos, roster,
+   studentRepos, integrations, description, scheduleCsv, rubric, materials,
+   lmsExports. DEFAULT_VISIBLE_COLUMNS (also the malformed-persist fallback)
+   is the pre-widening twelve-column face; the six heavy new columns default
+   hidden, discoverable via the Columns menu. parseColumnSet migrates legacy
+   persisted ids (rosterCount -> roster, studentRepoCount -> studentRepos,
+   reposCount -> repos, deduped).
+2. Sorting: SORT_FIELDS = ["name", ...ALL_COLUMN_IDS] by construction
+   ("actions" excluded - not data). One pure extractor sortValueFor(course,
+   field, ctx) feeds one generic comparator: text sorts case-insensitive,
+   numbers numeric, EMPTY values always last in both directions, ties break
+   by name ascending independent of direction. syllabusId sorts by the
+   RESOLVED syllabus name (ctx.syllabusNameById built from the syllabi prop;
+   raw id fallback); repos/roster/studentRepos/integrations/materials/
+   lmsExports sort by count (zero is ordinary, never "empty");
+   scheduleCsv/rubric/description sort by content text (unset last).
+   name/startDate semantics byte-identical to the pre-widening comparator.
+3. Header: every data th (name + all columns) is clickable with
+   cursor: pointer + the ascending/descending indicator; persistence stays
+   in ta-courses-sort (parseSortState accepts every SORT_FIELDS member,
+   legacy values valid, junk falls back). Header cells map over
+   ALL_COLUMN_IDS filtered by visibility; CourseRow renders cells in the
+   same canonical order, so header/cell alignment is order-independent of
+   the persisted visibility array. The Actions th has no sort affordance.
+4. Cells preserve 100% of the former cards' behaviors: RepoCell (codebase
+   editor + ownedRepos), RosterCell (editor + stats + From-LMS draft),
+   StudentReposCell, Integrations/Description via EditableCell (multiline,
+   truncated display, the Integrations format hint via EditableCell's new
+   optional hint prop), ScheduleCsvCell + RubricCell (Set/Not set display,
+   Preview, From LMS, From import, editor), MaterialsCell + LmsExportsCell
+   (compact summary + a Manage-anchored MUI Popover hosting the card bodies
+   verbatim: upload/replace/remove-with-confirm, per-file download/remove,
+   export upload, all busy states). saveField/computeFieldPatch semantics
+   unchanged (Phase 2 check 2).
+5. Structure: RowDetail.tsx, RowDetailRepos.tsx, RowDetailRoster.tsx,
+   RowDetailSchedule.tsx, RowDetailFiles.tsx deleted (git-recoverable);
+   cell files RepoCell/RosterCell/ScheduleCell/FilesCell each at or under
+   1000 lines; EditableCell's only change is the additive hint prop.
+6. Pure logic tested (courses-table-helpers.test.ts, 47 tests): legacy-id
+   migration + dedup, DEFAULT_VISIBLE_COLUMNS excludes the six heavy ids,
+   min-widths completeness vs the widened set, parseSortState over all
+   fields, sortValueFor per column class, comparator empty-last both
+   directions + tie-break, SORT_FIELDS completeness vs ALL_COLUMN_IDS.
+   Unit-test disposition: cell components are markup + moved bodies over
+   already-tested actions; code-trace coverage accepted.
+
+### 2026-07-22 - Composed fan-out (all institutions + course multiplicity)
+
+Context: scopes with institution "*" AND hubCourse "*"/multi-line died in
+both runners with "pick one fan-out dimension", killing autonomous lecture
+prep/deck runs. A course tile belongs to exactly one institution, so the
+composition collapses to a course-dimension fan-out with each group's
+institution derived from its tile.
+
+1. fanout.ts: hasCourseMultiplicity(scope) extracted (hubCourse "*" or 2+
+   newline-separated ids) and used by isCourseFanout AND both former guard
+   sites; isComposedFanout = institution fan-out + course multiplicity;
+   isCourseFanout still false when institution is "*" (public semantics
+   unchanged). resolveFanoutCourses items carry institution: string | null.
+   composedGroupLabel renders "<institution>: <course>" (course name alone
+   when institution is empty).
+2. Unattended (server-runner.ts): the rejection guard is REPLACED by a
+   composed branch - courses resolved with activeInstitution null, each
+   group's scope pinned via scopeForInstitution(scopeForCourse(...), tile
+   institution or ""), reusing the CourseGroupOutcome loop, doneCourses
+   checkpointing, deadline checks, and countOkCourses progress unchanged;
+   CourseGroupOutcome gains optional institution. Zero courses resolving is
+   an explicit error outcome, never a silent success. The cron route
+   classifies composed runs by hasCourseMultiplicity so checkpointing keys
+   on doneCourses (not doneInstitutions).
+3. Attended (useWorkflowRun.ts): the validation error is replaced by
+   composed entities (institution + courseId/courseName) built by the pure
+   buildComposedFanoutEntities/pinComposedGroupScope helpers
+   (attended-fanout.ts); the existing course-fanout UI machinery
+   (stop-after-course, course outcomes) applies; RunPanel group headers show
+   the composed label. Single-dimension paths are the original code verbatim.
+4. Stuck-run stamping: the cron route's per-schedule catch AND
+   workflow-trigger-runner's per-trigger catch now stamp
+   updateScheduleRunOutcome/updateTriggerRunOutcome(..., "error", message)
+   best-effort, so a post-claim throw surfaces as a failed run with detail
+   instead of a permanent "started"/"Did not finish" row. Residual (out of
+   scope, documented): a HARD platform kill (60s Vercel cap) inside a single
+   group iteration still cannot stamp; the 10-minute "Did not finish" chip
+   remains the honest surface for that case; composed/course fan-outs
+   mitigate it by checkpointing at the ~50s soft deadline.
+5. Tests: server-runner fan-out describes moved byte-identical to
+   server-runner.fanout.test.ts (both files at or under 950; shared fixtures
+   duplicated verbatim); the old rejection test is REPLACED by composed
+   tests - scope pinning per group asserted via probe steps, empty
+   institution "" case, multi-line + "*" composition, checkpoint resume via
+   skipCourses. fanout.test.ts covers hasCourseMultiplicity/
+   isComposedFanout/composedGroupLabel/institution field;
+   attended-fanout.test.ts covers the pure entity builders. The route/
+   trigger catch stamping is code-trace covered (exact calls quoted in the
+   entry's implementing commit).
+
+### 2026-07-22 - Source-URL TOC derivation (grounding ladder)
+
+Context: pasting a platform URL (e.g. a uCertify course link) as kickoff
+sourceMaterial produced an unaligned schedule - parseTocChapters finds no
+chapters in a URL and the name-only branch forbids alignment; the platform
+page itself is a login-walled SPA, so fetching cannot recover a TOC.
+
+1. Grounding ladder in generateSchedulePlanAction: (a) pasted TOC parses ->
+   aligned branch, byte-identical to before (the balancing policy text is
+   the shared CHAPTER_ALIGNMENT_POLICY constant, not duplicated); (b) no
+   parse AND shouldDeriveToc (URL present, or short identifier-like text,
+   pure predicate in source-alignment.ts) -> deriveTocFromSource
+   (course-planning-grounding.ts, a "use server" sibling re-exported via
+   actions.ts) makes ONE webSearch-grounded callLlm call (the
+   researchCurrentEventsAction idiom) asking for the official outline,
+   parses it with parseTocChapters, and on success drives the SAME aligned
+   branch with the derived TOC (original text still shown as the primary
+   source); (c) derivation failure of any kind returns null and falls back
+   to the name-only branch - never throws, never blocks the schedule.
+2. The generate-schedule step reports the grounding tier in its summary
+   notes (pasted TOC / derived TOC with chapter + source counts / name-only)
+   and lists the derivation's web sources (title + URL).
+3. Materials threading via output binding (no second search call):
+   generate-schedule exposes a resolvedSourceMaterial output (derived TOC
+   when found, otherwise the exact input text); NO_CODE_KICKOFF binds
+   lecture-materials-from-schedule.sourceMaterial to that output, so the
+   materials action's own parseTocChapters test sees a real TOC and takes
+   its pre-existing aligned branch. Pasted-TOC and name-only tiers pass
+   through byte-identical text.
+4. Headless-safe: the ladder runs inside server actions (no browser APIs);
+   unattended runs get identical grounding. The return type additions
+   (derivedToc/derivedSources) are optional - existing callers unaffected.
+5. Tests: shouldDeriveToc six cases (URL-only, URL-in-short-text, real
+   multi-line TOC, long prose, empty, short citation);
+   buildTocDerivationPrompt asserted directly; deriveTocFromSource tested
+   with a MOCKED callLlm across success/zero-chapters/HTTP-failure/blank/
+   thrown paths (all failure paths return null); step-level tests assert the
+   tier notes, sources listing, and resolvedSourceMaterial fallback; a
+   presets test pins the new output binding. source-alignment.test.ts grew
+   27 -> 35 with the original 27 untouched.

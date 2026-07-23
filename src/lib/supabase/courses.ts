@@ -78,6 +78,7 @@ export interface Course {
   dayTime: string | null;
   /** "async" | "sync" | null (unset - never defaulted). */
   modality: string | null;
+  topicOutline: string | null;
   materialsFiles: CourseMaterialFile[];
   exportFiles: CourseMaterialFile[];
   materialsZipName: string | null;
@@ -116,13 +117,14 @@ export interface CourseInput {
   lms?: string | null;
   dayTime?: string | null;
   modality?: string | null;
+  topicOutline?: string | null;
   customTiles?: CourseCustomTile[];
   hiddenTiles?: string[];
   studentRepos?: CourseStudentRepo[];
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, materials_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, materials_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -158,6 +160,7 @@ interface CourseRow {
   lms: string | null;
   day_time: string | null;
   modality: string | null;
+  topic_outline: string | null;
   materials_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
   export_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
   materials_zip_name: string | null;
@@ -196,6 +199,7 @@ function toCourse(r: CourseRow): Course {
     lms: r.lms,
     dayTime: r.day_time,
     modality: r.modality,
+    topicOutline: r.topic_outline,
     materialsFiles: Array.isArray(r.materials_files) ? r.materials_files.filter((x) => x && x.path && x.name) : [],
     exportFiles: Array.isArray(r.export_files) ? r.export_files.filter((x) => x && x.path && x.name) : [],
     materialsZipName: r.materials_zip_name,
@@ -256,6 +260,7 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     lms: clean(input.lms),
     day_time: clean(input.dayTime),
     modality: clean(input.modality),
+    topic_outline: clean(input.topicOutline),
     custom_tiles: Array.isArray(input.customTiles) ? (input.customTiles as unknown as Json) : undefined,
     hidden_tiles: Array.isArray(input.hiddenTiles) ? (input.hiddenTiles as unknown as Json) : undefined,
     student_repos: Array.isArray(input.studentRepos)

@@ -52,6 +52,7 @@ const mockCourse: Course = {
   lms: "canvas",
   dayTime: "MWF 10-11am",
   modality: "async",
+  topicOutline: null,
   customTiles: [],
   hiddenTiles: [],
   studentRepos: [

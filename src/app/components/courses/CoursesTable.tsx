@@ -56,6 +56,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   rubric: "Rubric",
   materials: "Materials",
   lmsExports: "LMS Exports",
+  topicOutline: "Topic Outline",
 };
 
 export interface CoursesTableProps {

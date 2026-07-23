@@ -233,6 +233,17 @@ export default function CourseRow({
         />
       )}
 
+      {has("topicOutline") && (
+        <EditableCell
+          kind="multiline"
+          rawValue={course.topicOutline ?? ""}
+          display={course.topicOutline ? <span className={styles.courseResourceValue}>{truncateForCell(course.topicOutline, 80)}</span> : undefined}
+          placeholder="Paste topic outline from Cengage, uCertify, etc."
+          emptyLabel="Not set"
+          onSave={save("topicOutline")}
+        />
+      )}
+
       <td>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <button type="button" className={styles.linkButton} onClick={() => onNavigate("course-planning", course)}>

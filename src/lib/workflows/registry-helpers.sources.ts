@@ -735,6 +735,22 @@ export async function gatherModuleMaterials(
     };
   };
 
+  const topicOutlineGatherer = async (): Promise<SourceGatherOutcome> => {
+    const outline = (tile.topicOutline ?? "").trim();
+    if (!outline) {
+      return {
+        text: "",
+        notes: ["no topic outline set on the course tile"],
+        ok: false,
+      };
+    }
+    return {
+      text: outline,
+      notes: [`topic outline from course tile (${outline.length} chars)`],
+      ok: true,
+    };
+  };
+
   const gather: SourceGatherer = (kind: SourceKind) => {
     switch (kind) {
       case "live-lms":
@@ -749,6 +765,8 @@ export async function gatherModuleMaterials(
         return materialsZipGatherer();
       case "repo":
         return repoGatherer();
+      case "topic-outline":
+        return topicOutlineGatherer();
     }
   };
 

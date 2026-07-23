@@ -49,6 +49,7 @@ function makeCourse(overrides: Partial<Course>): Course {
     lms: null,
     dayTime: null,
     modality: null,
+    topicOutline: null,
     materialsFiles: [],
     exportFiles: [],
     materialsZipName: null,
@@ -273,21 +274,21 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "institution",
       "weeks",
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline",
     ]);
   });
 
   it("unions all post-v0 columns into an empty legacy selection (a bare array is version 0)", () => {
     expect(parseColumnSet(JSON.stringify([]))).toEqual([
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline",
     ]);
   });
 
   it("ignores name/actions if present since they are not toggleable columns", () => {
     expect(parseColumnSet(JSON.stringify(["name", "actions", "lms"]))).toEqual([
       "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline",
     ]);
   });
 
@@ -298,14 +299,14 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "repos",
       "lms",
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline",
     ]);
   });
 
   it("dedups after migrating a legacy id that collides with a persisted new id", () => {
     expect(parseColumnSet(JSON.stringify(["roster", "rosterCount", "lms"]))).toEqual([
       "roster", "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline",
     ]);
   });
 
@@ -349,12 +350,17 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(JSON.stringify({ v: CURRENT_COLUMNS_VERSION, columns: ["bogus", "lms"] }))).toEqual(["lms"]);
   });
 
-  it("unions v2 columns into a v1 persisted set", () => {
+  it("unions v2+v3 columns into a v1 persisted set", () => {
     const v1 = JSON.stringify({ v: 1, columns: ["lms", "modality"] });
     expect(parseColumnSet(v1)).toEqual([
       "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline",
     ]);
+  });
+
+  it("unions v3 columns into a v2 persisted set", () => {
+    const v2 = JSON.stringify({ v: 2, columns: ["lms", "modality"] });
+    expect(parseColumnSet(v2)).toEqual(["lms", "modality", "topicOutline"]);
   });
 
   it("serializeColumnSet writes the current version", () => {

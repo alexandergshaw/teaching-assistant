@@ -15,7 +15,8 @@ export type SourceKind =
   | "source-url"
   | "materials-zip"
   | "repo"
-  | "tile-meta";
+  | "tile-meta"
+  | "topic-outline";
 
 export type SourceStrategy = "first-success" | "merge-all" | "until-failure";
 
@@ -32,6 +33,7 @@ export const ALL_SOURCE_KINDS: readonly SourceKind[] = [
   "materials-zip",
   "repo",
   "tile-meta",
+  "topic-outline",
 ];
 
 export const ALL_SOURCE_STRATEGIES: readonly SourceStrategy[] = [
@@ -47,6 +49,7 @@ export const SOURCE_KIND_LABELS: Record<SourceKind, string> = {
   "materials-zip": "Uploaded materials zip",
   repo: "Repository digest",
   "tile-meta": "Tile topics/description",
+  "topic-outline": "Topic outline (from tile)",
 };
 
 export const SOURCE_STRATEGY_LABELS: Record<SourceStrategy, string> = {

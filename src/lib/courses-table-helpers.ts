@@ -38,6 +38,7 @@ export const ALL_COLUMN_IDS = [
   "rubric",
   "materials",
   "lmsExports",
+  "topicOutline",
 ] as const;
 
 export type ColumnId = (typeof ALL_COLUMN_IDS)[number];
@@ -62,6 +63,7 @@ export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
   "rubric",
   "materials",
   "lmsExports",
+  "topicOutline",
 ];
 
 const COLUMN_ID_SET: Set<string> = new Set(ALL_COLUMN_IDS);
@@ -80,7 +82,7 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
 // column set unless it is unioned in here - bump this and add an entry to
 // COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
 // (no wrapper object) is treated as version 0.
-export const CURRENT_COLUMNS_VERSION = 2;
+export const CURRENT_COLUMNS_VERSION = 3;
 
 /** Columns introduced by each version, unioned into every persisted set
  * stored at an earlier version. Version 0 is the pre-versioning baseline, so
@@ -88,6 +90,7 @@ export const CURRENT_COLUMNS_VERSION = 2;
 const COLUMNS_ADDED_IN: Record<number, ColumnId[]> = {
   1: ["modality"],
   2: ["integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports"],
+  3: ["topicOutline"],
 };
 
 /** Parse a persisted ta-courses-columns value; unknown ids are dropped and a
@@ -182,6 +185,7 @@ export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = 
   rubric: 220,
   materials: 190,
   lmsExports: 190,
+  topicOutline: 260,
   actions: 240,
 };
 
@@ -300,6 +304,8 @@ export function sortValueFor(course: Course, field: SortField, ctx?: SortContext
       return countValue(course.materialsFiles.length + (course.materialsZipPath ? 1 : 0));
     case "lmsExports":
       return countValue(course.exportFiles.length);
+    case "topicOutline":
+      return textValue(course.topicOutline);
   }
 }
 
@@ -409,6 +415,8 @@ export function computeFieldPatch(field: TableEditableField, rawValue: string): 
       return { lms: rawValue || null };
     case "modality":
       return { modality: rawValue || null };
+    case "topicOutline":
+      return { topicOutline: rawValue || null };
     case "dayTime":
       return { dayTime: rawValue };
     case "studentRepos":

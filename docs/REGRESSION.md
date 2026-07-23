@@ -1600,3 +1600,25 @@ Acceptance criteria (cb76e74+):
 5. Draft assembly (GradingRunEntry shape, saveGradingDraftAction call)
    is unchanged - the grading panel, Canvas posting, and grade export
    flows are unaffected.
+
+## 54. Topic Outline column and source kind
+
+Acceptance criteria (196c1e8+):
+1. New topic_outline text column on course_hub (migration
+   20260831000000). Course/CourseInput/CourseRow types updated.
+   COLUMNS select string includes topic_outline; toCourse/toRow map it.
+2. Courses table: topicOutline added to ALL_COLUMN_IDS,
+   DEFAULT_VISIBLE_COLUMNS, COLUMN_MIN_WIDTHS (260px), sortValueFor,
+   COLUMN_LABELS ("Topic Outline"), computeFieldPatch (coerces empty
+   to null). Column version bumped to 3; COLUMNS_ADDED_IN[3] unions
+   it into existing persisted sets.
+3. CourseRow renders a multiline EditableCell with placeholder
+   "Paste topic outline from Cengage, uCertify, etc." and truncated
+   display (80 chars).
+4. New "topic-outline" SourceKind in source-policy.ts (added to
+   SourceKind union, ALL_SOURCE_KINDS, SOURCE_KIND_LABELS). Gatherer
+   in registry-helpers.sources.ts reads tile.topicOutline; returns
+   the outline text when set, a "no topic outline" note when empty.
+5. Existing source kinds, strategies, DEFAULT_SOURCE_POLICY, and the
+   gather switch are unchanged. The new kind only fires when selected
+   in the source policy editor.

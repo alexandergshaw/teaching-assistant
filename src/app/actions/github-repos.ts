@@ -618,13 +618,14 @@ export async function gradeRepoAction(
   assignmentInstructions: string,
   rubric: string,
   provider: LlmProvider = "gemini",
-  branch?: string
+  branch?: string,
+  pathPrefix?: string
 ): Promise<{ run: GradingRun; rubric: string; fullName: string } | { error: string }> {
   try {
     await requireOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
-    const digest = await ingestRepo(parsed.owner, parsed.repo, {}, branch);
+    const digest = await ingestRepo(parsed.owner, parsed.repo, { pathPrefix }, branch);
     const instructions = assignmentInstructions.trim() || `Evaluate the repository "${digest.fullName}".`;
 
     // Embedded Deterministic Engine: grade the repo in-process against the

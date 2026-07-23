@@ -53,12 +53,15 @@ export interface RepoDigest {
 export async function ingestRepo(
   owner: string,
   repo: string,
-  opts: { maxFiles?: number; maxBytes?: number; perFileBytes?: number } = {},
+  opts: { maxFiles?: number; maxBytes?: number; perFileBytes?: number; pathPrefix?: string } = {},
   ref?: string
 ): Promise<RepoDigest> {
   const maxFiles = opts.maxFiles ?? 40;
   const maxBytes = opts.maxBytes ?? 220_000;
   const perFileBytes = opts.perFileBytes ?? 8_000;
+  const prefix = opts.pathPrefix
+    ? (opts.pathPrefix.endsWith("/") ? opts.pathPrefix : `${opts.pathPrefix}/`).toLowerCase()
+    : "";
 
   const info = await getRepo(owner, repo);
   const branch = ref || info.defaultBranch;
@@ -69,6 +72,7 @@ export async function ingestRepo(
         t.type === "blob" &&
         t.size > 0 &&
         t.size < 60_000 &&
+        (!prefix || t.path.toLowerCase().startsWith(prefix)) &&
         !SKIP_DIR.test(t.path) &&
         !SKIP_FILE.test(t.path) &&
         (TEXT_EXT.has(fileExt(t.path)) || /(^|\/)(readme|dockerfile|makefile)$/i.test(t.path.toLowerCase()))

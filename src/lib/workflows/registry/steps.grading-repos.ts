@@ -8,6 +8,8 @@ import {
   deleteGradingDraftAction,
   generateFullCreditChecklistAction,
   getInstitutionCountsAction,
+  getRepoTreeAction,
+  getFileTextAction,
 } from "@/app/actions";
 import {
   type StepDefinition,
@@ -309,9 +311,15 @@ export const gradingRepoSteps: StepDefinition[] = [
             ? "Complete"
             : `Module ${String(displayWeek).padStart(2, "0")}${topic ? `: ${topic}` : ""}`;
 
-      // Step 4: Get instructions text (README) for rubric synthesis.
-      let instructions = "";
-      const instrRepoRef = String(values.instructionsRepo ?? "").trim() || (tile.repos?.[0]?.repo ?? "").toString();
+      // Step 4-6: Grade each student repo (per-folder or shared-instructions mode).
+      const instrRepoRef = String(values.instructionsRepo ?? "").trim() || "";
+      const userRubric = String(values.rubric ?? "").trim();
+      const wk = displayWeek;
+      const weekRe = new RegExp(`(week|wk|module|unit)[^0-9]?0*${wk}(?![0-9])`, "i");
+
+      // Shared-instructions fallback: read the instructions repo once if provided.
+      let sharedInstructions = "";
+      let sharedRubric = userRubric;
       if (instrRepoRef) {
         try {
           onProgress("Reading the instructions repo...");
@@ -319,64 +327,133 @@ export const gradingRepoSteps: StepDefinition[] = [
           if ("error" in r) {
             onProgress(`Note: could not ingest instructions repo: ${r.error}`);
           } else {
-            const wk = displayWeek;
-            const re = new RegExp(`(week|wk|module|unit)[^0-9]?0*${wk}(?![0-9])`, "i");
-            const matched = r.digest.files.filter((f) => re.test(f.path));
-
+            const matched = r.digest.files.filter((f) => weekRe.test(f.path));
             if (matched.length > 0) {
               const readmeFile = matched.find((f) => /readme/i.test(f.path));
-              if (readmeFile) {
-                instructions = readmeFile.content;
-              } else {
-                instructions = matched[0].content;
-              }
+              sharedInstructions = readmeFile ? readmeFile.content : matched[0].content;
             } else {
-              instructions = r.digest.text;
+              sharedInstructions = r.digest.text;
             }
           }
         } catch (err) {
           onProgress(`Note: error reading instructions repo: ${err instanceof Error ? err.message : String(err)}`);
         }
-      }
-
-      // Step 5: Get or synthesize rubric.
-      let rubric = String(values.rubric ?? "").trim();
-      if (!rubric) {
-        onProgress("Generating rubric...");
-        const rr = await generateAssignmentRubricAction(
-          moduleName + (topic ? `: ${topic}` : ""),
-          instructions,
-          helpers.provider
-        );
-        if (typeof rr === "string") {
-          rubric = rr;
-        } else {
-          onProgress(`Note: rubric generation failed: ${rr.error}`);
+        if (!sharedRubric && sharedInstructions) {
+          onProgress("Generating rubric...");
+          const rr = await generateAssignmentRubricAction(
+            moduleName + (topic ? `: ${topic}` : ""),
+            sharedInstructions,
+            helpers.provider
+          );
+          if (typeof rr === "string") {
+            sharedRubric = rr;
+          } else {
+            onProgress(`Note: rubric generation failed: ${rr.error}`);
+          }
         }
       }
 
-      if (!rubric && !instructions) {
-        throw new Error("Provide a rubric or an instructions repo with the week's README.");
-      }
-
-      // Step 6: Grade each student repo.
       const results: GradeResult[] = [];
       const notes: string[] = [];
+      // Cache rubrics by README content to avoid redundant LLM calls.
+      const rubricCache = new Map<string, string>();
 
       for (let i = 0; i < students.length; i++) {
         const student = students[i];
+        const label = student.student || student.repo;
         try {
-          onProgress(`Grading ${i + 1}/${students.length}...`);
-          const r = await gradeRepoAction(student.repo, instructions, rubric, helpers.provider);
+          // Try per-student folder grading: find the week folder in the student repo.
+          let folderPath = "";
+          let folderInstructions = "";
+          let folderRubric = userRubric;
+
+          if (!instrRepoRef) {
+            // Folder-per-module mode: discover the week folder in the student repo.
+            const treeRes = await getRepoTreeAction(student.repo);
+            if ("error" in treeRes) {
+              notes.push(`${label}: ${treeRes.error}`);
+              continue;
+            }
+            // Find the first top-level folder matching the week pattern.
+            const topFolders = new Set<string>();
+            for (const entry of treeRes.tree) {
+              const seg = entry.path.split("/")[0];
+              topFolders.add(seg);
+            }
+            const matched = [...topFolders].find((seg) => weekRe.test(seg));
+            if (!matched) {
+              notes.push(`${label}: no folder matching week ${wk}`);
+              continue;
+            }
+            folderPath = matched;
+
+            // Read the folder's README for instructions.
+            const readmeEntry = treeRes.tree.find(
+              (e) =>
+                e.path.toLowerCase().startsWith(`${matched.toLowerCase()}/`) &&
+                /\/readme\.md$/i.test(e.path) &&
+                e.path.split("/").length === 2
+            );
+            if (readmeEntry) {
+              const fileRes = await getFileTextAction(student.repo, readmeEntry.path);
+              if (!("error" in fileRes)) {
+                folderInstructions = fileRes.content;
+              }
+            }
+            if (!folderInstructions) {
+              folderInstructions = `Evaluate the contents of the ${matched} directory.`;
+            }
+
+            // Synthesize or retrieve cached rubric for this README content.
+            if (!folderRubric) {
+              const cached = rubricCache.get(folderInstructions);
+              if (cached) {
+                folderRubric = cached;
+              } else {
+                onProgress(`Generating rubric for ${matched}...`);
+                const rr = await generateAssignmentRubricAction(
+                  moduleName + (topic ? `: ${topic}` : ""),
+                  folderInstructions,
+                  helpers.provider
+                );
+                if (typeof rr === "string") {
+                  folderRubric = rr;
+                  rubricCache.set(folderInstructions, rr);
+                } else {
+                  onProgress(`Note: rubric generation failed for ${label}: ${rr.error}`);
+                }
+              }
+            }
+          } else {
+            // Shared-instructions mode (instructionsRepo provided).
+            folderInstructions = sharedInstructions;
+            folderRubric = sharedRubric;
+          }
+
+          if (!folderRubric && !folderInstructions) {
+            notes.push(`${label}: no rubric or instructions available`);
+            continue;
+          }
+
+          const progressFolder = folderPath ? ` (${folderPath}/)` : "";
+          onProgress(`Grading ${i + 1}/${students.length}: ${label}${progressFolder}...`);
+          const r = await gradeRepoAction(
+            student.repo,
+            folderInstructions,
+            folderRubric,
+            helpers.provider,
+            undefined,
+            folderPath || undefined
+          );
 
           if ("error" in r) {
-            notes.push(`${student.student || student.repo}: ${r.error}`);
+            notes.push(`${label}: ${r.error}`);
             continue;
           }
 
           const gr = r.run.results[0];
           if (!gr) {
-            notes.push(`${student.student || student.repo}: no result returned`);
+            notes.push(`${label}: no result returned`);
             continue;
           }
 
@@ -385,7 +462,7 @@ export const gradingRepoSteps: StepDefinition[] = [
           results.push(gr);
         } catch (err) {
           notes.push(
-            `${student.student || student.repo}: ${err instanceof Error ? err.message : String(err)}`
+            `${label}: ${err instanceof Error ? err.message : String(err)}`
           );
         }
       }

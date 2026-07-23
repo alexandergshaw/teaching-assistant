@@ -667,3 +667,111 @@ describe("describeScopeForType with concepts", () => {
     expect(describeScopeForType({ org: "*" }, "orgList")).toBe("all organizations");
   });
 });
+
+describe("scopeFamilyForType with lmsModule (AC4)", () => {
+  it("maps lmsModule to its own family", () => {
+    expect(scopeFamilyForType("lmsModule")).toBe("lmsModule");
+  });
+});
+
+describe("scopeCoversType with lmsModule (AC4)", () => {
+  it("covers an lmsModule input when the scope sets lmsModule", () => {
+    expect(scopeCoversType({ lmsModule: "name|Module 05: Loops" }, "lmsModule")).toBe(true);
+    expect(scopeCoversType({ lmsModule: "" }, "lmsModule")).toBe(false);
+    expect(scopeCoversType({}, "lmsModule")).toBe(false);
+    expect(scopeCoversType(undefined, "lmsModule")).toBe(false);
+  });
+
+  it("rejects '*' in lmsModule scope (not a valid module value)", () => {
+    expect(scopeCoversType({ lmsModule: "*" }, "lmsModule")).toBe(false);
+  });
+});
+
+describe("applyWorkflowScope with lmsModule (AC4)", () => {
+  it("returns the scope lmsModule value when run form is empty", () => {
+    expect(applyWorkflowScope("lmsModule", "", { lmsModule: "name|Module 05: Loops" })).toBe(
+      "name|Module 05: Loops"
+    );
+  });
+
+  it("returns the run-form value when non-empty (a per-run override)", () => {
+    expect(applyWorkflowScope("lmsModule", "42|Week 3", { lmsModule: "name|Module 05: Loops" })).toBe(
+      "42|Week 3"
+    );
+  });
+
+  it("rejects '*' in lmsModule scope (not a valid module value) and falls back to run value", () => {
+    expect(applyWorkflowScope("lmsModule", "", { lmsModule: "*" })).toBe("");
+    expect(applyWorkflowScope("lmsModule", "fallback", { lmsModule: "*" })).toBe("fallback");
+  });
+});
+
+describe("describeWorkflowScope with lmsModule (AC4)", () => {
+  it("includes a fixed-module summary in the scope description", () => {
+    expect(describeWorkflowScope({ lmsModule: "name|Module 05: Loops" })).toBe("a fixed current module");
+    expect(describeWorkflowScope({ institution: "MCC", lmsModule: "name|Module 05: Loops" })).toBe(
+      "institution MCC, a fixed current module"
+    );
+  });
+
+  it("ignores empty lmsModule values", () => {
+    expect(describeWorkflowScope({ lmsModule: "" })).toBe("");
+    expect(describeWorkflowScope({ lmsModule: "  " })).toBe("");
+  });
+});
+
+describe("describeScopeForType with lmsModule (AC4)", () => {
+  it("returns the module name for an lmsModule type", () => {
+    expect(describeScopeForType({ lmsModule: "name|Module 05: Loops" }, "lmsModule")).toBe(
+      'module "Module 05: Loops"'
+    );
+  });
+
+  it("returns empty when lmsModule scope is not set", () => {
+    expect(describeScopeForType(undefined, "lmsModule")).toBe("");
+    expect(describeScopeForType({}, "lmsModule")).toBe("");
+  });
+
+  it("returns empty for '*' in lmsModule scope (invalid)", () => {
+    expect(describeScopeForType({ lmsModule: "*" }, "lmsModule")).toBe("");
+  });
+
+  it("still handles entity types correctly", () => {
+    expect(describeScopeForType({ hubCourse: "a\nb" }, "hubCourseList")).toBe("2 course tile(s)");
+  });
+});
+
+describe("collectRuntimeFields with lmsModule scope (AC4)", () => {
+  const inputs: Record<string, StepInputSpec[]> = {
+    lectureZip: [
+      { key: "moduleId", label: "Current module", type: "lmsModule", required: false },
+      { key: "minutes", label: "Minutes", type: "number", required: true },
+    ],
+  };
+  const lookup = (type: string) => inputs[type];
+  const def: WorkflowDef = {
+    id: "w",
+    name: "W",
+    description: "",
+    steps: [
+      {
+        type: "lectureZip",
+        bindings: {
+          moduleId: { source: "runtime", fieldKey: "moduleId" },
+          minutes: { source: "runtime", fieldKey: "minutes" },
+        },
+      },
+    ],
+  };
+
+  it("hides the moduleId field when the scope sets lmsModule", () => {
+    const scoped: WorkflowDef = { ...def, scope: { lmsModule: "name|Module 05: Loops" } };
+    const fields = collectRuntimeFields(scoped, lookup);
+    expect(fields.map((f) => f.fieldKey)).toEqual(["minutes"]);
+  });
+
+  it("asks for the moduleId field when the scope does not set lmsModule", () => {
+    const fields = collectRuntimeFields(def, lookup);
+    expect(fields.map((f) => f.fieldKey).sort()).toEqual(["minutes", "moduleId"]);
+  });
+});

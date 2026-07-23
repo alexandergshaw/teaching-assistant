@@ -45,6 +45,14 @@ import {
 // pre-policy MATERIALS_CAP exactly.
 const MATERIALS_CAP = 20000;
 const DESCRIPTION_FETCH_LIMIT = 6;
+// course-progress ("Find the current week and module") emits these two texts
+// instead of a module name when the course has not started or has finished -
+// a name-reference module value carrying one of these must never be treated
+// as a real module name to look up (AC2's sentinel guard).
+const MODULE_NAME_SENTINELS = new Set(["Not started", "Complete"]);
+// Tolerant module-number match: the same idiom used in
+// steps.lms-integrations.ts ("Module NN" vs "Week N" style names).
+const MODULE_NUMBER_PATTERN = /(?:module|week)\s*0*(\d+)/i;
 // First http(s) URL found in free text (a tile's textbook field, e.g.).
 const URL_IN_TEXT_PATTERN = /https?:\/\/\S+/i;
 // A materials zip above this is skipped for text extraction (server actions
@@ -71,6 +79,25 @@ async function blobToBase64Local(blob: Blob): Promise<string> {
     return btoa(binaryStr);
   }
   throw new Error("Neither Buffer nor btoa available for base64 encoding");
+}
+
+// AC2: match a name-reference module value ("name|<name>") against a live
+// module list - exact case-insensitive match first, then a tolerant
+// module-NUMBER match on both sides (so "Module 05: Loops" matches a Canvas
+// module named "Module 5" or "Week 5 - Loops"). Returns null on no match;
+// never throws.
+function findModuleByName(modules: CanvasModule[], name: string): CanvasModule | null {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  const exact = modules.find((m) => (m.name ?? "").trim().toLowerCase() === trimmed.toLowerCase());
+  if (exact) return exact;
+  const wanted = trimmed.match(MODULE_NUMBER_PATTERN);
+  if (!wanted) return null;
+  const tolerant = modules.find((m) => {
+    const match = (m.name ?? "").match(MODULE_NUMBER_PATTERN);
+    return match ? match[1] === wanted[1] : false;
+  });
+  return tolerant ?? null;
 }
 
 async function listZipMemberNames(blob: Blob): Promise<string[]> {
@@ -124,6 +151,16 @@ export async function gatherModuleMaterials(
   const inst = helpers.activeInstitution || undefined;
   const picked = parseLmsModuleValue(moduleIdRaw);
   const noModuleSelected = moduleIdRaw.trim() === "";
+  // AC2/AC3: course-progress emits the sentinel RAW (unwrapped) for the
+  // not-started/complete cases, so it must be recognized whichever form it
+  // arrives in - the raw trimmed value (the common case) or, defensively, a
+  // name carried by a byName/export value.
+  const rawTrimmed = moduleIdRaw.trim();
+  const moduleNameSentinel = MODULE_NAME_SENTINELS.has(rawTrimmed)
+    ? rawTrimmed
+    : picked.name && MODULE_NAME_SENTINELS.has(picked.name)
+    ? picked.name
+    : null;
 
   let moduleName = "Upcoming module";
   let materialsSource = "";
@@ -332,6 +369,61 @@ export async function gatherModuleMaterials(
     liveLmsRan = true;
     const notes: string[] = [];
 
+    // course-progress's sentinel texts ("Not started" / "Complete") are never
+    // a real module name to look up, whichever form they arrive in (raw or
+    // wrapped) - guard them here and fall to the course-level/no-module
+    // handling instead, exactly as if no module had been selected.
+    if (moduleNameSentinel) {
+      notes.push(`the course is not in an active module (${moduleNameSentinel})`);
+      if (!canvasUrl) {
+        notes.push("live LMS: no Canvas URL is set on this course tile");
+        return { text: "", notes, ok: false };
+      }
+      return await gatherCourseLevelLive(notes);
+    }
+
+    // AC2: a name-reference value ("name|<name>") - match by name instead of
+    // by a live id.
+    if (picked.byName) {
+      if (canvasUrl && picked.name) {
+        onProgress("Loading module materials...");
+        try {
+          const content = await listCourseContentAction(canvasUrl, inst);
+          if ("error" in content) throw new Error(content.error);
+          const target = findModuleByName(content.modules, picked.name);
+          if (target) {
+            moduleName = target.name;
+            materialsSource = `Materials read from LMS module "${target.name}"`;
+            moduleNames = [target.name];
+            const gathered = await gatherLiveModuleItems(target);
+            return { text: gathered.text, notes: [...notes, ...gathered.notes], ok: true };
+          }
+          const available = content.modules.slice(0, 5).map((m) => m.name).join(", ");
+          notes.push(
+            `module "${picked.name}" not found by name in the live LMS (available: ${available || "none"})`
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "could not read the LMS course";
+          notes.push(`live LMS: ${message}`);
+        }
+      }
+
+      // No match (or no live LMS to search) - fall through to the export by
+      // name, then the course-level/no-module handling.
+      const r = await tryExport(picked.name);
+      if (r.ok) {
+        moduleName = r.name;
+        materialsSource = `Materials from the course export module "${r.name}" (item titles + syllabus)`;
+        return { text: r.text, notes, ok: true };
+      }
+      if (r.note) notes.push(r.note);
+      if (!canvasUrl) {
+        notes.push("live LMS: no Canvas URL is set on this course tile");
+        return { text: "", notes, ok: false };
+      }
+      return await gatherCourseLevelLive(notes);
+    }
+
     if (picked.fromExport) {
       const r = await tryExport(picked.name);
       if (r.ok) {
@@ -420,6 +512,14 @@ export async function gatherModuleMaterials(
       const notes: string[] = [];
       if (r.note) notes.push(r.note);
       return { text: "", notes, ok: false };
+    }
+
+    if (moduleNameSentinel) {
+      return {
+        text: "",
+        notes: [`the course is not in an active module (${moduleNameSentinel})`],
+        ok: false,
+      };
     }
 
     const r = await tryExport(picked.name);

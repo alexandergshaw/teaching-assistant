@@ -25,6 +25,7 @@ import { filterUpcoming, formatDeadlineReport, type DeadlineSection } from "@/li
 import { planningGeneratorSteps } from "@/lib/workflows/registry/steps.planning-generators";
 import { scheduleToCsv, csvToSchedule } from "@/lib/workflows/types";
 import { courseProgressStatus } from "@/lib/week-numbering";
+import { nameModuleValue } from "@/lib/workflows/module-value";
 import { parseTocChapters, validateScheduleAlignment, formatBalanceSummary } from "@/lib/workflows/source-alignment";
 
 export const planningSteps: StepDefinition[] = [
@@ -419,6 +420,7 @@ export const planningSteps: StepDefinition[] = [
     outputs: [
       { key: "week", label: "Current week", type: "number" },
       { key: "moduleName", label: "Current module", type: "text" },
+      { key: "moduleRef", label: "Current module (reference)", type: "lmsModule" },
       { key: "topic", label: "Current topic", type: "text" },
       { key: "status", label: "Status", type: "text" },
       { key: "inProgress", label: "Course in progress", type: "boolean" },
@@ -478,10 +480,19 @@ export const planningSteps: StepDefinition[] = [
         summaryText = `${tile.name} is in week ${effectiveWeek}${totalLabel}${topic ? ` - ${topic}` : ""}${sourceNote}${targetingNote}.`;
       }
 
+      // AC3: a bindable lmsModule reference for the derived module name -
+      // status === "in-progress" wraps it as a name-reference value
+      // (matched by name wherever a later step gathers materials); the
+      // not-started/complete sentinels pass through RAW (unwrapped) so
+      // AC2's sentinel guard in the gatherer can recognize them by exact
+      // text - a wrapped "name|Not started" would defeat that check.
+      const moduleRef = status === "in-progress" ? nameModuleValue(moduleName) : moduleName;
+
       return {
         outputs: {
           week: status === "not-started" ? 0 : effectiveWeek,
           moduleName,
+          moduleRef,
           topic,
           status,
           inProgress: status === "in-progress" ? "1" : "",

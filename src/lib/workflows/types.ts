@@ -7,6 +7,7 @@
 import type { ScheduleWeekPlan } from "@/app/actions";
 import { parseCsvRows } from "@/lib/csv";
 import { isCourseFanout } from "@/lib/workflows/fanout";
+import { parseLmsModuleValue } from "@/lib/workflows/module-value";
 
 /**
  * Value types supported in workflows:
@@ -21,6 +22,11 @@ import { isCourseFanout } from "@/lib/workflows/fanout";
  * - sourcePolicy: an encoded SourcePolicy (source-policy.ts) - which material
  *   sources a lecture-building step checks, in what order, and its strategy;
  *   a scopeable scalar family, empty/absent = the default policy
+ *
+ * lmsModule is ALSO a scopeable scalar family (see WorkflowScope.lmsModule):
+ * an encoded module-value.ts string (module-value.ts's LmsModuleValue forms),
+ * so a workflow can pin "the current module" once for every lmsModule input,
+ * the same way lookahead/moduleOffset/concepts/sourcePolicy do.
  */
 export type WorkflowValueType =
   | "text"
@@ -189,6 +195,7 @@ export interface WorkflowStepConfig {
  * The moduleOffset value is a scalar modules-ahead count (never "*" or a list).
  * The concepts value is a scalar newline-joined concept list (never "*" or a list).
  * The sourcePolicy value is a scalar encoded SourcePolicy (never "*" or a list).
+ * The lmsModule value is a scalar encoded module-value.ts string (never "*" or a list).
  * An unset family (empty/absent) leaves those inputs asking as before.
  */
 export interface WorkflowScope {
@@ -200,6 +207,7 @@ export interface WorkflowScope {
   moduleOffset?: string;
   concepts?: string;
   sourcePolicy?: string;
+  lmsModule?: string;
 }
 
 export interface WorkflowDef {
@@ -238,6 +246,8 @@ export function scopeFamilyForType(type: string): keyof WorkflowScope | null {
       return "concepts";
     case "sourcePolicy":
       return "sourcePolicy";
+    case "lmsModule":
+      return "lmsModule";
     default:
       return null;
   }
@@ -277,7 +287,7 @@ export function scopeCoversType(scope: WorkflowScope | undefined, type: string):
  * otherwise the scope value is coerced to the input's arity: a list input takes
  * the scope value as-is (the engine later expands "*"); a single input takes
  * the first concrete item, and never "*" (which a single input cannot express).
- * Scalar families (lookahead, moduleOffset, concepts, sourcePolicy) are returned as-is from scope, with "*" rejected.
+ * Scalar families (lookahead, moduleOffset, concepts, sourcePolicy, lmsModule) are returned as-is from scope, with "*" rejected.
  */
 export function applyWorkflowScope(
   type: string,
@@ -289,7 +299,13 @@ export function applyWorkflowScope(
   if (!family || !scope) return runtimeValue;
   const scopeVal = (scope[family] ?? "").trim();
   if (!scopeVal) return runtimeValue;
-  if (family === "lookahead" || family === "moduleOffset" || family === "concepts" || family === "sourcePolicy") {
+  if (
+    family === "lookahead" ||
+    family === "moduleOffset" ||
+    family === "concepts" ||
+    family === "sourcePolicy" ||
+    family === "lmsModule"
+  ) {
     return scopeVal === "*" ? runtimeValue : scopeVal;
   }
   if (isSingleEntityType(type)) {
@@ -335,6 +351,9 @@ export function describeWorkflowScope(scope: WorkflowScope | undefined): string 
   if (scope.sourcePolicy?.trim()) {
     parts.push("a custom material-source policy");
   }
+  if (scope.lmsModule?.trim()) {
+    parts.push("a fixed current module");
+  }
   return parts.join(", ");
 }
 
@@ -355,13 +374,17 @@ export function describeScopeForType(scope: WorkflowScope | undefined, type: str
     return `${conceptCount} concept(s) targeted`;
   }
   if (family === "sourcePolicy") return "custom material-source policy";
+  if (family === "lmsModule") {
+    const name = parseLmsModuleValue(effective).name;
+    return name ? `module "${name}"` : "a fixed current module";
+  }
   if (isSingleEntityType(type)) return effective;
-  const labels: Record<Exclude<keyof WorkflowScope, "institution" | "lookahead" | "moduleOffset" | "concepts" | "sourcePolicy">, [string, string]> = {
+  const labels: Record<Exclude<keyof WorkflowScope, "institution" | "lookahead" | "moduleOffset" | "concepts" | "sourcePolicy" | "lmsModule">, [string, string]> = {
     hubCourse: ["all course tiles", "course tile(s)"],
     lmsCourse: ["all Canvas courses", "Canvas course(s)"],
     org: ["all organizations", "organization(s)"],
   };
-  const pair = labels[family as Exclude<keyof WorkflowScope, "institution" | "lookahead" | "moduleOffset" | "concepts" | "sourcePolicy">];
+  const pair = labels[family as Exclude<keyof WorkflowScope, "institution" | "lookahead" | "moduleOffset" | "concepts" | "sourcePolicy" | "lmsModule">];
   if (!pair) return effective;
   if (effective === "*") return pair[0];
   const count = effective.split("\n").map((s) => s.trim()).filter(Boolean).length;

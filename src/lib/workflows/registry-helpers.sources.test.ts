@@ -16,7 +16,7 @@ import type { StepRunHelpers } from "./registry-helpers";
 import type { Course } from "@/lib/supabase/courses";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
 import { DEFAULT_SOURCE_POLICY, type SourcePolicy } from "./source-policy";
-import { liveModuleValue, exportModuleValue } from "./module-value";
+import { liveModuleValue, exportModuleValue, nameModuleValue } from "./module-value";
 
 function courseExport(overrides: Partial<CartridgeCourseData> = {}): CartridgeCourseData {
   return {
@@ -455,5 +455,102 @@ describe("gatherModuleMaterials - source-url policy", () => {
     const result = await gatherModuleMaterials(tile, "", testHelpers(), noProgress, mergePolicy);
     expect(result.notes.some((n) => n.includes("outline derivation found nothing usable"))).toBe(true);
     expect(result.materialsText).toContain("fallback topics");
+  });
+});
+
+describe("gatherModuleMaterials - AC2 match-by-name (name-reference module values)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("matches a live module by exact case-insensitive name", async () => {
+    vi.mocked(listCourseContentAction).mockResolvedValue({
+      courseName: "CS 101",
+      pages: [],
+      modules: [
+        { id: 1, name: "module 05: loops", position: 5, published: true, itemsCount: 1, items: [
+          { id: 1, moduleId: 1, type: "Quiz", title: "Loop quiz", position: 1, indent: 0, published: true, contentId: 1, htmlUrl: null, pageUrl: null, dueAt: null, pointsPossible: null, externalUrl: null },
+        ] },
+      ],
+    });
+    const tile = baseCourse({ canvasUrl: "https://canvas.example.com/courses/1" });
+    const moduleIdRaw = nameModuleValue("Module 05: Loops");
+    const result = await gatherModuleMaterials(tile, moduleIdRaw, testHelpers(), noProgress);
+    expect(result.moduleName).toBe("module 05: loops");
+    expect(result.materialsSource).toBe('Materials read from LMS module "module 05: loops"');
+    expect(result.notes).toEqual([]);
+  });
+
+  it("matches a live module by tolerant module-number match (Module 05 vs Week 5)", async () => {
+    vi.mocked(listCourseContentAction).mockResolvedValue({
+      courseName: "CS 101",
+      pages: [],
+      modules: [
+        { id: 1, name: "Week 5 - Loops", position: 5, published: true, itemsCount: 0, items: [] },
+      ],
+    });
+    const tile = baseCourse({ canvasUrl: "https://canvas.example.com/courses/1" });
+    const moduleIdRaw = nameModuleValue("Module 05: Loops");
+    const result = await gatherModuleMaterials(tile, moduleIdRaw, testHelpers(), noProgress);
+    expect(result.moduleName).toBe("Week 5 - Loops");
+    expect(result.materialsSource).toBe('Materials read from LMS module "Week 5 - Loops"');
+  });
+
+  it("no name match in the live LMS: a note naming the module and available modules, then falls through to course-level", async () => {
+    vi.mocked(listCourseContentAction).mockResolvedValue({
+      courseName: "CS 101",
+      pages: [],
+      modules: [
+        { id: 1, name: "Unit 1: Intro", position: 1, published: true, itemsCount: 0, items: [] },
+      ],
+    });
+    const tile = baseCourse({ canvasUrl: "https://canvas.example.com/courses/1", startDate: null });
+    const moduleIdRaw = nameModuleValue("Module 99: Nonexistent");
+    const result = await gatherModuleMaterials(tile, moduleIdRaw, testHelpers(), noProgress);
+    expect(result.notes.some((n) => n.includes('module "Module 99: Nonexistent" not found by name') && n.includes("Unit 1: Intro"))).toBe(true);
+  });
+
+  it("falls through to the export by name when the live LMS has no match", async () => {
+    vi.mocked(listCourseContentAction).mockResolvedValue({
+      courseName: "CS 101",
+      pages: [],
+      modules: [{ id: 1, name: "Unit 1", position: 1, published: true, itemsCount: 0, items: [] }],
+    });
+    const loadCourseExport = vi.fn(async () =>
+      courseExport({ modules: [{ name: "Module 05: Loops", position: 5, items: [{ type: "Page", title: "Loop page" }] }] })
+    );
+    const tile = baseCourse({ canvasUrl: "https://canvas.example.com/courses/1" });
+    const moduleIdRaw = nameModuleValue("Module 05: Loops");
+    const result = await gatherModuleMaterials(tile, moduleIdRaw, testHelpers({ loadCourseExport }), noProgress);
+    expect(result.moduleName).toBe("Module 05: Loops");
+    expect(result.materialsText).toContain("Page: Loop page");
+  });
+
+  it("the 'Not started' sentinel is never treated as a module name to look up", async () => {
+    const tile = baseCourse({ canvasUrl: null });
+    const moduleIdRaw = "Not started";
+    const result = await gatherModuleMaterials(tile, moduleIdRaw, testHelpers(), noProgress);
+    expect(listCourseContentAction).not.toHaveBeenCalled();
+    expect(result.notes.some((n) => n.includes("the course is not in an active module (Not started)"))).toBe(true);
+  });
+
+  it("the 'Complete' sentinel is never treated as a module name to look up", async () => {
+    const tile = baseCourse({ canvasUrl: null });
+    const moduleIdRaw = "Complete";
+    const result = await gatherModuleMaterials(tile, moduleIdRaw, testHelpers(), noProgress);
+    expect(listCourseContentAction).not.toHaveBeenCalled();
+    expect(result.notes.some((n) => n.includes("the course is not in an active module (Complete)"))).toBe(true);
+  });
+
+  it("a sentinel with a canvasUrl falls to the course-level live gather instead of a bogus module lookup", async () => {
+    vi.mocked(listCourseContentAction).mockResolvedValue({
+      courseName: "CS 101",
+      pages: [],
+      modules: [{ id: 1, name: "Unit 1", position: 1, published: true, itemsCount: 0, items: [] }],
+    });
+    const tile = baseCourse({ canvasUrl: "https://canvas.example.com/courses/1", startDate: null });
+    const result = await gatherModuleMaterials(tile, "Not started", testHelpers(), noProgress);
+    expect(result.notes.some((n) => n.includes("the course is not in an active module (Not started)"))).toBe(true);
+    expect(result.notes.some((n) => n.includes("no module selected"))).toBe(true);
   });
 });

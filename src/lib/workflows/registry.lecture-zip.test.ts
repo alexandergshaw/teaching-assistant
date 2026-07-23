@@ -37,6 +37,7 @@ import { getStepDefinition } from "./registry";
 import { assembleLectureFiles, type StepRunHelpers } from "./registry-helpers";
 import type { Course } from "@/lib/supabase/courses";
 import type { AssignmentPlan } from "@/app/actions-types";
+import { nameModuleValue } from "./module-value";
 
 const step = getStepDefinition("lecture-zip")!;
 
@@ -383,5 +384,153 @@ describe("lecture-zip step", () => {
       expect(result.summary.items.some((i) => i.includes("schedule derived from"))).toBe(true);
       expect(result.summary.items.some((i) => i.includes("LMS module"))).toBe(true);
     }
+  });
+
+  it("declares a moduleId (lmsModule) input mentioning binding to the current-week/module step, picking, or workflow scope", () => {
+    const moduleIdInput = step.inputs.find((i) => i.key === "moduleId");
+    expect(moduleIdInput).toBeTruthy();
+    expect(moduleIdInput!.type).toBe("lmsModule");
+    expect(moduleIdInput!.required).toBe(false);
+    expect(moduleIdInput!.help).toContain("Find the current week and module");
+    expect(moduleIdInput!.help).toContain("workflow scope");
+  });
+
+  // AC5: blank/unset moduleId is byte-identical to today's behavior - the
+  // repoless path already covers "" via the earlier tests in this file
+  // (no moduleId key at all in their values objects); this test makes that
+  // equivalence explicit.
+  it("AC5: blank moduleId and no moduleId key produce identical gatherModuleMaterials calls", async () => {
+    const tile = baseCourse({
+      id: "course-1",
+      csvData: "week,topic,summary,assignment,test\n1,Intro to Testing,,,",
+      topics: "Topic notes",
+    });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+
+    await step.run({ repo: "", minutes: 50, hubCourse: "course-1" }, testHelpers(), () => {});
+    const callsA = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0][6];
+
+    vi.clearAllMocks();
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+    await step.run({ repo: "", minutes: 50, hubCourse: "course-1", moduleId: "" }, testHelpers(), () => {});
+    const callsB = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0][6];
+
+    expect(callsA).toBe(callsB);
+  });
+
+  it("AC5: a resolved module whose name yields a matching schedule week targets ONLY that week", async () => {
+    const csvData = [
+      "week,topic,summary,assignment,test",
+      "1,Intro,,,",
+      "2,Loops,,,",
+      "3,Functions,,,",
+    ].join("\n");
+    const tile = baseCourse({ id: "course-1", csvData });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [{ name: "f.pptx", blob: new Blob([]), mimeType: "x", weekNumber: 2, sortOrder: 1, role: "slides" }],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+
+    await step.run(
+      {
+        repo: "",
+        minutes: 50,
+        hubCourse: "course-1",
+        moduleId: nameModuleValue("Module 02: Loops"),
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    const scheduleArg = JSON.parse(callArgs[0] as string) as Array<{ week: number; topic: string }>;
+    expect(scheduleArg).toEqual([{ week: 2, topic: "Loops", summary: "", assignmentTitle: null, assignmentSlug: null, testName: null }]);
+  });
+
+  it("AC5: a resolved module whose week does not match the schedule falls back to the full schedule with a note", async () => {
+    const csvData = ["week,topic,summary,assignment,test", "1,Intro,,,", "2,Loops,,,"].join("\n");
+    const tile = baseCourse({ id: "course-1", csvData });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [{ name: "f.pptx", blob: new Blob([]), mimeType: "x", weekNumber: 1, sortOrder: 1, role: "slides" }],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+
+    const result = await step.run(
+      {
+        repo: "",
+        minutes: 50,
+        hubCourse: "course-1",
+        moduleId: nameModuleValue("Module 09: Nonexistent"),
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    const scheduleArg = JSON.parse(callArgs[0] as string) as Array<{ week: number }>;
+    expect(scheduleArg.length).toBe(2);
+    if (result.summary.kind === "list") {
+      expect(
+        result.summary.items.some((i) => i.includes("no matching week") || i.includes("using the full schedule"))
+      ).toBe(true);
+    }
+  });
+
+  it("AC5: the repo-driven path passes moduleId through to the supplemental gatherer", async () => {
+    vi.mocked(getRepoZipAction).mockResolvedValue({ base64: "zip-data", name: "repo.zip" });
+    const tile = baseCourse({ id: "course-1", canvasUrl: "https://canvas.example.com/courses/1" });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+    vi.mocked(listCourseContentAction).mockResolvedValue({
+      courseName: "CS 101",
+      pages: [],
+      modules: [
+        {
+          id: 7,
+          name: "Module 05: Loops",
+          position: 5,
+          published: true,
+          itemsCount: 1,
+          items: [
+            { id: 1, moduleId: 7, type: "Quiz", title: "Loop quiz", position: 1, indent: 0, published: true, contentId: 1, htmlUrl: null, pageUrl: null, dueAt: null, pointsPossible: null, externalUrl: null },
+          ],
+        },
+      ],
+    });
+
+    const generateLecturePlansActionMod = await import("@/app/actions");
+    vi.mocked(generateLecturePlansActionMod.generateLecturePlansAction).mockResolvedValue([plan()]);
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+
+    await step.run(
+      {
+        repo: "org/repo",
+        minutes: 50,
+        hubCourse: "course-1",
+        moduleId: nameModuleValue("Module 05: Loops"),
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(listCourseContentAction).toHaveBeenCalled();
+    const callArgs = vi.mocked(generateLecturePlansActionMod.generateLecturePlansAction).mock.calls[0];
+    expect(callArgs[5]).toContain("Loop quiz");
   });
 });

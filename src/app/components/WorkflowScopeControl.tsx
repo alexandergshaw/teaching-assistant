@@ -5,6 +5,7 @@ import Typeahead from "./ui/Typeahead";
 import SourcePolicyEditor from "./workflows/SourcePolicyEditor";
 import { ALL_SCOPE } from "@/lib/workflows/scope";
 import type { WorkflowScope } from "@/lib/workflows/types";
+import { nameModuleValue, parseLmsModuleValue } from "@/lib/workflows/module-value";
 
 // Decompose canonical days to the largest clean unit for display.
 // 14 -> { value: "2", unit: "weeks" }; 30 -> { value: "1", unit: "months" }; 10 -> { value: "10", unit: "days" }
@@ -273,6 +274,29 @@ export default function WorkflowScopeControl({
             <SourcePolicyEditor value={scope.sourcePolicy ?? ""} onChange={(v) => set({ sourcePolicy: v })} />
             <p className="fieldHint" style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
               Fills every lecture-building step&apos;s material-source policy.
+            </p>
+          </div>
+        </div>
+        <div style={cell}>
+          <span style={labelStyle}>Current module</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {/* A live module picker would need a single concrete course tile
+                chosen at scope level, but "Course tiles" above supports one,
+                several, or all - so this is a name instead: it is matched by
+                name in whichever source answers (live LMS, then course
+                export), the same as binding a step's module input to "Find
+                the current week and module"'s output. */}
+            <TextField
+              size="small"
+              placeholder="e.g. Module 05: Loops"
+              value={parseLmsModuleValue(scope.lmsModule ?? "").name ?? ""}
+              onChange={(e) => {
+                const name = e.target.value;
+                set({ lmsModule: name.trim() ? nameModuleValue(name) : "" });
+              }}
+            />
+            <p className="fieldHint" style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+              Fills every module input, matched by name wherever the step reads modules. Blank leaves each step to resolve its own current module.
             </p>
           </div>
         </div>

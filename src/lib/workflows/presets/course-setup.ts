@@ -179,6 +179,7 @@ export const COURSE_REFRESH: WorkflowDef = {
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         template: { source: "runtime", fieldKey: "deckTemplate" },
         sources: { source: "runtime", fieldKey: "sources" },
+        moduleId: { source: "runtime", fieldKey: "moduleId" },
       },
     },
     {

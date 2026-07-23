@@ -619,6 +619,29 @@ describe("deck-template presets ask for the template", () => {
     });
   }
 
+  // AC6: every preset containing a lecture-zip step binds its new moduleId
+  // input - to a course-progress step's moduleRef output when the preset also
+  // has one, otherwise runtime with the shared fieldKey "moduleId" (so no
+  // per-step prompt duplication across presets that share the field).
+  it("AC6: every lecture-zip step's moduleId input is bound", () => {
+    for (const wf of all) {
+      wf.steps.forEach((step, i) => {
+        if (step.type !== "lecture-zip") return;
+        const binding = step.bindings.moduleId;
+        expect(binding, `${wf.id} step ${i}: lecture-zip's moduleId is unbound`).toBeTruthy();
+        const hasCourseProgress = wf.steps.some((s) => s.type === "course-progress");
+        if (hasCourseProgress) {
+          expect(binding!.source, `${wf.id} step ${i}: expected a course-progress moduleRef binding`).toBe("step");
+          if (binding!.source === "step") {
+            expect(binding!.outputKey).toBe("moduleRef");
+          }
+        } else {
+          expect(binding).toEqual({ source: "runtime", fieldKey: "moduleId" });
+        }
+      });
+    }
+  });
+
   it("every preset's required inputs are bound (runtime or wired), never silently unasked", () => {
     for (const wf of all) {
       wf.steps.forEach((step, i) => {

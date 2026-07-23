@@ -27,9 +27,9 @@ describe("sourcePolicy 'sources' input on the six lecture-building steps", () =>
     });
   }
 
-  it("lecture-zip has exactly 7 inputs", () => {
+  it("lecture-zip has exactly 8 inputs", () => {
     const def = getStepDefinition("lecture-zip");
-    expect(def!.inputs.length).toBe(7);
+    expect(def!.inputs.length).toBe(8);
   });
 
   it("draft-upcoming-lectures has exactly 7 inputs", () => {

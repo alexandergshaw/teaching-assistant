@@ -1107,7 +1107,8 @@ hard-coded and the uploaded materials zip was read by no lecture step.
    live-fail->export with the coupled note wording, explicit export pick,
    terminal tile-meta, no-canvasUrl no-op).
 2. gatherModuleMaterials moved to registry-helpers.sources.ts (re-exported;
-   registry-helpers.ts down to 734 lines) and parameterized by policy;
+   registry-helpers.ts well under the 1000-line cap - 688 at the time of the
+   current-module entry below) and parameterized by policy;
    per-kind gatherers include the NEW materials-zip source (newest tile zip
    via downloadCourseZipBlob + extractZipMaterialsTextAction wrapping the
    server-only office-extract, names+sizes fallback over 8 MB or on error)
@@ -1237,3 +1238,56 @@ schedule tiers, with no source notes at all (the silence was the tell).
    registry-helpers.sources.ts back to registry-helpers.ts are `import type`
    (erased - no runtime cycle). A future value import there would
    reintroduce the cycle; keep them type-only.
+
+### 2026-07-23 - Current-module control on Build lecture materials zip
+
+Context: the lecture-zip step needed a control naming the module the course is
+currently on, fillable from the "Find the current week and module" step's
+output or from Workflow Scope. That step produces a NAME
+("Module 05: Loops"), never a live module id, and no name-only module
+encoding existed - so four supporting pieces landed with the control.
+
+1. Module value encoding (module-value.ts): new "name|<name>" form parsing
+   to { liveId: null, name, fromExport: false, byName: true } via
+   nameModuleValue(); LmsModuleValue gained byName (false for every other
+   form). "", "<id>|<name>", "export|<name>", and bare "<id>" parse
+   BYTE-IDENTICALLY (pinned by tests) - "name|" is matched BEFORE the
+   generic separator split so it cannot be read as a live id.
+2. Match-by-name (registry-helpers.sources.ts findModuleByName): exact
+   case-insensitive name match first, then a tolerant module-NUMBER match on
+   both sides via /(?:module|week)\s*0*(\d+)/i (so "Module 05: Loops" finds
+   "Module 5" or "Week 5 - Loops"). No match: a note naming the wanted
+   module and up to 5 available ones, then the existing export-by-name ->
+   course-level fallthrough. Never throws.
+3. Sentinel guard: course-progress emits "Not started"/"Complete" instead of
+   a module name; both are recognized (raw or carried inside a byName/export
+   value) and produce a clear note instead of a bogus lookup, in BOTH the
+   live and export gatherers.
+4. course-progress gained output moduleRef (type lmsModule):
+   nameModuleValue(moduleName) when in progress, the RAW sentinel otherwise
+   (so check 3's guard sees it). Its moduleName text output is unchanged, so
+   existing bindings behave identically. This makes the step's output a
+   type-valid source for any lmsModule input (outputFeedsInput).
+5. Workflow Scope covers modules: WorkflowScope.lmsModule +
+   scopeFamilyForType("lmsModule") + applyWorkflowScope (rejecting "*" like
+   the other scalar families) + describeWorkflowScope/describeScopeForType;
+   WorkflowScopeControl renders a text control storing nameModuleValue(...)
+   (a picker needs one concrete course's module list, which scope cannot
+   guarantee when it targets several/all courses - the encoding is identical
+   either way). Every lmsModule input (lecture-zip's new one plus
+   prepare-lecture, lecture-qa, generate-presentation-from-template) is
+   scope-fillable and dropped from the run form when scope sets it.
+6. The control: lecture-zip input { key: "moduleId", label: "Current
+   module", type: "lmsModule", required: false }; threaded into BOTH the
+   repo-driven supplemental gather and the repoless gather (replacing the
+   hardcoded ""). Blank = today's course-level auto-pick/digest exactly.
+7. Single-week targeting: when the chosen module's name yields a week number
+   matching a week in the resolved schedule, the repoless run narrows to
+   that week; otherwise the full schedule is used. Every branch - targeted,
+   week-not-in-schedule, name-without-a-week, and a bare live id with no
+   name - emits a summary note, so a chosen module is never silently
+   ignored.
+8. Bindings: course-refresh's lecture-zip binds moduleId runtime with the
+   shared fieldKey "moduleId" (it has no course-progress step); both kickoff
+   variants inherit it through their include of course-refresh. The
+   source-policy input-count canary for lecture-zip is 8.

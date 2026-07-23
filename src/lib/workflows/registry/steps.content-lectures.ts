@@ -37,6 +37,12 @@ import { resolveRepolessSchedule } from "@/lib/workflows/registry/schedule-resol
 const SOURCES_HELP =
   "Which additional material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
 
+// Tolerant module-number match: the same idiom used in
+// registry-helpers.sources.ts and steps.lms-integrations.ts ("Module NN" vs
+// "Week N" style names) - lets a resolved module name target a single
+// schedule week in the repoless path (AC5).
+const MODULE_NUMBER_PATTERN = /(?:module|week)\s*0*(\d+)/i;
+
 // Non-repo material sources supplement a repo-driven step's primary pipeline;
 // the "repo" kind there refers to that pipeline's own required repo input,
 // never the generic repo-digest gatherer (which would redundantly re-digest
@@ -47,7 +53,8 @@ async function gatherSupplementalMaterials(
   onProgress: (msg: string) => void,
   sourcesRaw: string,
   excludeRepo: boolean,
-  sourceHint?: string
+  sourceHint?: string,
+  moduleIdRaw = ""
 ): Promise<{ text: string; notes: string[] }> {
   const policy = resolveSourcePolicy(sourcesRaw);
   const effectivePolicy: SourcePolicy = excludeRepo
@@ -64,7 +71,7 @@ async function gatherSupplementalMaterials(
   if ("error" in list) return { text: "", notes };
   const tile = list.courses.find((c) => c.id === hubCourseId);
   if (!tile) return { text: "", notes };
-  const g = await gatherModuleMaterials(tile, "", helpers, onProgress, effectivePolicy, { sourceHint });
+  const g = await gatherModuleMaterials(tile, moduleIdRaw, helpers, onProgress, effectivePolicy, { sourceHint });
   return { text: g.materialsText, notes: [...notes, ...g.notes] };
 }
 
@@ -94,12 +101,40 @@ async function runLectureZipRepoless(
     throw new Error("Choose a course tile.");
   }
 
+  const moduleIdRaw = String(values.moduleId ?? "").trim();
   const policy = resolveSourcePolicy(String(values.sources ?? ""));
-  const gathered = await gatherModuleMaterials(tile, "", helpers, onProgress, policy);
+  const gathered = await gatherModuleMaterials(tile, moduleIdRaw, helpers, onProgress, policy);
 
   const scheduleResolution = resolveRepolessSchedule(values.schedule, tile, gathered.moduleNames);
-  const schedule = scheduleResolution.schedule;
+  let schedule = scheduleResolution.schedule;
   const tierDetail = `schedule tiers tried: ${scheduleResolution.tried.join("; ")}`;
+
+  // AC5: when a module was specified and its name yields a week number (the
+  // AC2 regex idiom) that matches a week in the resolved schedule, narrow
+  // generation to that single week; otherwise keep the full schedule and
+  // note that no week could be matched. Blank/unset moduleId leaves the
+  // schedule untouched - today's behavior exactly.
+  let moduleTargetingNote: string | null = null;
+  if (moduleIdRaw) {
+    const picked = parseLmsModuleValue(moduleIdRaw);
+    const weekMatch = (picked.name ?? "").match(MODULE_NUMBER_PATTERN);
+    if (weekMatch) {
+      const weekNum = parseInt(weekMatch[1], 10);
+      const matchingWeek = schedule.find((w) => w.week === weekNum);
+      if (matchingWeek) {
+        schedule = [matchingWeek];
+        moduleTargetingNote = `targeted week ${weekNum} for module "${picked.name}"`;
+      } else {
+        moduleTargetingNote = `module "${picked.name}" names week ${weekNum}, but the resolved schedule has no matching week - using the full schedule`;
+      }
+    } else if (picked.name) {
+      moduleTargetingNote = `module "${picked.name}" has no week number to match - using the full schedule`;
+    } else {
+      // A bare live id carries no name to derive a week from. Say so rather
+      // than silently ignoring a module the user explicitly chose.
+      moduleTargetingNote = "the chosen module carries no name to match a schedule week - using the full schedule";
+    }
+  }
 
   if (schedule.length === 0) {
     if (!gathered.materialsText.trim()) {
@@ -138,6 +173,7 @@ async function runLectureZipRepoless(
     result.summary.items = [
       ...result.summary.items,
       ...(scheduleResolution.note ? [scheduleResolution.note] : []),
+      ...(moduleTargetingNote ? [moduleTargetingNote] : []),
       ...gathered.notes,
       "includeInstructions is repo-specific and does not apply in repoless mode",
     ];
@@ -203,6 +239,13 @@ export const contentLectureSteps: StepDefinition[] = [
         required: false,
         help: `${SOURCES_HELP} The repository is the primary source when linked (this step's own Repository input); other configured sources supplement it, or stand alone as the step's material source when no repository is linked.`,
       },
+      {
+        key: "moduleId",
+        label: "Current module",
+        type: "lmsModule",
+        required: false,
+        help: "Bind to \"Find the current week and module\", pick a module, or set it once in workflow scope. Blank = the step resolves the current module itself.",
+      },
     ],
     outputs: [
       { key: "files", label: "Generated files", type: "files" },
@@ -222,12 +265,15 @@ export const contentLectureSteps: StepDefinition[] = [
       }
 
       const hubCourseId = String(values.hubCourse ?? "").trim();
+      const moduleIdRaw = String(values.moduleId ?? "").trim();
       const supplemental = await gatherSupplementalMaterials(
         hubCourseId,
         helpers,
         onProgress,
         String(values.sources ?? ""),
-        true
+        true,
+        undefined,
+        moduleIdRaw
       );
 
       onProgress("Generating lecture plans...");

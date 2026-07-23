@@ -20,6 +20,7 @@ import {
 // Materials, LMS Exports) are columns here too - row expansion is gone.
 export const ALL_COLUMN_IDS = [
   "institution",
+  "modality",
   "startDate",
   "dayTime",
   "weeks",
@@ -47,6 +48,7 @@ export type ColumnId = (typeof ALL_COLUMN_IDS)[number];
 // default hidden - still discoverable in the Columns menu.
 export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
   "institution",
+  "modality",
   "startDate",
   "dayTime",
   "weeks",
@@ -71,18 +73,51 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
   reposCount: "repos",
 };
 
+// Version of the persisted ta-courses-columns shape. A newly added column
+// can never appear for someone with an already-persisted (explicit-subset)
+// column set unless it is unioned in here - bump this and add an entry to
+// COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
+// (no wrapper object) is treated as version 0.
+export const CURRENT_COLUMNS_VERSION = 1;
+
+/** Columns introduced by each version, unioned into every persisted set
+ * stored at an earlier version. Version 0 is the pre-versioning baseline, so
+ * it never appears as a key here. */
+const COLUMNS_ADDED_IN: Record<number, ColumnId[]> = {
+  1: ["modality"],
+};
+
 /** Parse a persisted ta-courses-columns value; unknown ids are dropped and a
  * malformed value falls back to the default visible set. Legacy count-column
  * ids migrate to the column that superseded them. Name/actions are handled
- * separately by callers - they are never toggleable. */
+ * separately by callers - they are never toggleable. Accepts both the
+ * current versioned shape ({ v, columns }) and the legacy bare-array shape
+ * (treated as version 0), unioning in any column added after the stored
+ * version so upgrades are never invisible to an existing persisted set. */
 export function parseColumnSet(raw: string | null | undefined): ColumnId[] {
   if (!raw) return [...DEFAULT_VISIBLE_COLUMNS];
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [...DEFAULT_VISIBLE_COLUMNS];
+    let storedVersion: number;
+    let columns: unknown;
+    if (Array.isArray(parsed)) {
+      storedVersion = 0;
+      columns = parsed;
+    } else if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof (parsed as { v?: unknown }).v === "number" &&
+      Array.isArray((parsed as { columns?: unknown }).columns)
+    ) {
+      storedVersion = (parsed as { v: number }).v;
+      columns = (parsed as { columns: unknown[] }).columns;
+    } else {
+      return [...DEFAULT_VISIBLE_COLUMNS];
+    }
+
     const seen = new Set<string>();
     const filtered: ColumnId[] = [];
-    for (const rawId of parsed) {
+    for (const rawId of columns as unknown[]) {
       if (typeof rawId !== "string") continue;
       const id = LEGACY_COLUMN_ID_MIGRATIONS[rawId] ?? rawId;
       if (COLUMN_ID_SET.has(id) && !seen.has(id)) {
@@ -90,14 +125,28 @@ export function parseColumnSet(raw: string | null | undefined): ColumnId[] {
         filtered.push(id as ColumnId);
       }
     }
+
+    for (const [versionStr, added] of Object.entries(COLUMNS_ADDED_IN)) {
+      if (Number(versionStr) <= storedVersion) continue;
+      for (const id of added) {
+        if (!seen.has(id)) {
+          seen.add(id);
+          filtered.push(id);
+        }
+      }
+    }
+
     return filtered;
   } catch {
     return [...DEFAULT_VISIBLE_COLUMNS];
   }
 }
 
+/** Serialize a column set at the current version. Callers should
+ * re-serialize (via this function) whenever they persist a set read through
+ * parseColumnSet, so a legacy or older-version value is upgraded on write. */
 export function serializeColumnSet(columns: ColumnId[]): string {
-  return JSON.stringify(columns);
+  return JSON.stringify({ v: CURRENT_COLUMNS_VERSION, columns });
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +161,7 @@ export function serializeColumnSet(columns: ColumnId[]): string {
 export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = {
   name: 240,
   institution: 150,
+  modality: 130,
   startDate: 120,
   dayTime: 140,
   weeks: 70,
@@ -209,6 +259,8 @@ export function sortValueFor(course: Course, field: SortField, ctx?: SortContext
       return textValue(course.startDate);
     case "institution":
       return textValue(course.institution);
+    case "modality":
+      return textValue(course.modality);
     case "dayTime":
       return textValue(course.dayTime);
     case "lms":
@@ -352,6 +404,8 @@ export function computeFieldPatch(field: TableEditableField, rawValue: string): 
       return { tests: rawValue.trim() ? (Number.isFinite(Number(rawValue.trim())) ? Number(rawValue.trim()) : null) : null };
     case "lms":
       return { lms: rawValue || null };
+    case "modality":
+      return { modality: rawValue || null };
     case "dayTime":
       return { dayTime: rawValue };
     case "studentRepos":

@@ -11,6 +11,7 @@ import {
   type StepDefinition,
 } from "@/lib/workflows/registry-helpers";
 import { type GeneratedCourseFile, scheduleToCsv } from "@/lib/workflows/types";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 
 export const courseSetupStorageSteps: StepDefinition[] = [
   {
@@ -40,13 +41,13 @@ export const courseSetupStorageSteps: StepDefinition[] = [
     outputs: [],
     run: async (values, helpers, onProgress) => {
       const csv = scheduleToCsv(values.schedule as ScheduleWeekPlan[]);
-      const base = String(values.courseTitle ?? "")
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, "-")
-        .replace(/[^a-z0-9-]/g, "")
-        .slice(0, 60) || "course-schedule";
-      const name = `${base}.csv`;
+      const userTitle = String(values.courseTitle ?? "").trim();
+      // A user-supplied title stays a literal override; the lookup below
+      // does not exist today for this step (no tile fetch), so the default
+      // omits the course part rather than adding a new network call.
+      const name = userTitle
+        ? buildWorkflowFileName({ artifact: userTitle, ext: "csv" })
+        : buildWorkflowFileName({ artifact: "Course Schedule", ext: "csv" });
 
       onProgress(`Saving ${name}...`);
       const r = await setCourseCsvAction(String(values.hubCourse), name, csv);
@@ -117,28 +118,24 @@ export const courseSetupStorageSteps: StepDefinition[] = [
 
       // An explicit name wins; otherwise the zip defaults to the course
       // tile's name so both Course Refresh zips share it, with
-      // "course_materials" as the last resort.
-      let base = String(values.name ?? "")
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]/gi, "_")
-        .replace(/_+/g, "_");
-      if (!base) {
+      // "Course Materials" as the last resort.
+      const userName = String(values.name ?? "").trim();
+      let fileName: string;
+      if (userName) {
+        fileName = buildWorkflowFileName({ artifact: userName, ext: "zip" });
+      } else {
         const list = await listCourseHubAction();
+        let course: { courseCode: string | null; name: string } | null = null;
         if (!("error" in list)) {
           const tile = list.courses.find(
             (c) => c.id === String(values.hubCourse)
           );
-          if (tile?.name?.trim()) {
-            base = tile.name
-              .trim()
-              .replace(/[^a-z0-9]/gi, "_")
-              .replace(/_+/g, "_");
-          }
+          if (tile) course = { courseCode: tile.courseCode, name: tile.name };
         }
+        fileName = course
+          ? buildWorkflowFileName({ course, artifact: "Course Materials", ext: "zip" })
+          : buildWorkflowFileName({ artifact: "Course Materials", ext: "zip" });
       }
-      if (!base) base = "course_materials";
-      const fileName = `${base}.zip`;
 
       onProgress(`Saving ${fileName}...`);
       await helpers.saveCourseMaterialFile(String(values.hubCourse), zipBlob, fileName);

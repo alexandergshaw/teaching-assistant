@@ -24,6 +24,7 @@ import {
   courseToInputPayload,
 } from "@/lib/workflows/registry-helpers";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 
 export const courseSetupMaterialsSteps: StepDefinition[] = [
   {
@@ -179,9 +180,11 @@ export const courseSetupMaterialsSteps: StepDefinition[] = [
                   throw new Error(g.error);
                 }
 
-                const generatedFileName = /\.docx$/i.test(g.name)
-                  ? g.name
-                  : `${g.name}.docx`;
+                const generatedFileName = buildWorkflowFileName({
+                  course: tile,
+                  artifact: "Syllabus",
+                  ext: "docx",
+                });
                 const saved = await createFinalizedSyllabusAction(
                   g.name,
                   generatedFileName,
@@ -222,7 +225,11 @@ export const courseSetupMaterialsSteps: StepDefinition[] = [
             if ("error" in s) {
               syllabusNote = `syllabus error: ${s.error}`;
             } else {
-              const fileName = `${s.syllabus.name || "Syllabus"}.docx`;
+              const fileName = buildWorkflowFileName({
+                course: tile,
+                artifact: "Syllabus",
+                ext: "docx",
+              });
               const placed = await placeSyllabusInModuleAction(
                 s.syllabus.content,
                 url,

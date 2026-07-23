@@ -26,6 +26,7 @@ export * from "./actions/canvas";
 export * from "./actions/course-hub";
 export * from "./actions/course-planning";
 export * from "./actions/course-planning-grounding";
+export * from "./actions/current-events";
 export * from "./actions/github";
 export * from "./actions/github-repos";
 export * from "./actions/github-content";

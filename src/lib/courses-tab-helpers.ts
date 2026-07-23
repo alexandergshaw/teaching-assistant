@@ -25,9 +25,10 @@ export interface CourseForm {
   tests: string;
   lms: string;
   dayTime: string;
+  modality: string;
 }
 
-export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos";
+export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality";
 
 export const EMPTY_FORM: CourseForm = {
   id: null,
@@ -50,6 +51,7 @@ export const EMPTY_FORM: CourseForm = {
   tests: "",
   lms: "",
   dayTime: "",
+  modality: "",
 };
 
 export function formFromCourse(c: Course): CourseForm {
@@ -74,6 +76,7 @@ export function formFromCourse(c: Course): CourseForm {
     tests: c.tests !== null ? String(c.tests) : "",
     lms: c.lms ?? "",
     dayTime: c.dayTime ?? "",
+    modality: c.modality ?? "",
   };
 }
 
@@ -102,6 +105,7 @@ export function courseToInput(c: Course) {
     tests: c.tests,
     lms: c.lms ?? "",
     dayTime: c.dayTime ?? "",
+    modality: c.modality ?? "",
     customTiles: c.customTiles,
     hiddenTiles: c.hiddenTiles,
     studentRepos: c.studentRepos,

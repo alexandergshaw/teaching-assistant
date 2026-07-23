@@ -91,6 +91,25 @@ export default function CourseRow({
       </td>
 
       {has("institution") && <EditableCell kind="text" rawValue={course.institution ?? ""} onSave={save("institution")} />}
+      {has("modality") && (
+        <EditableCell
+          kind="select"
+          rawValue={course.modality ?? ""}
+          options={[
+            { value: "", label: "Not set" },
+            { value: "async", label: "Asynchronous" },
+            { value: "sync", label: "Synchronous" },
+          ]}
+          display={
+            course.modality === "async" ? (
+              <span className={styles.courseResourceValue}>Asynchronous</span>
+            ) : course.modality === "sync" ? (
+              <span className={styles.courseResourceValue}>Synchronous</span>
+            ) : undefined
+          }
+          onSave={save("modality")}
+        />
+      )}
       {has("startDate") && (
         <EditableCell
           kind="date"

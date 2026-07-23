@@ -20,7 +20,7 @@ export const courseSetupTilesSteps: StepDefinition[] = [
   {
     type: "load-course-tile",
     name: "Load course tile",
-    description: "Read the course tile's linked repository, LMS course, and start date so later steps need no separate inputs. Missing pieces surface as warnings.",
+    description: "Read the course tile's linked repository, LMS course, start date, and modality so later steps need no separate inputs. Missing pieces surface as warnings. An unset modality yields isAsync false and isSync false - never silently true.",
     inputs: [
       {
         key: "hubCourse",
@@ -50,6 +50,9 @@ export const courseSetupTilesSteps: StepDefinition[] = [
       { key: "description", label: "Course description", type: "longtext" },
       { key: "weeks", label: "Number of weeks", type: "number" },
       { key: "tests", label: "Number of tests", type: "number" },
+      { key: "modality", label: "Modality", type: "text" },
+      { key: "isAsync", label: "Asynchronous course", type: "boolean" },
+      { key: "isSync", label: "Synchronous course", type: "boolean" },
     ],
     run: async (values, helpers, onProgress) => {
       const hubCourseId = String(values.hubCourse ?? "").trim();
@@ -78,6 +81,9 @@ export const courseSetupTilesSteps: StepDefinition[] = [
         typeof tile.tests === "number" && Number.isFinite(tile.tests)
           ? String(tile.tests)
           : "";
+      const modality = (tile.modality ?? "").trim();
+      const isAsync = modality === "async";
+      const isSync = modality === "sync";
 
       // Missing-repo handling defaults to a hard stop: a repo-less tile must
       // never reach the destructive LMS steps with nothing to rebuild. The two
@@ -142,7 +148,17 @@ export const courseSetupTilesSteps: StepDefinition[] = [
       ];
 
       const result: StepRunResult = {
-        outputs: { repo, course, startDate, description, weeks, tests },
+        outputs: {
+          repo,
+          course,
+          startDate,
+          description,
+          weeks,
+          tests,
+          modality,
+          isAsync: isAsync ? "1" : "",
+          isSync: isSync ? "1" : "",
+        },
         summary: {
           kind: "list",
           label: `Loaded "${tile.name}"`,
@@ -320,6 +336,56 @@ export const courseSetupTilesSteps: StepDefinition[] = [
           report,
         },
         summary: { kind: "text", text: report },
+      };
+    },
+  },
+
+  {
+    type: "course-modality",
+    name: "Course modality",
+    description: "Read a course tile's modality (asynchronous/synchronous) as boolean outputs so any workflow can gate a step on it with \"Run only if\" - without restructuring around load-course-tile. An unset modality yields isAsync false and isSync false, never silently true.",
+    inputs: [
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: true,
+      },
+    ],
+    outputs: [
+      { key: "modality", label: "Modality", type: "text" },
+      { key: "isAsync", label: "Asynchronous course", type: "boolean" },
+      { key: "isSync", label: "Synchronous course", type: "boolean" },
+    ],
+    run: async (values) => {
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+
+      const listR = await listCourseHubAction();
+      if ("error" in listR) {
+        throw new Error(listR.error);
+      }
+
+      const tile = listR.courses.find((c) => c.id === hubCourseId);
+      if (!tile) {
+        throw new Error("Choose a course tile.");
+      }
+
+      const modality = (tile.modality ?? "").trim();
+      const isAsync = modality === "async";
+      const isSync = modality === "sync";
+
+      return {
+        outputs: {
+          modality,
+          isAsync: isAsync ? "1" : "",
+          isSync: isSync ? "1" : "",
+        },
+        summary: {
+          kind: "text",
+          text: modality
+            ? `"${tile.name}" is ${modality === "async" ? "asynchronous" : "synchronous"}.`
+            : `"${tile.name}" has no modality set.`,
+        },
       };
     },
   },

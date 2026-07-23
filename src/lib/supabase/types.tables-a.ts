@@ -202,6 +202,7 @@ export interface CourseHubRow {
   tests: number | null;
   lms: string | null;
   day_time: string | null;
+  modality: string | null;
   materials_files: Json;
   export_files: Json | null;
   materials_zip_name: string | null;
@@ -240,6 +241,7 @@ export interface CourseHubInsert {
   tests?: number | null;
   lms?: string | null;
   day_time?: string | null;
+  modality?: string | null;
   materials_files?: Json;
   export_files?: Json | null;
   materials_zip_name?: string | null;
@@ -278,6 +280,7 @@ export interface CourseHubUpdate {
   tests?: number | null;
   lms?: string | null;
   day_time?: string | null;
+  modality?: string | null;
   materials_files?: Json;
   export_files?: Json | null;
   materials_zip_name?: string | null;

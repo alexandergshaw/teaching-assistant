@@ -74,6 +74,7 @@ function baseCourse(overrides: Partial<Course> = {}): Course {
     tests: null,
     lms: null,
     dayTime: null,
+    modality: null,
     materialsFiles: [],
     exportFiles: [],
     materialsZipName: null,

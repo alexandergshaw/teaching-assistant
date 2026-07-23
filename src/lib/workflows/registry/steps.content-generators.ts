@@ -34,6 +34,7 @@ import { applyTextRevision } from "@/lib/embedded/revise";
 import { findModuleForWeek } from "@/lib/week-numbering";
 import { liveModuleValue, exportModuleValue } from "@/lib/workflows/module-value";
 import { resolveSourcePolicy } from "@/lib/workflows/source-policy";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 
 const SOURCES_HELP =
   "Which material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -558,8 +559,6 @@ export const contentGeneratorSteps: StepDefinition[] = [
           let tileSuccessCount = 0;
           let tileEndWeek = startWeek;
           let tileGroundedInModules = false;
-          const sanitize = (s: string) =>
-            s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
 
           for (let w = 0; w < weeksAhead; w++) {
             const targetWeek = startWeek + w;
@@ -690,7 +689,12 @@ export const contentGeneratorSteps: StepDefinition[] = [
                 const scriptBlob = new Blob([new Uint8Array(scriptDocx)], {
                   type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 });
-                const scriptFileName = `${sanitize(tile.name)}_Week${targetWeek}_LectureScript.docx`;
+                const scriptFileName = buildWorkflowFileName({
+                  course: tile,
+                  artifact: "Lecture Script",
+                  qualifier: `Week ${targetWeek}`,
+                  ext: "docx",
+                });
 
                 if (helpers.saveCourseMaterialFile) {
                   try {
@@ -760,7 +764,12 @@ export const contentGeneratorSteps: StepDefinition[] = [
                 const planBlob = new Blob([new Uint8Array(planDocx)], {
                   type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 });
-                const planFileName = `${sanitize(tile.name)}_Week${targetWeek}_LessonPlan.docx`;
+                const planFileName = buildWorkflowFileName({
+                  course: tile,
+                  artifact: "Lesson Plan",
+                  qualifier: `Week ${targetWeek}`,
+                  ext: "docx",
+                });
 
                 if (helpers.saveCourseMaterialFile) {
                   try {
@@ -815,7 +824,12 @@ export const contentGeneratorSteps: StepDefinition[] = [
                 const slideBlob = new Blob([pptxData], {
                   type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 });
-                const slideFileName = `${sanitize(tile.name)}_Week${targetWeek}_Slides.pptx`;
+                const slideFileName = buildWorkflowFileName({
+                  course: tile,
+                  artifact: "Lecture Slides",
+                  qualifier: `Week ${targetWeek}`,
+                  ext: "pptx",
+                });
 
                 if (helpers.saveCourseMaterialFile) {
                   try {
@@ -859,7 +873,12 @@ export const contentGeneratorSteps: StepDefinition[] = [
                       `${tile.name}, week ${targetWeek}: narration synthesis failed - ${narResult.error}`
                     );
                   } else {
-                    const narFileName = `${sanitize(tile.name)}_Week${targetWeek}_Narration.mp3`;
+                    const narFileName = buildWorkflowFileName({
+                      course: tile,
+                      artifact: "Lecture Narration",
+                      qualifier: `Week ${targetWeek}`,
+                      ext: "mp3",
+                    });
                     if (helpers.saveCourseMaterialFile) {
                       try {
                         const narBlob = base64ToBlob(narResult.base64, narResult.mimeType);

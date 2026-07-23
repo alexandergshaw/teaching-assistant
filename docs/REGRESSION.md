@@ -45,10 +45,13 @@ Living regression document for the AC -> code -> verify -> regression delivery l
 
 ### 2026-07-22 - Workflow automation subsystem (schedules, triggers, unattended runner)
 
-Baseline taken before the run-observability feature. Evidence: 185 tests across
-server-runner.test.ts, workflow-schedules.test.ts, workflow-triggers.test.ts,
-workflow-schedule-handoff.test.ts, workflow-schedules.fanout.test.ts, all passing.
-These behaviors must keep working:
+Baseline taken before the run-observability feature. Evidence at baseline time:
+185 tests across server-runner.test.ts, workflow-schedules.test.ts,
+workflow-triggers.test.ts, workflow-schedule-handoff.test.ts,
+workflow-schedules.fanout.test.ts, all passing. Since then the monolithic
+workflow-triggers.test.ts was SPLIT into workflow-triggers.{comparisons,
+messages,repo,roster,scheduling,trigger-utils}.test.ts (run those instead) and
+the count has grown to 194 with no losses. These behaviors must keep working:
 
 1. At-most-once execution: claimWorkflowSchedule and claimAndAdvanceTrigger use
    atomic conditional updates (check_version / conditional claim) so an
@@ -372,15 +375,67 @@ most likely to break again when these files are edited.
 2. src/lib/llm.ts: LlmRequest.webSearch forwards tools [{ google_search: {} }];
    parseGroundingSources is an exported pure function (never throws, undefined on
    malformed metadata) with unit tests in src/lib/llm.test.ts.
-3. researchCurrentEventsAction (currently src/app/actions/llm-tools.ts) ALWAYS
-   ends the report with "## Sources": deduped "- title: uri" lines with verbatim
-   URLs, or an explicit no-sources line; it returns sourceCount and the step's
-   summary lists "N source(s) cited" first.
-4. Deliverable: docx built from the report, always saved to the Files library
-   (workflow-tagged), additionally to the bound course tile; save failures become
-   summary notes, never run failures.
-5. registry.current-events-report.test.ts proves the deck wire from both
-   generate-presentation-from-template and generate-slides-standalone.
+
+SUPERSEDED 2026-07-23 (see below): points 3-4 described a single whole-deck
+grounded call producing a Markdown-headed report saved as a .docx. That shape
+no longer exists.
+
+3. registry.current-events-report.test.ts proves the deck wire from both
+   generate-presentation-from-template and generate-slides-standalone (still
+   holds - unchanged by the pipeline rework).
+
+### 2026-07-23 - Current-events research pipeline and .txt report
+
+Supersedes the "Current-events research step" entry's points 3-4 above.
+
+1. researchCurrentEventsAction moved to src/app/actions/current-events.ts
+   ("use server", re-exported from actions.ts) to keep llm-tools.ts under 1000
+   lines; the export name and its two required positional args (deckText,
+   recentWindow) are unchanged, plus a new optional 4th `provider` and 5th
+   `options: { maxTopics?, itemsPerTopic?, extraFocus? }` arg - the only
+   caller (steps.knowledge.ts) is the only one that needed updating.
+2. Pipeline: topic extraction (no web search, JSON with a tolerant line-parse
+   fallback) -> one grounded call PER TOPIC issued in parallel via
+   Promise.allSettled (each spanning news/research/industry/incidents/policy
+   angles, one retry on a transient failure or empty result) -> a best-effort
+   synthesis pass (cross-cutting themes, what-changed, discussion prompts)
+   whose failure is a NOTE, not a step failure.
+3. Robustness: a failed/empty topic becomes a NOTES-section line, never a run
+   failure; when topic extraction finds nothing OR every topic fails, the
+   pipeline degrades to a single whole-deck grounded search (today's original
+   shape) and marks the report "(DEGRADED - see NOTES)"; the action only
+   returns an error (which the step throws) when there is no content at all -
+   extraction failed AND the whole-deck fallback also failed.
+4. New step inputs (all optional): maxTopics (number, default 6, clamped
+   1-12), itemsPerTopic (number, default 5, clamped 1-10), extraFocus
+   (longtext, folded into every per-topic and fallback prompt). Clamping is
+   pure (clampMaxTopics/clampItemsPerTopic). The pure helpers - the clamps,
+   the tolerant parsers, and the report builder - live in
+   src/lib/workflows/current-events-report.ts (a "use server" file may only
+   export async functions), tested there; the action itself is tested in
+   src/app/actions/current-events.test.ts. No preset in
+   src/lib/workflows/presets.ts contains current-events-report, so no preset
+   bindings were needed.
+5. Report: a plain-text document (CURRENT EVENTS REPORT title, Generated
+   timestamp, Recency window, a "Coverage: N topic(s) x M item(s), S
+   source(s)" line, one TOPIC: section per topic with dated items, CROSS-
+   CUTTING THEMES, WHAT CHANGED SINCE THIS DECK WAS WRITTEN, DISCUSSION
+   PROMPTS, a numbered SOURCES section (deduped by URL across every call,
+   explicit no-sources line when empty), and a NOTES section). Saved with
+   fileExt "txt" / mimeType "text/plain" via saveLibraryFileAction
+   (workflow-tagged) and helpers.saveCourseMaterialFile, mirroring
+   steps.assignments-answers.ts's .txt save pattern; the browser download is
+   also .txt. buildDocxFromPlainText is no longer imported by this step.
+   Outputs add sourceCount (number) and topicsCovered (number); reportText and
+   fileName keep their existing keys/types.
+6. Unit tests (src/app/actions/current-events.test.ts): the clamps, the topic
+   parser (JSON, tolerant line fallback, junk -> []), the item parser, the
+   URL dedupe, and the report builder (all sections present, sources
+   numbered/deduped, notes rendered, no-sources line, degraded marker) are
+   pure and directly tested; researchCurrentEventsAction is tested with a
+   mocked callLlm covering the happy path, one topic failing, all topics
+   failing (degraded fallback), extraction failure (degraded fallback), total
+   failure (informative error), and options passthrough.
 
 ### 2026-07-22 - Navigation restructure
 
@@ -968,7 +1023,8 @@ now display inside the repos/roster/studentRepos cells).
    RowDetailSchedule.tsx, RowDetailFiles.tsx deleted (git-recoverable);
    cell files RepoCell/RosterCell/ScheduleCell/FilesCell each at or under
    1000 lines; EditableCell's only change is the additive hint prop.
-6. Pure logic tested (courses-table-helpers.test.ts, 47 tests): legacy-id
+6. Pure logic tested (courses-table-helpers.test.ts, 47 tests at the time of
+   this entry; 56 since the modality column added its 9): legacy-id
    migration + dedup, DEFAULT_VISIBLE_COLUMNS excludes the six heavy ids,
    min-widths completeness vs the widened set, parseSortState over all
    fields, sortValueFor per column class, comparator empty-last both
@@ -1421,3 +1477,86 @@ copy left a draft and no file.
    asserts the Files save receives the workflow ids, the outputs are
    populated, the summary names the Files library and not Drafts, and that a
    Files-save failure makes the step throw.
+
+### 2026-07-23 - Course modality (async/sync) column + step gating
+
+Context: user request - a Courses-table column saying whether a course is
+async or sync, usable as a condition on whether steps run. Step gating
+(runIf) already existed; this only adds boolean sources for it.
+
+1. Data: Course/CourseInput/CourseRow carry modality ("async" | "sync" |
+   null; null = not set, never defaulted). Migration
+   20260830000000_course_modality.sql adds course_hub.modality text null in
+   the established `alter table if exists ... add column if not exists`
+   form. courses-tab-helpers' CourseForm/EMPTY_FORM/formFromCourse/
+   courseToInput carry it too, so full-input round-trip updates never blank
+   it.
+2. Column: ColumnId "modality" sits after "institution" with label
+   "Modality", a COLUMN_MIN_WIDTHS entry, membership in
+   DEFAULT_VISIBLE_COLUMNS, a sortValueFor text case (unset sorts last), and
+   a computeFieldPatch case mapping "" to null. The cell is EditableCell's
+   NEW "select" kind (options Not set / Asynchronous / Synchronous) - chosen
+   over a bespoke cell because the editor needs no async data (unlike
+   LmsCell); saving flows through the existing saveField/computeFieldPatch
+   path, so failed-save-keeps-the-editor-open still holds. AddCourseForm
+   offers the same select.
+3. Persisted-column-set VERSIONING (without this a new column can never
+   appear for an existing user): ta-courses-columns now stores
+   { v: CURRENT_COLUMNS_VERSION, columns: [...] }; parseColumnSet accepts
+   the legacy bare array as v0 and unions in every column listed in
+   COLUMNS_ADDED_IN for versions greater than the stored one. Unknown ids
+   are still dropped, the legacy count-id migrations still apply, and a
+   malformed value still falls back to DEFAULT_VISIBLE_COLUMNS.
+4. Gating sources: load-course-tile gains outputs modality (text), isAsync
+   (boolean), isSync (boolean) with its EXISTING outputs unchanged; a new
+   headless-safe step "course-modality" (Course modality; input hubCourse;
+   the same three outputs) lets any workflow gate without restructuring. An
+   unset modality yields "" / false / false - a gate on an unclassified
+   course is false for BOTH directions, never silently true.
+5. Because the builder's "Run only if" control enumerates earlier steps'
+   boolean outputs, these appear automatically; runIf itself (types.ts,
+   server-runner evaluation, include remapping) is UNCHANGED.
+6. Registration seam: steps.course-setup.ts hand-indexes each domain
+   module's array (courseSetupTilesSteps[n]) rather than spreading it, so a
+   new step must be appended there or it is silently unreachable despite
+   being defined. The headless canary is 131 (was 130).
+
+### 2026-07-23 - Professional workflow file names
+
+Context: user request - workflow-produced files need professional,
+descriptive, concise names. The tree carried epoch timestamps
+(`..._1753280000000.txt`), a raw database id (`<drop.id>-grades.csv`),
+underscore-mashed names, and lowercase-hyphen grade exports.
+
+1. One convention, one pure module (src/lib/workflows/file-names.ts, 16
+   tests): buildWorkflowFileName({ course?, artifact, qualifier?, date?,
+   ext }) joins present parts with " - " as
+   "<course> - <artifact> - <qualifier> - <YYYY-MM-DD>.<ext>".
+   sanitizeFileNamePart strips filesystem-illegal characters and control
+   chars and collapses whitespace/underscores; courseFileLabel prefers a
+   non-empty Course.courseCode over a WORD-BOUNDARY-shortened name; the
+   total is capped at 100 chars, truncating the QUALIFIER (never the
+   extension). Pure and deterministic; absent parts are omitted.
+2. NEVER emitted any more: epoch timestamps, raw database ids,
+   underscore-mashed names. Dates are ISO and appear only where the
+   artifact recurs (current events, grade exports); per-week/module
+   artifacts carry the week/module as the qualifier.
+3. Applied at every producing site: current events, cartridge + single
+   grade exports, lecture script/lesson plan/slides/narration, lecture
+   Q&A, study guide, module lecture deck, class openers (zip + items),
+   assembleLectureFiles' per-week set AND its zip, homework answers, the
+   schedule CSV default, course-setup storage and materials/syllabus.
+   A user-supplied filename input remains an override - only defaults
+   changed.
+4. Consistency invariant fixed in passing: assembleLectureFiles previously
+   downloaded "<base>.zip" while saving the bundle as bare "<base>";
+   download, library save and course-tile save now share ONE built name at
+   every site.
+5. Unchanged: extensions and MIME types at every site (so the Files tab's
+   extension normalization, stripMatchingExt and preview strategies keep
+   working), workflow tagging (workflowId/workflowName/workflowRunId), and
+   file CONTENTS.
+6. Out of scope (documented, not an omission): steps.lms-export.ts and
+   steps.media.ts carry their own ad-hoc sanitizers tied to Common
+   Cartridge display titles; they were not part of the surveyed offender
+   set and were left untouched.

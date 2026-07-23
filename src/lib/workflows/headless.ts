@@ -48,6 +48,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "blackboard-export",
   "starter-materials",
   "create-course-cards",
+  "course-modality",
   "set-course-start-dates",
   "assign-week-deadlines",
   "schedule-lecture-announcement",

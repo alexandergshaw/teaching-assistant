@@ -10,6 +10,7 @@ import {
   DEFAULT_VISIBLE_COLUMNS,
   parseColumnSet,
   serializeColumnSet,
+  CURRENT_COLUMNS_VERSION,
   COLUMN_MIN_WIDTHS,
   deriveCourseCounts,
   truncateForCell,
@@ -47,6 +48,7 @@ function makeCourse(overrides: Partial<Course>): Course {
     tests: null,
     lms: null,
     dayTime: null,
+    modality: null,
     materialsFiles: [],
     exportFiles: [],
     materialsZipName: null,
@@ -144,6 +146,11 @@ describe("sortValueFor", () => {
     expect(sortValueFor(makeCourse({ weeks: null }), "weeks")).toEqual({ kind: "number", value: 0, empty: true });
     expect(sortValueFor(makeCourse({ tests: 0 }), "tests")).toEqual({ kind: "number", value: 0, empty: false });
     expect(sortValueFor(makeCourse({ tests: null }), "tests")).toEqual({ kind: "number", value: 0, empty: true });
+  });
+
+  it("treats modality as empty-when-unset text", () => {
+    expect(sortValueFor(makeCourse({ modality: "async" }), "modality")).toEqual({ kind: "text", value: "async", empty: false });
+    expect(sortValueFor(makeCourse({ modality: null }), "modality")).toEqual({ kind: "text", value: "", empty: true });
   });
 
   it("treats blank string fields as empty text", () => {
@@ -261,19 +268,20 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(JSON.stringify({ institution: true }))).toEqual(DEFAULT_VISIBLE_COLUMNS);
   });
 
-  it("drops unknown ids and de-duplicates", () => {
+  it("drops unknown ids and de-duplicates (a legacy bare-array set also gains modality via the version union)", () => {
     expect(parseColumnSet(JSON.stringify(["institution", "bogus", "institution", "weeks"]))).toEqual([
       "institution",
       "weeks",
+      "modality",
     ]);
   });
 
-  it("preserves an empty selection (every optional column hidden)", () => {
-    expect(parseColumnSet(JSON.stringify([]))).toEqual([]);
+  it("unions modality into an empty legacy selection (a bare array is version 0)", () => {
+    expect(parseColumnSet(JSON.stringify([]))).toEqual(["modality"]);
   });
 
   it("ignores name/actions if present since they are not toggleable columns", () => {
-    expect(parseColumnSet(JSON.stringify(["name", "actions", "lms"]))).toEqual(["lms"]);
+    expect(parseColumnSet(JSON.stringify(["name", "actions", "lms"]))).toEqual(["lms", "modality"]);
   });
 
   it("migrates legacy count-column ids to the columns that superseded them", () => {
@@ -282,16 +290,58 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "studentRepos",
       "repos",
       "lms",
+      "modality",
     ]);
   });
 
   it("dedups after migrating a legacy id that collides with a persisted new id", () => {
-    expect(parseColumnSet(JSON.stringify(["roster", "rosterCount", "lms"]))).toEqual(["roster", "lms"]);
+    expect(parseColumnSet(JSON.stringify(["roster", "rosterCount", "lms"]))).toEqual(["roster", "lms", "modality"]);
   });
 
   it("round-trips through serializeColumnSet", () => {
     const cols: typeof ALL_COLUMN_IDS[number][] = ["lms", "textbook"];
     expect(parseColumnSet(serializeColumnSet(cols))).toEqual(cols);
+  });
+
+  it("unions modality into a legacy bare-array persisted set (version 0)", () => {
+    const legacy = JSON.stringify(["institution", "lms"]);
+    const parsed = parseColumnSet(legacy);
+    expect(parsed).toContain("modality");
+    expect(parsed).toContain("institution");
+    expect(parsed).toContain("lms");
+  });
+
+  it("leaves a set already persisted at the current version untouched (no duplicate union)", () => {
+    const current = serializeColumnSet(["lms"]);
+    expect(parseColumnSet(current)).toEqual(["lms"]);
+  });
+
+  it("unions modality exactly once even if it was already present in a legacy set", () => {
+    const legacy = JSON.stringify(["institution", "modality", "lms"]);
+    const parsed = parseColumnSet(legacy);
+    expect(parsed.filter((id) => id === "modality").length).toBe(1);
+  });
+
+  it("still falls back to the default visible set for junk wrapped in a versioned shape", () => {
+    expect(parseColumnSet(JSON.stringify({ v: 1, columns: "not-an-array" }))).toEqual(DEFAULT_VISIBLE_COLUMNS);
+    expect(parseColumnSet(JSON.stringify({ v: "bogus", columns: ["lms"] }))).toEqual(DEFAULT_VISIBLE_COLUMNS);
+  });
+
+  it("still migrates legacy count-column ids when read from a version-0 (bare array) set", () => {
+    const legacy = JSON.stringify(["rosterCount", "lms"]);
+    const parsed = parseColumnSet(legacy);
+    expect(parsed).toContain("roster");
+    expect(parsed).not.toContain("rosterCount");
+  });
+
+  it("still drops unknown ids under the versioned shape", () => {
+    expect(parseColumnSet(JSON.stringify({ v: CURRENT_COLUMNS_VERSION, columns: ["bogus", "lms"] }))).toEqual(["lms"]);
+  });
+
+  it("serializeColumnSet writes the current version", () => {
+    const written = JSON.parse(serializeColumnSet(["lms"])) as { v: number; columns: string[] };
+    expect(written.v).toBe(CURRENT_COLUMNS_VERSION);
+    expect(written.columns).toEqual(["lms"]);
   });
 });
 
@@ -378,6 +428,12 @@ describe("computeFieldPatch", () => {
   it("maps lms to null when blank", () => {
     expect(computeFieldPatch("lms", "canvas")).toEqual({ lms: "canvas" });
     expect(computeFieldPatch("lms", "")).toEqual({ lms: null });
+  });
+
+  it("maps modality to null when blank", () => {
+    expect(computeFieldPatch("modality", "async")).toEqual({ modality: "async" });
+    expect(computeFieldPatch("modality", "sync")).toEqual({ modality: "sync" });
+    expect(computeFieldPatch("modality", "")).toEqual({ modality: null });
   });
 
   it("parses studentRepos rows", () => {

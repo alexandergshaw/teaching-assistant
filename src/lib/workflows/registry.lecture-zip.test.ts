@@ -83,6 +83,7 @@ function baseCourse(overrides: Partial<Course> = {}): Course {
     tests: null,
     lms: null,
     dayTime: null,
+    modality: null,
     materialsFiles: [],
     exportFiles: [],
     materialsZipName: null,
@@ -200,7 +201,7 @@ describe("lecture-zip step", () => {
     expect(assembleLectureFiles).toHaveBeenCalledTimes(1);
     const assembleArgs = vi.mocked(assembleLectureFiles).mock.calls[0];
     expect(assembleArgs[0]).toEqual([plan()]);
-    expect(assembleArgs[4]).toBe("lecture_materials");
+    expect(assembleArgs[4]).toBe("Lecture Materials");
 
     expect(result.outputs.files).toBeTruthy();
     const files = result.outputs.files as unknown[];

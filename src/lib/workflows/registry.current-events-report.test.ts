@@ -40,7 +40,7 @@ describe("current-events-report step", () => {
     expect(hubCourseInput!.required).toBe(false);
   });
 
-  it("has correct outputs: reportText and fileName", () => {
+  it("has correct outputs: reportText, fileName, sourceCount, topicsCovered", () => {
     const reportTextOutput = def!.outputs.find((o) => o.key === "reportText");
     expect(reportTextOutput, "reportText output exists").toBeTruthy();
     expect(reportTextOutput!.type).toBe("longtext");
@@ -48,14 +48,39 @@ describe("current-events-report step", () => {
     const fileNameOutput = def!.outputs.find((o) => o.key === "fileName");
     expect(fileNameOutput, "fileName output exists").toBeTruthy();
     expect(fileNameOutput!.type).toBe("text");
+
+    const sourceCountOutput = def!.outputs.find((o) => o.key === "sourceCount");
+    expect(sourceCountOutput, "sourceCount output exists").toBeTruthy();
+    expect(sourceCountOutput!.type).toBe("number");
+
+    const topicsCoveredOutput = def!.outputs.find((o) => o.key === "topicsCovered");
+    expect(topicsCoveredOutput, "topicsCovered output exists").toBeTruthy();
+    expect(topicsCoveredOutput!.type).toBe("number");
   });
 
-  it("has exactly 2 outputs", () => {
-    expect(def!.outputs.length).toBe(2);
+  it("has exactly 4 outputs", () => {
+    expect(def!.outputs.length).toBe(4);
   });
 
-  it("has exactly 4 inputs", () => {
-    expect(def!.inputs.length).toBe(4);
+  it("has the new comprehensiveness inputs: maxTopics, itemsPerTopic, extraFocus", () => {
+    const maxTopicsInput = def!.inputs.find((i) => i.key === "maxTopics");
+    expect(maxTopicsInput, "maxTopics input exists").toBeTruthy();
+    expect(maxTopicsInput!.type).toBe("number");
+    expect(maxTopicsInput!.required).toBe(false);
+
+    const itemsPerTopicInput = def!.inputs.find((i) => i.key === "itemsPerTopic");
+    expect(itemsPerTopicInput, "itemsPerTopic input exists").toBeTruthy();
+    expect(itemsPerTopicInput!.type).toBe("number");
+    expect(itemsPerTopicInput!.required).toBe(false);
+
+    const extraFocusInput = def!.inputs.find((i) => i.key === "extraFocus");
+    expect(extraFocusInput, "extraFocus input exists").toBeTruthy();
+    expect(extraFocusInput!.type).toBe("longtext");
+    expect(extraFocusInput!.required).toBe(false);
+  });
+
+  it("has exactly 7 inputs", () => {
+    expect(def!.inputs.length).toBe(7);
   });
 
   it("slidesText input can accept output from generate-presentation-from-template deck", () => {

@@ -81,6 +81,7 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
       tests: form.tests.trim() ? (Number.isFinite(Number(form.tests.trim())) ? Number(form.tests.trim()) : null) : null,
       lms: form.lms,
       dayTime: form.dayTime,
+      modality: form.modality,
     };
     const result = form.id ? await updateCourseHubAction(form.id, input) : await createCourseHubAction(input);
     setSaving(false);
@@ -216,6 +217,11 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
           <MenuItem value="">Not set</MenuItem>
           <MenuItem value="canvas">Canvas</MenuItem>
           <MenuItem value="blackboard">Blackboard</MenuItem>
+        </TextField>
+        <TextField select label="Modality" size="small" fullWidth value={form.modality} onChange={(e) => update({ modality: e.target.value })}>
+          <MenuItem value="">Not set</MenuItem>
+          <MenuItem value="async">Asynchronous</MenuItem>
+          <MenuItem value="sync">Synchronous</MenuItem>
         </TextField>
       </div>
 

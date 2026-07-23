@@ -66,6 +66,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "import-roster-from-csv",
     "create-course-tile",
     "configure-institution-feeds",
+    "course-modality",
   ],
   content: [
     "lecture-zip",

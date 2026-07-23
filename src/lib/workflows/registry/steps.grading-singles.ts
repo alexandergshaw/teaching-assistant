@@ -20,6 +20,7 @@ import {
 } from "@/lib/gradebook-csv";
 import type { GradingRun } from "@/lib/grade";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 
 export const gradingSinglesSteps: StepDefinition[] = [
   {
@@ -459,11 +460,13 @@ export const gradingSinglesSteps: StepDefinition[] = [
 
       // Enrich scores with email from the course tile roster if available
       const hubCourseId = String(values.hubCourse ?? "").trim();
+      let course: { courseCode: string | null; name: string } | null = null;
       if (hubCourseId) {
         onProgress("Loading course roster...");
         const listResult = await listCourseHubAction();
         if (!("error" in listResult)) {
           const tile = listResult.courses.find((c) => c.id === hubCourseId);
+          if (tile) course = { courseCode: tile.courseCode, name: tile.name };
           if (tile && tile.studentRepos && tile.studentRepos.length > 0) {
             for (const score of scores) {
               if (score.email) continue; // Already has email
@@ -504,12 +507,25 @@ export const gradingSinglesSteps: StepDefinition[] = [
       let finalCsv: string;
       let fileName: string;
 
+      const lmsLabel = lmsType.charAt(0).toUpperCase() + lmsType.slice(1);
+      const isoDate = new Date().toISOString().slice(0, 10);
+
       if (templateCsv) {
         const fillResult = fillGradebookCsv(templateCsv, scores);
         finalCsv = fillResult.csv;
-        fileName = `grades-${lmsType}-${new Date().toISOString().split("T")[0]}.csv`;
+        fileName = buildWorkflowFileName({
+          course,
+          artifact: `Grades (${lmsLabel})`,
+          date: isoDate,
+          ext: "csv",
+        });
         if (lmsType === "blackboard" && templateCsv.includes("\t")) {
-          fileName = `grades-${lmsType}-${new Date().toISOString().split("T")[0]}.txt`;
+          fileName = buildWorkflowFileName({
+            course,
+            artifact: `Grades (${lmsLabel})`,
+            date: isoDate,
+            ext: "txt",
+          });
         }
       } else {
         if (["brightspace", "blackboard"].includes(lmsType)) {
@@ -522,14 +538,24 @@ export const gradingSinglesSteps: StepDefinition[] = [
             { name: scores[0].itemName, pointsPossible: 100 },
             new Map(scores.map((s) => [s.externalId || "", s.score]))
           );
-          fileName = `grades-canvas-${new Date().toISOString().split("T")[0]}.csv`;
+          fileName = buildWorkflowFileName({
+            course,
+            artifact: "Grades (Canvas)",
+            date: isoDate,
+            ext: "csv",
+          });
         } else {
           finalCsv = buildMoodleGradebookCsv(
             scores.map((s) => ({ email: s.email || "" })),
             scores[0].itemName,
             new Map(scores.map((s) => [s.email || "", s.score]))
           );
-          fileName = `grades-moodle-${new Date().toISOString().split("T")[0]}.csv`;
+          fileName = buildWorkflowFileName({
+            course,
+            artifact: "Grades (Moodle)",
+            date: isoDate,
+            ext: "csv",
+          });
         }
       }
 

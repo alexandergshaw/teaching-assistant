@@ -21,9 +21,9 @@ import {
   resolveTileCurrentWeek,
   loadTileWeekTopic,
 } from "@/lib/workflows/registry-helpers";
-import { buildDocxFromPlainText } from "@/lib/docx";
 import { nextLectureWeek } from "@/lib/workflows/next-week";
 import { extractDefinitions } from "@/lib/embedded/scaffold";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 
 export const knowledgeSteps: StepDefinition[] = [
   {
@@ -555,16 +555,42 @@ export const knowledgeSteps: StepDefinition[] = [
         type: "hubCourse",
         required: false,
       },
+      {
+        key: "maxTopics",
+        label: "Max topics",
+        type: "number",
+        required: false,
+        help: "How many major topics to research from the deck. Default 6 (1-12).",
+      },
+      {
+        key: "itemsPerTopic",
+        label: "Items per topic",
+        type: "number",
+        required: false,
+        help: "How many dated items to gather per topic. Default 5 (1-10).",
+      },
+      {
+        key: "extraFocus",
+        label: "Extra focus (optional)",
+        type: "longtext",
+        required: false,
+        help: "Additional angles, keywords, or regions to fold into every topic's search.",
+      },
     ],
     outputs: [
       { key: "reportText", label: "Report", type: "longtext" },
       { key: "fileName", label: "File name", type: "text" },
+      { key: "sourceCount", label: "Source count", type: "number" },
+      { key: "topicsCovered", label: "Topics covered", type: "number" },
     ],
     run: async (values, helpers, onProgress) => {
       const uploads = Array.isArray(values.slides) ? (values.slides as File[]) : [];
       const priorSlidesText = String(values.slidesText ?? "").trim();
       const recentWindow = String(values.recentWindow ?? "").trim();
       const hubCourseId = String(values.hubCourse ?? "").trim();
+      const maxTopics = String(values.maxTopics ?? "").trim();
+      const itemsPerTopic = String(values.itemsPerTopic ?? "").trim();
+      const extraFocus = String(values.extraFocus ?? "").trim();
 
       let deckText = priorSlidesText;
 
@@ -601,34 +627,35 @@ export const knowledgeSteps: StepDefinition[] = [
       const window = recentWindow || "the past 30 days";
 
       onProgress("Researching current events...");
-      const r = await researchCurrentEventsAction(deckText, window, helpers.provider);
+      const r = await researchCurrentEventsAction(deckText, window, helpers.provider, {
+        maxTopics: maxTopics ? Number(maxTopics) : undefined,
+        itemsPerTopic: itemsPerTopic ? Number(itemsPerTopic) : undefined,
+        extraFocus,
+      });
       if ("error" in r) throw new Error(r.error);
 
       const reportText = r.report;
       const sourceCount = r.sourceCount;
+      const topicsCovered = r.topicsCovered;
 
-      const docText = reportText;
-      const docxBuffer = await buildDocxFromPlainText(docText, [], helpers.author);
-      const blob = new Blob([new Uint8Array(docxBuffer)], {
-        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      });
+      const blob = new Blob([reportText], { type: "text/plain" });
 
-      const sanitize = (s: string) =>
-        s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
-
-      let courseTitle = "";
+      let course: { courseCode: string | null; name: string } | null = null;
       if (hubCourseId) {
         const list = await listCourseHubAction();
         if (!("error" in list)) {
-          courseTitle =
-            list.courses
-              .find((c) => c.id === hubCourseId)
-              ?.name?.substring(0, 20) || "";
+          const tile = list.courses.find((c) => c.id === hubCourseId);
+          if (tile) course = { courseCode: tile.courseCode, name: tile.name };
         }
       }
 
-      const baseTitle = courseTitle || "Current_Events";
-      const fileName = `${sanitize(baseTitle)}_${Date.now()}.docx`;
+      const isoDate = new Date().toISOString().slice(0, 10);
+      const fileName = buildWorkflowFileName({
+        course,
+        artifact: "Current Events",
+        date: isoDate,
+        ext: "txt",
+      });
 
       const notes: string[] = [];
 
@@ -649,8 +676,8 @@ export const knowledgeSteps: StepDefinition[] = [
         const lib = await saveLibraryFileAction({
           name: fileName,
           base64,
-          mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          fileExt: "docx",
+          mimeType: "text/plain",
+          fileExt: "txt",
           workflowId: helpers.workflowId,
           workflowName: helpers.workflowName,
           workflowRunId: helpers.workflowRunId,
@@ -680,13 +707,13 @@ export const knowledgeSteps: StepDefinition[] = [
 
       const reportLines = reportText
         .split("\n")
-        .filter((l) => l.trim().startsWith("##"))
-        .map((l) => l.replace(/^##\s*/, ""));
+        .filter((l) => l.trim().startsWith("TOPIC:"))
+        .map((l) => l.trim());
 
-      const sourceLine = `${sourceCount} source(s) cited`;
+      const sourceLine = `${sourceCount} source(s) cited across ${topicsCovered} topic(s)`;
 
       return {
-        outputs: { reportText, fileName },
+        outputs: { reportText, fileName, sourceCount, topicsCovered },
         summary: {
           kind: "list",
           label: `Current events report (${window}) -> ${fileName}`,

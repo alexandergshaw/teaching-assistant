@@ -28,6 +28,7 @@ import {
 } from "@/app/actions";
 import { type StepRunResult, type StepDefinition, parseRosterLines } from "@/lib/workflows/registry-helpers";
 import type { RepoPermission } from "@/lib/github";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 
 export const githubSteps: StepDefinition[] = [
   {
@@ -54,12 +55,7 @@ export const githubSteps: StepDefinition[] = [
       const newRepoName = String(values.newRepoName);
 
       onProgress("Creating repository...");
-      const r = await createRepoFromTemplateAction(
-        templateRepo,
-        newRepoName,
-        true,
-        true
-      );
+      const r = await createRepoFromTemplateAction(templateRepo, newRepoName, true, true);
 
       if ("error" in r) {
         throw new Error(r.error);
@@ -508,7 +504,7 @@ export const githubSteps: StepDefinition[] = [
     description: "Draft a GitHub Copilot coding-agent project/scaffolding prompt, ready to feed an agent task.",
     inputs: [
       { key: "schedule", label: "Course schedule", type: "longtext", required: true },
-      { key: "fileName", label: "Schedule file name", type: "text", required: false, help: "Defaults to schedule.csv." },
+      { key: "fileName", label: "Schedule file name", type: "text", required: false, help: "Defaults to Schedule.csv." },
     ],
     outputs: [
       { key: "prompt", label: "Agent prompt", type: "longtext" }
@@ -517,7 +513,7 @@ export const githubSteps: StepDefinition[] = [
       const schedule = String(values.schedule ?? "").trim();
       if (!schedule) throw new Error("Provide course schedule content.");
 
-      const fileName = String(values.fileName ?? "").trim() || "schedule.csv";
+      const fileName = String(values.fileName ?? "").trim() || buildWorkflowFileName({ artifact: "Schedule", ext: "csv" });
 
       onProgress("Drafting Copilot prompt...");
       const r = await generateCopilotProjectPromptAction(schedule, fileName, helpers.provider);

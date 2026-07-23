@@ -5,10 +5,16 @@
 // affordances - just laid out as a table cell instead of a card tile.
 import { useState } from "react";
 import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 import Button from "@mui/material/Button";
 import styles from "../../page.module.css";
 
-export type EditableCellKind = "text" | "multiline" | "number" | "date";
+export type EditableCellKind = "text" | "multiline" | "number" | "date" | "select";
+
+export interface EditableCellOption {
+  value: string;
+  label: string;
+}
 
 export interface EditableCellProps {
   kind: EditableCellKind;
@@ -20,10 +26,12 @@ export interface EditableCellProps {
   placeholder?: string;
   /** Optional helper text shown under the editor while editing (e.g. line-format guidance). */
   hint?: string;
+  /** kind "select" only: the options shown in the editor's dropdown. */
+  options?: EditableCellOption[];
   onSave: (rawValue: string) => Promise<boolean | null>;
 }
 
-export default function EditableCell({ kind, rawValue, display, emptyLabel = "Not set", placeholder, hint, onSave }: EditableCellProps) {
+export default function EditableCell({ kind, rawValue, display, emptyLabel = "Not set", placeholder, hint, options, onSave }: EditableCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(rawValue);
   const [saving, setSaving] = useState(false);
@@ -50,6 +58,7 @@ export default function EditableCell({ kind, rawValue, display, emptyLabel = "No
             size="small"
             fullWidth
             autoFocus
+            select={kind === "select"}
             type={kind === "date" ? "date" : kind === "number" ? "number" : "text"}
             multiline={kind === "multiline"}
             minRows={kind === "multiline" ? 3 : undefined}
@@ -58,11 +67,15 @@ export default function EditableCell({ kind, rawValue, display, emptyLabel = "No
             onChange={(e) => setDraft(e.target.value)}
             slotProps={kind === "date" ? { inputLabel: { shrink: true } } : undefined}
             onKeyDown={(e) => {
-              if (kind === "multiline") return;
+              if (kind === "multiline" || kind === "select") return;
               if (e.key === "Enter") void commit();
               if (e.key === "Escape") cancel();
             }}
-          />
+          >
+            {kind === "select" && (options ?? []).map((opt) => (
+              <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+            ))}
+          </TextField>
           {hint && <p className={styles.fieldHint} style={{ margin: 0 }}>{hint}</p>}
           <div className={styles.tileEditorActions}>
             <Button variant="contained" size="small" disabled={saving} onClick={() => void commit()}>

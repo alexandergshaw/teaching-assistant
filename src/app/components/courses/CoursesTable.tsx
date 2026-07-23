@@ -38,6 +38,7 @@ const COLUMNS_KEY = "ta-courses-columns";
 
 const COLUMN_LABELS: Record<ColumnId, string> = {
   institution: "Institution",
+  modality: "Modality",
   startDate: "Start date",
   dayTime: "Day/Time",
   weeks: "Weeks",

@@ -15,6 +15,7 @@ import type { GradingRunEntry } from "@/lib/grade";
 import {
   stripGradingRunEntriesForDraft,
 } from "@/lib/workflows/grading-review-rows";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 
 export const gradingCartridgeSteps: StepDefinition[] = [
   {
@@ -172,15 +173,21 @@ export const gradingCartridgeSteps: StepDefinition[] = [
 
           // Convert CSV to base64
           const csvBase64 = Buffer.from(csvContent).toString("base64");
+          const csvName = buildWorkflowFileName({
+            course: { courseCode: null, name: drop.courseLabel },
+            artifact: "Grades",
+            qualifier: drop.assignmentLabel,
+            ext: "csv",
+          });
           csvFiles.push({
-            name: `${drop.id}-grades.csv`,
+            name: csvName,
             base64: csvBase64,
           });
 
           // Finish the cartridge drop (upload CSV, mark as graded)
           const finishResult = await finishCartridgeDropAction(drop.id, {
             status: "graded",
-            csvName: `${drop.assignmentLabel}_grades.csv`,
+            csvName,
             csvBase64,
           });
 

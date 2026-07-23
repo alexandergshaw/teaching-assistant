@@ -22,6 +22,7 @@ import type { CartridgeCourseData } from "@/lib/cartridge-import";
 import type { CommonResourceItem } from "@/lib/common-resources";
 import type { InstitutionField } from "@/lib/institution-fields";
 import type { StepInputSpec, StepOutputSpec } from "@/lib/workflows/types";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 
 export type { StepInputSpec, StepOutputSpec } from "@/lib/workflows/types";
 
@@ -525,6 +526,33 @@ export async function assembleLectureFiles(
   const deck = await resolveDeckTheme(values.template);
   const files: GeneratedCourseFile[] = [];
 
+  // Determine the course tile (if any) up front so both the per-file names
+  // below and the zip's base name share the same course label.
+  const hubCourseId = String(values.hubCourse ?? "").trim();
+  let course: { courseCode: string | null; name: string } | null = null;
+  let tileLms = "";
+  if (hubCourseId) {
+    const list = await listCourseHubAction();
+    if (!("error" in list)) {
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (tile) {
+        course = { courseCode: tile.courseCode, name: tile.name };
+        tileLms = (tile.lms ?? "").trim().toLowerCase();
+
+        // The course tile's LMS inherits from the institution's LMS field
+        // when unset, matching the Courses tab display.
+        if (!tileLms && tile.institution && helpers.getInstitutionFields) {
+          const fields = await helpers
+            .getInstitutionFields(tile.institution)
+            .catch(() => []);
+          tileLms = (fields.find((f) => f.id === "lmsUrl")?.lms ?? "")
+            .trim()
+            .toLowerCase();
+        }
+      }
+    }
+  }
+
   if (deck.note) onProgress(deck.note);
   onProgress(`Processing ${plans.length} assignments...`);
   for (const plan of plans) {
@@ -537,7 +565,12 @@ export async function assembleLectureFiles(
     });
 
     files.push({
-      name: `${plan.label} Slides.pptx`,
+      name: buildWorkflowFileName({
+        course,
+        artifact: "Lecture Slides",
+        qualifier: plan.label,
+        ext: "pptx",
+      }),
       blob: new Blob([pptxData], {
         type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       }),
@@ -555,7 +588,12 @@ export async function assembleLectureFiles(
         helpers.author
       );
       files.push({
-        name: `${plan.label} Introduction.docx`,
+        name: buildWorkflowFileName({
+          course,
+          artifact: "Lecture Notes",
+          qualifier: plan.label,
+          ext: "docx",
+        }),
         blob: new Blob([docxData], {
           type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         }),
@@ -575,7 +613,12 @@ export async function assembleLectureFiles(
         helpers.author
       );
       files.push({
-        name: `${plan.label} Instructions.docx`,
+        name: buildWorkflowFileName({
+          course,
+          artifact: "Assignment Instructions",
+          qualifier: plan.label,
+          ext: "docx",
+        }),
         blob: new Blob([docxData], {
           type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         }),
@@ -599,33 +642,9 @@ export async function assembleLectureFiles(
 
   const zipBlob = await zip.generateAsync({ type: "blob" });
 
-  // Determine base name from hubCourse or use fallback
-  const hubCourseId = String(values.hubCourse ?? "").trim();
-  let baseName = baseNameFallback;
-  let tileLms = "";
-  if (hubCourseId) {
-    const list = await listCourseHubAction();
-    if (!("error" in list)) {
-      const tile = list.courses.find((c) => c.id === hubCourseId);
-      if (tile?.name?.trim()) {
-        baseName =
-          tile.name.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_") ||
-          baseName;
-      }
-      tileLms = (tile?.lms ?? "").trim().toLowerCase();
-
-      // The course tile's LMS inherits from the institution's LMS field
-      // when unset, matching the Courses tab display.
-      if (!tileLms && tile?.institution && helpers.getInstitutionFields) {
-        const fields = await helpers
-          .getInstitutionFields(tile.institution)
-          .catch(() => []);
-        tileLms = (fields.find((f) => f.id === "lmsUrl")?.lms ?? "")
-          .trim()
-          .toLowerCase();
-      }
-    }
-  }
+  const zipFileName = course
+    ? buildWorkflowFileName({ course, artifact: "Lecture Materials", ext: "zip" })
+    : `${baseNameFallback}.zip`;
 
   // Tile's LMS routes which format the browser downloads; files output
   // and library save are unaffected. Headless (server) runs have no
@@ -637,7 +656,7 @@ export async function assembleLectureFiles(
     const url = URL.createObjectURL(zipBlob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${baseName}.zip`;
+    a.download = zipFileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -648,7 +667,7 @@ export async function assembleLectureFiles(
 
   if (helpers.saveBundle) {
     try {
-      await helpers.saveBundle(zipBlob, baseName);
+      await helpers.saveBundle(zipBlob, zipFileName);
     } catch (err) {
       console.error("Library save failed:", err);
     }

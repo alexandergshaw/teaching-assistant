@@ -21,6 +21,7 @@ import { moduleItemContentUrl } from "@/lib/canvas-url";
 import type { CanvasModule, CanvasModuleItem } from "@/lib/canvas-modules";
 import { courseProgressStatus, parseWeekToken } from "@/lib/week-numbering";
 import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 
 export const assignmentAnswerSteps: StepDefinition[] = [
   {
@@ -443,10 +444,12 @@ export const assignmentAnswerSteps: StepDefinition[] = [
         const base64 = Buffer.from(answerText, "utf-8").toString("base64");
 
         // Determine the filename
-        let filename = `Module ${moduleName} Homework Answers.txt`;
-        if (moduleWeekNumber !== null) {
-          filename = `Module ${moduleWeekNumber} Homework Answers.txt`;
-        }
+        const filename = buildWorkflowFileName({
+          course: tile,
+          artifact: "Homework Answers",
+          qualifier: `Module ${moduleWeekNumber !== null ? moduleWeekNumber : moduleName}`,
+          ext: "txt",
+        });
 
         // Save to library with workflow tagging
         onProgress("Saving to Files tab...");

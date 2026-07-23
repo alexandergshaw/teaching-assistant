@@ -25,4 +25,5 @@ export const courseSetupSteps: StepDefinition[] = [
   courseSetupRosterSteps[3],
   courseSetupTilesSteps[1],
   courseSetupTilesSteps[2],
+  courseSetupTilesSteps[3],
 ];

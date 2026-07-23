@@ -33,6 +33,7 @@ import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
 import { resolveSourcePolicy, type SourcePolicy } from "@/lib/workflows/source-policy";
 import { resolveRepolessSchedule, parseTargetedModule } from "@/lib/workflows/registry/schedule-resolution";
+import { buildWorkflowFileName, sanitizeFileNamePart } from "@/lib/workflows/file-names";
 
 const SOURCES_HELP =
   "Which additional material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -172,7 +173,7 @@ async function runLectureZipRepoless(
     throw new Error(plans.error);
   }
 
-  const result = await assembleLectureFiles(plans, values, helpers, onProgress, "lecture_materials");
+  const result = await assembleLectureFiles(plans, values, helpers, onProgress, "Lecture Materials");
   if (result.summary.kind === "list") {
     result.summary.label = `Built from course sources - no repository linked (${plans.length} deck${plans.length === 1 ? "" : "s"})`;
     result.summary.items = [
@@ -306,11 +307,7 @@ export const contentLectureSteps: StepDefinition[] = [
         }
       }
 
-      const baseName = repo
-        .split("/")
-        .pop()
-        ?.replace(/[^a-z0-9]/gi, "_")
-        .replace(/_+/g, "_") || "lecture_plans";
+      const baseName = sanitizeFileNamePart(repo.split("/").pop() ?? "") || "Lecture Plans";
 
       const result = await assembleLectureFiles(plans, values, helpers, onProgress, baseName);
       if (supplemental.notes.length > 0 && result.summary.kind === "list") {
@@ -443,7 +440,7 @@ export const contentLectureSteps: StepDefinition[] = [
         throw new Error(plans.error);
       }
 
-      const baseName = "lecture_materials";
+      const baseName = "Lecture Materials";
 
       const result = await assembleLectureFiles(plans, values, helpers, onProgress, baseName);
       if (supplemental.notes.length > 0 && result.summary.kind === "list") {
@@ -568,23 +565,27 @@ export const contentLectureSteps: StepDefinition[] = [
       const zipBlob = await zip.generateAsync({ type: "blob" });
 
       const hubCourseId = String(values.hubCourse ?? "").trim();
-      let baseName = "class_openers";
+      let course: { courseCode: string | null; name: string } | null = null;
       if (hubCourseId) {
         const list = await listCourseHubAction();
         if (!("error" in list)) {
           const tile = list.courses.find((c) => c.id === hubCourseId);
-          if (tile?.name?.trim()) {
-            baseName = tile.name.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_") || baseName;
-          }
+          if (tile) course = { courseCode: tile.courseCode, name: tile.name };
         }
       }
+
+      const fileName = buildWorkflowFileName({
+        course,
+        artifact: "Class Openers",
+        ext: "zip",
+      });
 
       if (typeof document !== "undefined") {
         onProgress("Downloading zip...");
         const url = URL.createObjectURL(zipBlob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${baseName}_openers.zip`;
+        a.download = fileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -593,7 +594,7 @@ export const contentLectureSteps: StepDefinition[] = [
 
       if (helpers.saveBundle) {
         try {
-          await helpers.saveBundle(zipBlob, `${baseName} Class Openers`);
+          await helpers.saveBundle(zipBlob, fileName);
         } catch (err) {
           console.error("Library save failed:", err);
         }
@@ -601,7 +602,7 @@ export const contentLectureSteps: StepDefinition[] = [
 
       if (helpers.saveCourseMaterialFile && hubCourseId) {
         try {
-          await helpers.saveCourseMaterialFile(hubCourseId, zipBlob, `${baseName} Class Openers.zip`);
+          await helpers.saveCourseMaterialFile(hubCourseId, zipBlob, fileName);
         } catch (err) {
           console.error("Course tile save failed:", err);
         }
@@ -791,9 +792,12 @@ export const contentLectureSteps: StepDefinition[] = [
           type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         });
 
-        const sanitize = (s: string) =>
-          s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
-        const fileName = `${sanitize(tile.name)}_${sanitize(moduleName)}_Lecture.pptx`;
+        const fileName = buildWorkflowFileName({
+          course: tile,
+          artifact: "Lecture Slides",
+          qualifier: moduleName,
+          ext: "pptx",
+        });
 
         // Browser-only convenience download; skipped server-side (no document)
         // and in the autonomous multi-tile path. The tile save below is the

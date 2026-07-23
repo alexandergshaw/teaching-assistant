@@ -27,6 +27,7 @@ import { buildDocxFromPlainText } from "@/lib/docx";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
 import { resolveSourcePolicy } from "@/lib/workflows/source-policy";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 
 const SOURCES_HELP =
   "Which material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -244,9 +245,12 @@ export const contentInsightSteps: StepDefinition[] = [
         type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       });
 
-      const sanitize = (s: string) =>
-        s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
-      const fileName = `${sanitize(tile.name)}_${sanitize(moduleName)}_QA.docx`;
+      const fileName = buildWorkflowFileName({
+        course: tile,
+        artifact: "Lecture Q&A",
+        qualifier: moduleName,
+        ext: "docx",
+      });
 
       // Headless (server) runs have no `document` to build a download link
       // with; the course-tile save below still carries the file.
@@ -558,9 +562,6 @@ export const contentInsightSteps: StepDefinition[] = [
       const reportLines: string[] = [];
       let generated = 0;
 
-      const sanitize = (s: string) =>
-        s.trim().replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
-
       for (const id of ids) {
         const tile = hub.courses.find((c) => c.id === id);
         if (!tile) {
@@ -681,7 +682,12 @@ export const contentInsightSteps: StepDefinition[] = [
               const blob = new Blob([new Uint8Array(docx)], {
                 type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
               });
-              const fileName = `${sanitize(tile.name)}_Week${targetWeek}_StudyGuide.docx`;
+              const fileName = buildWorkflowFileName({
+                course: tile,
+                artifact: "Study Guide",
+                qualifier: `Week ${targetWeek}`,
+                ext: "docx",
+              });
 
               if (helpers.saveCourseMaterialFile) {
                 try {

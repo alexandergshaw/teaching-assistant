@@ -32,16 +32,10 @@ import { buildDocxFromPlainText } from "@/lib/docx";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
 import { resolveSourcePolicy, type SourcePolicy } from "@/lib/workflows/source-policy";
-import { resolveRepolessSchedule } from "@/lib/workflows/registry/schedule-resolution";
+import { resolveRepolessSchedule, parseTargetedModule } from "@/lib/workflows/registry/schedule-resolution";
 
 const SOURCES_HELP =
   "Which additional material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
-
-// Tolerant module-number match: the same idiom used in
-// registry-helpers.sources.ts and steps.lms-integrations.ts ("Module NN" vs
-// "Week N" style names) - lets a resolved module name target a single
-// schedule week in the repoless path (AC5).
-const MODULE_NUMBER_PATTERN = /(?:module|week)\s*0*(\d+)/i;
 
 // Non-repo material sources supplement a repo-driven step's primary pipeline;
 // the "repo" kind there refers to that pipeline's own required repo input,
@@ -111,24 +105,35 @@ async function runLectureZipRepoless(
 
   // AC5: when a module was specified and its name yields a week number (the
   // AC2 regex idiom) that matches a week in the resolved schedule, narrow
-  // generation to that single week; otherwise keep the full schedule and
-  // note that no week could be matched. Blank/unset moduleId leaves the
-  // schedule untouched - today's behavior exactly.
+  // generation to that single week (today's behavior, unchanged). Otherwise
+  // an explicitly targeted module must never be silently replaced by
+  // unrelated weeks - SYNTHESIZE a single week from the module name itself
+  // (AC1) and use ONLY that; the old full-schedule fallback is removed
+  // entirely. Blank/unset moduleId leaves the schedule untouched - today's
+  // behavior exactly.
   let moduleTargetingNote: string | null = null;
   if (moduleIdRaw) {
     const picked = parseLmsModuleValue(moduleIdRaw);
-    const weekMatch = (picked.name ?? "").match(MODULE_NUMBER_PATTERN);
-    if (weekMatch) {
-      const weekNum = parseInt(weekMatch[1], 10);
-      const matchingWeek = schedule.find((w) => w.week === weekNum);
+    if (picked.name) {
+      const parsed = parseTargetedModule(picked.name);
+      const matchingWeek = parsed.week !== null ? schedule.find((w) => w.week === parsed.week) : undefined;
       if (matchingWeek) {
         schedule = [matchingWeek];
-        moduleTargetingNote = `targeted week ${weekNum} for module "${picked.name}"`;
+        moduleTargetingNote = `targeted week ${parsed.week} for module "${picked.name}"`;
       } else {
-        moduleTargetingNote = `module "${picked.name}" names week ${weekNum}, but the resolved schedule has no matching week - using the full schedule`;
+        const synthesizedWeek = parsed.week ?? 1;
+        schedule = [
+          {
+            week: synthesizedWeek,
+            topic: parsed.topic || picked.name,
+            summary: "",
+            assignmentTitle: null,
+            assignmentSlug: null,
+            testName: null,
+          },
+        ];
+        moduleTargetingNote = `module "${picked.name}" is not in the resolved schedule - generated week ${synthesizedWeek} from the module name itself`;
       }
-    } else if (picked.name) {
-      moduleTargetingNote = `module "${picked.name}" has no week number to match - using the full schedule`;
     } else {
       // A bare live id carries no name to derive a week from. Say so rather
       // than silently ignoring a module the user explicitly chose.

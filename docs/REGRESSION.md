@@ -1283,11 +1283,55 @@ encoding existed - so four supporting pieces landed with the control.
    hardcoded ""). Blank = today's course-level auto-pick/digest exactly.
 7. Single-week targeting: when the chosen module's name yields a week number
    matching a week in the resolved schedule, the repoless run narrows to
-   that week; otherwise the full schedule is used. Every branch - targeted,
-   week-not-in-schedule, name-without-a-week, and a bare live id with no
-   name - emits a summary note, so a chosen module is never silently
-   ignored.
+   that week. (The original "otherwise the full schedule is used" clause is
+   SUPERSEDED by the targeted-module entry below, which synthesizes the
+   module's own week instead.) Every branch emits a summary note, so a
+   chosen module is never silently ignored.
 8. Bindings: course-refresh's lecture-zip binds moduleId runtime with the
    shared fieldKey "moduleId" (it has no course-progress step); both kickoff
    variants inherit it through their include of course-refresh. The
    source-policy input-count canary for lecture-zip is 8.
+
+### 2026-07-23 - A targeted module drives the lecture (never substituted)
+
+Context: a user targeted "Module 07: Algorithms and Data Structures" and got a
+Week 1 deck about "Start Here" - their Canvas course holds only a "Start Here"
+module, the ladder built a one-week schedule from it, week 7 was absent, and
+the code fell back to that unrelated schedule.
+
+1. parseTargetedModule (schedule-resolution.ts, pure, exported): "Module 07:
+   Algorithms and Data Structures" -> { week: 7, topic: "Algorithms and Data
+   Structures" }; "Week 5 - Loops" -> { week: 5, topic: "Loops" };
+   "Module 3" -> { week: 3, topic: "" }; "Algorithms" -> { week: null,
+   topic: "Algorithms" }; "" -> { week: null, topic: "" }.
+2. Targeted-module precedence (steps.content-lectures.ts): when the resolved
+   schedule contains the targeted week, narrow to it (unchanged). When it
+   does NOT, synthesize exactly one week from the module name itself
+   ({ week: parsed.week ?? 1, topic: parsed.topic || the module name,
+   summary "", assignment/test fields null}) and use ONLY that - the
+   full-schedule fallback for a targeted module is REMOVED. A bare live id
+   with no name cannot be parsed and keeps the full schedule, noted.
+3. Notes: matched -> `targeted week N for module "<name>"`; synthesized ->
+   `module "<name>" is not in the resolved schedule - generated week N from
+   the module name itself`.
+4. Front-matter filtering: isFrontMatterModuleText (source-alignment.ts, NEW
+   and unit-tested; isNonContentWeekText UNCHANGED) recognizes course
+   furniture - start here, welcome, orientation, getting started, syllabus,
+   course information/info, resources, readme, announcements. The
+   LMS-module-names ladder tier filters with BOTH predicates and keeps the
+   pre-existing keep-all-if-filtering-empties safeguard; the tier note names
+   which filtering applied ("non-content", "front-matter", or both).
+5. Honest post-failure note: after a by-name module lookup fails, the
+   course-level digest reports `module "<name>" was not found - digested N
+   LMS module name(s) and item titles as course-level context (page/file
+   bodies not fetched)`, and materialsSource says the same, so the digest
+   can never be misread as the target module's materials. The genuinely-no-
+   module wording is unchanged. (The export-side digest is reachable only
+   when no module was selected, so its wording is correct as-is.)
+6. End-to-end guard (registry.lecture-zip.test.ts) reproduces the report:
+   targeted "Module 07: Algorithms and Data Structures" + a live LMS holding
+   only "Start Here" + no CSV topics + blank tile topics -> exactly ONE deck
+   for week 7 built from "Algorithms and Data Structures", never week 1 /
+   Start Here.
+7. Blank/unset moduleId: byte-identical to the prior behavior (the targeting
+   block does not run); pinned by the existing unchanged test.

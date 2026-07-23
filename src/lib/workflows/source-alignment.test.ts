@@ -5,6 +5,7 @@ import {
   formatBalanceSummary,
   planWeekItems,
   isNonContentWeekText,
+  isFrontMatterModuleText,
   describeCoveredChapters,
   shouldDeriveToc,
   buildTocDerivationPrompt,
@@ -323,6 +324,32 @@ Module 3: Scanning Networks`;
       expect(isNonContentWeekText("REVIEW")).toBe(true);
       expect(isNonContentWeekText("ReViEw")).toBe(true);
       expect(isNonContentWeekText("EXAM")).toBe(true);
+    });
+  });
+
+  describe("isFrontMatterModuleText", () => {
+    it("recognizes each listed front-matter phrase", () => {
+      expect(isFrontMatterModuleText("Start Here")).toBe(true);
+      expect(isFrontMatterModuleText("Welcome")).toBe(true);
+      expect(isFrontMatterModuleText("Orientation")).toBe(true);
+      expect(isFrontMatterModuleText("Getting Started")).toBe(true);
+      expect(isFrontMatterModuleText("Syllabus")).toBe(true);
+      expect(isFrontMatterModuleText("Course Information")).toBe(true);
+      expect(isFrontMatterModuleText("Course Info")).toBe(true);
+      expect(isFrontMatterModuleText("Resources")).toBe(true);
+      expect(isFrontMatterModuleText("Readme")).toBe(true);
+      expect(isFrontMatterModuleText("Announcements")).toBe(true);
+    });
+
+    it("returns false for real teaching topics", () => {
+      expect(isFrontMatterModuleText("Algorithms and Data Structures")).toBe(false);
+      expect(isFrontMatterModuleText("Loops")).toBe(false);
+      expect(isFrontMatterModuleText("")).toBe(false);
+    });
+
+    it("is case-insensitive and matches as a substring", () => {
+      expect(isFrontMatterModuleText("START HERE")).toBe(true);
+      expect(isFrontMatterModuleText("Module 0: Start Here and Setup")).toBe(true);
     });
   });
 

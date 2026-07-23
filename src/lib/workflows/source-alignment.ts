@@ -296,6 +296,29 @@ export function isNonContentWeekText(...texts: Array<string | undefined>): boole
 }
 
 /**
+ * A name counts as course furniture (front matter) rather than a teaching
+ * week - "Start Here", "Welcome", etc. Kept separate from
+ * isNonContentWeekText (which other callers depend on for the schedule/
+ * materials review-week policy and is never modified for this): a
+ * front-matter module is not a review/exam week, it is not a week at all.
+ */
+export function isFrontMatterModuleText(...texts: Array<string | undefined>): boolean {
+  const combined = texts.filter(Boolean).join(" ").toLowerCase();
+  return (
+    combined.includes("start here") ||
+    combined.includes("welcome") ||
+    combined.includes("orientation") ||
+    combined.includes("getting started") ||
+    combined.includes("syllabus") ||
+    combined.includes("course information") ||
+    combined.includes("course info") ||
+    combined.includes("resources") ||
+    combined.includes("readme") ||
+    combined.includes("announcements")
+  );
+}
+
+/**
  * Summarize the source-material chapters mentioned in every week BEFORE
  * weekNumber, so a review/exam/project week's materials can ground in what
  * was already covered instead of fabricating a new chapter's content.

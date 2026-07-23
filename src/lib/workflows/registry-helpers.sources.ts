@@ -313,7 +313,16 @@ export async function gatherModuleMaterials(
   // (resolveTileCurrentWeek + findModuleForWeek), gathering it exactly like
   // the module-scoped branch; otherwise digest every module's name + item
   // titles (no page/file bodies fetched - cost).
-  const gatherCourseLevelLive = async (notes: string[]): Promise<SourceGatherOutcome> => {
+  // AC3: `failedModuleName` is set only when a module WAS targeted but a
+  // by-name lookup failed to find it (the sentinel and genuinely-no-module
+  // callers below pass none) - it corrects the digest note so it never
+  // claims "no module selected" when one plainly was, and makes clear the
+  // gathered text is course-level CONTEXT rather than that module's
+  // materials.
+  const gatherCourseLevelLive = async (
+    notes: string[],
+    failedModuleName: string | null = null
+  ): Promise<SourceGatherOutcome> => {
     onProgress("Loading course content...");
     let content: Awaited<ReturnType<typeof listCourseContentAction>>;
     try {
@@ -352,7 +361,9 @@ export async function gatherModuleMaterials(
     }
 
     moduleNames = content.modules.map((m) => m.name);
-    materialsSource = `Materials digested from ${content.modules.length} LMS module name(s) + item titles (course-level, no module selected)`;
+    materialsSource = failedModuleName
+      ? `Materials digested from ${content.modules.length} LMS module name(s) + item titles (course-level context; module "${failedModuleName}" was not found)`
+      : `Materials digested from ${content.modules.length} LMS module name(s) + item titles (course-level, no module selected)`;
     const chunks: string[] = [];
     for (const m of content.modules) {
       chunks.push(`# ${m.name}\n`);
@@ -360,7 +371,9 @@ export async function gatherModuleMaterials(
     }
     const text = chunks.join("");
     notes.push(
-      `no module selected - digested ${content.modules.length} LMS module name(s) and item titles (course-level; page/file bodies not fetched)`
+      failedModuleName
+        ? `module "${failedModuleName}" was not found - digested ${content.modules.length} LMS module name(s) and item titles as course-level context (page/file bodies not fetched)`
+        : `no module selected - digested ${content.modules.length} LMS module name(s) and item titles (course-level; page/file bodies not fetched)`
     );
     return { text, notes, ok: text.trim().length > 0 };
   };
@@ -421,7 +434,7 @@ export async function gatherModuleMaterials(
         notes.push("live LMS: no Canvas URL is set on this course tile");
         return { text: "", notes, ok: false };
       }
-      return await gatherCourseLevelLive(notes);
+      return await gatherCourseLevelLive(notes, picked.name);
     }
 
     if (picked.fromExport) {

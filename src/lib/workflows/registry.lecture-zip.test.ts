@@ -459,13 +459,13 @@ describe("lecture-zip step", () => {
     expect(scheduleArg).toEqual([{ week: 2, topic: "Loops", summary: "", assignmentTitle: null, assignmentSlug: null, testName: null }]);
   });
 
-  it("AC5: a resolved module whose week does not match the schedule falls back to the full schedule with a note", async () => {
+  it("AC1: a targeted module whose week is absent from the resolved schedule synthesizes a single week from the module name, never the full schedule", async () => {
     const csvData = ["week,topic,summary,assignment,test", "1,Intro,,,", "2,Loops,,,"].join("\n");
     const tile = baseCourse({ id: "course-1", csvData });
     vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
     vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
     vi.mocked(assembleLectureFiles).mockResolvedValue({
-      files: [{ name: "f.pptx", blob: new Blob([]), mimeType: "x", weekNumber: 1, sortOrder: 1, role: "slides" }],
+      files: [{ name: "f.pptx", blob: new Blob([]), mimeType: "x", weekNumber: 9, sortOrder: 1, role: "slides" }],
       summary: { kind: "list", label: "label", items: [] },
     });
 
@@ -481,11 +481,78 @@ describe("lecture-zip step", () => {
     );
 
     const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
-    const scheduleArg = JSON.parse(callArgs[0] as string) as Array<{ week: number }>;
-    expect(scheduleArg.length).toBe(2);
+    const scheduleArg = JSON.parse(callArgs[0] as string) as Array<{ week: number; topic: string }>;
+    expect(scheduleArg).toEqual([
+      { week: 9, topic: "Nonexistent", summary: "", assignmentTitle: null, assignmentSlug: null, testName: null },
+    ]);
     if (result.summary.kind === "list") {
       expect(
-        result.summary.items.some((i) => i.includes("no matching week") || i.includes("using the full schedule"))
+        result.summary.items.some((i) =>
+          i.includes('module "Module 09: Nonexistent" is not in the resolved schedule - generated week 9 from the module name itself')
+        )
+      ).toBe(true);
+      expect(result.summary.items.some((i) => i.includes("using the full schedule"))).toBe(false);
+    }
+  });
+
+  // AC4: the user's exact reported scenario - a course whose live LMS has
+  // only a front-matter "Start Here" module (no CSV schedule, no tile
+  // topics), targeting "Module 07: Algorithms and Data Structures". The
+  // ladder's LMS-module-names tier would otherwise build a Week 1 "Start
+  // Here" schedule that the targeting block then falls back to in full -
+  // exactly the reported bug. It must instead produce exactly ONE deck for
+  // week 7, built from the module name, never week 1 / Start Here.
+  it("AC4: targeted Module 07 with only a front-matter LMS module produces one week-7 deck, never week 1 / Start Here", async () => {
+    const tile = baseCourse({
+      id: "course-1",
+      canvasUrl: "https://canvas.example.com/courses/1",
+      csvData: null,
+      topics: null,
+    });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+    vi.mocked(listCourseContentAction).mockResolvedValue({
+      courseName: "CS 101",
+      pages: [],
+      modules: [{ id: 1, name: "Start Here", position: 1, published: true, itemsCount: 0, items: [] }],
+    });
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [{ name: "f.pptx", blob: new Blob([]), mimeType: "x", weekNumber: 7, sortOrder: 1, role: "slides" }],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+
+    const result = await step.run(
+      {
+        repo: "",
+        minutes: 50,
+        hubCourse: "course-1",
+        moduleId: nameModuleValue("Module 07: Algorithms and Data Structures"),
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    const scheduleArg = JSON.parse(callArgs[0] as string) as Array<{ week: number; topic: string }>;
+    expect(scheduleArg).toEqual([
+      {
+        week: 7,
+        topic: "Algorithms and Data Structures",
+        summary: "",
+        assignmentTitle: null,
+        assignmentSlug: null,
+        testName: null,
+      },
+    ]);
+    expect(scheduleArg.some((w) => w.week === 1 || /start here/i.test(w.topic))).toBe(false);
+    if (result.summary.kind === "list") {
+      expect(result.summary.label).toContain("(1 deck)");
+      expect(
+        result.summary.items.some((i) =>
+          i.includes(
+            'module "Module 07: Algorithms and Data Structures" is not in the resolved schedule - generated week 7 from the module name itself'
+          )
+        )
       ).toBe(true);
     }
   });

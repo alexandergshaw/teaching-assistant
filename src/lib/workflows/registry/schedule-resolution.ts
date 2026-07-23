@@ -9,7 +9,34 @@
 import { type ScheduleWeekPlan } from "@/app/actions";
 import { csvToSchedule } from "@/lib/workflows/types";
 import { parseCsvRows } from "@/lib/csv";
-import { isNonContentWeekText } from "@/lib/workflows/source-alignment";
+import { isNonContentWeekText, isFrontMatterModuleText } from "@/lib/workflows/source-alignment";
+
+// Same tolerant "Module NN"/"Week N" idiom used in steps.content-lectures.ts
+// (MODULE_NUMBER_PATTERN there) - kept as a private constant here rather than
+// imported, since this module has no dependency on that client-only registry
+// file (and shouldn't gain one).
+const TARGET_MODULE_NUMBER_PATTERN = /(?:module|week)\s*0*(\d+)/i;
+
+// Splits a targeted module's name into its week number and a topic, on the
+// first ":" or " - " separator (trimmed both sides). A trailing separator
+// yields topic "". Pure and standalone so steps.content-lectures.ts can
+// synthesize a single week from a targeted module the resolved schedule
+// doesn't contain (AC1), instead of falling back to an unrelated schedule.
+export function parseTargetedModule(name: string): { week: number | null; topic: string } {
+  const trimmed = (name ?? "").trim();
+  if (!trimmed) return { week: null, topic: "" };
+
+  const weekMatch = trimmed.match(TARGET_MODULE_NUMBER_PATTERN);
+  const week = weekMatch ? parseInt(weekMatch[1], 10) : null;
+
+  const sepMatch = trimmed.match(/:| - /);
+  if (sepMatch && sepMatch.index !== undefined) {
+    return { week, topic: trimmed.slice(sepMatch.index + sepMatch[0].length).trim() };
+  }
+  // No separator: a bare "Module 3" names a week but no topic; a bare
+  // "Algorithms" (no number either) is itself the topic.
+  return { week, topic: week !== null ? "" : trimmed };
+}
 
 function withTopicOnly(weeks: ScheduleWeekPlan[]): ScheduleWeekPlan[] {
   return weeks.filter((w) => w.topic && w.topic.trim());
@@ -83,12 +110,16 @@ function deriveAliasTopicSchedule(csv: string): AliasCsvSchedule | null {
   return { schedule, header: aliasHeader };
 }
 
-// AC3: maps ordered LMS/export module names to weeks, skipping obvious
-// non-content modules (review/exam/etc, via the same isNonContentWeekText
-// used elsewhere) UNLESS filtering would empty the list - then every name is
-// kept and the caller is told so via the returned `filtered` flag.
-function moduleNamesToWeeks(moduleNames: string[]): { weeks: ScheduleWeekPlan[]; filtered: boolean } {
-  const contentOnly = moduleNames.filter((name) => !isNonContentWeekText(name));
+// AC2/AC3: maps ordered LMS/export module names to weeks, skipping obvious
+// non-content modules (review/exam/etc, via isNonContentWeekText) AND
+// front-matter modules ("Start Here", "Welcome", etc, via
+// isFrontMatterModuleText) UNLESS filtering would empty the list - then
+// every name is kept and the caller is told so via the returned `filterNote`
+// (null when nothing was filtered).
+function moduleNamesToWeeks(moduleNames: string[]): { weeks: ScheduleWeekPlan[]; filterNote: string | null } {
+  const contentOnly = moduleNames.filter(
+    (name) => !isNonContentWeekText(name) && !isFrontMatterModuleText(name)
+  );
   const usable = contentOnly.length > 0 ? contentOnly : moduleNames;
   const weeks: ScheduleWeekPlan[] = usable.map((name, i) => ({
     week: i + 1,
@@ -98,7 +129,19 @@ function moduleNamesToWeeks(moduleNames: string[]): { weeks: ScheduleWeekPlan[];
     assignmentSlug: null,
     testName: null,
   }));
-  return { weeks, filtered: contentOnly.length > 0 && contentOnly.length < moduleNames.length };
+
+  let filterNote: string | null = null;
+  if (contentOnly.length > 0 && contentOnly.length < moduleNames.length) {
+    const droppedNonContent = moduleNames.some((name) => isNonContentWeekText(name));
+    const droppedFrontMatter = moduleNames.some((name) => isFrontMatterModuleText(name));
+    filterNote =
+      droppedNonContent && droppedFrontMatter
+        ? "non-content and front-matter modules skipped"
+        : droppedFrontMatter
+        ? "front-matter modules skipped"
+        : "non-content modules skipped";
+  }
+  return { weeks, filterNote };
 }
 
 export interface ScheduleResolution {
@@ -180,7 +223,7 @@ export function resolveRepolessSchedule(
   }
 
   const moduleNameList = (moduleNames ?? []).map((n) => n.trim()).filter(Boolean);
-  const { weeks: moduleWeeks, filtered } = moduleNamesToWeeks(moduleNameList);
+  const { weeks: moduleWeeks, filterNote } = moduleNamesToWeeks(moduleNameList);
   tried.push(
     moduleNameList.length > 0
       ? `LMS/export module names (${moduleWeeks.length} of ${moduleNameList.length} usable as week(s))`
@@ -189,7 +232,7 @@ export function resolveRepolessSchedule(
   if (moduleWeeks.length > 0) {
     return {
       schedule: moduleWeeks,
-      note: `schedule derived from ${moduleWeeks.length} LMS module name(s)${filtered ? " (non-content modules skipped)" : ""}`,
+      note: `schedule derived from ${moduleWeeks.length} LMS module name(s)${filterNote ? ` (${filterNote})` : ""}`,
       tried,
     };
   }

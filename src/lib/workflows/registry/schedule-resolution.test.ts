@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveRepolessSchedule } from "./schedule-resolution";
+import { resolveRepolessSchedule, parseTargetedModule } from "./schedule-resolution";
 import type { ScheduleWeekPlan } from "@/app/actions";
 
 function week(overrides: Partial<ScheduleWeekPlan> = {}): ScheduleWeekPlan {
@@ -135,5 +135,57 @@ describe("resolveRepolessSchedule", () => {
       expect(result.schedule.map((w) => w.topic)).toEqual(["Midterm Exam", "Final Exam Review"]);
       expect(result.note).not.toContain("skipped");
     });
+
+    // AC2: front-matter modules ("Start Here", etc) are not content weeks.
+    it("drops front-matter modules (Start Here) when doing so does not empty the list", () => {
+      const result = resolveRepolessSchedule(undefined, { csvData: null, topics: null }, [
+        "Start Here",
+        "Intro to Programming",
+        "Loops and Conditionals",
+      ]);
+      expect(result.schedule.map((w) => w.topic)).toEqual(["Intro to Programming", "Loops and Conditionals"]);
+      expect(result.note).toContain("front-matter modules skipped");
+    });
+
+    it("keeps every module name when only front-matter modules are present (keep-all safeguard)", () => {
+      const result = resolveRepolessSchedule(undefined, { csvData: null, topics: null }, ["Start Here"]);
+      expect(result.schedule.map((w) => w.topic)).toEqual(["Start Here"]);
+      expect(result.note).not.toContain("skipped");
+    });
+
+    it("names both kinds of filtering when both non-content and front-matter modules are dropped", () => {
+      const result = resolveRepolessSchedule(undefined, { csvData: null, topics: null }, [
+        "Start Here",
+        "Intro to Programming",
+        "Midterm Exam",
+      ]);
+      expect(result.schedule.map((w) => w.topic)).toEqual(["Intro to Programming"]);
+      expect(result.note).toContain("non-content and front-matter modules skipped");
+    });
+  });
+});
+
+describe("parseTargetedModule", () => {
+  it("splits 'Module 07: Algorithms and Data Structures' into week 7 and its topic", () => {
+    expect(parseTargetedModule("Module 07: Algorithms and Data Structures")).toEqual({
+      week: 7,
+      topic: "Algorithms and Data Structures",
+    });
+  });
+
+  it("splits 'Week 5 - Loops' into week 5 and its topic", () => {
+    expect(parseTargetedModule("Week 5 - Loops")).toEqual({ week: 5, topic: "Loops" });
+  });
+
+  it("'Module 3' (no separator) yields week 3 and an empty topic", () => {
+    expect(parseTargetedModule("Module 3")).toEqual({ week: 3, topic: "" });
+  });
+
+  it("'Algorithms' (no number, no separator) yields no week and the whole string as topic", () => {
+    expect(parseTargetedModule("Algorithms")).toEqual({ week: null, topic: "Algorithms" });
+  });
+
+  it("empty input yields no week and an empty topic", () => {
+    expect(parseTargetedModule("")).toEqual({ week: null, topic: "" });
   });
 });

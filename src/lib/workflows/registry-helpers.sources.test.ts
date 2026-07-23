@@ -510,6 +510,26 @@ describe("gatherModuleMaterials - AC2 match-by-name (name-reference module value
     expect(result.notes.some((n) => n.includes('module "Module 99: Nonexistent" not found by name') && n.includes("Unit 1: Intro"))).toBe(true);
   });
 
+  // AC3: a targeted module that fails a by-name lookup must never claim "no
+  // module selected" (one plainly was) - and must make clear the digested
+  // text is course-level CONTEXT, not that module's own materials.
+  it("AC3: a failed by-name lookup's course-level digest note names the module instead of claiming none was selected", async () => {
+    vi.mocked(listCourseContentAction).mockResolvedValue({
+      courseName: "CS 101",
+      pages: [],
+      modules: [{ id: 1, name: "Start Here", position: 1, published: true, itemsCount: 0, items: [] }],
+    });
+    const tile = baseCourse({ canvasUrl: "https://canvas.example.com/courses/1", startDate: null });
+    const moduleIdRaw = nameModuleValue("Module 07: Algorithms and Data Structures");
+    const result = await gatherModuleMaterials(tile, moduleIdRaw, testHelpers(), noProgress);
+    expect(result.notes).toContainEqual(
+      'module "Module 07: Algorithms and Data Structures" was not found - digested 1 LMS module name(s) and item titles as course-level context (page/file bodies not fetched)'
+    );
+    expect(result.notes.some((n) => n.includes("no module selected"))).toBe(false);
+    expect(result.materialsSource).toContain("course-level context");
+    expect(result.materialsSource).toContain('module "Module 07: Algorithms and Data Structures" was not found');
+  });
+
   it("falls through to the export by name when the live LMS has no match", async () => {
     vi.mocked(listCourseContentAction).mockResolvedValue({
       courseName: "CS 101",

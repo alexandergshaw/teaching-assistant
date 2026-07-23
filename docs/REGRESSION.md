@@ -1579,3 +1579,24 @@ Acceptance criteria (a20fd09+):
    flag always cleared. Zero-result shows a note (not an error). On
    success shows "Added N repos (M already listed)." count feedback.
 5. No new server action needed (reuses listOrgReposAction).
+
+## 53. Folder-per-module grading (batch-grade-repos-to-draft)
+
+Acceptance criteria (cb76e74+):
+1. ingestRepo gains pathPrefix opt: when set, only files under that
+   prefix are ingested. gradeRepoAction gains a matching pathPrefix
+   param, threaded through. Both are backwards compatible (omit =
+   whole repo).
+2. Folder-per-module mode (default, no instructionsRepo): for each
+   student repo, discovers the top-level folder matching the week
+   regex, reads its README.md as instructions, synthesizes a rubric
+   (cached across students with identical READMEs), and grades only
+   that folder via pathPrefix.
+3. Shared-instructions mode (instructionsRepo provided): existing
+   behavior preserved as fallback - shared instructions + rubric
+   applied to all students.
+4. Students without a matching folder are skipped with a note, not
+   thrown. Progress messages show student and folder name.
+5. Draft assembly (GradingRunEntry shape, saveGradingDraftAction call)
+   is unchanged - the grading panel, Canvas posting, and grade export
+   flows are unaffected.

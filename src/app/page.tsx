@@ -24,6 +24,7 @@ import WorkflowTriggerWatcher from "./components/WorkflowTriggerWatcher";
 import LessonPlanPreview from "./components/LessonPlanPreview";
 import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModal";
 import LessonPlanningForm from "./components/LessonPlanningForm";
+import TabShell from "./components/TabShell";
 import TopBar from "./components/TopBar";
 import { useInstitutionCounts } from "./components/InstitutionCounts";
 import { useVcCounts } from "./components/VcCounts";
@@ -769,7 +770,7 @@ export default function Home() {
             />
 
             {manualView === "course-planning" && (
-              <div className={styles.card}>
+              <TabShell>
                 {buildView === "new" ? (
                   <CoursePlanningTab />
                 ) : (
@@ -790,11 +791,11 @@ export default function Home() {
                     onGenerate={handleGenerateLesson}
                   />
                 )}
-              </div>
+              </TabShell>
             )}
 
             {manualView === "content" && (
-              <div className={styles.card}>
+              <TabShell>
                 <ContentTab
                   view={contentView}
                   grading={
@@ -811,19 +812,19 @@ export default function Home() {
                   announcements={<CanvasTab view="announcements" />}
                   inbox={<CanvasTab view="inbox" />}
                 />
-              </div>
+              </TabShell>
             )}
 
             {manualView === "version-control" && (
-              <div className={styles.card}>
+              <TabShell>
                 <VersionControlTab />
-              </div>
+              </TabShell>
             )}
 
             {manualView === "ppt-design" && (
-              <div className={styles.card}>
+              <TabShell>
                 <PowerPointDesignTab />
-              </div>
+              </TabShell>
             )}
           </>
         )}

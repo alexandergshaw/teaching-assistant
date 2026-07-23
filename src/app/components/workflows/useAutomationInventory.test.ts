@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { filterAutomatedWorkflows, orderWorkflowsAttentionFirst, needsAttention, lastRunChip, isStaleStarted } from "./automation-inventory-logic";
+import { filterAutomatedWorkflows, orderWorkflowsAttentionFirst, needsAttention, lastRunChip, isStaleStarted, scheduleRowKey, triggerRowKey, resolveCourseName, formatFieldValues } from "./automation-inventory-logic";
 import type { WorkflowDef } from "@/lib/workflows/types";
 import type { WorkflowSchedule } from "@/lib/workflow-schedules";
 import type { WorkflowTrigger } from "@/lib/workflow-triggers";
@@ -329,5 +329,217 @@ describe("isStaleStarted", () => {
 
     const result = isStaleStarted(twentyMinutesAgo);
     expect(result).toBe(true);
+  });
+});
+
+describe("scheduleRowKey", () => {
+  it("returns schedule prefix with id", () => {
+    const result = scheduleRowKey("s1");
+    expect(result).toBe("schedule:s1");
+  });
+
+  it("generates same key for same input", () => {
+    const key1 = scheduleRowKey("s123");
+    const key2 = scheduleRowKey("s123");
+    expect(key1).toBe(key2);
+  });
+
+  it("generates distinct keys for different ids", () => {
+    const key1 = scheduleRowKey("s1");
+    const key2 = scheduleRowKey("s2");
+    expect(key1).not.toBe(key2);
+  });
+
+  it("preserves id uniqueness in key (two schedules same workflow have distinct keys)", () => {
+    const schedule1 = makeSchedule({ id: "s1", workflowId: "w1" });
+    const schedule2 = makeSchedule({ id: "s2", workflowId: "w1" });
+
+    const key1 = scheduleRowKey(schedule1.id);
+    const key2 = scheduleRowKey(schedule2.id);
+
+    expect(key1).toBe("schedule:s1");
+    expect(key2).toBe("schedule:s2");
+    expect(key1).not.toBe(key2);
+  });
+
+  it("handles special characters in id", () => {
+    const result = scheduleRowKey("s-1_abc.def");
+    expect(result).toBe("schedule:s-1_abc.def");
+  });
+});
+
+describe("triggerRowKey", () => {
+  it("returns trigger prefix with id", () => {
+    const result = triggerRowKey("t1");
+    expect(result).toBe("trigger:t1");
+  });
+
+  it("generates same key for same input", () => {
+    const key1 = triggerRowKey("t123");
+    const key2 = triggerRowKey("t123");
+    expect(key1).toBe(key2);
+  });
+
+  it("generates distinct keys for different ids", () => {
+    const key1 = triggerRowKey("t1");
+    const key2 = triggerRowKey("t2");
+    expect(key1).not.toBe(key2);
+  });
+
+  it("preserves id uniqueness in key", () => {
+    const trigger1 = makeTrigger({ id: "t1", workflowId: "w1" });
+    const trigger2 = makeTrigger({ id: "t2", workflowId: "w1" });
+
+    const key1 = triggerRowKey(trigger1.id);
+    const key2 = triggerRowKey(trigger2.id);
+
+    expect(key1).toBe("trigger:t1");
+    expect(key2).toBe("trigger:t2");
+    expect(key1).not.toBe(key2);
+  });
+
+  it("distinguishes schedule and trigger keys", () => {
+    const scheduleKey = scheduleRowKey("row1");
+    const triggerKey = triggerRowKey("row1");
+
+    expect(scheduleKey).not.toBe(triggerKey);
+    expect(scheduleKey).toBe("schedule:row1");
+    expect(triggerKey).toBe("trigger:row1");
+  });
+});
+
+describe("resolveCourseName", () => {
+  it("returns null when courseId is null", () => {
+    const result = resolveCourseName(null, [{ id: "c1", name: "Course 1" }]);
+    expect(result).toBeNull();
+  });
+
+  it("returns null when courseId is empty string", () => {
+    const result = resolveCourseName("", [{ id: "c1", name: "Course 1" }]);
+    expect(result).toBeNull();
+  });
+
+  it("returns course name when found in hubCourses", () => {
+    const hubCourses = [
+      { id: "c1", name: "Math 101" },
+      { id: "c2", name: "English 201" },
+    ];
+    const result = resolveCourseName("c1", hubCourses);
+    expect(result).toBe("Math 101");
+  });
+
+  it("returns fallback 'course' when courseId not found in hubCourses", () => {
+    const hubCourses = [{ id: "c1", name: "Math 101" }];
+    const result = resolveCourseName("c99", hubCourses);
+    expect(result).toBe("course");
+  });
+
+  it("returns fallback 'course' when hubCourses is null", () => {
+    const result = resolveCourseName("c1", null);
+    expect(result).toBe("course");
+  });
+
+  it("returns fallback 'course' when hubCourses is empty array", () => {
+    const result = resolveCourseName("c1", []);
+    expect(result).toBe("course");
+  });
+
+  it("finds course by id even if multiple courses exist", () => {
+    const hubCourses = [
+      { id: "c1", name: "First" },
+      { id: "c2", name: "Second" },
+      { id: "c3", name: "Third" },
+    ];
+    const result = resolveCourseName("c2", hubCourses);
+    expect(result).toBe("Second");
+  });
+
+  it("returns exact course name without modification", () => {
+    const hubCourses = [{ id: "c1", name: "Complex Name With Spaces 123" }];
+    const result = resolveCourseName("c1", hubCourses);
+    expect(result).toBe("Complex Name With Spaces 123");
+  });
+});
+
+describe("formatFieldValues", () => {
+  it("returns empty array when fieldValues is empty", () => {
+    const result = formatFieldValues({});
+    expect(result).toHaveLength(0);
+    expect(result).toEqual([]);
+  });
+
+  it("filters out empty string values", () => {
+    const fieldValues = {
+      name: "John",
+      email: "",
+      age: "25",
+      notes: "",
+    };
+    const result = formatFieldValues(fieldValues);
+    expect(result).toEqual([
+      { key: "name", value: "John" },
+      { key: "age", value: "25" },
+    ]);
+  });
+
+  it("includes all non-empty values", () => {
+    const fieldValues = {
+      field1: "value1",
+      field2: "value2",
+      field3: "value3",
+    };
+    const result = formatFieldValues(fieldValues);
+    expect(result).toHaveLength(3);
+    expect(result).toContainEqual({ key: "field1", value: "value1" });
+    expect(result).toContainEqual({ key: "field2", value: "value2" });
+    expect(result).toContainEqual({ key: "field3", value: "value3" });
+  });
+
+  it("preserves stable order (Object.entries iteration)", () => {
+    const fieldValues = {
+      zebra: "z",
+      apple: "a",
+      middle: "m",
+    };
+    const result = formatFieldValues(fieldValues);
+    // Object.entries preserves insertion order in modern JS
+    expect(result[0].key).toBe("zebra");
+    expect(result[1].key).toBe("apple");
+    expect(result[2].key).toBe("middle");
+  });
+
+  it("handles long values without truncation", () => {
+    const longValue = "a".repeat(500);
+    const fieldValues = {
+      description: longValue,
+      other: "short",
+    };
+    const result = formatFieldValues(fieldValues);
+    expect(result).toContainEqual({ key: "description", value: longValue });
+    expect(result[0].value).toHaveLength(500);
+  });
+
+  it("skips only empty strings, preserves spaces and special characters", () => {
+    const fieldValues = {
+      empty: "",
+      space: " ",
+      special: "!@#$%",
+      zero: "0",
+      newline: "line1\nline2",
+    };
+    const result = formatFieldValues(fieldValues);
+    expect(result).toContainEqual({ key: "space", value: " " });
+    expect(result).toContainEqual({ key: "special", value: "!@#$%" });
+    expect(result).toContainEqual({ key: "zero", value: "0" });
+    expect(result).toContainEqual({ key: "newline", value: "line1\nline2" });
+    expect(result).toHaveLength(4);
+  });
+
+  it("returns an array of objects with key and value properties", () => {
+    const fieldValues = { test: "value" };
+    const result = formatFieldValues(fieldValues);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result[0]).toHaveProperty("key");
+    expect(result[0]).toHaveProperty("value");
   });
 });

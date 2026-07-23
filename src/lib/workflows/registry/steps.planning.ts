@@ -6,7 +6,6 @@ import {
   generateSchedulePlanAction,
   generateSchedulePlanFromRepoAction,
   listCourseHubAction,
-  generateCourseScheduleAction,
   listCoursesByTermAction,
   listCourseAssignmentDueDatesAction,
   listConfiguredInstitutionsAction,
@@ -23,11 +22,10 @@ import {
 } from "@/lib/workflows/registry-helpers";
 import { parseIcsEvents } from "@/lib/ics";
 import { filterUpcoming, formatDeadlineReport, type DeadlineSection } from "@/lib/workflows/deadline-report";
-import { parseCalendarEmbedded } from "@/lib/embedded/calendar";
-import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
-import { scaffoldCourseOutline } from "@/lib/embedded/course";
+import { planningGeneratorSteps } from "@/lib/workflows/registry/steps.planning-generators";
 import { scheduleToCsv, csvToSchedule } from "@/lib/workflows/types";
 import { courseProgressStatus } from "@/lib/week-numbering";
+import { parseTocChapters, validateScheduleAlignment, formatBalanceSummary } from "@/lib/workflows/source-alignment";
 
 export const planningSteps: StepDefinition[] = [
   {
@@ -52,6 +50,27 @@ export const planningSteps: StepDefinition[] = [
         label: "Number of tests",
         type: "number",
         required: true,
+      },
+      {
+        key: "context",
+        label: "Additional context (optional)",
+        type: "longtext",
+        required: false,
+        help: "Steers the generated schedule (tone, emphases, constraints, course-specific facts).",
+      },
+      {
+        key: "sourceMaterial",
+        label: "Source material (optional)",
+        type: "longtext",
+        required: false,
+        help: "Name the primary source (textbook, course module, etc.) and paste its table of contents or chapter list. The schedule maps weeks onto it, balancing chapters across weeks automatically, and names covered chapters in each week. Include the platform URL to enable link embedding in the LMS integration step. Instructor context above overrides this policy where it speaks (e.g. \"no exam weeks\").",
+      },
+      {
+        key: "hubCourse",
+        label: "Course tile",
+        type: "hubCourse",
+        required: false,
+        help: "Fallback only: when Source material is blank, the tile's textbook field is used as a name-only source (no chapter alignment).",
       },
     ],
     outputs: [
@@ -82,16 +101,50 @@ export const planningSteps: StepDefinition[] = [
         );
       }
 
+      const context = String(values.context ?? "").trim() || undefined;
+      let sourceMaterial = String(values.sourceMaterial ?? "").trim();
+
+      // Fallback: an empty sourceMaterial falls back to the course tile's
+      // textbook field, used as a name-only source (weaker grounding - see
+      // the balance note appended below, which degrades the same way for any
+      // sourceMaterial with no parseable chapter list).
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      if (!sourceMaterial && hubCourseId) {
+        const tileList = await listCourseHubAction();
+        if (!("error" in tileList)) {
+          const tile = tileList.courses.find((c) => c.id === hubCourseId);
+          const textbook = (tile?.textbook ?? "").trim();
+          if (textbook) sourceMaterial = textbook;
+        }
+      }
+
       onProgress("Generating schedule...");
       const r = await generateSchedulePlanAction(
         description,
         weeks,
         tests,
-        helpers.provider
+        helpers.provider,
+        context,
+        sourceMaterial || undefined
       );
 
       if ("error" in r) {
         throw new Error(r.error);
+      }
+
+      // Post-generation alignment check (AC1b): parse the source's chapter
+      // list and compare it against what the returned schedule actually
+      // covers, so a mismatch is a summary note - never silent. A source with
+      // no parseable chapter list (including the tile.textbook fallback,
+      // which is a bare citation, not a TOC) degrades to a name-only note.
+      let notes: string | undefined;
+      if (sourceMaterial) {
+        const chapters = parseTocChapters(sourceMaterial);
+        if (chapters.length > 0) {
+          notes = formatBalanceSummary(validateScheduleAlignment(r.schedule, chapters));
+        } else {
+          notes = "Source material has no parseable chapter list - schedule generated with name-only grounding (no chapter alignment to verify).";
+        }
       }
 
       const csv = scheduleToCsv(r.schedule);
@@ -106,6 +159,7 @@ export const planningSteps: StepDefinition[] = [
           courseTitle: r.courseTitle,
           schedule: r.schedule,
           csv,
+          notes,
         },
       };
     },
@@ -552,211 +606,7 @@ export const planningSteps: StepDefinition[] = [
     },
   },
 
-  {
-    type: "parse-academic-calendar",
-    name: "Parse an academic calendar",
-    description: "Extract typed, categorized calendar events (lectures, exams, deadlines, holidays) from pasted syllabus or calendar text.",
-    inputs: [
-      {
-        key: "text",
-        label: "Calendar or syllabus text",
-        type: "longtext",
-        required: true,
-      },
-    ],
-    outputs: [
-      { key: "events", label: "Parsed events", type: "longtext" },
-      { key: "school", label: "School", type: "text" },
-      { key: "term", label: "Term", type: "text" },
-    ],
-    run: async (values, helpers, onProgress) => {
-      const text = String(values.text ?? "").trim();
-      if (!text) {
-        throw new Error("Paste the calendar or syllabus text to parse.");
-      }
-
-      onProgress("Parsing calendar...");
-      const result = parseCalendarEmbedded(text);
-
-      const items = result.events.map((evt) => {
-        let line = `${evt.date}`;
-        if (evt.endDate) {
-          line += ` - ${evt.endDate}`;
-        }
-        line += ` - ${evt.type}: ${evt.title}`;
-        return line;
-      });
-
-      const eventCount = result.events.length;
-      const school = result.school ?? "";
-      const term = result.term ?? "";
-      const events = items.join("\n");
-
-      return {
-        outputs: {
-          events,
-          school,
-          term,
-        },
-        summary: {
-          kind: "list",
-          label: `${eventCount} event(s) parsed`,
-          items: items.length ? items : ["(none found)"],
-        },
-      };
-    },
-  },
-
-  {
-    type: "generate-dated-schedule",
-    name: "Generate a dated course schedule",
-    description: "Generate a week-by-week course schedule anchored to real calendar dates from a term and start date.",
-    inputs: [
-      { key: "description", label: "Course description", type: "longtext", required: true },
-      { key: "startDate", label: "Start date", type: "date", required: true },
-      { key: "term", label: "Term", type: "text", required: false, help: "e.g. Fall 2026." },
-      { key: "weeks", label: "Number of weeks", type: "number", required: false },
-      { key: "tests", label: "Number of tests", type: "number", required: false },
-    ],
-    outputs: [
-      { key: "courseTitle", label: "Course title", type: "text" },
-      { key: "scheduleText", label: "Schedule", type: "longtext" },
-    ],
-    run: async (values, helpers, onProgress) => {
-      const description = String(values.description ?? "").trim();
-      if (!description) {
-        throw new Error("Provide a course description.");
-      }
-
-      const startDate = String(values.startDate ?? "").trim();
-      if (!startDate) {
-        throw new Error("Provide a start date.");
-      }
-
-      const term = String(values.term ?? "").trim();
-      const weeksRaw = String(values.weeks ?? "").trim();
-      const weeks = weeksRaw ? Number(weeksRaw) : null;
-      const testsRaw = String(values.tests ?? "").trim();
-      const tests = testsRaw ? Number(testsRaw) : null;
-
-      onProgress("Generating dated schedule...");
-      const r = await generateCourseScheduleAction(description, term, startDate, weeks, tests, helpers.provider);
-      if ("error" in r) throw new Error(r.error);
-
-      const courseTitle = "";
-      const rows = r.rows ?? [];
-      const items: string[] = [];
-      const lines: string[] = [];
-
-      for (const row of rows) {
-        const weekLabel = row.dates ? `Week ${row.week} (${row.dates})` : `Week ${row.week}`;
-        const topicStr = row.topics || "(no topics)";
-        const line = `${weekLabel} - ${topicStr}`;
-        lines.push(line);
-        items.push(topicStr || `Week ${row.week}`);
-      }
-
-      const scheduleText = lines.join("\n");
-
-      return {
-        outputs: { courseTitle, scheduleText },
-        summary: { kind: "list", label: `${rows.length}-week schedule`, items },
-      };
-    },
-  },
-
-  {
-    type: "generate-schedule-offline",
-    name: "Generate a schedule (offline, no AI)",
-    description: "Deterministically build a week-by-week schedule (dates, topics, spaced tests) with no model call -- an offline fallback that always runs unattended.",
-    inputs: [
-      { key: "description", label: "Course description", type: "longtext", required: true },
-      { key: "startDate", label: "Start date", type: "date", required: true },
-      { key: "weeks", label: "Number of weeks", type: "number", required: true },
-      { key: "tests", label: "Number of tests", type: "number", required: false },
-    ],
-    outputs: [
-      { key: "scheduleText", label: "Schedule", type: "longtext" },
-    ],
-    run: async (values, helpers, onProgress) => {
-      const description = String(values.description ?? "").trim();
-      if (!description) {
-        throw new Error("Provide a course description.");
-      }
-
-      const startDate = String(values.startDate ?? "").trim();
-      if (!startDate) {
-        throw new Error("Provide a start date.");
-      }
-
-      const weeks = Number(values.weeks);
-      if (!Number.isInteger(weeks) || weeks < 1) {
-        throw new Error("Provide a valid number of weeks (1 or more).");
-      }
-
-      const testsRaw = String(values.tests ?? "").trim();
-      const tests = testsRaw && Number.isInteger(Number(testsRaw)) ? Number(testsRaw) : 0;
-
-      onProgress("Building schedule...");
-      const rows = scaffoldCourseSchedule(description, startDate, weeks, tests);
-
-      const items: string[] = [];
-      const lines: string[] = [];
-
-      for (const row of rows) {
-        const weekLabel = row.dates ? `Week ${row.week} (${row.dates})` : `Week ${row.week}`;
-        const topicStr = row.topics || "(no topic)";
-        const assignStr = row.assignment || "(no assignment)";
-        const line = `${weekLabel} - ${topicStr} [${assignStr}]`;
-        lines.push(line);
-        items.push(topicStr);
-      }
-
-      const scheduleText = lines.join("\n");
-
-      return {
-        outputs: { scheduleText },
-        summary: { kind: "list", label: `${rows.length}-week schedule`, items },
-      };
-    },
-  },
-
-  {
-    type: "outline-course-from-repo",
-    name: "Outline a course from a repo digest",
-    description: "Build a week-by-week markdown course outline from a repository digest or file listing (detects technologies, adds a capstone).",
-    inputs: [
-      {
-        key: "digest",
-        label: "Repo digest or file listing",
-        type: "longtext",
-        required: true,
-        help: "A repo digest or newline-separated file paths, e.g. from Build a repo digest.",
-      },
-    ],
-    outputs: [
-      { key: "outline", label: "Course outline", type: "longtext" },
-    ],
-    run: async (values, helpers, onProgress) => {
-      const digest = String(values.digest ?? "").trim();
-      if (!digest) {
-        throw new Error("Provide a repo digest or file listing.");
-      }
-
-      onProgress("Building course outline...");
-
-      const lines = digest.split("\n").map((s) => s.trim()).filter(Boolean);
-      const fullName = lines[0] || "Repository";
-      const paths = lines.slice(1);
-
-      const outline = scaffoldCourseOutline(fullName, paths);
-
-      return {
-        outputs: { outline },
-        summary: { kind: "text", text: outline },
-      };
-    },
-  },
+  ...planningGeneratorSteps,
 
   {
     type: "list-upcoming-deadlines",

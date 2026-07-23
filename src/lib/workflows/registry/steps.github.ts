@@ -99,25 +99,30 @@ export const githubSteps: StepDefinition[] = [
         type: "longtext",
         required: true,
       },
+      {
+        key: "context",
+        label: "Additional context (optional)",
+        type: "longtext",
+        required: false,
+      },
     ],
     outputs: [],
     run: async (values, helpers, onProgress) => {
       const repo = String(values.repo);
       const schedule = values.schedule as ScheduleWeekPlan[];
       const description = String(values.description);
-
       onProgress("Writing assignment READMEs...");
+      const context = String(values.context ?? "").trim() || undefined;
       const r = await fillAssignmentReadmesAction(
         repo,
         schedule,
         description,
-        helpers.provider
+        helpers.provider,
+        context
       );
-
       if ("error" in r) {
         throw new Error(r.error);
       }
-
       return {
         outputs: {},
         summary: {

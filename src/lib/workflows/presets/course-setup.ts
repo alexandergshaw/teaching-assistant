@@ -21,6 +21,8 @@ export const COURSE_KICKOFF: WorkflowDef = {
         description: { source: "step", stepIndex: 0, outputKey: "description" },
         weeks: { source: "step", stepIndex: 0, outputKey: "weeks" },
         tests: { source: "step", stepIndex: 0, outputKey: "tests" },
+        context: { source: "runtime", fieldKey: "context" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
       },
     },
     {
@@ -36,6 +38,7 @@ export const COURSE_KICKOFF: WorkflowDef = {
         repo: { source: "step", stepIndex: 2, outputKey: "repo" },
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         description: { source: "step", stepIndex: 0, outputKey: "description" },
+        context: { source: "runtime", fieldKey: "context" },
       },
     },
     {
@@ -79,6 +82,9 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
         description: { source: "step", stepIndex: 0, outputKey: "description" },
         weeks: { source: "step", stepIndex: 0, outputKey: "weeks" },
         tests: { source: "step", stepIndex: 0, outputKey: "tests" },
+        context: { source: "runtime", fieldKey: "context" },
+        sourceMaterial: { source: "runtime", fieldKey: "sourceMaterial" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
       },
     },
     {
@@ -87,6 +93,8 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         minutes: { source: "literal", value: "50" },
         description: { source: "step", stepIndex: 0, outputKey: "description" },
+        context: { source: "runtime", fieldKey: "context" },
+        sourceMaterial: { source: "runtime", fieldKey: "sourceMaterial" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         includeInstructions: { source: "literal", value: "1" },
         template: { source: "runtime", fieldKey: "deckTemplate" },
@@ -108,6 +116,15 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
           "1.weeks": { source: "step", stepIndex: 1, outputKey: "weeks" },
           "3.files": { source: "step", stepIndex: 2, outputKey: "files" },
         },
+      },
+    },
+    {
+      type: "integrate-source-into-lms",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        sourceMaterial: { source: "runtime", fieldKey: "sourceMaterial" },
+        sourceUrl: { source: "runtime", fieldKey: "sourceUrl" },
       },
     },
   ],

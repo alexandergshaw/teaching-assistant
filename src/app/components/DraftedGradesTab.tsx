@@ -10,6 +10,7 @@ import { useDraftedGradesInbox } from "./DraftedGradesInbox";
 import { updateGradingDraftPayloadAction, postGradingDraftAction, pullSubmissionAction } from "../actions";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import type { CanvasSubmissionDetail } from "@/lib/canvas";
+import TabShell from "./TabShell";
 import CommentEditModal from "./drafted-grades/CommentEditModal";
 import styles from "../page.module.css";
 
@@ -341,7 +342,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
   };
 
   return (
-    <section className={styles.card}>
+    <TabShell>
       <TabHeader
         eyebrow="Grades"
         title="Drafted grades"
@@ -653,6 +654,6 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
           })()}
         </>
       )}
-    </section>
+    </TabShell>
   );
 }

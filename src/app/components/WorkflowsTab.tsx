@@ -42,6 +42,7 @@ import {
   getStepDefinition,
 } from "@/lib/workflows/registry";
 import type { WorkflowDef, RuntimeField, WorkflowStepConfig } from "@/lib/workflows/types";
+import TabShell from "./TabShell";
 import styles from "../page.module.css";
 
 export default function WorkflowsTab() {
@@ -633,7 +634,7 @@ export default function WorkflowsTab() {
   }, [pendingHandoff, workflowRun, selectedWorkflowId, values]);
 
   return (
-    <div className={styles.card}>
+    <TabShell>
       <TabHeader
         eyebrow="Workflows"
         title="Composite actions"
@@ -829,6 +830,6 @@ export default function WorkflowsTab() {
           )}
         </div>
       </div>
-    </div>
+    </TabShell>
   );
 }

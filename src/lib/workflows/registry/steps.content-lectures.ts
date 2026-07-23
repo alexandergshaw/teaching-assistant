@@ -166,6 +166,20 @@ export const contentLectureSteps: StepDefinition[] = [
         help: "Provides context for generating slides and materials.",
       },
       {
+        key: "context",
+        label: "Additional context (optional)",
+        type: "longtext",
+        required: false,
+        help: "Steers the generated materials (tone, emphases, constraints, course-specific facts).",
+      },
+      {
+        key: "sourceMaterial",
+        label: "Source material (optional)",
+        type: "longtext",
+        required: false,
+        help: "Name the primary source (textbook, course module, etc.) and paste its table of contents or chapter list. Materials reference and ground in the source where applicable. Falls back to the course tile's textbook field (name-only, no TOC alignment) when left blank.",
+      },
+      {
         key: "hubCourse",
         label: "Course tile",
         type: "hubCourse",
@@ -194,6 +208,21 @@ export const contentLectureSteps: StepDefinition[] = [
       const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
       const minutes = Number(values.minutes);
       const description = String(values.description ?? "").trim();
+      const context = String(values.context ?? "").trim() || undefined;
+      let sourceMaterial = String(values.sourceMaterial ?? "").trim();
+
+      // Fallback: an empty sourceMaterial falls back to the course tile's
+      // textbook field, used as a name-only source (weaker grounding - the
+      // action mentions it by name only, with no chapter/TOC alignment).
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      if (!sourceMaterial && hubCourseId) {
+        const tileList = await listCourseHubAction();
+        if (!("error" in tileList)) {
+          const tile = tileList.courses.find((c) => c.id === hubCourseId);
+          const textbook = (tile?.textbook ?? "").trim();
+          if (textbook) sourceMaterial = textbook;
+        }
+      }
 
       if (!schedule.length) {
         throw new Error("No schedule provided.");
@@ -205,7 +234,9 @@ export const contentLectureSteps: StepDefinition[] = [
         scheduleJson,
         description,
         minutes,
-        helpers.provider
+        helpers.provider,
+        context,
+        sourceMaterial || undefined
       );
 
       if ("error" in plans) {

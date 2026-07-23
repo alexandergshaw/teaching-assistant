@@ -158,6 +158,11 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
             Copy CSV
           </Button>
         </div>
+        {summary.notes && (
+          <p className={styles.fieldHint} style={{ marginTop: 8 }}>
+            {summary.notes}
+          </p>
+        )}
       </div>
     );
   }

@@ -63,6 +63,10 @@ export type StepRunSummary =
       courseTitle: string;
       schedule: ScheduleWeekPlan[];
       csv: string;
+      /** Source-material alignment note (chapter/week balance, or a
+       * name-only-grounding note when the TOC did not parse). Absent when no
+       * source material was supplied. */
+      notes?: string;
     }
   | { kind: "link"; label: string; url: string }
   | { kind: "list"; label: string; items: string[] }

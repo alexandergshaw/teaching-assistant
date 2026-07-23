@@ -109,3 +109,42 @@ export function orderWorkflowsAttentionFirst(
     return a.name.localeCompare(b.name);
   });
 }
+
+// ---------------------------------------------------------------------------
+// Automations hub row helpers (per-row expansion/edit in AutomationsPanel)
+// ---------------------------------------------------------------------------
+
+/** Composite key identifying a schedule row for expansion/editing state, kept
+ * in one place so every consumer (panel, row, hub) agrees on the format. */
+export function scheduleRowKey(id: string): string {
+  return `schedule:${id}`;
+}
+
+/** Composite key identifying a trigger row for expansion/editing state, kept
+ * in one place so every consumer (panel, row, hub) agrees on the format. */
+export function triggerRowKey(id: string): string {
+  return `trigger:${id}`;
+}
+
+/** Resolve a schedule/trigger's courseId to the hub course's display name, for
+ * the row's detail view. Null when no course is attached; falls back to a
+ * generic "course" label if the id no longer resolves (mirrors the existing
+ * ScheduleSection/TriggerSection attachment behavior). */
+export function resolveCourseName(
+  courseId: string | null,
+  hubCourses: Array<{ id: string; name: string }> | null
+): string | null {
+  if (!courseId) return null;
+  return hubCourses?.find((c) => c.id === courseId)?.name ?? "course";
+}
+
+/** Render a schedule/trigger's fieldValues snapshot as a compact, stable-order
+ * key/value list for the row's expanded view. Skips empty values so the
+ * snapshot only shows what was actually filled in at schedule/trigger time. */
+export function formatFieldValues(
+  fieldValues: Record<string, string>
+): Array<{ key: string; value: string }> {
+  return Object.entries(fieldValues)
+    .filter(([, value]) => value !== "")
+    .map(([key, value]) => ({ key, value }));
+}

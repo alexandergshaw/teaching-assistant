@@ -6,6 +6,7 @@ import TabHeader from "./TabHeader";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { listPendingMessageDrafts, deleteMessageDraft, type MessageDraft } from "@/lib/message-drafts";
 import { updateMessageDraftPayloadAction, postMessageDraftAction, sendMessageDraftByEmailAction } from "../actions";
+import TabShell from "./TabShell";
 import { useDraftedGradesInbox } from "./DraftedGradesInbox";
 import styles from "../page.module.css";
 
@@ -187,7 +188,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
   };
 
   return (
-    <section className={styles.card}>
+    <TabShell>
       <TabHeader
         eyebrow="Drafts"
         title="Drafted messages"
@@ -360,6 +361,6 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
           )}
         </>
       )}
-    </section>
+    </TabShell>
   );
 }

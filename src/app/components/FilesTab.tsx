@@ -30,6 +30,7 @@ import {
   createModuleItemAction,
 } from "../actions";
 import type { CanvasModule } from "@/lib/canvas-modules";
+import TabShell from "./TabShell";
 import styles from "../page.module.css";
 import { FileRow } from "./files/FileRow";
 import { FilterToolbar } from "./files/FilterToolbar";
@@ -641,7 +642,7 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
     setSelected(allShownSelected ? new Set() : new Set(shown.map((f) => f.id)));
 
   return (
-    <section className={styles.card}>
+    <TabShell>
       <TabHeader
         eyebrow="Files"
         title="Your file library"
@@ -976,6 +977,6 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
           onClose={filePreview.closePreview}
         />
       )}
-    </section>
+    </TabShell>
   );
 }

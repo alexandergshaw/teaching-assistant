@@ -194,11 +194,12 @@ describe("course-kickoff-no-code preset", () => {
     const wf = byId.get("course-kickoff-no-code");
     expect(wf, "course-kickoff-no-code is registered").toBeTruthy();
 
-    expect(wf!.steps.length).toBe(4);
+    expect(wf!.steps.length).toBe(5);
     expect(wf!.steps[0].type).toBe("load-course-tile");
     expect(wf!.steps[1].type).toBe("generate-schedule");
     expect(wf!.steps[2].type).toBe("lecture-materials-from-schedule");
     expect(wf!.steps[3].type).toBe("include-workflow");
+    expect(wf!.steps[4].type).toBe("integrate-source-into-lms");
 
     const includeStep = wf!.steps[3];
     expect(includeStep.include?.workflowId).toBe("course-refresh");
@@ -392,6 +393,45 @@ describe("course-kickoff-no-code preset", () => {
     expect(rubricStep!.bindings.schedule.source).toBe("step");
     if (rubricStep!.bindings.schedule.source === "step") {
       expect(rubricStep!.bindings.schedule.outputKey).toBe("schedule");
+    }
+  });
+
+  it("course-kickoff-no-code binds generate-schedule's hubCourse to the shared 'hubCourse' fieldKey (textbook fallback)", () => {
+    const wf = byId.get("course-kickoff-no-code");
+    expect(wf, "course-kickoff-no-code is registered").toBeTruthy();
+
+    const generateScheduleStep = wf!.steps[1];
+    expect(generateScheduleStep.type).toBe("generate-schedule");
+    const binding = generateScheduleStep.bindings.hubCourse;
+    expect(binding, "hubCourse binding exists").toBeTruthy();
+    expect(binding.source).toBe("runtime");
+    if (binding.source === "runtime") {
+      // Same fieldKey as load-course-tile's own hubCourse binding, so the run
+      // form asks for the tile exactly once.
+      expect(binding.fieldKey).toBe("hubCourse");
+    }
+
+    const lectureMaterialsStep = wf!.steps[2];
+    expect(lectureMaterialsStep.type).toBe("lecture-materials-from-schedule");
+    const lectureBinding = lectureMaterialsStep.bindings.hubCourse;
+    expect(lectureBinding, "hubCourse binding exists").toBeTruthy();
+    expect(lectureBinding.source).toBe("runtime");
+    if (lectureBinding.source === "runtime") {
+      expect(lectureBinding.fieldKey).toBe("hubCourse");
+    }
+  });
+
+  it("course-kickoff binds generate-schedule's hubCourse to the shared 'hubCourse' fieldKey (textbook fallback)", () => {
+    const wf = byId.get("course-kickoff");
+    expect(wf, "course-kickoff is registered").toBeTruthy();
+
+    const generateScheduleStep = wf!.steps[1];
+    expect(generateScheduleStep.type).toBe("generate-schedule");
+    const binding = generateScheduleStep.bindings.hubCourse;
+    expect(binding, "hubCourse binding exists").toBeTruthy();
+    expect(binding.source).toBe("runtime");
+    if (binding.source === "runtime") {
+      expect(binding.fieldKey).toBe("hubCourse");
     }
   });
 

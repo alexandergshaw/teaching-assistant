@@ -46,6 +46,7 @@ import { assignmentSteps } from "./registry/steps.assignments";
 import { rubricSteps } from "./registry/steps.rubrics";
 import { gradingSteps } from "./registry/steps.grading";
 import { lmsSteps } from "./registry/steps.lms";
+import { lmsIntegrationsSteps } from "./registry/steps.lms-integrations";
 import { announcementSteps } from "./registry/steps.announcements";
 import { messagingSteps } from "./registry/steps.messaging";
 import { githubSteps } from "./registry/steps.github";
@@ -62,6 +63,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   ...rubricSteps,
   ...gradingSteps,
   ...lmsSteps,
+  ...lmsIntegrationsSteps,
   ...announcementSteps,
   ...messagingSteps,
   ...githubSteps,

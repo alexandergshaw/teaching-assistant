@@ -195,9 +195,16 @@ suite). Whatever the presentation becomes, these CAPABILITIES must survive:
    startDate, description, weeks, tests, lms, dayTime, studentRepos - each
    editable and saving via the update action (courseToInput mapping).
 3. Roster and student-repos parsing: rosterStats/rosterToRows/rowsToRoster and
-   studentReposToRows/rowsToStudentReposText round-trip the text formats; CSV
-   upload populates the roster; export-package upload populates course fields
-   (with the no-course-settings message when absent).
+   studentReposToRows/rowsToStudentReposText round-trip the text formats; the
+   roster editor offers the table editor, stats, From-LMS draft fill, and Copy
+   (roster and the schedule-of-topics csv are independent fields - an earlier
+   wording here wrongly implied a roster-CSV upload); export-package upload
+   populates course fields (with the no-course-settings message when absent).
+   NOTE (2026-07-22, user-approved scope): the tile-layout system and its
+   panels (custom tiles, drag/hide, the per-institution common-fields editor,
+   syllabus-template admin, the per-course scheduled-workflows display) were
+   retired with the table redesign; mergeCardLayout/mergeInstitutionFields
+   remain as tolerant pure helpers only.
 4. Navigation: per-course actions reach course planning, version control, and
    workflows via the onNavigate contract with page.tsx.
 5. Institution fields (mergeInstitutionFields) and any saved layout state load
@@ -668,6 +675,114 @@ most likely to break again when these files are edited.
    the extension only when the name does not already end with it. Extension
    accumulation ("x.docx.docx") can no longer occur through save/download/
    re-upload cycles; the ext chip display is unchanged.
+
+### 2026-07-22 - Kickoff context, source alignment, and LMS tool integration
+
+1. generate-schedule, fill-readmes, and lecture-materials-from-schedule accept
+   an optional context (longtext) threaded into their prompts as a delimited
+   instructor-context section; COURSE_KICKOFF binds it on its two generative
+   steps and NO_CODE_KICKOFF on its two, all via the shared "context" fieldKey
+   (asked once).
+2. generate-schedule and lecture-materials-from-schedule accept sourceMaterial
+   (longtext); NO_CODE_KICKOFF binds it (shared fieldKey). The schedule prompt
+   encodes the balanced-hybrid policy (densest-chapter Part I/II splits;
+   group-adjacent-never-drop; standard review/exam/project non-content weeks;
+   never invent source content; instructor context overrides where it speaks);
+   the materials prompt emits review guides / practice sets / project briefs
+   for non-content weeks grounded in already-covered chapters
+   (isNonContentWeekText + describeCoveredChapters, exported and tested).
+3. Post-generation validation: parseTocChapters (tolerant "Chapter N:",
+   "N.", "Unit N -" formats) + validateScheduleAlignment +
+   formatBalanceSummary run in generate-schedule when a TOC parses, and the
+   balance line + anomalies land in the schedule summary's notes (rendered in
+   run-results); unparseable TOCs note name-only grounding. Blank
+   sourceMaterial with a tile textbook falls back to name-only grounding via
+   the shared hubCourse binding (asked once; tests assert the exact action
+   args).
+4. integrate-source-into-lms (steps.lms-integrations.ts, headless-safe,
+   canary-counted): appended last in NO_CODE_KICKOFF; matches week modules
+   tolerantly (/(?:module|week)\s*0*(\d+)/i - "Module 01" works; binding an
+   absorbed include's output is impossible by design, documented inline);
+   creates per-chapter-week pages and online_url assignments with
+   match-by-title idempotent skip (existing titles enumerated; within-run
+   double-create prevented and tested); skips cleanly (with notes) when no
+   live connection or no source; no quiz creation (no create-quiz action
+   exists - only question-level).
+
+### 2026-07-22 - Courses tab table view (Phase 2)
+
+1. The Courses tab is a table: one row per course, sticky sortable header
+   (name/startDate, ta-courses-sort), sticky name column, column-visibility
+   menu (ta-courses-columns; name/actions always shown), derived
+   roster/student-repo/repo count columns.
+2. Scalar fields edit inline in cells through computeFieldPatch + the update
+   action with the pre-redesign patch semantics (weeks/tests numeric handling,
+   lms null-when-blank, repos topic-extraction side effect); failed saves keep
+   the editor open with the draft (result threaded to every commit handler).
+3. Row expansion hosts the ported structural editors (repos, roster with
+   stats/From-LMS/Copy, student repos, integrations, description,
+   schedule-of-topics csv, rubric, materials, export package incl. the
+   no-course-settings message); the SyllabusCell offers select/preview/
+   download/From-LMS/From-import plus the direct-upload control (onUploaded
+   updates the row and reloads the syllabus list).
+4. The actions column preserves the onNavigate contract; delete uses the
+   original single confirm; the add/edit form is the ported AddCourseForm.
+5. Retired by user approval: the tile/card-layout system and its panels
+   (custom tiles, drag/hide, institution common-fields editor,
+   syllabus-template admin, per-course scheduled-workflows display) and the
+   Common Resources panel (component deleted; the common-resources lib remains
+   for the Starter Materials workflow). card-layout.ts remains only as a lib
+   consumed by courses-tab-helpers; no layout localStorage keys are read.
+6. Pure logic tested: sort comparators, column-set parsing, derived counts,
+   field patches (courses-table-helpers, 25 tests) on top of Phase 1's 42.
+
+### 2026-07-22 - TabShell layout normalization
+
+1. Every tab-level surface renders inside the shared TabShell component
+   (section.card): Courses, Files library, Workflows root, Automations,
+   the three Drafts views, and the Manual destination containers - structural
+   convergence with byte-equivalent DOM where .card already applied;
+   AutomationsTabView gained the standard container. RecordingTab is the one
+   exception (deferred to its split). Zero new CSS or class names.
+
+### 2026-07-22 - Automations hub full view/edit
+
+1. The schedule/trigger edit-form bodies live in shared
+   ScheduleEditForm/TriggerEditForm components consumed by BOTH the
+   per-workflow Automate panel (byte-identical rendering - the only added
+   error line is gated behind an error prop the panel passes null) and the
+   hub; the pure validators live in workflow-form-helpers (exported, 53
+   tests: interval minimums, runAt rules, per-event required config, scope
+   fallbacks).
+2. Every hub row has a Details disclosure showing cadence/runAt/interval or
+   event + every configured field (event-source labels, resolved display
+   names), course, institution, unattended, full last-run, and a field-values
+   snapshot; Edit swaps in the shared form pre-filled via
+   scheduleToForm/triggerToForm, validates with the shared validators, saves
+   through the store functions with optimistic update + rollback + inline
+   error; unattended gating uses headless-safety from the inventory's defs;
+   one editor open at a time; delete remains panel-only.
+
+### 2026-07-22 - Repo-wide downsizing (structure guard extension)
+
+1. No tracked source file under src/ exceeds 1000 lines, with the sole
+   documented exception of RecordingTab.tsx (its split runs as a separate
+   session task). Spot checks: ModulesView.tsx is a ~638-line orchestrator
+   over content-tab/modules/ (10 hooks + 8 components); RepoDetail.tsx is an
+   orchestrator over repo-detail/; the former giants canvas-modules.ts,
+   canvas.ts, github.ts, grade.ts are thin barrels over domain modules
+   (canvas-modules/, canvas/, github.*.ts, grade/) whose export surfaces
+   match their pre-split originals symbol-for-symbol; steps.course-setup/
+   steps.lms/steps.assignments are in-order aggregators over sibling group
+   files (create-canvas-quiz last among assignment steps); actions/canvas.ts
+   and actions/course-hub.ts re-export their cluster modules with every
+   symbol exported exactly once into the actions.ts star-export graph.
+2. The split test files (workflow-triggers.*.test.ts x6,
+   github.copyrepo.*.test.ts x5) collectively reproduce their baseline
+   suites; the original monolithic test files are deleted.
+3. listCourseContentAction returns { courseName, modules, pages } - the pages
+   field is load-bearing for ContentTab's Pages view and the
+   integrate-source-into-lms step (a split once dropped it; never again).
 
 ### 2026-07-22 - Workflows tab UX overhaul (grouped sidebar, fewer-click run)
 

@@ -1,23 +1,34 @@
+"use client";
+
+import { ReactNode } from "react";
 import TabHeader from "./TabHeader";
 import styles from "../page.module.css";
 
 /** Shared root container for a top-level tab surface: the standard card
- *  section with the TabHeader on top. */
+ *  section, with an optional subnav rendered above it and an optional
+ *  TabHeader (eyebrow + title) rendered on top of the card content. */
 export default function TabShell({
+  children,
+  subnav,
   eyebrow,
   title,
   subtitle,
-  children,
 }: {
-  eyebrow: string;
-  title: string;
+  children: ReactNode;
+  subnav?: ReactNode;
+  eyebrow?: string;
+  title?: string;
   subtitle?: string;
-  children: React.ReactNode;
 }) {
   return (
-    <section className={styles.card}>
-      <TabHeader eyebrow={eyebrow} title={title} subtitle={subtitle} />
-      {children}
-    </section>
+    <>
+      {subnav}
+      <section className={styles.card}>
+        {eyebrow !== undefined && title !== undefined ? (
+          <TabHeader eyebrow={eyebrow} title={title} subtitle={subtitle} />
+        ) : null}
+        {children}
+      </section>
+    </>
   );
 }

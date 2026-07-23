@@ -160,6 +160,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "propose-problem-solutions",
   "generate-module-answers",
   "current-events-report",
+  "integrate-source-into-lms",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

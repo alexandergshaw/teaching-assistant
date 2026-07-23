@@ -145,6 +145,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "lms-modules",
     "lms-populate",
     "lms-wipe",
+    "integrate-source-into-lms",
     "blackboard-export",
     "publish-file-as-page",
     "revise-page-with-ai",

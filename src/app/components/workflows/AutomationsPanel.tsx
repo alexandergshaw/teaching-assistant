@@ -1,10 +1,14 @@
 "use client";
 
-import { describeScheduleCadence, type WorkflowSchedule } from "@/lib/workflow-schedules";
-import { describeTrigger, type WorkflowTrigger } from "@/lib/workflow-triggers";
+import type { WorkflowSchedule } from "@/lib/workflow-schedules";
+import type { WorkflowTrigger } from "@/lib/workflow-triggers";
 import type { WorkflowDef } from "@/lib/workflows/types";
-import { orderWorkflowsAttentionFirst, needsAttention, lastRunChip } from "./automation-inventory-logic";
+import type { ScheduleFormData, TriggerFormData } from "@/lib/workflow-form-helpers";
+import { orderWorkflowsAttentionFirst, needsAttention, scheduleRowKey, triggerRowKey } from "./automation-inventory-logic";
+import { ScheduleRow, TriggerRow } from "./AutomationRow";
 import styles from "../../page.module.css";
+
+type HubCourse = { id: string; name: string; canvasUrl: string | null; repos: string[] };
 
 interface AutomationsPanelProps {
   workflows: WorkflowDef[];
@@ -13,6 +17,26 @@ interface AutomationsPanelProps {
   onSelectWorkflow: (workflowId: string, panel: "automate") => void;
   onToggleSchedule: (schedule: WorkflowSchedule) => Promise<void>;
   onToggleTrigger: (trigger: WorkflowTrigger) => Promise<void>;
+  hubCourses: HubCourse[] | null;
+  institutions: string[];
+  activeInstitution: string | null;
+  orgs: string[] | null;
+  orgsError: string | null;
+  isWorkflowHeadlessSafeById: (workflowId: string) => boolean;
+  expanded: Set<string>;
+  onToggleExpanded: (key: string) => void;
+  editingKey: string | null;
+  scheduleEditForm: ScheduleFormData | null;
+  setScheduleEditForm: (form: ScheduleFormData | null | ((prev: ScheduleFormData | null) => ScheduleFormData | null)) => void;
+  triggerEditForm: TriggerFormData | null;
+  setTriggerEditForm: (form: TriggerFormData | null | ((prev: TriggerFormData | null) => TriggerFormData | null)) => void;
+  editBusy: boolean;
+  editError: string | null;
+  onStartEditSchedule: (schedule: WorkflowSchedule) => void;
+  onStartEditTrigger: (trigger: WorkflowTrigger) => void;
+  onSaveScheduleEdit: (scheduleId: string) => void;
+  onSaveTriggerEdit: (triggerId: string) => void;
+  onCancelEdit: () => void;
 }
 
 export function AutomationsPanel({
@@ -22,6 +46,26 @@ export function AutomationsPanel({
   onSelectWorkflow,
   onToggleSchedule,
   onToggleTrigger,
+  hubCourses,
+  institutions,
+  activeInstitution,
+  orgs,
+  orgsError,
+  isWorkflowHeadlessSafeById,
+  expanded,
+  onToggleExpanded,
+  editingKey,
+  scheduleEditForm,
+  setScheduleEditForm,
+  triggerEditForm,
+  setTriggerEditForm,
+  editBusy,
+  editError,
+  onStartEditSchedule,
+  onStartEditTrigger,
+  onSaveScheduleEdit,
+  onSaveTriggerEdit,
+  onCancelEdit,
 }: AutomationsPanelProps) {
   const automated = orderWorkflowsAttentionFirst(workflows, schedules, triggers);
 
@@ -92,94 +136,56 @@ export function AutomationsPanel({
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
               {wfSchedules.map((s) => {
-                const chip = lastRunChip(s.lastRunStatus, s.lastRunAt);
-
+                const key = scheduleRowKey(s.id);
                 return (
-                  <div
+                  <ScheduleRow
                     key={s.id}
-                    style={{
-                      display: "flex",
-                      gap: 8,
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                      fontSize: "0.85rem",
-                      padding: "4px 0",
-                    }}
-                  >
-                    <span style={{ color: "var(--text-secondary)" }}>
-                      Scheduled {describeScheduleCadence(s)}
-                      {s.unattended ? " (unattended)" : ""}
-                    </span>
-                    {chip.text && (
-                      <span className={`${styles.ghBadge} ${chip.class}`}>
-                        {chip.text}
-                      </span>
-                    )}
-                    <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                      <button
-                        type="button"
-                        className={styles.linkButton}
-                        onClick={() => void onToggleSchedule(s)}
-                      >
-                        {s.enabled ? "Disable" : "Enable"}
-                      </button>
-                    </span>
-                    {s.lastRunDetail && (
-                      <span
-                        className={styles.fieldHint}
-                        style={{ margin: 0, width: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "0.8rem" }}
-                        title={s.lastRunDetail}
-                      >
-                        {s.lastRunDetail}
-                      </span>
-                    )}
-                  </div>
+                    schedule={s}
+                    schedules={schedules}
+                    hubCourses={hubCourses}
+                    institutions={institutions}
+                    isWorkflowHeadlessSafeById={isWorkflowHeadlessSafeById}
+                    expanded={expanded.has(key)}
+                    onToggleExpanded={() => onToggleExpanded(key)}
+                    isEditing={editingKey === key}
+                    editForm={scheduleEditForm}
+                    setEditForm={setScheduleEditForm}
+                    editBusy={editBusy}
+                    editError={editError}
+                    onStartEdit={() => onStartEditSchedule(s)}
+                    onSaveEdit={onSaveScheduleEdit}
+                    onCancelEdit={onCancelEdit}
+                    onToggle={onToggleSchedule}
+                  />
                 );
               })}
 
               {wfTriggers.map((t) => {
-                const chip = lastRunChip(t.lastRunStatus, t.lastFiredAt);
-
+                const key = triggerRowKey(t.id);
                 return (
-                  <div
+                  <TriggerRow
                     key={t.id}
-                    style={{
-                      display: "flex",
-                      gap: 8,
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                      fontSize: "0.85rem",
-                      padding: "4px 0",
-                    }}
-                  >
-                    <span style={{ color: "var(--text-secondary)" }}>
-                      Trigger: {describeTrigger(t)}
-                      {t.unattended ? " (unattended)" : ""}
-                    </span>
-                    {chip.text && (
-                      <span className={`${styles.ghBadge} ${chip.class}`}>
-                        {chip.text}
-                      </span>
-                    )}
-                    <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                      <button
-                        type="button"
-                        className={styles.linkButton}
-                        onClick={() => void onToggleTrigger(t)}
-                      >
-                        {t.enabled ? "Disable" : "Enable"}
-                      </button>
-                    </span>
-                    {t.lastRunDetail && (
-                      <span
-                        className={styles.fieldHint}
-                        style={{ margin: 0, width: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "0.8rem" }}
-                        title={t.lastRunDetail}
-                      >
-                        {t.lastRunDetail}
-                      </span>
-                    )}
-                  </div>
+                    trigger={t}
+                    triggers={triggers}
+                    hubCourses={hubCourses}
+                    institutions={institutions}
+                    activeInstitution={activeInstitution}
+                    isWorkflowHeadlessSafeById={isWorkflowHeadlessSafeById}
+                    orgs={orgs}
+                    orgsError={orgsError}
+                    workflows={workflows}
+                    expanded={expanded.has(key)}
+                    onToggleExpanded={() => onToggleExpanded(key)}
+                    isEditing={editingKey === key}
+                    editForm={triggerEditForm}
+                    setEditForm={setTriggerEditForm}
+                    editBusy={editBusy}
+                    editError={editError}
+                    onStartEdit={() => onStartEditTrigger(t)}
+                    onSaveEdit={onSaveTriggerEdit}
+                    onCancelEdit={onCancelEdit}
+                    onToggle={onToggleTrigger}
+                  />
                 );
               })}
             </div>

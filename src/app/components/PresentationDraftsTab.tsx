@@ -15,6 +15,7 @@ import {
 } from "../actions";
 import { buildSlidesPptx, type PptxTheme } from "@/lib/pptx";
 import type { DeckTheme } from "@/lib/decks/types";
+import TabShell from "./TabShell";
 import { useDraftedGradesInbox } from "./DraftedGradesInbox";
 import styles from "../page.module.css";
 
@@ -256,7 +257,7 @@ export default function PresentationDraftsTab({
   };
 
   return (
-    <section className={styles.card}>
+    <TabShell>
       <TabHeader
         eyebrow="Drafts"
         title="Drafted presentations"
@@ -576,6 +577,6 @@ export default function PresentationDraftsTab({
           )}
         </>
       )}
-    </section>
+    </TabShell>
   );
 }

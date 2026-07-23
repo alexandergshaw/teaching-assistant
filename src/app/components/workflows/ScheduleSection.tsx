@@ -1,21 +1,12 @@
 "use client";
 
-import { Button, MenuItem, TextField, Checkbox, FormControlLabel } from "@mui/material";
-import { describeScheduleCadence, MIN_INTERVAL_MINUTES, type WorkflowSchedule, type ScheduleRepeat } from "@/lib/workflow-schedules";
-import { scheduleToForm } from "@/lib/workflow-form-helpers";
+import { Button } from "@mui/material";
+import { describeScheduleCadence, type WorkflowSchedule } from "@/lib/workflow-schedules";
+import { scheduleToForm, type ScheduleFormData } from "@/lib/workflow-form-helpers";
 import type { WorkflowDef, RuntimeField } from "@/lib/workflows/types";
 import { lastRunChip } from "./automation-inventory-logic";
+import { ScheduleEditForm } from "./ScheduleEditForm";
 import styles from "../../page.module.css";
-
-type ScheduleFormData = {
-  runAt: string;
-  repeat: ScheduleRepeat;
-  intervalValue: string;
-  intervalUnit: "minutes" | "hours";
-  courseId: string;
-  institution: string;
-  unattended: boolean;
-};
 
 interface ScheduleSectionProps {
   scheduleForm: ScheduleFormData | null;
@@ -92,182 +83,24 @@ export function ScheduleSection({
       </Button>
 
       {scheduleForm && (
-        <div style={{ marginTop: 16, border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-          {editingScheduleId ? (
-            <>
-              <span style={{ fontWeight: 600, fontSize: "0.9em" }}>
-                Editing {schedules?.find((s) => s.id === editingScheduleId)?.workflowName}&apos;s schedule
-              </span>
-            </>
-          ) : (
-            <>
-              <span style={{ fontWeight: 600, fontSize: "0.9em" }}>Schedule {selectedDef?.name}</span>
-              <p className={styles.fieldHint} style={{ margin: 0 }}>
-                Uses the run form values as they are right now. Runs start while the app is open; an overdue schedule runs on your next visit.
-              </p>
-              {runtimeFields.some((f) => f.type === "uploads" && f.required) && (
-                <p className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)" }}>
-                  This workflow requires a file upload at run time, which cannot be saved with a schedule - the scheduled run will stop at the form.
-                </p>
-              )}
-            </>
-          )}
-          {scheduleForm.repeat === "interval" && (
-            <p className={styles.fieldHint} style={{ margin: 0 }}>
-              Set any interval from {MIN_INTERVAL_MINUTES} minutes up. Unattended runs are checked about every {MIN_INTERVAL_MINUTES} minutes, so that is the shortest that fires reliably.
-            </p>
-          )}
-          {editingScheduleId
-            ? (() => {
-                const editingSchedule = schedules?.find((s) => s.id === editingScheduleId);
-                const editingIsHeadlessSafe = editingSchedule ? isWorkflowHeadlessSafeById(editingSchedule.workflowId) : false;
-                return editingIsHeadlessSafe ? (
-                  <div>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          size="small"
-                          checked={scheduleForm.unattended}
-                          onChange={(e) =>
-                            setScheduleForm((p) => (p ? { ...p, unattended: e.target.checked } : p))
-                          }
-                        />
-                      }
-                      label="Run unattended in the cloud (even when the app is closed)"
-                    />
-                    <p className={styles.fieldHint} style={{ margin: 0 }}>
-                      Unattended runs use the current run-form values and provider snapshot; interactive workflows are not eligible.
-                    </p>
-                  </div>
-                ) : (
-                  <p className={styles.fieldHint} style={{ margin: 0 }}>
-                    This workflow pauses for input, so it can only run while the app is open.
-                  </p>
-                );
-              })()
-            : selectedHeadlessSafe ? (
-            <div>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    size="small"
-                    checked={scheduleForm.unattended}
-                    onChange={(e) =>
-                      setScheduleForm((p) => (p ? { ...p, unattended: e.target.checked } : p))
-                    }
-                  />
-                }
-                label="Run unattended in the cloud (even when the app is closed)"
-              />
-              <p className={styles.fieldHint} style={{ margin: 0 }}>
-                Unattended runs use the current run-form values and provider snapshot; interactive workflows are not eligible.
-              </p>
-            </div>
-          ) : (
-            <p className={styles.fieldHint} style={{ margin: 0 }}>
-              This workflow pauses for input, so it can only run while the app is open.
-            </p>
-          )}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <TextField
-              size="small"
-              label="First run"
-              type="datetime-local"
-              value={scheduleForm.runAt}
-              onChange={(e) => setScheduleForm((p) => (p ? { ...p, runAt: e.target.value } : p))}
-              slotProps={{ inputLabel: { shrink: true } }}
-            />
-            <TextField
-              select
-              size="small"
-              label="Repeat"
-              value={scheduleForm.repeat}
-              onChange={(e) => setScheduleForm((p) => (p ? { ...p, repeat: e.target.value as ScheduleRepeat } : p))}
-              sx={{ minWidth: 150 }}
-            >
-              <MenuItem value="none">Does not repeat</MenuItem>
-              <MenuItem value="interval">Every...</MenuItem>
-              <MenuItem value="daily">Daily</MenuItem>
-              <MenuItem value="weekly">Weekly</MenuItem>
-            </TextField>
-            {scheduleForm.repeat === "interval" && (
-              <>
-                <TextField
-                  size="small"
-                  label="Every"
-                  type="number"
-                  value={scheduleForm.intervalValue}
-                  onChange={(e) => setScheduleForm((p) => (p ? { ...p, intervalValue: e.target.value } : p))}
-                  slotProps={{ htmlInput: { min: 1, step: 1 } }}
-                  sx={{ width: 90 }}
-                />
-                <TextField
-                  select
-                  size="small"
-                  label="Unit"
-                  value={scheduleForm.intervalUnit}
-                  onChange={(e) => setScheduleForm((p) => (p ? { ...p, intervalUnit: e.target.value as "minutes" | "hours" } : p))}
-                  sx={{ minWidth: 110 }}
-                >
-                  <MenuItem value="minutes">minutes</MenuItem>
-                  <MenuItem value="hours">hours</MenuItem>
-                </TextField>
-              </>
-            )}
-            <TextField
-              select
-              size="small"
-              label="Course (optional)"
-              value={scheduleForm.courseId}
-              onChange={(e) => setScheduleForm((p) => (p ? { ...p, courseId: e.target.value } : p))}
-              sx={{ minWidth: 180 }}
-            >
-              <MenuItem value="">None</MenuItem>
-              {(hubCourses ?? []).map((c) => (
-                <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              select
-              size="small"
-              label="Institution (optional)"
-              value={scheduleForm.institution}
-              onChange={(e) => setScheduleForm((p) => (p ? { ...p, institution: e.target.value } : p))}
-              sx={{ minWidth: 160 }}
-            >
-              <MenuItem value="">None</MenuItem>
-              {institutions.map((i) => (
-                <MenuItem key={i} value={i}>{i}</MenuItem>
-              ))}
-            </TextField>
-            <Button
-              variant="contained"
-              size="small"
-              disabled={scheduleBusy || !scheduleForm.runAt}
-              onClick={() =>
-                editingScheduleId
-                  ? void onSaveEdit(editingScheduleId)
-                  : void onCreate()
-              }
-            >
-              {scheduleBusy ? "Saving..." : editingScheduleId ? "Save changes" : "Save schedule"}
-            </Button>
-            {editingScheduleId && (
-              <Button
-                variant="outlined"
-                size="small"
-                disabled={scheduleBusy}
-                onClick={() => {
-                  setScheduleForm(null);
-                  setEditingScheduleId(null);
-                  setScheduleError(null);
-                }}
-              >
-                Cancel
-              </Button>
-            )}
-          </div>
-        </div>
+        <ScheduleEditForm
+          scheduleForm={scheduleForm}
+          setScheduleForm={setScheduleForm}
+          editingScheduleId={editingScheduleId}
+          setEditingScheduleId={setEditingScheduleId}
+          setScheduleError={setScheduleError}
+          schedules={schedules}
+          scheduleBusy={scheduleBusy}
+          error={null}
+          selectedDef={selectedDef}
+          runtimeFields={runtimeFields}
+          hubCourses={hubCourses}
+          institutions={institutions}
+          isWorkflowHeadlessSafeById={isWorkflowHeadlessSafeById}
+          selectedHeadlessSafe={selectedHeadlessSafe}
+          onSaveEdit={onSaveEdit}
+          onCreate={onCreate}
+        />
       )}
 
       {scheduleError && <p className={styles.error}>{scheduleError}</p>}

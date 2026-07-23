@@ -5,6 +5,7 @@ import { useSupabase } from "@/context/SupabaseProvider";
 import {
   listDueWorkflowSchedules,
   claimWorkflowSchedule,
+  shouldWatcherClaim,
 } from "@/lib/workflow-schedules";
 import { enqueueScheduledRun } from "@/lib/workflow-schedule-handoff";
 
@@ -38,9 +39,14 @@ export default function WorkflowScheduleWatcher({
         const now = new Date();
         const due = await listDueWorkflowSchedules(supabase, user.id, now);
         if (cancelled || due.length === 0) return;
+        // Unattended schedules belong to the server cron; the watcher only
+        // steps in once one is overdue past the grace backstop (see
+        // shouldWatcherClaim). Attended schedules are always claimable.
+        const claimable = due.filter((s) => shouldWatcherClaim(s, now));
+        if (claimable.length === 0) return;
         // One run per tick keeps runs from piling onto the tab at once; the
         // next tick picks up the next due schedule.
-        const schedule = due[0];
+        const schedule = claimable[0];
         const claimed = await claimWorkflowSchedule(supabase, user.id, schedule, now);
         if (!claimed || cancelled) return;
         enqueueScheduledRun({

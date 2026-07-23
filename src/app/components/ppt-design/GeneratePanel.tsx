@@ -307,7 +307,7 @@ export default function GeneratePanel({
               onClick={onSaveDraft}
               sx={{ textTransform: "none" }}
             >
-              {savingDraft ? "Saving..." : "Save as draft"}
+              {savingDraft ? "Saving..." : "Save a copy to Files"}
             </Button>
           </div>
 

@@ -15,7 +15,6 @@ import RecordingTab from "./components/RecordingTab";
 import FilesTab from "./components/FilesTab";
 import DraftedGradesTab from "./components/DraftedGradesTab";
 import MessageDraftsTab from "./components/MessageDraftsTab";
-import PresentationDraftsTab from "./components/PresentationDraftsTab";
 import WorkflowsTab from "./components/WorkflowsTab";
 import AutomationsTabView from "./components/AutomationsTabView";
 import PowerPointDesignTab from "./components/PowerPointDesignTab";
@@ -58,8 +57,8 @@ const BUILD_VIEW_KEY = "ta-build-view";
 // The Workflows tab groups Workflows, Automations, and Drafts as subtabs.
 type WorkflowsView = "workflows" | "automations" | "drafts";
 const WORKFLOWS_VIEW_KEY = "ta-workflows-view";
-// The Drafts tab groups Grades, Messages, and Presentations as subtabs.
-type DraftsView = "grades" | "messages" | "presentations";
+// The Drafts tab groups Grades and Messages as subtabs.
+type DraftsView = "grades" | "messages";
 const DRAFTS_VIEW_KEY = "ta-drafts-view";
 
 // The hosted Course Engine runs on Vercel, which caps the request body at
@@ -73,7 +72,7 @@ export default function Home() {
   const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
   const { total: vcAttention } = useVcCounts();
   const { count: filesInbox, markSeen: markFilesSeen } = useFilesInbox();
-  const { count: draftsInbox, gradesCount: draftsGradesCount, messagesCount: draftsMessagesCount, presentationsCount: draftsPresentationsCount, refresh: refreshDrafts } = useDraftedGradesInbox();
+  const { count: draftsInbox, gradesCount: draftsGradesCount, messagesCount: draftsMessagesCount, refresh: refreshDrafts } = useDraftedGradesInbox();
   const [testState] = useActionState(testGeminiAction, initialTestState);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "manual";
@@ -144,7 +143,10 @@ export default function Home() {
   const [draftsView, setDraftsView] = useState<DraftsView>(() => {
     if (typeof window === "undefined") return "grades";
     const saved = localStorage.getItem(DRAFTS_VIEW_KEY);
-    return saved === "grades" || saved === "messages" || saved === "presentations" ? saved : "grades";
+    // A stale "presentations" value (the subtab was removed) must never leave
+    // the user on a dead view - migrate it to "grades".
+    if (saved === "presentations") return "grades";
+    return saved === "grades" || saved === "messages" ? saved : "grades";
   });
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
@@ -906,24 +908,11 @@ export default function Home() {
                         {draftsMessagesCount > 0 && <span className={styles.navBadge}>{draftsMessagesCount}</span>}
                       </span>
                     </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={draftsView === "presentations"}
-                      className={`${styles.lessonInnerTab}${draftsView === "presentations" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                      onClick={() => setDraftsView("presentations")}
-                    >
-                      <span className={styles.tabLabelWrap}>
-                        Presentations
-                        {draftsPresentationsCount > 0 && <span className={styles.navBadge}>{draftsPresentationsCount}</span>}
-                      </span>
-                    </button>
                   </div>
                 </div>
 
                 {draftsView === "grades" && <DraftedGradesTab onOpenWorkflow={openWorkflow} />}
                 {draftsView === "messages" && <MessageDraftsTab onOpenWorkflow={openWorkflow} />}
-                {draftsView === "presentations" && <PresentationDraftsTab onOpenWorkflow={openWorkflow} />}
               </>
             )}
           </>

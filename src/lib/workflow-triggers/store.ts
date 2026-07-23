@@ -68,6 +68,7 @@ export function mapTrigger(row: TriggerRow): WorkflowTrigger {
     lastFiredAt: row.last_fired_at,
     lastRunStatus: (row.last_run_status && VALID_RUN_STATUSES.has(row.last_run_status) ? row.last_run_status : null) as WorkflowRunStatus | null,
     lastRunDetail: row.last_run_detail ?? null,
+    recoveryAttempts: typeof row.recovery_attempts === "number" ? row.recovery_attempts : 0,
   };
 }
 
@@ -287,6 +288,73 @@ export function advanceRepoPushCursor(
       ? (prev.repos as Record<string, string>)
       : {};
   return { ...prev, repos: { ...prevRepos, [repo]: commitTimestamp } } as unknown as Json;
+}
+
+/** How long a trigger may sit at last_run_status "started" before the cron
+ * sweep treats it as abandoned (fired, but the runner - browser tab or
+ * server process - never reported back). Mirrors STALE_CLAIM_MS in
+ * workflow-schedules.ts. */
+export const STALE_CLAIM_MS = 15 * 60_000;
+
+const INTERRUPTED_REASON =
+  "did not finish - the run was interrupted (a browser tab running it was closed, or the process stopped)";
+
+/** Detail string for a trigger found stuck at "started" past STALE_CLAIM_MS.
+ * Unlike a schedule (time-driven, so the occurrence can simply be made due
+ * again), a trigger occurrence is event-driven: its cursor already advanced
+ * past the event that fired it, so there is nothing to safely re-fire. The
+ * sweep only clears the stale status honestly. */
+export function decideStaleTriggerRecovery(): { detail: string } {
+  return {
+    detail: `${INTERRUPTED_REASON}; the occurrence was recovered, but no retry was scheduled (trigger occurrences are event-driven and cannot be safely re-armed).`,
+  };
+}
+
+/**
+ * Triggers stuck at last_run_status "started" for longer than STALE_CLAIM_MS,
+ * enabled or not, capped like the other cron queries. Server-only: not scoped
+ * to a single user, mirroring listUnattendedTriggersDue.
+ */
+export async function listStaleClaimedWorkflowTriggers(
+  supabase: SupabaseClient<Database>,
+  now: Date,
+  limit = 5
+): Promise<WorkflowTrigger[]> {
+  const cutoff = new Date(now.getTime() - STALE_CLAIM_MS).toISOString();
+  const { data, error } = await table(supabase)
+    .select("*")
+    .eq("last_run_status", "started")
+    .lt("last_fired_at", cutoff)
+    .order("last_fired_at", { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as TriggerRow[]).map(mapTrigger);
+}
+
+/**
+ * Recover one stale-claimed trigger: stamp it honestly as an interrupted
+ * error and bump recovery_attempts (informational - trigger occurrences
+ * cannot be re-armed the way a schedule's next_run_at can). Caller wraps this
+ * per-row so one failure cannot abort the sweep.
+ */
+export async function recoverStaleWorkflowTrigger(
+  supabase: SupabaseClient<Database>,
+  trigger: WorkflowTrigger,
+  now: Date
+): Promise<{ detail: string }> {
+  const { detail } = decideStaleTriggerRecovery();
+  const { error } = await table(supabase)
+    .update({
+      last_run_status: "error",
+      last_run_detail: detail.slice(0, 500),
+      updated_at: now.toISOString(),
+      recovery_attempts: trigger.recoveryAttempts + 1,
+    })
+    .eq("user_id", trigger.userId)
+    .eq("id", trigger.id)
+    .eq("last_run_status", "started");
+  if (error) throw new Error(error.message);
+  return { detail };
 }
 
 /** Look up a single enabled webhook trigger by its token (service-role client;

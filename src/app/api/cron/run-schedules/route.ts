@@ -5,6 +5,7 @@ import { isOwnerEmail } from "@/lib/owner";
 import {
   listDueUnattendedWorkflowSchedules, claimWorkflowSchedule,
   claimFanoutSchedule, checkpointFanoutInstitution, deferFanoutResume, finishFanoutSchedule,
+  listStaleClaimedWorkflowSchedules, recoverStaleWorkflowSchedule,
 } from "@/lib/workflow-schedules";
 import { updateScheduleRunOutcome } from "@/lib/workflow-run-status";
 import { listWorkflowDefs } from "@/lib/workflow-defs";
@@ -13,6 +14,7 @@ import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
 import { runWorkflowUnattended, buildServerStepRunHelpers } from "@/lib/workflows/server-runner";
 import { isInstitutionFanout, isCourseFanout, hasCourseMultiplicity } from "@/lib/workflows/fanout";
 import { runDueUnattendedTriggers } from "@/lib/workflow-trigger-runner";
+import { listStaleClaimedWorkflowTriggers, recoverStaleWorkflowTrigger } from "@/lib/workflow-triggers";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { saveRecordingFile } from "@/lib/recording-files";
@@ -80,6 +82,28 @@ export async function GET(req: NextRequest) {
   // rest resume next tick (see runWorkflowUnattended deadlineMs).
   const runDeadlineMs = now.getTime() + 50_000;
   const results: ScheduleResult[] = [];
+
+  // Sweep stale claims BEFORE processing due schedules/triggers: a row stuck
+  // at "started" (its runner - a browser tab or a prior process - never
+  // reported back) would otherwise leave that occurrence silently lost
+  // forever, since claiming already advanced past it. Per-row try/catch so
+  // one failure to stamp/reset a row never aborts the tick.
+  const staleSchedules = await listStaleClaimedWorkflowSchedules(supabase, now, MAX_SCHEDULES_PER_RUN);
+  for (const stale of staleSchedules) {
+    try {
+      await recoverStaleWorkflowSchedule(supabase, stale, now);
+    } catch (err) {
+      console.error("Failed to recover stale schedule claim:", stale.id, err);
+    }
+  }
+  const staleTriggers = await listStaleClaimedWorkflowTriggers(supabase, now, MAX_SCHEDULES_PER_RUN);
+  for (const stale of staleTriggers) {
+    try {
+      await recoverStaleWorkflowTrigger(supabase, stale, now);
+    } catch (err) {
+      console.error("Failed to recover stale trigger claim:", stale.id, err);
+    }
+  }
 
   const due = await listDueUnattendedWorkflowSchedules(supabase, now, MAX_SCHEDULES_PER_RUN);
 

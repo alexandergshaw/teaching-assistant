@@ -37,6 +37,7 @@ function makeSchedule(overrides: Partial<WorkflowSchedule> = {}): WorkflowSchedu
     lastRunAt: null,
     lastRunStatus: null,
     lastRunDetail: null,
+    recoveryAttempts: 0,
     ...overrides,
   };
 }
@@ -63,6 +64,7 @@ function makeTrigger(overrides: Partial<WorkflowTrigger> = {}): WorkflowTrigger 
     lastFiredAt: null,
     lastRunStatus: null,
     lastRunDetail: null,
+    recoveryAttempts: 0,
     ...overrides,
   };
 }

@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { computeNextRunAt, mapSchedule, reenableSchedule, updateWorkflowSchedule, type WorkflowSchedule } from "./workflow-schedules";
+import {
+  computeNextRunAt,
+  mapSchedule,
+  reenableSchedule,
+  updateWorkflowSchedule,
+  shouldWatcherClaim,
+  WATCHER_UNATTENDED_GRACE_MS,
+  decideStaleScheduleRecovery,
+  type WorkflowSchedule,
+} from "./workflow-schedules";
 import type { Database } from "./supabase/types";
 
 type ScheduleRow = Database["public"]["Tables"]["workflow_schedules"]["Row"];
@@ -26,6 +35,7 @@ function makeRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
     fanout_progress: null,
     last_run_status: null,
     last_run_detail: null,
+    recovery_attempts: 0,
     ...overrides,
   };
 }
@@ -185,6 +195,58 @@ describe("mapSchedule", () => {
   it("defaults interval_minutes to null when absent", () => {
     const s = mapSchedule(makeRow());
     expect(s.intervalMinutes).toBeNull();
+  });
+
+  it("maps recovery_attempts, defaulting to 0", () => {
+    expect(mapSchedule(makeRow()).recoveryAttempts).toBe(0);
+    expect(mapSchedule(makeRow({ recovery_attempts: 1 })).recoveryAttempts).toBe(1);
+  });
+});
+
+describe("shouldWatcherClaim", () => {
+  const now = new Date("2026-07-13T15:00:00.000Z");
+
+  it("always claims an attended schedule, even far overdue", () => {
+    const s = { unattended: false, nextRunAt: "2026-07-01T00:00:00.000Z" };
+    expect(shouldWatcherClaim(s, now)).toBe(true);
+  });
+
+  it("skips an unattended schedule due within the grace window", () => {
+    const s = { unattended: true, nextRunAt: "2026-07-13T14:50:00.000Z" }; // 10 min ago
+    expect(shouldWatcherClaim(s, now)).toBe(false);
+  });
+
+  it("claims an unattended schedule overdue past the grace window", () => {
+    const s = { unattended: true, nextRunAt: "2026-07-13T14:00:00.000Z" }; // 60 min ago
+    expect(shouldWatcherClaim(s, now)).toBe(true);
+  });
+
+  it("is exclusive at the exact grace boundary (not yet claimable)", () => {
+    const dueAt = now.getTime() - WATCHER_UNATTENDED_GRACE_MS;
+    const s = { unattended: true, nextRunAt: new Date(dueAt).toISOString() };
+    expect(shouldWatcherClaim(s, now)).toBe(false);
+  });
+
+  it("claims once one millisecond past the grace boundary", () => {
+    const dueAt = now.getTime() - WATCHER_UNATTENDED_GRACE_MS - 1;
+    const s = { unattended: true, nextRunAt: new Date(dueAt).toISOString() };
+    expect(shouldWatcherClaim(s, now)).toBe(true);
+  });
+});
+
+describe("decideStaleScheduleRecovery", () => {
+  it("retries the first time a schedule is found stale", () => {
+    const d = decideStaleScheduleRecovery(0);
+    expect(d.retry).toBe(true);
+    expect(d.detail).toMatch(/interrupted/);
+    expect(d.detail).toMatch(/retry on the next tick/);
+  });
+
+  it("does not retry a second time", () => {
+    const d = decideStaleScheduleRecovery(1);
+    expect(d.retry).toBe(false);
+    expect(d.detail).toMatch(/interrupted/);
+    expect(d.detail).toMatch(/no further retry/);
   });
 });
 

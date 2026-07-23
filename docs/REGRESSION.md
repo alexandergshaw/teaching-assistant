@@ -390,8 +390,11 @@ most likely to break again when these files are edited.
    -> Workflows + Drafts subtab; mail -> default).
 2. PowerPoint Design is the LAST Manual subtab and renders PowerPointDesignTab.
 3. The Workflows tab hosts a persisted subtab level (ta-workflows-view:
-   workflows | drafts); Drafts keeps its Grades/Messages/Presentations third
-   level (ta-drafts-view); the draftsInbox badge sits on the Workflows top tab;
+   workflows | drafts); Drafts keeps a persisted third level (ta-drafts-view)
+   - Grades/Messages/Presentations at the time of this entry, SUPERSEDED by
+   the presentations-to-Files entry below (Presentations removed; a stored
+   "presentations" migrates to "grades"); the draftsInbox badge sits on the
+   Workflows top tab;
    openWorkflow and both watcher callbacks force the "workflows" subtab so runs
    are visible; refreshDrafts fires on entering the Drafts subtab.
 4. Mail is gone from the nav (MailTab.tsx deleted) while mail/message server
@@ -1335,3 +1338,86 @@ the code fell back to that unrelated schedule.
    Start Here.
 7. Blank/unset moduleId: byte-identical to the prior behavior (the targeting
    block does not run); pinned by the existing unchanged test.
+
+### 2026-07-23 - Unattended schedules stay server-side + stale-claim recovery
+
+Context: a weekly schedule "didn't finish" on its automated run but completed
+when run manually. Evidence: the GitHub cron is healthy (last 100 runs of
+unattended-runs.yml = 9 runs, ALL success/HTTP 200; a Vercel 60s kill would
+be a 504 and a FAILED action). The real cause was in-browser claiming.
+
+1. Claim ownership: WorkflowScheduleWatcher (60s poll) previously claimed ANY
+   due schedule - including unattended ones the server runner owns - and ran
+   it in the tab; the cron fires only ~hourly, so the browser almost always
+   won the atomic claim. A closed/navigated tab then left the row stuck at
+   last_run_status "started" with next_run_at ALREADY advanced, silently
+   skipping the occurrence. Now the watcher filters candidates through the
+   pure shouldWatcherClaim(schedule, now, graceMs): attended rows are always
+   claimable (byte-identical behavior); unattended rows are skipped UNLESS
+   overdue past WATCHER_UNATTENDED_GRACE_MS (45 min), which keeps a backstop
+   for a lagging or unregistered cron (this repo has seen both).
+2. Stale-claim recovery: migration 20260829000000 adds recovery_attempts
+   (default 0) to workflow_schedules and workflow_triggers. The cron route
+   sweeps rows whose last_run_status is "started" and last_run_at is older
+   than STALE_CLAIM_MS (15 min - deliberately longer than the 10-minute
+   display threshold in automation-inventory-logic.ts, which is untouched,
+   so a live run is never swept mid-flight). Each swept row is stamped
+   "error" with a detail naming the interruption AND whether a retry was
+   scheduled; the sweep is per-row try/catch so one failure cannot abort the
+   tick.
+3. Retry policy: schedules with recovery_attempts 0 are re-armed once
+   (next_run_at = now, attempts -> 1) so the missed occurrence actually
+   runs; at >= 1 no further retry is scheduled (no loops) and the detail
+   says so. A successful run resets recovery_attempts to 0
+   (updateScheduleRunOutcome / updateTriggerRunOutcome on "ok").
+4. Triggers: the same claimed-then-abandoned window exists
+   (WorkflowTriggerWatcher -> claimAndAdvanceTrigger stamps "started" then
+   hands the run to the tab), so the sweep is mirrored for triggers -
+   stamping only. Trigger occurrences are event-driven and their cursor has
+   already advanced past the firing event, so they are deliberately NOT
+   re-armed; the detail states that. Watcher-side gating is schedules-only.
+5. Unchanged: claim atomicity and one-run-per-tick semantics,
+   listDueWorkflowSchedules' signature/behavior (its only caller is the
+   watcher), listDueUnattendedWorkflowSchedules, the Automations chip
+   semantics (a swept row now reads as a failed run with an explanatory
+   detail instead of a permanent "Did not finish").
+
+### 2026-07-23 - Presentations land in Files; Presentations subtab removed
+
+Context: user direction - every workflow-generated presentation belongs in the
+Files tab, and the Drafts > Presentations subtab is retired. Previously the
+deck step's PRIMARY deliverable was a presentation DRAFT (throwing on
+failure) with the real .pptx only best-effort copied to Files, so a failed
+copy left a draft and no file.
+
+1. Deck step (steps.media.ts): savePresentationDraftAction is GONE from the
+   step; savePresentationFileAction is the primary deliverable and THROWS on
+   failure (a run can no longer "succeed" without producing the file). It
+   still passes workflowName/workflowId/workflowRunId, so the Files row stays
+   source-tagged. The summary names the saved .pptx and the Files library.
+2. Step OUTPUTS are unchanged in shape and keys (presentationTitle, deck,
+   slidesJson, slideCount, draftId - draftId now carries the Files row id),
+   so "PPT deck outputs feed later steps" keeps holding; the lecture-qa wire
+   and the metadata test are untouched and pass.
+3. Manual PPT Design (ppt-design): its save flow writes to Files via
+   savePresentationFileAction instead of creating a draft; button and
+   success/error copy say Files. The tab's other pre-existing direct
+   save-to-Files button is unchanged (both destinations are now Files).
+4. Nav: DraftsView is "grades" | "messages"; the Presentations chip and
+   render branch are removed and PresentationDraftsTab.tsx deleted
+   (git-recoverable); a persisted ta-drafts-view of "presentations" migrates
+   to "grades" so a stale value never lands on a dead view.
+5. Badge accounting: DraftedGradesInbox no longer counts presentation
+   drafts (countPendingPresentationDrafts removed from workflow-support.ts -
+   its only consumer was that badge; grep-confirmed); the draftsInbox
+   aggregate on the Workflows tab is grades + messages.
+6. Data safety (explicit): the presentation_drafts table, lib/presentation-
+   drafts.ts, savePresentationDraftAction, and the Supabase types are
+   RETAINED and untouched - no drop, no row deletion, no migration. Existing
+   drafts remain readable programmatically but have no UI surface; they were
+   also largely copied to Files already by the old best-effort path, so no
+   backfill was run (it would duplicate them).
+7. Run-level test (registry.generate-presentation-from-template-run.test.ts)
+   asserts the Files save receives the workflow ids, the outputs are
+   populated, the summary names the Files library and not Drafts, and that a
+   Files-save failure makes the step throw.

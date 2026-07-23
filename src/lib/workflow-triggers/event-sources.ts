@@ -83,6 +83,9 @@ export interface WorkflowTrigger {
   lastFiredAt: string | null;
   lastRunStatus: WorkflowRunStatus | null;
   lastRunDetail: string | null;
+  /** How many times the stale-claim sweep has already re-armed this trigger
+   * after an interrupted run; capped at 1 (mirrors WorkflowSchedule). */
+  recoveryAttempts: number;
 }
 
 export type TriggerEventCategory =

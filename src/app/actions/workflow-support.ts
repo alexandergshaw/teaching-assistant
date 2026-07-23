@@ -252,22 +252,6 @@ export async function countPendingMessageDrafts(): Promise<{ count: number }> {
   }
 }
 
-/** Count of the owner's PENDING presentation drafts. */
-export async function countPendingPresentationDrafts(): Promise<{ count: number }> {
-  try {
-    const user = await requireOwner();
-    const supabase = createServiceClient();
-    const { count } = await supabase
-      .from("presentation_drafts")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .eq("status", "pending");
-    return { count: count ?? 0 };
-  } catch {
-    return { count: 0 };
-  }
-}
-
 /** Count workflow deliverable files saved since a given ISO timestamp. */
 export async function countWorkflowDeliverablesSince(sinceIso: string): Promise<{ count: number }> {
   try {

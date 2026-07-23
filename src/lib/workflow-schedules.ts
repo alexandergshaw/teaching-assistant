@@ -98,6 +98,10 @@ export interface WorkflowSchedule {
   lastRunStatus: WorkflowRunStatus | null;
   /** Human-readable detail of the last run outcome, or null if never run. */
   lastRunDetail: string | null;
+  /** How many times the stale-claim sweep has already re-armed this
+   * occurrence after an interrupted run; capped at 1 so a run that keeps
+   * getting abandoned does not retry forever (see recoverStaleWorkflowSchedule). */
+  recoveryAttempts: number;
 }
 
 /**
@@ -209,12 +213,39 @@ export function mapSchedule(row: ScheduleRow): WorkflowSchedule {
     fanoutProgress: parseFanoutProgress(row.fanout_progress),
     lastRunStatus: (row.last_run_status && VALID_RUN_STATUSES.has(row.last_run_status) ? row.last_run_status : null) as WorkflowRunStatus | null,
     lastRunDetail: row.last_run_detail ?? null,
+    recoveryAttempts: typeof row.recovery_attempts === "number" ? row.recovery_attempts : 0,
   };
 }
 
 function table(supabase: SupabaseClient<Database>) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (supabase as any).from("workflow_schedules");
+}
+
+/** Grace window past which the in-app watcher may claim an overdue unattended
+ * schedule anyway - a backstop for when the server cron lags or is paused
+ * (GitHub Action schedules are best-effort; this repo has seen ~hourly
+ * delivery and a total registration failure before). Otherwise unattended
+ * schedules belong to the server cron, not the browser tab. */
+export const WATCHER_UNATTENDED_GRACE_MS = 45 * 60_000;
+
+/**
+ * Whether the in-app watcher (polling every ~60s while a tab is open) should
+ * claim this due schedule, or leave it for the server cron. Pure so both
+ * branches are directly testable:
+ * - Attended schedules: always claimable (today's behavior, unchanged).
+ * - Unattended schedules: only claimable once overdue by more than
+ *   `graceMs` past their next_run_at - otherwise the server cron owns it.
+ */
+export function shouldWatcherClaim(
+  schedule: Pick<WorkflowSchedule, "unattended" | "nextRunAt">,
+  now: Date,
+  graceMs: number = WATCHER_UNATTENDED_GRACE_MS
+): boolean {
+  if (!schedule.unattended) return true;
+  const dueAt = new Date(schedule.nextRunAt).getTime();
+  if (Number.isNaN(dueAt)) return true;
+  return now.getTime() - dueAt > graceMs;
 }
 
 /** All of the owner's schedules, soonest next run first. */
@@ -498,6 +529,98 @@ export async function deferFanoutResume(
     .eq("user_id", userId).eq("id", scheduleId)
     .eq("fanout_progress->>runToken", runToken);
   if (error) throw new Error(error.message);
+}
+
+/** How long a schedule may sit at last_run_status "started" before the cron
+ * sweep treats it as abandoned (a claimed occurrence whose runner - browser
+ * tab or server process - never reported back). Comfortably above the
+ * watcher's 60s poll and the fan-out lease (FANOUT_LEASE_MS) so a genuinely
+ * in-flight run is never swept mid-flight. */
+export const STALE_CLAIM_MS = 15 * 60_000;
+
+/** Cap on stale-claim retries per occurrence: the sweep re-arms an
+ * interrupted run exactly once, so a schedule whose runner keeps dying can
+ * never loop forever. */
+export const MAX_RECOVERY_ATTEMPTS = 1;
+
+const INTERRUPTED_REASON =
+  "did not finish - the run was interrupted (a browser tab running it was closed, or the process stopped)";
+
+/**
+ * Detail string + whether the occurrence should be made due again, for a
+ * schedule found stuck at last_run_status "started" past STALE_CLAIM_MS. Pure
+ * so the attempts-gating (retry once, then stop) is directly testable.
+ */
+export function decideStaleScheduleRecovery(recoveryAttempts: number): { detail: string; retry: boolean } {
+  if (recoveryAttempts < MAX_RECOVERY_ATTEMPTS) {
+    return {
+      detail: `${INTERRUPTED_REASON}; the occurrence was recovered and will retry on the next tick.`,
+      retry: true,
+    };
+  }
+  return {
+    detail: `${INTERRUPTED_REASON}; it was already retried once, so no further retry was scheduled.`,
+    retry: false,
+  };
+}
+
+/**
+ * Schedules stuck at last_run_status "started" for longer than STALE_CLAIM_MS
+ * (claimed but never reported back), enabled or not, capped like the other
+ * cron queries. Server-only: not scoped to a single user, mirroring
+ * listDueUnattendedWorkflowSchedules.
+ */
+export async function listStaleClaimedWorkflowSchedules(
+  supabase: SupabaseClient<Database>,
+  now: Date,
+  limit = 5
+): Promise<WorkflowSchedule[]> {
+  const cutoff = new Date(now.getTime() - STALE_CLAIM_MS).toISOString();
+  const { data, error } = await table(supabase)
+    .select("*")
+    .eq("last_run_status", "started")
+    .lt("last_run_at", cutoff)
+    .order("last_run_at", { ascending: true })
+    .limit(limit);
+  if (error) {
+    throw new Error(error.message);
+  }
+  return ((data ?? []) as ScheduleRow[]).map(mapSchedule);
+}
+
+/**
+ * Recover one stale-claimed schedule: stamp it honestly as an interrupted
+ * error, and either re-arm the occurrence (next_run_at = now, incrementing
+ * recovery_attempts - the first stale sweep) or leave next_run_at alone when
+ * it has already been retried, PRESERVING recovery_attempts so the guard
+ * against retry loops holds. Only a successful run resets the counter to 0
+ * (updateScheduleRunOutcome). Caller wraps this per-row so one failure
+ * cannot abort the sweep.
+ */
+export async function recoverStaleWorkflowSchedule(
+  supabase: SupabaseClient<Database>,
+  schedule: WorkflowSchedule,
+  now: Date
+): Promise<{ detail: string; retried: boolean }> {
+  const { detail, retry } = decideStaleScheduleRecovery(schedule.recoveryAttempts);
+  const patch: Record<string, unknown> = {
+    last_run_status: "error",
+    last_run_detail: detail.slice(0, 500),
+    updated_at: now.toISOString(),
+    recovery_attempts: retry ? schedule.recoveryAttempts + 1 : schedule.recoveryAttempts,
+  };
+  if (retry) {
+    patch.next_run_at = now.toISOString();
+  }
+  const { error } = await table(supabase)
+    .update(patch)
+    .eq("user_id", schedule.userId)
+    .eq("id", schedule.id)
+    .eq("last_run_status", "started");
+  if (error) {
+    throw new Error(error.message);
+  }
+  return { detail, retried: retry };
 }
 
 /** Completed fan-out: clear the checkpoint and restore the real schedule -

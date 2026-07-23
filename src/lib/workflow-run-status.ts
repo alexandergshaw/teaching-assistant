@@ -26,8 +26,12 @@ export async function updateScheduleRunOutcome(
   detail: string
 ): Promise<void> {
   const capped = detail.slice(0, 500);
+  const patch: Record<string, unknown> = { last_run_status: status, last_run_detail: capped };
+  // A successful completion clears any pending stale-claim recovery count, so
+  // a later interrupted run gets its one retry again.
+  if (status === "ok") patch.recovery_attempts = 0;
   const { error } = await scheduleTable(supabase)
-    .update({ last_run_status: status, last_run_detail: capped })
+    .update(patch)
     .eq("user_id", userId)
     .eq("id", scheduleId);
   if (error) {
@@ -45,8 +49,10 @@ export async function updateTriggerRunOutcome(
   detail: string
 ): Promise<void> {
   const capped = detail.slice(0, 500);
+  const patch: Record<string, unknown> = { last_run_status: status, last_run_detail: capped };
+  if (status === "ok") patch.recovery_attempts = 0;
   const { error } = await triggerTable(supabase)
-    .update({ last_run_status: status, last_run_detail: capped })
+    .update(patch)
     .eq("user_id", userId)
     .eq("id", triggerId);
   if (error) {

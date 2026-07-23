@@ -383,6 +383,7 @@ export interface WorkflowSchedulesRow {
   fanout_progress: Json | null;
   last_run_status: string | null;
   last_run_detail: string | null;
+  recovery_attempts: number;
 }
 
 export interface WorkflowSchedulesInsert {
@@ -406,6 +407,7 @@ export interface WorkflowSchedulesInsert {
   fanout_progress?: Json | null;
   last_run_status?: string | null;
   last_run_detail?: string | null;
+  recovery_attempts?: number;
 }
 
 export interface WorkflowSchedulesUpdate {
@@ -429,6 +431,7 @@ export interface WorkflowSchedulesUpdate {
   fanout_progress?: Json | null;
   last_run_status?: string | null;
   last_run_detail?: string | null;
+  recovery_attempts?: number;
 }
 
 export interface WorkflowTriggersRow {
@@ -454,6 +457,7 @@ export interface WorkflowTriggersRow {
   updated_at: string;
   last_run_status: string | null;
   last_run_detail: string | null;
+  recovery_attempts: number;
 }
 
 export interface WorkflowTriggersInsert {
@@ -479,6 +483,7 @@ export interface WorkflowTriggersInsert {
   updated_at?: string;
   last_run_status?: string | null;
   last_run_detail?: string | null;
+  recovery_attempts?: number;
 }
 
 export interface WorkflowTriggersUpdate {
@@ -504,4 +509,5 @@ export interface WorkflowTriggersUpdate {
   updated_at?: string;
   last_run_status?: string | null;
   last_run_detail?: string | null;
+  recovery_attempts?: number;
 }

@@ -18,7 +18,6 @@ import {
   getAvatarVideoStatusAction,
   getDeckTemplateAction,
   generateDeckFromTemplateAction,
-  savePresentationDraftAction,
   savePresentationFileAction,
   saveLibraryFileAction,
   type SlideData,
@@ -46,7 +45,7 @@ export const mediaSteps: StepDefinition[] = [
   {
     type: "generate-presentation-from-template",
     name: "Generate a presentation from a template",
-    description: "Generate a slide deck from a saved PowerPoint Design template (the assistant fills each slide role) and save it to Drafts > Presentations for review. Repeats any loop block over the concepts you list.",
+    description: "Generate a slide deck from a saved PowerPoint Design template (the assistant fills each slide role) and save it to the Files library. Repeats any loop block over the concepts you list.",
     inputs: [
       { key: "template", label: "Template", type: "deckTemplate", required: true, help: "Pick a PowerPoint Design template." },
       { key: "hubCourse", label: "Course", type: "hubCourse", required: false, help: "Pick the course whose module to build from (optional)." },
@@ -185,35 +184,21 @@ export const mediaSteps: StepDefinition[] = [
       // runs on the server where it does. Unattended runs work either way.
       const deck = await generateDeckFromTemplateAction(template, ctx, helpers.provider);
       if ("error" in deck) throw new Error(deck.error);
-      const res = await savePresentationDraftAction(
-        `Presentation: ${deck.presentationTitle}`,
-        { presentationTitle: deck.presentationTitle, slides: deck.slides, templateName: template.name, subject, theme: template.theme },
-        helpers.workflowId,
-        helpers.workflowName
-      );
-      if ("error" in res) throw new Error(res.error);
-      // Also drop a real, downloadable .pptx into the Files library (best-effort;
-      // the reviewable draft above is the primary deliverable).
-      let savedToFiles = false;
-      try {
-        const fileRes = await savePresentationFileAction({
-          presentationTitle: deck.presentationTitle,
-          slides: deck.slides,
-          theme: template.theme,
-          author: helpers.author,
-          workflowName: helpers.workflowName ?? null,
-          workflowId: helpers.workflowId,
-          workflowRunId: helpers.workflowRunId,
-        });
-        if ("error" in fileRes) {
-          onProgress(`Saved the draft; could not save the .pptx to Files (${fileRes.error}).`);
-        } else {
-          savedToFiles = true;
-        }
-      } catch (err) {
-        onProgress(`Saved the draft; could not save the .pptx to Files (${err instanceof Error ? err.message : "unknown"}).`);
-      }
-      const summaryText = `Generated a ${deck.slides.length}-slide deck from "${template.name}"${moduleName ? ` for ${moduleName}` : ""} and saved it to Drafts > Presentations${savedToFiles ? " and the Files library" : ""}.`;
+      // Save the real, downloadable .pptx to the Files library as the primary
+      // deliverable. A failure here throws so the run fails loudly rather than
+      // silently producing nothing.
+      const fileRes = await savePresentationFileAction({
+        presentationTitle: deck.presentationTitle,
+        slides: deck.slides,
+        theme: template.theme,
+        author: helpers.author,
+        workflowName: helpers.workflowName ?? null,
+        workflowId: helpers.workflowId,
+        workflowRunId: helpers.workflowRunId,
+      });
+      if ("error" in fileRes) throw new Error(fileRes.error);
+      const safeName = deck.presentationTitle.replace(/[\\/:*?"<>|]+/g, "-").slice(0, 120) || "Presentation";
+      const summaryText = `Generated a ${deck.slides.length}-slide deck from "${template.name}"${moduleName ? ` for ${moduleName}` : ""} and saved "${safeName}.pptx" to the Files library.`;
 
       const deckLines: string[] = [deck.presentationTitle];
       for (const slide of deck.slides) {
@@ -233,7 +218,7 @@ export const mediaSteps: StepDefinition[] = [
 
       return {
         outputs: {
-          draftId: res.id,
+          draftId: fileRes.id,
           slideCount: String(deck.slides.length),
           presentationTitle: deck.presentationTitle,
           deck: readableDeck,

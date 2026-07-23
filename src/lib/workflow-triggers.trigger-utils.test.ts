@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isTriggerDueForCheck,
   mapTrigger,
+  decideStaleTriggerRecovery,
   describeTrigger,
   getEventSource,
   EVENT_SOURCES,
@@ -44,6 +45,7 @@ function makeRow(overrides: Partial<TriggerRow> = {}): TriggerRow {
     updated_at: "2026-07-13T00:00:00.000Z",
     last_run_status: null,
     last_run_detail: null,
+    recovery_attempts: 0,
     ...overrides,
   };
 }
@@ -70,6 +72,7 @@ function makeTrigger(overrides: Partial<WorkflowTrigger> = {}): WorkflowTrigger 
     lastFiredAt: null,
     lastRunStatus: null,
     lastRunDetail: null,
+    recoveryAttempts: 0,
     ...overrides,
   };
 }
@@ -100,6 +103,14 @@ describe("isTriggerDueForCheck", () => {
   });
 });
 
+describe("decideStaleTriggerRecovery", () => {
+  it("says interrupted and that no retry was scheduled", () => {
+    const d = decideStaleTriggerRecovery();
+    expect(d.detail).toMatch(/interrupted/);
+    expect(d.detail).toMatch(/no retry was scheduled/);
+  });
+});
+
 describe("mapTrigger", () => {
   it("round-trips lastRunStatus and lastRunDetail when set", () => {
     const row = makeRow({ last_run_status: "ok", last_run_detail: "completed successfully" });
@@ -113,6 +124,11 @@ describe("mapTrigger", () => {
     const t = mapTrigger(row);
     expect(t.lastRunStatus).toBeNull();
     expect(t.lastRunDetail).toBeNull();
+  });
+
+  it("maps recovery_attempts, defaulting to 0", () => {
+    expect(mapTrigger(makeRow()).recoveryAttempts).toBe(0);
+    expect(mapTrigger(makeRow({ recovery_attempts: 2 })).recoveryAttempts).toBe(2);
   });
 
   it("maps a DB row to its camelCase domain object", () => {

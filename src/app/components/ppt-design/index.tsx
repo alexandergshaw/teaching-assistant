@@ -23,7 +23,7 @@ import {
   type DeckTemplate,
   type SlideRole,
 } from "@/lib/decks/types";
-import { generateDeckFromTemplateAction, savePresentationDraftAction } from "@/app/actions";
+import { generateDeckFromTemplateAction, savePresentationFileAction } from "@/app/actions";
 import { buildSlidesPptx, type PptxTheme } from "@/lib/pptx";
 import { saveRecordingFile } from "@/lib/recording-files";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -431,31 +431,26 @@ export default function PowerPointDesignTab() {
     if (!generatedDeck || !selected) return;
     setSavingDraft(true);
     try {
-      const payload = {
+      const res = await savePresentationFileAction({
         presentationTitle: generatedDeck.presentationTitle,
         slides: editedSlides,
-        templateName: selected.name,
-        subject,
         theme: selected.theme,
-      };
-      const res = await savePresentationDraftAction(
-        `Presentation: ${generatedDeck.presentationTitle}`,
-        payload
-      );
+        author: user?.user_metadata?.full_name || undefined,
+      });
       if ("error" in res) {
         setDraftNote({ kind: "error", text: res.error });
       } else {
         draftedGradesInbox.refresh();
         setDraftNote({
           kind: "success",
-          text: "Saved to Drafts > Presentations",
+          text: "Saved to Files",
         });
         setTimeout(() => setDraftNote(null), 3000);
       }
     } catch (err) {
       setDraftNote({
         kind: "error",
-        text: err instanceof Error ? err.message : "Could not save draft",
+        text: err instanceof Error ? err.message : "Could not save to Files",
       });
     } finally {
       setSavingDraft(false);

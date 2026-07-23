@@ -268,20 +268,27 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(JSON.stringify({ institution: true }))).toEqual(DEFAULT_VISIBLE_COLUMNS);
   });
 
-  it("drops unknown ids and de-duplicates (a legacy bare-array set also gains modality via the version union)", () => {
+  it("drops unknown ids and de-duplicates (a legacy bare-array set gains columns added in later versions)", () => {
     expect(parseColumnSet(JSON.stringify(["institution", "bogus", "institution", "weeks"]))).toEqual([
       "institution",
       "weeks",
       "modality",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports",
     ]);
   });
 
-  it("unions modality into an empty legacy selection (a bare array is version 0)", () => {
-    expect(parseColumnSet(JSON.stringify([]))).toEqual(["modality"]);
+  it("unions all post-v0 columns into an empty legacy selection (a bare array is version 0)", () => {
+    expect(parseColumnSet(JSON.stringify([]))).toEqual([
+      "modality",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports",
+    ]);
   });
 
   it("ignores name/actions if present since they are not toggleable columns", () => {
-    expect(parseColumnSet(JSON.stringify(["name", "actions", "lms"]))).toEqual(["lms", "modality"]);
+    expect(parseColumnSet(JSON.stringify(["name", "actions", "lms"]))).toEqual([
+      "lms", "modality",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports",
+    ]);
   });
 
   it("migrates legacy count-column ids to the columns that superseded them", () => {
@@ -291,11 +298,15 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "repos",
       "lms",
       "modality",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports",
     ]);
   });
 
   it("dedups after migrating a legacy id that collides with a persisted new id", () => {
-    expect(parseColumnSet(JSON.stringify(["roster", "rosterCount", "lms"]))).toEqual(["roster", "lms", "modality"]);
+    expect(parseColumnSet(JSON.stringify(["roster", "rosterCount", "lms"]))).toEqual([
+      "roster", "lms", "modality",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports",
+    ]);
   });
 
   it("round-trips through serializeColumnSet", () => {
@@ -338,6 +349,14 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(JSON.stringify({ v: CURRENT_COLUMNS_VERSION, columns: ["bogus", "lms"] }))).toEqual(["lms"]);
   });
 
+  it("unions v2 columns into a v1 persisted set", () => {
+    const v1 = JSON.stringify({ v: 1, columns: ["lms", "modality"] });
+    expect(parseColumnSet(v1)).toEqual([
+      "lms", "modality",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports",
+    ]);
+  });
+
   it("serializeColumnSet writes the current version", () => {
     const written = JSON.parse(serializeColumnSet(["lms"])) as { v: number; columns: string[] };
     expect(written.v).toBe(CURRENT_COLUMNS_VERSION);
@@ -346,9 +365,9 @@ describe("parseColumnSet / serializeColumnSet", () => {
 });
 
 describe("DEFAULT_VISIBLE_COLUMNS", () => {
-  it("excludes the six heavy former row-expansion columns by default", () => {
-    for (const heavy of ["integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports"] as const) {
-      expect(DEFAULT_VISIBLE_COLUMNS).not.toContain(heavy);
+  it("includes all column ids by default", () => {
+    for (const id of ALL_COLUMN_IDS) {
+      expect(DEFAULT_VISIBLE_COLUMNS).toContain(id);
     }
   });
 

@@ -42,10 +42,6 @@ export const ALL_COLUMN_IDS = [
 
 export type ColumnId = (typeof ALL_COLUMN_IDS)[number];
 
-// The pre-widening default face: the twelve columns that were visible before
-// the row-expansion cards became columns. The six heavy new columns
-// (integrations, description, scheduleCsv, rubric, materials, lmsExports)
-// default hidden - still discoverable in the Columns menu.
 export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
   "institution",
   "modality",
@@ -60,6 +56,12 @@ export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
   "repos",
   "roster",
   "studentRepos",
+  "integrations",
+  "description",
+  "scheduleCsv",
+  "rubric",
+  "materials",
+  "lmsExports",
 ];
 
 const COLUMN_ID_SET: Set<string> = new Set(ALL_COLUMN_IDS);
@@ -78,13 +80,14 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
 // column set unless it is unioned in here - bump this and add an entry to
 // COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
 // (no wrapper object) is treated as version 0.
-export const CURRENT_COLUMNS_VERSION = 1;
+export const CURRENT_COLUMNS_VERSION = 2;
 
 /** Columns introduced by each version, unioned into every persisted set
  * stored at an earlier version. Version 0 is the pre-versioning baseline, so
  * it never appears as a key here. */
 const COLUMNS_ADDED_IN: Record<number, ColumnId[]> = {
   1: ["modality"],
+  2: ["integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports"],
 };
 
 /** Parse a persisted ta-courses-columns value; unknown ids are dropped and a

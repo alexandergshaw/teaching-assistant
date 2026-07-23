@@ -223,4 +223,84 @@ describe("lecture-zip step", () => {
       step.run({ repo: "", minutes: 50, hubCourse: "course-1" }, testHelpers(), () => {})
     ).rejects.toThrow("generation failed");
   });
+
+  it("materials present but every schedule tier is topic-less: actionable error naming what to add, never the raw action error", async () => {
+    const tile = baseCourse({
+      id: "course-1",
+      csvData: "week,topic,summary,assignment,test\n1,,,,",
+      topics: null,
+      description: "Some description with real material content",
+    });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+
+    await expect(
+      step.run(
+        { repo: "", minutes: 50, hubCourse: "course-1", sources: JSON.stringify({ order: ["tile-meta"], strategy: "first-success" }) },
+        testHelpers(),
+        () => {}
+      )
+    ).rejects.toThrow(/add a schedule with topics to the course tile, bind a schedule, or fill the tile's topics field/);
+    expect(generateLectureMaterialsFromScheduleAction).not.toHaveBeenCalled();
+  });
+
+  it("bound schedule value arrives as a JSON string: parsed, topic-filtered, and used instead of the csv/topics tiers", async () => {
+    const boundSchedule = JSON.stringify([
+      { week: 1, topic: "Bound Topic", summary: "", assignmentTitle: null, assignmentSlug: null, testName: null },
+    ]);
+    const tile = baseCourse({
+      id: "course-1",
+      csvData: "week,topic,summary,assignment,test\n1,CSV Topic,,,",
+      topics: "Topics field",
+    });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+
+    await step.run(
+      { repo: "", minutes: 50, hubCourse: "course-1", schedule: boundSchedule },
+      testHelpers(),
+      () => {}
+    );
+
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    const scheduleArg = JSON.parse(callArgs[0] as string);
+    expect(scheduleArg).toEqual([
+      { week: 1, topic: "Bound Topic", summary: "", assignmentTitle: null, assignmentSlug: null, testName: null },
+    ]);
+  });
+
+  it("csv is topic-less but the tile's topics field has lines: synthesizes a schedule and still reaches the action", async () => {
+    const tile = baseCourse({
+      id: "course-1",
+      csvData: "week,topic,summary,assignment,test\n1,,,,",
+      topics: "Intro to Testing\nAdvanced Testing",
+      description: "Course description",
+    });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [{ name: "f.pptx", blob: new Blob([]), mimeType: "x", weekNumber: 1, sortOrder: 1, role: "slides" }],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+
+    const result = await step.run(
+      { repo: "", minutes: 50, hubCourse: "course-1" },
+      testHelpers(),
+      () => {}
+    );
+
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    const scheduleArg = JSON.parse(callArgs[0] as string);
+    expect(scheduleArg).toEqual([
+      { week: 1, topic: "Intro to Testing", summary: "", assignmentTitle: null, assignmentSlug: null, testName: null },
+      { week: 2, topic: "Advanced Testing", summary: "", assignmentTitle: null, assignmentSlug: null, testName: null },
+    ]);
+    expect(result.summary.kind).toBe("list");
+    if (result.summary.kind === "list") {
+      expect(result.summary.items.some((i) => i.includes("schedule derived from the tile's topics"))).toBe(true);
+    }
+  });
 });

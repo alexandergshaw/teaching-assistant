@@ -1145,3 +1145,34 @@ hard-coded and the uploaded materials zip was read by no lecture step.
 6. File hygiene: course-planning.ts at 807 after moving
    buildScheduleWeekPlan/generateSlidesFromTopic to the grounding sibling
    (284); every touched file at or under 1000 lines.
+
+### 2026-07-23 - Repoless lecture-zip schedule ladder (amends the source-policy entry)
+
+Context: the repoless path could reach
+generateLectureMaterialsFromScheduleAction with a schedule holding zero
+topic-bearing weeks, surfacing its raw "No weeks with topics found in the
+schedule." to the user with no guidance. (Investigation also established
+that schedule-type inputs arrive as already-parsed arrays from step
+bindings; JSON-string handling is defensive for literal bindings, not the
+reported cause.)
+
+1. resolveRepolessSchedule (registry/schedule-resolution.ts, pure, 6 tests)
+   resolves in tiers, filtering EVERY tier to weeks with a non-empty
+   trimmed topic (mirroring the action's own filter): bound schedule value
+   (array, or JSON string tolerantly parsed - malformed falls through) ->
+   csvToSchedule(tile.csvData) -> synthesis from the tile's topics lines
+   ({ week: i+1, topic, summary: "", assignmentTitle/assignmentSlug/
+   testName: null } matching ScheduleWeekPlan). Returns the winning tier's
+   note plus a `tried` audit trail naming what each tier held.
+2. The step never calls the action with an empty/topic-less schedule: with
+   no materials AND no schedule it throws the no-content error including
+   the tier audit; with materials but no topic-bearing weeks it throws
+   "No weeks with topics for <course>: add a schedule with topics to the
+   course tile, bind a schedule, or fill the tile's topics field" plus the
+   audit. The action's own "Schedule is empty."/"No weeks with topics"
+   strings never surface.
+3. The winning tier's note is appended to the run summary items alongside
+   the source-gather notes.
+4. Repo-present lecture-zip path untouched; registry.lecture-zip.test.ts
+   covers the new error message, the bound-JSON-string path, and the
+   topics-synthesis path reaching the action with the derived schedule.

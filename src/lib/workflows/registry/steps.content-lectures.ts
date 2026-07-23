@@ -32,7 +32,7 @@ import { buildDocxFromPlainText } from "@/lib/docx";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
 import { resolveSourcePolicy, type SourcePolicy } from "@/lib/workflows/source-policy";
-import { csvToSchedule } from "@/lib/workflows/types";
+import { resolveRepolessSchedule } from "@/lib/workflows/registry/schedule-resolution";
 
 const SOURCES_HELP =
   "Which additional material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -96,12 +96,21 @@ async function runLectureZipRepoless(
   const policy = resolveSourcePolicy(String(values.sources ?? ""));
   const gathered = await gatherModuleMaterials(tile, "", helpers, onProgress, policy);
 
-  const boundSchedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
-  const schedule = boundSchedule.length > 0 ? boundSchedule : csvToSchedule(tile.csvData ?? "");
+  const scheduleResolution = resolveRepolessSchedule(values.schedule, tile);
+  const schedule = scheduleResolution.schedule;
+  const tierDetail = `schedule tiers tried: ${scheduleResolution.tried.join("; ")}`;
 
-  if (!gathered.materialsText.trim() && schedule.length === 0) {
-    const checked = [...gathered.notes, "no schedule input bound and the tile has no schedule data"];
-    throw new Error(`No usable content sources for "${tile.name}": ${checked.join("; ")}.`);
+  if (schedule.length === 0) {
+    if (!gathered.materialsText.trim()) {
+      const checked = [...gathered.notes, tierDetail];
+      throw new Error(`No usable content sources for "${tile.name}": ${checked.join("; ")}.`);
+    }
+    // Materials exist, but the generation action requires topic-bearing
+    // weeks - never let its own "Schedule is empty."/"No weeks with topics
+    // found in the schedule." errors surface; name exactly what to add.
+    throw new Error(
+      `No weeks with topics for "${tile.name}": add a schedule with topics to the course tile, bind a schedule, or fill the tile's topics field. ${tierDetail}.`
+    );
   }
 
   const description = [tile.topics ?? "", tile.description ?? ""].filter(Boolean).join("\n\n");
@@ -127,6 +136,7 @@ async function runLectureZipRepoless(
     result.summary.label = `Built from course sources - no repository linked (${plans.length} deck${plans.length === 1 ? "" : "s"})`;
     result.summary.items = [
       ...result.summary.items,
+      ...(scheduleResolution.note ? [scheduleResolution.note] : []),
       ...gathered.notes,
       "includeInstructions is repo-specific and does not apply in repoless mode",
     ];

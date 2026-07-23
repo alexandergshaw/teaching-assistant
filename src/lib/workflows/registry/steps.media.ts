@@ -37,6 +37,10 @@ import { nextLectureWeek } from "@/lib/workflows/next-week";
 import type { DeckGenContext } from "@/lib/decks/generate";
 import { wrapAnimationDocument } from "@/lib/animation-html";
 import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
+import { resolveSourcePolicy } from "@/lib/workflows/source-policy";
+
+const SOURCES_HELP =
+  "Which material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
 
 export const mediaSteps: StepDefinition[] = [
   {
@@ -56,6 +60,13 @@ export const mediaSteps: StepDefinition[] = [
         type: "moduleOffset",
         required: false,
         help: "How many modules past the current one to target. 0 or blank = the current module.",
+      },
+      {
+        key: "sources",
+        label: "Material sources",
+        type: "sourcePolicy",
+        required: false,
+        help: SOURCES_HELP,
       },
     ],
     outputs: [
@@ -78,6 +89,7 @@ export const mediaSteps: StepDefinition[] = [
       let moduleName = "";
       let materials: string | undefined;
       let moduleNotes: string[] = [];
+      let materialSourceNotes: string[] = [];
       const offsetNotes: string[] = [];
       if (hubCourseId) {
         const list = await listCourseHubAction();
@@ -146,10 +158,12 @@ export const mediaSteps: StepDefinition[] = [
           }
 
           onProgress("Gathering module materials...");
-          const g = await gatherModuleMaterials(tile, effectiveModuleIdRaw, helpers, onProgress);
+          const sourcesPolicy = resolveSourcePolicy(String(values.sources ?? ""));
+          const g = await gatherModuleMaterials(tile, effectiveModuleIdRaw, helpers, onProgress, sourcesPolicy);
           moduleName = g.moduleName;
           materials = g.materialsText || undefined;
           moduleNotes = [...moduleNotes, ...g.notes];
+          materialSourceNotes = g.notes;
         }
       }
       const subject = String(values.subject ?? "").trim() || moduleName || template.name;
@@ -225,9 +239,12 @@ export const mediaSteps: StepDefinition[] = [
           deck: readableDeck,
           slidesJson
         },
-        summary: offsetNotes.length > 0
-          ? { kind: "list", label: summaryText, items: offsetNotes }
-          : { kind: "text", text: summaryText },
+        summary: (() => {
+          const items = [...offsetNotes, ...materialSourceNotes];
+          return items.length > 0
+            ? { kind: "list" as const, label: summaryText, items }
+            : { kind: "text" as const, text: summaryText };
+        })(),
       };
     },
   },

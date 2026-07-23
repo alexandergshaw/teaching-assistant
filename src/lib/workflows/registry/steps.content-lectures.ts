@@ -31,6 +31,112 @@ import { buildSlidesPptx } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
+import { resolveSourcePolicy, type SourcePolicy } from "@/lib/workflows/source-policy";
+import { csvToSchedule } from "@/lib/workflows/types";
+
+const SOURCES_HELP =
+  "Which additional material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
+
+// Non-repo material sources supplement a repo-driven step's primary pipeline;
+// the "repo" kind there refers to that pipeline's own required repo input,
+// never the generic repo-digest gatherer (which would redundantly re-digest
+// the same repository through a different path).
+async function gatherSupplementalMaterials(
+  hubCourseId: string,
+  helpers: Parameters<typeof gatherModuleMaterials>[2],
+  onProgress: (msg: string) => void,
+  sourcesRaw: string,
+  excludeRepo: boolean
+): Promise<{ text: string; notes: string[] }> {
+  const policy = resolveSourcePolicy(sourcesRaw);
+  const effectivePolicy: SourcePolicy = excludeRepo
+    ? { order: policy.order.filter((k) => k !== "repo"), strategy: policy.strategy }
+    : policy;
+  const notes: string[] = [];
+  if (excludeRepo && policy.order.includes("repo")) {
+    notes.push("policy's repository entry is ignored here - the step's own repo input is always the primary source");
+  }
+  if (!hubCourseId || effectivePolicy.order.length === 0) {
+    return { text: "", notes };
+  }
+  const list = await listCourseHubAction();
+  if ("error" in list) return { text: "", notes };
+  const tile = list.courses.find((c) => c.id === hubCourseId);
+  if (!tile) return { text: "", notes };
+  const g = await gatherModuleMaterials(tile, "", helpers, onProgress, effectivePolicy);
+  return { text: g.materialsText, notes: [...notes, ...g.notes] };
+}
+
+// lecture-zip without a linked repository: builds the same decks+notes zip
+// from the configured material sources and the course schedule, mirroring
+// lecture-materials-from-schedule's run (gatherModuleMaterials with the
+// resolved policy, generateLectureMaterialsFromScheduleAction,
+// assembleLectureFiles) instead of the repo digest pipeline. Never a silent
+// skip: missing content sources are a clear error.
+async function runLectureZipRepoless(
+  values: Record<string, unknown>,
+  helpers: Parameters<typeof gatherModuleMaterials>[2],
+  onProgress: (msg: string) => void,
+  minutes: number
+): Promise<StepRunResult> {
+  const hubCourseId = String(values.hubCourse ?? "").trim();
+  if (!hubCourseId) {
+    throw new Error("Link a repository or choose a course tile - the step needs at least one content source.");
+  }
+
+  const list = await listCourseHubAction();
+  if ("error" in list) {
+    throw new Error(list.error);
+  }
+  const tile = list.courses.find((c) => c.id === hubCourseId);
+  if (!tile) {
+    throw new Error("Choose a course tile.");
+  }
+
+  const policy = resolveSourcePolicy(String(values.sources ?? ""));
+  const gathered = await gatherModuleMaterials(tile, "", helpers, onProgress, policy);
+
+  const boundSchedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
+  const schedule = boundSchedule.length > 0 ? boundSchedule : csvToSchedule(tile.csvData ?? "");
+
+  if (!gathered.materialsText.trim() && schedule.length === 0) {
+    const checked = [...gathered.notes, "no schedule input bound and the tile has no schedule data"];
+    throw new Error(`No usable content sources for "${tile.name}": ${checked.join("; ")}.`);
+  }
+
+  const description = [tile.topics ?? "", tile.description ?? ""].filter(Boolean).join("\n\n");
+
+  onProgress("Generating lecture materials from course sources...");
+  const scheduleJson = JSON.stringify(schedule);
+  const plans = await generateLectureMaterialsFromScheduleAction(
+    scheduleJson,
+    description,
+    minutes,
+    helpers.provider,
+    undefined,
+    undefined,
+    gathered.materialsText || undefined
+  );
+
+  if ("error" in plans) {
+    throw new Error(plans.error);
+  }
+
+  const result = await assembleLectureFiles(plans, values, helpers, onProgress, "lecture_materials");
+  if (result.summary.kind === "list") {
+    result.summary.label = `Built from course sources - no repository linked (${plans.length} deck${plans.length === 1 ? "" : "s"})`;
+    result.summary.items = [
+      ...result.summary.items,
+      ...gathered.notes,
+      "includeInstructions is repo-specific and does not apply in repoless mode",
+    ];
+  }
+
+  return {
+    outputs: { files: result.files },
+    summary: result.summary,
+  };
+}
 
 export const contentLectureSteps: StepDefinition[] = [
   {
@@ -42,7 +148,8 @@ export const contentLectureSteps: StepDefinition[] = [
         key: "repo",
         label: "Repository",
         type: "repo",
-        required: true,
+        required: false,
+        help: "The repository is the primary source when linked - without one, the step builds the zip from the configured material sources and the course schedule instead.",
       },
       {
         key: "minutes",
@@ -78,6 +185,13 @@ export const contentLectureSteps: StepDefinition[] = [
         required: false,
         help: "A PPT Design template that styles the generated slides. Blank uses Classic Lecture (the app's standard look). Slide content still comes from this step's own generator.",
       },
+      {
+        key: "sources",
+        label: "Material sources",
+        type: "sourcePolicy",
+        required: false,
+        help: `${SOURCES_HELP} The repository is the primary source when linked (this step's own Repository input); other configured sources supplement it, or stand alone as the step's material source when no repository is linked.`,
+      },
     ],
     outputs: [
       { key: "files", label: "Generated files", type: "files" },
@@ -87,13 +201,7 @@ export const contentLectureSteps: StepDefinition[] = [
       const minutes = Number(values.minutes);
 
       if (!repo) {
-        return {
-          outputs: { files: [] },
-          summary: {
-            kind: "text",
-            text: "Skipped - no repository linked; no lecture materials were generated.",
-          },
-        };
+        return runLectureZipRepoless(values, helpers, onProgress, minutes);
       }
 
       onProgress("Downloading repository...");
@@ -102,13 +210,23 @@ export const contentLectureSteps: StepDefinition[] = [
         throw new Error(z.error);
       }
 
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      const supplemental = await gatherSupplementalMaterials(
+        hubCourseId,
+        helpers,
+        onProgress,
+        String(values.sources ?? ""),
+        true
+      );
+
       onProgress("Generating lecture plans...");
       const plans = await generateLecturePlansAction(
         z.base64,
         minutes,
         undefined,
         undefined,
-        helpers.provider
+        helpers.provider,
+        supplemental.text || undefined
       );
 
       if ("error" in plans) {
@@ -133,6 +251,9 @@ export const contentLectureSteps: StepDefinition[] = [
         .replace(/_+/g, "_") || "lecture_plans";
 
       const result = await assembleLectureFiles(plans, values, helpers, onProgress, baseName);
+      if (supplemental.notes.length > 0 && result.summary.kind === "list") {
+        result.summary.items = [...result.summary.items, ...supplemental.notes];
+      }
       return {
         outputs: { files: result.files },
         summary: result.summary,
@@ -200,6 +321,13 @@ export const contentLectureSteps: StepDefinition[] = [
         required: false,
         help: "A PPT Design template that styles the generated slides. Blank uses Classic Lecture.",
       },
+      {
+        key: "sources",
+        label: "Material sources",
+        type: "sourcePolicy",
+        required: false,
+        help: SOURCES_HELP,
+      },
     ],
     outputs: [
       { key: "files", label: "Generated files", type: "files" },
@@ -228,6 +356,14 @@ export const contentLectureSteps: StepDefinition[] = [
         throw new Error("No schedule provided.");
       }
 
+      const supplemental = await gatherSupplementalMaterials(
+        hubCourseId,
+        helpers,
+        onProgress,
+        String(values.sources ?? ""),
+        false
+      );
+
       onProgress("Generating lecture materials from schedule...");
       const scheduleJson = JSON.stringify(schedule);
       const plans = await generateLectureMaterialsFromScheduleAction(
@@ -236,7 +372,8 @@ export const contentLectureSteps: StepDefinition[] = [
         minutes,
         helpers.provider,
         context,
-        sourceMaterial || undefined
+        sourceMaterial || undefined,
+        supplemental.text || undefined
       );
 
       if ("error" in plans) {
@@ -246,6 +383,9 @@ export const contentLectureSteps: StepDefinition[] = [
       const baseName = "lecture_materials";
 
       const result = await assembleLectureFiles(plans, values, helpers, onProgress, baseName);
+      if (supplemental.notes.length > 0 && result.summary.kind === "list") {
+        result.summary.items = [...result.summary.items, ...supplemental.notes];
+      }
       return {
         outputs: { files: result.files },
         summary: result.summary,
@@ -456,6 +596,13 @@ export const contentLectureSteps: StepDefinition[] = [
         required: false,
         help: "How many modules past the current one to target. 0 or blank = the current module.",
       },
+      {
+        key: "sources",
+        label: "Material sources",
+        type: "sourcePolicy",
+        required: false,
+        help: SOURCES_HELP,
+      },
     ],
     outputs: [
       { key: "announcement", label: "Announcement", type: "longtext" },
@@ -466,6 +613,7 @@ export const contentLectureSteps: StepDefinition[] = [
       const hubCourseId = String(values.hubCourse ?? "").trim();
       const moduleIdRaw = String(values.moduleId ?? "").trim();
       const modulesAhead = resolveModulesAhead(values);
+      const sourcesPolicy = resolveSourcePolicy(String(values.sources ?? ""));
 
       const list = await listCourseHubAction();
       if ("error" in list) {
@@ -553,7 +701,7 @@ export const contentLectureSteps: StepDefinition[] = [
         }
 
         const { moduleName, materialsText, notes, materialsSource } =
-          await gatherModuleMaterials(tile, effectiveModuleIdRaw, helpers, onProgress);
+          await gatherModuleMaterials(tile, effectiveModuleIdRaw, helpers, onProgress, sourcesPolicy);
 
         // Combine offset notes with materials gathering notes
         const allNotes = [...offsetNotes, ...notes];

@@ -38,6 +38,7 @@ import {
   COURSE_KICKOFF,
 } from "@/lib/workflows/presets";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
+import { resolveSelectionReconciliation } from "@/lib/workflows/selection-reconciliation";
 import {
   getStepDefinition,
 } from "@/lib/workflows/registry";
@@ -73,14 +74,30 @@ export default function WorkflowsTab() {
     }
   }, [workflowSearch]);
 
+  // Honor a saved (or deep-linked) id UNVALIDATED against `workflows`: custom
+  // defs live in Supabase and arrive async (customLoaded below), so at mount
+  // `workflows` may only hold presets. Rejecting an id that simply hasn't
+  // loaded yet would silently swap a deep link for workflows[0] and then
+  // persist that fallback, destroying the original target. selectedDef's
+  // `find(...) || workflows[0]` fallback covers rendering until the id
+  // resolves; the reconciliation effect below (loadedForIdRef) reloads
+  // values/disabledSteps once it does, and falls back explicitly only if the
+  // id is still unresolved after the custom load has settled.
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(() => {
     if (typeof window === "undefined") return COURSE_KICKOFF.id;
     const saved = localStorage.getItem("ta-workflows-selected");
-    if (saved && workflows.some((w) => w.id === saved)) return saved;
+    if (saved) return saved;
     return workflows[0]?.id ?? COURSE_KICKOFF.id;
   });
 
   const selectedDef = workflows.find((w) => w.id === selectedWorkflowId) || workflows[0];
+
+  // The workflow id that `values`/`disabledSteps` below currently reflect.
+  // Kept in sync synchronously by handleWorkflowChange (ordinary selection)
+  // and asynchronously by the reconciliation effect further down (a
+  // deep-linked id resolving, or a stale id falling back, once the custom
+  // workflow load settles) - see resolveSelectionReconciliation.
+  const loadedForIdRef = useRef<string | null>(selectedDef?.id ?? null);
 
   const [values, setValues] = useState<Record<string, string>>(() => {
     if (typeof window === "undefined" || !selectedDef) return {};
@@ -102,6 +119,24 @@ export default function WorkflowsTab() {
   const [disabledSteps, setDisabledSteps] = useState<Set<number>>(() =>
     selectedDef ? new Set(loadDisabledSteps(selectedDef.id)) : new Set()
   );
+
+  // Load a workflow's persisted values + disabled-steps overlay by id (not via
+  // the `workflows` closure, which is stale right after creating/duplicating).
+  // Shared by handleWorkflowChange (ordinary selection) and the reconciliation
+  // effect below (deep-link resolution / stale-id fallback) so both apply the
+  // exact same reload semantics.
+  const loadWorkflowFormState = useCallback((id: string) => {
+    const saved = localStorage.getItem(`ta-workflow-values-${id}`);
+    let nextValues: Record<string, string> = {};
+    if (saved) {
+      try {
+        nextValues = JSON.parse(saved);
+      } catch {
+        nextValues = {};
+      }
+    }
+    return { values: nextValues, disabledSteps: new Set(loadDisabledSteps(id)) };
+  }, []);
 
 
   const [pendingHandoff, setPendingHandoff] = useState<{ workflowId: string; prefill: Record<string, string>; scheduleId?: string | null; triggerId?: string | null } | null>(null);
@@ -391,6 +426,50 @@ export default function WorkflowsTab() {
     }
   }, [disabledSteps, selectedDef]);
 
+  // Reconciles selectedWorkflowId against `workflows` whenever it drifts
+  // WITHOUT a click - i.e. handleWorkflowChange did not just update
+  // loadedForIdRef itself. Two cases (see resolveSelectionReconciliation):
+  // a deep-linked id resolving once the async custom-def load lands it (id
+  // unchanged, but `values`/`disabledSteps` were loaded against the mount-time
+  // fallback and need reloading for the real id), and a stale id that never
+  // resolves, which falls back to workflows[0] only once the load has
+  // definitively settled (customLoaded && !customLoadFailed) - matching
+  // today's ultimate fallback, but now deferred until it is safe to judge the
+  // id gone.
+  useEffect(() => {
+    const action = resolveSelectionReconciliation(
+      selectedWorkflowId,
+      loadedForIdRef.current,
+      workflows,
+      customLoaded,
+      customLoadFailed
+    );
+    if (action.type === "none") return;
+
+    let cancelled = false;
+
+    (async () => {
+      // No real async work is required; the await defers the state updates
+      // past this render pass so they are not "setState synchronously from
+      // an effect" (the lint rule this repo enforces - see the cancelled-flag
+      // idiom used throughout this file and useWorkflowOptions).
+      await Promise.resolve();
+      if (cancelled) return;
+
+      loadedForIdRef.current = action.id;
+      if (action.type === "fallback") {
+        setSelectedWorkflowId(action.id);
+      }
+      const state = loadWorkflowFormState(action.id);
+      setValues(state.values);
+      setDisabledSteps(state.disabledSteps);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedWorkflowId, workflows, customLoaded, customLoadFailed, loadWorkflowFormState]);
+
   useEffect(() => {
     if (user && supabase) {
       const handleFocus = () => {
@@ -499,27 +578,20 @@ export default function WorkflowsTab() {
   });
 
 
-  const handleWorkflowChange = (newId: string) => {
-    setSelectedWorkflowId(newId);
-    setEditing(false);
-    setDeleteArmed(false);
-    // Load saved values by id (not via the workflows closure, which is stale
-    // right after creating/duplicating) so the previous workflow's form values
-    // never leak into the newly selected one.
-    const saved = localStorage.getItem(`ta-workflow-values-${newId}`);
-    if (saved) {
-      try {
-        setValues(JSON.parse(saved));
-      } catch {
-        setValues({});
-      }
-    } else {
-      setValues({});
-    }
-    // Same lifecycle as values: the disabled-step overlay is per workflow id,
-    // so it is rehydrated (not carried over) whenever the selection changes.
-    setDisabledSteps(new Set(loadDisabledSteps(newId)));
-  };
+  const handleWorkflowChange = useCallback(
+    (newId: string) => {
+      setSelectedWorkflowId(newId);
+      setEditing(false);
+      setDeleteArmed(false);
+      // Keep the reconciliation effect's "loaded for" tracker in sync so it
+      // treats this click as already reconciled and stays a no-op.
+      loadedForIdRef.current = newId;
+      const state = loadWorkflowFormState(newId);
+      setValues(state.values);
+      setDisabledSteps(state.disabledSteps);
+    },
+    [loadWorkflowFormState]
+  );
 
   // Set the selected (custom) workflow's workflow-level targets and persist.
   const handleScopeChange = (scope: WorkflowScope) => {
@@ -631,7 +703,7 @@ export default function WorkflowsTab() {
     handoffArmedRef.current = false;
     setPendingHandoff(null);
     void workflowRun.handleRun();
-  }, [pendingHandoff, workflowRun, selectedWorkflowId, values]);
+  }, [pendingHandoff, workflowRun, selectedWorkflowId, values, handleWorkflowChange]);
 
   return (
     <TabShell>

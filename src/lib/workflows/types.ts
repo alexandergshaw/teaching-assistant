@@ -18,6 +18,9 @@ import { isCourseFanout } from "@/lib/workflows/fanout";
  * - lookahead: a days-ahead scope value (string representation of number)
  * - moduleOffset: a modules-ahead scope value (string representation of number)
  * - concepts: newline-joined concept list for loop items; a scopeable scalar family
+ * - sourcePolicy: an encoded SourcePolicy (source-policy.ts) - which material
+ *   sources a lecture-building step checks, in what order, and its strategy;
+ *   a scopeable scalar family, empty/absent = the default policy
  */
 export type WorkflowValueType =
   | "text"
@@ -42,7 +45,8 @@ export type WorkflowValueType =
   | "deckTemplate"
   | "lookahead"
   | "moduleOffset"
-  | "concepts";
+  | "concepts"
+  | "sourcePolicy";
 
 // Value types that can carry a fixed ("preset") value in the builder, so a
 // workflow can hard-set the input and run unmonitored without prompting. Beyond
@@ -67,6 +71,7 @@ export const LITERAL_CAPABLE_TYPES: ReadonlySet<string> = new Set([
   "lookahead",
   "moduleOffset",
   "concepts",
+  "sourcePolicy",
 ]);
 
 // A single-item value type -> its scopeable list type. Lets a single-item
@@ -183,6 +188,7 @@ export interface WorkflowStepConfig {
  * only). The lookahead value is a scalar days count (never "*" or a list).
  * The moduleOffset value is a scalar modules-ahead count (never "*" or a list).
  * The concepts value is a scalar newline-joined concept list (never "*" or a list).
+ * The sourcePolicy value is a scalar encoded SourcePolicy (never "*" or a list).
  * An unset family (empty/absent) leaves those inputs asking as before.
  */
 export interface WorkflowScope {
@@ -193,6 +199,7 @@ export interface WorkflowScope {
   lookahead?: string;
   moduleOffset?: string;
   concepts?: string;
+  sourcePolicy?: string;
 }
 
 export interface WorkflowDef {
@@ -229,6 +236,8 @@ export function scopeFamilyForType(type: string): keyof WorkflowScope | null {
       return "moduleOffset";
     case "concepts":
       return "concepts";
+    case "sourcePolicy":
+      return "sourcePolicy";
     default:
       return null;
   }
@@ -268,7 +277,7 @@ export function scopeCoversType(scope: WorkflowScope | undefined, type: string):
  * otherwise the scope value is coerced to the input's arity: a list input takes
  * the scope value as-is (the engine later expands "*"); a single input takes
  * the first concrete item, and never "*" (which a single input cannot express).
- * Scalar families (lookahead, moduleOffset, concepts) are returned as-is from scope, with "*" rejected.
+ * Scalar families (lookahead, moduleOffset, concepts, sourcePolicy) are returned as-is from scope, with "*" rejected.
  */
 export function applyWorkflowScope(
   type: string,
@@ -280,7 +289,7 @@ export function applyWorkflowScope(
   if (!family || !scope) return runtimeValue;
   const scopeVal = (scope[family] ?? "").trim();
   if (!scopeVal) return runtimeValue;
-  if (family === "lookahead" || family === "moduleOffset" || family === "concepts") {
+  if (family === "lookahead" || family === "moduleOffset" || family === "concepts" || family === "sourcePolicy") {
     return scopeVal === "*" ? runtimeValue : scopeVal;
   }
   if (isSingleEntityType(type)) {
@@ -323,6 +332,9 @@ export function describeWorkflowScope(scope: WorkflowScope | undefined): string 
   if (scope.concepts?.trim()) {
     parts.push(`${count(scope.concepts)} concept(s) targeted`);
   }
+  if (scope.sourcePolicy?.trim()) {
+    parts.push("a custom material-source policy");
+  }
   return parts.join(", ");
 }
 
@@ -342,13 +354,14 @@ export function describeScopeForType(scope: WorkflowScope | undefined, type: str
     const conceptCount = effective.split("\n").map((s) => s.trim()).filter(Boolean).length;
     return `${conceptCount} concept(s) targeted`;
   }
+  if (family === "sourcePolicy") return "custom material-source policy";
   if (isSingleEntityType(type)) return effective;
-  const labels: Record<Exclude<keyof WorkflowScope, "institution" | "lookahead" | "moduleOffset" | "concepts">, [string, string]> = {
+  const labels: Record<Exclude<keyof WorkflowScope, "institution" | "lookahead" | "moduleOffset" | "concepts" | "sourcePolicy">, [string, string]> = {
     hubCourse: ["all course tiles", "course tile(s)"],
     lmsCourse: ["all Canvas courses", "Canvas course(s)"],
     org: ["all organizations", "organization(s)"],
   };
-  const pair = labels[family as Exclude<keyof WorkflowScope, "institution" | "lookahead" | "moduleOffset" | "concepts">];
+  const pair = labels[family as Exclude<keyof WorkflowScope, "institution" | "lookahead" | "moduleOffset" | "concepts" | "sourcePolicy">];
   if (!pair) return effective;
   if (effective === "*") return pair[0];
   const count = effective.split("\n").map((s) => s.trim()).filter(Boolean).length;

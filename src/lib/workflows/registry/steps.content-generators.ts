@@ -33,6 +33,10 @@ import { buildSlidesPptx } from "@/lib/pptx";
 import { applyTextRevision } from "@/lib/embedded/revise";
 import { findModuleForWeek } from "@/lib/week-numbering";
 import { liveModuleValue, exportModuleValue } from "@/lib/workflows/module-value";
+import { resolveSourcePolicy } from "@/lib/workflows/source-policy";
+
+const SOURCES_HELP =
+  "Which material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
 
 export const contentGeneratorSteps: StepDefinition[] = [
   {
@@ -477,6 +481,13 @@ export const contentGeneratorSteps: StepDefinition[] = [
         required: false,
         help: "Also synthesize a narrated mp3 of each lecture script (ElevenLabs) for asynchronous students.",
       },
+      {
+        key: "sources",
+        label: "Material sources",
+        type: "sourcePolicy",
+        required: false,
+        help: SOURCES_HELP,
+      },
     ],
     outputs: [
       { key: "report", label: "Report", type: "longtext" },
@@ -488,6 +499,8 @@ export const contentGeneratorSteps: StepDefinition[] = [
         .split("\n")
         .map((s) => s.trim())
         .filter(Boolean);
+
+      const sourcesPolicy = resolveSourcePolicy(String(values.sources ?? ""));
 
       if (ids.length === 0) {
         throw new Error("Select at least one course tile.");
@@ -628,7 +641,7 @@ export const contentGeneratorSteps: StepDefinition[] = [
                   }
 
                   try {
-                    const gathered = await gatherModuleMaterials(tile, moduleId, helpers, onProgress);
+                    const gathered = await gatherModuleMaterials(tile, moduleId, helpers, onProgress, sourcesPolicy);
                     if (gathered.materialsText.trim()) {
                       // Cap module materials at 12000 chars as per spec
                       modulesText = gathered.materialsText.trim().slice(0, 12000);

@@ -2,6 +2,7 @@
 
 import { Autocomplete, Checkbox, FormControlLabel, TextField, MenuItem } from "@mui/material";
 import Typeahead from "./ui/Typeahead";
+import SourcePolicyEditor from "./workflows/SourcePolicyEditor";
 import { ALL_SCOPE } from "@/lib/workflows/scope";
 import type { WorkflowScope } from "@/lib/workflows/types";
 
@@ -263,6 +264,15 @@ export default function WorkflowScopeControl({
             />
             <p className="fieldHint" style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
               Fills every step that targets concepts to loop over.
+            </p>
+          </div>
+        </div>
+        <div style={cell}>
+          <span style={labelStyle}>Material sources</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <SourcePolicyEditor value={scope.sourcePolicy ?? ""} onChange={(v) => set({ sourcePolicy: v })} />
+            <p className="fieldHint" style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+              Fills every lecture-building step&apos;s material-source policy.
             </p>
           </div>
         </div>

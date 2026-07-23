@@ -26,6 +26,7 @@ function fakeHelpers(): StepRunHelpers {
     getLibraryFile: vi.fn(async () => null),
     getInstitutionFields: vi.fn(async () => []),
     loadCourseExport: vi.fn(async () => null),
+    loadCourseMaterials: vi.fn(async () => null),
   };
 }
 

@@ -2,6 +2,7 @@
 
 import { MenuItem, TextField } from "@mui/material";
 import GithubRepoPicker from "../../GithubRepoPicker";
+import SourcePolicyEditor from "../SourcePolicyEditor";
 import ScopePicker from "./ScopePicker";
 import { type BuilderPickerData } from "./builder-shared";
 
@@ -178,6 +179,9 @@ function LiteralEditor({
         </TextField>
       </div>
     );
+  }
+  if (type === "sourcePolicy") {
+    return <SourcePolicyEditor value={value} onChange={onChange} />;
   }
   if (type === "moduleOffset") {
     return (

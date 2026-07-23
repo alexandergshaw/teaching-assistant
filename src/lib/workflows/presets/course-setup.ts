@@ -105,6 +105,7 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         includeInstructions: { source: "literal", value: "1" },
         template: { source: "runtime", fieldKey: "deckTemplate" },
+        sources: { source: "runtime", fieldKey: "sources" },
       },
     },
     {
@@ -177,6 +178,7 @@ export const COURSE_REFRESH: WorkflowDef = {
         includeInstructions: { source: "literal", value: "1" },
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         template: { source: "runtime", fieldKey: "deckTemplate" },
+        sources: { source: "runtime", fieldKey: "sources" },
       },
     },
     {

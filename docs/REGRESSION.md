@@ -548,8 +548,10 @@ most likely to break again when these files are edited.
    errors return clean error outcomes and NEVER throw even with saveRunReport
    set (guarded courseNames map; server-runner tests pin it); reports group per
    course.
-5. Guardrails: institution "*" + course fan-out rejected in both paths with the
-   pick-one-dimension message; institution fan-out behavior byte-identical.
+5. Guardrails: institution fan-out behavior byte-identical. (The original
+   institution-"*"-plus-course-fan-out rejection was REPLACED by composed
+   execution - see the "Composed fan-out" entry below, which supersedes this
+   check's rejection wording.)
 
 ### 2026-07-22 - Automations subtab (monitoring hub)
 
@@ -1061,3 +1063,85 @@ page itself is a login-walled SPA, so fetching cannot recover a TOC.
    tier notes, sources listing, and resolvedSourceMaterial fallback; a
    presets test pins the new output binding. source-alignment.test.ts grew
    27 -> 35 with the original 27 untouched.
+
+### 2026-07-23 - Workflows deep links honor async custom defs
+
+Context: deep links from the Automations/Drafts/Files surfaces always landed
+on workflows[0] ("Announcement draft") because WorkflowsTab's selection
+initializer validated ta-workflows-selected against a list that does not yet
+contain the async-loaded Supabase custom defs, then persisted the fallback
+over the target.
+
+1. The initializer keeps a non-empty saved id UNVALIDATED; selectedDef's
+   find-or-first fallback covers rendering until the custom defs land.
+2. loadedForIdRef tracks which id values/disabledSteps reflect; the shared
+   loadWorkflowFormState loader gives handleWorkflowChange (synchronous
+   update, byte-identical click behavior) and the reconciliation effect the
+   exact same reload semantics.
+3. The reconciliation effect (cancelled-flag async idiom, no eslint-disable)
+   acts only when selection drifted without a click: a resolving deep-link
+   id reloads form state for the real id; a stale id falls back to
+   workflows[0] ONLY after the custom load settled successfully
+   (customLoaded && !customLoadFailed) - a failed load never discards the
+   target. Decision logic is pure: resolveSelectionReconciliation
+   (selection-reconciliation.ts, 5 tests: honored pre-load, reload on
+   resolve, fallback rules incl. load-failure, no-op on match, empty list).
+4. Clicking any workflow link on the Automations subtab lands on THAT
+   workflow with the Automate panel open, its own saved values, and its own
+   disabled-steps overlay; ta-workflows-selected now persists the deep-link
+   id (never the fallback) through the async window.
+
+### 2026-07-23 - Source-resolution policy for lecture-building steps
+
+Context: user-configurable list/order/strategy of course-material sources
+for all six lecture-building steps; previously the resolver chain was
+hard-coded and the uploaded materials zip was read by no lecture step.
+
+1. Pure model (source-policy.ts, 16 tests): SourceKind = live-lms |
+   course-export | materials-zip | repo | tile-meta; SourcePolicy = ordered
+   deduped subset + strategy (first-success | merge-all | until-failure);
+   tolerant decode (junk/unknown -> dropped or null); DEFAULT_SOURCE_POLICY
+   = live-lms -> course-export -> tile-meta, first-success - exactly the
+   legacy chain, so unset/legacy values change nothing (default-equivalence
+   proven in registry-helpers.sources.test.ts, 12 tests: live success,
+   live-fail->export with the coupled note wording, explicit export pick,
+   terminal tile-meta, no-canvasUrl no-op).
+2. gatherModuleMaterials moved to registry-helpers.sources.ts (re-exported;
+   registry-helpers.ts down to 734 lines) and parameterized by policy;
+   per-kind gatherers include the NEW materials-zip source (newest tile zip
+   via downloadCourseZipBlob + extractZipMaterialsTextAction wrapping the
+   server-only office-extract, names+sizes fallback over 8 MB or on error)
+   and the NEW repo digest source (tile repo via ingestRepoAction). Notes
+   name every source checked in order and what it yielded; caps and
+   never-hard-fail semantics preserved.
+3. Input plumbing: "sourcePolicy" WorkflowValueType with a scope family
+   (set once per workflow via WorkflowScopeControl; the no-per-step-prompt
+   rule), SourcePolicyEditor composite (checkbox list + reorder + strategy
+   select) shared by RuntimeFieldInput/LiteralEditor/scope control; value
+   persists via ta-workflow-values-<id>. The "sources" input (required
+   false) exists on lecture-zip, lecture-materials-from-schedule,
+   prepare-lecture, lecture-qa, generate-presentation-from-template,
+   draft-upcoming-lectures (registry.source-policy-input.test.ts) and is
+   bound in every preset using those steps (prepare-lecture, lecture-qa,
+   module-slides-from-template, weekly-lecture-deck, next-week-lectures,
+   weekly-everything-prep, course-kickoff-no-code, course-refresh).
+4. Step wiring: the module-materials consumers pass the decoded policy
+   through; repo-driven lecture-zip treats a policy "repo" entry as its own
+   repo input (noted when excluded); supplemental materials fold into
+   generateLecturePlansAction / generateLectureMaterialsFromScheduleAction
+   via delimited sections (optional trailing params). Headless-safe set
+   UNCHANGED (canary count untouched). StepRunHelpers gained
+   loadCourseMaterials in both runners.
+5. Repoless lecture-zip (follow-up fix, same batch): the repo input is
+   required FALSE; with a repo the pipeline is byte-identical; without one
+   the step (a) errors clearly when hubCourse is also blank, (b) gathers
+   via the policy, resolves the schedule from the bound input else tile
+   csvData (csvToSchedule), (c) errors with the gather notes when neither
+   materials nor schedule exist - NEVER a silent skip, (d) generates via
+   generateLectureMaterialsFromScheduleAction + assembleLectureFiles with
+   the summary labeled "Built from course sources - no repository linked"
+   and an includeInstructions-inapplicable note
+   (registry.lecture-zip.test.ts, incl. error paths).
+6. File hygiene: course-planning.ts at 807 after moving
+   buildScheduleWeekPlan/generateSlidesFromTopic to the grounding sibling
+   (284); every touched file at or under 1000 lines.

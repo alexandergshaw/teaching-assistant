@@ -53,6 +53,11 @@ describe("generate-presentation-from-template step", () => {
     expect(modulesAheadInput, "modulesAhead input exists").toBeTruthy();
     expect(modulesAheadInput!.type).toBe("moduleOffset");
     expect(modulesAheadInput!.required).toBe(false);
+
+    const sourcesInput = def!.inputs.find((i) => i.key === "sources");
+    expect(sourcesInput, "sources input exists").toBeTruthy();
+    expect(sourcesInput!.type).toBe("sourcePolicy");
+    expect(sourcesInput!.required).toBe(false);
   });
 
   it("has correct outputs: draftId, slideCount, presentationTitle, deck, and slidesJson", () => {
@@ -81,8 +86,8 @@ describe("generate-presentation-from-template step", () => {
     expect(def!.outputs.length).toBe(5);
   });
 
-  it("has exactly 7 inputs", () => {
-    expect(def!.inputs.length).toBe(7);
+  it("has exactly 8 inputs", () => {
+    expect(def!.inputs.length).toBe(8);
   });
 
   it("deck and slidesJson outputs can feed lecture-qa slidesText input", () => {

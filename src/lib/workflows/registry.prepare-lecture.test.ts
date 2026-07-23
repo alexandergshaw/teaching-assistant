@@ -40,6 +40,11 @@ describe("prepare-lecture step", () => {
     expect(modulesAheadInput, "modulesAhead input exists").toBeTruthy();
     expect(modulesAheadInput!.type).toBe("moduleOffset");
     expect(modulesAheadInput!.required).toBe(false);
+
+    const sourcesInput = def!.inputs.find((i) => i.key === "sources");
+    expect(sourcesInput, "sources input exists").toBeTruthy();
+    expect(sourcesInput!.type).toBe("sourcePolicy");
+    expect(sourcesInput!.required).toBe(false);
   });
 
   it("has correct outputs: announcement and moduleName", () => {
@@ -56,7 +61,7 @@ describe("prepare-lecture step", () => {
     expect(def!.outputs.length).toBe(2);
   });
 
-  it("has exactly 5 inputs", () => {
-    expect(def!.inputs.length).toBe(5);
+  it("has exactly 6 inputs", () => {
+    expect(def!.inputs.length).toBe(6);
   });
 });

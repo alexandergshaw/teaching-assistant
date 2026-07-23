@@ -296,7 +296,11 @@ export async function generateLecturePlansAction(
   lectureDurationMinutes: number,
   introTemplateBase64?: string,
   instructionsTemplateBase64?: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  // Non-repo material-source-policy text (source-policy.ts resolver output),
+  // folded into each assignment's content via a delimited section so the repo
+  // remains the primary source; absent/blank changes nothing.
+  supplementalMaterials?: string
 ): Promise<AssignmentPlan[] | { error: string }> {
   try {
     const JSZip = (await import("jszip")).default;
@@ -320,6 +324,12 @@ export async function generateLecturePlansAction(
     for (const folder of folders) {
       const bundle = await extractAssignmentContentBundle(zip, allPaths, prefix, folder);
       if (bundle) bundles.push(bundle);
+    }
+
+    if (supplementalMaterials?.trim()) {
+      for (const bundle of bundles) {
+        bundle.content = `${bundle.content}\n\n--- Additional course materials (configured sources) ---\n${supplementalMaterials.trim()}`;
+      }
     }
 
     if (bundles.length === 0) {

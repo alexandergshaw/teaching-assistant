@@ -41,6 +41,10 @@ describe("lecture-materials-from-schedule step", () => {
     expect(inputByKey.get("template")!.required, "template is optional").toBe(false);
     expect(inputByKey.get("template")!.type, "template type").toBe("deckTemplate");
 
+    expect(inputByKey.has("sources"), "has sources input").toBe(true);
+    expect(inputByKey.get("sources")!.required, "sources is optional").toBe(false);
+    expect(inputByKey.get("sources")!.type, "sources type").toBe("sourcePolicy");
+
     // Verify outputs
     const outputs = step!.outputs;
     const outputByKey = new Map(outputs.map((out) => [out.key, out]));

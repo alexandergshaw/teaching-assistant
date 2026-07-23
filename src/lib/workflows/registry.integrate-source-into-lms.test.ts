@@ -33,6 +33,7 @@ function testHelpers(): StepRunHelpers {
     getLibraryFile: null,
     getInstitutionFields: null,
     loadCourseExport: null,
+    loadCourseMaterials: null,
   };
 }
 

@@ -5,6 +5,7 @@ import { ALL_SCOPE } from "@/lib/workflows/scope";
 import CoursePicker from "../CoursePicker";
 import GithubRepoPicker from "../GithubRepoPicker";
 import Typeahead from "../ui/Typeahead";
+import SourcePolicyEditor from "./SourcePolicyEditor";
 import type { RuntimeField } from "@/lib/workflows/types";
 import styles from "../../page.module.css";
 
@@ -256,6 +257,18 @@ export function RuntimeFieldInput({
             <MenuItem value="months">months</MenuItem>
           </TextField>
         </div>
+        {field.help && (
+          <p className={styles.fieldHint} style={{ margin: 0 }}>
+            {field.help}
+          </p>
+        )}
+      </div>
+    );
+  } else if (field.type === "sourcePolicy") {
+    return (
+      <div key={field.fieldKey} className={styles.field}>
+        <label>{field.label}</label>
+        <SourcePolicyEditor value={value} onChange={onChange} />
         {field.help && (
           <p className={styles.fieldHint} style={{ margin: 0 }}>
             {field.help}

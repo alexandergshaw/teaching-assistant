@@ -34,6 +34,7 @@ export * from "./actions/grading-inbox";
 export * from "./actions/lecture-plans";
 export * from "./actions/llm-content";
 export * from "./actions/llm-tools";
+export * from "./actions/materials-extract";
 export * from "./actions/media";
 export * from "./actions/messaging";
 export * from "./actions/research";

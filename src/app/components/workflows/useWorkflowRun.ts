@@ -15,7 +15,8 @@ import {
   type CourseOutcome,
 } from "./attended-fanout";
 import { loadInstitutionFields } from "@/lib/institution-fields";
-import { appendCourseMaterialFileAction, appendCourseExportFileAction } from "@/app/actions";
+import { appendCourseMaterialFileAction, appendCourseExportFileAction, listCourseHubAction } from "@/app/actions";
+import { downloadCourseZipBlob } from "@/lib/course-files";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
 import { updateScheduleRunOutcome, updateTriggerRunOutcome } from "@/lib/workflow-run-status";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -441,6 +442,28 @@ export function useWorkflowRun(
               loadInstitutionFields(supabase, user.id, acronym)
           : null,
       loadCourseExport: user && supabase ? loadCourseExportData : null,
+      loadCourseMaterials:
+        user && supabase
+          ? async (courseId: string) => {
+              const list = await listCourseHubAction();
+              if ("error" in list) return null;
+              const tile = list.courses.find((c) => c.id === courseId);
+              if (!tile) return null;
+              const newestMaterialsFile =
+                tile.materialsFiles.length > 0
+                  ? tile.materialsFiles.reduce((a, b) => (b.addedAt > a.addedAt ? b : a))
+                  : null;
+              if (newestMaterialsFile) {
+                const blob = await downloadCourseZipBlob(supabase, newestMaterialsFile);
+                return { name: newestMaterialsFile.name, blob };
+              }
+              if (tile.materialsZipPath) {
+                const blob = await downloadCourseZipBlob(supabase, { path: tile.materialsZipPath });
+                return { name: tile.materialsZipName ?? "materials.zip", blob };
+              }
+              return null;
+            }
+          : null,
       workflowId: selectedDef.id,
       workflowName: selectedDef.name,
       workflowRunId,

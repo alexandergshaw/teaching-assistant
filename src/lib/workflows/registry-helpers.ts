@@ -5,9 +5,6 @@ import type { LlmProvider } from "@/lib/llm";
 import type { ScheduleWeekPlan, AssignmentPlan } from "@/app/actions";
 import {
   listCourseContentAction,
-  getPageAction,
-  previewFileAction,
-  fetchCanvasMetaAction,
   listCourseHubAction,
   listAssignmentDueDatesByUrlAction,
   getDeckTemplateAction,
@@ -19,9 +16,8 @@ import { csvToSchedule } from "@/lib/workflows/types";
 import type { PptxTheme } from "@/lib/pptx";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
-import { detectCanvasUrlKind, moduleItemContentUrl } from "@/lib/canvas-url";
+import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { currentCourseWeek, courseProgressStatus, currentWeekFromDeadlines } from "@/lib/week-numbering";
-import { parseLmsModuleValue } from "@/lib/workflows/module-value";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
 import type { CommonResourceItem } from "@/lib/common-resources";
 import type { InstitutionField } from "@/lib/institution-fields";
@@ -52,6 +48,10 @@ export interface StepRunHelpers {
   getLibraryFile: ((fileId: string) => Promise<{ blob: Blob; name: string; mimeType: string } | null>) | null;
   getInstitutionFields: ((acronym: string) => Promise<InstitutionField[]>) | null;
   loadCourseExport: ((courseId: string) => Promise<CartridgeCourseData | null>) | null;
+  /** The newest course-materials zip (uploaded materials, not an LMS export)
+   * on a tile - the "materials-zip" source kind's raw input; null when the
+   * tile has none configured or courseId is not found. */
+  loadCourseMaterials: ((courseId: string) => Promise<{ name: string; blob: Blob } | null>) | null;
   workflowId?: string;
   workflowName?: string;
   workflowRunId?: string;
@@ -284,233 +284,10 @@ export function weekDeadline(start: Date, week: number): Date {
   return due;
 }
 
-// Gather the text a lecture-shaped step feeds the model, trying sources in
-// order: the live LMS module (page bodies + file previews + assignment/quiz/discussion
-// descriptions when available + item titles), then on live failure or an export-sourced
-// module pick the course's LMS export tile (item titles + syllabus text), then the tile's
-// own topics/description. Assignment/discussion descriptions are fetched for up to 6 items
-// per module; beyond that, only titles are included. Content gathering never hard-fails
-// the step.
-export async function gatherModuleMaterials(
-  tile: Course,
-  moduleIdRaw: string,
-  helpers: StepRunHelpers,
-  onProgress: (text: string) => void
-): Promise<{ moduleName: string; materialsText: string; notes: string[]; materialsSource: string }> {
-  // Materials cap at ~20000 chars so the deck prompt stays inside the
-  // action's own truncation budget; going over surfaces as a note.
-  const MATERIALS_CAP = 20000;
-  const DESCRIPTION_FETCH_LIMIT = 6;
-  const chunks: string[] = [];
-  const notes: string[] = [];
-  let total = 0;
-  let truncated = false;
-  const push = (text: string) => {
-    if (!text) return;
-    if (total >= MATERIALS_CAP) {
-      truncated = true;
-      return;
-    }
-    const slice = text.slice(0, MATERIALS_CAP - total);
-    if (slice.length < text.length) truncated = true;
-    chunks.push(slice);
-    total += slice.length;
-  };
-
-  const canvasUrl = (tile.canvasUrl ?? "").trim();
-  const inst = helpers.activeInstitution || undefined;
-  const picked = parseLmsModuleValue(moduleIdRaw);
-
-  let moduleName = "Upcoming module";
-  let materialsSource = "";
-  let gathered = false;
-
-  // Pull item titles + syllabus text from the course's newest LMS export.
-  const gatherFromExport = async (matchName: string | null): Promise<boolean> => {
-    if (!helpers.loadCourseExport || !matchName) return false;
-    onProgress("Reading the course export...");
-    let data: CartridgeCourseData | null = null;
-    try {
-      data = await helpers.loadCourseExport(tile.id);
-    } catch (err) {
-      notes.push(`course export: ${err instanceof Error ? err.message : "could not read"}`);
-      return false;
-    }
-    if (!data || data.modules.length === 0) return false;
-    const target =
-      data.modules.find((m) => m.name === matchName) ??
-      data.modules.find((m) => m.name.toLowerCase() === matchName.toLowerCase());
-    if (!target) return false;
-    moduleName = target.name;
-    for (const item of target.items) {
-      push(`${item.type}: ${item.title}\n`);
-    }
-    if (data.syllabusHtml) {
-      const syllabusText = data.syllabusHtml
-        .replace(/<[^>]+>/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-      if (syllabusText) push(`\n# Course syllabus (context)\n${syllabusText}\n`);
-    }
-    materialsSource = `Materials from the course export module "${target.name}" (item titles + syllabus)`;
-    return true;
-  };
-
-  if (picked.fromExport) {
-    gathered = await gatherFromExport(picked.name);
-    if (!gathered) {
-      notes.push(`module "${picked.name ?? ""}" not found in the course export`);
-    }
-  } else if (canvasUrl && picked.liveId) {
-    onProgress("Loading module materials...");
-    try {
-      const content = await listCourseContentAction(canvasUrl, inst);
-      if ("error" in content) {
-        throw new Error(content.error);
-      }
-      const courseModule = content.modules.find((m) => String(m.id) === picked.liveId);
-      if (!courseModule) {
-        throw new Error("the chosen module was not found in the LMS course");
-      }
-      moduleName = courseModule.name;
-      materialsSource = `Materials read from LMS module "${courseModule.name}"`;
-
-      // Collect Assignment/Discussion items that support description fetching
-      let descriptionsFetched = 0;
-      const assignmentLikeItems = courseModule.items.filter(
-        (item) =>
-          (item.type === "Assignment" || item.type === "Discussion") &&
-          item.htmlUrl
-      );
-      const hasMoreDescriptions = assignmentLikeItems.length > DESCRIPTION_FETCH_LIMIT;
-
-      for (const item of courseModule.items) {
-        // Fail-forward per item: unreadable materials become notes.
-        try {
-          if (item.type === "Page" && item.pageUrl) {
-            const p = await getPageAction(canvasUrl, item.pageUrl, inst);
-            if ("error" in p) {
-              throw new Error(p.error);
-            }
-            const bodyText = p.page.body
-              .replace(/<[^>]+>/g, " ")
-              .replace(/\s+/g, " ")
-              .trim();
-            push(`# ${p.page.title}\n${bodyText}\n\n`);
-          } else if (item.type === "File" && item.contentId !== null) {
-            const f = await previewFileAction(canvasUrl, item.contentId, inst);
-            if ("error" in f) {
-              throw new Error(f.error);
-            }
-            if (f.preview.text.trim()) {
-              push(`# ${item.title}\n${f.preview.text}\n\n`);
-            }
-          } else if (
-            (item.type === "Assignment" || item.type === "Discussion") &&
-            moduleItemContentUrl(canvasUrl, item.type, item.contentId, item.htmlUrl) &&
-            descriptionsFetched < DESCRIPTION_FETCH_LIMIT
-          ) {
-            // Fetch description for Assignment/Discussion items (up to 6).
-            // The item's html_url is the /modules/items/ wrapper link, so the
-            // direct content URL is built from the item's content id.
-            descriptionsFetched++;
-            const meta = await fetchCanvasMetaAction(
-              moduleItemContentUrl(canvasUrl, item.type, item.contentId, item.htmlUrl)!
-            );
-            if ("error" in meta) {
-              throw new Error(meta.error);
-            }
-            const description = meta.description.trim();
-
-            // Format the header with points and due date when available
-            let headerLine = `${item.type}: ${item.title}`;
-            const suffixes: string[] = [];
-            if (typeof item.pointsPossible === "number" && item.pointsPossible > 0) {
-              suffixes.push(`${item.pointsPossible} point${item.pointsPossible === 1 ? "" : "s"}`);
-            }
-            if (item.dueAt) {
-              const dueDate = new Date(item.dueAt);
-              const dateStr = dueDate.toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-              });
-              suffixes.push(`due ${dateStr}`);
-            }
-            if (suffixes.length > 0) {
-              headerLine += ` (${suffixes.join(", ")})`;
-            }
-            push(`${headerLine}\n`);
-
-            if (description) {
-              push(`${description}\n\n`);
-            }
-          } else if (item.type === "Assignment" || item.type === "Quiz" || item.type === "Discussion") {
-            // Title-only line for Quiz items (fetchCanvasMetaAction doesn't support them)
-            // or Assignment/Discussion items beyond the fetch limit
-            let headerLine = `${item.type}: ${item.title}`;
-            const suffixes: string[] = [];
-            if (typeof item.pointsPossible === "number" && item.pointsPossible > 0) {
-              suffixes.push(`${item.pointsPossible} point${item.pointsPossible === 1 ? "" : "s"}`);
-            }
-            if (item.dueAt) {
-              const dueDate = new Date(item.dueAt);
-              const dateStr = dueDate.toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-              });
-              suffixes.push(`due ${dateStr}`);
-            }
-            if (suffixes.length > 0) {
-              headerLine += ` (${suffixes.join(", ")})`;
-            }
-            push(`${headerLine}\n`);
-          }
-        } catch (err) {
-          notes.push(
-            `${item.title}: ${
-              err instanceof Error ? err.message : "could not read"
-            }`
-          );
-        }
-      }
-
-      if (hasMoreDescriptions) {
-        notes.push(
-          `further assignment descriptions omitted (${assignmentLikeItems.length - DESCRIPTION_FETCH_LIMIT} more)`
-        );
-      }
-      gathered = true;
-    } catch (err) {
-      // Live LMS failed: fall back to the course export tile by module name.
-      const message = err instanceof Error ? err.message : "could not read the LMS course";
-      gathered = await gatherFromExport(picked.name);
-      if (gathered) {
-        notes.push(`live LMS failed (${message}) - used the course export instead`);
-      } else {
-        notes.push(`live LMS failed (${message}) and the course export had no matching module`);
-      }
-    }
-  }
-
-  if (!gathered) {
-    // Reset any partial content so the terminal fallback stands alone.
-    chunks.length = 0;
-    total = 0;
-    push(
-      [tile.topics ?? "", tile.description ?? ""]
-        .filter(Boolean)
-        .join("\n\n")
-    );
-    notes.push("no live LMS module or export module - using tile topics/description");
-    materialsSource = "Materials from the tile's topics/description";
-  }
-
-  if (truncated) {
-    notes.push("materials truncated to ~20000 characters");
-  }
-
-  return { moduleName, materialsText: chunks.join(""), notes, materialsSource };
-}
+// gatherModuleMaterials lives in registry-helpers.sources.ts (kept this file
+// under the 1000-line gate); re-exported here so existing importers are
+// unchanged.
+export { gatherModuleMaterials } from "@/lib/workflows/registry-helpers.sources";
 
 // Module-level cache for live course modules, keyed by canvasUrl.
 // TTL is ~120 seconds to avoid redundant fetches during multi-week/multi-tile runs.

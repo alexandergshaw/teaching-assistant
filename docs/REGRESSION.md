@@ -1622,3 +1622,23 @@ Acceptance criteria (196c1e8+):
 5. Existing source kinds, strategies, DEFAULT_SOURCE_POLICY, and the
    gather switch are unchanged. The new kind only fires when selected
    in the source policy editor.
+
+## 55. Generate course schedule: source policy input
+
+Acceptance criteria (d0e4b35+):
+1. generate-schedule step gains a `sources` input (type sourcePolicy,
+   optional). SourcePolicyEditor renders automatically for it. Workflow
+   scope's sourcePolicy fills it via applyWorkflowScope when blank.
+2. Runtime priority chain: explicit sourceMaterial text (always wins)
+   > source policy gatherers (gatherModuleMaterials course-level with
+   empty moduleIdRaw) > tile textbook fallback > nothing. Course tile
+   loaded once and cached across both policy and textbook branches.
+3. Gather notes appended to the step's summary notes under "Source
+   resolution:" when the policy branch fires.
+4. COURSE_KICKOFF and NO_CODE_KICKOFF presets bind `sources` to
+   `{ source: "runtime", fieldKey: "sources" }` on their
+   generate-schedule steps.
+5. Existing sourceMaterial free-text input preserved. Existing
+   alignment check (pasted TOC / derived TOC / name-only) works
+   unchanged on whatever sourceMaterial was resolved.
+   resolvedSourceMaterial output passes the resolved value forward.

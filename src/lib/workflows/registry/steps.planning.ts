@@ -19,7 +19,10 @@ import {
   resolveModulesAhead,
   resolveTileCurrentWeek,
   loadTileWeekTopic,
+  gatherModuleMaterials,
 } from "@/lib/workflows/registry-helpers";
+import type { Course } from "@/lib/supabase/courses";
+import { resolveSourcePolicy } from "@/lib/workflows/source-policy";
 import { parseIcsEvents } from "@/lib/ics";
 import { filterUpcoming, formatDeadlineReport, type DeadlineSection } from "@/lib/workflows/deadline-report";
 import { planningGeneratorSteps } from "@/lib/workflows/registry/steps.planning-generators";
@@ -67,6 +70,13 @@ export const planningSteps: StepDefinition[] = [
         help: "Name the primary source (textbook, course module, etc.) and paste its table of contents or chapter list. The schedule maps weeks onto it, balancing chapters across weeks automatically, and names covered chapters in each week. Include the platform URL to enable link embedding in the LMS integration step. A bare URL or short citation with no chapter list triggers one web search for the source's official table of contents before falling back to name-only. Instructor context above overrides this policy where it speaks (e.g. \"no exam weeks\").",
       },
       {
+        key: "sources",
+        label: "Material sources",
+        type: "sourcePolicy",
+        required: false,
+        help: "Select which sources to check for course material (topic outline, source platform URL, tile metadata, etc.). When set, overrides the tile-textbook fallback. An explicit Source material value above always takes priority.",
+      },
+      {
         key: "hubCourse",
         label: "Course tile",
         type: "hubCourse",
@@ -109,19 +119,34 @@ export const planningSteps: StepDefinition[] = [
 
       const context = String(values.context ?? "").trim() || undefined;
       let sourceMaterial = String(values.sourceMaterial ?? "").trim();
-
-      // Fallback: an empty sourceMaterial falls back to the course tile's
-      // textbook field, used as a name-only source (weaker grounding - see
-      // the balance note appended below, which degrades the same way for any
-      // sourceMaterial with no parseable chapter list).
       const hubCourseId = String(values.hubCourse ?? "").trim();
-      if (!sourceMaterial && hubCourseId) {
+      const sourcesRaw = String(values.sources ?? "").trim();
+      let gatherNotes: string[] = [];
+
+      // Load the course tile once (used by both the source policy and textbook fallback).
+      let resolvedTile: Course | undefined;
+      if (hubCourseId) {
         const tileList = await listCourseHubAction();
         if (!("error" in tileList)) {
-          const tile = tileList.courses.find((c) => c.id === hubCourseId);
-          const textbook = (tile?.textbook ?? "").trim();
-          if (textbook) sourceMaterial = textbook;
+          resolvedTile = tileList.courses.find((c) => c.id === hubCourseId);
         }
+      }
+
+      // Priority 2: source policy gatherers (when no explicit source material).
+      if (!sourceMaterial && sourcesRaw && resolvedTile) {
+        const policy = resolveSourcePolicy(sourcesRaw);
+        onProgress("Resolving source material from configured sources...");
+        const gathered = await gatherModuleMaterials(resolvedTile, "", helpers, onProgress, policy);
+        if (gathered.materialsText.trim()) {
+          sourceMaterial = gathered.materialsText;
+          gatherNotes = gathered.notes;
+        }
+      }
+
+      // Priority 3: tile textbook fallback (legacy behavior when no policy set).
+      if (!sourceMaterial && resolvedTile) {
+        const textbook = (resolvedTile.textbook ?? "").trim();
+        if (textbook) sourceMaterial = textbook;
       }
 
       onProgress("Generating schedule...");
@@ -166,6 +191,10 @@ export const planningSteps: StepDefinition[] = [
         } else {
           notes = "name-only | Source material has no parseable chapter list - schedule generated with name-only grounding (no chapter alignment to verify).";
         }
+      }
+
+      if (gatherNotes.length > 0) {
+        notes = (notes ? notes + "\n" : "") + "Source resolution:\n" + gatherNotes.map((n) => `- ${n}`).join("\n");
       }
 
       // Fed forward to the lecture-materials-from-schedule step (see

@@ -23,6 +23,7 @@ import type { CommonResourceItem } from "@/lib/common-resources";
 import type { InstitutionField } from "@/lib/institution-fields";
 import type { StepInputSpec, StepOutputSpec } from "@/lib/workflows/types";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+import { dueDateForWeek, type AssignmentDueRule } from "@/lib/assignment-due-rule";
 
 export type { StepInputSpec, StepOutputSpec } from "@/lib/workflows/types";
 
@@ -175,6 +176,7 @@ export function courseToInputPayload(c: Course): CourseInput {
     assignmentDueRule: c.assignmentDueRule,
     email: c.email,
     emailClient: c.emailClient,
+    classLengthMinutes: c.classLengthMinutes,
     customTiles: c.customTiles,
     hiddenTiles: c.hiddenTiles,
     studentRepos: c.studentRepos,
@@ -243,23 +245,47 @@ export function parseDayTime(
     F: 5,
   };
 
+  // Spelled-out day names, matched whole by a token's first three letters.
+  const FULL_NAMES: Record<string, number> = {
+    SUN: 0,
+    MON: 1,
+    TUE: 2,
+    WED: 3,
+    THU: 4,
+    FRI: 5,
+    SAT: 6,
+  };
+
   const days = new Set<number>();
   const tokens = dayPartUpper.split(/[^A-Z]+/).filter(Boolean);
   for (const token of tokens) {
-    // Try longest match first within this token
-    if (token.length >= 2) {
-      const twoChar = token.slice(0, 2);
-      if (twoChar in tokenMap) {
-        days.add(tokenMap[twoChar]);
+    // A spelled-out name (MON, MONDAY, THURS, ...) is matched whole first, so
+    // its inner letters are never mistaken for concatenated codes ("FRI" must
+    // not yield Thursday from its R).
+    if (token.length >= 3) {
+      const three = token.slice(0, 3);
+      if (three in FULL_NAMES) {
+        days.add(FULL_NAMES[three]);
         continue;
       }
     }
-    // Fall back to single character
-    if (token.length >= 1) {
-      const oneChar = token[0];
-      if (oneChar in tokenMap) {
-        days.add(tokenMap[oneChar]);
+    // Otherwise treat the token as one or more concatenated day codes (MW,
+    // MWF, TTH, TR, SU...), consuming two chars at a time when they match a
+    // two-char code (SU/SA/TH/TU) and one char otherwise, so every code in
+    // the token is captured instead of just the first.
+    let i = 0;
+    while (i < token.length) {
+      const two = token.slice(i, i + 2);
+      if (two.length === 2 && two in tokenMap) {
+        days.add(tokenMap[two]);
+        i += 2;
+        continue;
       }
+      const one = token[i];
+      if (one in tokenMap) {
+        days.add(tokenMap[one]);
+      }
+      i += 1;
     }
   }
 
@@ -283,16 +309,18 @@ export function parseDayTime(
   return { days, hour, minute };
 }
 
+// The historical, hardcoded default: deadlines land on the Sunday ending
+// week N (23:59:00.000 local time), matching Assign Due Dates.
+const DEFAULT_DUE_RULE: AssignmentDueRule = { day: "sun", time: "23:59" };
+
 // Calculate the deadline for a given week, anchored on the Monday of the start date's week.
-// Deadlines land on the Sunday ending week N (23:59:00.000 local time), matching Assign Due Dates.
-export function weekDeadline(start: Date, week: number): Date {
-  const monday0 = new Date(start);
-  const day = monday0.getDay();
-  monday0.setDate(monday0.getDate() + (day === 0 ? -6 : 1 - day));
-  const due = new Date(monday0);
-  due.setDate(monday0.getDate() + week * 7 - 1);
-  due.setHours(23, 59, 0, 0);
-  return due;
+// With no rule (or an explicit null), this reproduces the historical Sunday-23:59 behavior
+// exactly - DEFAULT_DUE_RULE is proven equal to the old hardcoded arithmetic across weeks
+// 1-20 and every start weekday (see assignment-due-rule.test.ts). Delegates to
+// dueDateForWeek so there is exactly one implementation of the date arithmetic
+// (src/lib/assignment-due-rule.ts), not two copies that can drift apart.
+export function weekDeadline(start: Date, week: number, rule?: AssignmentDueRule | null): Date {
+  return dueDateForWeek(start, week, rule ?? DEFAULT_DUE_RULE);
 }
 
 // gatherModuleMaterials lives in registry-helpers.sources.ts (kept this file

@@ -33,9 +33,10 @@ export interface CourseForm {
   assignmentDueRule: string;
   email: string;
   emailClient: string;
+  classLengthMinutes: string;
 }
 
-export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality" | "topicOutline" | "syllabusTemplateId" | "endDate" | "breaks" | "assignmentDueRule" | "email" | "emailClient";
+export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality" | "topicOutline" | "syllabusTemplateId" | "endDate" | "breaks" | "assignmentDueRule" | "email" | "emailClient" | "classLengthMinutes";
 
 export const EMPTY_FORM: CourseForm = {
   id: null,
@@ -66,6 +67,7 @@ export const EMPTY_FORM: CourseForm = {
   assignmentDueRule: "",
   email: "",
   emailClient: "",
+  classLengthMinutes: "",
 };
 
 export function formFromCourse(c: Course): CourseForm {
@@ -98,6 +100,7 @@ export function formFromCourse(c: Course): CourseForm {
     assignmentDueRule: c.assignmentDueRule ?? "",
     email: c.email ?? "",
     emailClient: c.emailClient ?? "",
+    classLengthMinutes: c.classLengthMinutes !== null ? String(c.classLengthMinutes) : "",
   };
 }
 
@@ -134,6 +137,7 @@ export function courseToInput(c: Course) {
     assignmentDueRule: c.assignmentDueRule ?? "",
     email: c.email ?? "",
     emailClient: c.emailClient ?? "",
+    classLengthMinutes: c.classLengthMinutes,
     customTiles: c.customTiles,
     hiddenTiles: c.hiddenTiles,
     studentRepos: c.studentRepos,

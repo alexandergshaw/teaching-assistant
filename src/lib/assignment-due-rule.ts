@@ -3,10 +3,13 @@
 // - settled by the user, not to be redesigned. Stored as ONE encoded string
 // ("sun|23:59") so it round-trips through the existing scalar column/patch
 // machinery (course.assignmentDueRule) exactly like topicOutline or
-// syllabusTemplateId. Nothing here computes an actual per-week deadline date
-// - that is weekDeadline's job (a deliberately separate, later wave); this
-// file only encodes, decodes, and describes the rule itself. No Date-of-now,
-// no randomness - fully deterministic and safe on client or server.
+// syllabusTemplateId. Encoding/decoding/describing the rule itself is fully
+// deterministic and safe on client or server (no Date-of-now, no
+// randomness); dueDateForWeek below is the single bridge from a rule to an
+// actual per-week deadline date. weekDeadline (src/lib/workflows/
+// registry-helpers.ts) delegates to it, defaulting to the Sunday 23:59 rule
+// so callers that pass no rule keep the historical behavior; its three
+// callers now pass each course's own rule through.
 
 export type Weekday = "sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat";
 
@@ -87,4 +90,55 @@ export function describeAssignmentDueRule(raw: string | null | undefined): strin
   const parsed = parseAssignmentDueRule(raw);
   if (!parsed) return "";
   return `${WEEKDAY_LABELS[parsed.day]}s at ${formatClockTime(parsed.time)}`;
+}
+
+// Offset (in days) from the Monday that begins a Monday-anchored week to the
+// rule's weekday - sun ends the week it began (Monday-anchored), so it is 6
+// days after that Monday, not 0.
+const WEEKDAY_MONDAY_OFFSET: Record<Weekday, number> = {
+  mon: 0,
+  tue: 1,
+  wed: 2,
+  thu: 3,
+  fri: 4,
+  sat: 5,
+  sun: 6,
+};
+
+/** The concrete deadline instant for week N under a recurring rule. `start`
+ * anchors the term the same way weekDeadline (src/lib/workflows/registry-helpers.ts)
+ * does: week 1 is the week containing `start`, weeks are Monday-anchored.
+ * `dueDateForWeek(start, n, { day: "sun", time: "23:59" })` is guaranteed to
+ * equal `weekDeadline(start, n)` for every n and every start weekday - that
+ * equivalence is what lets the rule be adopted without silently changing any
+ * existing course's deadlines (see assignment-due-rule.test.ts).
+ *
+ * `week` values below 1 clamp to week 1 - there is no "week 0" or negative
+ * week to compute a real deadline for, and clamping (rather than
+ * extrapolating backward past the term's start) keeps the result inside the
+ * term.
+ *
+ * Pure: no Date.now(), no randomness. */
+export function dueDateForWeek(start: Date, week: number, rule: AssignmentDueRule): Date {
+  const effectiveWeek = week < 1 ? 1 : week;
+
+  // Step 1: the Monday of start's week - copied verbatim from weekDeadline.
+  const monday0 = new Date(start);
+  const day = monday0.getDay();
+  monday0.setDate(monday0.getDate() + (day === 0 ? -6 : 1 - day));
+
+  // Step 2: the Monday that begins week `effectiveWeek`.
+  const weekStart = new Date(monday0);
+  weekStart.setDate(monday0.getDate() + (effectiveWeek - 1) * 7);
+
+  // Step 3: offset onto the rule's weekday.
+  const due = new Date(weekStart);
+  due.setDate(weekStart.getDate() + WEEKDAY_MONDAY_OFFSET[rule.day]);
+
+  // Step 4: the rule's time, in local time - seconds/ms zeroed, matching
+  // weekDeadline's setHours call.
+  const [hourStr, minuteStr] = rule.time.split(":");
+  due.setHours(Number(hourStr), Number(minuteStr), 0, 0);
+
+  return due;
 }

@@ -243,6 +243,7 @@ export interface CourseHubRow {
   assignment_due_rule: string | null;
   email: string | null;
   email_client: string | null;
+  class_length_minutes: number | null;
   materials_files: Json;
   castletop_files: Json;
   export_files: Json | null;
@@ -290,6 +291,7 @@ export interface CourseHubInsert {
   assignment_due_rule?: string | null;
   email?: string | null;
   email_client?: string | null;
+  class_length_minutes?: number | null;
   materials_files?: Json;
   castletop_files?: Json;
   export_files?: Json | null;
@@ -337,6 +339,7 @@ export interface CourseHubUpdate {
   assignment_due_rule?: string | null;
   email?: string | null;
   email_client?: string | null;
+  class_length_minutes?: number | null;
   materials_files?: Json;
   castletop_files?: Json;
   export_files?: Json | null;

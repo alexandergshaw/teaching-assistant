@@ -65,6 +65,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   assignmentDue: "Assignment due",
   email: "Email",
   emailClient: "Email client",
+  classLength: "Class length",
 };
 
 export interface CoursesTableProps {

@@ -60,6 +60,7 @@ const mockCourse: Course = {
   assignmentDueRule: "sun|23:59",
   email: "prof@mit.edu",
   emailClient: "outlook",
+  classLengthMinutes: 75,
   customTiles: [],
   hiddenTiles: [],
   studentRepos: [
@@ -83,6 +84,7 @@ describe("formFromCourse", () => {
     expect(form.weeks).toBe("15");
     expect(form.tests).toBe("3");
     expect(form.syllabusTemplateId).toBe("tmpl-1");
+    expect(form.classLengthMinutes).toBe("75");
     expect(form.repos).toEqual([
       { repo: "org/repo1", branch: "main" },
       { repo: "org/repo2", branch: "" },
@@ -90,10 +92,11 @@ describe("formFromCourse", () => {
   });
 
   it("handles null numeric fields", () => {
-    const course = { ...mockCourse, weeks: null, tests: null };
+    const course = { ...mockCourse, weeks: null, tests: null, classLengthMinutes: null };
     const form = formFromCourse(course);
     expect(form.weeks).toBe("");
     expect(form.tests).toBe("");
+    expect(form.classLengthMinutes).toBe("");
   });
 
   it("handles missing optional fields", () => {
@@ -119,6 +122,12 @@ describe("courseToInput", () => {
     expect(input.weeks).toBe(15);
     expect(input.tests).toBe(3);
     expect(input.syllabusTemplateId).toBe("tmpl-1");
+    expect(input.classLengthMinutes).toBe(75);
+  });
+
+  it("carries classLengthMinutes through as the number (null when unset)", () => {
+    expect(courseToInput(mockCourse).classLengthMinutes).toBe(75);
+    expect(courseToInput({ ...mockCourse, classLengthMinutes: null }).classLengthMinutes).toBe(null);
   });
 
   it("carries syllabusTemplateId through as an empty string when unset, not dropped from the patch (updateCourseHubAction receives the whole input, so an omitted field would be silently wiped on every other cell's save)", () => {

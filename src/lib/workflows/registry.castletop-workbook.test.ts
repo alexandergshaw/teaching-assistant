@@ -74,6 +74,7 @@ function baseCourse(overrides: Partial<Course> = {}): Course {
     assignmentDueRule: null,
     email: null,
     emailClient: null,
+    classLengthMinutes: null,
     materialsFiles: [],
     castletopFiles: [],
     exportFiles: [],

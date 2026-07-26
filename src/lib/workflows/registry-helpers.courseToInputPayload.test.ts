@@ -55,6 +55,7 @@ function fullCourseFixture(): Course {
     assignmentDueRule: "wed|17:30",
     email: "fixture-instructor@example.edu",
     emailClient: "gmail",
+    classLengthMinutes: 83,
     materialsFiles: [
       { name: "fixture-materials.zip", path: "fixture/materials.zip", size: 111, addedAt: "2026-01-01T00:00:00Z" },
     ],

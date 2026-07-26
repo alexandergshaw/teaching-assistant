@@ -10,6 +10,7 @@ import {
   checkBrokenLinksAction,
 } from "@/app/actions";
 import { type StepDefinition, base64ToBlob, weekDeadline } from "@/lib/workflows/registry-helpers";
+import { parseAssignmentDueRule, describeAssignmentDueRule } from "@/lib/assignment-due-rule";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
@@ -125,6 +126,10 @@ export const lmsExportSteps: StepDefinition[] = [
         throw new Error("Enter the class start date as a valid date.");
       }
 
+      // One course tile for this whole export, so the rule is resolved once.
+      const rule = parseAssignmentDueRule(tile?.assignmentDueRule);
+      const ruleNote = describeAssignmentDueRule(tile?.assignmentDueRule);
+
       const esc = (s: string): string => {
         return s
           .replace(/&/g, "&amp;")
@@ -181,7 +186,7 @@ export const lmsExportSteps: StepDefinition[] = [
         let dueText = "";
         let dueAt: string | undefined;
         if (start) {
-          const due = weekDeadline(start, plan.week);
+          const due = weekDeadline(start, plan.week, rule);
           dueText = due.toLocaleString();
           dueAt = toUtcTimestamp(due);
         }
@@ -371,7 +376,9 @@ export const lmsExportSteps: StepDefinition[] = [
         outputs: {},
         summary: {
           kind: "text",
-          text: `${summaryText} ${starterSummary}${tileSaveNote}`,
+          text: `${summaryText} ${starterSummary}${tileSaveNote}${
+            ruleNote ? ` Deadlines set to ${ruleNote}.` : ""
+          }`,
         },
       };
     },

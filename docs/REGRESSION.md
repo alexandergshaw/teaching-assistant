@@ -197,6 +197,14 @@ suite). Whatever the presentation becomes, these CAPABILITIES must survive:
    githubOrg, textbook, roster, repos, syllabusId, integrations, csv,
    startDate, description, weeks, tests, lms, dayTime, studentRepos - each
    editable and saving via the update action (courseToInput mapping).
+   CORRECTED 2026-07-26: this list is the baseline-era subset and is NOT
+   exhaustive - InlineField (src/lib/courses-tab-helpers.ts) has since grown
+   to include modality, topicOutline, syllabusTemplateId, endDate, breaks,
+   assignmentDueRule, email, emailClient, classLengthMinutes, and possibly
+   more added after this note. Treat the type definition as the source of
+   truth rather than enumerating it here; the behavioral guarantee (each
+   field is editable and saves via the update action) applies to the type's
+   current full union, not just the fields listed above.
 3. Roster and student-repos parsing: rosterStats/rosterToRows/rowsToRoster and
    studentReposToRows/rowsToStudentReposText round-trip the text formats; the
    roster editor offers the table editor, stats, From-LMS draft fill, and Copy
@@ -832,7 +840,12 @@ Supersedes the "Current-events research step" entry's points 3-4 above.
 
 1. No tracked source file under src/ exceeds 1000 lines, with the sole
    documented exception of RecordingTab.tsx (its split runs as a separate
-   session task). Spot checks: ModulesView.tsx is a ~638-line orchestrator
+   session task).
+   SUPERSEDED (see "Recording tab split under 1000 lines + TabShell" below):
+   RecordingTab.tsx was itself split and the exception no longer applies.
+   As of 2026-07-26 the 1000-line limit holds with NO documented exception;
+   the largest tracked file under src/ is steps.github.ts at 996 lines.
+   Spot checks: ModulesView.tsx is a ~638-line orchestrator
    over content-tab/modules/ (10 hooks + 8 components); RepoDetail.tsx is an
    orchestrator over repo-detail/; the former giants canvas-modules.ts,
    canvas.ts, github.ts, grade.ts are thin barrels over domain modules
@@ -1534,11 +1547,14 @@ async or sync, usable as a condition on whether steps run. Step gating
    module's array (courseSetupTilesSteps[n]) rather than spreading it, so a
    new step must be appended there or it is silently unreachable despite
    being defined. The headless canary is 131 (was 130).
-   SUPERSEDED 2026-07-26: the canary is now 132, bumped by the
-   "castletop-workbook" step (see section 56 check 19). The canary count is
+   SUPERSEDED 2026-07-26: the canary went to 132, bumped by the
+   "castletop-workbook" step (see section 56 check 19), then on to 134 as
+   further headless-safe steps were registered. The canary count is
    a moving target by design - each new headless-safe step bumps it in the
-   same commit; what must hold is that the assertion and the test title
-   agree and that the count matches HEADLESS_SAFE_STEP_TYPES.size.
+   same commit; what must hold is not any specific number recorded in this
+   document but that the assertion and the test title agree and that the
+   count matches HEADLESS_SAFE_STEP_TYPES.size (currently 134, in
+   headless.test.ts).
 
 ### 2026-07-23 - Professional workflow file names
 
@@ -1740,12 +1756,13 @@ Column and cell:
     COLUMN_LABELS; COLUMNS_ADDED_IN[4] = ["castletop"] so the column
     appears for existing persisted column sets.
     SUPERSEDED 2026-07-26 as to the version number only: this check
-    originally read "CURRENT_COLUMNS_VERSION is 4". The version is a
-    moving target by design - each new column bumps it (now 5, see
-    section 60 check 1). What must hold is that COLUMNS_ADDED_IN[4]
-    still lists "castletop" and that every prior version's entry is
-    retained, so a set persisted at ANY earlier version still unions in
-    every column added since.
+    originally read "CURRENT_COLUMNS_VERSION is 4", then 5 (section 60
+    check 1), then 6 (section 62 check 1). The version is a moving target
+    by design - each new column bumps it (now 7). What must hold is not
+    any specific number recorded in this document but that
+    COLUMNS_ADDED_IN[4] still lists "castletop" and that every prior
+    version's entry is retained, so a set persisted at ANY earlier
+    version still unions in every column added since.
 17. CastletopCell shows the generated files with Download/Remove and a
     Generate button that runs the action, uploads via uploadCourseFile
     ("xlsx"), appends to the column, and deletes any replaced object.
@@ -1756,7 +1773,12 @@ Column and cell:
 Workflow step:
 19. Step "castletop-workbook" is registered in the course-setup
     aggregator, CATEGORY_MEMBERS, and HEADLESS_SAFE_STEP_TYPES; the
-    canary asserts 132 and its title matches.
+    canary asserted 132 and its title matched at the time this step was
+    added.
+    SUPERSEDED 2026-07-26: the canary has since moved to 134 (see section
+    50 check 6 - it is a moving target by design, so treat
+    HEADLESS_SAFE_STEP_TYPES.size / headless.test.ts as the source of
+    truth rather than the number recorded here).
 20. The step's browser download is guarded by
     `typeof document !== "undefined"` - this is what makes it
     headless-safe.
@@ -1839,10 +1861,14 @@ Acceptance criteria (2235ab1+):
 
 Acceptance criteria (2235ab1+):
 1. New per-course `syllabus_template_id` column, surfaced as the
-   `syllabusTemplate` table column (version 5,
+   `syllabusTemplate` table column (introduced at version 5,
    `COLUMNS_ADDED_IN[5] = ["syllabusTemplate"]`). Unlike the file
    columns it IS written by `toRow` and IS carried by `courseToInput` -
    it is a plain scalar the user edits inline.
+   SUPERSEDED 2026-07-26 as to the version number only: `COLUMNS_ADDED_IN[5]`
+   is unchanged, but `CURRENT_COLUMNS_VERSION` is a moving target by design
+   (now 7, see section 56 check 16) and has moved past 5 - "version 5" names
+   when this column was introduced, not the current version.
 2. `SyllabusTemplateCell` selects from the user's syllabus templates,
    loaded via a 4th `listSyllabusTemplatesAction()` element in
    `useCoursesData`'s Promise.all and threaded through CoursesTable ->
@@ -1892,6 +1918,11 @@ Acceptance criteria (5dfb38a+):
    `email_client`. Column ids `endDate`, `breaks`, `assignmentDue`,
    `email`, `emailClient`; version 6 with
    `COLUMNS_ADDED_IN[6]` listing all five.
+   SUPERSEDED 2026-07-26 as to the version number only: `COLUMNS_ADDED_IN[6]`
+   still lists exactly these five ids, but `CURRENT_COLUMNS_VERSION` is a
+   moving target by design (now 7, see section 56 check 16) and has since
+   advanced past 6 - "version 6" names when these five columns were
+   introduced, not the current version.
 2. **`breaks` is ANNOTATION ONLY.** It must never shift week
    numbering. `weekDeadline`, `resolveTileCurrentWeek`,
    `courseProgressStatus` and the Castletop week blocks are untouched
@@ -1968,3 +1999,92 @@ Acceptance criteria (5dfb38a+):
    returns empty: `"Fall 2026 v1.2.docx"` -> `"Fall 2026 v1.2"`,
    `".docx"` -> `".docx"`, `"template"` -> `"template"`, and
    surrounding whitespace is trimmed.
+
+## 65. Course calendar sync (Group B)
+
+Acceptance criteria (6ea6505+):
+
+Safety - the target is the user's OWN "Adjuncting" calendar:
+1. Every event the sync writes carries private properties
+   `taCourseId` / `taKind` / `taKey`. It finds its own work by querying
+   `taCourseId` and may touch ONLY those events.
+2. An existing event with a missing or unrecognised `taKey` is LEFT
+   ALONE and counted as `skippedUntagged` - NEVER deleted. Enforced in
+   two independent places (the action filters before diffing, and
+   `diffPlannedEvents` also refuses), sharing one
+   `isRecognizedEventKey` predicate.
+3. `resolveCalendarTarget` NEVER falls back to `primary`. A missing
+   calendar returns `calendar-not-found` with a message listing the
+   writable calendars actually found; no token returns `not-connected`.
+   Falling back would scatter course events through personal ones.
+4. The sync never wipes or rebuilds a calendar.
+
+Correctness:
+5. Google all-day `end` is EXCLUSIVE - the term event adds one day to
+   `endDate` or the final day silently vanishes.
+6. Missing `classLengthMinutes` SKIPS all class meetings with a note.
+   No invented default - the user chose to specify it per course.
+7. Derived test dates state in the description that they are derived.
+   `Course.tests` is only a count; there is no stored test-date source,
+   so the event must not imply authority it lacks.
+8. `breaks` is annotation-only here too: events are NOT skipped for
+   break weeks; a note records that breaks are not applied.
+9. Partial success: per-event catch, keep going, report real counts
+   plus per-failure notes (capped, with a "+N more"). Deliberately NOT
+   the fail-fast Canvas precedent, which abandons its loop and orphans
+   what it created.
+10. `dryRun` returns counts without writing.
+11. Pagination is followed on BOTH calendarList and events.list -
+    silent truncation would report "calendar not found" for a calendar
+    that exists.
+12. `deleteCalendarEvent` treats HTTP 404 AND 410 as success, so a
+    re-sync converges instead of erroring on an already-deleted event.
+13. `createCalendarEvent` defaults preserve the pre-existing
+    meeting-booking behavior exactly: `calendarId` "primary" and
+    `withMeet` TRUE when omitted. Course sync passes `withMeet: false`
+    so class meetings never get phantom Meet rooms.
+
+## 66. weekDeadline consumes the per-course due rule
+
+Acceptance criteria (6ea6505+):
+1. **ONE implementation.** `weekDeadline(start, week, rule?)` delegates
+   to `dueDateForWeek(start, week, rule ?? { day: "sun", time: "23:59" })`.
+   There must never be a second copy of this derivation - this file's
+   history contains five instances of a duplicated rule drifting.
+2. Backward compatible: with no rule argument the result is IDENTICAL
+   to the historical Sunday 23:59 behavior. Pinned by an equivalence
+   test across all seven term-start weekdays and weeks 1-20.
+3. All three call sites pass the tile's rule:
+   `lms-assignments`, `assign-week-deadlines`, and the cartridge
+   export. `parseAssignmentDueRule` returns null for blank/malformed
+   input and null means "use the default", so no call site branches.
+4. **`assign-week-deadlines` resolves the rule PER COURSE, inside its
+   loop.** It runs over a hubCourseList; hoisting the resolution out
+   makes every course silently inherit the first course's due day.
+   Pinned by a two-course test with different rules - verified by
+   sabotage to fail ("expected 3 to be 5") when hoisted.
+5. A summary note names the applied rule only when one is set; no note
+   when behavior is unchanged.
+
+## 67. parseDayTime parses concatenated day codes
+
+Acceptance criteria (6ea6505+):
+1. Concatenated forms yield EVERY day: `MW` -> {Mon,Wed},
+   `MWF` -> {Mon,Wed,Fri}, `TTh` -> {Tue,Thu}, `TR` -> {Tue,Thu},
+   `MTWRF` -> all five, `SU` -> {Sun}, `SA` -> {Sat}.
+   Regression fixed here: the tokenizer previously matched at most ONE
+   code per whitespace-separated token, so `MW 10:00-11:15` - the
+   app's own placeholder in the Day/Time cell - yielded Monday only.
+   Class-meeting sync and `schedule-lecture-announcement` both silently
+   lost days.
+2. **Spelled-out names must NOT regress.** A full day-name match (first
+   three letters against SUN/MON/TUE/WED/THU/FRI/SAT) is tried BEFORE
+   the concatenated-code scan, because scanning `FRI` would match F
+   (Friday) then R (Thursday). `FRI` -> {Fri} and must NOT contain Thu;
+   `Mon Wed Fri` -> exactly {Mon,Wed,Fri}.
+3. Separator forms still work: `M/W/F`, `M, W, F` -> {Mon,Wed,Fri}.
+4. Time parsing is unchanged, including the documented
+   `hour <= 7 && no meridiem -> PM` rule.
+5. Deliberate behavior change on the record: this corrects
+   `schedule-lecture-announcement` for MW/TTh courses, which had been
+   scheduling only their first day.

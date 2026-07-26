@@ -13,6 +13,7 @@ import {
   courseToInputPayload,
   weekDeadline,
 } from "@/lib/workflows/registry-helpers";
+import { parseAssignmentDueRule, describeAssignmentDueRule } from "@/lib/assignment-due-rule";
 import type { DueDateUpdate } from "@/lib/canvas-modules";
 
 export const courseSetupTimelineSteps: StepDefinition[] = [
@@ -162,6 +163,12 @@ export const courseSetupTimelineSteps: StepDefinition[] = [
 
           const inst = tile.institution?.trim() || helpers.activeInstitution || undefined;
 
+          // Resolved per course, INSIDE this loop - this step runs over a
+          // hubCourseList, so hoisting the rule out of the loop would make
+          // every course silently inherit the first course's due day.
+          const rule = parseAssignmentDueRule(tile.assignmentDueRule);
+          const ruleNote = describeAssignmentDueRule(tile.assignmentDueRule);
+
           onProgress(`Loading modules for ${tile.name}...`);
           const content = await listCourseContentAction(
             canvasUrl,
@@ -201,7 +208,7 @@ export const courseSetupTimelineSteps: StepDefinition[] = [
               updates.push({
                 type: item.type,
                 contentId: item.contentId,
-                dueAt: weekDeadline(start, week).toISOString(),
+                dueAt: weekDeadline(start, week, rule).toISOString(),
               });
             }
           }
@@ -219,7 +226,7 @@ export const courseSetupTimelineSteps: StepDefinition[] = [
           lines.push(
             `${tile.name}: ${r.updated} deadline(s) across ${moduleCount} module(s)${
               r.failures.length ? ` (${r.failures.length} failed)` : ""
-            }`
+            }${ruleNote ? ` (deadlines set to ${ruleNote})` : ""}`
           );
         } catch (err) {
           lines.push(

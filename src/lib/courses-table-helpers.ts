@@ -47,6 +47,7 @@ export const ALL_COLUMN_IDS = [
   "assignmentDue",
   "email",
   "emailClient",
+  "classLength",
 ] as const;
 
 export type ColumnId = (typeof ALL_COLUMN_IDS)[number];
@@ -79,6 +80,7 @@ export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
   "assignmentDue",
   "email",
   "emailClient",
+  "classLength",
 ];
 
 const COLUMN_ID_SET: Set<string> = new Set(ALL_COLUMN_IDS);
@@ -97,7 +99,7 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
 // column set unless it is unioned in here - bump this and add an entry to
 // COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
 // (no wrapper object) is treated as version 0.
-export const CURRENT_COLUMNS_VERSION = 6;
+export const CURRENT_COLUMNS_VERSION = 7;
 
 /** Columns introduced by each version, unioned into every persisted set
  * stored at an earlier version. Version 0 is the pre-versioning baseline, so
@@ -109,6 +111,7 @@ const COLUMNS_ADDED_IN: Record<number, ColumnId[]> = {
   4: ["castletop"],
   5: ["syllabusTemplate"],
   6: ["endDate", "breaks", "assignmentDue", "email", "emailClient"],
+  7: ["classLength"],
 };
 
 /** Parse a persisted ta-courses-columns value; unknown ids are dropped and a
@@ -211,6 +214,7 @@ export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = 
   assignmentDue: 170,
   email: 200,
   emailClient: 140,
+  classLength: 130,
   actions: 240,
 };
 
@@ -353,6 +357,8 @@ export function sortValueFor(course: Course, field: SortField, ctx?: SortContext
       return textValue(course.email);
     case "emailClient":
       return textValue(course.emailClient);
+    case "classLength":
+      return numberValue(course.classLengthMinutes);
   }
 }
 
@@ -458,6 +464,10 @@ export function computeFieldPatch(field: TableEditableField, rawValue: string): 
       return { weeks: rawValue.trim() ? (Number.isFinite(Number(rawValue.trim())) ? Number(rawValue.trim()) : null) : null };
     case "tests":
       return { tests: rawValue.trim() ? (Number.isFinite(Number(rawValue.trim())) ? Number(rawValue.trim()) : null) : null };
+    case "classLengthMinutes":
+      return {
+        classLengthMinutes: rawValue.trim() ? (Number.isFinite(Number(rawValue.trim())) ? Number(rawValue.trim()) : null) : null,
+      };
     case "lms":
       return { lms: rawValue || null };
     case "modality":

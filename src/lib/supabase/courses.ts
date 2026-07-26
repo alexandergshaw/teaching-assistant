@@ -91,6 +91,10 @@ export interface Course {
   email: string | null;
   /** "outlook" | "gmail" | "other" | null (unset - never defaulted). */
   emailClient: string | null;
+  /** Minutes per class meeting (e.g. 75). Unset - never defaulted; asked per
+   * class since it varies by course. Used to derive a meeting's end time
+   * from parseDayTime's start time (registry-helpers.ts). */
+  classLengthMinutes: number | null;
   materialsFiles: CourseMaterialFile[];
   castletopFiles: CourseMaterialFile[];
   exportFiles: CourseMaterialFile[];
@@ -137,13 +141,14 @@ export interface CourseInput {
   assignmentDueRule?: string | null;
   email?: string | null;
   emailClient?: string | null;
+  classLengthMinutes?: number | null;
   customTiles?: CourseCustomTile[];
   hiddenTiles?: string[];
   studentRepos?: CourseStudentRepo[];
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, end_date, breaks, assignment_due_rule, email, email_client, materials_files, castletop_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, materials_files, castletop_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -186,6 +191,7 @@ interface CourseRow {
   assignment_due_rule: string | null;
   email: string | null;
   email_client: string | null;
+  class_length_minutes: number | null;
   materials_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
   castletop_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
   export_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
@@ -232,6 +238,7 @@ function toCourse(r: CourseRow): Course {
     assignmentDueRule: r.assignment_due_rule,
     email: r.email,
     emailClient: r.email_client,
+    classLengthMinutes: r.class_length_minutes,
     materialsFiles: Array.isArray(r.materials_files) ? r.materials_files.filter((x) => x && x.path && x.name) : [],
     castletopFiles: Array.isArray(r.castletop_files) ? r.castletop_files.filter((x) => x && x.path && x.name) : [],
     exportFiles: Array.isArray(r.export_files) ? r.export_files.filter((x) => x && x.path && x.name) : [],
@@ -300,6 +307,10 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     assignment_due_rule: clean(input.assignmentDueRule),
     email: clean(input.email),
     email_client: clean(input.emailClient),
+    class_length_minutes:
+      typeof input.classLengthMinutes === "number" && Number.isFinite(input.classLengthMinutes)
+        ? input.classLengthMinutes
+        : null,
     custom_tiles: Array.isArray(input.customTiles) ? (input.customTiles as unknown as Json) : undefined,
     hidden_tiles: Array.isArray(input.hiddenTiles) ? (input.hiddenTiles as unknown as Json) : undefined,
     student_repos: Array.isArray(input.studentRepos)

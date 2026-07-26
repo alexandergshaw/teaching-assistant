@@ -14,6 +14,7 @@ import {
   weekDeadline,
   resolveModuleObjectives,
 } from "@/lib/workflows/registry-helpers";
+import { parseAssignmentDueRule, describeAssignmentDueRule } from "@/lib/assignment-due-rule";
 import type { GeneratedCourseFile, EnsuredModule } from "@/lib/workflows/types";
 
 export const assignmentCreationSteps: StepDefinition[] = [
@@ -111,6 +112,12 @@ export const assignmentCreationSteps: StepDefinition[] = [
         throw new Error("Enter the class start date as a valid date.");
       }
 
+      // One course tile for this whole step, so the rule is resolved once -
+      // not the multi-course case (assign-week-deadlines) where each course
+      // must resolve its own.
+      const rule = parseAssignmentDueRule(tile?.assignmentDueRule);
+      const ruleNote = describeAssignmentDueRule(tile?.assignmentDueRule);
+
       const lines: string[] = [];
 
       for (const m of modules) {
@@ -147,7 +154,7 @@ export const assignmentCreationSteps: StepDefinition[] = [
         let dueAt = "";
         let dueDateStr = "";
         if (start) {
-          const due = weekDeadline(start, m.week);
+          const due = weekDeadline(start, m.week, rule);
           dueAt = due.toISOString();
           dueDateStr = ` (due ${due.toLocaleDateString()})`;
         }
@@ -178,7 +185,9 @@ export const assignmentCreationSteps: StepDefinition[] = [
         outputs: {},
         summary: {
           kind: "list",
-          label: `Created ${modules.length} assignment(s)`,
+          label: `Created ${modules.length} assignment(s)${
+            ruleNote ? ` (deadlines set to ${ruleNote})` : ""
+          }`,
           items: lines,
         },
       };

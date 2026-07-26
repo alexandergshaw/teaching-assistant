@@ -68,6 +68,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "configure-institution-feeds",
     "course-modality",
     "castletop-workbook",
+    "sync-course-calendar",
   ],
   content: [
     "lecture-zip",

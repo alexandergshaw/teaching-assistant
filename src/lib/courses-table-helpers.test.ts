@@ -56,6 +56,7 @@ function makeCourse(overrides: Partial<Course>): Course {
     assignmentDueRule: null,
     email: null,
     emailClient: null,
+    classLengthMinutes: null,
     materialsFiles: [],
     castletopFiles: [],
     exportFiles: [],
@@ -154,6 +155,12 @@ describe("sortValueFor", () => {
     expect(sortValueFor(makeCourse({ weeks: null }), "weeks")).toEqual({ kind: "number", value: 0, empty: true });
     expect(sortValueFor(makeCourse({ tests: 0 }), "tests")).toEqual({ kind: "number", value: 0, empty: false });
     expect(sortValueFor(makeCourse({ tests: null }), "tests")).toEqual({ kind: "number", value: 0, empty: true });
+  });
+
+  it("treats classLength as an empty-when-null number, mirroring weeks/tests", () => {
+    expect(sortValueFor(makeCourse({ classLengthMinutes: 75 }), "classLength")).toEqual({ kind: "number", value: 75, empty: false });
+    expect(sortValueFor(makeCourse({ classLengthMinutes: 0 }), "classLength")).toEqual({ kind: "number", value: 0, empty: false });
+    expect(sortValueFor(makeCourse({ classLengthMinutes: null }), "classLength")).toEqual({ kind: "number", value: 0, empty: true });
   });
 
   it("treats modality as empty-when-unset text", () => {
@@ -310,21 +317,21 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "institution",
       "weeks",
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength",
     ]);
   });
 
   it("unions all post-v0 columns into an empty legacy selection (a bare array is version 0)", () => {
     expect(parseColumnSet(JSON.stringify([]))).toEqual([
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength",
     ]);
   });
 
   it("ignores name/actions if present since they are not toggleable columns", () => {
     expect(parseColumnSet(JSON.stringify(["name", "actions", "lms"]))).toEqual([
       "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength",
     ]);
   });
 
@@ -335,14 +342,14 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "repos",
       "lms",
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength",
     ]);
   });
 
   it("dedups after migrating a legacy id that collides with a persisted new id", () => {
     expect(parseColumnSet(JSON.stringify(["roster", "rosterCount", "lms"]))).toEqual([
       "roster", "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength",
     ]);
   });
 
@@ -386,32 +393,37 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(JSON.stringify({ v: CURRENT_COLUMNS_VERSION, columns: ["bogus", "lms"] }))).toEqual(["lms"]);
   });
 
-  it("unions v2+v3+v4+v5+v6 columns into a v1 persisted set", () => {
+  it("unions v2+v3+v4+v5+v6+v7 columns into a v1 persisted set", () => {
     const v1 = JSON.stringify({ v: 1, columns: ["lms", "modality"] });
     expect(parseColumnSet(v1)).toEqual([
       "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength",
     ]);
   });
 
-  it("unions v3+v4+v5+v6 columns into a v2 persisted set", () => {
+  it("unions v3+v4+v5+v6+v7 columns into a v2 persisted set", () => {
     const v2 = JSON.stringify({ v: 2, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v2)).toEqual(["lms", "modality", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient"]);
+    expect(parseColumnSet(v2)).toEqual(["lms", "modality", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength"]);
   });
 
-  it("unions v4+v5+v6 columns into a v3 persisted set", () => {
+  it("unions v4+v5+v6+v7 columns into a v3 persisted set", () => {
     const v3 = JSON.stringify({ v: 3, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v3)).toEqual(["lms", "modality", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient"]);
+    expect(parseColumnSet(v3)).toEqual(["lms", "modality", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength"]);
   });
 
-  it("unions v5+v6 columns into a v4 persisted set", () => {
+  it("unions v5+v6+v7 columns into a v4 persisted set", () => {
     const v4 = JSON.stringify({ v: 4, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v4)).toEqual(["lms", "modality", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient"]);
+    expect(parseColumnSet(v4)).toEqual(["lms", "modality", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength"]);
   });
 
-  it("unions v6 columns into a v5 persisted set", () => {
+  it("unions v6+v7 columns into a v5 persisted set", () => {
     const v5 = JSON.stringify({ v: 5, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v5)).toEqual(["lms", "modality", "endDate", "breaks", "assignmentDue", "email", "emailClient"]);
+    expect(parseColumnSet(v5)).toEqual(["lms", "modality", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength"]);
+  });
+
+  it("unions v7 columns into a v6 persisted set", () => {
+    const v6 = JSON.stringify({ v: 6, columns: ["lms", "modality"] });
+    expect(parseColumnSet(v6)).toEqual(["lms", "modality", "classLength"]);
   });
 
   it("serializeColumnSet writes the current version", () => {
@@ -499,6 +511,12 @@ describe("computeFieldPatch", () => {
     expect(computeFieldPatch("weeks", "")).toEqual({ weeks: null });
     expect(computeFieldPatch("weeks", "abc")).toEqual({ weeks: null });
     expect(computeFieldPatch("tests", "3")).toEqual({ tests: 3 });
+  });
+
+  it("parses classLengthMinutes as a number, blank/invalid as null, mirroring weeks/tests", () => {
+    expect(computeFieldPatch("classLengthMinutes", "75")).toEqual({ classLengthMinutes: 75 });
+    expect(computeFieldPatch("classLengthMinutes", "")).toEqual({ classLengthMinutes: null });
+    expect(computeFieldPatch("classLengthMinutes", "abc")).toEqual({ classLengthMinutes: null });
   });
 
   it("maps lms to null when blank", () => {

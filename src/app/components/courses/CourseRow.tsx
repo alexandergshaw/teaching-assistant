@@ -312,6 +312,20 @@ export default function CourseRow({
         />
       )}
 
+      {has("classLength") && (
+        <EditableCell
+          kind="number"
+          rawValue={course.classLengthMinutes !== null ? String(course.classLengthMinutes) : ""}
+          display={
+            course.classLengthMinutes !== null ? (
+              <span className={styles.courseResourceValue}>{course.classLengthMinutes} min</span>
+            ) : undefined
+          }
+          placeholder="75"
+          onSave={save("classLengthMinutes")}
+        />
+      )}
+
       <td>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <button type="button" className={styles.linkButton} onClick={() => onNavigate("course-planning", course)}>

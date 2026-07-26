@@ -164,6 +164,9 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "generate-module-answers",
   "current-events-report",
   "integrate-source-into-lms",
+  // Reads a course tile, resolves the target calendar, and writes/updates/
+  // deletes only its own tagged events - never pauses for a human.
+  "sync-course-calendar",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

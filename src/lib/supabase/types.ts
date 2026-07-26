@@ -8,6 +8,9 @@ import type {
   AiChatMessagesRow,
   AiChatMessagesInsert,
   AiChatMessagesUpdate,
+  ArtifactTemplatesRow,
+  ArtifactTemplatesInsert,
+  ArtifactTemplatesUpdate,
   CartridgeDropsRow,
   CartridgeDropsInsert,
   CartridgeDropsUpdate,
@@ -95,146 +98,191 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[];
 
+// @supabase/postgrest-js's generic client requires each table entry to
+// satisfy `GenericTable` (Row/Insert/Update assignable to Record<string,
+// unknown>, plus a `Relationships` array) or the whole schema silently
+// collapses to `never` for every `.insert`/`.upsert`/`.update` call (forcing
+// `as any` at every call site, which is how this file's tables were written
+// before). Named `interface`s (like the ones in ./types.tables-a and
+// ./types.tables-b) don't get TypeScript's implicit index signature, so they
+// don't satisfy `Record<string, unknown>` on their own - `Expand<T>` copies
+// an interface's members into a plain mapped type, which does. Purely a
+// compile-time reshaping; it changes no runtime behavior.
+type Expand<T> = { [K in keyof T]: T[K] };
+
 export interface Database {
   public: {
     Tables: {
       accessibility_scans: {
-        Row: AccessibilityScansRow;
-        Insert: AccessibilityScansInsert;
-        Update: AccessibilityScansUpdate;
+        Row: Expand<AccessibilityScansRow>;
+        Insert: Expand<AccessibilityScansInsert>;
+        Update: Expand<AccessibilityScansUpdate>;
+        Relationships: [];
       };
       ai_chat_messages: {
-        Row: AiChatMessagesRow;
-        Insert: AiChatMessagesInsert;
-        Update: AiChatMessagesUpdate;
+        Row: Expand<AiChatMessagesRow>;
+        Insert: Expand<AiChatMessagesInsert>;
+        Update: Expand<AiChatMessagesUpdate>;
+        Relationships: [];
+      };
+      artifact_templates: {
+        Row: Expand<ArtifactTemplatesRow>;
+        Insert: Expand<ArtifactTemplatesInsert>;
+        Update: Expand<ArtifactTemplatesUpdate>;
+        Relationships: [];
       };
       cartridge_drops: {
-        Row: CartridgeDropsRow;
-        Insert: CartridgeDropsInsert;
-        Update: CartridgeDropsUpdate;
+        Row: Expand<CartridgeDropsRow>;
+        Insert: Expand<CartridgeDropsInsert>;
+        Update: Expand<CartridgeDropsUpdate>;
+        Relationships: [];
       };
       common_resources: {
-        Row: CommonResourcesRow;
-        Insert: CommonResourcesInsert;
-        Update: CommonResourcesUpdate;
+        Row: Expand<CommonResourcesRow>;
+        Insert: Expand<CommonResourcesInsert>;
+        Update: Expand<CommonResourcesUpdate>;
+        Relationships: [];
       };
       course_card_layout: {
-        Row: CourseCardLayoutRow;
-        Insert: CourseCardLayoutInsert;
-        Update: CourseCardLayoutUpdate;
+        Row: Expand<CourseCardLayoutRow>;
+        Insert: Expand<CourseCardLayoutInsert>;
+        Update: Expand<CourseCardLayoutUpdate>;
+        Relationships: [];
       };
       course_hub: {
-        Row: CourseHubRow;
-        Insert: CourseHubInsert;
-        Update: CourseHubUpdate;
+        Row: Expand<CourseHubRow>;
+        Insert: Expand<CourseHubInsert>;
+        Update: Expand<CourseHubUpdate>;
+        Relationships: [];
       };
       course_syllabi: {
-        Row: CourseSyllabiRow;
-        Insert: CourseSyllabiInsert;
-        Update: CourseSyllabiUpdate;
+        Row: Expand<CourseSyllabiRow>;
+        Insert: Expand<CourseSyllabiInsert>;
+        Update: Expand<CourseSyllabiUpdate>;
+        Relationships: [];
       };
       deck_templates: {
-        Row: DeckTemplatesRow;
-        Insert: DeckTemplatesInsert;
-        Update: DeckTemplatesUpdate;
+        Row: Expand<DeckTemplatesRow>;
+        Insert: Expand<DeckTemplatesInsert>;
+        Update: Expand<DeckTemplatesUpdate>;
+        Relationships: [];
       };
       glossary_terms: {
-        Row: GlossaryTermsRow;
-        Insert: GlossaryTermsInsert;
-        Update: GlossaryTermsUpdate;
+        Row: Expand<GlossaryTermsRow>;
+        Insert: Expand<GlossaryTermsInsert>;
+        Update: Expand<GlossaryTermsUpdate>;
+        Relationships: [];
       };
       google_credentials: {
-        Row: GoogleCredentialsRow;
-        Insert: GoogleCredentialsInsert;
-        Update: GoogleCredentialsUpdate;
+        Row: Expand<GoogleCredentialsRow>;
+        Insert: Expand<GoogleCredentialsInsert>;
+        Update: Expand<GoogleCredentialsUpdate>;
+        Relationships: [];
       };
       grading_dismissals: {
-        Row: GradingDismissalsRow;
-        Insert: GradingDismissalsInsert;
-        Update: GradingDismissalsUpdate;
+        Row: Expand<GradingDismissalsRow>;
+        Insert: Expand<GradingDismissalsInsert>;
+        Update: Expand<GradingDismissalsUpdate>;
+        Relationships: [];
       };
       grading_drafts: {
-        Row: GradingDraftsRow;
-        Insert: GradingDraftsInsert;
-        Update: GradingDraftsUpdate;
+        Row: Expand<GradingDraftsRow>;
+        Insert: Expand<GradingDraftsInsert>;
+        Update: Expand<GradingDraftsUpdate>;
+        Relationships: [];
       };
       institution_fields: {
-        Row: InstitutionFieldsRow;
-        Insert: InstitutionFieldsInsert;
-        Update: InstitutionFieldsUpdate;
+        Row: Expand<InstitutionFieldsRow>;
+        Insert: Expand<InstitutionFieldsInsert>;
+        Update: Expand<InstitutionFieldsUpdate>;
+        Relationships: [];
       };
       knowledge_entries: {
-        Row: KnowledgeEntriesRow;
-        Insert: KnowledgeEntriesInsert;
-        Update: KnowledgeEntriesUpdate;
+        Row: Expand<KnowledgeEntriesRow>;
+        Insert: Expand<KnowledgeEntriesInsert>;
+        Update: Expand<KnowledgeEntriesUpdate>;
+        Relationships: [];
       };
       message_drafts: {
-        Row: MessageDraftsRow;
-        Insert: MessageDraftsInsert;
-        Update: MessageDraftsUpdate;
+        Row: Expand<MessageDraftsRow>;
+        Insert: Expand<MessageDraftsInsert>;
+        Update: Expand<MessageDraftsUpdate>;
+        Relationships: [];
       };
       microsoft_credentials: {
-        Row: MicrosoftCredentialsRow;
-        Insert: MicrosoftCredentialsInsert;
-        Update: MicrosoftCredentialsUpdate;
+        Row: Expand<MicrosoftCredentialsRow>;
+        Insert: Expand<MicrosoftCredentialsInsert>;
+        Update: Expand<MicrosoftCredentialsUpdate>;
+        Relationships: [];
       };
       presentation_drafts: {
-        Row: PresentationDraftsRow;
-        Insert: PresentationDraftsInsert;
-        Update: PresentationDraftsUpdate;
+        Row: Expand<PresentationDraftsRow>;
+        Insert: Expand<PresentationDraftsInsert>;
+        Update: Expand<PresentationDraftsUpdate>;
+        Relationships: [];
       };
       problem_solutions: {
-        Row: ProblemSolutionsRow;
-        Insert: ProblemSolutionsInsert;
-        Update: ProblemSolutionsUpdate;
+        Row: Expand<ProblemSolutionsRow>;
+        Insert: Expand<ProblemSolutionsInsert>;
+        Update: Expand<ProblemSolutionsUpdate>;
+        Relationships: [];
       };
       problems: {
-        Row: ProblemsRow;
-        Insert: ProblemsInsert;
-        Update: ProblemsUpdate;
+        Row: Expand<ProblemsRow>;
+        Insert: Expand<ProblemsInsert>;
+        Update: Expand<ProblemsUpdate>;
+        Relationships: [];
       };
       recording_files: {
-        Row: RecordingFilesRow;
-        Insert: RecordingFilesInsert;
-        Update: RecordingFilesUpdate;
+        Row: Expand<RecordingFilesRow>;
+        Insert: Expand<RecordingFilesInsert>;
+        Update: Expand<RecordingFilesUpdate>;
+        Relationships: [];
       };
       rubric_bank: {
-        Row: RubricBankRow;
-        Insert: RubricBankInsert;
-        Update: RubricBankUpdate;
+        Row: Expand<RubricBankRow>;
+        Insert: Expand<RubricBankInsert>;
+        Update: Expand<RubricBankUpdate>;
+        Relationships: [];
       };
       syllabus_templates: {
-        Row: SyllabusTemplatesRow;
-        Insert: SyllabusTemplatesInsert;
-        Update: SyllabusTemplatesUpdate;
+        Row: Expand<SyllabusTemplatesRow>;
+        Insert: Expand<SyllabusTemplatesInsert>;
+        Update: Expand<SyllabusTemplatesUpdate>;
+        Relationships: [];
       };
       user_style: {
-        Row: UserStyleRow;
-        Insert: UserStyleInsert;
-        Update: UserStyleUpdate;
+        Row: Expand<UserStyleRow>;
+        Insert: Expand<UserStyleInsert>;
+        Update: Expand<UserStyleUpdate>;
+        Relationships: [];
       };
       workflow_defs: {
-        Row: WorkflowDefsRow;
-        Insert: WorkflowDefsInsert;
-        Update: WorkflowDefsUpdate;
+        Row: Expand<WorkflowDefsRow>;
+        Insert: Expand<WorkflowDefsInsert>;
+        Update: Expand<WorkflowDefsUpdate>;
+        Relationships: [];
       };
       workflow_runs: {
-        Row: WorkflowRunsRow;
-        Insert: WorkflowRunsInsert;
-        Update: WorkflowRunsUpdate;
+        Row: Expand<WorkflowRunsRow>;
+        Insert: Expand<WorkflowRunsInsert>;
+        Update: Expand<WorkflowRunsUpdate>;
+        Relationships: [];
       };
       workflow_schedules: {
-        Row: WorkflowSchedulesRow;
-        Insert: WorkflowSchedulesInsert;
-        Update: WorkflowSchedulesUpdate;
+        Row: Expand<WorkflowSchedulesRow>;
+        Insert: Expand<WorkflowSchedulesInsert>;
+        Update: Expand<WorkflowSchedulesUpdate>;
+        Relationships: [];
       };
       workflow_triggers: {
-        Row: WorkflowTriggersRow;
-        Insert: WorkflowTriggersInsert;
-        Update: WorkflowTriggersUpdate;
+        Row: Expand<WorkflowTriggersRow>;
+        Insert: Expand<WorkflowTriggersInsert>;
+        Update: Expand<WorkflowTriggersUpdate>;
+        Relationships: [];
       };
     };
-    Views: Record<string, { Row: Record<string, unknown> }>;
+    Views: Record<string, { Row: Record<string, unknown>; Relationships: [] }>;
     Functions: Record<string, { Args: Record<string, unknown>; Returns: unknown }>;
     Enums: Record<string, string>;
     CompositeTypes: Record<string, Record<string, unknown>>;

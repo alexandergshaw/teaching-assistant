@@ -65,6 +65,7 @@ function baseCourse(overrides: Partial<Course> = {}): Course {
     dayTime: null,
     modality: null,
     topicOutline: null,
+    syllabusTemplateId: null,
     materialsFiles: [],
     castletopFiles: [],
     exportFiles: [],
@@ -379,18 +380,18 @@ describe("generateCastletopWorkbookAction", () => {
       }
     });
 
-    it("includes 'Castletop Workload' in the fileName", async () => {
+    it("uses the new underscore convention, ending in _Castletop.xlsx", async () => {
       const course = baseCourse({ id: "course-1", name: "Test Course" });
       vi.mocked(listCourses).mockResolvedValue([course]);
 
       const result = await generateCastletopWorkbookAction("course-1");
       expect("fileName" in result).toBe(true);
       if ("fileName" in result) {
-        expect(result.fileName).toContain("Castletop Workload");
+        expect(result.fileName).toBe("Test Course_Castletop.xlsx");
       }
     });
 
-    it("includes today's ISO date in the fileName", async () => {
+    it("does not include a date in the fileName", async () => {
       const course = baseCourse({ id: "course-1", name: "Test Course" });
       vi.mocked(listCourses).mockResolvedValue([course]);
 
@@ -398,7 +399,7 @@ describe("generateCastletopWorkbookAction", () => {
       const result = await generateCastletopWorkbookAction("course-1");
       expect("fileName" in result).toBe(true);
       if ("fileName" in result) {
-        expect(result.fileName).toContain(today);
+        expect(result.fileName).not.toContain(today);
       }
     });
 
@@ -413,7 +414,47 @@ describe("generateCastletopWorkbookAction", () => {
       const result = await generateCastletopWorkbookAction("course-1");
       expect("fileName" in result).toBe(true);
       if ("fileName" in result) {
-        expect(result.fileName.startsWith("CS101")).toBe(true);
+        expect(result.fileName).toBe("CS101_Test Course_Castletop.xlsx");
+      }
+    });
+
+    it("uses instructorFileAs in the fileName, taking precedence over instructor", async () => {
+      const course = baseCourse({
+        id: "course-1",
+        name: "Intro to Computer Science",
+        courseCode: "INFO-2350",
+      });
+      vi.mocked(listCourses).mockResolvedValue([course]);
+
+      const result = await generateCastletopWorkbookAction("course-1", {
+        instructor: "William A Loring",
+        instructorFileAs: "Loring, William",
+      });
+      expect("fileName" in result).toBe(true);
+      if ("fileName" in result) {
+        expect(result.fileName).toBe(
+          "Loring, William_INFO-2350_Intro to Computer Science_Castletop.xlsx"
+        );
+      }
+    });
+
+    it("falls back to instructor for the fileName when instructorFileAs is blank", async () => {
+      const course = baseCourse({
+        id: "course-1",
+        name: "Intro to Computer Science",
+        courseCode: "INFO-2350",
+      });
+      vi.mocked(listCourses).mockResolvedValue([course]);
+
+      const result = await generateCastletopWorkbookAction("course-1", {
+        instructor: "William A Loring",
+        instructorFileAs: null,
+      });
+      expect("fileName" in result).toBe(true);
+      if ("fileName" in result) {
+        expect(result.fileName).toBe(
+          "William A Loring_INFO-2350_Intro to Computer Science_Castletop.xlsx"
+        );
       }
     });
   });

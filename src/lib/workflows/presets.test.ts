@@ -662,3 +662,59 @@ describe("deck-template presets ask for the template", () => {
     }
   });
 });
+
+// Every workflow that produces a course kickoff or refresh must finish by
+// generating the Castletop workload workbook. Both course-kickoff and
+// course-kickoff-no-code end by including course-refresh, so the step is
+// appended to COURSE_REFRESH only - appending it to all three would run it
+// twice in both kickoffs.
+describe("castletop-workbook finishes every kickoff/refresh run", () => {
+  const all = allWorkflows([]);
+  const byId = new Map(all.map((w) => [w.id, w]));
+
+  it("course-refresh's last step is castletop-workbook", () => {
+    const wf = byId.get("course-refresh");
+    expect(wf, "course-refresh is registered").toBeTruthy();
+    expect(wf!.steps.at(-1)?.type).toBe("castletop-workbook");
+  });
+
+  it("neither course-kickoff nor course-kickoff-no-code declares a direct castletop-workbook step (proving no duplication - it is inherited exactly once via the course-refresh include)", () => {
+    for (const id of ["course-kickoff", "course-kickoff-no-code"]) {
+      const wf = byId.get(id);
+      expect(wf, `${id} is registered`).toBeTruthy();
+      const direct = wf!.steps.filter((s) => s.type === "castletop-workbook");
+      expect(
+        direct.length,
+        `${id}: castletop-workbook must not be a direct step (would double-run it, since it also arrives via the course-refresh include)`
+      ).toBe(0);
+    }
+  });
+
+  it("every input declared by the castletop-workbook step definition has a binding in course-refresh's entry", () => {
+    const wf = byId.get("course-refresh");
+    expect(wf, "course-refresh is registered").toBeTruthy();
+    const step = wf!.steps.find((s) => s.type === "castletop-workbook");
+    expect(step, "course-refresh has a castletop-workbook step").toBeTruthy();
+
+    const def = getStepDefinition("castletop-workbook");
+    expect(def, "castletop-workbook step definition is registered").toBeTruthy();
+
+    // Derived from the step definition's inputs, not a hardcoded list, so a
+    // future input added without a binding fails this test - the guard
+    // against the "unbound inputs are silently skipped" failure mode.
+    for (const input of def!.inputs) {
+      expect(
+        step!.bindings[input.key],
+        `castletop-workbook input "${input.key}" is unbound in course-refresh - an unbound input is silently skipped and never appears on the run form`
+      ).toBeTruthy();
+    }
+  });
+
+  it("course-kickoff's last step is still the include-workflow -> course-refresh entry, so castletop-workbook genuinely lands last there via the include", () => {
+    const wf = byId.get("course-kickoff");
+    expect(wf, "course-kickoff is registered").toBeTruthy();
+    const lastStep = wf!.steps.at(-1);
+    expect(lastStep?.type).toBe("include-workflow");
+    expect(lastStep?.include?.workflowId).toBe("course-refresh");
+  });
+});

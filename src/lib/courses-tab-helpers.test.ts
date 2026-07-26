@@ -53,6 +53,7 @@ const mockCourse: Course = {
   dayTime: "MWF 10-11am",
   modality: "async",
   topicOutline: null,
+  syllabusTemplateId: "tmpl-1",
   customTiles: [],
   hiddenTiles: [],
   studentRepos: [
@@ -75,6 +76,7 @@ describe("formFromCourse", () => {
     expect(form.name).toBe("CS 101");
     expect(form.weeks).toBe("15");
     expect(form.tests).toBe("3");
+    expect(form.syllabusTemplateId).toBe("tmpl-1");
     expect(form.repos).toEqual([
       { repo: "org/repo1", branch: "main" },
       { repo: "org/repo2", branch: "" },
@@ -94,11 +96,13 @@ describe("formFromCourse", () => {
       courseCode: null,
       term: null,
       institution: null,
+      syllabusTemplateId: null,
     };
     const form = formFromCourse(course);
     expect(form.courseCode).toBe("");
     expect(form.term).toBe("");
     expect(form.institution).toBe("");
+    expect(form.syllabusTemplateId).toBe("");
   });
 });
 
@@ -108,6 +112,12 @@ describe("courseToInput", () => {
     expect(input.name).toBe("CS 101");
     expect(input.weeks).toBe(15);
     expect(input.tests).toBe(3);
+    expect(input.syllabusTemplateId).toBe("tmpl-1");
+  });
+
+  it("carries syllabusTemplateId through as an empty string when unset, not dropped from the patch (updateCourseHubAction receives the whole input, so an omitted field would be silently wiped on every other cell's save)", () => {
+    const input = courseToInput({ ...mockCourse, syllabusTemplateId: null });
+    expect(input.syllabusTemplateId).toBe("");
   });
 
   it("preserves null branches in repos", () => {

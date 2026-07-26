@@ -167,7 +167,11 @@ export function courseToInputPayload(c: Course): CourseInput {
     tests: c.tests,
     lms: c.lms,
     dayTime: c.dayTime,
+    modality: c.modality,
+    topicOutline: c.topicOutline,
+    syllabusTemplateId: c.syllabusTemplateId,
     customTiles: c.customTiles,
+    hiddenTiles: c.hiddenTiles,
     studentRepos: c.studentRepos,
   };
 }

@@ -1,3 +1,5 @@
+import { sanitizeFileNamePart } from "@/lib/workflows/file-names";
+
 export interface CastletopItem {
   /** Assignment / activity label. */
   assignment: string;
@@ -137,4 +139,101 @@ export function buildCastletopPlan(o: BuildCastletopPlanOptions): CastletopPlan 
     blockRows,
     weeks,
   };
+}
+
+// ---------------------------------------------------------------------------
+// File naming
+//
+// The Castletop workbook's file name follows a DIFFERENT convention from
+// buildWorkflowFileName (src/lib/workflows/file-names.ts): underscore
+// separated, includes the full course name, and carries no date. This is
+// deliberate and Castletop-specific - do not change file-names.ts to match
+// it, since 14 other workflow steps depend on that shared convention.
+// ---------------------------------------------------------------------------
+
+export interface CastletopFileNameOptions {
+  /** Instructor in file-as form, e.g. "Loring, William". */
+  instructorFileAs?: string | null;
+  /** Fallback when instructorFileAs is blank, e.g. "William A Loring". */
+  instructor?: string | null;
+  courseCode?: string | null;
+  courseName?: string | null;
+}
+
+const CASTLETOP_SUFFIX = "Castletop";
+const CASTLETOP_EXT = "xlsx";
+const CASTLETOP_NAME_MAX_LENGTH = 150;
+
+/**
+ * Shortens a string to at most `max` characters, breaking only at a word
+ * boundary (never mid-word). A local equivalent of the same-named helper in
+ * workflows/file-names.ts - that helper is not exported there, and this
+ * module must not modify workflows/file-names.ts (14 other workflow steps
+ * depend on its convention, which is unrelated to Castletop's).
+ */
+function truncateAtWordBoundary(s: string, max: number): string {
+  if (max <= 0) return "";
+  if (s.length <= max) return s;
+  const slice = s.slice(0, max);
+  const lastSpace = slice.lastIndexOf(" ");
+  const shortened = lastSpace > 0 ? slice.slice(0, lastSpace) : slice;
+  return shortened.trim();
+}
+
+/**
+ * Builds the Castletop workbook file name to match the user's institutional
+ * convention:
+ *
+ *   <instructor, file-as>_<course code>_<course name>_Castletop.xlsx
+ *
+ * Parts are sanitized with sanitizeFileNamePart (workflows/file-names.ts) -
+ * reused as-is because it already preserves commas, which the "Last, First"
+ * instructor form depends on. Blank parts are omitted entirely (no doubled
+ * or trailing separators); "Castletop" is always present, so the minimum
+ * possible output is "Castletop.xlsx".
+ *
+ * Pure and deterministic - no date, no Date.now(), no randomness. Dropping
+ * the date is intentional: one Castletop workbook per course per term, and
+ * appendCourseCastletopFile dedupes by name so regenerating REPLACES the
+ * previous file rather than accumulating dated copies.
+ *
+ * The total length (including extension) is capped at 150 chars; when over,
+ * the course name - the longest and least identifying part - is truncated
+ * at a word boundary first. The extension and the "Castletop" suffix are
+ * never truncated.
+ */
+export function buildCastletopFileName(o: CastletopFileNameOptions): string {
+  const instructorSource =
+    o.instructorFileAs && o.instructorFileAs.trim() ? o.instructorFileAs : o.instructor;
+  const instructorPart = sanitizeFileNamePart(instructorSource ?? "");
+  const courseCodePart = sanitizeFileNamePart(o.courseCode ?? "");
+  let courseNamePart = sanitizeFileNamePart(o.courseName ?? "");
+
+  const buildName = () =>
+    [instructorPart, courseCodePart, courseNamePart, CASTLETOP_SUFFIX]
+      .filter((p) => p.length > 0)
+      .join("_") + `.${CASTLETOP_EXT}`;
+
+  let fileName = buildName();
+
+  if (fileName.length > CASTLETOP_NAME_MAX_LENGTH && courseNamePart.length > 0) {
+    // Every non-blank part contributes one "_" separator to its right except
+    // the last part overall. otherParts excludes courseNamePart (the part
+    // being resized) but always includes "Castletop", so - since
+    // courseNamePart is non-blank in this branch - the total separator
+    // count in the final name is exactly otherParts.length.
+    const otherParts = [instructorPart, courseCodePart, CASTLETOP_SUFFIX].filter(
+      (p) => p.length > 0
+    );
+    const fixedLength =
+      otherParts.reduce((sum, p) => sum + p.length, 0) +
+      otherParts.length +
+      1 + // "."
+      CASTLETOP_EXT.length;
+    const budget = Math.max(0, CASTLETOP_NAME_MAX_LENGTH - fixedLength);
+    courseNamePart = truncateAtWordBoundary(courseNamePart, budget);
+    fileName = buildName();
+  }
+
+  return fileName;
 }

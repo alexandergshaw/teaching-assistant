@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildCastletopPlan, sanitizeSheetName } from "./castletop-plan";
+import { buildCastletopPlan, sanitizeSheetName, buildCastletopFileName } from "./castletop-plan";
 import { buildCastletopWorkbook } from "./castletop";
 
 describe("sanitizeSheetName", () => {
@@ -540,5 +540,107 @@ describe("buildCastletopWorkbook", () => {
 
     expect(ws.getColumn("A").width).toBe(3.71);
     expect(ws.getColumn("K").width).toBe(8.29);
+  });
+});
+
+describe("buildCastletopFileName", () => {
+  it("reference case: instructorFileAs + courseCode + courseName", () => {
+    const result = buildCastletopFileName({
+      instructorFileAs: "Loring, William",
+      courseCode: "INFO-2350",
+      courseName: "Intro to Computer Science",
+    });
+    expect(result).toBe(
+      "Loring, William_INFO-2350_Intro to Computer Science_Castletop.xlsx"
+    );
+  });
+
+  it("prefers instructorFileAs over instructor when both are present", () => {
+    const result = buildCastletopFileName({
+      instructorFileAs: "Loring, William",
+      instructor: "William A Loring",
+      courseCode: "INFO-2350",
+      courseName: "Intro to Computer Science",
+    });
+    expect(result).toBe(
+      "Loring, William_INFO-2350_Intro to Computer Science_Castletop.xlsx"
+    );
+  });
+
+  it("falls back to instructor when instructorFileAs is blank (whitespace-only)", () => {
+    const result = buildCastletopFileName({
+      instructorFileAs: "   ",
+      instructor: "William A Loring",
+      courseCode: "INFO-2350",
+      courseName: "Intro to Computer Science",
+    });
+    expect(result).toBe(
+      "William A Loring_INFO-2350_Intro to Computer Science_Castletop.xlsx"
+    );
+  });
+
+  it("starts with the course code and has no leading underscore when both instructor fields are blank", () => {
+    const result = buildCastletopFileName({
+      courseCode: "INFO-2350",
+      courseName: "Intro to Computer Science",
+    });
+    expect(result).toBe("INFO-2350_Intro to Computer Science_Castletop.xlsx");
+    expect(result.startsWith("_")).toBe(false);
+  });
+
+  it("produces exactly Castletop.xlsx when every part is blank", () => {
+    const result = buildCastletopFileName({
+      instructorFileAs: null,
+      instructor: "   ",
+      courseCode: "",
+      courseName: undefined,
+    });
+    expect(result).toBe("Castletop.xlsx");
+  });
+
+  it("sanitizes illegal characters from a part", () => {
+    const result = buildCastletopFileName({
+      instructorFileAs: "a/b:c*",
+      courseCode: "INFO-2350",
+      courseName: "Course",
+    });
+    expect(result).toBe("abc_INFO-2350_Course_Castletop.xlsx");
+  });
+
+  it("preserves a comma in the instructor part (guards the Last, First form)", () => {
+    const result = buildCastletopFileName({
+      instructorFileAs: "Loring, William",
+      courseName: "Course",
+    });
+    expect(result).toBe("Loring, William_Course_Castletop.xlsx");
+  });
+
+  it("truncates a very long course name at a word boundary, keeps total <= 150, and still ends _Castletop.xlsx", () => {
+    const longName = Array.from({ length: 30 }, () => "Chapter").join(" ");
+    const result = buildCastletopFileName({
+      instructorFileAs: "Loring, William",
+      courseCode: "INFO-2350",
+      courseName: longName,
+    });
+
+    expect(result.length).toBeLessThanOrEqual(150);
+    expect(result.endsWith("_Castletop.xlsx")).toBe(true);
+
+    const prefix = "Loring, William_INFO-2350_";
+    const suffix = "_Castletop.xlsx";
+    expect(result.startsWith(prefix)).toBe(true);
+
+    const truncatedCourseName = result.slice(prefix.length, result.length - suffix.length);
+    expect(truncatedCourseName.length).toBeLessThan(longName.length);
+    expect(/^Chapter( Chapter)*$/.test(truncatedCourseName)).toBe(true);
+  });
+
+  it("is deterministic for the same input", () => {
+    const input = {
+      instructorFileAs: "Loring, William",
+      courseCode: "INFO-2350",
+      courseName: "Intro to Computer Science",
+    };
+    expect(buildCastletopFileName(input)).toBe(buildCastletopFileName(input));
   });
 });

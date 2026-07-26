@@ -5,17 +5,21 @@ import {
   listCourseHubAction,
   listFinalizedSyllabiAction,
   listMyOrgsAction,
+  listSyllabusTemplatesAction,
   getCourseNotificationsAction,
   listGithubReposAction,
 } from "@/app/actions";
 import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
+import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
 
 export interface UseCoursesDataReturn {
   courses: Course[];
   setCourses: (courses: Course[] | ((prev: Course[]) => Course[])) => void;
   syllabi: FinalizedSyllabusMeta[];
   setSyllabi: (syllabi: FinalizedSyllabusMeta[] | ((prev: FinalizedSyllabusMeta[]) => FinalizedSyllabusMeta[])) => void;
+  templates: SyllabusTemplateMeta[];
+  setTemplates: (templates: SyllabusTemplateMeta[] | ((prev: SyllabusTemplateMeta[]) => SyllabusTemplateMeta[])) => void;
   orgs: string[];
   setOrgs: (orgs: string[] | ((prev: string[]) => string[])) => void;
   state: "loading" | "idle" | "error";
@@ -28,11 +32,12 @@ export interface UseCoursesDataReturn {
   ownedRepos: string[] | null;
 }
 
-let hubCache: { courses: Course[]; syllabi: FinalizedSyllabusMeta[]; orgs: string[] } | null = null;
+let hubCache: { courses: Course[]; syllabi: FinalizedSyllabusMeta[]; templates: SyllabusTemplateMeta[]; orgs: string[] } | null = null;
 
 export function useCoursesData(): UseCoursesDataReturn {
   const [courses, setCourses] = useState<Course[]>(() => hubCache?.courses ?? []);
   const [syllabi, setSyllabi] = useState<FinalizedSyllabusMeta[]>(() => hubCache?.syllabi ?? []);
+  const [templates, setTemplates] = useState<SyllabusTemplateMeta[]>(() => hubCache?.templates ?? []);
   const [orgs, setOrgs] = useState<string[]>(() => hubCache?.orgs ?? []);
   const [state, setState] = useState<"loading" | "idle" | "error">(hubCache ? "idle" : "loading");
   const [refreshing, setRefreshing] = useState(false);
@@ -56,6 +61,14 @@ export function useCoursesData(): UseCoursesDataReturn {
     });
   }, []);
 
+  const setTemplatesWithCache = useCallback((u: SyllabusTemplateMeta[] | ((prev: SyllabusTemplateMeta[]) => SyllabusTemplateMeta[])): void => {
+    setTemplates((prev) => {
+      const next = typeof u === "function" ? u(prev) : u;
+      if (hubCache) hubCache = { ...hubCache, templates: next };
+      return next;
+    });
+  }, []);
+
   const setOrgsWithCache = useCallback((u: string[] | ((prev: string[]) => string[])): void => {
     setOrgs((prev) => {
       const next = typeof u === "function" ? u(prev) : u;
@@ -67,7 +80,12 @@ export function useCoursesData(): UseCoursesDataReturn {
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (opts?.silent) setRefreshing(true);
     else setState("loading");
-    const [c, s, o] = await Promise.all([listCourseHubAction(), listFinalizedSyllabiAction(), listMyOrgsAction()]);
+    const [c, s, o, t] = await Promise.all([
+      listCourseHubAction(),
+      listFinalizedSyllabiAction(),
+      listMyOrgsAction(),
+      listSyllabusTemplatesAction(),
+    ]);
     if ("error" in c) {
       setRefreshing(false);
       if (!opts?.silent) {
@@ -80,14 +98,16 @@ export function useCoursesData(): UseCoursesDataReturn {
       courses: c.courses,
       syllabi: "error" in s ? [] : s.syllabi,
       orgs: "error" in o ? [] : o.orgs,
+      templates: "error" in t ? [] : t.templates,
     };
     hubCache = next;
     setCoursesWithCache(next.courses);
     setSyllabisWithCache(next.syllabi);
     setOrgsWithCache(next.orgs);
+    setTemplatesWithCache(next.templates);
     setState("idle");
     setRefreshing(false);
-  }, [setCoursesWithCache, setSyllabisWithCache, setOrgsWithCache]);
+  }, [setCoursesWithCache, setSyllabisWithCache, setOrgsWithCache, setTemplatesWithCache]);
 
   const reloadSyllabi = useCallback(async () => {
     const s = await listFinalizedSyllabiAction();
@@ -145,6 +165,8 @@ export function useCoursesData(): UseCoursesDataReturn {
     setCourses: setCoursesWithCache,
     syllabi,
     setSyllabi: setSyllabisWithCache,
+    templates,
+    setTemplates: setTemplatesWithCache,
     orgs,
     setOrgs: setOrgsWithCache,
     state,

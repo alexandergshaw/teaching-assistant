@@ -27,9 +27,10 @@ export interface CourseForm {
   dayTime: string;
   modality: string;
   topicOutline: string;
+  syllabusTemplateId: string;
 }
 
-export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality" | "topicOutline";
+export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality" | "topicOutline" | "syllabusTemplateId";
 
 export const EMPTY_FORM: CourseForm = {
   id: null,
@@ -54,6 +55,7 @@ export const EMPTY_FORM: CourseForm = {
   dayTime: "",
   modality: "",
   topicOutline: "",
+  syllabusTemplateId: "",
 };
 
 export function formFromCourse(c: Course): CourseForm {
@@ -80,6 +82,7 @@ export function formFromCourse(c: Course): CourseForm {
     dayTime: c.dayTime ?? "",
     modality: c.modality ?? "",
     topicOutline: c.topicOutline ?? "",
+    syllabusTemplateId: c.syllabusTemplateId ?? "",
   };
 }
 
@@ -110,6 +113,7 @@ export function courseToInput(c: Course) {
     dayTime: c.dayTime ?? "",
     modality: c.modality ?? "",
     topicOutline: c.topicOutline ?? "",
+    syllabusTemplateId: c.syllabusTemplateId ?? "",
     customTiles: c.customTiles,
     hiddenTiles: c.hiddenTiles,
     studentRepos: c.studentRepos,

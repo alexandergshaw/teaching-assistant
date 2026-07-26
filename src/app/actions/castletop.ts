@@ -1,16 +1,19 @@
 "use server";
 
 import { buildCastletopWorkbook } from "@/lib/castletop";
-import { buildCastletopPlan } from "@/lib/castletop-plan";
+import { buildCastletopPlan, buildCastletopFileName } from "@/lib/castletop-plan";
 import { buildCastletopSources } from "@/lib/castletop-sources";
 import { listCourses as listCourseHubTiles } from "@/lib/supabase/courses";
 import { requireOwner } from "@/lib/supabase/auth";
 import { resolveRepolessSchedule } from "@/lib/workflows/registry/schedule-resolution";
-import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { listAssignmentBriefsByUrlAction } from "./canvas-inbox";
 
 export interface GenerateCastletopConfig {
   instructor?: string | null;
+  /** Instructor in file-as form, e.g. "Loring, William". Names the file
+   * only; the A1 title always uses `instructor`. Falls back to
+   * `instructor` when blank. */
+  instructorFileAs?: string | null;
   contactMinutes?: number | null;
   readingRate?: number | null;
   pagesPerChapter?: number | null;
@@ -88,12 +91,11 @@ export async function generateCastletopWorkbookAction(
     const buffer = await buildCastletopWorkbook(plan);
     const base64 = Buffer.from(buffer).toString("base64");
 
-    const today = new Date().toISOString().split("T")[0];
-    const fileName = buildWorkflowFileName({
-      course: tile,
-      artifact: "Castletop Workload",
-      date: today,
-      ext: "xlsx",
+    const fileName = buildCastletopFileName({
+      instructorFileAs: config?.instructorFileAs ?? undefined,
+      instructor: config?.instructor ?? undefined,
+      courseCode: tile.courseCode,
+      courseName: tile.name,
     });
 
     return { base64, fileName, notes: allNotes, weeks };

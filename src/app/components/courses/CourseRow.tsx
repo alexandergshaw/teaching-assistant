@@ -8,12 +8,14 @@
 // expansion is gone - every card's behavior now lives in its column's cell.
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
+import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
 import { COLUMN_MIN_WIDTHS, truncateForCell, type ColumnId, type TableEditableField } from "@/lib/courses-table-helpers";
 import { integrationsToText } from "@/lib/courses-tab-helpers";
 import type { UseCourseImportActionsReturn } from "./useCourseImportActions";
 import EditableCell from "./EditableCell";
 import LmsCell from "./LmsCell";
 import SyllabusCell from "./SyllabusCell";
+import SyllabusTemplateCell from "./SyllabusTemplateCell";
 import RepoCell from "./RepoCell";
 import { RosterCell, StudentReposCell } from "./RosterCell";
 import { ScheduleCsvCell, RubricCell } from "./ScheduleCell";
@@ -26,6 +28,7 @@ export interface CourseRowProps {
   course: Course;
   visibleColumns: ColumnId[];
   syllabi: FinalizedSyllabusMeta[];
+  syllabusTemplates: SyllabusTemplateMeta[];
   ownedRepos: string[] | null;
   notifTotal: number;
   saveField: (course: Course, field: TableEditableField, rawValue: string, extra?: Partial<CourseInput>) => Promise<Course | null>;
@@ -49,6 +52,7 @@ export default function CourseRow({
   course,
   visibleColumns,
   syllabi,
+  syllabusTemplates,
   ownedRepos,
   notifTotal,
   saveField,
@@ -246,6 +250,10 @@ export default function CourseRow({
       )}
 
       {has("castletop") && <CastletopCell course={course} onCourseUpdated={onCourseUpdated} />}
+
+      {has("syllabusTemplate") && (
+        <SyllabusTemplateCell course={course} templates={syllabusTemplates} onSave={save("syllabusTemplateId")} />
+      )}
 
       <td>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

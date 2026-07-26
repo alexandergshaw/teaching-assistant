@@ -50,6 +50,7 @@ function makeCourse(overrides: Partial<Course>): Course {
     dayTime: null,
     modality: null,
     topicOutline: null,
+    syllabusTemplateId: null,
     materialsFiles: [],
     castletopFiles: [],
     exportFiles: [],
@@ -169,6 +170,14 @@ describe("sortValueFor", () => {
     expect(sortValueFor(makeCourse({ syllabusId: null }), "syllabusId")).toEqual({ kind: "text", value: "", empty: true });
   });
 
+  it("resolves syllabusTemplateId to its display name via ctx, falling back to the raw id when unmapped", () => {
+    const c = makeCourse({ syllabusTemplateId: "tmpl-1" });
+    const ctx = { syllabusTemplateNameById: new Map([["tmpl-1", "Standard Syllabus Template"]]) };
+    expect(sortValueFor(c, "syllabusTemplate", ctx)).toEqual({ kind: "text", value: "Standard Syllabus Template", empty: false });
+    expect(sortValueFor(c, "syllabusTemplate")).toEqual({ kind: "text", value: "tmpl-1", empty: false });
+    expect(sortValueFor(makeCourse({ syllabusTemplateId: null }), "syllabusTemplate")).toEqual({ kind: "text", value: "", empty: true });
+  });
+
   it("uses raw content text for scheduleCsv/rubric, empty when unset", () => {
     expect(sortValueFor(makeCourse({ csvData: "week,topic\n1,Intro" }), "scheduleCsv")).toEqual({
       kind: "text",
@@ -275,21 +284,21 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "institution",
       "weeks",
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate",
     ]);
   });
 
   it("unions all post-v0 columns into an empty legacy selection (a bare array is version 0)", () => {
     expect(parseColumnSet(JSON.stringify([]))).toEqual([
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate",
     ]);
   });
 
   it("ignores name/actions if present since they are not toggleable columns", () => {
     expect(parseColumnSet(JSON.stringify(["name", "actions", "lms"]))).toEqual([
       "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate",
     ]);
   });
 
@@ -300,14 +309,14 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "repos",
       "lms",
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate",
     ]);
   });
 
   it("dedups after migrating a legacy id that collides with a persisted new id", () => {
     expect(parseColumnSet(JSON.stringify(["roster", "rosterCount", "lms"]))).toEqual([
       "roster", "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate",
     ]);
   });
 
@@ -351,22 +360,27 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(JSON.stringify({ v: CURRENT_COLUMNS_VERSION, columns: ["bogus", "lms"] }))).toEqual(["lms"]);
   });
 
-  it("unions v2+v3+v4 columns into a v1 persisted set", () => {
+  it("unions v2+v3+v4+v5 columns into a v1 persisted set", () => {
     const v1 = JSON.stringify({ v: 1, columns: ["lms", "modality"] });
     expect(parseColumnSet(v1)).toEqual([
       "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate",
     ]);
   });
 
-  it("unions v3+v4 columns into a v2 persisted set", () => {
+  it("unions v3+v4+v5 columns into a v2 persisted set", () => {
     const v2 = JSON.stringify({ v: 2, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v2)).toEqual(["lms", "modality", "topicOutline", "castletop"]);
+    expect(parseColumnSet(v2)).toEqual(["lms", "modality", "topicOutline", "castletop", "syllabusTemplate"]);
   });
 
-  it("unions v4 columns into a v3 persisted set", () => {
+  it("unions v4+v5 columns into a v3 persisted set", () => {
     const v3 = JSON.stringify({ v: 3, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v3)).toEqual(["lms", "modality", "castletop"]);
+    expect(parseColumnSet(v3)).toEqual(["lms", "modality", "castletop", "syllabusTemplate"]);
+  });
+
+  it("unions v5 columns into a v4 persisted set", () => {
+    const v4 = JSON.stringify({ v: 4, columns: ["lms", "modality"] });
+    expect(parseColumnSet(v4)).toEqual(["lms", "modality", "syllabusTemplate"]);
   });
 
   it("serializeColumnSet writes the current version", () => {
@@ -465,6 +479,11 @@ describe("computeFieldPatch", () => {
     expect(computeFieldPatch("modality", "async")).toEqual({ modality: "async" });
     expect(computeFieldPatch("modality", "sync")).toEqual({ modality: "sync" });
     expect(computeFieldPatch("modality", "")).toEqual({ modality: null });
+  });
+
+  it("maps syllabusTemplateId to null when blank", () => {
+    expect(computeFieldPatch("syllabusTemplateId", "tmpl-1")).toEqual({ syllabusTemplateId: "tmpl-1" });
+    expect(computeFieldPatch("syllabusTemplateId", "")).toEqual({ syllabusTemplateId: null });
   });
 
   it("parses studentRepos rows", () => {

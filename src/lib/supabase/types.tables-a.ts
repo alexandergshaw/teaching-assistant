@@ -80,6 +80,39 @@ export interface AiChatMessagesUpdate {
   context_text?: string | null;
 }
 
+export interface ArtifactTemplatesRow {
+  id: string;
+  user_id: string;
+  kind: string;
+  name: string;
+  description: string;
+  spec: Json;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ArtifactTemplatesInsert {
+  id?: string;
+  user_id: string;
+  kind: string;
+  name?: string;
+  description?: string;
+  spec?: Json;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ArtifactTemplatesUpdate {
+  id?: string;
+  user_id?: string;
+  kind?: string;
+  name?: string;
+  description?: string;
+  spec?: Json;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface CartridgeDropsRow {
   id: string;
   user_id: string;
@@ -204,6 +237,7 @@ export interface CourseHubRow {
   day_time: string | null;
   modality: string | null;
   topic_outline: string | null;
+  syllabus_template_id: string | null;
   materials_files: Json;
   castletop_files: Json;
   export_files: Json | null;
@@ -245,6 +279,7 @@ export interface CourseHubInsert {
   day_time?: string | null;
   modality?: string | null;
   topic_outline?: string | null;
+  syllabus_template_id?: string | null;
   materials_files?: Json;
   castletop_files?: Json;
   export_files?: Json | null;
@@ -286,6 +321,7 @@ export interface CourseHubUpdate {
   day_time?: string | null;
   modality?: string | null;
   topic_outline?: string | null;
+  syllabus_template_id?: string | null;
   materials_files?: Json;
   castletop_files?: Json;
   export_files?: Json | null;

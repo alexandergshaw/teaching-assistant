@@ -35,6 +35,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     courses,
     setCourses,
     syllabi,
+    templates,
     orgs,
     state,
     refreshing,
@@ -197,6 +198,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         onSearchChange={setSearch}
         totalCourseCount={courses.length}
         syllabi={syllabi}
+        syllabusTemplates={templates}
         ownedRepos={ownedRepos}
         notifByCourse={notifByCourse}
         saveField={saveField}

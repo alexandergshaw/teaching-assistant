@@ -43,6 +43,13 @@ export const courseSetupCastletopSteps: StepDefinition[] = [
         help: "Appears in the workbook's title line. Blank omits it.",
       },
       {
+        key: "instructorFileAs",
+        label: "Instructor (file-as)",
+        type: "text",
+        required: false,
+        help: "Names the file, e.g. \"Loring, William\". Falls back to Instructor name when blank.",
+      },
+      {
         key: "contactMinutes",
         label: "Minutes per contact hour",
         type: "number",
@@ -95,6 +102,7 @@ export const courseSetupCastletopSteps: StepDefinition[] = [
 
       const result = await generateCastletopWorkbookAction(hubCourseId, {
         instructor: String(values.instructor ?? "").trim() || null,
+        instructorFileAs: String(values.instructorFileAs ?? "").trim() || null,
         contactMinutes: parseNumericInput(values.contactMinutes),
         readingRate: parseNumericInput(values.readingRate),
         pagesPerChapter: parseNumericInput(values.pagesPerChapter),

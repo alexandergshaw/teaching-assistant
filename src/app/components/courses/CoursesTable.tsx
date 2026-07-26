@@ -14,6 +14,7 @@ import ListItemText from "@mui/material/ListItemText";
 import CircularProgress from "@mui/material/CircularProgress";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
+import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
 import {
   ALL_COLUMN_IDS,
   COLUMN_MIN_WIDTHS,
@@ -58,6 +59,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   lmsExports: "LMS Exports",
   topicOutline: "Topic Outline",
   castletop: "Castletop",
+  syllabusTemplate: "Syllabus template",
 };
 
 export interface CoursesTableProps {
@@ -70,6 +72,7 @@ export interface CoursesTableProps {
   onSearchChange: (value: string) => void;
   totalCourseCount: number;
   syllabi: FinalizedSyllabusMeta[];
+  syllabusTemplates: SyllabusTemplateMeta[];
   ownedRepos: string[] | null;
   notifByCourse: Record<string, { needsGrading: number; unread: number }>;
   saveField: (course: Course, field: TableEditableField, rawValue: string, extra?: Partial<CourseInput>) => Promise<Course | null>;
@@ -99,6 +102,7 @@ export default function CoursesTable({
   onSearchChange,
   totalCourseCount,
   syllabi,
+  syllabusTemplates,
   ownedRepos,
   notifByCourse,
   saveField,
@@ -145,7 +149,10 @@ export default function CoursesTable({
 
   const sortIndicator = (field: SortField) => (sort.field === field ? (sort.direction === "asc" ? " ▲" : " ▼") : "");
 
-  const sortCtx: SortContext = { syllabusNameById: new Map(syllabi.map((s) => [s.id, s.name])) };
+  const sortCtx: SortContext = {
+    syllabusNameById: new Map(syllabi.map((s) => [s.id, s.name])),
+    syllabusTemplateNameById: new Map(syllabusTemplates.map((t) => [t.id, t.name])),
+  };
   const sorted = sortCourses(courses, sort, sortCtx);
 
   return (
@@ -217,6 +224,7 @@ export default function CoursesTable({
                   course={c}
                   visibleColumns={visibleColumns}
                   syllabi={syllabi}
+                  syllabusTemplates={syllabusTemplates}
                   ownedRepos={ownedRepos}
                   notifTotal={(() => {
                     const n = notifByCourse[c.id];

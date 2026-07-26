@@ -68,6 +68,7 @@ function baseCourse(overrides: Partial<Course> = {}): Course {
     dayTime: null,
     modality: null,
     topicOutline: null,
+    syllabusTemplateId: null,
     materialsFiles: [],
     castletopFiles: [],
     exportFiles: [],
@@ -148,6 +149,7 @@ describe("castletop-workbook step", () => {
     expect(callArgs[0]).toBe("course-1");
     expect(callArgs[1]).toEqual({
       instructor: null,
+      instructorFileAs: null,
       contactMinutes: undefined,
       readingRate: undefined,
       pagesPerChapter: undefined,
@@ -288,10 +290,40 @@ describe("castletop-workbook step", () => {
     const callArgs = vi.mocked(generateCastletopWorkbookAction).mock.calls[0];
     expect(callArgs[1]).toEqual({
       instructor: "Dr. Smith",
+      instructorFileAs: null,
       contactMinutes: undefined,
       readingRate: 19,
       pagesPerChapter: undefined,
       classSessionMinutes: 120,
+    });
+  });
+
+  it("AC11: instructorFileAs is trimmed and passed through, blank becomes null", async () => {
+    const tile = baseCourse({ id: "course-1" });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+    vi.mocked(generateCastletopWorkbookAction).mockResolvedValue({
+      base64: "dGVzdCBkYXRh",
+      fileName: "workbook.xlsx",
+      notes: [],
+      weeks: 16,
+    });
+    vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
+
+    await step.run(
+      { hubCourse: "course-1", instructorFileAs: "  Loring, William  " },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(generateCastletopWorkbookAction).toHaveBeenCalledTimes(1);
+    const callArgs = vi.mocked(generateCastletopWorkbookAction).mock.calls[0];
+    expect(callArgs[1]).toEqual({
+      instructor: null,
+      instructorFileAs: "Loring, William",
+      contactMinutes: undefined,
+      readingRate: undefined,
+      pagesPerChapter: undefined,
+      classSessionMinutes: undefined,
     });
   });
 

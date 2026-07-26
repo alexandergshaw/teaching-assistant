@@ -1355,9 +1355,15 @@ encoding existed - so four supporting pieces landed with the control.
    module's own week instead.) Every branch emits a summary note, so a
    chosen module is never silently ignored.
 8. Bindings: course-refresh's lecture-zip binds moduleId runtime with the
-   shared fieldKey "moduleId" (it has no course-progress step); both kickoff
-   variants inherit it through their include of course-refresh. The
+   shared fieldKey "moduleId" (it has no course-progress step). The
    source-policy input-count canary for lecture-zip is 8.
+   CORRECTED 2026-07-26: this check originally said "both kickoff
+   variants inherit it through their include of course-refresh". That
+   is true of COURSE_KICKOFF but NOT of NO_CODE_KICKOFF, whose include
+   skips the lecture-zip step (skipSteps includes its index - see
+   presets/course-setup.ts). The inaccuracy dates from the introducing
+   commit add7432 and was never a behavior regression; only this
+   description was wrong.
 
 ### 2026-07-23 - A targeted module drives the lecture (never substituted)
 
@@ -1710,8 +1716,20 @@ Generation action (src/app/actions/castletop.ts):
 13. LMS enrichment is attempted only when the tile has both lms and
     canvasUrl, and is non-fatal: an error or a throw becomes a note and
     generation still succeeds.
-14. File name via buildWorkflowFileName: "<course> - Castletop Workload
-    - <YYYY-MM-DD>.xlsx".
+14. File name via buildCastletopFileName (src/lib/castletop-plan.ts), NOT
+    buildWorkflowFileName: "<instructor, file-as>_<course code>_<course
+    name>_Castletop.xlsx", underscore-separated and including the FULL
+    course name. Blank parts are omitted (no doubled/trailing
+    underscores); "Castletop" is always present, so the floor is
+    "Castletop.xlsx". The instructor part prefers instructorFileAs (e.g.
+    "Loring, William") and falls back to instructor (e.g. "William A
+    Loring") when instructorFileAs is blank - a DIFFERENT form of the
+    name than the A1 title, which always uses instructor. Deliberately
+    carries NO date: one Castletop file per course per term, and
+    appendCourseCastletopFile dedupes by name so regenerating REPLACES
+    the previous file instead of accumulating dated copies. Capped at
+    150 chars total, truncating the course name at a word boundary
+    first (never the extension or the "Castletop" suffix) when over.
 
 Column and cell:
 15. castletop_files is a jsonb column written ONLY by its dedicated
@@ -1719,9 +1737,15 @@ Column and cell:
     toRow never writes it, so updateCourse cannot clobber it.
 16. Column id "castletop" is registered in ALL_COLUMN_IDS,
     DEFAULT_VISIBLE_COLUMNS, COLUMN_MIN_WIDTHS, sortValueFor (count),
-    COLUMN_LABELS; CURRENT_COLUMNS_VERSION is 4 with
-    COLUMNS_ADDED_IN[4] = ["castletop"] so the column appears for
-    existing persisted column sets.
+    COLUMN_LABELS; COLUMNS_ADDED_IN[4] = ["castletop"] so the column
+    appears for existing persisted column sets.
+    SUPERSEDED 2026-07-26 as to the version number only: this check
+    originally read "CURRENT_COLUMNS_VERSION is 4". The version is a
+    moving target by design - each new column bumps it (now 5, see
+    section 60 check 1). What must hold is that COLUMNS_ADDED_IN[4]
+    still lists "castletop" and that every prior version's entry is
+    retained, so a set persisted at ANY earlier version still unions in
+    every column added since.
 17. CastletopCell shows the generated files with Download/Remove and a
     Generate button that runs the action, uploads via uploadCourseFile
     ("xlsx"), appends to the column, and deletes any replaced object.
@@ -1741,3 +1765,121 @@ Workflow step:
     runner and the headless server runner), never to materialsFiles,
     and also to the Files tab with workflow tagging. A Files-tab error
     or a null helper is a note, not a failure.
+
+## 57. Castletop finishes every kickoff / refresh workflow
+
+Acceptance criteria (2235ab1+):
+1. `castletop-workbook` is the FINAL step of `COURSE_REFRESH`, with all
+   seven of its inputs bound (hubCourse, instructor, instructorFileAs,
+   contactMinutes, readingRate, pagesPerChapter, classSessionMinutes).
+   An unbound input never reaches the run form, so a binding-completeness
+   test derives the expected key set from the step definition itself
+   rather than a hardcoded list.
+2. `COURSE_KICKOFF` and `NO_CODE_KICKOFF` contain NO direct
+   `castletop-workbook` step. Both END by including `course-refresh`, so
+   they inherit it exactly once; adding it directly would run it twice.
+3. `COURSE_KICKOFF`'s last step remains the `include-workflow` ->
+   `course-refresh` entry, so the Castletop genuinely lands last there.
+4. Known and deliberate: in `NO_CODE_KICKOFF`, `integrate-source-into-lms`
+   runs AFTER the include, so the Castletop is second-to-last there and
+   does not reflect pages/assignments that step creates. Recorded in a
+   code comment and in that preset's description. Not "fixed" by
+   reordering, which would shift the include's remap stepIndex refs.
+5. All three preset descriptions state that the run finishes by
+   producing the Castletop workbook.
+
+## 58. Artifact template store (foundation for course artifact templates)
+
+Acceptance criteria (2235ab1+):
+1. ONE table `artifact_templates` with a `kind` discriminator
+   (assignment | test | discussion | quiz | class-session) plus a jsonb
+   `spec` - not five tables. Owner-only RLS, mirroring `deck_templates`.
+2. `src/lib/artifact-templates/types.ts` and `presets.ts` are PURE - no
+   I/O, no Date, no randomness. Ids and timestamps are caller-supplied,
+   which is why `emptyArtifactTemplate` / `duplicateArtifactTemplate`
+   take an id parameter.
+3. `coerceAssignmentSpec` is defensive against untrusted jsonb: null,
+   undefined, a string, an array, a number, `{}`, and out-of-union
+   enum values ALL yield the documented defaults without throwing.
+   `deliverables` keeps only non-blank strings.
+4. `duplicateArtifactTemplate` deep-clones `spec` - mutating the copy
+   must never affect the original.
+5. Preset ids start with `preset-`; `upsertArtifactTemplate` and the
+   save/delete actions REFUSE them (presets are code, not rows).
+6. `getArtifactTemplateAction` resolves over `[...presets, ...userRows]`
+   by id FIRST then case-insensitive name, so a workflow can bind a
+   template by a human name.
+7. `mapArtifactTemplate` routes coercion by kind; an unknown or
+   malformed kind yields `{}` rather than fabricated structure.
+8. Only the assignment spec is designed; the other four kinds are
+   placeholders pending their own kickoffs.
+
+## 59. Database type shape: Expand<> + Relationships
+
+Acceptance criteria (2235ab1+):
+1. `src/lib/supabase/types.ts` wraps every table's Row/Insert/Update in
+   `Expand<T> = { [K in keyof T]: T[K] }` and gives every table entry
+   `Relationships: []`. This is what makes `.insert`/`.upsert`/`.update`
+   typecheck without `as any`: postgrest-js requires each table to
+   satisfy `GenericTable`, and named interfaces lack the implicit index
+   signature that a mapped type provides.
+2. **`Expand<T>` MUST remain identity-preserving.** Optional fields stay
+   optional, required stay required, and value types are unchanged.
+   Verify by type-probe: a minimal `course_hub` Insert literal with only
+   the required keys must compile, omitting a required key must error,
+   and `Row["weeks"]` must accept `number`/`null` and reject a string.
+   A regression here would silently make every Insert all-required or
+   all-optional, and existing `as any` call sites would NOT catch it.
+3. `types.ts` has ZERO runtime exports - it is type-only, so this
+   carries no runtime effect.
+4. The ~150 Row/Insert/Update interfaces in types.tables-a/-b are
+   untouched by this mechanism.
+
+## 60. Syllabus template column + Generate button
+
+Acceptance criteria (2235ab1+):
+1. New per-course `syllabus_template_id` column, surfaced as the
+   `syllabusTemplate` table column (version 5,
+   `COLUMNS_ADDED_IN[5] = ["syllabusTemplate"]`). Unlike the file
+   columns it IS written by `toRow` and IS carried by `courseToInput` -
+   it is a plain scalar the user edits inline.
+2. `SyllabusTemplateCell` selects from the user's syllabus templates,
+   loaded via a 4th `listSyllabusTemplatesAction()` element in
+   `useCoursesData`'s Promise.all and threaded through CoursesTable ->
+   CourseRow.
+3. The Syllabus cell's Generate button is disabled with an explanatory
+   title + hint until `syllabusTemplateId` is set.
+4. Generation REUSES the existing `generateCourseSyllabusAction` - a new
+   caller, not a new generator. Facts come from the row via the pure
+   `buildSyllabusFactsFromCourse`; `email` and `lmsUrl` come from the
+   institution's fields and, when blank, are reported in a note rather
+   than silently producing a thinner document (the generator leaves
+   those template paragraphs untouched).
+5. **`createFinalizedSyllabusAction` does NOT write
+   `course_hub.syllabus_id`** (unlike `uploadSyllabusAction`, which does
+   it server-side). So the Generate flow MUST persist the link itself
+   via the cell's `onSave` before calling `onUploaded` - otherwise the
+   UI shows a linked syllabus that reverts on refresh.
+
+## 61. courseToInputPayload carries every Course field
+
+Acceptance criteria (2235ab1+):
+1. `courseToInputPayload` (registry-helpers.ts) must carry EVERY
+   `Course` field except a named, commented exclusion list (`id`,
+   `updatedAt`, and the dedicated-writer-only file/zip fields).
+   Omission is NOT neutral: `toRow`'s `clean()` maps `undefined` to
+   `null`, so a missing string field WIPES that column.
+2. Regression fixed here: the function previously omitted `modality`,
+   `topicOutline`, `syllabusTemplateId` and `hiddenTiles`. It has six
+   call sites including `starter-materials`, which `course-refresh`
+   includes and both kickoffs include in turn - so every Kickoff and
+   Refresh run silently erased the tile's Modality, Topic Outline and
+   Syllabus template. Topic Outline is also a registered source kind, so
+   the loss silently degraded downstream lecture/schedule generation.
+3. `hiddenTiles` was NOT wiped (toRow yields `undefined` for arrays and
+   JSON.stringify drops undefined keys before the request), but it is
+   carried now for completeness.
+4. A drift-proof test derives the checked key set from a fully-populated
+   `Course` fixture rather than a hardcoded list, so a future `Course`
+   field that is neither carried nor consciously excluded FAILS. Verified
+   by sabotage: removing any single carried field fails the test.

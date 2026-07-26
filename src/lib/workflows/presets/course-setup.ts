@@ -6,7 +6,7 @@ export const COURSE_KICKOFF: WorkflowDef = {
   category: "course-setup",
   name: "Course Kickoff",
   description:
-    "Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile, the template repository, and the new repository's name. Generates the schedule, creates the class repo from the template, writes assignment READMEs - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically).",
+    "Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile, the template repository, and the new repository's name. Generates the schedule, creates the class repo from the template, writes assignment READMEs - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), finishing by generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab.",
   steps: [
     {
       type: "load-course-tile",
@@ -68,7 +68,7 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
   category: "course-setup",
   name: "Course Kickoff (no codebase)",
   description:
-    "For courses without a code base (ethical hacking, project management, business, etc.). Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile and the deck template. Generates the schedule and lecture materials from the schedule topics - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps.",
+    "For courses without a code base (ethical hacking, project management, business, etc.). Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile and the deck template. Generates the schedule and lecture materials from the schedule topics - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps, and generates the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab before the final step integrates the source material into the LMS, so any pages or assignments that final step creates are not reflected in the workbook.",
   steps: [
     {
       type: "load-course-tile",
@@ -129,6 +129,14 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
       },
     },
     {
+      // Runs AFTER the course-refresh include above, and that include now
+      // ends with castletop-workbook (it is course-refresh's last step) -
+      // so the Castletop workbook here is built second-to-last, before
+      // this step. Consequence: any pages or assignments this step adds
+      // to the LMS are not yet present when the workbook is generated, so
+      // they are not reflected in it. Not reordered on purpose: moving
+      // this step would shift the include's remap stepIndex references
+      // above, which is out of scope for this change.
       type: "integrate-source-into-lms",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
@@ -146,7 +154,7 @@ export const COURSE_REFRESH: WorkflowDef = {
   category: "course-setup",
   name: "Course Refresh",
   description:
-    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. A tile without a linked repository pauses with an alert and, on continue, the schedule falls back to the tile's saved Schedule of Topics (CSV) or its topics; repo-driven materials steps are skipped in that case. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved to the LMS course, onto the course tile, and as a document in the LMS export's Start Here module. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines; each module's assignment carries its generated instructions. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set. Finally the Starter Materials workflow runs against the tile's LMS course (dynamic - edits to it apply here).",
+    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. A tile without a linked repository pauses with an alert and, on continue, the schedule falls back to the tile's saved Schedule of Topics (CSV) or its topics; repo-driven materials steps are skipped in that case. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved to the LMS course, onto the course tile, and as a document in the LMS export's Start Here module. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines; each module's assignment carries its generated instructions. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set. The Starter Materials workflow then runs against the tile's LMS course (dynamic - edits to it apply here), and the run finishes by generating the Castletop credit-hour workload workbook for the course, saving it onto the course tile's Castletop column and the Files tab.",
   steps: [
     {
       type: "load-course-tile",
@@ -269,6 +277,21 @@ export const COURSE_REFRESH: WorkflowDef = {
         bindOverrides: {
           "0.courses": { source: "step", stepIndex: 0, outputKey: "course" },
         },
+      },
+    },
+    {
+      // Castletop last: it reads the tile's schedule and, when an LMS is
+      // connected, the assignments this workflow just created - so it must
+      // run after module/assignment creation, not before.
+      type: "castletop-workbook",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        instructor: { source: "runtime", fieldKey: "instructor" },
+        instructorFileAs: { source: "runtime", fieldKey: "instructorFileAs" },
+        contactMinutes: { source: "runtime", fieldKey: "contactMinutes" },
+        readingRate: { source: "runtime", fieldKey: "readingRate" },
+        pagesPerChapter: { source: "runtime", fieldKey: "pagesPerChapter" },
+        classSessionMinutes: { source: "runtime", fieldKey: "classSessionMinutes" },
       },
     },
   ],

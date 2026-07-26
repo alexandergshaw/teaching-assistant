@@ -47,6 +47,7 @@ export function CastletopCell({ course, onCourseUpdated }: CastletopCellProps) {
   };
 
   const [instructor, setInstructor] = useState(() => getStorageValue("instructor", ""));
+  const [instructorFileAs, setInstructorFileAs] = useState(() => getStorageValue("instructorFileAs", ""));
   const [contactMinutes, setContactMinutes] = useState(() => getStorageValue("contactMinutes", "50"));
   const [readingRate, setReadingRate] = useState(() => getStorageValue("readingRate", "19"));
   const [pagesPerChapter, setPagesPerChapter] = useState(() => getStorageValue("pagesPerChapter", "30"));
@@ -55,6 +56,11 @@ export function CastletopCell({ course, onCourseUpdated }: CastletopCellProps) {
   const handleInstructorChange = (value: string) => {
     setInstructor(value);
     setStorageValue("instructor", value);
+  };
+
+  const handleInstructorFileAsChange = (value: string) => {
+    setInstructorFileAs(value);
+    setStorageValue("instructorFileAs", value);
   };
 
   const handleContactMinutesChange = (value: string) => {
@@ -95,6 +101,7 @@ export function CastletopCell({ course, onCourseUpdated }: CastletopCellProps) {
 
       const result = await generateCastletopWorkbookAction(course.id, {
         instructor: instructor.trim() || null,
+        instructorFileAs: instructorFileAs.trim() || null,
         contactMinutes: contactMinutesNum,
         readingRate: readingRateNum,
         pagesPerChapter: pagesPerChapterNum,
@@ -227,6 +234,16 @@ export function CastletopCell({ course, onCourseUpdated }: CastletopCellProps) {
               onChange={(e) => handleInstructorChange(e.target.value)}
               fullWidth
               variant="outlined"
+            />
+            <TextField
+              label="Instructor (file-as)"
+              size="small"
+              value={instructorFileAs}
+              onChange={(e) => handleInstructorFileAsChange(e.target.value)}
+              fullWidth
+              variant="outlined"
+              placeholder="Loring, William"
+              helperText="Names the file. Falls back to Instructor when blank."
             />
             <TextField
               label="Contact minutes"

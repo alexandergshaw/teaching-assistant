@@ -40,6 +40,7 @@ export const ALL_COLUMN_IDS = [
   "lmsExports",
   "topicOutline",
   "castletop",
+  "syllabusTemplate",
 ] as const;
 
 export type ColumnId = (typeof ALL_COLUMN_IDS)[number];
@@ -66,6 +67,7 @@ export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
   "lmsExports",
   "topicOutline",
   "castletop",
+  "syllabusTemplate",
 ];
 
 const COLUMN_ID_SET: Set<string> = new Set(ALL_COLUMN_IDS);
@@ -84,7 +86,7 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
 // column set unless it is unioned in here - bump this and add an entry to
 // COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
 // (no wrapper object) is treated as version 0.
-export const CURRENT_COLUMNS_VERSION = 4;
+export const CURRENT_COLUMNS_VERSION = 5;
 
 /** Columns introduced by each version, unioned into every persisted set
  * stored at an earlier version. Version 0 is the pre-versioning baseline, so
@@ -94,6 +96,7 @@ const COLUMNS_ADDED_IN: Record<number, ColumnId[]> = {
   2: ["integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports"],
   3: ["topicOutline"],
   4: ["castletop"],
+  5: ["syllabusTemplate"],
 };
 
 /** Parse a persisted ta-courses-columns value; unknown ids are dropped and a
@@ -190,6 +193,7 @@ export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = 
   lmsExports: 190,
   topicOutline: 260,
   castletop: 200,
+  syllabusTemplate: 200,
   actions: 240,
 };
 
@@ -239,6 +243,8 @@ export function parseSortState(raw: string | null | undefined): SortState {
 export interface SortContext {
   /** Resolved syllabus display name by syllabus id, for the syllabusId column. */
   syllabusNameById?: Map<string, string>;
+  /** Resolved syllabus template display name by template id, for the syllabusTemplate column. */
+  syllabusTemplateNameById?: Map<string, string>;
 }
 
 export type SortValue = { kind: "text"; value: string; empty: boolean } | { kind: "number"; value: number; empty: boolean };
@@ -312,6 +318,12 @@ export function sortValueFor(course: Course, field: SortField, ctx?: SortContext
       return textValue(course.topicOutline);
     case "castletop":
       return countValue(course.castletopFiles.length);
+    case "syllabusTemplate": {
+      const raw = (course.syllabusTemplateId ?? "").trim();
+      if (!raw) return { kind: "text", value: "", empty: true };
+      const resolved = ctx?.syllabusTemplateNameById?.get(raw) ?? raw;
+      return { kind: "text", value: resolved, empty: false };
+    }
   }
 }
 
@@ -423,6 +435,8 @@ export function computeFieldPatch(field: TableEditableField, rawValue: string): 
       return { modality: rawValue || null };
     case "topicOutline":
       return { topicOutline: rawValue || null };
+    case "syllabusTemplateId":
+      return { syllabusTemplateId: rawValue || null };
     case "dayTime":
       return { dayTime: rawValue };
     case "studentRepos":

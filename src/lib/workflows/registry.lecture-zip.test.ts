@@ -86,6 +86,7 @@ function baseCourse(overrides: Partial<Course> = {}): Course {
     dayTime: null,
     modality: null,
     topicOutline: null,
+    syllabusTemplateId: null,
     materialsFiles: [],
     castletopFiles: [],
     exportFiles: [],

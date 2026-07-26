@@ -39,6 +39,7 @@ export const ALL_COLUMN_IDS = [
   "materials",
   "lmsExports",
   "topicOutline",
+  "castletop",
 ] as const;
 
 export type ColumnId = (typeof ALL_COLUMN_IDS)[number];
@@ -64,6 +65,7 @@ export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
   "materials",
   "lmsExports",
   "topicOutline",
+  "castletop",
 ];
 
 const COLUMN_ID_SET: Set<string> = new Set(ALL_COLUMN_IDS);
@@ -82,7 +84,7 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
 // column set unless it is unioned in here - bump this and add an entry to
 // COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
 // (no wrapper object) is treated as version 0.
-export const CURRENT_COLUMNS_VERSION = 3;
+export const CURRENT_COLUMNS_VERSION = 4;
 
 /** Columns introduced by each version, unioned into every persisted set
  * stored at an earlier version. Version 0 is the pre-versioning baseline, so
@@ -91,6 +93,7 @@ const COLUMNS_ADDED_IN: Record<number, ColumnId[]> = {
   1: ["modality"],
   2: ["integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports"],
   3: ["topicOutline"],
+  4: ["castletop"],
 };
 
 /** Parse a persisted ta-courses-columns value; unknown ids are dropped and a
@@ -186,6 +189,7 @@ export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = 
   materials: 190,
   lmsExports: 190,
   topicOutline: 260,
+  castletop: 200,
   actions: 240,
 };
 
@@ -306,6 +310,8 @@ export function sortValueFor(course: Course, field: SortField, ctx?: SortContext
       return countValue(course.exportFiles.length);
     case "topicOutline":
       return textValue(course.topicOutline);
+    case "castletop":
+      return countValue(course.castletopFiles.length);
   }
 }
 

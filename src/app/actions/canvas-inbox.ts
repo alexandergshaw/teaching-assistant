@@ -162,6 +162,51 @@ export async function listAssignmentDueDatesByUrlAction(
   }
 }
 
+export async function listAssignmentBriefsByUrlAction(
+  courseUrl: string,
+  fallbackAcronym?: string
+): Promise<{ assignments: Array<{ name: string; pointsPossible: number | null; dueAt: string | null }>; institution: string } | { error: string }> {
+  try {
+    await requireOwner();
+
+    let isAbsolute = false;
+    try {
+      new URL(courseUrl);
+      isAbsolute = true;
+    } catch {
+    }
+
+    let resolved;
+    try {
+      resolved = resolveInstitution(courseUrl);
+    } catch (e) {
+      if (isAbsolute) {
+        return { error: e instanceof Error ? e.message : "Could not match the course URL to a configured institution." };
+      }
+      try {
+        resolved = resolveInstitutionByCode((fallbackAcronym ?? "").trim().toUpperCase());
+      } catch {
+        return { error: "Could not match the course URL to a configured institution." };
+      }
+    }
+
+    const courseMatch = courseUrl.match(/courses\/(\d+)/);
+    if (!courseMatch || !courseMatch[1]) {
+      return { error: "Could not parse the Canvas course ID from the URL." };
+    }
+    const courseId = courseMatch[1];
+
+    const briefs = await listAssignmentBriefsWithDue(resolved.baseUrl, resolved.token, resolved.institution, courseId);
+    const assignments = briefs
+      .filter((b) => b.published !== false)
+      .map((b) => ({ name: b.name, pointsPossible: b.pointsPossible, dueAt: b.dueAt }));
+
+    return { assignments, institution: resolved.institution.code };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load assignment briefs." };
+  }
+}
+
 export async function listAnnouncementsAction(
   courseUrl: string,
   acronym?: string

@@ -39,6 +39,7 @@ function testHelpers(overrides: Partial<StepRunHelpers> = {}): StepRunHelpers {
     author: "Test Author",
     saveBundle: null,
     saveCourseMaterialFile: null,
+    saveCourseCastletopFile: null,
     saveCourseExportFile: null,
     loadCommonResources: null,
     getLibraryFile: null,

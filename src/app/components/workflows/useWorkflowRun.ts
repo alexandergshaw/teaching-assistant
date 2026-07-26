@@ -3,7 +3,7 @@
 import { useMemo, useState, useRef } from "react";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFile } from "@/lib/recording-files";
-import { uploadCourseZip, uploadCourseZipChunked, removeCourseZip, removeCourseZipObjects } from "@/lib/course-files";
+import { uploadCourseZip, uploadCourseZipChunked, uploadCourseFile, removeCourseZip, removeCourseZipObjects } from "@/lib/course-files";
 import { isScopeableListType, expandScopedValue, resolveClassRepoRef, resolveClassTileRef } from "@/lib/workflows/scope";
 import { isInstitutionFanout, isCourseFanout, isComposedFanout, resolveFanoutInstitutions, resolveFanoutCourses, scopeForInstitution, scopeForCourse } from "@/lib/workflows/fanout";
 import {
@@ -15,7 +15,7 @@ import {
   type CourseOutcome,
 } from "./attended-fanout";
 import { loadInstitutionFields } from "@/lib/institution-fields";
-import { appendCourseMaterialFileAction, appendCourseExportFileAction, listCourseHubAction } from "@/app/actions";
+import { appendCourseMaterialFileAction, appendCourseCastletopFileAction, appendCourseExportFileAction, listCourseHubAction } from "@/app/actions";
 import { downloadCourseZipBlob } from "@/lib/course-files";
 import { recordWorkflowRun } from "@/lib/workflow-runs";
 import { updateScheduleRunOutcome, updateTriggerRunOutcome } from "@/lib/workflow-run-status";
@@ -386,6 +386,28 @@ export function useWorkflowRun(
                 null
               );
               const r = await appendCourseMaterialFileAction(courseId, {
+                name: fileName,
+                path,
+                size: blob.size,
+              });
+              if ("error" in r) throw new Error(r.error);
+              if (r.replacedPath) {
+                await removeCourseZip(supabase, r.replacedPath);
+              }
+            }
+          : null,
+      saveCourseCastletopFile:
+        user && supabase
+          ? async (courseId: string, blob: Blob, fileName: string) => {
+              const { path } = await uploadCourseFile(
+                supabase,
+                user.id,
+                courseId,
+                blob,
+                "xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              );
+              const r = await appendCourseCastletopFileAction(courseId, {
                 name: fileName,
                 path,
                 size: blob.size,

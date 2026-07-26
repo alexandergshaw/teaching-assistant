@@ -67,6 +67,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "create-course-tile",
     "configure-institution-feeds",
     "course-modality",
+    "castletop-workbook",
   ],
   content: [
     "lecture-zip",

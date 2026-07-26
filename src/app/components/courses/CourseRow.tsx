@@ -18,6 +18,7 @@ import RepoCell from "./RepoCell";
 import { RosterCell, StudentReposCell } from "./RosterCell";
 import { ScheduleCsvCell, RubricCell } from "./ScheduleCell";
 import { MaterialsCell, LmsExportsCell } from "./FilesCell";
+import { CastletopCell } from "./CastletopCell";
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
 
@@ -243,6 +244,8 @@ export default function CourseRow({
           onSave={save("topicOutline")}
         />
       )}
+
+      {has("castletop") && <CastletopCell course={course} onCourseUpdated={onCourseUpdated} />}
 
       <td>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

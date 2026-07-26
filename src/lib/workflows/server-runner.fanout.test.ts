@@ -30,6 +30,7 @@ function fakeHelpers(): StepRunHelpers {
     author: "Test Author",
     saveBundle: vi.fn(async () => {}),
     saveCourseMaterialFile: vi.fn(async () => {}),
+    saveCourseCastletopFile: vi.fn(async () => {}),
     saveCourseExportFile: vi.fn(async () => {}),
     loadCommonResources: vi.fn(async () => []),
     getLibraryFile: vi.fn(async () => null),

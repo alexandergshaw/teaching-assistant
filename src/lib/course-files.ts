@@ -12,11 +12,13 @@ import type { Database } from "./supabase/types";
 /** Per-object ceiling kept safely under the 50 MB project upload limit. */
 const CHUNK_SIZE = 45 * 1024 * 1024;
 
-export async function uploadCourseZip(
+export async function uploadCourseFile(
   supabase: SupabaseClient<Database>,
   userId: string,
   courseId: string,
   blob: Blob,
+  ext: string,
+  contentType: string,
   previousPath?: string | null
 ): Promise<{ path: string }> {
   // Best-effort remove of previous file if it exists
@@ -27,17 +29,27 @@ export async function uploadCourseZip(
       .catch(() => {});
   }
 
-  const path = `${userId}/${courseId}/${crypto.randomUUID()}.zip`;
+  const path = `${userId}/${courseId}/${crypto.randomUUID()}.${ext}`;
 
   const { error: uploadError } = await supabase.storage
     .from("course-files")
-    .upload(path, blob, { contentType: "application/zip", upsert: false });
+    .upload(path, blob, { contentType, upsert: false });
 
   if (uploadError) {
     throw new Error(uploadError.message);
   }
 
   return { path };
+}
+
+export async function uploadCourseZip(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  courseId: string,
+  blob: Blob,
+  previousPath?: string | null
+): Promise<{ path: string }> {
+  return uploadCourseFile(supabase, userId, courseId, blob, "zip", "application/zip", previousPath);
 }
 
 /**

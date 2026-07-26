@@ -44,6 +44,7 @@ export interface StepRunHelpers {
   saveBundle: ((blob: Blob, name: string) => Promise<void>) | null;
   saveRunReport?: ((name: string, markdown: string) => Promise<void>) | null;
   saveCourseMaterialFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
+  saveCourseCastletopFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
   saveCourseExportFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
   loadCommonResources: (() => Promise<CommonResourceItem[]>) | null;
   getLibraryFile: ((fileId: string) => Promise<{ blob: Blob; name: string; mimeType: string } | null>) | null;

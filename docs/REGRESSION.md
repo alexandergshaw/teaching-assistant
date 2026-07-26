@@ -989,7 +989,13 @@ now display inside the repos/roster/studentRepos cells).
    studentRepos, integrations, description, scheduleCsv, rubric, materials,
    lmsExports. DEFAULT_VISIBLE_COLUMNS (also the malformed-persist fallback)
    is the pre-widening twelve-column face; the six heavy new columns default
-   hidden, discoverable via the Columns menu. parseColumnSet migrates legacy
+   hidden, discoverable via the Columns menu.
+   SUPERSEDED 2026-07-26 by commit 8f921fc "reveal all hidden columns by
+   default": DEFAULT_VISIBLE_COLUMNS now contains EVERY id in
+   ALL_COLUMN_IDS - the six heavy columns (integrations, description,
+   scheduleCsv, rubric, materials, lmsExports) are visible by default, and
+   COLUMNS_ADDED_IN[2] unions them into pre-existing persisted sets. The
+   Columns menu still hides them on request. parseColumnSet migrates legacy
    persisted ids (rosterCount -> roster, studentRepoCount -> studentRepos,
    reposCount -> repos, deduped).
 2. Sorting: SORT_FIELDS = ["name", ...ALL_COLUMN_IDS] by construction
@@ -1025,7 +1031,9 @@ now display inside the repos/roster/studentRepos cells).
    1000 lines; EditableCell's only change is the additive hint prop.
 6. Pure logic tested (courses-table-helpers.test.ts, 47 tests at the time of
    this entry; 56 since the modality column added its 9): legacy-id
-   migration + dedup, DEFAULT_VISIBLE_COLUMNS excludes the six heavy ids,
+   migration + dedup, DEFAULT_VISIBLE_COLUMNS excludes the six heavy ids
+   (SUPERSEDED 2026-07-26 by 8f921fc - the test now asserts the inverse,
+   "includes all column ids by default"; see the supersession on check 1),
    min-widths completeness vs the widened set, parseSortState over all
    fields, sortValueFor per column class, comparator empty-last both
    directions + tie-break, SORT_FIELDS completeness vs ALL_COLUMN_IDS.
@@ -1520,6 +1528,11 @@ async or sync, usable as a condition on whether steps run. Step gating
    module's array (courseSetupTilesSteps[n]) rather than spreading it, so a
    new step must be appended there or it is silently unreachable despite
    being defined. The headless canary is 131 (was 130).
+   SUPERSEDED 2026-07-26: the canary is now 132, bumped by the
+   "castletop-workbook" step (see section 56 check 19). The canary count is
+   a moving target by design - each new headless-safe step bumps it in the
+   same commit; what must hold is that the assertion and the test title
+   agree and that the count matches HEADLESS_SAFE_STEP_TYPES.size.
 
 ### 2026-07-23 - Professional workflow file names
 
@@ -1642,3 +1655,89 @@ Acceptance criteria (d0e4b35+):
    alignment check (pasted TOC / derived TOC / name-only) works
    unchanged on whatever sourceMaterial was resolved.
    resolvedSourceMaterial output passes the resolved value forward.
+
+## 56. Castletop workload workbook (column, button, workflow step)
+
+Acceptance criteria (8d7af88+):
+
+Workbook format (src/lib/castletop.ts, src/lib/castletop-plan.ts):
+1. buildCastletopWorkbook emits the Castletop credit-hour worksheet:
+   A1 title "<courseCode> <name>, <instructor>"; merged group headers
+   C2:E2 "Pre class work", F2:G2 "In class work", H2:I2 "After class
+   work"; row-3 column headers with C3 filled FFFFFF99; K3 holding the
+   contact-minute divisor (default 50).
+2. Per content row: E = (B/D)*60 when qty and rate are present,
+   K = G/$K$3, L = (E+I)/$K$3, M = L+K. Per week total row:
+   K/L/M = SUM over the block, N = M. Grand totals sum the week total
+   rows in REVERSE order; M = SUM(N4:N<last+2>); Average = grand/weeks.
+3. Calibri 11 throughout, accounting number format on numeric cells,
+   fixed column widths (A 3.71 ... K 8.29), freeze pane at ySplit 3,
+   week label merged down each block including its total row.
+4. The three work columns are PARALLEL LISTS indexed independently per
+   row - not aligned records.
+5. An empty weeks array emits the header only and skips the
+   grand-total block (no formula over an empty set).
+6. Provenance (NOT machine-checkable here - no reference workbook is
+   committed, deliberately: the only real sample is a user's own course
+   data). During development the generated output was compared against a
+   real Castletop file and its formula semantics reproduced that file's
+   Week-1 per-row values and all three week totals to 1e-9, with header
+   text, merges, fill, number format and column widths matching exactly.
+   What a regression run CAN check is checks 1-5 above: the committed
+   tests in castletop.test.ts read the produced workbook back and assert
+   the literal formula strings, so any drift in those formulas fails.
+
+Week bucketing (src/lib/castletop-sources.ts):
+7. Assignments are placed by name-number match
+   (/(?:module|week|unit)\s*0*(\d+)/i) first, then by due-date
+   arithmetic from startDate, else reported unplaced.
+8. Date parsing accepts BOTH a bare YYYY-MM-DD and a full ISO
+   timestamp (Canvas due_at is always a full timestamp). An
+   unparseable date is reported as unplaced and must NOT increment the
+   due-date count. No non-finite value may ever become a week key.
+9. A brief whose name matches an existing item (case-insensitive,
+   trimmed) fills in that item's missing points instead of duplicating.
+10. Schedule-derived items default to 60 minutes (assignment) and 30
+    minutes (test). These are NOT the contact-minute divisor or the
+    class-session length - wiring those in is a regression.
+
+Generation action (src/app/actions/castletop.ts):
+11. Weeks ladder: tile.weeks (positive integer) -> schedule length ->
+    16. Zero and negative tile.weeks are treated as unset.
+12. The action RETURNS the weeks it used. No caller may recompute it -
+    the step's reported count must always equal the workbook's real
+    week-label count.
+13. LMS enrichment is attempted only when the tile has both lms and
+    canvasUrl, and is non-fatal: an error or a throw becomes a note and
+    generation still succeeds.
+14. File name via buildWorkflowFileName: "<course> - Castletop Workload
+    - <YYYY-MM-DD>.xlsx".
+
+Column and cell:
+15. castletop_files is a jsonb column written ONLY by its dedicated
+    writers (appendCourseCastletopFile / removeCourseCastletopFile) -
+    toRow never writes it, so updateCourse cannot clobber it.
+16. Column id "castletop" is registered in ALL_COLUMN_IDS,
+    DEFAULT_VISIBLE_COLUMNS, COLUMN_MIN_WIDTHS, sortValueFor (count),
+    COLUMN_LABELS; CURRENT_COLUMNS_VERSION is 4 with
+    COLUMNS_ADDED_IN[4] = ["castletop"] so the column appears for
+    existing persisted column sets.
+17. CastletopCell shows the generated files with Download/Remove and a
+    Generate button that runs the action, uploads via uploadCourseFile
+    ("xlsx"), appends to the column, and deletes any replaced object.
+    Its config controls persist to localStorage per course.
+18. uploadCourseZip still delegates to the generalized uploadCourseFile
+    - all pre-existing zip callers unchanged.
+
+Workflow step:
+19. Step "castletop-workbook" is registered in the course-setup
+    aggregator, CATEGORY_MEMBERS, and HEADLESS_SAFE_STEP_TYPES; the
+    canary asserts 132 and its title matches.
+20. The step's browser download is guarded by
+    `typeof document !== "undefined"` - this is what makes it
+    headless-safe.
+21. The step saves to the CASTLETOP column via
+    helpers.saveCourseCastletopFile (implemented in BOTH the browser
+    runner and the headless server runner), never to materialsFiles,
+    and also to the Files tab with workflow tagging. A Files-tab error
+    or a null helper is a note, not a failure.

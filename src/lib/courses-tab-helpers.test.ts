@@ -61,6 +61,7 @@ const mockCourse: Course = {
   ],
   exportFiles: [],
   materialsFiles: [],
+  castletopFiles: [],
   materialsZipName: null,
   materialsZipPath: null,
   materialsZipSize: null,

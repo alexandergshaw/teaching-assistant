@@ -26,6 +26,7 @@ import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFil
 import {
   uploadCourseZip,
   uploadCourseZipChunked,
+  uploadCourseFile,
   removeCourseZip,
   removeCourseZipObjects,
   downloadCourseZipBlob,
@@ -33,7 +34,7 @@ import {
 import { parseCartridgeBlob } from "@/lib/cartridge-import";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
-import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseExportFileAction } from "@/app/actions";
+import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseCastletopFileAction, appendCourseExportFileAction } from "@/app/actions";
 import {
   isInstitutionFanout,
   isCourseFanout,
@@ -686,6 +687,21 @@ export function buildServerStepRunHelpers(opts: {
     saveCourseMaterialFile: async (courseId, blob, fileName) => {
       const { path } = await uploadCourseZip(supabase, userId, courseId, blob, null);
       const r = await appendCourseMaterialFileAction(courseId, { name: fileName, path, size: blob.size });
+      if ("error" in r) throw new Error(r.error);
+      if (r.replacedPath) {
+        await removeCourseZip(supabase, r.replacedPath);
+      }
+    },
+    saveCourseCastletopFile: async (courseId, blob, fileName) => {
+      const { path } = await uploadCourseFile(
+        supabase,
+        userId,
+        courseId,
+        blob,
+        "xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+      const r = await appendCourseCastletopFileAction(courseId, { name: fileName, path, size: blob.size });
       if ("error" in r) throw new Error(r.error);
       if (r.replacedPath) {
         await removeCourseZip(supabase, r.replacedPath);

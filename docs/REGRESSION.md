@@ -1883,3 +1883,88 @@ Acceptance criteria (2235ab1+):
    `Course` fixture rather than a hardcoded list, so a future `Course`
    field that is neither carried nor consciously excluded FAILS. Verified
    by sabotage: removing any single carried field fails the test.
+
+## 62. Group A course columns (end date, breaks, due rule, email, client)
+
+Acceptance criteria (5dfb38a+):
+1. Five columns in ONE migration and ONE version bump:
+   `end_date`, `breaks`, `assignment_due_rule`, `email`,
+   `email_client`. Column ids `endDate`, `breaks`, `assignmentDue`,
+   `email`, `emailClient`; version 6 with
+   `COLUMNS_ADDED_IN[6]` listing all five.
+2. **`breaks` is ANNOTATION ONLY.** It must never shift week
+   numbering. `weekDeadline`, `resolveTileCurrentWeek`,
+   `courseProgressStatus` and the Castletop week blocks are untouched
+   by it. A change that makes a break shift weeks is a regression.
+3. `assignmentDueRule` is a RECURRING RULE stored as one encoded
+   string `"<day>|<HH:MM>"` (e.g. `"sun|23:59"`), not per-week dates.
+   The column id (`assignmentDue`) and the Course field
+   (`assignmentDueRule`) deliberately differ, like
+   `syllabusTemplate`/`syllabusTemplateId`.
+4. `parseAssignmentDueRule` rejects, returning null and never
+   throwing: blank, whitespace, missing separator, unknown day, hour
+   > 23, minute > 59, and a malformed minute (`"9:5"`). It accepts a
+   case-insensitive day (`"SUN"`) and normalizes a single-digit hour
+   (`"9:05"` -> `"09:05"`).
+5. `describeAssignmentDueRule` renders 12-hour correctly at BOTH
+   edges: `"wed|12:00"` -> "Wednesdays at 12:00 PM" and
+   `"fri|00:00"` -> "Fridays at 12:00 AM". Naive conversion yields
+   "0:00 PM"/"0:00 AM" here - that is the regression to catch.
+6. The cell defaults to Sunday 23:59, matching the deadline the app
+   already hardcodes, so an untouched course behaves as before.
+7. All five fields are carried by BOTH `courseToInput` AND
+   `courseToInputPayload` - omission wipes the column (section 61).
+8. Deliberately NOT done in this group: making `weekDeadline` and its
+   three call sites consume the rule, and calendar sync.
+
+## 63. Syllabus generation in every kickoff / refresh workflow
+
+Acceptance criteria (5dfb38a+):
+1. **The template precedence rule lives in ONE place:**
+   `resolveSyllabusTemplateId(courseTemplateId, institutionFields)` in
+   `src/lib/syllabus-facts.ts`, returning
+   `{ templateId, source: "course" | "institution" | "none" }`.
+   The per-course `syllabusTemplateId` column wins; the institution's
+   `syllabusTemplate` field is the fallback; a whitespace-only course
+   value falls through rather than winning.
+2. **Both callers use that helper** - `starter-materials`
+   (steps.course-setup.materials.ts) and the `generate-syllabus` step
+   (steps.syllabus.ts). Neither may re-implement the ladder. Verified
+   by sabotage: flipping the precedence inside the helper fails tests
+   in BOTH call sites, not just the helper's own.
+   This was a real defect - the rule was duplicated verbatim and the
+   `starter-materials` copy had NO test, despite being the path that
+   actually generates the syllabus on a normal run (the new step
+   short-circuits when one already exists).
+3. `starter-materials` keeps its `!syllabusId` gate and distinguishes
+   its note by the resolved `source`.
+4. New `generate-syllabus` step: `hubCourse` required, `regenerate`
+   boolean (default off). Skips with the existing id when a syllabus
+   is linked and `regenerate` is off; throws when no template resolves
+   anywhere; notes (never throws) blank institution email/LMS URL and a
+   failed tile-link. Headless-safe; canary is 133.
+5. Appended to `COURSE_REFRESH` ONLY, immediately before
+   `castletop-workbook` (so the Castletop stays last). Both kickoffs
+   inherit it exactly once through their include - a direct copy in
+   either would double-run it.
+6. Facts come from the shared pure `buildSyllabusFactsFromCourse` - no
+   caller re-implements the 12-key mapping.
+
+## 64. Upload a syllabus template from its column
+
+Acceptance criteria (5dfb38a+):
+1. The Syllabus template cell's editor uploads a `.docx` via the
+   existing `createSyllabusTemplateAction` (which already enforces the
+   extension and a ~6 MB cap) - a new caller only.
+2. Because that action RETURNS the created template, no list reload is
+   needed: the new template is handed to the parent, appended to the
+   shared list (deduped by id), and appears in the dropdown.
+3. The upload sets the cell's PENDING selection but does NOT auto-save.
+   The user still presses Save - matching every sibling cell, and
+   keeping "add a template to the library" and "use it for this course"
+   as separate intents. Cancel leaves the template in the library
+   unlinked.
+4. `templateNameFromFileName` strips only the LAST extension and never
+   returns empty: `"Fall 2026 v1.2.docx"` -> `"Fall 2026 v1.2"`,
+   `".docx"` -> `".docx"`, `"template"` -> `"template"`, and
+   surrounding whitespace is trimmed.

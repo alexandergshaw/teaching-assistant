@@ -238,6 +238,11 @@ export interface CourseHubRow {
   modality: string | null;
   topic_outline: string | null;
   syllabus_template_id: string | null;
+  end_date: string | null;
+  breaks: string | null;
+  assignment_due_rule: string | null;
+  email: string | null;
+  email_client: string | null;
   materials_files: Json;
   castletop_files: Json;
   export_files: Json | null;
@@ -280,6 +285,11 @@ export interface CourseHubInsert {
   modality?: string | null;
   topic_outline?: string | null;
   syllabus_template_id?: string | null;
+  end_date?: string | null;
+  breaks?: string | null;
+  assignment_due_rule?: string | null;
+  email?: string | null;
+  email_client?: string | null;
   materials_files?: Json;
   castletop_files?: Json;
   export_files?: Json | null;
@@ -322,6 +332,11 @@ export interface CourseHubUpdate {
   modality?: string | null;
   topic_outline?: string | null;
   syllabus_template_id?: string | null;
+  end_date?: string | null;
+  breaks?: string | null;
+  assignment_due_rule?: string | null;
+  email?: string | null;
+  email_client?: string | null;
   materials_files?: Json;
   castletop_files?: Json;
   export_files?: Json | null;

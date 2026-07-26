@@ -14,6 +14,7 @@ import {
   readFileText,
   mergeCardLayout,
   mergeInstitutionFields,
+  templateNameFromFileName,
   EMPTY_FORM,
 } from "./courses-tab-helpers";
 import type { Course } from "./supabase/courses";
@@ -54,6 +55,11 @@ const mockCourse: Course = {
   modality: "async",
   topicOutline: null,
   syllabusTemplateId: "tmpl-1",
+  endDate: "2024-12-15",
+  breaks: "Week 8 - Spring Break",
+  assignmentDueRule: "sun|23:59",
+  email: "prof@mit.edu",
+  emailClient: "outlook",
   customTiles: [],
   hiddenTiles: [],
   studentRepos: [
@@ -322,6 +328,32 @@ describe("readFileBase64", () => {
 describe("readFileText", () => {
   it("is a function", () => {
     expect(typeof readFileText).toBe("function");
+  });
+});
+
+describe("templateNameFromFileName", () => {
+  it("strips a lowercase .docx extension", () => {
+    expect(templateNameFromFileName("MCC Syllabus Template.docx")).toBe("MCC Syllabus Template");
+  });
+
+  it("strips an uppercase extension", () => {
+    expect(templateNameFromFileName("X.DOCX")).toBe("X");
+  });
+
+  it("only strips the last extension from a name with dots", () => {
+    expect(templateNameFromFileName("Fall 2026 v1.2.docx")).toBe("Fall 2026 v1.2");
+  });
+
+  it("falls back to the raw file name when stripping would yield an empty string", () => {
+    expect(templateNameFromFileName(".docx")).toBe(".docx");
+  });
+
+  it("returns the file name unchanged when there is no extension", () => {
+    expect(templateNameFromFileName("template")).toBe("template");
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(templateNameFromFileName("  MCC Syllabus Template.docx  ")).toBe("MCC Syllabus Template");
   });
 });
 

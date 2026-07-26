@@ -8,9 +8,18 @@ import {
   listSyllabusTemplatesAction,
   updateSyllabusTemplateAction,
   deleteSyllabusTemplateAction,
+  listCourseHubAction,
+  generateCourseSyllabusAction,
+  createFinalizedSyllabusAction,
+  updateCourseHubAction,
 } from "@/app/actions";
-import type { StepDefinition } from "@/lib/workflows/registry-helpers";
+import {
+  type StepDefinition,
+  courseToInputPayload,
+} from "@/lib/workflows/registry-helpers";
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+import { buildSyllabusFactsFromCourse, resolveSyllabusTemplateId } from "@/lib/syllabus-facts";
 
 export const syllabusSteps: StepDefinition[] = [
   {
@@ -177,6 +186,144 @@ export const syllabusSteps: StepDefinition[] = [
         return { outputs: {}, summary: { kind: "text", text: `Renamed template to "${newName}".` } };
       }
       throw new Error("Action must be rename or delete.");
+    },
+  },
+
+  {
+    type: "generate-syllabus",
+    name: "Generate the course syllabus",
+    description:
+      "Build the course's syllabus from its tile - the Syllabus template column plus the row's own facts and the institution's email/LMS URL - then save it to the syllabus library and link it to the tile.",
+    inputs: [
+      { key: "hubCourse", label: "Course tile", type: "hubCourse", required: true },
+      {
+        key: "regenerate",
+        label: "Regenerate if one already exists",
+        type: "boolean",
+        required: false,
+        help: "Off by default: a course that already has a linked syllabus is left alone. Turn on to rebuild it from the template.",
+      },
+    ],
+    outputs: [
+      { key: "syllabusId", label: "Syllabus id", type: "text" },
+      { key: "syllabusName", label: "Syllabus name", type: "text" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      if (!hubCourseId) {
+        throw new Error("Choose a course tile.");
+      }
+
+      const list = await listCourseHubAction();
+      if ("error" in list) {
+        throw new Error(list.error);
+      }
+
+      const tile = list.courses.find((c) => c.id === hubCourseId);
+      if (!tile) {
+        throw new Error("Course tile not found.");
+      }
+
+      // A course that already has a linked syllabus is left alone unless the
+      // caller explicitly asks to rebuild it - unlike starter-materials (whose
+      // syllabus generation is one optional part of a larger step), this step's
+      // whole job is the syllabus, so it is safe to always report success here.
+      const existingSyllabusId = tile.syllabusId?.trim() ?? "";
+      if (existingSyllabusId && String(values.regenerate ?? "") !== "1") {
+        return {
+          outputs: { syllabusId: existingSyllabusId, syllabusName: "" },
+          summary: {
+            kind: "text",
+            text: "Course already has a linked syllabus - left alone (turn on Regenerate to rebuild it).",
+          },
+        };
+      }
+
+      const instFields =
+        tile.institution && helpers.getInstitutionFields
+          ? await helpers.getInstitutionFields(tile.institution).catch(() => [])
+          : [];
+
+      // Per-course column wins; the institution field is only a fallback for
+      // tiles that predate the column (its editor was retired in the
+      // tiles->table redesign, so it is unsettable in practice).
+      const resolvedTemplate = resolveSyllabusTemplateId(tile.syllabusTemplateId, instFields);
+      const templateId = resolvedTemplate.templateId;
+
+      if (!templateId) {
+        throw new Error("Set a syllabus template on the course (or its institution) first.");
+      }
+
+      const instEmail = instFields.find((f) => f.id === "email")?.value ?? "";
+      const instLmsUrl = instFields.find((f) => f.id === "lmsUrl")?.value ?? "";
+
+      // Checked trimmed: buildSyllabusFactsFromCourse below trims email/lmsUrl
+      // before building the facts payload, so a whitespace-only stored value
+      // resolves to "" in the generated syllabus. Testing the raw value here
+      // would miss that case and skip the warning even though the fact ends
+      // up absent from the document.
+      const notes: string[] = [];
+      if (!instEmail.trim()) {
+        notes.push(
+          "the institution has no email on file - the syllabus's email paragraph is left untouched"
+        );
+      }
+      if (!instLmsUrl.trim()) {
+        notes.push(
+          "the institution has no LMS URL on file - the syllabus's LMS paragraph is left untouched"
+        );
+      }
+
+      const facts = buildSyllabusFactsFromCourse(tile, {
+        email: instEmail,
+        lmsUrl: instLmsUrl,
+      });
+
+      onProgress(`Generating syllabus for ${tile.name}...`);
+      const g = await generateCourseSyllabusAction(templateId, facts, helpers.provider);
+      if ("error" in g) {
+        throw new Error(g.error);
+      }
+
+      const fileName = buildWorkflowFileName({
+        course: tile,
+        artifact: "Syllabus",
+        ext: "docx",
+      });
+      const saved = await createFinalizedSyllabusAction(
+        g.name,
+        fileName,
+        g.base64,
+        tile.courseCode ?? undefined
+      );
+      if ("error" in saved) {
+        throw new Error(saved.error);
+      }
+
+      try {
+        const linked = await updateCourseHubAction(tile.id, {
+          ...courseToInputPayload(tile),
+          syllabusId: saved.syllabus.id,
+        });
+        if ("error" in linked) {
+          throw new Error(linked.error);
+        }
+      } catch (err) {
+        notes.push(
+          `linking the generated syllabus to the tile failed: ${
+            err instanceof Error ? err.message : "unknown error"
+          }`
+        );
+      }
+
+      return {
+        outputs: { syllabusId: saved.syllabus.id, syllabusName: saved.syllabus.name },
+        summary: {
+          kind: "list",
+          label: `Syllabus generated: ${saved.syllabus.name}`,
+          items: notes,
+        },
+      };
     },
   },
 ];

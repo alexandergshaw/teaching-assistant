@@ -10,6 +10,7 @@ import {
   studentReposToRows,
   type InlineField,
 } from "./courses-tab-helpers";
+import { describeAssignmentDueRule } from "./assignment-due-rule";
 
 // ---------------------------------------------------------------------------
 // Column visibility (declared before sorting so SortField can derive from it)
@@ -41,6 +42,11 @@ export const ALL_COLUMN_IDS = [
   "topicOutline",
   "castletop",
   "syllabusTemplate",
+  "endDate",
+  "breaks",
+  "assignmentDue",
+  "email",
+  "emailClient",
 ] as const;
 
 export type ColumnId = (typeof ALL_COLUMN_IDS)[number];
@@ -68,6 +74,11 @@ export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
   "topicOutline",
   "castletop",
   "syllabusTemplate",
+  "endDate",
+  "breaks",
+  "assignmentDue",
+  "email",
+  "emailClient",
 ];
 
 const COLUMN_ID_SET: Set<string> = new Set(ALL_COLUMN_IDS);
@@ -86,7 +97,7 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
 // column set unless it is unioned in here - bump this and add an entry to
 // COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
 // (no wrapper object) is treated as version 0.
-export const CURRENT_COLUMNS_VERSION = 5;
+export const CURRENT_COLUMNS_VERSION = 6;
 
 /** Columns introduced by each version, unioned into every persisted set
  * stored at an earlier version. Version 0 is the pre-versioning baseline, so
@@ -97,6 +108,7 @@ const COLUMNS_ADDED_IN: Record<number, ColumnId[]> = {
   3: ["topicOutline"],
   4: ["castletop"],
   5: ["syllabusTemplate"],
+  6: ["endDate", "breaks", "assignmentDue", "email", "emailClient"],
 };
 
 /** Parse a persisted ta-courses-columns value; unknown ids are dropped and a
@@ -194,6 +206,11 @@ export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = 
   topicOutline: 260,
   castletop: 200,
   syllabusTemplate: 200,
+  endDate: 120,
+  breaks: 220,
+  assignmentDue: 170,
+  email: 200,
+  emailClient: 140,
   actions: 240,
 };
 
@@ -324,6 +341,18 @@ export function sortValueFor(course: Course, field: SortField, ctx?: SortContext
       const resolved = ctx?.syllabusTemplateNameById?.get(raw) ?? raw;
       return { kind: "text", value: resolved, empty: false };
     }
+    case "endDate":
+      return textValue(course.endDate);
+    case "breaks":
+      return textValue(course.breaks);
+    case "assignmentDue":
+      // Sort by the human-readable form (e.g. "Sundays at 11:59 PM") so the
+      // column sorts the way it reads, not by the raw encoded string.
+      return textValue(describeAssignmentDueRule(course.assignmentDueRule));
+    case "email":
+      return textValue(course.email);
+    case "emailClient":
+      return textValue(course.emailClient);
   }
 }
 
@@ -437,6 +466,16 @@ export function computeFieldPatch(field: TableEditableField, rawValue: string): 
       return { topicOutline: rawValue || null };
     case "syllabusTemplateId":
       return { syllabusTemplateId: rawValue || null };
+    case "endDate":
+      return { endDate: rawValue || null };
+    case "breaks":
+      return { breaks: rawValue || null };
+    case "assignmentDueRule":
+      return { assignmentDueRule: rawValue || null };
+    case "email":
+      return { email: rawValue || null };
+    case "emailClient":
+      return { emailClient: rawValue || null };
     case "dayTime":
       return { dayTime: rawValue };
     case "studentRepos":

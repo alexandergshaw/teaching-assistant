@@ -16,6 +16,7 @@ import EditableCell from "./EditableCell";
 import LmsCell from "./LmsCell";
 import SyllabusCell from "./SyllabusCell";
 import SyllabusTemplateCell from "./SyllabusTemplateCell";
+import AssignmentDueCell from "./AssignmentDueCell";
 import RepoCell from "./RepoCell";
 import { RosterCell, StudentReposCell } from "./RosterCell";
 import { ScheduleCsvCell, RubricCell } from "./ScheduleCell";
@@ -46,6 +47,7 @@ export interface CourseRowProps {
   previewSyllabusBusy: boolean;
   downloadSyllabusBusy: boolean;
   onSyllabusUploaded: (course: Course, syllabusId: string) => void;
+  onSyllabusTemplateCreated: (template: SyllabusTemplateMeta) => void;
 }
 
 export default function CourseRow({
@@ -70,6 +72,7 @@ export default function CourseRow({
   previewSyllabusBusy,
   downloadSyllabusBusy,
   onSyllabusUploaded,
+  onSyllabusTemplateCreated,
 }: CourseRowProps) {
   const has = (id: ColumnId) => visibleColumns.includes(id);
 
@@ -252,7 +255,61 @@ export default function CourseRow({
       {has("castletop") && <CastletopCell course={course} onCourseUpdated={onCourseUpdated} />}
 
       {has("syllabusTemplate") && (
-        <SyllabusTemplateCell course={course} templates={syllabusTemplates} onSave={save("syllabusTemplateId")} />
+        <SyllabusTemplateCell
+          course={course}
+          templates={syllabusTemplates}
+          onSave={save("syllabusTemplateId")}
+          onTemplateCreated={onSyllabusTemplateCreated}
+        />
+      )}
+
+      {has("endDate") && (
+        <EditableCell
+          kind="date"
+          rawValue={course.endDate ?? ""}
+          display={course.endDate ? <span className={styles.courseResourceValue}>{new Date(`${course.endDate}T00:00:00`).toLocaleDateString()}</span> : undefined}
+          onSave={save("endDate")}
+        />
+      )}
+
+      {has("breaks") && (
+        <EditableCell
+          kind="multiline"
+          rawValue={course.breaks ?? ""}
+          display={course.breaks ? <span className={styles.courseResourceValue}>{truncateForCell(course.breaks, 60)}</span> : undefined}
+          placeholder="Week 8 - Spring Break; Nov 27-29 - Thanksgiving"
+          emptyLabel="None"
+          onSave={save("breaks")}
+        />
+      )}
+
+      {has("assignmentDue") && <AssignmentDueCell course={course} onSave={save("assignmentDueRule")} />}
+
+      {has("email") && (
+        <EditableCell kind="text" rawValue={course.email ?? ""} placeholder="instructor@school.edu" onSave={save("email")} />
+      )}
+
+      {has("emailClient") && (
+        <EditableCell
+          kind="select"
+          rawValue={course.emailClient ?? ""}
+          options={[
+            { value: "", label: "Not set" },
+            { value: "outlook", label: "Outlook" },
+            { value: "gmail", label: "Gmail" },
+            { value: "other", label: "Other" },
+          ]}
+          display={
+            course.emailClient === "outlook" ? (
+              <span className={styles.courseResourceValue}>Outlook</span>
+            ) : course.emailClient === "gmail" ? (
+              <span className={styles.courseResourceValue}>Gmail</span>
+            ) : course.emailClient === "other" ? (
+              <span className={styles.courseResourceValue}>Other</span>
+            ) : undefined
+          }
+          onSave={save("emailClient")}
+        />
       )}
 
       <td>

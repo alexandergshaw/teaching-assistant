@@ -25,6 +25,7 @@ import {
 } from "@/lib/workflows/registry-helpers";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+import { buildSyllabusFactsFromCourse, resolveSyllabusTemplateId } from "@/lib/syllabus-facts";
 
 export const courseSetupMaterialsSteps: StepDefinition[] = [
   {
@@ -143,10 +144,11 @@ export const courseSetupMaterialsSteps: StepDefinition[] = [
                     .getInstitutionFields(tile.institution)
                     .catch(() => [])
                 : [];
-            const templateId =
-              instFields
-                .find((f) => f.id === "syllabusTemplate")
-                ?.value?.trim() ?? "";
+            // Per-course column wins; the institution field (its editor was
+            // retired in the tiles->table redesign, so it is unsettable in
+            // practice) is only a fallback for tiles that predate the column.
+            const resolvedTemplate = resolveSyllabusTemplateId(tile.syllabusTemplateId, instFields);
+            const templateId = resolvedTemplate.templateId;
             const instEmail =
               instFields.find((f) => f.id === "email")?.value ?? "";
             const instLmsUrl =
@@ -154,26 +156,13 @@ export const courseSetupMaterialsSteps: StepDefinition[] = [
 
             if (!templateId) {
               syllabusNote =
-                "no syllabus on the tile and no institution syllabus template - skipped";
+                "no syllabus on the tile, and no syllabus template set on the course or its institution - skipped";
             } else {
               try {
                 onProgress(`Generating syllabus for ${tile.name}...`);
                 const g = await generateCourseSyllabusAction(
                   templateId,
-                  {
-                    courseName: tile.name,
-                    courseCode: tile.courseCode ?? "",
-                    term: tile.term ?? "",
-                    description: tile.description ?? "",
-                    dayTime: tile.dayTime ?? "",
-                    startDate: tile.startDate ?? "",
-                    weeks: tile.weeks != null ? String(tile.weeks) : "",
-                    tests: tile.tests != null ? String(tile.tests) : "",
-                    textbook: tile.textbook ?? "",
-                    email: instEmail,
-                    lmsUrl: instLmsUrl,
-                    institution: tile.institution ?? "",
-                  },
+                  buildSyllabusFactsFromCourse(tile, { email: instEmail, lmsUrl: instLmsUrl }),
                   helpers.provider
                 );
                 if ("error" in g) {
@@ -196,7 +185,9 @@ export const courseSetupMaterialsSteps: StepDefinition[] = [
                 }
 
                 syllabusId = saved.syllabus.id;
-                syllabusNote = "syllabus generated from the institution template";
+                syllabusNote = resolvedTemplate.source === "course"
+                  ? "syllabus generated from the course's syllabus template"
+                  : "syllabus generated from the institution template";
                 generatedFromTemplate = true;
 
                 try {

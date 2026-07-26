@@ -718,3 +718,50 @@ describe("castletop-workbook finishes every kickoff/refresh run", () => {
     expect(lastStep?.include?.workflowId).toBe("course-refresh");
   });
 });
+
+// The new generate-syllabus step is appended to COURSE_REFRESH only, exactly
+// like castletop-workbook above: both kickoffs include course-refresh, so
+// appending it to all three would run it twice in both kickoffs.
+describe("generate-syllabus runs once per kickoff/refresh run", () => {
+  const all = allWorkflows([]);
+  const byId = new Map(all.map((w) => [w.id, w]));
+
+  it("course-refresh contains exactly one generate-syllabus step", () => {
+    const wf = byId.get("course-refresh");
+    expect(wf, "course-refresh is registered").toBeTruthy();
+    const matches = wf!.steps.filter((s) => s.type === "generate-syllabus");
+    expect(matches.length).toBe(1);
+  });
+
+  it("neither course-kickoff nor course-kickoff-no-code declares a direct generate-syllabus step (proving no duplication - it is inherited exactly once via the course-refresh include)", () => {
+    for (const id of ["course-kickoff", "course-kickoff-no-code"]) {
+      const wf = byId.get(id);
+      expect(wf, `${id} is registered`).toBeTruthy();
+      const direct = wf!.steps.filter((s) => s.type === "generate-syllabus");
+      expect(
+        direct.length,
+        `${id}: generate-syllabus must not be a direct step (would double-run it, since it also arrives via the course-refresh include)`
+      ).toBe(0);
+    }
+  });
+
+  it("every input declared by the generate-syllabus step definition has a binding in course-refresh's entry", () => {
+    const wf = byId.get("course-refresh");
+    expect(wf, "course-refresh is registered").toBeTruthy();
+    const step = wf!.steps.find((s) => s.type === "generate-syllabus");
+    expect(step, "course-refresh has a generate-syllabus step").toBeTruthy();
+
+    const def = getStepDefinition("generate-syllabus");
+    expect(def, "generate-syllabus step definition is registered").toBeTruthy();
+
+    // Derived from the step definition's inputs, not a hardcoded list, so a
+    // future input added without a binding fails this test - the guard
+    // against the "unbound inputs are silently skipped" failure mode.
+    for (const input of def!.inputs) {
+      expect(
+        step!.bindings[input.key],
+        `generate-syllabus input "${input.key}" is unbound in course-refresh - an unbound input is silently skipped and never appears on the run form`
+      ).toBeTruthy();
+    }
+  });
+});

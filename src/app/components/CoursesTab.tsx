@@ -7,6 +7,7 @@
 // live under src/app/components/courses/.
 import { useState } from "react";
 import type { Course } from "@/lib/supabase/courses";
+import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
 import {
   deleteCourseHubAction,
   getFinalizedSyllabusAction,
@@ -36,6 +37,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     setCourses,
     syllabi,
     templates,
+    setTemplates,
     orgs,
     state,
     refreshing,
@@ -160,6 +162,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     void reloadSyllabi();
   };
 
+  const handleSyllabusTemplateCreated = (template: SyllabusTemplateMeta) => {
+    setTemplates((prev) =>
+      prev.some((t) => t.id === template.id) ? prev.map((t) => (t.id === template.id ? template : t)) : [...prev, template]
+    );
+  };
+
   return (
     <TabShell>
       <TabHeader
@@ -216,6 +224,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         previewSyllabusId={previewSyllabusId}
         downloadSyllabusId={downloadSyllabusId}
         onSyllabusUploaded={handleSyllabusUploaded}
+        onSyllabusTemplateCreated={handleSyllabusTemplateCreated}
       />
 
       {preview && <SyllabusPreviewModal name={preview.name} paragraphs={preview.paragraphs} onClose={() => setPreview(null)} />}

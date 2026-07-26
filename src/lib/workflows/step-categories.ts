@@ -220,6 +220,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "regenerate-syllabus-field",
     "list-syllabus-templates",
     "manage-syllabus-template",
+    "generate-syllabus",
   ],
   knowledge: [
     "research-topic",

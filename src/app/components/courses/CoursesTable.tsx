@@ -60,6 +60,11 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   topicOutline: "Topic Outline",
   castletop: "Castletop",
   syllabusTemplate: "Syllabus template",
+  endDate: "End date",
+  breaks: "Breaks",
+  assignmentDue: "Assignment due",
+  email: "Email",
+  emailClient: "Email client",
 };
 
 export interface CoursesTableProps {
@@ -90,6 +95,7 @@ export interface CoursesTableProps {
   previewSyllabusId: string | null;
   downloadSyllabusId: string | null;
   onSyllabusUploaded: (course: Course, syllabusId: string) => void;
+  onSyllabusTemplateCreated: (template: SyllabusTemplateMeta) => void;
 }
 
 export default function CoursesTable({
@@ -120,6 +126,7 @@ export default function CoursesTable({
   previewSyllabusId,
   downloadSyllabusId,
   onSyllabusUploaded,
+  onSyllabusTemplateCreated,
 }: CoursesTableProps) {
   // Lazy-initialized from localStorage (client-only guard avoids an SSR
   // mismatch; matches the ta- persistence idiom used across the app).
@@ -245,6 +252,7 @@ export default function CoursesTable({
                   previewSyllabusBusy={previewSyllabusId === c.id}
                   downloadSyllabusBusy={downloadSyllabusId === c.id}
                   onSyllabusUploaded={onSyllabusUploaded}
+                  onSyllabusTemplateCreated={onSyllabusTemplateCreated}
                 />
               ))}
             </tbody>

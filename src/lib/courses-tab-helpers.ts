@@ -28,9 +28,14 @@ export interface CourseForm {
   modality: string;
   topicOutline: string;
   syllabusTemplateId: string;
+  endDate: string;
+  breaks: string;
+  assignmentDueRule: string;
+  email: string;
+  emailClient: string;
 }
 
-export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality" | "topicOutline" | "syllabusTemplateId";
+export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality" | "topicOutline" | "syllabusTemplateId" | "endDate" | "breaks" | "assignmentDueRule" | "email" | "emailClient";
 
 export const EMPTY_FORM: CourseForm = {
   id: null,
@@ -56,6 +61,11 @@ export const EMPTY_FORM: CourseForm = {
   modality: "",
   topicOutline: "",
   syllabusTemplateId: "",
+  endDate: "",
+  breaks: "",
+  assignmentDueRule: "",
+  email: "",
+  emailClient: "",
 };
 
 export function formFromCourse(c: Course): CourseForm {
@@ -83,6 +93,11 @@ export function formFromCourse(c: Course): CourseForm {
     modality: c.modality ?? "",
     topicOutline: c.topicOutline ?? "",
     syllabusTemplateId: c.syllabusTemplateId ?? "",
+    endDate: c.endDate ?? "",
+    breaks: c.breaks ?? "",
+    assignmentDueRule: c.assignmentDueRule ?? "",
+    email: c.email ?? "",
+    emailClient: c.emailClient ?? "",
   };
 }
 
@@ -114,6 +129,11 @@ export function courseToInput(c: Course) {
     modality: c.modality ?? "",
     topicOutline: c.topicOutline ?? "",
     syllabusTemplateId: c.syllabusTemplateId ?? "",
+    endDate: c.endDate ?? "",
+    breaks: c.breaks ?? "",
+    assignmentDueRule: c.assignmentDueRule ?? "",
+    email: c.email ?? "",
+    emailClient: c.emailClient ?? "",
     customTiles: c.customTiles,
     hiddenTiles: c.hiddenTiles,
     studentRepos: c.studentRepos,
@@ -214,6 +234,19 @@ export function readFileText(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("Could not read the file."));
     reader.readAsText(file);
   });
+}
+
+/**
+ * Derive a syllabus template's display name from an uploaded file's name by
+ * stripping its last extension (case-insensitively) and trimming whitespace.
+ * Falls back to the trimmed raw file name when stripping would otherwise
+ * yield an empty string (e.g. a file literally named ".docx"), so the
+ * derived name is never empty as long as the file name isn't. Pure - no I/O.
+ */
+export function templateNameFromFileName(fileName: string): string {
+  const trimmed = fileName.trim();
+  const stripped = trimmed.replace(/\.[^.]+$/, "").trim();
+  return stripped || trimmed;
 }
 
 export function downloadDocx(base64: string, fileName: string): void {

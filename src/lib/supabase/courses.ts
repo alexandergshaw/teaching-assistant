@@ -80,6 +80,17 @@ export interface Course {
   modality: string | null;
   topicOutline: string | null;
   syllabusTemplateId: string | null;
+  endDate: string | null;
+  /** Free-text break annotations (e.g. "Week 8 - Spring Break"). Display
+   * only - never shifts week numbering (weekDeadline, resolveTileCurrentWeek,
+   * courseProgressStatus, and the Castletop's week blocks are unaffected). */
+  breaks: string | null;
+  /** Encoded recurring rule "<day>|<HH:MM>", e.g. "sun|23:59". See
+   * src/lib/assignment-due-rule.ts for the parse/format/describe helpers. */
+  assignmentDueRule: string | null;
+  email: string | null;
+  /** "outlook" | "gmail" | "other" | null (unset - never defaulted). */
+  emailClient: string | null;
   materialsFiles: CourseMaterialFile[];
   castletopFiles: CourseMaterialFile[];
   exportFiles: CourseMaterialFile[];
@@ -121,13 +132,18 @@ export interface CourseInput {
   modality?: string | null;
   topicOutline?: string | null;
   syllabusTemplateId?: string | null;
+  endDate?: string | null;
+  breaks?: string | null;
+  assignmentDueRule?: string | null;
+  email?: string | null;
+  emailClient?: string | null;
   customTiles?: CourseCustomTile[];
   hiddenTiles?: string[];
   studentRepos?: CourseStudentRepo[];
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, materials_files, castletop_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, end_date, breaks, assignment_due_rule, email, email_client, materials_files, castletop_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -165,6 +181,11 @@ interface CourseRow {
   modality: string | null;
   topic_outline: string | null;
   syllabus_template_id: string | null;
+  end_date: string | null;
+  breaks: string | null;
+  assignment_due_rule: string | null;
+  email: string | null;
+  email_client: string | null;
   materials_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
   castletop_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
   export_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
@@ -206,6 +227,11 @@ function toCourse(r: CourseRow): Course {
     modality: r.modality,
     topicOutline: r.topic_outline,
     syllabusTemplateId: r.syllabus_template_id,
+    endDate: r.end_date,
+    breaks: r.breaks,
+    assignmentDueRule: r.assignment_due_rule,
+    email: r.email,
+    emailClient: r.email_client,
     materialsFiles: Array.isArray(r.materials_files) ? r.materials_files.filter((x) => x && x.path && x.name) : [],
     castletopFiles: Array.isArray(r.castletop_files) ? r.castletop_files.filter((x) => x && x.path && x.name) : [],
     exportFiles: Array.isArray(r.export_files) ? r.export_files.filter((x) => x && x.path && x.name) : [],
@@ -269,6 +295,11 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     modality: clean(input.modality),
     topic_outline: clean(input.topicOutline),
     syllabus_template_id: clean(input.syllabusTemplateId),
+    end_date: clean(input.endDate),
+    breaks: clean(input.breaks),
+    assignment_due_rule: clean(input.assignmentDueRule),
+    email: clean(input.email),
+    email_client: clean(input.emailClient),
     custom_tiles: Array.isArray(input.customTiles) ? (input.customTiles as unknown as Json) : undefined,
     hidden_tiles: Array.isArray(input.hiddenTiles) ? (input.hiddenTiles as unknown as Json) : undefined,
     student_repos: Array.isArray(input.studentRepos)

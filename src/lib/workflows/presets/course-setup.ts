@@ -6,7 +6,7 @@ export const COURSE_KICKOFF: WorkflowDef = {
   category: "course-setup",
   name: "Course Kickoff",
   description:
-    "Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile, the template repository, and the new repository's name. Generates the schedule, creates the class repo from the template, writes assignment READMEs - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), finishing by generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab.",
+    "Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile, the template repository, and the new repository's name. Generates the schedule, creates the class repo from the template, writes assignment READMEs - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), including (re)generating the course's syllabus from its Syllabus template column, finishing by generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab.",
   steps: [
     {
       type: "load-course-tile",
@@ -68,7 +68,7 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
   category: "course-setup",
   name: "Course Kickoff (no codebase)",
   description:
-    "For courses without a code base (ethical hacking, project management, business, etc.). Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile and the deck template. Generates the schedule and lecture materials from the schedule topics - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps, and generates the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab before the final step integrates the source material into the LMS, so any pages or assignments that final step creates are not reflected in the workbook.",
+    "For courses without a code base (ethical hacking, project management, business, etc.). Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile and the deck template. Generates the schedule and lecture materials from the schedule topics - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps, (re)generating the course's syllabus from its Syllabus template column, and generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab before the final step integrates the source material into the LMS, so any pages or assignments that final step creates are not reflected in the workbook.",
   steps: [
     {
       type: "load-course-tile",
@@ -154,7 +154,7 @@ export const COURSE_REFRESH: WorkflowDef = {
   category: "course-setup",
   name: "Course Refresh",
   description:
-    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. A tile without a linked repository pauses with an alert and, on continue, the schedule falls back to the tile's saved Schedule of Topics (CSV) or its topics; repo-driven materials steps are skipped in that case. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved to the LMS course, onto the course tile, and as a document in the LMS export's Start Here module. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines; each module's assignment carries its generated instructions. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set. The Starter Materials workflow then runs against the tile's LMS course (dynamic - edits to it apply here), and the run finishes by generating the Castletop credit-hour workload workbook for the course, saving it onto the course tile's Castletop column and the Files tab.",
+    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. A tile without a linked repository pauses with an alert and, on continue, the schedule falls back to the tile's saved Schedule of Topics (CSV) or its topics; repo-driven materials steps are skipped in that case. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved to the LMS course, onto the course tile, and as a document in the LMS export's Start Here module. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines; each module's assignment carries its generated instructions. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set. The Starter Materials workflow then runs against the tile's LMS course (dynamic - edits to it apply here); the run then (re)generates the course's syllabus from its Syllabus template column, and finishes by generating the Castletop credit-hour workload workbook for the course, saving it onto the course tile's Castletop column and the Files tab.",
   steps: [
     {
       type: "load-course-tile",
@@ -277,6 +277,19 @@ export const COURSE_REFRESH: WorkflowDef = {
         bindOverrides: {
           "0.courses": { source: "step", stepIndex: 0, outputKey: "course" },
         },
+      },
+    },
+    {
+      // starter-materials (above) already generates a syllabus from the
+      // template when the tile has none - so on a first run this step
+      // usually finds one already linked and skips, which is correct. Its
+      // value is the `regenerate` path (rebuilding an existing syllabus from
+      // its template) and being an explicitly bindable, re-runnable step in
+      // its own right, independent of starter-materials.
+      type: "generate-syllabus",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        regenerate: { source: "runtime", fieldKey: "regenerateSyllabus" },
       },
     },
     {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSyllabusFactsFromCourse } from "./syllabus-facts";
+import { buildSyllabusFactsFromCourse, resolveSyllabusTemplateId } from "./syllabus-facts";
 import type { Course } from "./supabase/courses";
 
 function makeCourse(overrides: Partial<Course> = {}): Course {
@@ -31,6 +31,11 @@ function makeCourse(overrides: Partial<Course> = {}): Course {
     modality: null,
     topicOutline: null,
     syllabusTemplateId: null,
+    endDate: null,
+    breaks: null,
+    assignmentDueRule: null,
+    email: null,
+    emailClient: null,
     materialsFiles: [],
     castletopFiles: [],
     exportFiles: [],
@@ -123,5 +128,98 @@ describe("buildSyllabusFactsFromCourse", () => {
     const facts = buildSyllabusFactsFromCourse(makeCourse(), { email: "", lmsUrl: "" });
     expect(facts.email).toBe("");
     expect(facts.lmsUrl).toBe("");
+  });
+
+  it("trims leading/trailing whitespace from the email extra", () => {
+    const facts = buildSyllabusFactsFromCourse(makeCourse(), { email: "  a@b.edu\n", lmsUrl: "" });
+    expect(facts.email).toBe("a@b.edu");
+  });
+
+  it("trims leading/trailing whitespace from the lmsUrl extra", () => {
+    const facts = buildSyllabusFactsFromCourse(makeCourse(), { email: "", lmsUrl: "  https://lms.example.edu\n" });
+    expect(facts.lmsUrl).toBe("https://lms.example.edu");
+  });
+
+  it("turns a whitespace-only email or lmsUrl extra into an empty string, not the whitespace itself", () => {
+    const facts = buildSyllabusFactsFromCourse(makeCourse(), { email: "   ", lmsUrl: "\n\t " });
+    expect(facts.email).toBe("");
+    expect(facts.lmsUrl).toBe("");
+  });
+});
+
+describe("resolveSyllabusTemplateId", () => {
+  it("course value set, institution set - the course column wins", () => {
+    const result = resolveSyllabusTemplateId("course-tpl", [
+      { id: "syllabusTemplate", value: "inst-tpl" },
+    ]);
+    expect(result).toEqual({ templateId: "course-tpl", source: "course" });
+  });
+
+  it("course blank, institution set - falls through to the institution field", () => {
+    const result = resolveSyllabusTemplateId("", [
+      { id: "syllabusTemplate", value: "inst-tpl" },
+    ]);
+    expect(result).toEqual({ templateId: "inst-tpl", source: "institution" });
+  });
+
+  it("course null/undefined, institution set - falls through to the institution field", () => {
+    expect(
+      resolveSyllabusTemplateId(null, [{ id: "syllabusTemplate", value: "inst-tpl" }])
+    ).toEqual({ templateId: "inst-tpl", source: "institution" });
+    expect(
+      resolveSyllabusTemplateId(undefined, [{ id: "syllabusTemplate", value: "inst-tpl" }])
+    ).toEqual({ templateId: "inst-tpl", source: "institution" });
+  });
+
+  it("course whitespace-only, institution set - the institution field wins, not the blank course value", () => {
+    const result = resolveSyllabusTemplateId("   ", [
+      { id: "syllabusTemplate", value: "inst-tpl" },
+    ]);
+    expect(result).toEqual({ templateId: "inst-tpl", source: "institution" });
+  });
+
+  it("both blank - templateId empty, source none", () => {
+    const result = resolveSyllabusTemplateId("", [{ id: "syllabusTemplate", value: "" }]);
+    expect(result).toEqual({ templateId: "", source: "none" });
+  });
+
+  it("institution fields array empty - handled, source none", () => {
+    const result = resolveSyllabusTemplateId("", []);
+    expect(result).toEqual({ templateId: "", source: "none" });
+  });
+
+  it("institution fields missing the syllabusTemplate id entirely - handled, source none", () => {
+    const result = resolveSyllabusTemplateId(null, [
+      { id: "email", value: "prof@mcc.edu" },
+      { id: "lmsUrl", value: "https://canvas.mcc.edu" },
+    ]);
+    expect(result).toEqual({ templateId: "", source: "none" });
+  });
+
+  it("institution field present but whitespace-only value - treated as absent (source none)", () => {
+    const result = resolveSyllabusTemplateId("", [{ id: "syllabusTemplate", value: "   " }]);
+    expect(result).toEqual({ templateId: "", source: "none" });
+  });
+
+  it("institution field present but whitespace-only value, course also blank - still none (not a false institution win)", () => {
+    const result = resolveSyllabusTemplateId(undefined, [
+      { id: "syllabusTemplate", value: "   " },
+    ]);
+    expect(result.source).toBe("none");
+    expect(result.templateId).toBe("");
+  });
+
+  it("trims a padded course value in the returned templateId", () => {
+    const result = resolveSyllabusTemplateId("  course-tpl  ", [
+      { id: "syllabusTemplate", value: "inst-tpl" },
+    ]);
+    expect(result).toEqual({ templateId: "course-tpl", source: "course" });
+  });
+
+  it("trims a padded institution value in the returned templateId", () => {
+    const result = resolveSyllabusTemplateId("", [
+      { id: "syllabusTemplate", value: "  inst-tpl  " },
+    ]);
+    expect(result).toEqual({ templateId: "inst-tpl", source: "institution" });
   });
 });

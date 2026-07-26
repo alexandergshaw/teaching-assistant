@@ -51,6 +51,11 @@ function makeCourse(overrides: Partial<Course>): Course {
     modality: null,
     topicOutline: null,
     syllabusTemplateId: null,
+    endDate: null,
+    breaks: null,
+    assignmentDueRule: null,
+    email: null,
+    emailClient: null,
     materialsFiles: [],
     castletopFiles: [],
     exportFiles: [],
@@ -178,6 +183,27 @@ describe("sortValueFor", () => {
     expect(sortValueFor(makeCourse({ syllabusTemplateId: null }), "syllabusTemplate")).toEqual({ kind: "text", value: "", empty: true });
   });
 
+  it("treats endDate/breaks/email/emailClient as empty-when-unset text", () => {
+    expect(sortValueFor(makeCourse({ endDate: "2024-12-15" }), "endDate")).toEqual({ kind: "text", value: "2024-12-15", empty: false });
+    expect(sortValueFor(makeCourse({ endDate: null }), "endDate")).toEqual({ kind: "text", value: "", empty: true });
+    expect(sortValueFor(makeCourse({ breaks: "Week 8 - Spring Break" }), "breaks")).toEqual({ kind: "text", value: "Week 8 - Spring Break", empty: false });
+    expect(sortValueFor(makeCourse({ breaks: null }), "breaks")).toEqual({ kind: "text", value: "", empty: true });
+    expect(sortValueFor(makeCourse({ email: "prof@mcc.edu" }), "email")).toEqual({ kind: "text", value: "prof@mcc.edu", empty: false });
+    expect(sortValueFor(makeCourse({ email: null }), "email")).toEqual({ kind: "text", value: "", empty: true });
+    expect(sortValueFor(makeCourse({ emailClient: "gmail" }), "emailClient")).toEqual({ kind: "text", value: "gmail", empty: false });
+    expect(sortValueFor(makeCourse({ emailClient: null }), "emailClient")).toEqual({ kind: "text", value: "", empty: true });
+  });
+
+  it("sorts assignmentDue by the human-readable description, not the raw encoded rule", () => {
+    expect(sortValueFor(makeCourse({ assignmentDueRule: "sun|23:59" }), "assignmentDue")).toEqual({
+      kind: "text",
+      value: "Sundays at 11:59 PM",
+      empty: false,
+    });
+    expect(sortValueFor(makeCourse({ assignmentDueRule: null }), "assignmentDue")).toEqual({ kind: "text", value: "", empty: true });
+    expect(sortValueFor(makeCourse({ assignmentDueRule: "garbage" }), "assignmentDue")).toEqual({ kind: "text", value: "", empty: true });
+  });
+
   it("uses raw content text for scheduleCsv/rubric, empty when unset", () => {
     expect(sortValueFor(makeCourse({ csvData: "week,topic\n1,Intro" }), "scheduleCsv")).toEqual({
       kind: "text",
@@ -284,21 +310,21 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "institution",
       "weeks",
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient",
     ]);
   });
 
   it("unions all post-v0 columns into an empty legacy selection (a bare array is version 0)", () => {
     expect(parseColumnSet(JSON.stringify([]))).toEqual([
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient",
     ]);
   });
 
   it("ignores name/actions if present since they are not toggleable columns", () => {
     expect(parseColumnSet(JSON.stringify(["name", "actions", "lms"]))).toEqual([
       "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient",
     ]);
   });
 
@@ -309,14 +335,14 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "repos",
       "lms",
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient",
     ]);
   });
 
   it("dedups after migrating a legacy id that collides with a persisted new id", () => {
     expect(parseColumnSet(JSON.stringify(["roster", "rosterCount", "lms"]))).toEqual([
       "roster", "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient",
     ]);
   });
 
@@ -360,27 +386,32 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(JSON.stringify({ v: CURRENT_COLUMNS_VERSION, columns: ["bogus", "lms"] }))).toEqual(["lms"]);
   });
 
-  it("unions v2+v3+v4+v5 columns into a v1 persisted set", () => {
+  it("unions v2+v3+v4+v5+v6 columns into a v1 persisted set", () => {
     const v1 = JSON.stringify({ v: 1, columns: ["lms", "modality"] });
     expect(parseColumnSet(v1)).toEqual([
       "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient",
     ]);
   });
 
-  it("unions v3+v4+v5 columns into a v2 persisted set", () => {
+  it("unions v3+v4+v5+v6 columns into a v2 persisted set", () => {
     const v2 = JSON.stringify({ v: 2, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v2)).toEqual(["lms", "modality", "topicOutline", "castletop", "syllabusTemplate"]);
+    expect(parseColumnSet(v2)).toEqual(["lms", "modality", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient"]);
   });
 
-  it("unions v4+v5 columns into a v3 persisted set", () => {
+  it("unions v4+v5+v6 columns into a v3 persisted set", () => {
     const v3 = JSON.stringify({ v: 3, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v3)).toEqual(["lms", "modality", "castletop", "syllabusTemplate"]);
+    expect(parseColumnSet(v3)).toEqual(["lms", "modality", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient"]);
   });
 
-  it("unions v5 columns into a v4 persisted set", () => {
+  it("unions v5+v6 columns into a v4 persisted set", () => {
     const v4 = JSON.stringify({ v: 4, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v4)).toEqual(["lms", "modality", "syllabusTemplate"]);
+    expect(parseColumnSet(v4)).toEqual(["lms", "modality", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient"]);
+  });
+
+  it("unions v6 columns into a v5 persisted set", () => {
+    const v5 = JSON.stringify({ v: 5, columns: ["lms", "modality"] });
+    expect(parseColumnSet(v5)).toEqual(["lms", "modality", "endDate", "breaks", "assignmentDue", "email", "emailClient"]);
   });
 
   it("serializeColumnSet writes the current version", () => {
@@ -484,6 +515,31 @@ describe("computeFieldPatch", () => {
   it("maps syllabusTemplateId to null when blank", () => {
     expect(computeFieldPatch("syllabusTemplateId", "tmpl-1")).toEqual({ syllabusTemplateId: "tmpl-1" });
     expect(computeFieldPatch("syllabusTemplateId", "")).toEqual({ syllabusTemplateId: null });
+  });
+
+  it("maps endDate to null when blank", () => {
+    expect(computeFieldPatch("endDate", "2024-12-15")).toEqual({ endDate: "2024-12-15" });
+    expect(computeFieldPatch("endDate", "")).toEqual({ endDate: null });
+  });
+
+  it("maps breaks to null when blank", () => {
+    expect(computeFieldPatch("breaks", "Week 8 - Spring Break")).toEqual({ breaks: "Week 8 - Spring Break" });
+    expect(computeFieldPatch("breaks", "")).toEqual({ breaks: null });
+  });
+
+  it("maps assignmentDueRule to null when blank", () => {
+    expect(computeFieldPatch("assignmentDueRule", "sun|23:59")).toEqual({ assignmentDueRule: "sun|23:59" });
+    expect(computeFieldPatch("assignmentDueRule", "")).toEqual({ assignmentDueRule: null });
+  });
+
+  it("maps email to null when blank", () => {
+    expect(computeFieldPatch("email", "prof@mcc.edu")).toEqual({ email: "prof@mcc.edu" });
+    expect(computeFieldPatch("email", "")).toEqual({ email: null });
+  });
+
+  it("maps emailClient to null when blank", () => {
+    expect(computeFieldPatch("emailClient", "gmail")).toEqual({ emailClient: "gmail" });
+    expect(computeFieldPatch("emailClient", "")).toEqual({ emailClient: null });
   });
 
   it("parses studentRepos rows", () => {

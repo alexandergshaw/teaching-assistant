@@ -50,6 +50,11 @@ function fullCourseFixture(): Course {
     modality: "async",
     topicOutline: "Fixture Ch 1: Intro; Ch 2: Loops",
     syllabusTemplateId: "fixture-tpl-1",
+    endDate: "2026-05-08",
+    breaks: "Week 8 - Fixture Spring Break",
+    assignmentDueRule: "wed|17:30",
+    email: "fixture-instructor@example.edu",
+    emailClient: "gmail",
     materialsFiles: [
       { name: "fixture-materials.zip", path: "fixture/materials.zip", size: 111, addedAt: "2026-01-01T00:00:00Z" },
     ],

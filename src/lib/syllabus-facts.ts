@@ -30,7 +30,12 @@ export interface SyllabusFactsExtra {
 
 /** Maps a course row plus its resolved institution facts onto the shape
  * generateCourseSyllabusAction expects. Pure - no I/O. Null numerics (weeks,
- * tests) become "", never the string "null"; blank/null strings stay blank. */
+ * tests) become "", never the string "null"; blank/null strings stay blank.
+ * `email`/`lmsUrl` are trimmed here so every caller gets the same behavior
+ * without remembering to trim institution values itself - config fields
+ * routinely carry trailing whitespace (see canvas-core.ts's token trim for
+ * the same reason). Trimming is idempotent, so a caller that already trims
+ * before calling this is unaffected. */
 export function buildSyllabusFactsFromCourse(course: Course, extra: SyllabusFactsExtra): SyllabusFacts {
   return {
     courseName: course.name,
@@ -42,8 +47,41 @@ export function buildSyllabusFactsFromCourse(course: Course, extra: SyllabusFact
     weeks: course.weeks != null ? String(course.weeks) : "",
     tests: course.tests != null ? String(course.tests) : "",
     textbook: course.textbook ?? "",
-    email: extra.email,
-    lmsUrl: extra.lmsUrl,
+    email: extra.email.trim(),
+    lmsUrl: extra.lmsUrl.trim(),
     institution: course.institution ?? "",
   };
+}
+
+export interface SyllabusTemplateResolution {
+  templateId: string;
+  source: "course" | "institution" | "none";
+}
+
+/** Resolve which syllabus template a course should use: the per-course
+ * column first, then the institution's "syllabusTemplate" field. Both
+ * candidates are trimmed; a whitespace-only course value falls through to
+ * the institution field rather than winning. Returns templateId "" and
+ * source "none" when neither is set. Pure - no I/O.
+ *
+ * The single home for this precedence rule - shared by the starter-materials
+ * step (steps.course-setup.materials.ts) and the generate-syllabus step
+ * (steps.syllabus.ts) so it cannot drift between the two call sites. */
+export function resolveSyllabusTemplateId(
+  courseTemplateId: string | null | undefined,
+  institutionFields: Array<{ id: string; value: string }>
+): SyllabusTemplateResolution {
+  const course = (courseTemplateId ?? "").trim();
+  if (course) {
+    return { templateId: course, source: "course" };
+  }
+
+  const institution = (
+    institutionFields.find((f) => f.id === "syllabusTemplate")?.value ?? ""
+  ).trim();
+  if (institution) {
+    return { templateId: institution, source: "institution" };
+  }
+
+  return { templateId: "", source: "none" };
 }

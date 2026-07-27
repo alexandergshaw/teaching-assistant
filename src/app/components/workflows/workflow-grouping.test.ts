@@ -7,6 +7,8 @@ import {
   emptyFolderState,
   assignFolder,
   moveFolder,
+  renameFolder,
+  removeFolder,
   folderNames,
 } from "./workflow-grouping";
 import type { WorkflowDef } from "@/lib/workflows/types";
@@ -266,6 +268,71 @@ describe("workflow folders (Group E)", () => {
       expect(groups).toHaveLength(1);
       expect(groups[0].title).toBe("");
       expect(groups[0].workflows.map((w) => w.id)).toEqual(["a"]);
+    });
+  });
+});
+
+describe("folder rename and delete", () => {
+  const state = { assignments: { a: "One", b: "One", c: "Two" }, order: ["One", "Two"] };
+
+  describe("renameFolder", () => {
+    it("moves every workflow filed under the old name", () => {
+      const next = renameFolder(state, "One", "Renamed");
+      expect(next.assignments).toEqual({ a: "Renamed", b: "Renamed", c: "Two" });
+    });
+
+    it("preserves the folder's position in the order", () => {
+      expect(folderNames(renameFolder(state, "One", "Renamed"))).toEqual(["Renamed", "Two"]);
+    });
+
+    // Renaming onto an existing folder is a merge, not an error - and the
+    // order must not end up listing the surviving folder twice.
+    it("merges when renamed onto an existing folder", () => {
+      const next = renameFolder(state, "One", "Two");
+      expect(next.assignments).toEqual({ a: "Two", b: "Two", c: "Two" });
+      expect(next.order).toEqual(["Two"]);
+      expect(folderNames(next)).toEqual(["Two"]);
+    });
+
+    it("is a no-op for a blank or unchanged name", () => {
+      expect(renameFolder(state, "One", "   ")).toBe(state);
+      expect(renameFolder(state, "One", "One")).toBe(state);
+    });
+
+    it("never mutates the state it was given", () => {
+      renameFolder(state, "One", "Renamed");
+      expect(state.assignments.a).toBe("One");
+    });
+  });
+
+  describe("removeFolder", () => {
+    // A folder is only an organizing layer, so deleting one must never take
+    // the workflows inside it with it.
+    it("unfiles its workflows rather than deleting them", () => {
+      const next = removeFolder(state, "One");
+      expect(next.assignments).toEqual({ c: "Two" });
+      expect(folderNames(next)).toEqual(["Two"]);
+    });
+
+    it("returns those workflows to their built-in groups", () => {
+      const wfs = [
+        { id: "a", name: "Alpha", preset: true, category: "grading" },
+        { id: "c", name: "Gamma", preset: false },
+      ] as unknown as Parameters<typeof groupWorkflowsWithFolders>[0];
+      const filed = { assignments: { a: "One" }, order: ["One"] };
+      const after = removeFolder(filed, "One");
+      const groups = groupWorkflowsWithFolders(wfs, [], "", after);
+      expect(groups.map((g) => g.title)).toEqual(["Custom", "Grading"]);
+      expect(groups.flatMap((g) => g.workflows).map((w) => w.id).sort()).toEqual(["a", "c"]);
+    });
+
+    it("is harmless for a folder that does not exist", () => {
+      expect(removeFolder(state, "Nope").assignments).toEqual(state.assignments);
+    });
+
+    it("never mutates the state it was given", () => {
+      removeFolder(state, "One");
+      expect(state.assignments.a).toBe("One");
     });
   });
 });

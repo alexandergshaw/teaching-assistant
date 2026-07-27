@@ -9,9 +9,13 @@ import {
   serializeFolderState,
   assignFolder,
   moveFolder,
+  renameFolder,
+  removeFolder,
   folderNames,
   type FolderState,
 } from "./workflow-grouping";
+import FolderPicker from "./FolderPicker";
+import FolderActionsMenu from "./FolderActionsMenu";
 import styles from "../../page.module.css";
 
 const FOLDERS_KEY = "ta-workflow-folders";
@@ -106,15 +110,8 @@ export function WorkflowListSidebar({
 
   const existingFolders = folderNames(folders);
 
-  // Prompt-based rather than a bespoke dialog: filing a workflow is a rare,
-  // one-line action and the sidebar is 220px wide.
-  const promptForFolder = (workflowId: string, current: string) => {
-    if (typeof window === "undefined") return;
-    const suggestion = existingFolders.length > 0 ? ` (existing: ${existingFolders.join(", ")})` : "";
-    const name = window.prompt(`Folder for this workflow${suggestion}. Leave blank to unfile.`, current);
-    if (name === null) return;
-    persistFolders(assignFolder(folders, workflowId, name));
-  };
+  // The workflow whose folder picker is open, and the button it hangs off.
+  const [folderPicker, setFolderPicker] = useState<{ id: string; anchor: HTMLElement } | null>(null);
 
   return (
     <div style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 4 }}>
@@ -141,9 +138,22 @@ export function WorkflowListSidebar({
         </div>
       )}
 
+      <FolderPicker
+        open={folderPicker !== null}
+        anchorEl={folderPicker?.anchor ?? null}
+        folders={existingFolders}
+        current={folderPicker ? folders.assignments[folderPicker.id] ?? "" : ""}
+        onPick={(folder) => {
+          if (folderPicker) persistFolders(assignFolder(folders, folderPicker.id, folder));
+          setFolderPicker(null);
+        }}
+        onClose={() => setFolderPicker(null)}
+      />
+
       {groups.map((group) => (
         <div key={group.title}>
           {group.title && (
+            <div style={{ display: "flex", alignItems: "center" }}>
             <button
               type="button"
               onClick={() => toggleGroup(group.title)}
@@ -187,32 +197,19 @@ export function WorkflowListSidebar({
               </span>
               {group.title}
             </button>
-          )}
-
-          {existingFolders.includes(group.title) && !collapsedGroups.has(group.title) && (
-            <div style={{ display: "flex", gap: 4, padding: "0 8px 4px" }}>
-              <button
-                type="button"
-                aria-label={`Move folder ${group.title} up`}
-                title="Move folder up"
-                className={styles.linkButton}
-                disabled={existingFolders.indexOf(group.title) === 0}
-                onClick={() => persistFolders(moveFolder(folders, group.title, "up"))}
-              >
-                Up
-              </button>
-              <button
-                type="button"
-                aria-label={`Move folder ${group.title} down`}
-                title="Move folder down"
-                className={styles.linkButton}
-                disabled={existingFolders.indexOf(group.title) === existingFolders.length - 1}
-                onClick={() => persistFolders(moveFolder(folders, group.title, "down"))}
-              >
-                Down
-              </button>
+            {existingFolders.includes(group.title) && (
+              <FolderActionsMenu
+                folder={group.title}
+                canMoveUp={existingFolders.indexOf(group.title) > 0}
+                canMoveDown={existingFolders.indexOf(group.title) < existingFolders.length - 1}
+                onRename={(next) => persistFolders(renameFolder(folders, group.title, next))}
+                onMove={(direction) => persistFolders(moveFolder(folders, group.title, direction))}
+                onRemove={() => persistFolders(removeFolder(folders, group.title))}
+              />
+            )}
             </div>
           )}
+
 
           {!collapsedGroups.has(group.title) &&
             group.workflows.map((w) => (
@@ -286,7 +283,7 @@ export function WorkflowListSidebar({
                 {(w.id === selectedWorkflowId || w.id === hoveredWorkflowId) && (
                   <button
                     type="button"
-                    onClick={() => promptForFolder(w.id, folders.assignments[w.id] ?? "")}
+                    onClick={(e) => setFolderPicker({ id: w.id, anchor: e.currentTarget })}
                     className={styles.ghBadge}
                     style={{ padding: "4px 8px", fontSize: "0.75em", whiteSpace: "nowrap", flex: "none" }}
                     title={`Put ${w.name} in a folder`}

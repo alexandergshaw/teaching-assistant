@@ -2487,3 +2487,19 @@ Acceptance criteria (Group E):
 13. `parseFolderState` degrades to "no folders" on anything malformed
     rather than throwing, and a BLANK folder name means "unfile" rather
     than creating a folder with an empty name.
+14. **The folder picker is a real control, not a `window.prompt`.** One
+    combined filter-and-create field over the folder list: typing
+    narrows it, and a name that does not exist offers to create it, so
+    filing into an existing folder and into a new one are the SAME
+    gesture. "Create" is offered only when the typed name is not already
+    a folder, or the same name would appear twice - once as a match and
+    once as a create row that does nothing new. Enter commits only when
+    the choice is unambiguous (a new name, or exactly one match).
+    "Remove from folder" appears only when the workflow is filed.
+15. Each folder header carries a rename / move / delete menu.
+    **Renaming ONTO an existing folder is a merge, not an error**, and
+    the order must not then list the surviving folder twice.
+    **Deleting a folder UNFILES its workflows, never deletes them** - a
+    folder is only an organizing layer - and the menu item says so, so
+    the action does not read as destructive. Unfiled workflows return to
+    their built-in Recent/Custom/category groups.

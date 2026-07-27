@@ -199,3 +199,45 @@ export function groupWorkflowsWithFolders(
 
   return [...folderGroups, ...groupWorkflows(unfiled, recentIds, "")];
 }
+
+/**
+ * Rename a folder, moving every workflow filed under it and preserving its
+ * position in the order.
+ *
+ * Renaming ONTO an existing folder name is a merge, not an error: both sets of
+ * workflows end up in the surviving folder, and the now-duplicate order entry
+ * is dropped so the folder cannot appear twice.
+ */
+export function renameFolder(state: FolderState, from: string, to: string): FolderState {
+  const target = to.trim();
+  if (!target || target === from) return state;
+
+  const assignments: Record<string, string> = {};
+  for (const [id, folder] of Object.entries(state.assignments)) {
+    assignments[id] = folder === from ? target : folder;
+  }
+
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const name of state.order) {
+    const next = name === from ? target : name;
+    if (seen.has(next)) continue;
+    seen.add(next);
+    order.push(next);
+  }
+
+  return { assignments, order };
+}
+
+/**
+ * Delete a folder. Its workflows are UNFILED rather than deleted - a folder is
+ * only an organizing layer, so removing one must never remove the workflows
+ * inside it.
+ */
+export function removeFolder(state: FolderState, name: string): FolderState {
+  const assignments: Record<string, string> = {};
+  for (const [id, folder] of Object.entries(state.assignments)) {
+    if (folder !== name) assignments[id] = folder;
+  }
+  return { assignments, order: state.order.filter((n) => n !== name) };
+}

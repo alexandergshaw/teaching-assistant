@@ -97,6 +97,7 @@ export interface Course {
   classLengthMinutes: number | null;
   materialsFiles: CourseMaterialFile[];
   castletopFiles: CourseMaterialFile[];
+  miscFiles: CourseMaterialFile[];
   exportFiles: CourseMaterialFile[];
   materialsZipName: string | null;
   materialsZipPath: string | null;
@@ -148,7 +149,7 @@ export interface CourseInput {
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, materials_files, castletop_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, materials_files, castletop_files, misc_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -194,6 +195,7 @@ interface CourseRow {
   class_length_minutes: number | null;
   materials_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
   castletop_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
+  misc_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
   export_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
   materials_zip_name: string | null;
   materials_zip_path: string | null;
@@ -241,6 +243,7 @@ function toCourse(r: CourseRow): Course {
     classLengthMinutes: r.class_length_minutes,
     materialsFiles: Array.isArray(r.materials_files) ? r.materials_files.filter((x) => x && x.path && x.name) : [],
     castletopFiles: Array.isArray(r.castletop_files) ? r.castletop_files.filter((x) => x && x.path && x.name) : [],
+    miscFiles: Array.isArray(r.misc_files) ? r.misc_files.filter((x) => x && x.path && x.name) : [],
     exportFiles: Array.isArray(r.export_files) ? r.export_files.filter((x) => x && x.path && x.name) : [],
     materialsZipName: r.materials_zip_name,
     materialsZipPath: r.materials_zip_path,
@@ -318,9 +321,12 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
       : undefined,
     // Omit materials_zip_* fields: inserts use NULL defaults, updates preserve existing
     // values. updateCourseMaterials is the sole writer of these columns.
-    // Omit materials_files, castletop_files, and export_files: dedicated writers only
-    // (appendCourseMaterialFile, removeCourseMaterialFile, appendCourseCastletopFile,
-    // removeCourseCastletopFile, appendCourseExportFile, removeCourseExportFile).
+    // Omit materials_files, castletop_files, misc_files, and export_files: dedicated
+    // writers only (appendCourseMaterialFile, removeCourseMaterialFile,
+    // appendCourseCastletopFile, removeCourseCastletopFile, appendCourseMiscFile,
+    // removeCourseMiscFile, appendCourseExportFile, removeCourseExportFile). This is
+    // what stops updateCourse from clobbering these columns on every unrelated save -
+    // do not add them here or to CourseInput.
     updated_at: new Date().toISOString(),
   };
 }
@@ -602,6 +608,82 @@ export async function removeCourseCastletopFile(
     .eq("id", id);
   if (error) {
     throw new Error(`Could not update the course Castletop files: ${error.message}`);
+  }
+}
+
+/** Append a misc file to a course's misc files list, deduplicating by name. Returns the storage path of any replaced entry, or null if none. */
+export async function appendCourseMiscFile(
+  userId: string,
+  id: string,
+  file: CourseMaterialFile
+): Promise<string | null> {
+  const { data, error: selectError } = await table()
+    .select("misc_files")
+    .eq("user_id", userId)
+    .eq("id", id)
+    .single();
+  if (selectError) {
+    throw new Error(`Could not read the course misc files: ${selectError.message}`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const current = Array.isArray((data as any).misc_files) ? (data as any).misc_files : [];
+  let replacedPath: string | null = null;
+
+  // Remove any existing entry with the same name, capturing its path.
+  const filtered = current.filter((x: CourseMaterialFile) => {
+    if (x && x.name === file.name) {
+      replacedPath = x.path;
+      return false;
+    }
+    return true;
+  });
+
+  // Append the new entry.
+  const updated = [...filtered, file];
+
+  const { error } = await table()
+    .update({
+      misc_files: updated,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) {
+    throw new Error(`Could not update the course misc files: ${error.message}`);
+  }
+
+  return replacedPath;
+}
+
+/** Remove a misc file from a course's misc files list by path. */
+export async function removeCourseMiscFile(
+  userId: string,
+  id: string,
+  path: string
+): Promise<void> {
+  const { data, error: selectError } = await table()
+    .select("misc_files")
+    .eq("user_id", userId)
+    .eq("id", id)
+    .single();
+  if (selectError) {
+    throw new Error(`Could not read the course misc files: ${selectError.message}`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const current = Array.isArray((data as any).misc_files) ? (data as any).misc_files : [];
+  const filtered = current.filter((x: CourseMaterialFile) => x && x.path !== path);
+
+  const { error } = await table()
+    .update({
+      misc_files: filtered,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) {
+    throw new Error(`Could not update the course misc files: ${error.message}`);
   }
 }
 

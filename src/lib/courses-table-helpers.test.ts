@@ -59,6 +59,7 @@ function makeCourse(overrides: Partial<Course>): Course {
     classLengthMinutes: null,
     materialsFiles: [],
     castletopFiles: [],
+    miscFiles: [],
     exportFiles: [],
     materialsZipName: null,
     materialsZipPath: null,
@@ -317,21 +318,21 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "institution",
       "weeks",
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles",
     ]);
   });
 
   it("unions all post-v0 columns into an empty legacy selection (a bare array is version 0)", () => {
     expect(parseColumnSet(JSON.stringify([]))).toEqual([
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles",
     ]);
   });
 
   it("ignores name/actions if present since they are not toggleable columns", () => {
     expect(parseColumnSet(JSON.stringify(["name", "actions", "lms"]))).toEqual([
       "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles",
     ]);
   });
 
@@ -342,14 +343,14 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "repos",
       "lms",
       "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles",
     ]);
   });
 
   it("dedups after migrating a legacy id that collides with a persisted new id", () => {
     expect(parseColumnSet(JSON.stringify(["roster", "rosterCount", "lms"]))).toEqual([
       "roster", "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles",
     ]);
   });
 
@@ -393,37 +394,42 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(JSON.stringify({ v: CURRENT_COLUMNS_VERSION, columns: ["bogus", "lms"] }))).toEqual(["lms"]);
   });
 
-  it("unions v2+v3+v4+v5+v6+v7 columns into a v1 persisted set", () => {
+  it("unions v2+v3+v4+v5+v6+v7+v8 columns into a v1 persisted set", () => {
     const v1 = JSON.stringify({ v: 1, columns: ["lms", "modality"] });
     expect(parseColumnSet(v1)).toEqual([
       "lms", "modality",
-      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength",
+      "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles",
     ]);
   });
 
-  it("unions v3+v4+v5+v6+v7 columns into a v2 persisted set", () => {
+  it("unions v3+v4+v5+v6+v7+v8 columns into a v2 persisted set", () => {
     const v2 = JSON.stringify({ v: 2, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v2)).toEqual(["lms", "modality", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength"]);
+    expect(parseColumnSet(v2)).toEqual(["lms", "modality", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles"]);
   });
 
-  it("unions v4+v5+v6+v7 columns into a v3 persisted set", () => {
+  it("unions v4+v5+v6+v7+v8 columns into a v3 persisted set", () => {
     const v3 = JSON.stringify({ v: 3, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v3)).toEqual(["lms", "modality", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength"]);
+    expect(parseColumnSet(v3)).toEqual(["lms", "modality", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles"]);
   });
 
-  it("unions v5+v6+v7 columns into a v4 persisted set", () => {
+  it("unions v5+v6+v7+v8 columns into a v4 persisted set", () => {
     const v4 = JSON.stringify({ v: 4, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v4)).toEqual(["lms", "modality", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength"]);
+    expect(parseColumnSet(v4)).toEqual(["lms", "modality", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles"]);
   });
 
-  it("unions v6+v7 columns into a v5 persisted set", () => {
+  it("unions v6+v7+v8 columns into a v5 persisted set", () => {
     const v5 = JSON.stringify({ v: 5, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v5)).toEqual(["lms", "modality", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength"]);
+    expect(parseColumnSet(v5)).toEqual(["lms", "modality", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles"]);
   });
 
-  it("unions v7 columns into a v6 persisted set", () => {
+  it("unions v7+v8 columns into a v6 persisted set", () => {
     const v6 = JSON.stringify({ v: 6, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v6)).toEqual(["lms", "modality", "classLength"]);
+    expect(parseColumnSet(v6)).toEqual(["lms", "modality", "classLength", "miscFiles"]);
+  });
+
+  it("unions v8 columns into a v7 persisted set", () => {
+    const v7 = JSON.stringify({ v: 7, columns: ["lms", "modality"] });
+    expect(parseColumnSet(v7)).toEqual(["lms", "modality", "miscFiles"]);
   });
 
   it("serializeColumnSet writes the current version", () => {

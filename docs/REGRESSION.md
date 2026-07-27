@@ -2088,3 +2088,36 @@ Acceptance criteria (6ea6505+):
 5. Deliberate behavior change on the record: this corrects
    `schedule-lecture-announcement` for MW/TTh courses, which had been
    scheduling only their first day.
+
+## 68. Misc files column (Group C)
+
+Acceptance criteria (d5fdffa+):
+1. Per-course `misc_files` jsonb column holding arbitrary supporting
+   files, stored in SUPABASE. Google Drive was explicitly ruled out by
+   the user; no Drive scope or client exists and none may be added.
+   The Google OAuth scopes stay calendar-only.
+2. **File columns are DEDICATED-WRITER-ONLY.** `miscFiles` appears in
+   `Course`, the `COLUMNS` select, the private `CourseRow`, `toCourse`,
+   and its own append/remove writers - and NOWHERE ELSE. It must stay
+   absent from `CourseInput`, from `toRow`'s returned object, from
+   `courseToInput`, and from `courseToInputPayload`, exactly like
+   `materialsFiles` / `castletopFiles` / `exportFiles`. Adding it to
+   any of those makes `updateCourse`'s full-input round-trip wipe the
+   column on every unrelated save.
+   Note this is the EXACT INVERSE of the rule for scalar columns
+   (section 61), which must appear in both carriers or they get wiped.
+   Same files, opposite rules - do not "fix" one into the other.
+3. `registry-helpers.courseToInputPayload.test.ts` lists `miscFiles` in
+   its `EXCLUDED_COURSE_KEYS` allowlist with the dedicated-writer
+   rationale, so the drift-proof test treats the omission as
+   deliberate rather than failing on it.
+4. Column id `miscFiles`, version 8 with
+   `COLUMNS_ADDED_IN[8] = ["miscFiles"]`; a count column in
+   `sortValueFor`; no `computeFieldPatch` case (not inline-editable).
+5. `MiscFilesCell` accepts ANY file type (no accept filter), caps at
+   50 MB matching MaterialsCell, and on a name collision deletes the
+   replaced storage object returned by the append action.
+6. `storageExtFromFileName` takes only the LAST extension and never
+   returns empty: `"notes.tar.gz"` -> `"gz"`, `"a.PDF"` -> `"pdf"`,
+   `"README"` / `".hidden"` / `"x."` / `""` -> `"bin"`, whitespace
+   trimmed. A leading dot is not an extension.

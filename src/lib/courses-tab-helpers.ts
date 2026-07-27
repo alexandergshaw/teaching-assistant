@@ -253,6 +253,21 @@ export function templateNameFromFileName(fileName: string): string {
   return stripped || trimmed;
 }
 
+/**
+ * Derive a Supabase Storage object extension from an uploaded file's name
+ * (used by MiscFilesCell, which accepts any file type): the last dot
+ * segment, lowercased. Falls back to "bin" when the name has no extension,
+ * when its only dot is a leading one (a dotfile like ".hidden" is not an
+ * extension), or when nothing follows the last dot (e.g. "x."). Pure - no
+ * I/O.
+ */
+export function storageExtFromFileName(name: string): string {
+  const trimmed = name.trim();
+  const idx = trimmed.lastIndexOf(".");
+  if (idx <= 0 || idx === trimmed.length - 1) return "bin";
+  return trimmed.slice(idx + 1).toLowerCase();
+}
+
 export function downloadDocx(base64: string, fileName: string): void {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const blob = new Blob([bytes], {

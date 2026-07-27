@@ -95,6 +95,7 @@ function baseCourse(overrides: Partial<Course> = {}): Course {
     classLengthMinutes: null,
     materialsFiles: [],
     castletopFiles: [],
+    miscFiles: [],
     exportFiles: [],
     materialsZipName: null,
     materialsZipPath: null,

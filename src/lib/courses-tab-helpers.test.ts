@@ -15,6 +15,7 @@ import {
   mergeCardLayout,
   mergeInstitutionFields,
   templateNameFromFileName,
+  storageExtFromFileName,
   EMPTY_FORM,
 } from "./courses-tab-helpers";
 import type { Course } from "./supabase/courses";
@@ -70,6 +71,7 @@ const mockCourse: Course = {
   exportFiles: [],
   materialsFiles: [],
   castletopFiles: [],
+  miscFiles: [],
   materialsZipName: null,
   materialsZipPath: null,
   materialsZipSize: null,
@@ -363,6 +365,32 @@ describe("templateNameFromFileName", () => {
 
   it("trims surrounding whitespace", () => {
     expect(templateNameFromFileName("  MCC Syllabus Template.docx  ")).toBe("MCC Syllabus Template");
+  });
+});
+
+describe("storageExtFromFileName", () => {
+  it("lowercases a simple extension", () => {
+    expect(storageExtFromFileName("a.PDF")).toBe("pdf");
+  });
+
+  it("takes only the last extension from a multi-dot name", () => {
+    expect(storageExtFromFileName("notes.tar.gz")).toBe("gz");
+  });
+
+  it("falls back to bin when there is no extension", () => {
+    expect(storageExtFromFileName("README")).toBe("bin");
+  });
+
+  it("falls back to bin for a leading dot (a dotfile, not an extension)", () => {
+    expect(storageExtFromFileName(".hidden")).toBe("bin");
+  });
+
+  it("falls back to bin when nothing follows the last dot", () => {
+    expect(storageExtFromFileName("x.")).toBe("bin");
+  });
+
+  it("trims surrounding whitespace before deriving the extension", () => {
+    expect(storageExtFromFileName("  notes.txt  ")).toBe("txt");
   });
 });
 

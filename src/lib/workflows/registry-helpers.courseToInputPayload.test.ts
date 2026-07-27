@@ -62,6 +62,9 @@ function fullCourseFixture(): Course {
     castletopFiles: [
       { name: "fixture-castletop.xlsx", path: "fixture/castletop.xlsx", size: 222, addedAt: "2026-01-02T00:00:00Z" },
     ],
+    miscFiles: [
+      { name: "fixture-misc.pdf", path: "fixture/misc.pdf", size: 555, addedAt: "2026-01-04T00:00:00Z" },
+    ],
     exportFiles: [
       { name: "fixture-export.imscc", path: "fixture/export.imscc", size: 333, addedAt: "2026-01-03T00:00:00Z" },
     ],
@@ -99,6 +102,7 @@ const EXCLUDED_COURSE_KEYS: ReadonlyArray<keyof Course> = [
   "materialsFiles", // dedicated writer only: append/removeCourseMaterialFile
   "exportFiles", // dedicated writer only: append/removeCourseExportFile
   "castletopFiles", // dedicated writer only: append/removeCourseCastletopFile
+  "miscFiles", // dedicated writer only: append/removeCourseMiscFile
   "materialsZipName", // dedicated writer only: updateCourseMaterials
   "materialsZipPath", // dedicated writer only: updateCourseMaterials
   "materialsZipSize", // dedicated writer only: updateCourseMaterials

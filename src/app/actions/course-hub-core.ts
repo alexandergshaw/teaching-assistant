@@ -1,6 +1,6 @@
 "use server";
 
-import { listCourses as listCourseHubRows, createCourse as createCourseRow, updateCourse as updateCourseRow, deleteCourse as deleteCourseRow, updateCourseMaterials, updateCourseCsv, updateCourseRubric, appendCourseMaterialFile, removeCourseMaterialFile, appendCourseCastletopFile, removeCourseCastletopFile, appendCourseExportFile, removeCourseExportFile, type Course as CourseHub, type CourseInput as CourseHubInput } from "@/lib/supabase/courses";
+import { listCourses as listCourseHubRows, createCourse as createCourseRow, updateCourse as updateCourseRow, deleteCourse as deleteCourseRow, updateCourseMaterials, updateCourseCsv, updateCourseRubric, appendCourseMaterialFile, removeCourseMaterialFile, appendCourseCastletopFile, removeCourseCastletopFile, appendCourseMiscFile, removeCourseMiscFile, appendCourseExportFile, removeCourseExportFile, type Course as CourseHub, type CourseInput as CourseHubInput } from "@/lib/supabase/courses";
 import { requireOwner } from "@/lib/supabase/auth";
 
 // ── Course hub (bundle a course's resources: codebase, syllabus, textbook, Canvas) ──
@@ -168,6 +168,39 @@ export async function removeCourseCastletopFileAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not remove the file from the course Castletop files." };
+  }
+}
+
+/** Append a misc file to a course's misc files list. Returns the storage path of any replaced entry. */
+export async function appendCourseMiscFileAction(
+  courseId: string,
+  file: { name: string; path: string; size: number }
+): Promise<{ replacedPath: string | null } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!courseId.trim()) return { error: "Choose a course." };
+    const replacedPath = await appendCourseMiscFile(user.id, courseId, {
+      ...file,
+      addedAt: new Date().toISOString(),
+    });
+    return { replacedPath };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the file to the course misc files." };
+  }
+}
+
+/** Remove a misc file from a course's misc files list. */
+export async function removeCourseMiscFileAction(
+  courseId: string,
+  path: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!courseId.trim()) return { error: "Choose a course." };
+    await removeCourseMiscFile(user.id, courseId, path);
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not remove the file from the course misc files." };
   }
 }
 

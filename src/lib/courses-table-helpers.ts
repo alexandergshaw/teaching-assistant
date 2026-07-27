@@ -48,6 +48,7 @@ export const ALL_COLUMN_IDS = [
   "email",
   "emailClient",
   "classLength",
+  "miscFiles",
 ] as const;
 
 export type ColumnId = (typeof ALL_COLUMN_IDS)[number];
@@ -81,6 +82,7 @@ export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
   "email",
   "emailClient",
   "classLength",
+  "miscFiles",
 ];
 
 const COLUMN_ID_SET: Set<string> = new Set(ALL_COLUMN_IDS);
@@ -99,7 +101,7 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
 // column set unless it is unioned in here - bump this and add an entry to
 // COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
 // (no wrapper object) is treated as version 0.
-export const CURRENT_COLUMNS_VERSION = 7;
+export const CURRENT_COLUMNS_VERSION = 8;
 
 /** Columns introduced by each version, unioned into every persisted set
  * stored at an earlier version. Version 0 is the pre-versioning baseline, so
@@ -112,6 +114,7 @@ const COLUMNS_ADDED_IN: Record<number, ColumnId[]> = {
   5: ["syllabusTemplate"],
   6: ["endDate", "breaks", "assignmentDue", "email", "emailClient"],
   7: ["classLength"],
+  8: ["miscFiles"],
 };
 
 /** Parse a persisted ta-courses-columns value; unknown ids are dropped and a
@@ -215,6 +218,7 @@ export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = 
   email: 200,
   emailClient: 140,
   classLength: 130,
+  miscFiles: 190,
   actions: 240,
 };
 
@@ -359,6 +363,8 @@ export function sortValueFor(course: Course, field: SortField, ctx?: SortContext
       return textValue(course.emailClient);
     case "classLength":
       return numberValue(course.classLengthMinutes);
+    case "miscFiles":
+      return countValue(course.miscFiles.length);
   }
 }
 

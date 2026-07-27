@@ -246,6 +246,7 @@ export interface CourseHubRow {
   class_length_minutes: number | null;
   materials_files: Json;
   castletop_files: Json;
+  misc_files: Json;
   export_files: Json | null;
   materials_zip_name: string | null;
   materials_zip_path: string | null;
@@ -294,6 +295,7 @@ export interface CourseHubInsert {
   class_length_minutes?: number | null;
   materials_files?: Json;
   castletop_files?: Json;
+  misc_files?: Json;
   export_files?: Json | null;
   materials_zip_name?: string | null;
   materials_zip_path?: string | null;
@@ -342,6 +344,7 @@ export interface CourseHubUpdate {
   class_length_minutes?: number | null;
   materials_files?: Json;
   castletop_files?: Json;
+  misc_files?: Json;
   export_files?: Json | null;
   materials_zip_name?: string | null;
   materials_zip_path?: string | null;

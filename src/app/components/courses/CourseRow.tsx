@@ -22,6 +22,7 @@ import { RosterCell, StudentReposCell } from "./RosterCell";
 import { ScheduleCsvCell, RubricCell } from "./ScheduleCell";
 import { MaterialsCell, LmsExportsCell } from "./FilesCell";
 import { CastletopCell } from "./CastletopCell";
+import { MiscFilesCell } from "./MiscFilesCell";
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
 
@@ -325,6 +326,8 @@ export default function CourseRow({
           onSave={save("classLengthMinutes")}
         />
       )}
+
+      {has("miscFiles") && <MiscFilesCell course={course} onCourseUpdated={onCourseUpdated} setError={setError} />}
 
       <td>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
